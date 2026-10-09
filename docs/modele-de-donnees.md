@@ -61,8 +61,26 @@ Le numéro n'a de sens que dans son calque (`next_group_id`, `group_members`,
 commun n'est pas stocké à part : la fenêtre des séries l'écrit dans chaque
 membre (une série réglée seule ensuite garde son exception). Le nœud de
 l'Object Manager sous un calque (`VisibilityTarget::Group`, ancien « Plot Group »,
-affiché « Series ») liste toutes les séries du calque ; les groupes de séries y
-sont en retrait sous un en-tête « Group n ».
+affiché « Series ») liste toutes les séries du calque ; chaque groupe de séries y
+est un nœud parent (voir ci-dessous).
+
+**Nom, ordre et gestes d'un groupe (#197).** `PanelSpec::group_names`
+(`BTreeMap<u32, String>`) donne un nom à un groupe ; sans entrée, le nom
+automatique « Group n » (`object_manager::group_title`, partout où un groupe est
+nommé). Un nom n'a de sens que pour un groupe qui existe : `group_label`
+l'ignore sinon, et `next_group_id` ne réemploie pas le numéro d'un nom resté
+seul, donc un nom ne passe jamais à un groupe neuf. **Un groupe est toujours
+contigu** dans `PanelSpec::series` (l'ordre de tracé et de légende) : les
+gestes sont des méthodes de `PanelSpec`, qui rangent les séries par
+`slots()` (une série seule ou un groupe et tous ses membres — la projection que
+l'Object Manager et la fenêtre des séries se partagent) : `set_series_group`
+(entrer à la suite des membres, sortir juste derrière le groupe, en créer un),
+`dissolve_group` (les séries restent, style gardé), `remove_group`,
+`rename_group`, `move_series` (reste dans son groupe, saute un groupe entier),
+`move_group`, `apply_group_gradient`. Un groupe n'est toujours pas un nœud ni
+une commande : l'interface passe par `EditPlotSpec` (motifs `RenameGroup`,
+`DissolveGroup`, `RemoveGroup`, `ReorderGroup`, `ReorderSeries`), `pyst` par
+`SetPlotSpec` (`group_series` rassemble des séries en un groupe neuf, #196 ; surface : `docs/python-et-script.md`, § Groupes de séries).
 
 **Nuanciers (#178).** `stokesforge_plot::gradient` : `GRADIENT_PRESETS` (bleu →
 rouge, noir → rouge…) et `gradient_colors(arrêts, n)`, couleurs `#RRGGBB`

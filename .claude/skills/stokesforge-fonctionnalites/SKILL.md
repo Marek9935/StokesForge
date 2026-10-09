@@ -102,9 +102,12 @@ manques encore vérifiés au 2026-10-08, écrits dans `docs/application.md` :
   des propriétés (glisser, « Plot », « Send to », Graph › New Layer) ;
 - les séries ont leur fenêtre (#179 : double-clic sur une courbe) avec groupes
   (séries ajoutées ensemble, #177 ; portée « cette série / tout le groupe »,
-  « Quitter le groupe ») et nuanciers (#178, enregistrables dans le projet ou
-  pour l'utilisateur) ; les scripts `pyst` ajoutent une série à la fois, donc ne
-  créent pas de groupe (#196) ;
+  « Quitter le groupe » ; un groupe a un nom, se replie dans l'Object Manager
+  comme dans la fenêtre, se renomme (F2), se dissout ou se supprime avec ses
+  séries, #197) et nuanciers (#178, enregistrables dans le projet ou
+  pour l'utilisateur) ; les scripts `pyst` créent, lisent et règlent
+  les groupes (`plot([y1, y2])`, `series_groups`, `group_series`, `rename_group`,
+  `ungroup`, `remove_group`, `set_group_style`, `apply_gradient`, #196) ;
 - les fenêtres ouvertes et leur mode ne sont pas restaurés au démarrage (seules
   position et taille le sont) ;
 - une seule cellule éditable à la fois par fenêtre.
@@ -166,8 +169,9 @@ Quatre comportements ressemblent à des manques et n'en sont pas :
 - **Écrire une lettre grecque, un indice ou un exposant** dans un titre, un
   libellé d'axe ou un nom de série : la syntaxe est celle de Typst, entre
   dollars — `$lambda$`, `$x_2$`, `$x^2$`, `$"cm"^(-1)$` ; `\$` pour un vrai
-  dollar, `\_` pour un vrai tiret bas. La fenêtre des propriétés a un mémo
-  replié « Formula syntax » sous ces champs. Un nom de colonne repris en
+  dollar, `\_` pour un vrai tiret bas. La fenêtre des propriétés a une petite
+  icône « ? » à droite de ces champs : son survol rappelle la syntaxe (celle de
+  Typst). Un nom de colonne repris en
   légende s'affiche toujours tel quel (`docs/rendu.md` § Typst).
 
 - **Ctrl+Z pendant une saisie** annule la dernière modification du projet, pas

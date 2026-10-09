@@ -572,6 +572,33 @@ pub enum Action {
         source: stokesforge_plot::SeriesRef,
         index: usize,
     },
+    /// Remonte ou descend une série d'un cran (#197) : elle reste dans son
+    /// groupe, ou saute par-dessus un groupe entier.
+    MoveSeries {
+        graph: NodeId,
+        series: stokesforge_plot::SeriesRef,
+        up: bool,
+    },
+    /// Remonte ou descend un groupe de séries en bloc (#197).
+    MoveSeriesGroup {
+        graph: NodeId,
+        group: stokesforge_plot::SeriesGroupRef,
+        up: bool,
+    },
+    /// Donne son nom à un groupe de séries ; un nom vide rend le nom
+    /// automatique (#197).
+    RenameSeriesGroup {
+        graph: NodeId,
+        group: stokesforge_plot::SeriesGroupRef,
+        name: String,
+    },
+    /// Dissout un groupe de séries : ses séries restent, simples, avec leur
+    /// style (#197). Supprimer le groupe et ses séries passe par
+    /// [`Action::RemovePlotObject`].
+    UngroupSeries {
+        graph: NodeId,
+        group: stokesforge_plot::SeriesGroupRef,
+    },
     /// Propriétés sur la série ou le calque exacts.
     OpenObjectProperties {
         graph: NodeId,
@@ -4361,9 +4388,44 @@ impl AppState {
             } => self.edit_plot_object(graph, PlotEditKind::ReorderSeries, |spec| {
                 crate::object_manager::reorder_series(spec, source, index)
             }),
+            Action::MoveSeries { graph, series, up } => {
+                self.edit_plot_object(graph, PlotEditKind::ReorderSeries, |spec| {
+                    spec.panels
+                        .get_mut(series.panel)
+                        .is_some_and(|panel| panel.move_series(series.index, up).is_some())
+                })
+            }
+            Action::MoveSeriesGroup { graph, group, up } => {
+                self.edit_plot_object(graph, PlotEditKind::ReorderGroup, |spec| {
+                    spec.panels
+                        .get_mut(group.panel)
+                        .is_some_and(|panel| panel.move_group(group.group, up))
+                })
+            }
+            Action::RenameSeriesGroup { graph, group, name } => {
+                self.edit_plot_object(graph, PlotEditKind::RenameGroup, |spec| {
+                    spec.panels
+                        .get_mut(group.panel)
+                        .is_some_and(|panel| panel.rename_group(group.group, &name))
+                })
+            }
+            Action::UngroupSeries { graph, group } => {
+                self.edit_plot_object(graph, PlotEditKind::DissolveGroup, |spec| {
+                    spec.panels
+                        .get_mut(group.panel)
+                        .is_some_and(|panel| panel.dissolve_group(group.group))
+                })
+            }
             Action::RemovePlotObject { graph, target } => {
                 use crate::object_manager::VisibilityTarget as T;
                 match target {
+                    T::SeriesGroup(group) => {
+                        self.edit_plot_object(graph, PlotEditKind::RemoveGroup, |spec| {
+                            spec.panels
+                                .get_mut(group.panel)
+                                .is_some_and(|panel| panel.remove_group(group.group))
+                        })
+                    }
                     T::Series(series) => {
                         self.edit_plot_object(graph, PlotEditKind::RemoveSeries, |spec| {
                             let Some(panel) = spec.panels.get_mut(series.panel) else {
@@ -4398,6 +4460,15 @@ impl AppState {
                 }
                 let (tab, axis, panel, series) = match target {
                     T::Series(s) => (PlotSettingsTab::Series, None, s.panel, Some(s.index)),
+                    // Un groupe s'ouvre sur sa première série (#197).
+                    T::SeriesGroup(g) => (
+                        PlotSettingsTab::Series,
+                        None,
+                        g.panel,
+                        spec.panels
+                            .get(g.panel)
+                            .and_then(|panel| panel.group_members(g.group).first().copied()),
+                    ),
                     T::Panel(i) => (PlotSettingsTab::PlotArea, None, i, None),
                     T::Group(i) => (PlotSettingsTab::Series, None, i, None),
                     T::Axes(i) => (PlotSettingsTab::Axes, None, i, None),

@@ -114,6 +114,10 @@ de barre : son infobulle porte le nom du panneau. Les panneaux fixes (#100) réu
 `CaretLeft`/`CaretRight`/`CaretUp`/`CaretDown` pour le repli ; aucune icône ajoutée.
 Leurs en-têtes ne proposent ni `Close` ni `Maximize`.
 
+L'aide au survol d'un champ (#197, `app/hover_help.rs`) utilise `question`
+(`Icon::Help`, rôle neutre) estompée par `theme::help_icon_tint` : le point
+d'interrogation ne distingue pas un type d'objet, il dit « un rappel existe ici ».
+
 ## Échantillons de couleur (#89)
 
 Un réglage de couleur est un **petit carré** (`color_picker::color_button`).

@@ -35,8 +35,8 @@ use super::graph_text_edit::{
 use super::grid::keyboard_focus_outside_grid;
 use super::menu_sections::MenuSections;
 use super::object_manager_ui::{
-    apply_object_request, object_node_menu, select_manager_target, series_shortcuts,
-    ObjectManagerRequest,
+    apply_object_request, group_shortcuts, object_node_menu, open_group_name_editor,
+    select_manager_target, series_shortcuts, ObjectManagerRequest,
 };
 use super::shortcuts::SHORTCUT_EXPORT_GRAPH;
 use crate::color_picker::{saved_colors_id, SavedColorRequest};
@@ -307,7 +307,25 @@ pub(super) fn graph_view_contents(
             annotation_interactions(ui, view, &snapshot.tree, graph_id, actions);
             if !keyboard_focus_outside_grid(ui.ctx()) {
                 if let Some(spec) = crate::state::current_plot_spec(&snapshot.tree, graph_id) {
-                    if let Some(series) = view.selected_series() {
+                    if let Some(group) = view.selected_group() {
+                        // Un groupe sélectionné (#197) : mêmes gestes qu'au
+                        // clavier de l'Object Manager ; le renommage se fait
+                        // dans son arbre.
+                        let mut requests = Vec::new();
+                        group_shortcuts(ui.ctx(), graph_id, group, &spec, actions, &mut requests);
+                        for request in requests {
+                            if let ObjectManagerRequest::RenameGroup(group) = request {
+                                open_group_name_editor(ui.ctx(), &spec, graph_id, group);
+                            }
+                        }
+                        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete))
+                        {
+                            actions.push(Action::RemovePlotObject {
+                                graph: graph_id,
+                                target: crate::object_manager::VisibilityTarget::SeriesGroup(group),
+                            });
+                        }
+                    } else if let Some(series) = view.selected_series() {
                         let mut requests = Vec::new();
                         series_shortcuts(ui.ctx(), graph_id, series, &spec, actions, &mut requests);
                         for request in requests {

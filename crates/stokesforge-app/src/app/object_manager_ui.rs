@@ -25,7 +25,7 @@ use stokesforge_render_egui::GraphView;
 
 use crate::icons::{icon_image, Icon, IconRole};
 use crate::object_manager::{
-    LayerRow, ObjectRow, ObjectTree, SeriesRow, Shown, VisibilityTarget as T,
+    GroupRow, LayerRow, LayerSlot, ObjectRow, ObjectTree, SeriesRow, Shown, VisibilityTarget as T,
 };
 use crate::preferences::{ObjectManagerGroup, ObjectManagerSettings};
 use crate::state::{active_graph, Action};
@@ -48,14 +48,13 @@ use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
 use super::window_detach::ObjectManagerModel;
 use super::StokesForgeApp;
 
-/// Retrait des séries d'un groupe de séries (#177), en points.
-const GROUP_INDENT: f32 = 14.0;
-
 #[derive(Clone, Copy)]
 pub(super) enum ObjectManagerRequest {
     Select(crate::object_manager::VisibilityTarget),
     Properties(crate::object_manager::VisibilityTarget),
     Rename(stokesforge_plot::SeriesRef),
+    /// Édite sur place le nom d'un groupe de séries (#197).
+    RenameGroup(stokesforge_plot::SeriesGroupRef),
     /// Édite sur place le titre, le titre d'axe ou l'entrée de légende.
     EditText(ContextText),
 }
@@ -95,8 +94,9 @@ pub(super) fn selected_manager_target(
     view: &GraphView,
 ) -> Option<crate::object_manager::VisibilityTarget> {
     use crate::object_manager::VisibilityTarget as T;
-    view.selected_series()
-        .map(T::Series)
+    view.selected_group()
+        .map(T::SeriesGroup)
+        .or_else(|| view.selected_series().map(T::Series))
         .or_else(|| view.selected_annotation().map(T::Annotation))
         .or_else(|| view.selected_shape().map(T::Shape))
         .or_else(|| view.selected_text().map(T::Text))
@@ -109,6 +109,7 @@ pub(super) fn select_manager_target(
     use crate::object_manager::VisibilityTarget as T;
     match target {
         Some(T::Series(t)) => view.select_series(Some(t), spec),
+        Some(T::SeriesGroup(t)) => view.select_series_group(Some(t), spec),
         Some(T::Annotation(t)) => view.select_annotation(Some(t), spec),
         Some(T::Shape(t)) if t.get(spec).is_some() => {
             view.set_tool(stokesforge_render_egui::GraphTool::Pointer);
@@ -161,8 +162,19 @@ pub(super) fn object_node_menu(
     let mut sections = MenuSections::new();
     sections.section(
         ui,
-        matches!(target, T::Series(_)) || text_moved.is_some() || editable_text == Some(true),
+        matches!(target, T::Series(_) | T::SeriesGroup(_))
+            || text_moved.is_some()
+            || editable_text == Some(true),
         |ui| {
+            if matches!(target, T::SeriesGroup(_))
+                && ui
+                    .add_enabled(exists, egui::Button::new(tr!("action-select-group-series")))
+                    .on_hover_text(tr!("action-select-group-series", "hint"))
+                    .clicked()
+            {
+                requests.push(ObjectManagerRequest::Select(target));
+                ui.close();
+            }
             if let T::Series(series) = target {
                 if ui
                     .add_enabled(exists, egui::Button::new(tr!("action-show-graph-data")))
@@ -218,37 +230,72 @@ pub(super) fn object_node_menu(
                     requests.push(ObjectManagerRequest::Rename(series));
                     ui.close();
                 }
-                let last = spec.panels.get(series.panel).map_or(0, |p| p.series.len());
+                let panel = spec.panels.get(series.panel);
                 let moves = [
-                    (
-                        tr!("action-move-series-up"),
-                        SHORTCUT_MOVE_SERIES_UP,
-                        series.index.checked_sub(1),
-                    ),
+                    (tr!("action-move-series-up"), SHORTCUT_MOVE_SERIES_UP, true),
                     (
                         tr!("action-move-series-down"),
                         SHORTCUT_MOVE_SERIES_DOWN,
-                        series.index.checked_add(1).filter(|i| *i < last),
+                        false,
                     ),
                 ];
-                for (label, shortcut, index) in moves {
+                for (label, shortcut, up) in moves {
+                    let movable = panel.is_some_and(|p| p.can_move_series(series.index, up));
                     if ui
                         .add_enabled(
-                            index.is_some(),
+                            movable,
                             egui::Button::new(label)
                                 .shortcut_text(ui.ctx().format_shortcut(&shortcut)),
                         )
                         .clicked()
                     {
-                        if let Some(index) = index {
-                            actions.push(Action::ReorderSeries {
-                                graph,
-                                source: series,
-                                index,
-                            });
-                        }
+                        actions.push(Action::MoveSeries { graph, series, up });
                         ui.close();
                     }
+                }
+            }
+            if let T::SeriesGroup(group) = target {
+                if ui
+                    .add_enabled(
+                        exists,
+                        egui::Button::new(tr!("action-rename-group"))
+                            .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_RENAME_OBJECT)),
+                    )
+                    .clicked()
+                {
+                    requests.push(ObjectManagerRequest::RenameGroup(group));
+                    ui.close();
+                }
+                let panel = spec.panels.get(group.panel);
+                let moves = [
+                    (tr!("action-move-series-up"), SHORTCUT_MOVE_SERIES_UP, true),
+                    (
+                        tr!("action-move-series-down"),
+                        SHORTCUT_MOVE_SERIES_DOWN,
+                        false,
+                    ),
+                ];
+                for (label, shortcut, up) in moves {
+                    let movable = panel.is_some_and(|p| p.can_move_group(group.group, up));
+                    if ui
+                        .add_enabled(
+                            movable,
+                            egui::Button::new(label)
+                                .shortcut_text(ui.ctx().format_shortcut(&shortcut)),
+                        )
+                        .clicked()
+                    {
+                        actions.push(Action::MoveSeriesGroup { graph, group, up });
+                        ui.close();
+                    }
+                }
+                if ui
+                    .add_enabled(exists, egui::Button::new(tr!("action-ungroup-series")))
+                    .on_hover_text(tr!("action-ungroup-series", "hint"))
+                    .clicked()
+                {
+                    actions.push(Action::UngroupSeries { graph, group });
+                    ui.close();
                 }
             }
             if let T::Shape(object) = target {
@@ -491,8 +538,14 @@ pub(super) fn object_manager_contents(
                     target,
                 });
             }
-            if let T::Series(series) = target {
-                series_shortcuts(ui.ctx(), model.graph, series, spec, actions, &mut requests);
+            match target {
+                T::Series(series) => {
+                    series_shortcuts(ui.ctx(), model.graph, series, spec, actions, &mut requests)
+                }
+                T::SeriesGroup(group) => {
+                    group_shortcuts(ui.ctx(), model.graph, group, spec, actions, &mut requests)
+                }
+                _ => {}
             }
         }
     }
@@ -650,34 +703,124 @@ impl ObjectManagerPaint<'_> {
             })
             .body(|ui| {
                 crate::tree_lines::tree_children(ui, |ui, branch| {
-                    // Un groupe de séries (#177) : un en-tête, puis ses membres
-                    // en retrait ; une série seule reste au niveau du dessus.
-                    let mut previous: Option<u32> = None;
-                    for series in &layer.series {
-                        if series.selected {
-                            *selected = Some(T::Series(series.target));
-                        }
-                        let group = series.spec.group;
-                        if let (Some(group), true) = (group, group != previous) {
-                            let y = ui
-                                .horizontal(|ui| {
-                                    ui.weak(super::curve_settings::group_name(group));
-                                })
-                                .response
-                                .rect
-                                .center()
-                                .y;
-                            branch.mark(y);
-                        }
-                        previous = group;
-                        let indent = if group.is_some() { GROUP_INDENT } else { 0.0 };
-                        let y = self.series_row(ui, series, indent, actions, requests);
+                    // Un groupe de séries (#177, #197) est un nœud parent comme
+                    // les autres : en-tête repliable, membres en branche. Une
+                    // série seule reste au niveau du dessus.
+                    for slot in &layer.slots {
+                        let y = match slot {
+                            LayerSlot::Single(rank) => {
+                                let series = &layer.series[*rank];
+                                if series.selected {
+                                    *selected = Some(T::Series(series.target));
+                                }
+                                self.series_row(ui, series, actions, requests)
+                            }
+                            LayerSlot::Group(group) => {
+                                self.series_group(ui, layer, group, actions, requests, selected)
+                            }
+                        };
                         branch.mark(y);
                     }
                 })
             });
 
         group_toggle.rect.center().y
+    }
+
+    /// Un groupe de séries (#197) : le nœud, sa case de visibilité mixte, son
+    /// nom (éditable sur place) et ses membres en branche `tree_lines`. Le
+    /// repli initial est celui de « Series » (#139).
+    fn series_group(
+        &self,
+        ui: &mut egui::Ui,
+        layer: &LayerRow,
+        group: &GroupRow,
+        actions: &mut Vec<Action>,
+        requests: &mut Vec<ObjectManagerRequest>,
+        selected: &mut Option<T>,
+    ) -> f32 {
+        let id =
+            ui.make_persistent_id((self.graph, layer.index, "series-group", group.target.group));
+        let (toggle, _, _) = egui::collapsing_header::CollapsingState::load_with_default_open(
+            ui.ctx(),
+            id,
+            self.settings.group_open(ObjectManagerGroup::Plots),
+        )
+        .show_header(ui, |ui| {
+            if group.selected {
+                *selected = Some(T::SeriesGroup(group.target));
+            }
+            self.group_header(ui, group, actions, requests);
+        })
+        .body(|ui| {
+            crate::tree_lines::tree_children(ui, |ui, branch| {
+                for rank in &group.members {
+                    let series = &layer.series[*rank];
+                    if series.selected {
+                        *selected = Some(T::Series(series.target));
+                    }
+                    let y = self.series_row(ui, series, actions, requests);
+                    branch.mark(y);
+                }
+            })
+        });
+        toggle.rect.center().y
+    }
+
+    /// L'en-tête d'un groupe : une ligne de liste (#169) sous la case et le
+    /// nom, sélectionnable, ouvrant la fenêtre des séries au double-clic.
+    fn group_header(
+        &self,
+        ui: &mut egui::Ui,
+        group: &GroupRow,
+        actions: &mut Vec<Action>,
+        requests: &mut Vec<ObjectManagerRequest>,
+    ) {
+        let target = T::SeriesGroup(group.target);
+        let background = ListRowBackground::reserve(ui);
+        let row = ui
+            .horizontal(|ui| {
+                object_visibility(
+                    ui,
+                    self.graph,
+                    target,
+                    self.spec,
+                    Shown::from(self.settings),
+                    actions,
+                );
+                let renaming = group_rename_of(ui.ctx(), self.graph, group.target);
+                if let Some(rename) = renaming {
+                    group_name_editor(ui, self.graph, group, rename, actions);
+                    return;
+                }
+                let text = list_row_text(&group.name, group.selected).color(list_row_text_color(
+                    ui,
+                    group.selected,
+                    false,
+                ));
+                let response = ui.add(list_row_label(text, group.selected));
+                if response.clicked() || response.secondary_clicked() {
+                    requests.push(ObjectManagerRequest::Select(target));
+                    ui.memory_mut(|memory| memory.request_focus(self.focus));
+                }
+                if response.double_clicked() {
+                    requests.push(ObjectManagerRequest::Properties(target));
+                }
+                response.context_menu(|ui| {
+                    object_node_menu(
+                        ui,
+                        self.graph,
+                        target,
+                        self.spec,
+                        Shown::from(self.settings),
+                        actions,
+                        requests,
+                    )
+                });
+            })
+            .response
+            .rect;
+        background.paint(ui, row, group.selected);
     }
 
     fn axes(
@@ -768,7 +911,6 @@ impl ObjectManagerPaint<'_> {
         &self,
         ui: &mut egui::Ui,
         series: &SeriesRow,
-        indent: f32,
         actions: &mut Vec<Action>,
         requests: &mut Vec<ObjectManagerRequest>,
     ) -> f32 {
@@ -777,7 +919,6 @@ impl ObjectManagerPaint<'_> {
             let background = ListRowBackground::reserve(ui);
             let row = ui
                 .horizontal(|ui| {
-                    ui.add_space(indent);
                     object_visibility(
                         ui,
                         self.graph,
@@ -884,23 +1025,136 @@ pub(super) fn series_shortcuts(
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
         requests.push(ObjectManagerRequest::Rename(series));
     }
-    for (key, index) in [
-        (egui::Key::ArrowUp, series.index.checked_sub(1)),
-        (egui::Key::ArrowDown, series.index.checked_add(1)),
-    ] {
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, key)) {
-            if let Some(index) = index.filter(|i| {
-                spec.panels
-                    .get(series.panel)
-                    .is_some_and(|p| *i < p.series.len())
-            }) {
-                actions.push(Action::ReorderSeries {
-                    graph,
-                    source: series,
-                    index,
-                });
-            }
+    for (key, up) in [(egui::Key::ArrowUp, true), (egui::Key::ArrowDown, false)] {
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, key))
+            && spec
+                .panels
+                .get(series.panel)
+                .is_some_and(|p| p.can_move_series(series.index, up))
+        {
+            actions.push(Action::MoveSeries { graph, series, up });
         }
+    }
+}
+
+/// Les raccourcis d'un groupe de séries sélectionné (#197) : F2 renomme,
+/// Ctrl+↑/↓ le déplace en bloc. Suppr est celui de tous les contenus.
+pub(super) fn group_shortcuts(
+    ctx: &egui::Context,
+    graph: NodeId,
+    group: stokesforge_plot::SeriesGroupRef,
+    spec: &stokesforge_plot::PlotSpec,
+    actions: &mut Vec<Action>,
+    requests: &mut Vec<ObjectManagerRequest>,
+) {
+    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
+        requests.push(ObjectManagerRequest::RenameGroup(group));
+    }
+    for (key, up) in [(egui::Key::ArrowUp, true), (egui::Key::ArrowDown, false)] {
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, key))
+            && spec
+                .panels
+                .get(group.panel)
+                .is_some_and(|p| p.can_move_group(group.group, up))
+        {
+            actions.push(Action::MoveSeriesGroup { graph, group, up });
+        }
+    }
+}
+
+/// Le renommage d'un groupe en cours (#197), tenu dans la mémoire d'egui sous
+/// l'identité du graphe : le panneau fixe et sa copie détachée partagent le
+/// même éditeur, qui n'existe que dans l'arbre.
+#[derive(Clone)]
+struct GroupRename {
+    target: stokesforge_plot::SeriesGroupRef,
+    original: String,
+    buffer: String,
+    focus: bool,
+}
+
+fn group_rename_id(graph: NodeId) -> egui::Id {
+    egui::Id::new(("object_manager_group_rename", graph))
+}
+
+fn group_rename_of(
+    ctx: &egui::Context,
+    graph: NodeId,
+    target: stokesforge_plot::SeriesGroupRef,
+) -> Option<GroupRename> {
+    ctx.data(|data| data.get_temp::<GroupRename>(group_rename_id(graph)))
+        .filter(|rename| rename.target == target)
+}
+
+/// Ouvre l'éditeur du nom du groupe `group` dans l'arbre.
+pub(super) fn open_group_name_editor(
+    ctx: &egui::Context,
+    spec: &stokesforge_plot::PlotSpec,
+    graph: NodeId,
+    group: stokesforge_plot::SeriesGroupRef,
+) {
+    let Some(panel) = spec.panels.get(group.panel) else {
+        return;
+    };
+    if panel.group_members(group.group).is_empty() {
+        return;
+    }
+    let name = crate::object_manager::group_title(panel, group.group);
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            group_rename_id(graph),
+            GroupRename {
+                target: group,
+                original: name.clone(),
+                buffer: name,
+                focus: true,
+            },
+        );
+    });
+}
+
+/// Le champ du nom à la place du libellé : Entrée ou un clic ailleurs valide
+/// (une seule action, et aucune si le nom n'a pas changé), Échap annule.
+fn group_name_editor(
+    ui: &mut egui::Ui,
+    graph: NodeId,
+    group: &GroupRow,
+    mut rename: GroupRename,
+    actions: &mut Vec<Action>,
+) {
+    let id = group_rename_id(graph);
+    let field = ui.add(
+        egui::TextEdit::singleline(&mut rename.buffer)
+            .id(id.with("field"))
+            .desired_width(160.0),
+    );
+    if rename.focus {
+        field.request_focus();
+        // Le nom en cours est sélectionné : taper le remplace.
+        let mut state = egui::TextEdit::load_state(ui.ctx(), field.id).unwrap_or_default();
+        let end = rename.buffer.chars().count();
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(end),
+            )));
+        state.store(ui.ctx(), field.id);
+        rename.focus = false;
+    }
+    if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+        ui.data_mut(|data| data.remove::<GroupRename>(id));
+    } else if field.lost_focus() {
+        if rename.buffer != rename.original {
+            actions.push(Action::RenameSeriesGroup {
+                graph,
+                group: group.target,
+                name: rename.buffer.clone(),
+            });
+        }
+        ui.data_mut(|data| data.remove::<GroupRename>(id));
+    } else {
+        ui.data_mut(|data| data.insert_temp(id, rename));
     }
 }
 
@@ -1080,6 +1334,9 @@ pub(super) fn apply_object_request(
         ObjectManagerRequest::Select(target) => select_manager_target(view, Some(target), &spec),
         ObjectManagerRequest::Rename(series) => {
             open_series_name_editor(ctx, view, tree, graph, series)
+        }
+        ObjectManagerRequest::RenameGroup(group) => {
+            open_group_name_editor(ctx, &spec, graph, group)
         }
         ObjectManagerRequest::EditText(ContextText::Title(target)) => {
             open_text_editor(ctx, view, tree, graph, target)
@@ -1320,20 +1577,20 @@ mod tests {
     #[test]
     fn clic_droit_serie_ordre_grise_les_extremes_et_ferme_apres_deplacement() {
         use super::super::test_support::{painted, texte_exact, textes};
-        for (row, source, disabled, enabled, index) in [
+        for (row, source, disabled, enabled, up) in [
             (
                 "Premier",
                 SeriesRef::new(0, 0),
                 tr!("action-move-series-up"),
                 tr!("action-move-series-down"),
-                1,
+                false,
             ),
             (
                 "Dernier",
                 SeriesRef::new(0, 2),
                 tr!("action-move-series-down"),
                 tr!("action-move-series-up"),
-                1,
+                true,
             ),
         ] {
             let (project, graph, spec, model) = trois_series();
@@ -1388,10 +1645,10 @@ mod tests {
             );
             assert_eq!(
                 actions,
-                vec![Action::ReorderSeries {
+                vec![Action::MoveSeries {
                     graph,
-                    source,
-                    index
+                    series: source,
+                    up
                 }]
             );
             assert!(requests.is_empty());
@@ -1697,9 +1954,9 @@ mod tests {
         let (_, actions, _) = image(vec![key(egui::Key::ArrowDown, egui::Modifiers::CTRL)]);
         assert!(matches!(
             actions.as_slice(),
-            [Action::ReorderSeries {
-                source: SeriesRef { panel: 0, index: 0 },
-                index: 1,
+            [Action::MoveSeries {
+                series: SeriesRef { panel: 0, index: 0 },
+                up: false,
                 ..
             }]
         ));
@@ -1804,35 +2061,163 @@ mod tests {
         assert!(!gras("Deuxième") && !gras("Dernier"), "témoin : les autres");
     }
 
-    /// #177 : les séries d'un groupe se rangent sous un en-tête « Group n » et
-    /// en retrait ; une série seule reste au niveau des en-têtes de groupe.
-    #[test]
-    fn les_series_d_un_groupe_sont_en_retrait_sous_leur_en_tete() {
-        let (project, graph, mut spec, _) = trois_series();
-        spec.panels.get_mut(0).unwrap().series[1].group = Some(1);
-        spec.panels.get_mut(0).unwrap().series[2].group = Some(1);
-        let mut project = project;
+    /// Trois séries, les deux dernières en groupe nommé « Lots » (#197), et
+    /// l'arbre d'Object Manager de ce graphe.
+    fn groupe_nomme() -> (Project, NodeId, PlotSpec, crate::object_manager::ObjectTree) {
+        let (mut project, graph, mut spec, _) = trois_series();
+        let panel = spec.panels.get_mut(0).unwrap();
+        panel.series[1].group = Some(1);
+        panel.series[2].group = Some(1);
+        assert!(panel.rename_group(1, "Lots"));
         project
             .set_plot_spec(graph, spec.clone())
             .expect("spec avec groupe");
         let model = crate::object_manager::object_tree(project.tree(), graph, None).unwrap();
+        (project, graph, spec, model)
+    }
+
+    /// #177, #197 : un groupe est un nœud parent comme les autres — un
+    /// en-tête qui porte son nom, puis ses séries en branche, plus à droite
+    /// que l'en-tête ; une série seule reste au niveau du dessus.
+    #[test]
+    fn un_groupe_est_un_noeud_parent_dont_les_membres_sont_en_branche() {
+        let (project, _, spec, model) = groupe_nomme();
         let ctx = super::super::test_support::contexte();
         image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
         let (output, _, _) = image(&ctx, project.tree(), Some(&model), Some(&spec), Vec::new());
         let seule = text_center(&output, "Premier");
         let membre = text_center(&output, "Deuxième");
-        let en_tete = text_center(&output, &super::super::curve_settings::group_name(1));
-        assert!(
-            membre.x > seule.x + GROUP_INDENT - 1.0,
-            "le membre est en retrait : {membre:?} contre {seule:?}"
-        );
+        let en_tete = text_center(&output, "Lots");
         assert!(
             en_tete.y > seule.y && en_tete.y < membre.y,
-            "l'en-tête précède ses membres"
+            "l'en-tête précède ses membres : {en_tete:?}"
         );
         assert!(
-            text_center(&output, "Dernier").x > seule.x + GROUP_INDENT - 4.0,
-            "le dernier membre aussi"
+            membre.x > en_tete.x && text_center(&output, "Dernier").x > en_tete.x,
+            "les membres sont plus à droite que l'en-tête"
+        );
+        assert_eq!(
+            super::super::test_support::textes(&output.shapes)
+                .iter()
+                .filter(|t| t.texte == tr!("curve-group-name", number = 1))
+                .count(),
+            0,
+            "le nom donné remplace « Group 1 » partout"
+        );
+    }
+
+    /// #197 : replier un groupe cache ses membres, jamais ses courbes — la
+    /// case de visibilité du groupe est mixte quand ses membres divergent.
+    #[test]
+    fn replier_un_groupe_cache_ses_lignes_et_pas_ses_courbes() {
+        let (project, _, mut spec, _) = groupe_nomme();
+        spec.panels.get_mut(0).unwrap().series[2].visible = false;
+        let mut project = project;
+        let graph = project.tree().node(project.root()).unwrap().children()[0];
+        project.set_plot_spec(graph, spec.clone()).unwrap();
+        let model = crate::object_manager::object_tree(project.tree(), graph, None).unwrap();
+        let ctx = super::super::test_support::contexte();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+        paint(Vec::new());
+        let (output, _, _) = paint(Vec::new());
+        let en_tete = text_center(&output, "Lots");
+        let target = stokesforge_plot::SeriesGroupRef::new(0, 1);
+        let state = T::SeriesGroup(target).visibility(&spec);
+        assert!(state.mixed && !state.checked, "case mixte : {state:?}");
+        // Le triangle de repli est à gauche de la case, dans la rangée de l'en-tête.
+        let arrow = egui::pos2(en_tete.x - 46.0, en_tete.y);
+        clic_menu(&paint, arrow, egui::PointerButton::Primary);
+        paint(Vec::new());
+        let (output, _, _) = paint(Vec::new());
+        assert!(
+            super::super::test_support::textes(&output.shapes)
+                .iter()
+                .all(|t| t.texte != "Deuxième" && t.texte != "Dernier"),
+            "les membres d'un groupe replié ne sont plus listés"
+        );
+        assert!(
+            super::super::test_support::textes(&output.shapes)
+                .iter()
+                .any(|t| t.texte == "Premier"),
+            "témoin : la série seule reste"
+        );
+        assert_eq!(
+            T::SeriesGroup(target).contents(&spec).len(),
+            2,
+            "replier ne retire aucune courbe du groupe"
+        );
+    }
+
+    /// #197 : l'en-tête se sélectionne, s'ouvre au double-clic et porte les
+    /// gestes de groupe au clic droit — sections de `docs/menus.md`.
+    #[test]
+    fn l_en_tete_d_un_groupe_se_selectionne_s_ouvre_et_a_son_menu() {
+        let (project, graph, spec, model) = groupe_nomme();
+        let target = stokesforge_plot::SeriesGroupRef::new(0, 1);
+        let ctx = super::super::test_support::contexte();
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+        paint(Vec::new());
+        let (output, _, _) = paint(Vec::new());
+        let en_tete = text_center(&output, "Lots");
+        let (_, actions, requests) = clic_menu(&paint, en_tete, egui::PointerButton::Primary);
+        assert!(actions.is_empty());
+        assert!(requests
+            .iter()
+            .any(|r| matches!(r, ObjectManagerRequest::Select(T::SeriesGroup(g)) if *g == target)));
+        // Clic droit : le menu du groupe.
+        clic_menu(&paint, en_tete, egui::PointerButton::Secondary);
+        let output = paint(Vec::new()).0;
+        use super::super::test_support::painted;
+        for entry in [
+            tr!("action-select-group-series"),
+            tr!("action-rename-group"),
+            tr!("action-ungroup-series"),
+            tr!("action-delete-content"),
+            tr!("action-properties"),
+        ] {
+            assert!(painted(&output, &entry), "{entry}");
+        }
+        let (_, actions, _) = clic_menu(
+            &paint,
+            text_center(&output, &tr!("action-ungroup-series")),
+            egui::PointerButton::Primary,
+        );
+        assert_eq!(
+            actions,
+            vec![Action::UngroupSeries {
+                graph,
+                group: target
+            }]
+        );
+    }
+
+    /// #197 : renommer un groupe se fait sur place, dans l'arbre — Entrée
+    /// valide en une action, un nom inchangé n'en émet aucune.
+    #[test]
+    fn renommer_un_groupe_sur_place_emet_une_action_a_la_validation() {
+        let (project, graph, spec, model) = groupe_nomme();
+        let target = stokesforge_plot::SeriesGroupRef::new(0, 1);
+        let ctx = super::super::test_support::contexte();
+        let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+        paint(Vec::new());
+        open_group_name_editor(&ctx, &spec, graph, target);
+        paint(Vec::new());
+        paint(Vec::new());
+        paint(vec![egui::Event::Text("Blancs".into())]);
+        let (_, actions, _) = paint(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+        assert_eq!(
+            actions,
+            vec![Action::RenameSeriesGroup {
+                graph,
+                group: target,
+                name: "Blancs".into()
+            }]
+        );
+        assert!(
+            group_rename_of(&ctx, graph, target).is_none(),
+            "l'éditeur se referme"
         );
     }
 
@@ -1914,14 +2299,17 @@ mod tests {
             r,
             ObjectManagerRequest::Rename(SeriesRef { panel: 0, index: 0 })
         )));
-        for (key_name, index) in [(egui::Key::ArrowDown, Some(1)), (egui::Key::ArrowUp, None)] {
+        for (key_name, up) in [
+            (egui::Key::ArrowDown, Some(false)),
+            (egui::Key::ArrowUp, None),
+        ] {
             let (_, actions, _) = image(vec![key(key_name, egui::Modifiers::CTRL)]);
-            let expected: Vec<_> = index
+            let expected: Vec<_> = up
                 .into_iter()
-                .map(|index| Action::ReorderSeries {
+                .map(|up| Action::MoveSeries {
                     graph,
-                    source: SeriesRef::new(0, 0),
-                    index,
+                    series: SeriesRef::new(0, 0),
+                    up,
                 })
                 .collect();
             assert_eq!(actions, expected);

@@ -349,3 +349,234 @@ fn objets_graphiques_seuls_ou_avec_donnees_rejoignent_le_groupe_du_script() {
     assert_eq!(*after.tree, *before.tree);
     assert_eq!(after.history, before.history);
 }
+
+/// #196 : plusieurs colonnes en un appel forment un groupe, comme les séries
+/// ajoutées ensemble depuis l'interface ; une colonne seule n'en forme pas.
+#[test]
+fn plusieurs_colonnes_forment_un_groupe_et_une_seule_non() {
+    let b = banc();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y, y], x, name='Graph1', label=['A', 'B', 'C'], group_name='Lots')"),
+    );
+    let panel = &graph_spec(&b).panels[0];
+    assert_eq!(panel.series.len(), 3);
+    let group = panel.series[0].group.expect("groupe");
+    assert!(panel.series.iter().all(|s| s.group == Some(group)));
+    assert_eq!(panel.group_label(group), Some("Lots"));
+    let names: Vec<&str> = panel.series.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["A", "B", "C"]);
+    assert!(panel.series.iter().all(|s| s.x == Some(b.x)));
+    let colors: Vec<&str> = panel.series.iter().map(|s| s.line.color.as_str()).collect();
+    assert_eq!(colors[0], stokesforge_plot::palette_color(0));
+    assert_eq!(colors[2], stokesforge_plot::palette_color(2));
+
+    // Ajouter à un graphe existant : nouveau groupe, l'ancien intact.
+    run(&b, "pyst.plot([y, y], graph=g)\npyst.plot(y, graph=g)");
+    let panel = &graph_spec(&b).panels[0];
+    assert_eq!(panel.series.len(), 6);
+    assert_eq!(panel.group_ids().len(), 2);
+    assert_eq!(panel.series[5].group, None);
+    assert_eq!(panel.series[3].group, panel.series[4].group);
+    assert_eq!(
+        panel.series[4].line.color,
+        stokesforge_plot::palette_color(4)
+    );
+
+    let b = banc();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y], x, name='Graph1')"),
+    );
+    assert_eq!(graph_spec(&b).panels[0].series[0].group, None);
+}
+
+#[test]
+fn lire_les_series_et_les_groupes() {
+    let b = banc();
+    run(
+        &b,
+        &format!(
+            "{HANDLES}g = pyst.plot([y, y, y], x, name='Graph1', label=['A', 'B', 'C'], group_name='Lots')
+pyst.plot(y, graph=g, label='Seule')
+rows = pyst.series(g)
+assert [r['name'] for r in rows] == ['A', 'B', 'C', 'Seule'], rows
+assert [r['index'] for r in rows] == [0, 1, 2, 3]
+assert rows[0]['group'] is not None and rows[0]['group'] == rows[2]['group']
+assert rows[3]['group'] is None
+assert rows[0]['visible'] is True
+groups = pyst.series_groups(g)
+assert len(groups) == 1
+assert groups[0]['id'] == rows[0]['group']
+assert groups[0]['name'] == 'Lots'
+assert groups[0]['members'] == [0, 1, 2]
+pyst.rename_group(g, groups[0]['id'], '')
+assert pyst.series_groups(g)[0]['name'] is None
+"
+        ),
+    );
+    // Rien n'a été écrit par les lectures, hors le renommage.
+    assert_eq!(graph_spec(&b).panels[0].group_names.len(), 0);
+}
+
+/// Toutes les modifications d'un script — rassembler, déplacer, renommer,
+/// dissoudre, supprimer, style, nuancier — se défont d'un seul `undo`.
+#[test]
+fn modifier_les_groupes_rejoint_le_groupe_annulable_du_script() {
+    let b = banc();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot(y, x, name='Graph1', label='A')\nfor n in 'BCD':\n    pyst.plot(y, graph=g, label=n)"),
+    );
+    let before = b.session.snapshot().unwrap();
+    run(
+        &b,
+        "gid = pyst.group_series(g, [3, 1], name='Duo')
+assert [r['name'] for r in pyst.series(g)] == ['A', 'D', 'B', 'C'], pyst.series(g)
+assert pyst.series_groups(g) == [{'id': gid, 'name': 'Duo', 'members': [1, 2]}]
+rank = pyst.set_series_group(g, 3, gid)
+assert rank == 3
+assert pyst.series_groups(g)[0]['members'] == [1, 2, 3]
+assert pyst.set_series_group(g, 0, gid) == 3
+assert [r['name'] for r in pyst.series(g)] == ['D', 'B', 'C', 'A']
+pyst.set_series_group(g, 3, None)
+assert pyst.series_groups(g)[0]['members'] == [0, 1, 2]
+pyst.set_group_style(g, gid, line_style='dash', line_width=3., symbol='square', symbol_size=8.)
+pyst.apply_gradient(g, gid, 'blue-red')
+",
+    );
+    let panel = &graph_spec(&b).panels[0];
+    let gid = panel.series[0].group.unwrap();
+    for member in panel.group_members(gid) {
+        let s = &panel.series[member];
+        assert_eq!(s.line.style, LineStyle::Dash);
+        assert_eq!(s.line.width, 3.);
+        assert_eq!(s.symbol.shape, SymbolShape::Square);
+        assert_eq!(s.symbol.size, 8.);
+    }
+    assert_eq!(panel.series[0].line.color, "#0000ff");
+    assert_eq!(panel.series[2].line.color, "#ff0000");
+    assert_eq!(
+        panel.series[3].line.color,
+        stokesforge_plot::palette_color(0)
+    );
+    b.session.undo().unwrap();
+    assert_eq!(*b.session.snapshot().unwrap().tree, *before.tree);
+
+    run(
+        &b,
+        "gid = pyst.group_series(g, [0, 1, 2], name='Trio')
+pyst.apply_gradient(g, gid, ['#000000', '#00ff00'])
+pyst.ungroup(g, gid)
+assert pyst.series_groups(g) == []
+assert [r['name'] for r in pyst.series(g)] == ['A', 'B', 'C', 'D']
+gid = pyst.group_series(g, [1, 2])
+pyst.remove_group(g, gid)
+assert [r['name'] for r in pyst.series(g)] == ['A', 'D']
+",
+    );
+    let panel = &graph_spec(&b).panels[0];
+    assert_eq!(panel.series.len(), 2);
+    assert!(
+        panel.group_names.is_empty(),
+        "les noms des groupes disparus s'effacent"
+    );
+    assert_eq!(panel.series[0].line.color, "#000000");
+}
+
+#[test]
+fn un_script_en_erreur_ne_laisse_aucun_groupe() {
+    let b = banc();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y], x, name='Graph1')"),
+    );
+    let before = b.session.snapshot().unwrap();
+    let out = b
+        .engine
+        .run("gid = pyst.series_groups(g)[0]['id']\npyst.remove_group(g, gid)\nraise RuntimeError('rollback groupe')")
+        .unwrap();
+    assert!(out.error.unwrap().contains("rollback groupe"));
+    let after = b.session.snapshot().unwrap();
+    assert_eq!(*after.tree, *before.tree);
+    assert_eq!(after.history, before.history);
+}
+
+#[test]
+fn les_gestes_de_groupe_incorrects_sont_refuses_sans_rien_changer() {
+    let b = banc();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y], x, name='Graph1')\npyst.plot(y, graph=g)"),
+    );
+    let before = b.session.snapshot().unwrap();
+    run(
+        &b,
+        r#"
+gid = pyst.series_groups(g)[0]['id']
+refus = [
+    lambda: pyst.plot([y, y], x, label='seul'),
+    lambda: pyst.plot([y, y], x, label=['un']),
+    lambda: pyst.plot([y, y], [x, x, x]),
+    lambda: pyst.plot([y, y], x, y_error=y),
+    lambda: pyst.plot([], x),
+    lambda: pyst.plot(y, x, group_name='sans groupe'),
+    lambda: pyst.plot([y, 3], x),
+    lambda: pyst.group_series(g, []),
+    lambda: pyst.group_series(g, [0, 0]),
+    lambda: pyst.group_series(g, [0, 9]),
+    lambda: pyst.set_series_group(g, 9, gid),
+    lambda: pyst.set_series_group(g, 2, 99),
+    lambda: pyst.rename_group(g, 99, 'x'),
+    lambda: pyst.ungroup(g, 99),
+    lambda: pyst.remove_group(g, 99),
+    lambda: pyst.set_group_style(g, 99, line_width=2.),
+    lambda: pyst.set_group_style(g, gid, line_style='--'),
+    lambda: pyst.set_group_style(g, gid, symbol='o'),
+    lambda: pyst.set_group_style(g, gid, line_width=0.),
+    lambda: pyst.apply_gradient(g, gid, 'inconnu'),
+    lambda: pyst.apply_gradient(g, gid, []),
+    lambda: pyst.apply_gradient(g, gid, ['rouge']),
+    lambda: pyst.apply_gradient(g, gid, 3),
+    lambda: pyst.apply_gradient(g, 99, 'blue-red'),
+    lambda: pyst.series(g, panel=(5, 5)),
+    lambda: pyst.group_series(g, [0, 1], panel=(5, 5)),
+    lambda: pyst.series_groups(y),
+]
+for action in refus:
+    try: action()
+    except pyst.InvalidValueError: pass
+    else: raise AssertionError('geste invalide accepté')
+"#,
+    );
+    let after = b.session.snapshot().unwrap();
+    assert_eq!(*after.tree, *before.tree);
+    assert_eq!(after.history, before.history);
+    assert_eq!(after.revision, before.revision);
+}
+
+#[test]
+fn une_ancienne_poignee_de_graphe_est_refusee_par_les_gestes_de_groupe() {
+    let b = banc();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y], x, name='Graph1')"),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("groups.stf");
+    b.session.save(&path).unwrap();
+    b.session.load(&path).unwrap();
+    let before = b.session.snapshot().unwrap();
+    run(
+        &b,
+        r#"
+for action in (lambda: pyst.series(g), lambda: pyst.series_groups(g), lambda: pyst.group_series(g, [0, 1]), lambda: pyst.ungroup(g, 1), lambda: pyst.remove_group(g, 1)):
+    try: action()
+    except pyst.BrokenReferenceError: pass
+    else: raise AssertionError('ancienne poignée acceptée')
+"#,
+    );
+    let after = b.session.snapshot().unwrap();
+    assert_eq!(*after.tree, *before.tree);
+    assert_eq!(after.history, before.history);
+}

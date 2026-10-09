@@ -1247,3 +1247,44 @@ fn la_molette_et_le_glisser_sur_un_axe_ne_cadrent_que_cette_echelle() {
         "le calque de base n'a pas suivi"
     );
 }
+
+/// #197 : un groupe de séries se sélectionne par sa première série ; la
+/// sélection de n'importe quelle autre courbe — même du même groupe — ou d'un
+/// groupe absent la lève.
+#[test]
+fn un_groupe_se_selectionne_par_sa_premiere_serie_et_une_autre_courbe_le_leve() {
+    use stokesforge_plot::{PanelSpec, PlotSpec, SeriesGroupRef, SeriesRef, SeriesSpec};
+    let mut panel = PanelSpec::default();
+    panel.push_series_batch(vec![SeriesSpec::new(stokesforge_core::NodeId::from_raw(1))]);
+    panel.push_series_batch(
+        (2..=3)
+            .map(|n| SeriesSpec::new(stokesforge_core::NodeId::from_raw(n)))
+            .collect(),
+    );
+    let spec = PlotSpec::default().with_panels(panel);
+    let mut view = GraphView::new();
+    let group = SeriesGroupRef::new(0, 1);
+    view.select_series_group(Some(group), &spec);
+    assert_eq!(view.selected_group(), Some(group));
+    assert_eq!(view.selected_series(), Some(SeriesRef::new(0, 1)));
+
+    view.select_series(Some(SeriesRef::new(0, 2)), &spec);
+    assert_eq!(
+        view.selected_group(),
+        None,
+        "une autre courbe lève le groupe"
+    );
+    assert_eq!(view.selected_series(), Some(SeriesRef::new(0, 2)));
+
+    view.select_series_group(Some(group), &spec);
+    view.select_series(Some(SeriesRef::new(0, 1)), &spec);
+    assert_eq!(
+        view.selected_group(),
+        None,
+        "re-sélectionner la même courbe seule aussi"
+    );
+
+    view.select_series_group(Some(SeriesGroupRef::new(0, 9)), &spec);
+    assert_eq!(view.selected_group(), None);
+    assert_eq!(view.selected_series(), None, "groupe absent : rien");
+}

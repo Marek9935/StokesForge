@@ -58,7 +58,8 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/graph_text_edit.rs` | éditeurs sur place (texte libre, titre, nom de légende) et mise en forme en attente demandée par la barre de format |
 | `app/file_drop.rs` | dépôt de fichiers : `begin_file_drop`, `claim_file_drop`, `finish_file_drop` (un emplacement par viewport), `open_project_in_new_window` |
 | `app/import_wizard.rs` | assistant d'import : `import_window`, ses six étapes ; choix du modèle/fichiers et réglages du format en sections, l'aperçu coloré par rôle, les libellés des choix |
-| `app/plot_settings.rs` | propriétés du graphe : `plot_settings_window`, ses onglets, un éditeur par page, le mémo des formules ; `column_metadata_window` |
+| `app/plot_settings.rs` | propriétés du graphe : `plot_settings_window`, ses onglets, un éditeur par page, l'aide à la syntaxe des formules (`formula_field`, `formula_help`) ; `column_metadata_window` |
+| `app/hover_help.rs` | brique commune de l'aide au survol d'un champ (#197) : `hover_help`, l'icône grisée à droite du champ dont la bulle montre le rappel |
 | `app/dialogs.rs` | brique commune des dialogues modaux : `modal_dialog`, `modal_dialog_with` |
 | `app/tab_strip.rs` | brique commune de la bande d'onglets : `tab_strip`, `tab_strip_with` (`TabOps`, `TabEvent`) |
 | `app/list_row.rs` | brique commune de la ligne de liste sélectionnable (#169) : `list_row`, `ListRowBackground`, `list_row_label`, `list_row_text`, `LIST_ROW_MARK` ; Project Manager, Object Manager, liste des séries des propriétés |
@@ -1539,12 +1540,15 @@ sont des données, jamais traduits.
 
 **Textes du graphe** : titre, titre du panneau, libellé et unité d'axe, nom de
 série sont composés par Typst et lus comme du **markup** (`docs/rendu.md`
-§ Typst). Sous chacun de ces champs, une section repliée « Formula syntax »
-(`app::plot_settings::formula_memo`, issue #33) rappelle la syntaxe : `$lambda$`, `$x_2$`,
-`$"cm"^(-1)$`, `*bold*`, `\$` pour un dollar. Repliable plutôt qu'en bulle
-d'aide : la fenêtre est un dialogue modal (issue #9). Le test
-`chaque_exemple_du_memo_compile` vérifie que chaque exemple compile. Un nom de
-série laissé vide reprend celui de la colonne, affiché tel quel.
+§ Typst). Chacun de ces champs (`formula_field`) porte à sa droite une petite
+icône d'aide grisée (#197, `app/hover_help.rs`) dont la bulle, au survol, rappelle
+la syntaxe (`formula_help`, issue #33) : `$lambda$`, `$x_2$`, `$"cm"^(-1)$`,
+`*bold*`, `\$` pour un dollar, et nomme Typst avec l'adresse de sa référence.
+Elle remplace le mémo repliable « Formula syntax » : le lien avec le champ se
+voit et l'aide ne prend plus de hauteur. Tout champ futur qui accepte une
+formule passe par `formula_field` ; une autre aide au survol, par `hover_help`.
+Le test `chaque_exemple_du_memo_compile` vérifie que chaque exemple compile. Un
+nom de série laissé vide reprend celui de la colonne, affiché tel quel.
 
 **Onglet « Thème »** : deux thèmes prédéfinis (`stokesforge_plot::THEMES` : Clair,
 Sombre) et trois couleurs globales — fond, texte, axes. Une
@@ -1689,10 +1693,17 @@ réellement dans `stokesforge-plot` (lu avant d'écrire, comme demandé) :
   `plot_settings_window` — même brouillon, autre titre `curve-window-title`, autre
   identité egui et autre taille ; ouverte par le double-clic sur une courbe de la
   figure ou sur sa ligne de l'Object Manager, `Properties…` et Graph › Properties ›
-  Series…). Liste à gauche (`list_row`, suffixe « · Group n », Move Up / Move
-  Down qui changent le rang), réglages à droite : le **groupe** de la série
-  (liste déroulante Aucun / Group n / New group, et « Leave Group » qui la
-  détache ; groupe créé à l'ajout simultané, #177) et, pour une série
+  Series…). Liste à gauche rangée comme l'Object Manager (#197, `PanelSpec::slots`) :
+  une série seule est une ligne `list_row`, un groupe est un **nœud repliable**
+  (réduire ne masque aucune courbe) dont les membres sont en branche
+  `tree_lines` ; Move Up / Move Down changent le rang dans le groupe (ou sautent
+  un groupe entier), réglages à droite : le **groupe** de la série
+  (liste déroulante Aucun / nom du groupe / New group, et « Leave Group » qui la
+  détache ; groupe créé à l'ajout simultané, #177 ; entrer dans un groupe place
+  la série à la suite de ses membres), puis les gestes du groupe (`group_editor`) :
+  son **nom** (champ validé à la perte de focus, vide = « Group n »), Move Group
+  Up / Down, **Ungroup** (les séries restent, simples, avec leur style) et
+  **Delete Group** (le groupe et ses séries) ; et, pour une série
   groupée, la **portée** (`EditScope`) en clair — « This series only » ou
   « Whole group (n series) » (par défaut) — avec une phrase qui dit ce qui
   s'applique. Portée groupe : style et épaisseur du trait, forme et taille du
@@ -1707,8 +1718,19 @@ réellement dans `stokesforge-plot` (lu avant d'écrire, comme demandé) :
   N couleurs (nom + cible + Save), aperçu, « Apply to Group » qui répartit les
   couleurs dans l'ordre de la liste. Le choix en cours est un état de fenêtre ;
   seules les couleurs appliquées et les nuanciers enregistrés entrent dans le
-  modèle. Dans l'Object Manager, le nœud sous le calque s'appelle « Series » ; les
-  groupes y sont un en-tête « Group n » suivi de leurs séries en retrait.
+  modèle. Dans l'Object Manager, le nœud sous le calque s'appelle « Series » ; un
+  groupe y est un **nœud parent comme les autres** (#197) : triangle de repli
+  (repli initial = celui de « Series », #139), case de visibilité mixte qui ne
+  commande que ses membres (`VisibilityTarget::SeriesGroup`), nom éditable sur
+  place (F2 ou Rename, Entrée valide, Échap annule), sélection (la `GraphView`
+  garde `selected_group`, valable tant que la série qui le désigne est
+  sélectionnée ; les poignées de toutes ses courbes sont peintes), double-clic
+  = fenêtre des séries ouverte sur sa première série, clic droit
+  (`object_node_menu` : Select Members, Rename, Move Up / Down, Ungroup, Hide,
+  Delete, Properties…). Suppr supprime le groupe **et ses séries** (le geste
+  distinct de la dissolution) ; Ctrl+↑/↓ le déplace en bloc. Actions :
+  `RenameSeriesGroup`, `UngroupSeries`, `MoveSeriesGroup`, `MoveSeries`,
+  `RemovePlotObject`.
   Ancienne description de la liste : (`egui::ScrollArea` bornée en hauteur,
   `selectable_label` par série, libellé `state::series_list_label` : le nom
   de la série s'il est renseigné, sinon le nom long de la colonne Y, sinon

@@ -104,6 +104,12 @@ pub fn tab_rule_color() -> Color32 {
     Color32::from_gray(0xD6)
 }
 
+/// Teinte de l'icône d'aide au survol d'un champ (#197) : l'icône neutre,
+/// estompée pour rester discrète à côté du champ qu'elle explique.
+pub fn help_icon_tint() -> Color32 {
+    Color32::from_white_alpha(150)
+}
+
 /// Trait d'un onglet survolé, à la place de celui de l'onglet actif (#169).
 pub fn tab_hover_mark_color() -> Color32 {
     Color32::from_gray(0xC4)

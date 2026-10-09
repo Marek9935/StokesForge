@@ -185,6 +185,11 @@ sur un seul instantané, puis de nouveau après acquisition de la macro.
 valider le spec avant réservation puis le relire sous macro, même si l'objet
 est la première mutation. Aucun mutateur de graphe ne doit contourner la macro
 `Script`, sinon une exception laisserait son objet derrière elle.
+Une liste de colonnes passée à `plot` forme un groupe (`push_series_batch`),
+et les gestes de groupe de `crates/stokesforge-script/src/groups.rs` appellent
+les méthodes de `PanelSpec` que l'interface emploie aussi (#196) : un geste de
+groupe nouveau s'écrit d'abord dans `PanelSpec`, puis se réexpose ici par
+`edit_panel`, jamais en réimplémentant la règle côté script.
 Conserver les autres panneaux et les options non fournies. Les titres et
 labels explicites sont du markup Typst ; les labels automatiques restent
 littéraux. Contrat et SVG témoins : `tests/graphs.rs`.

@@ -114,6 +114,24 @@ impl SeriesRef {
     }
 }
 
+/// Adresse d'un groupe de séries (#197) : le panneau, puis le numéro de groupe
+/// dans ce panneau. Comme [`SeriesRef`], elle ne vaut que pour la valeur de
+/// [`PlotSpec`] dont elle sort.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SeriesGroupRef {
+    /// Indice du panneau dans [`PlotSpec::panels`].
+    pub panel: usize,
+    /// Numéro du groupe dans ce panneau.
+    pub group: u32,
+}
+
+impl SeriesGroupRef {
+    /// Adresse du groupe `group` du panneau `panel`.
+    pub const fn new(panel: usize, group: u32) -> Self {
+        Self { panel, group }
+    }
+}
+
 impl std::fmt::Display for SeriesRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "série {} du panneau {}", self.index, self.panel)

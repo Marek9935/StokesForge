@@ -849,6 +849,8 @@ fn non_trivial_spec(
                 0.5,
             ),
         ],
+        // Nom du groupe 3 (#197).
+        group_names: [(3, "Séries d'été".to_string())].into(),
         ..PanelSpec::at(0, 0)
     };
     let panel_b = PanelSpec {

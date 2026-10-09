@@ -655,7 +655,6 @@ plot-series-symbol-color = Symbol color
 
 curve-window-title = Series Properties — { $name }
 curve-group-name = Group { $number }
-curve-list-label = { $name } · { $group }
 curve-group-section = Group
 curve-group-field = Group
 curve-group-none = None
@@ -665,6 +664,21 @@ curve-group-leave =
     Leave Group
     .hint = Detaches this series from its group; it keeps its current style
     .disabled = This series is not in a group
+curve-group-name-field =
+    Name
+    .hint = Name of the group in the Object Manager and the series list. Leave empty for the automatic name.
+curve-group-ungroup =
+    Ungroup
+    .hint = Turns every series of the group into a single series; each keeps its style
+curve-group-delete =
+    Delete Group
+    .hint = Deletes the group and all its series from the graph
+curve-group-move-up =
+    Move Group Up
+    .hint = Moves the whole group up in the drawing order
+curve-group-move-down =
+    Move Group Down
+    .hint = Moves the whole group down in the drawing order
 curve-scope-field = Edit
 curve-scope-series = This series only
 curve-scope-group = Whole group ({ $count } series)
@@ -753,7 +767,7 @@ plot-formula-full = Full formula
 plot-formula-upright = Upright text in a formula
 plot-formula-format = Text formatting
 plot-formula-escape = The character itself
-plot-formula-footer = Text between $ … $ is a formula, the rest is plain text. Full syntax: { $url }
+plot-formula-footer = Text between $ … $ is a formula, the rest is plain text. This is Typst syntax; full reference: { $url }
 
 # Text on the graph (editor in place) and view of the graph
 
@@ -966,6 +980,13 @@ object-manager-show-axes = Show Axes
 menu-selected-content = Selection
     .disabled = Select a curve, a text or an object first
 action-rename-series = Rename
+action-rename-group = Rename
+action-ungroup-series =
+    Ungroup
+    .hint = Turns every series of this group into a single series; each keeps its style
+action-select-group-series =
+    Select Members
+    .hint = Selects the group and shows the handles of all its series
 action-move-series-up = Move Up
 action-move-series-down = Move Down
 action-show-content = Show
@@ -980,6 +1001,10 @@ history-plot-remove-series = Delete Series
 history-plot-remove-text = Delete Text
 history-plot-remove-object = Delete Object
 history-plot-reorder-object = Reorder Object
+history-plot-rename-group = Rename Group
+history-plot-dissolve-group = Ungroup Series
+history-plot-remove-group = Delete Group
+history-plot-reorder-group = Reorder Group
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Expand the panel

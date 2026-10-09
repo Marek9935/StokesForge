@@ -259,7 +259,10 @@ x' non fini lu d'un fichier est ramené à `None`.
 transporte les nuanciers enregistrés du projet.
 
 `SeriesSpecRecord::group` (#177, `Option<u32>`) : `#[serde(default)]`, les
-fichiers sans lui se relisent sans groupe.
+fichiers sans lui se relisent sans groupe. `PanelSpecRecord::group_names` (#197,
+liste de `{ group, name }`, `#[serde(default)]`) : les noms de groupes ; absent,
+tous les groupes portent leur nom automatique, et un nom vide lu d'un fichier
+est écarté.
 
 ## Visibilité des objets (#81, #85)
 

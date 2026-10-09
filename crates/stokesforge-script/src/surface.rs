@@ -680,6 +680,20 @@ Surface de script de StokesForge : navigation, lecture, écriture, annulation et
     pyst.set_values(handle, values) -> None (remplacement, longueur comprise)
     pyst.set_column_meta(handle, **metadata) -> None
     pyst.plot(y, x=None, *, graph=None, name=None, parent=None, **options) -> Handle
+                  (y : une colonne, ou une liste de colonnes = un groupe de séries ;
+                   label=[...] un nom par série, group_name='...')
+    pyst.series(graph, *, panel=(0, 0)) -> list[dict] (index, name, group, color, visible, y)
+    pyst.series_groups(graph, *, panel=(0, 0)) -> list[dict] (id, name, members)
+    pyst.group_series(graph, indices, *, name=None, panel=(0, 0)) -> int (numéro du groupe)
+    pyst.set_series_group(graph, index, group, *, panel=(0, 0)) -> int (nouveau rang ;
+                  group=None sort la série de son groupe)
+    pyst.rename_group(graph, group, name, *, panel=(0, 0)) -> None ('' = nom automatique)
+    pyst.ungroup(graph, group, *, panel=(0, 0)) -> None (les séries restent)
+    pyst.remove_group(graph, group, *, panel=(0, 0)) -> None (supprime aussi les séries)
+    pyst.set_group_style(graph, group, *, panel=(0, 0), line_style=None, line_width=None,
+                  symbol=None, symbol_size=None) -> None
+    pyst.apply_gradient(graph, group, gradient, *, panel=(0, 0)) -> None (nom d'un nuancier
+                  fourni ou enregistré dans le projet, ou liste d'arrêts '#RRGGBB')
     pyst.add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis='left',
                   line_color='', line_width=1.5, fill_color='') -> int
     pyst.remove_shape(graph, index, *, panel=(0, 0)) -> None
@@ -734,6 +748,19 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(crate::graph::plot, &module)?)?;
     module.add_function(wrap_pyfunction!(add_shape, &module)?)?;
     module.add_function(wrap_pyfunction!(remove_shape, &module)?)?;
+    for function in [
+        wrap_pyfunction!(crate::groups::series, &module)?,
+        wrap_pyfunction!(crate::groups::series_groups, &module)?,
+        wrap_pyfunction!(crate::groups::group_series, &module)?,
+        wrap_pyfunction!(crate::groups::set_series_group, &module)?,
+        wrap_pyfunction!(crate::groups::rename_group, &module)?,
+        wrap_pyfunction!(crate::groups::ungroup, &module)?,
+        wrap_pyfunction!(crate::groups::remove_group, &module)?,
+        wrap_pyfunction!(crate::groups::set_group_style, &module)?,
+        wrap_pyfunction!(crate::groups::apply_gradient, &module)?,
+    ] {
+        module.add_function(function)?;
+    }
     module.add_function(wrap_pyfunction!(undo, &module)?)?;
     module.add_function(wrap_pyfunction!(import_file, &module)?)?;
     module.add("UnknownPathError", py.get_type::<UnknownPathError>())?;

@@ -8122,6 +8122,156 @@ fn object_manager_supprime_une_courbe_sans_toucher_aux_donnees() {
     assert_eq!(remaining_nodes, original_nodes);
 }
 
+/// #197 : les gestes d'un groupe de séries sont des commandes annulables,
+/// chacune avec son motif d'historique ; une cible périmée n'en crée aucune.
+#[test]
+fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
+    use stokesforge_app::object_manager::{object_tree, LayerSlot, VisibilityTarget as T};
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_plot::{SeriesGroupRef, SeriesRef};
+    let dir = tempfile::tempdir().unwrap();
+    let (mut project, graph, mut spec) = object_manager_project();
+    // Premier calque : A, [B C] — le groupe 1 de « B » et « C ».
+    {
+        let panel = spec.panels.get_mut(0).unwrap();
+        panel.series[1].group = Some(1);
+        panel.series[2].group = Some(1);
+    }
+    project.set_plot_spec(graph, spec.clone()).unwrap();
+    let (_session, mut state) = start(project, &dir.path().join("groupes.stf"));
+    let group = SeriesGroupRef::new(0, 1);
+    let labels = |state: &AppState| state.snapshot().history.undo_label.clone();
+
+    state.dispatch(Action::RenameSeriesGroup {
+        graph,
+        group,
+        name: "  Lots  ".into(),
+    });
+    let named = graph_spec(&state, graph);
+    assert_eq!(named.panels[0].group_label(1), Some("Lots"));
+    assert_eq!(
+        labels(&state),
+        Some(HistoryLabel::EditPlotSpec(K::RenameGroup))
+    );
+    let model = object_tree(state.tree(), graph, None).unwrap();
+    assert!(matches!(
+        &model.layers[0].slots[1],
+        LayerSlot::Group(row) if row.name == "Lots" && row.members == [1, 2]
+    ));
+
+    let revision = state.revision();
+    state.dispatch(Action::RenameSeriesGroup {
+        graph,
+        group,
+        name: "Lots".into(),
+    });
+    state.dispatch(Action::RenameSeriesGroup {
+        graph,
+        group: SeriesGroupRef::new(0, 9),
+        name: "Fantôme".into(),
+    });
+    state.dispatch(Action::UngroupSeries {
+        graph,
+        group: SeriesGroupRef::new(0, 9),
+    });
+    state.dispatch(Action::MoveSeriesGroup {
+        graph,
+        group,
+        up: false,
+    });
+    assert_eq!(
+        state.revision(),
+        revision,
+        "nom identique, groupe absent, butée : rien"
+    );
+
+    // Monter le groupe l'amène avant « A » ; une série seule saute le groupe.
+    state.dispatch(Action::MoveSeriesGroup {
+        graph,
+        group,
+        up: true,
+    });
+    let moved = graph_spec(&state, graph);
+    let names = |spec: &stokesforge_plot::PlotSpec| {
+        spec.panels[0]
+            .series
+            .iter()
+            .map(|s| s.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(&moved), ["B", "C", "A"]);
+    assert_eq!(
+        labels(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ReorderGroup))
+    );
+    state.dispatch(Action::MoveSeries {
+        graph,
+        series: SeriesRef::new(0, 2),
+        up: true,
+    });
+    assert_eq!(names(&graph_spec(&state, graph)), ["A", "B", "C"]);
+    assert_eq!(
+        labels(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ReorderSeries))
+    );
+    state.dispatch(Action::MoveSeries {
+        graph,
+        series: SeriesRef::new(0, 1),
+        up: true,
+    });
+    assert_eq!(
+        names(&graph_spec(&state, graph)),
+        ["A", "B", "C"],
+        "premier membre d'un groupe : il y reste"
+    );
+
+    // Dissoudre garde les séries et leur style ; Annuler rend le groupe et son nom.
+    let before = graph_spec(&state, graph);
+    state.dispatch(Action::UngroupSeries { graph, group });
+    let ungrouped = graph_spec(&state, graph);
+    assert_eq!(names(&ungrouped), names(&before));
+    assert!(ungrouped.panels[0].series.iter().all(|s| s.group.is_none()));
+    assert!(ungrouped.panels[0].group_names.is_empty());
+    assert_eq!(
+        labels(&state),
+        Some(HistoryLabel::EditPlotSpec(K::DissolveGroup))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+
+    // Supprimer le groupe retire ses séries ; les données ne sont pas touchées.
+    state.dispatch(Action::RemovePlotObject {
+        graph,
+        target: T::SeriesGroup(group),
+    });
+    assert_eq!(names(&graph_spec(&state, graph)), ["A"]);
+    assert_eq!(
+        labels(&state),
+        Some(HistoryLabel::EditPlotSpec(K::RemoveGroup))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+    state.dispatch(Action::Redo);
+    assert_eq!(names(&graph_spec(&state, graph)), ["A"]);
+    state.dispatch(Action::Undo);
+
+    // La case du groupe ne commande que ses membres.
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: T::SeriesGroup(group),
+        visible: false,
+    });
+    let hidden = graph_spec(&state, graph);
+    assert_eq!(
+        hidden.panels[0]
+            .series
+            .iter()
+            .map(|s| s.visible)
+            .collect::<Vec<_>>(),
+        [true, false, false]
+    );
+}
+
 #[test]
 fn object_manager_series_renommage_ordre_suppression_undo_redo() {
     use stokesforge_app::object_manager::{series_drop, VisibilityTarget as T};
