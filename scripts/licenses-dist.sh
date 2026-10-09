@@ -26,7 +26,8 @@ fi
 
 PYTHON_LIB="$PACKAGE_DIR/lib/python/lib/python${PYTHON_XY}"
 NUMPY_LICENSES="$PYTHON_LIB/site-packages/numpy-${NUMPY_VERSION}.dist-info/licenses"
-for notice in "$PYTHON_LIB/LICENSE.txt" "$NUMPY_LICENSES/LICENSE.txt"; do
+SCIPY_LICENSE="$PYTHON_LIB/site-packages/scipy-${SCIPY_VERSION}.dist-info/LICENSE.txt"
+for notice in "$PYTHON_LIB/LICENSE.txt" "$NUMPY_LICENSES/LICENSE.txt" "$SCIPY_LICENSE"; do
     [[ -s "$notice" ]] || {
         echo "[licences] ERREUR : notice absente du paquet : $notice" >&2
         exit 1
@@ -54,7 +55,7 @@ cp LICENSE LICENSE-EXCEPTION "$PACKAGE_DIR/"
 mkdir -p "$PACKAGE_DIR/licenses/fonts" "$PACKAGE_DIR/licenses/epaint-default-fonts" \
     "$PACKAGE_DIR/licenses/phosphor" \
     "$PACKAGE_DIR/licenses/winit" "$PACKAGE_DIR/licenses/smithay-clipboard" \
-    "$PACKAGE_DIR/licenses/python" "$PACKAGE_DIR/licenses/numpy"
+    "$PACKAGE_DIR/licenses/python" "$PACKAGE_DIR/licenses/numpy" "$PACKAGE_DIR/licenses/scipy"
 for notice in vendor/fonts/*/OFL.txt; do
     family="$(basename "$(dirname "$notice")")"
     mkdir -p "$PACKAGE_DIR/licenses/fonts/$family"
@@ -67,5 +68,6 @@ cp vendor/smithay-clipboard/LICENSE "$PACKAGE_DIR/licenses/smithay-clipboard/"
 cp -a vendor/python/licenses/. "$PACKAGE_DIR/licenses/python/"
 cp "$PYTHON_LIB/LICENSE.txt" "$PACKAGE_DIR/licenses/python/LICENSE-runtime.txt"
 cp -a "$NUMPY_LICENSES/." "$PACKAGE_DIR/licenses/numpy/"
+cp "$SCIPY_LICENSE" "$PACKAGE_DIR/licenses/scipy/LICENSE.txt"
 mv "$TEMP_DIR/THIRD-PARTY-LICENSES.txt" "$PACKAGE_DIR/THIRD-PARTY-LICENSES.txt"
 echo "[licences] OK : licences et notices livrées dans $PACKAGE_DIR"

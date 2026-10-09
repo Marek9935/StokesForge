@@ -20,6 +20,11 @@ Deux crates, derrière la feature `python`, **absente de `default`** :
 - **`stokesforge-script`** — le fil de script, l'interruption, et la surface `pyst`
   offerte aux scripts. Lui connaît le modèle, et parle à l'acteur.
 
+La pile embarquée porte numpy **et scipy** (#191), versions épinglées dans
+`vendor/python/lock.env` ; scipy sert aux scripts seulement, jamais à l'interface.
+Changer une version : `scripts/python-vendor.sh`, `scripts/python-test.sh`, notices
+(`scripts/licenses-dist.sh`).
+
 Lire `docs/python-et-script.md` et `crates/stokesforge-python/README.md` avant de
 commencer.
 

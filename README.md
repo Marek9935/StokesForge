@@ -48,7 +48,7 @@ couvertes et les notices tierces sont décrites dans
 
 Les distributions livrent `LICENSE`, `LICENSE-EXCEPTION`,
 `THIRD-PARTY-LICENSES.txt` et un dossier `licenses/` (polices, icônes, patches,
-CPython et numpy). Les outils de contrôle et de génération des notices
+CPython, numpy et scipy). Les outils de contrôle et de génération des notices
 doivent être installés avant d'exécuter les scripts de distribution ; voir
 la page de licence. Le travail CI `licenses` vérifie la politique et génère
 les notices.

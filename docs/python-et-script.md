@@ -53,6 +53,24 @@ les `atexit` Python ne s'exécutent pas.
 `stokesforge-pyhello` existe pour prouver que cette isolation tient une fois
 empaquetée (`scripts/pyhello-dist.sh`, environnement nettoyé).
 
+### scipy dans le préfixe embarqué (#191)
+
+La pile embarquée porte numpy **et scipy** (`SCIPY_VERSION` de
+`vendor/python/lock.env`, roue cp312 manylinux, installée par
+`scripts/python-vendor.sh` avec `--no-deps --only-binary=:all:` comme numpy).
+Les deux sont solidaires de CPython et entre eux (la roue scipy exige
+`numpy>=2.0,<2.8`) : changer l'un se rejoue par `scripts/python-vendor.sh` puis
+`scripts/python-test.sh`. scipy sert aux **scripts** `pyst` (par exemple
+`scipy.optimize.curve_fit` pour un modèle que `pyst.analysis.fit` ne propose
+pas) ; l'interface et les menus n'en dépendent jamais, tout le traitement des
+menus est du Rust pur (`stokesforge-analysis`). Poids : ≈ 140 Mo installés
+(`scipy` 109 Mo + `scipy.libs` 30 Mo, OpenBLAS, libgfortran et libquadmath
+inclus), à compter dans le paquet. Les notices vont dans `licenses/scipy/`
+(`scripts/licenses-dist.sh`). Témoin : `stokesforge-script/tests/analysis.rs`,
+`scipy_ajuste_une_exponentielle_depuis_un_script` (travail CI `test-python`).
+Windows : la pile n'est pas vendorisée aujourd'hui (tâche 5.1b) ; la roue
+`win_amd64` s'y installera de la même façon, à vérifier alors.
+
 ## Tableaux : l'asymétrie est une décision
 
 | Sens | Mécanisme | Copie ? |

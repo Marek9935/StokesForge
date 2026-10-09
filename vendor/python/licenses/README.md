@@ -18,7 +18,8 @@ texte `LICENSE.zlib.txt` est conservé tel quel.
 
 Les distributions livrent ces notices, le `LICENSE.txt` du CPython réellement
 empaqueté et **tous les textes du répertoire de licences de la roue numpy**,
-y compris ceux de ses composants natifs. La licence du code Python de
+y compris ceux de ses composants natifs, et le `LICENSE.txt` de la roue scipy
+(#191), qui reprend les licences de ses bibliothèques natives. La licence du code Python de
 StokesForge ne remplace aucune de ces licences.
 
 Lors d'une mise à jour de `vendor/python/lock.env` :
