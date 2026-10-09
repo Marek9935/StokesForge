@@ -135,7 +135,7 @@ impl Func {
             Func::Cosh => a.cosh(),
             Func::Tanh => a.tanh(),
             Func::Erf => erf(a),
-            Func::Erfc => 1.0 - erf(a),
+            Func::Erfc => erfc(a),
             Func::Sign => {
                 if a > 0.0 {
                     1.0
@@ -153,6 +153,29 @@ impl Func {
             Func::Atan2 => a.atan2(b),
         }
     }
+}
+
+/// Fonction d'erreur complémentaire, précise en queue : `1 − erf(x)` perdrait
+/// tous ses chiffres dès `x ≈ 6` (`erfc(6) ≈ 2e-17`).
+pub fn erfc(x: f64) -> f64 {
+    if x.is_nan() {
+        return f64::NAN;
+    }
+    if x < 0.0 {
+        return 2.0 - erfc(-x);
+    }
+    if x < 2.5 {
+        return 1.0 - erf(x);
+    }
+    if x > 27.0 {
+        return 0.0;
+    }
+    // Même fraction continue que `erf`, sans la soustraire à 1.
+    let mut f = 0.0;
+    for k in (1..=60).rev() {
+        f = (k as f64 / 2.0) / (x + f);
+    }
+    (-x * x).exp() / (std::f64::consts::PI.sqrt() * (x + f))
 }
 
 /// Fonction d'erreur (Abramowitz & Stegun 7.1.26 raffinée par une série pour
@@ -603,5 +626,22 @@ mod tests {
             assert!((erf(-x) + want).abs() < 1e-12);
         }
         assert!((ev("erfc(1)", 0.0, &[]) - 0.157_299_207_050_285_1).abs() < 1e-12);
+    }
+
+    #[test]
+    fn erfc_garde_sa_precision_relative_en_queue() {
+        // erfc(3) et erfc(6) : valeurs tabulées ; 1 − erf(6) vaudrait 0.
+        for (x, want) in [
+            (3.0, 2.209_049_699_858_544e-5),
+            (6.0, 2.151_973_671_249_892e-17),
+        ] {
+            assert!(
+                (erfc(x) / want - 1.0).abs() < 1e-9,
+                "erfc({x}) = {}",
+                erfc(x)
+            );
+        }
+        assert!((erfc(-3.0) - (2.0 - 2.209_049_699_858_544e-5)).abs() < 1e-12);
+        assert_eq!(erfc(40.0), 0.0);
     }
 }

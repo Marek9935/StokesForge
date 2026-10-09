@@ -251,6 +251,13 @@ pub fn decompose(series: &Series, spec: &PeaksSpec) -> Result<PeaksFit, Analysis
     }
     let wc = spec.shape.width_count();
     let s = series;
+    if s.x.len() < 3 {
+        // Une série vide ou presque : rien à lire sous les graines posées.
+        return Err(AnalysisError::NotEnoughPoints {
+            found: s.x.len(),
+            needed: 3,
+        });
+    }
     let (xmin, xmax) =
         s.x.iter()
             .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), v| {
@@ -294,7 +301,9 @@ pub fn decompose(series: &Series, spec: &PeaksSpec) -> Result<PeaksFit, Analysis
     let mut peak_slots: Vec<(usize, usize, Vec<usize>)> = Vec::new();
     for (i, seed) in spec.seeds.iter().enumerate() {
         let near = nearest_index(&s.x, seed.center);
-        let h0 = seed.height.unwrap_or(s.y[near] - base_guess);
+        let h0 = seed
+            .height
+            .unwrap_or_else(|| s.y.get(near).copied().unwrap_or(0.0) - base_guess);
         let fwhm0 = seed.fwhm.unwrap_or(default_width);
         let h_slot = slots.len();
         slots.push(Slot::new(format!("A{}", i + 1), h0));

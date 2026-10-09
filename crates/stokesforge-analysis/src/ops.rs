@@ -16,6 +16,7 @@ use crate::deconv::{self, DirectMethod, ReconvSpec};
 use crate::error::AnalysisError;
 use crate::fit::{self, FitInput, FitSpec};
 use crate::integrate::{self, IntegrateSpec};
+use crate::model::Model;
 use crate::peaks::{self, PeakSeed, PeaksSpec};
 use crate::series::{clean, interpolate, Series};
 
@@ -367,11 +368,59 @@ fn restrict(series: &Series, range: Option<(f64, f64)>) -> Result<Series, Analys
 /// Exécute `op` sur chaque entrée. Une erreur sur une entrée annule le lot
 /// (l'appelant décide de relancer les autres). Un ajustement global traite
 /// toutes les entrées ensemble.
+/// Plafonds des réglages, communs à l'interface, à `pyst` et au fichier : un
+/// degré de 10⁹ créerait un milliard de paramètres, des itérations sans borne
+/// bloqueraient l'acteur de session au recalcul.
+pub const MAX_DEGREE: u32 = 9;
+pub const MAX_ITERATIONS: usize = 5000;
+
+impl Operation {
+    /// Refuse les réglages hors plafond avant tout calcul.
+    pub fn validate(&self) -> Result<(), AnalysisError> {
+        let bad = |name: &str| {
+            Err(AnalysisError::InvalidParameter {
+                name: name.to_string(),
+            })
+        };
+        match self {
+            Operation::Baseline {
+                method: BaselineMethod::Zones { degree, .. },
+                ..
+            } if !(1..=MAX_DEGREE).contains(degree) => bad("degree"),
+            Operation::Fit { spec, .. } => match spec.model {
+                Model::Polynomial { degree } if !(1..=MAX_DEGREE).contains(&degree) => {
+                    bad("degree")
+                }
+                _ => Ok(()),
+            },
+            Operation::Peaks { auto, .. } if auto.is_some_and(|a| a.max_peaks > 100) => {
+                bad("max_peaks")
+            }
+            Operation::DirectDeconvolution { method, .. } => match method {
+                DirectMethod::RichardsonLucy { iterations }
+                    if !(1..=MAX_ITERATIONS).contains(iterations) =>
+                {
+                    bad("iterations")
+                }
+                DirectMethod::Wiener { noise: Some(k) } if !(k.is_finite() && *k > 0.0) => {
+                    bad("noise")
+                }
+                _ => Ok(()),
+            },
+            Operation::Reconvolution { spec, .. } if !(1..=4).contains(&spec.components) => {
+                bad("components")
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
 pub fn run(
     op: &Operation,
     inputs: &[SeriesInput],
     aux: Option<&AuxInput>,
 ) -> Result<Vec<Outcome>, AnalysisError> {
+    op.validate()?;
     if inputs.is_empty() {
         return Err(AnalysisError::NotEnoughPoints {
             found: 0,
@@ -536,7 +585,7 @@ fn run_fit(
         for (j, name) in report.param_names.iter().enumerate() {
             o.value(format!("param.{name}"), None, fs.values[j], fs.errors[j]);
         }
-        o.stats(fs.points, fs.r_squared, report.reduced_chi2, report.dof);
+        o.stats(fs.points, fs.r_squared, fs.reduced_chi2, fs.dof);
         let fitted = a.eval_in(range, |x| model.eval(&fs.values, x));
         if residuals {
             let y = a.y_rows(&inputs[k]);

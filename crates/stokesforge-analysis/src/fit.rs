@@ -46,6 +46,11 @@ pub struct FittedSeries {
     pub r_squared: f64,
     /// χ² pondéré de cette courbe.
     pub chi2: f64,
+    /// Degrés de liberté de cette courbe seule (ajustement global : de
+    /// l'ensemble, partagé par toutes les courbes).
+    pub dof: usize,
+    /// χ² réduit de cette courbe seule (ajustement global : de l'ensemble).
+    pub reduced_chi2: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -166,6 +171,8 @@ fn fit_one(
             points: sol.terms[0].points,
             r_squared: sol.terms[0].r_squared,
             chi2: sol.chi2,
+            dof: sol.dof,
+            reduced_chi2: sol.reduced_chi2,
         },
         sol.dof,
         sol.iterations,
@@ -224,6 +231,8 @@ fn fit_linear(input: &FitInput, model: &CompiledModel) -> Option<(FittedSeries, 
                 f64::NAN
             },
             chi2,
+            dof,
+            reduced_chi2: scale,
         },
         dof,
     ))
@@ -293,6 +302,8 @@ fn fit_together(
             errors: map[i].iter().map(|&s| sol.errors[s]).collect(),
             points: sol.terms[i].points,
             r_squared: sol.terms[i].r_squared,
+            dof: sol.dof,
+            reduced_chi2: sol.reduced_chi2,
             chi2: {
                 // χ² de la courbe seule.
                 let t = &terms[i];

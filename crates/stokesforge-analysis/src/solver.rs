@@ -156,8 +156,20 @@ pub fn solve_problem(
         jacobian(terms, &values, slots, &free, &mut jac, &mut buf);
         let a = jac.gram();
         let g = jac.transpose_mul(&r);
-        let gmax = g.iter().fold(0.0_f64, |a, b| a.max(b.abs()));
-        if gmax < 1e-14 * (1.0 + chi2) {
+        // Critère de gradient **indépendant de l'échelle** des données (le
+        // `gtol` de MINPACK) : cosinus de l'angle entre le résidu et chaque
+        // colonne du jacobien. Un seuil absolu arrêtait l'ajustement dès le
+        // premier pas quand les Y valent 1e-12 (ampères, sections efficaces).
+        let residual_norm = chi2.sqrt();
+        let cosine = (0..free.len()).fold(0.0_f64, |acc, k| {
+            let norm = a.get(k, k).sqrt();
+            if norm > 0.0 && residual_norm > 0.0 {
+                acc.max(g[k].abs() / (norm * residual_norm))
+            } else {
+                acc
+            }
+        });
+        if residual_norm == 0.0 || cosine < 1e-9 {
             converged = true;
             break;
         }
@@ -165,7 +177,10 @@ pub fn solve_problem(
         for _ in 0..40 {
             let mut damped = a.clone();
             for i in 0..free.len() {
-                let d = a.get(i, i).max(1e-12 * (1.0 + chi2));
+                // Marquardt : l'amortissement suit la diagonale de chaque paramètre,
+                // sans plancher absolu (les colonnes du jacobien peuvent différer de
+                // vingt ordres de grandeur) ; une colonne nulle prend 1.
+                let d = if a.get(i, i) > 0.0 { a.get(i, i) } else { 1.0 };
                 damped.add(i, i, lambda * d);
             }
             let rhs: Vec<f64> = g.iter().map(|v| -v).collect();
@@ -275,7 +290,13 @@ fn jacobian(
     let (mut plus, mut minus) = (Vec::new(), Vec::new());
     let mut work = values.to_vec();
     for (k, &i) in free.iter().enumerate() {
-        let h = 1e-6 * values[i].abs().max(1e-2 * pmax).max(1e-9);
+        // Pas relatif à l'échelle des paramètres ; le repli absolu ne sert que si
+        // tous sont nuls (jamais un plancher qui écraserait des valeurs en 1e-12).
+        let h = 1e-6
+            * values[i]
+                .abs()
+                .max(1e-2 * pmax)
+                .max(if pmax > 0.0 { 0.0 } else { 1e-9 });
         // Le pas ne sort pas des bornes : à une borne, différence décentrée.
         let hi = (values[i] + h).min(slots[i].max);
         let lo = (values[i] - h).max(slots[i].min);

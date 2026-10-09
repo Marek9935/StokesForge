@@ -206,11 +206,9 @@ pub fn build(method: &BaselineMethod, series: &Series) -> Result<Baseline, Analy
                     v *= t;
                 }
             }
-            let ls = least_squares(&a, &ys).ok_or(AnalysisError::ZonesTooSmall {
-                found: xs.len(),
-                needed,
-                degree: *degree,
-            })?;
+            // Assez de points mais de rang insuffisant (X tous égaux) : ce n'est
+            // pas un manque de points, le dire autrement.
+            let ls = least_squares(&a, &ys).ok_or(AnalysisError::DuplicateX)?;
             Ok(Baseline {
                 shape: Shape::Poly {
                     coeffs: ls.coefficients,

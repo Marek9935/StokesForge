@@ -295,7 +295,7 @@ fn log_linear_decay(x: &[f64], y: &[f64], y0: f64, span: f64) -> (f64, f64) {
         Some(ls) if ls.coefficients[1].abs() > 1e-300 => {
             let tau = -1.0 / ls.coefficients[1];
             let amp = sign * ls.coefficients[0].exp();
-            if amp.is_finite() && tau.is_finite() {
+            if amp.is_finite() && tau.is_finite() && tau > 0.0 {
                 (amp, tau)
             } else {
                 fallback
