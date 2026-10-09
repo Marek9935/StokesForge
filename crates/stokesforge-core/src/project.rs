@@ -142,7 +142,12 @@ impl Project {
     /// [`IdAllocator::resume`]), et le compteur reprend à
     /// `max(next_id_hint, plus grand identifiant de l'arbre + 1)`.
     pub fn from_tree(tree: Arc<Tree>, next_id_hint: u64) -> Self {
-        let highest = tree.iter().map(|(id, _)| id.raw()).max().unwrap_or(0);
+        let highest = tree
+            .iter()
+            .map(|(id, _)| id.raw())
+            .chain(tree.calculations().keys().map(|id| id.raw()))
+            .max()
+            .unwrap_or(0);
         // A7 — le compteur de version de colonne n'est pas encore persisté
         // (contrairement à `next_id_hint`) : reprendre au-delà de la plus
         // haute version déjà lue évite au moins de régresser DANS ce
@@ -162,6 +167,17 @@ impl Project {
             identity: Arc::new(()),
             column_version_counter: highest_version + 1,
         }
+    }
+
+    /// Accès `pub(crate)` à l'arbre, pour les modules du crate qui écrivent
+    /// des enregistrements portés par `Tree` (voir [`crate::calc`]).
+    pub(crate) fn tree_arc_mut(&mut self) -> &mut Arc<Tree> {
+        &mut self.tree
+    }
+
+    /// Alloue un identifiant du projet (jamais réutilisé, invariant 7).
+    pub(crate) fn allocate_id(&mut self) -> CoreResult<NodeId> {
+        self.ids.next()
     }
 
     // -- lecture --
@@ -556,7 +572,31 @@ impl Project {
     pub fn remove(&mut self, id: NodeId) -> CoreResult<usize> {
         self.tree.validate_remove(id)?;
         let tree = Arc::make_mut(&mut self.tree);
-        tree.remove(id)
+        let index = tree.remove(id)?;
+        self.prune_orphaned_calculations();
+        Ok(index)
+    }
+
+    /// Retire les calculs dont **toutes** les colonnes Y d'entrée ont disparu
+    /// (feuille, classeur ou colonnes supprimés) : ils n'ont plus de feuille où
+    /// s'afficher ni rien à recalculer. Un calcul qui garde au moins une série
+    /// reste, périmé pour les autres (`Staleness::InputMissing`). Annuler la
+    /// suppression les ramène avec l'arbre.
+    fn prune_orphaned_calculations(&mut self) {
+        let orphans: Vec<NodeId> = self
+            .tree
+            .calculations()
+            .iter()
+            .filter(|(_, c)| c.series.iter().all(|s| self.tree.node(s.y).is_none()))
+            .map(|(id, _)| *id)
+            .collect();
+        if orphans.is_empty() {
+            return;
+        }
+        let map = Arc::make_mut(&mut self.tree).calculations_mut();
+        for id in orphans {
+            map.remove(&id);
+        }
     }
 
     /// Renomme `id`. Rend l'ancien nom.

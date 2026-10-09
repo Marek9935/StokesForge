@@ -6,6 +6,7 @@
 //! une décision consciente plutôt qu'un import qui se glisse.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
+    "stokesforge-analysis", // calculs d'analyse purs : `pyst.analysis`, sans interface
     "stokesforge-core",     // le modèle
     "stokesforge-commands", // le bus de commandes : tout passe par lui
     "stokesforge-plot", // description native des graphes et objets graphiques, sans rendu ni interface

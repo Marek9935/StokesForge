@@ -295,6 +295,18 @@ impl SessionHandle {
             .map_err(SessionError::from)
     }
 
+    /// Relance des calculs d'analyse (#181) : les `ids` donnés, ou — liste
+    /// vide — tous ceux qui sont périmés. Hors historique, comme le recalcul
+    /// automatique ; la révision avance. Un calcul dont une entrée a disparu
+    /// ou dont l'opération échoue garde ses dernières valeurs et se marque
+    /// périmé (`Staleness`).
+    pub fn recalculate(&self, ids: &[NodeId]) -> SessionResult<Revision> {
+        let client = self.client;
+        let ids = ids.to_vec();
+        self.request(|reply| Request::Recalculate { ids, client, reply })?
+            .map_err(SessionError::from)
+    }
+
     /// Demande un instantané de l'état courant. Bon marché : ne clone pas
     /// l'arbre.
     pub fn snapshot(&self) -> SessionResult<Snapshot> {

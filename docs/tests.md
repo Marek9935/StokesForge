@@ -191,6 +191,20 @@ les siens.
 | colonnes lues ignorées (toujours la longueur des ordinaires) | `le_resultat_suit_la_longueur_des_colonnes_lues`, `allonger_une_colonne_non_lue_ne_change_pas_la_formule`, `deplacer_une_source_vers_une_autre_feuille`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — pas `b22` |
 | colonnes-formule comptées dans la longueur de repli | `une_constante_suit_les_colonnes_ordinaires`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — pas `b22` |
 
+### Mutants éprouvés (#181, calculs d'analyse)
+
+Même mécanisme, autre mémo (`CalcFingerprint`, `CalcMemo`). `b22` joue les pas
+`AjouterCalcul` (ajustement ou correction, automatique ou manuel), `RetirerCalcul`
+et `RecalculerPerimes` à côté des formules ; `stokesforge-session/tests/analyse.rs`
+nomme les comportements.
+
+| Mutant (ce qui est cassé) | Vu par |
+|---|---|
+| versions des entrées retirées de l'empreinte d'un calcul automatique | `b22`, `un_calcul_automatique_suit_ses_entrees` |
+| manuel : comparaison par le contenu (`seen`) supprimée | `b22` (le recalcul complet réécrit les formules, donc leurs versions) |
+| garde des boucles calcul → formule → calcul retirée | `b22` (propriété 3 : une commande sans rapport réécrit des colonnes) |
+| manuel : changement de définition non « cru » (`Trust`) | `modifier_un_calcul_manuel_perime_le_met_a_jour_sans_le_reperimer` seul |
+
 ### Ajouter une fonctionnalité qui en dépend : les tests à écrire
 
 **A. Une donnée de plus entre dans le calcul d'une formule** (fonction

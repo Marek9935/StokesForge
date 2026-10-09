@@ -50,6 +50,7 @@
     warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+pub mod calc;
 pub mod column;
 pub mod copy;
 pub mod error;
@@ -62,6 +63,11 @@ pub mod project;
 pub mod resolve;
 pub mod tree;
 
+pub use calc::{
+    compute, AuxRef, Calculation, CalculationDraft, ComputeError, Computed, ComputedColumn,
+    OutputDraft, OutputRef, ResultValue, SeriesRef, SeriesResult, Staleness,
+    MAX_CALCULATION_SERIES,
+};
 pub use column::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, ImportSource, MetaLine,
     MixedCell, NumericStatus, ValueBlock, ValuesDelta,

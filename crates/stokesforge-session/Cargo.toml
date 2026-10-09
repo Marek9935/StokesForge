@@ -9,6 +9,7 @@ description = "Acteur qui possède le Project de StokesForge et le sert à ses c
 workspace = true
 
 [dependencies]
+stokesforge-analysis = { path = "../stokesforge-analysis" }
 stokesforge-core = { path = "../stokesforge-core" }
 stokesforge-commands = { path = "../stokesforge-commands" }
 thiserror = "2"

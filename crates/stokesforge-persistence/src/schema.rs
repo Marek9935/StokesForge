@@ -57,6 +57,11 @@ pub(crate) struct FileBody {
     /// pour la même raison qu'eux (voir ci-dessous).
     #[serde(default)]
     pub(crate) saved_colors: SavedColorsRecord,
+    /// Calculs d'analyse (#181). Absents des fichiers antérieurs : liste
+    /// vide. Placé avant `window_geometries` et `save_counter`, pour la même
+    /// raison que `saved_colors`.
+    #[serde(default)]
+    pub(crate) calculations: Vec<crate::calculations::CalculationRecord>,
     /// Géométrie des fenêtres (position/taille), par identifiant de nœud —
     /// bloc **séparé de l'arbre annulable** (voir la doc de tête de
     /// `stokesforge-session` : la géométrie ne vit pas dans `Project`, ne passe

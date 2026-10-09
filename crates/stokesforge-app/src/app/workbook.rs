@@ -24,6 +24,7 @@ use super::grid::{
     show_horizontally_scrollable_grid,
 };
 use super::menu_sections::MenuSections;
+use super::results_pane;
 use super::shortcuts::SHORTCUT_DUPLICATE_SHEET;
 use super::tab_strip::{
     tab_strip_with, TabEvent, TabOps, TabStripOutput, TabStripSide, TAB_STRIP_HEIGHT,
@@ -215,8 +216,14 @@ pub(super) fn book_contents(
     let (upper_area, horizontal_bar_strip) = main_area
         .split_top_bottom_at_y(main_area.bottom() - horizontal_bar_height.min(main_area.height()));
     let tabs_height = TAB_STRIP_HEIGHT.min(upper_area.height());
-    let (grid_rect, tabs_rect) =
-        upper_area.split_top_bottom_at_y(upper_area.bottom() - tabs_height);
+    // Le volet Results (#181) se loge entre la grille et les onglets ; sans
+    // résultat gardé sa hauteur est nulle et la disposition ne change pas.
+    let results_height = results_pane::pane_height(ui, state, book)
+        .min((upper_area.height() - tabs_height).max(0.0) / 2.0);
+    let (grid_rect, lower_area) =
+        upper_area.split_top_bottom_at_y(upper_area.bottom() - tabs_height - results_height);
+    let (results_rect, tabs_rect) =
+        lower_area.split_top_bottom_at_y(lower_area.top() + results_height);
     // Avec la barre, les onglets descendent de la moitié de la bande : l'espace
     // sous eux est réduit de moitié et le même espace apparaît au-dessus
     // (#51). Sans barre, aucune réserve ni décalage.
@@ -232,6 +239,10 @@ pub(super) fn book_contents(
     };
     let mut tabs_ui = bounded(tabs_rect);
     let mut grid_ui = bounded(grid_rect);
+    if results_height > 0.0 {
+        let mut results_ui = bounded(results_rect);
+        results_pane::results_pane(&mut results_ui, state, actions, book, selected);
+    }
     let sheet_ops = TabOps {
         renaming: state.renaming_sheet(),
         can_delete: sheets.len() > 1,

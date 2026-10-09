@@ -185,6 +185,34 @@ Côté calcul, une colonne mixte n'est **pas** « non numérique » : `formula`
 l'accepte et ses trous valent `NaN` ligne à ligne. Seule une colonne
 entièrement texte est refusée en bloc.
 
+## Les calculs d'analyse (#181)
+
+`stokesforge-analysis` est le calcul pur (aucune dépendance du workspace, `NaN`
+dit « vide »). `stokesforge-core` n'en prend que les types de données et fait le
+lien avec l'arbre : `Tree::calculations()` (`BTreeMap<NodeId, Arc<Calculation>>`,
+dans `calc.rs`). Un `Calculation` n'est **pas un nœud** : sans nom, parent ni
+fenêtre, il voyage avec l'instantané, le retour arrière et le `.stf` à côté des
+couleurs enregistrées, avec un `NodeId` du même allocateur (jamais réutilisé).
+
+- Il relie une `Operation` (baseline, correction, intégrale, ajustement, pics,
+  déconvolution), ses séries d'entrée (`SeriesRef`, `AuxRef`), ses colonnes de
+  sortie (`outputs`) et ses résultats (valeurs, erreurs types, avertissements).
+- La trace « cette colonne vient de tel calcul » se lit dans `outputs`
+  (`Tree::calculation_of_column`), **jamais** sur la colonne : une copie ou un
+  déplacement ne peut pas la dédoubler.
+- `compute(tree, op, series, aux) -> Computed` est la fonction pure que
+  partagent l'aperçu, la commande, le recalcul de la session et `pyst.analysis`.
+- Péremption (`Staleness`) : `Manual` (recalcul automatique coupé), `InputMissing`
+  (une entrée a disparu), `Failed` (le calcul échoue). Une sortie supprimée
+  reste pendante et se relit « sortie supprimée » ; supprimer une entrée n'édite
+  pas les calculs qui la citent.
+- Une colonne calculée est **en lecture seule** pour les cellules, le type et la
+  suppression de cellules (`CoreError::CalculatedColumnReadOnly`) ; ses métadonnées
+  restent éditables, hors formule.
+- Écriture : commandes ([`commandes-et-historique.md`](commandes-et-historique.md)) ;
+  recalcul ciblé par empreinte, comme les formules (invariant 11) ; fichier :
+  [`persistance.md`](persistance.md).
+
 ## `PlotSpec` — ce qu'il faut tracer
 
 ```text
@@ -282,6 +310,8 @@ Deux propriétés à connaître avant d'y toucher :
 
 ## Ce qu'il faut savoir avant de modifier
 
+- Une donnée lue par un calcul d'analyse entre dans l'empreinte du recalcul,
+  comme pour les formules : voir « Recalcul des formules » dans `CLAUDE.md`.
 - Ajouter une méthode `pub` mutante à `Project` sans commande correspondante
   dans `stokesforge-commands` ouvre un chemin d'écriture non annulable
   (invariant 1).

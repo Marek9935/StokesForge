@@ -92,6 +92,7 @@
     warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+mod calculations;
 pub mod clipboard;
 mod convert;
 mod error;
@@ -276,6 +277,7 @@ pub fn save_with_geometries(
         nodes,
         save_counter,
         saved_colors: convert::saved_colors_to_record(tree.saved_colors()),
+        calculations: calculations::calculations_to_records(tree),
         window_geometries,
     };
 
@@ -453,7 +455,11 @@ fn build_project(body: FileBody, path: &Path) -> PersistenceResult<Project> {
             path: path.to_path_buf(),
             source,
         })?
-        .with_saved_colors(convert::record_to_saved_colors(body.saved_colors));
+        .with_saved_colors(convert::record_to_saved_colors(body.saved_colors))
+        .with_calculations(calculations::records_to_calculations(
+            body.calculations,
+            MAX_NODE_ID,
+        ));
     Ok(Project::from_tree(Arc::new(tree), body.next_id_hint))
 }
 
@@ -719,6 +725,7 @@ mod tests {
             nodes: vec![root, child],
             save_counter: 0,
             saved_colors: Default::default(),
+            calculations: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let project = build_project(body, Path::new("test.plyx")).expect("modèle valide");
@@ -743,6 +750,7 @@ mod tests {
             nodes: vec![root, orphan],
             save_counter: 0,
             saved_colors: Default::default(),
+            calculations: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
@@ -760,6 +768,7 @@ mod tests {
             nodes: vec![a, b],
             save_counter: 0,
             saved_colors: Default::default(),
+            calculations: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
@@ -786,6 +795,7 @@ mod tests {
             nodes: vec![root],
             save_counter: 0,
             saved_colors: Default::default(),
+            calculations: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
@@ -830,6 +840,7 @@ mod tests {
             nodes: vec![root, column],
             save_counter: 0,
             saved_colors: Default::default(),
+            calculations: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
@@ -897,6 +908,7 @@ mod tests {
             nodes: vec![root, book, sheet, column],
             save_counter: 0,
             saved_colors: Default::default(),
+            calculations: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let project = build_project(body, Path::new("legacy.plyx")).expect("modèle valide");

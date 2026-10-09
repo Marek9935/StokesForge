@@ -5,7 +5,8 @@
 //! consciente plutôt qu'un import qui se glisse.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
-    "stokesforge-core", // le modèle : dépendance à sens unique, sans surface UI
+    "stokesforge-analysis", // `Operation`/`OperationKind` portés par `Command::AddCalculation` et ses libellés ; Rust pur, sans UI
+    "stokesforge-core",     // le modèle : dépendance à sens unique, sans surface UI
     "stokesforge-plot", // `PlotSpec`, porté par `Command::AddGraph`/`SetPlotSpec` ; sans dépendance de dessin (invariant 3)
     "thiserror",        // erreurs typées, sans surface UI
 ];

@@ -116,6 +116,22 @@ Selection ▸ ne subsiste que dans Edit.
 | Grille vide, zone blanche | Add Column |
 | Onglet de feuille, bande vide | Add Worksheet ─ Rename · Duplicate ─ Delete |
 
+### Colonne : Analysis (#181)
+
+`Analysis ▸` est dans la section « créer » du clic droit d'un en-tête de
+colonne (après `Plot ▸` et Add Column) ; sur une colonne que produit un calcul,
+une section de gestes du calcul (Edit · Recalculate · Detach · Delete) suit
+Type/Role. Le menu du haut (`analysis_menu_contents`) est le même contenu :
+Baseline ▸ · Correct… · Integrate… · Fit ▸ · Peaks and Deconvolution ▸ ─
+Recalculate Out of Date. Les entrées sont **grisées** (info-bulle `.disabled`)
+tant qu'aucune colonne Y n'est visée, jamais absentes.
+
+**Exception à la profondeur 2 au clic droit** : `Analysis ▸` y contient encore
+des sous-menus (Baseline, Fit, Peaks and Deconvolution), soit trois niveaux.
+C'est le même contenu que le menu du haut, partagé comme l'exige « une seule
+peinture » ; l'aplatir mêlerait une vingtaine d'entrées au menu de la colonne.
+La règle est à trancher : issue #202.
+
 ### Barre de menus
 
 Les menus du haut rangent leurs sections dans le même ordre ; ce qu'ils

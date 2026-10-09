@@ -1071,6 +1071,18 @@ impl History {
                 project.remove(id)?;
                 Ok(structural(before, project, label))
             }
+            Command::AddCalculation { draft } => {
+                project.add_calculation(draft)?;
+                Ok(structural(before, project, label))
+            }
+            Command::UpdateCalculation { id, draft } => {
+                project.update_calculation(id, draft)?;
+                Ok(structural(before, project, label))
+            }
+            Command::RemoveCalculation { id, with_columns } => {
+                project.remove_calculation(id, with_columns)?;
+                Ok(structural(before, project, label))
+            }
             Command::SetCells { .. }
             | Command::SetCellsPromoting { .. }
             | Command::SetColumnType { .. }
@@ -1178,6 +1190,7 @@ impl History {
                 column,
                 column_type,
             } => {
+                check_not_calculated(project, column)?;
                 let before_state = project.set_column_type(column, column_type)?;
                 let after_state = column_state(project, column)?;
                 Ok(Entry::Data {
@@ -1218,6 +1231,10 @@ impl History {
                 })
             }
             Command::DeleteCells { columns, at, count } => {
+                // Avant toute mutation : un refus ne laisse aucun état partiel.
+                for column in &columns {
+                    check_not_calculated(project, *column)?;
+                }
                 // Colonne par colonne, indépendamment — contrairement à
                 // `DeleteRows`, `columns` n'est pas nécessairement "toutes
                 // les colonnes de la feuille" : c'est la sélection explicite
@@ -1270,6 +1287,17 @@ impl History {
                 })
             }
             Command::SetColumnMeta { column, meta } => {
+                // Une formule sur une colonne de sortie d'un calcul : deux
+                // sources de vérité pour les mêmes cellules.
+                if meta.formula.is_some() {
+                    if let Some((calculation, _)) = project.tree().calculation_of_column(column) {
+                        return Err(CoreError::CalculatedColumnReadOnly {
+                            column,
+                            calculation,
+                        }
+                        .into());
+                    }
+                }
                 let before = project.set_column_meta(column, meta.clone())?;
                 // Voir la doc de `DataDelta::ColumnMeta::values_before` :
                 // capturé seulement à la transition « pas de formule avant,
@@ -1328,7 +1356,10 @@ impl History {
             | Command::AddGraph { .. }
             | Command::AddMatrix { .. }
             | Command::AddNote { .. }
-            | Command::RemoveNode { .. } => {
+            | Command::RemoveNode { .. }
+            | Command::AddCalculation { .. }
+            | Command::UpdateCalculation { .. }
+            | Command::RemoveCalculation { .. } => {
                 unreachable!("apply_data appelée avec une commande structurelle")
             }
         }
@@ -1578,6 +1609,21 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
     }
 }
 
+/// Une colonne produite par un calcul d'analyse (#181) refuse aussi les
+/// écritures qui changeraient sa forme (type, cellules supprimées) : le
+/// recalcul les défairait, ou échouerait sans le dire (`TypeMismatch` sur une
+/// colonne passée en texte).
+fn check_not_calculated(project: &Project, column: NodeId) -> CommandResult<()> {
+    if let Some((calculation, _)) = project.tree().calculation_of_column(column) {
+        return Err(CoreError::CalculatedColumnReadOnly {
+            column,
+            calculation,
+        }
+        .into());
+    }
+    Ok(())
+}
+
 /// Les deux refus que toute écriture de cellules — `SetCells` comme
 /// `SetCellsPromoting` — doit opposer **avant** de toucher au modèle, pour
 /// qu'un échec ne laisse aucun état partiel.
@@ -1590,6 +1636,7 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
 ///    colonne-formule n'accepte l'écriture directe de cellules d'aucun
 ///    client : ses valeurs ne sont recalculées que par
 ///    `stokesforge-session::actor` après coup, en dehors de l'historique.
+///    Même refus pour une colonne produite par un calcul d'analyse (#181).
 ///
 /// Une colonne absente ou d'un autre type n'est traitée ni par l'un ni par
 /// l'autre : c'est `Project::set_values`, ensuite, qui rendra l'erreur
@@ -1620,6 +1667,13 @@ fn check_writable_cells(
     }
     if target.is_some_and(|column| column.meta().formula.is_some()) {
         return Err(CoreError::FormulaColumnReadOnly { column }.into());
+    }
+    if let Some((calculation, _)) = project.tree().calculation_of_column(column) {
+        return Err(CoreError::CalculatedColumnReadOnly {
+            column,
+            calculation,
+        }
+        .into());
     }
     Ok(())
 }
@@ -1941,6 +1995,9 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::AddMatrix { .. }
         | Command::AddNote { .. }
         | Command::RemoveNode { .. }
+        | Command::AddCalculation { .. }
+        | Command::UpdateCalculation { .. }
+        | Command::RemoveCalculation { .. }
         | Command::SetWindowMeta { .. }
         | Command::SetNoteText { .. }
         | Command::SetColumnMeta { .. }

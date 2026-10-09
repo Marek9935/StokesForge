@@ -82,6 +82,9 @@ pub mod model {
             CoreError::FormulaColumnReadOnly { .. } => {
                 tr!("error-model-formula-column-read-only")
             }
+            CoreError::CalculatedColumnReadOnly { .. } => {
+                tr!("error-model-calculated-column-read-only")
+            }
         }
     }
 
@@ -110,8 +113,12 @@ pub mod model {
                 CoreError::FormulaColumnReadOnly {
                     column: NodeId::from_raw(7),
                 },
+                CoreError::CalculatedColumnReadOnly {
+                    column: NodeId::from_raw(7),
+                    calculation: NodeId::from_raw(8),
+                },
             ];
-            let mut seen = [false; 10];
+            let mut seen = [false; 11];
             for sample in &samples {
                 let index = match sample {
                     CoreError::InvalidName(_) => 0,
@@ -124,6 +131,7 @@ pub mod model {
                     CoreError::IdentifiersExhausted => 7,
                     CoreError::ConcurrentModification { .. } => 8,
                     CoreError::FormulaColumnReadOnly { .. } => 9,
+                    CoreError::CalculatedColumnReadOnly { .. } => 10,
                 };
                 seen[index] = true;
             }
@@ -549,6 +557,193 @@ pub mod formula {
             for error in every_variant() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
+        }
+    }
+}
+
+/// Erreurs d'un calcul d'analyse (`stokesforge-analysis`, #181).
+pub mod analysis {
+    use stokesforge_analysis::expr::{ExprError, ExprErrorKind};
+    use stokesforge_analysis::AnalysisError;
+
+    use crate::tr;
+
+    /// Un compte pour Fluent, qui ne convertit pas `usize`.
+    fn number(count: usize) -> i64 {
+        i64::try_from(count).unwrap_or(i64::MAX)
+    }
+
+    /// La phrase d'une [`AnalysisError`].
+    pub fn error_message(error: &AnalysisError) -> String {
+        match error {
+            AnalysisError::NotEnoughPoints { found, needed } => tr!(
+                "error-analysis-not-enough-points",
+                found = number(*found),
+                needed = number(*needed)
+            ),
+            AnalysisError::DuplicateX => tr!("error-analysis-duplicate-x"),
+            AnalysisError::BadExpression(detail) => {
+                tr!(
+                    "error-analysis-bad-expression",
+                    detail = expr_message(detail)
+                )
+            }
+            AnalysisError::NoFreeParameter => tr!("error-analysis-no-free-parameter"),
+            AnalysisError::EmptyBounds { name, min, max } => tr!(
+                "error-analysis-empty-bounds",
+                name = name.as_str(),
+                min = min.to_string(),
+                max = max.to_string()
+            ),
+            AnalysisError::NonFiniteModel => tr!("error-analysis-non-finite-model"),
+            AnalysisError::SingularSystem => tr!("error-analysis-singular-system"),
+            AnalysisError::NotConverged { iterations } => tr!(
+                "error-analysis-not-converged",
+                iterations = number(*iterations)
+            ),
+            AnalysisError::NotEnoughAnchors { found, needed } => tr!(
+                "error-analysis-not-enough-anchors",
+                found = number(*found),
+                needed = number(*needed)
+            ),
+            AnalysisError::ZonesTooSmall {
+                found,
+                needed,
+                degree,
+            } => tr!(
+                "error-analysis-zones-too-small",
+                found = number(*found),
+                needed = number(*needed),
+                degree = i64::from(*degree)
+            ),
+            AnalysisError::DuplicateAnchor => tr!("error-analysis-duplicate-anchor"),
+            AnalysisError::EmptyReference => tr!("error-analysis-empty-reference"),
+            AnalysisError::EmptyResponse => tr!("error-analysis-empty-response"),
+            AnalysisError::EmptyRange => tr!("error-analysis-empty-range"),
+            // Le nom est une clé interne du crate de calcul : chacune de celles
+            // que l'utilisateur peut provoquer a sa phrase.
+            AnalysisError::InvalidParameter { name } => match name.as_str() {
+                "peaks" => tr!("error-analysis-no-peak"),
+                "sigma" => tr!("error-analysis-bad-sigma"),
+                "signal" => tr!("error-analysis-bad-signal"),
+                "components" => tr!("error-analysis-bad-components"),
+                "degree" => tr!("error-analysis-bad-degree"),
+                "iterations" => tr!("error-analysis-bad-iterations"),
+                "noise" => tr!("error-analysis-bad-noise"),
+                "max_peaks" => tr!("error-analysis-bad-max-peaks"),
+                other => tr!("error-analysis-invalid-parameter", name = other),
+            },
+            AnalysisError::LengthMismatch => tr!("error-analysis-length-mismatch"),
+            AnalysisError::OutputUnwritable => tr!("error-analysis-output-unwritable"),
+        }
+    }
+
+    /// La phrase d'une erreur de lecture d'expression de modèle, avec sa position.
+    pub fn expr_message(error: &ExprError) -> String {
+        let position = number(error.position);
+        match &error.kind {
+            ExprErrorKind::Empty => tr!("error-analysis-expr-empty"),
+            ExprErrorKind::UnexpectedChar(symbol) => tr!(
+                "error-analysis-expr-unexpected-char",
+                symbol = symbol.to_string(),
+                position = position
+            ),
+            ExprErrorKind::UnexpectedEnd => {
+                tr!("error-analysis-expr-unexpected-end", position = position)
+            }
+            ExprErrorKind::UnexpectedToken => {
+                tr!("error-analysis-expr-unexpected-token", position = position)
+            }
+            ExprErrorKind::UnbalancedParenthesis => {
+                tr!("error-analysis-expr-unbalanced", position = position)
+            }
+            ExprErrorKind::BadNumber => tr!("error-analysis-expr-bad-number", position = position),
+            ExprErrorKind::UnknownFunction(name) => tr!(
+                "error-analysis-expr-unknown-function",
+                name = name.as_str(),
+                position = position
+            ),
+            ExprErrorKind::WrongArgumentCount {
+                name,
+                expected,
+                found,
+            } => tr!(
+                "error-analysis-expr-wrong-arguments",
+                name = name.as_str(),
+                expected = number(*expected),
+                found = number(*found),
+                position = position
+            ),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+            let samples = [
+                AnalysisError::NotEnoughPoints {
+                    found: 2,
+                    needed: 3,
+                },
+                AnalysisError::DuplicateX,
+                AnalysisError::BadExpression(
+                    stokesforge_analysis::expr::Expr::parse("a*").unwrap_err(),
+                ),
+                AnalysisError::NoFreeParameter,
+                AnalysisError::EmptyBounds {
+                    name: "tau".into(),
+                    min: 2.0,
+                    max: 1.0,
+                },
+                AnalysisError::NonFiniteModel,
+                AnalysisError::SingularSystem,
+                AnalysisError::NotConverged { iterations: 100 },
+                AnalysisError::NotEnoughAnchors {
+                    found: 1,
+                    needed: 2,
+                },
+                AnalysisError::ZonesTooSmall {
+                    found: 1,
+                    needed: 4,
+                    degree: 3,
+                },
+                AnalysisError::DuplicateAnchor,
+                AnalysisError::EmptyReference,
+                AnalysisError::EmptyResponse,
+                AnalysisError::EmptyRange,
+                AnalysisError::InvalidParameter {
+                    name: "peaks".into(),
+                },
+                AnalysisError::LengthMismatch,
+                AnalysisError::OutputUnwritable,
+            ];
+            // Un `match` sans `_` : une variante sans exemple ne compile pas.
+            for sample in &samples {
+                match sample {
+                    AnalysisError::NotEnoughPoints { .. }
+                    | AnalysisError::DuplicateX
+                    | AnalysisError::BadExpression(_)
+                    | AnalysisError::NoFreeParameter
+                    | AnalysisError::EmptyBounds { .. }
+                    | AnalysisError::NonFiniteModel
+                    | AnalysisError::SingularSystem
+                    | AnalysisError::NotConverged { .. }
+                    | AnalysisError::NotEnoughAnchors { .. }
+                    | AnalysisError::ZonesTooSmall { .. }
+                    | AnalysisError::DuplicateAnchor
+                    | AnalysisError::EmptyReference
+                    | AnalysisError::EmptyResponse
+                    | AnalysisError::EmptyRange
+                    | AnalysisError::InvalidParameter { .. }
+                    | AnalysisError::LengthMismatch
+                    | AnalysisError::OutputUnwritable => {}
+                }
+                crate::errors::tests_support::check(sample, &error_message(sample));
+            }
+            assert_eq!(samples.len(), 17);
         }
     }
 }

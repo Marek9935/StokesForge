@@ -5,6 +5,7 @@
 //! qu'un import qui se glisse.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
+    "stokesforge-analysis", // `Operation` d'un calcul : sa forme arborescente traverse le fichier (#181)
     "stokesforge-core",
     // le PlotSpec porté par NodeKind::Graph (phase R3) : la conversion vers
     // son propre schéma (schema.rs) a besoin du type complet, pas seulement

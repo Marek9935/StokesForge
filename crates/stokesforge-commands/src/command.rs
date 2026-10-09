@@ -32,7 +32,8 @@
 //! remplace elle aussi un contenu en bloc sans toucher à la structure.
 
 use stokesforge_core::{
-    Column, ColumnMeta, ColumnType, NodeCopy, NodeId, Tree, ValueBlock, WindowMeta,
+    CalculationDraft, Column, ColumnMeta, ColumnType, NodeCopy, NodeId, Tree, ValueBlock,
+    WindowMeta,
 };
 use stokesforge_plot::{PlotSpec, SavedColors};
 
@@ -308,6 +309,35 @@ pub enum Command {
         spec: PlotSpec,
         kind: crate::label::PlotEditKind,
     },
+    /// Enregistre un calcul d'analyse (#181) : crée ses colonnes de sortie
+    /// juste après la colonne Y de chaque série, avec leurs valeurs, et son
+    /// enregistrement. **Une seule commande, une seule entrée d'historique**,
+    /// structurelle (des colonnes apparaissent) : l'annuler retire colonnes et
+    /// enregistrement d'un coup. Le calcul des valeurs est fait *avant*,
+    /// par `stokesforge-analysis`, et porté par `draft` — la commande n'appelle
+    /// aucun calcul, elle reste une valeur.
+    AddCalculation {
+        /// L'opération, ses entrées et les colonnes à écrire.
+        draft: CalculationDraft,
+    },
+    /// Remplace les paramètres, les colonnes et les résultats d'un calcul
+    /// (« Edit Calculation… », glisser une poignée de ligne de base sur le
+    /// graphe). Les sorties qui existent déjà sont réécrites en place.
+    UpdateCalculation {
+        /// Calcul visé.
+        id: NodeId,
+        /// Nouvelle description.
+        draft: CalculationDraft,
+    },
+    /// Retire un calcul. `with_columns` supprime aussi ses colonnes de sortie ;
+    /// sinon elles deviennent des colonnes ordinaires (« Detach from
+    /// Calculation »).
+    RemoveCalculation {
+        /// Calcul visé.
+        id: NodeId,
+        /// Supprimer aussi les colonnes de sortie.
+        with_columns: bool,
+    },
     /// Remplace les couleurs enregistrées dans le projet, en bloc (enregistrer
     /// ou retirer une couleur du sélecteur de couleur). Données, pas
     /// structure : aucun nœud ne bouge.
@@ -370,6 +400,17 @@ impl Command {
             Command::EditPlotSpec { kind, .. } => HistoryLabel::EditPlotSpec(*kind),
             Command::SetPlotSpec { graph, .. } => HistoryLabel::SetPlotSpec { name: name(*graph) },
             Command::SetSavedColors { .. } => HistoryLabel::SetSavedColors,
+            Command::AddCalculation { draft } => {
+                HistoryLabel::AddCalculation(draft.operation.kind())
+            }
+            Command::UpdateCalculation { id, draft } => HistoryLabel::UpdateCalculation(
+                tree.calculation(*id)
+                    .map_or_else(|| draft.operation.kind(), |c| c.operation.kind()),
+            ),
+            Command::RemoveCalculation { id, with_columns } => HistoryLabel::RemoveCalculation {
+                kind: tree.calculation(*id).map(|c| c.operation.kind()),
+                with_columns: *with_columns,
+            },
         }
     }
 }
@@ -415,6 +456,9 @@ impl Command {
                 | Command::AddMatrix { .. }
                 | Command::AddNote { .. }
                 | Command::RemoveNode { .. }
+                | Command::AddCalculation { .. }
+                | Command::UpdateCalculation { .. }
+                | Command::RemoveCalculation { .. }
         )
     }
 }

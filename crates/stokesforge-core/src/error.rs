@@ -65,6 +65,18 @@ pub enum CoreError {
         /// Colonne-formule visée par l'écriture refusée.
         column: NodeId,
     },
+    /// Colonne produite par un calcul d'analyse (#181) : `Command::SetCells`
+    /// refusé, comme pour une colonne-formule — ses valeurs sont réécrites par
+    /// le recalcul, une saisie à la main serait écrasée (M9 d A). Se détache
+    /// du calcul par `Command::RemoveCalculation { with_columns: false }`
+    /// (« Detach from Calculation »).
+    #[error("read-only column: {column} is produced by calculation {calculation}")]
+    CalculatedColumnReadOnly {
+        /// Colonne de sortie visée par l'écriture refusée.
+        column: NodeId,
+        /// Calcul qui la produit.
+        calculation: NodeId,
+    },
 }
 
 /// Alias de résultat du crate.
@@ -123,6 +135,14 @@ mod tests {
             }
             .to_string(),
             "read-only column: node 9 is computed by a formula"
+        );
+        assert_eq!(
+            CoreError::CalculatedColumnReadOnly {
+                column: NodeId::from_raw(9),
+                calculation: NodeId::from_raw(12),
+            }
+            .to_string(),
+            "read-only column: node 9 is produced by calculation node 12"
         );
     }
 }

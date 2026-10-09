@@ -73,6 +73,9 @@ use crate::selection::{GridCursor, Selection};
 use crate::tr;
 use crate::user_colors::UserColors;
 
+mod analysis;
+pub use analysis::CalculationDelete;
+
 /// Ce que l'utilisateur peut demander. La couche fenêtre ne fait que produire
 /// ces valeurs ; elle ne touche jamais l'acteur directement.
 // `ImportFiles` porte une recette d'import entière, bien plus grosse que les
@@ -431,6 +434,33 @@ pub enum Action {
     },
     /// Ferme la fenêtre des métadonnées.
     CloseColumnMetadata,
+    /// Ouvre la fenêtre d'analyse (#181) sur les colonnes Y sélectionnées de
+    /// `sheet`, chacune avec le X le plus proche à sa gauche. Rien ne s'ouvre
+    /// sans colonne Y.
+    OpenAnalysis {
+        /// La famille d'opération et la méthode préchoisie.
+        preset: crate::analysis::Preset,
+        /// Feuille contenant les colonnes.
+        sheet: NodeId,
+        /// Colonnes sélectionnées au moment du geste.
+        columns: Vec<NodeId>,
+    },
+    /// Rouvre un calcul existant dans la fenêtre d'analyse.
+    EditCalculation(NodeId),
+    /// Ferme la fenêtre d'analyse sans rien enregistrer.
+    CloseAnalysis,
+    /// Valide la fenêtre d'analyse : un calcul neuf ou modifié, une seule
+    /// entrée d'historique.
+    ApplyAnalysis,
+    /// Recalcule des calculs, hors historique ; liste vide : tous les calculs
+    /// périmés.
+    RecalculateCalculations(Vec<NodeId>),
+    /// Retire un calcul et laisse ses colonnes devenir ordinaires.
+    DetachCalculation(NodeId),
+    /// Demande la suppression d'un calcul : ouvre la confirmation.
+    RequestDeleteCalculation(NodeId),
+    /// Réponse à la confirmation de [`Action::RequestDeleteCalculation`].
+    ConfirmDeleteCalculation(CalculationDelete),
     /// Crée un graphe à partir des colonnes sélectionnées d'une feuille de
     /// classeur — menu contextuel de l'en-tête de colonne. Le nouveau graphe
     /// est ajouté dans le même dossier parent que le classeur ([`Command::
@@ -2362,6 +2392,13 @@ pub struct AppState {
     /// Colonne dont la fenêtre des métadonnées de fichier est ouverte
     /// (lecture seule, transitoire : jamais dans l'historique).
     metadata_view: Option<NodeId>,
+    /// Formulaire de la fenêtre d'analyse, s'il est ouvert (#181).
+    analysis: Option<crate::analysis::AnalysisForm>,
+    /// « Keep in Results » : le dernier choix de la session (M5), repris à
+    /// l'ouverture suivante.
+    analysis_keep_results: bool,
+    /// Calcul dont la suppression attend confirmation (M8).
+    pending_calculation_delete: Option<NodeId>,
     /// Import en cours sur un fil de fond.
     import_job: Option<ImportJob>,
     /// Dernier import réussi, pour le reprendre dans l'assistant.
@@ -2468,6 +2505,9 @@ impl AppState {
             import_state: None,
             projects_to_open: Vec::new(),
             metadata_view: None,
+            analysis: None,
+            analysis_keep_results: false,
+            pending_calculation_delete: None,
             import_job: None,
             last_import: None,
             recent_to_record: Vec::new(),
@@ -4229,6 +4269,18 @@ impl AppState {
             Action::RefreshFromSource { sheet } => self.refresh_from_source(sheet),
             Action::ViewColumnMetadata { column } => self.metadata_view = Some(column),
             Action::CloseColumnMetadata => self.metadata_view = None,
+            Action::OpenAnalysis {
+                preset,
+                sheet,
+                columns,
+            } => self.open_analysis(&preset, sheet, &columns),
+            Action::EditCalculation(id) => self.edit_calculation(id),
+            Action::CloseAnalysis => self.analysis = None,
+            Action::ApplyAnalysis => self.apply_analysis(),
+            Action::RecalculateCalculations(ids) => self.recalculate_calculations(&ids),
+            Action::DetachCalculation(id) => self.detach_calculation(id),
+            Action::RequestDeleteCalculation(id) => self.request_delete_calculation(id),
+            Action::ConfirmDeleteCalculation(choice) => self.confirm_delete_calculation(choice),
             Action::PlotColumns {
                 sheet,
                 columns,
@@ -4569,6 +4621,7 @@ impl AppState {
                     self.renaming_sheet = None;
                     self.pending_sheet_delete = None;
                     self.pending_row_drop = None;
+                    self.pending_calculation_delete = None;
                     self.pending_object_delete.clear();
                     self.object_clipboard_output = None;
                     self.copied_objects.clear();
@@ -5883,6 +5936,7 @@ impl AppState {
                 self.plot_edit = None;
                 self.plot_settings = None;
                 self.metadata_view = None;
+                self.analysis = None;
                 self.import_state = None;
                 self.last_import = None;
                 self.delete_repeat = None;

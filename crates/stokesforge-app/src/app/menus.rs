@@ -90,6 +90,7 @@ impl StokesForgeApp {
                     if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
                         self.graph_menu(ui, ctx, graph, actions, &mut object_requests);
                     }
+                    self.analysis_menu(ui, actions);
                     self.view_menu(ui, actions);
                     self.window_menu(ui);
                 });
@@ -329,6 +330,27 @@ impl StokesForgeApp {
                 });
             }
         }
+    }
+
+    /// Menu Analysis (#181) : toujours présent ; ses entrées se grisent tant
+    /// qu'aucune colonne Y n'est sélectionnée dans le classeur actif.
+    fn analysis_menu(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let book = self.active_book();
+        let sheet = book.and_then(|book| self.state.selected_sheet_in(book));
+        let columns = sheet
+            .and_then(|sheet| {
+                self.state
+                    .selection(sheet)
+                    .map(|selection| selection.columns(self.state.tree(), sheet))
+            })
+            .unwrap_or_default();
+        ui.menu_button(tr!("menu-analysis"), |ui| {
+            let target = sheet.map(|sheet| super::analysis_menu::AnalysisTarget {
+                sheet,
+                columns: &columns,
+            });
+            super::analysis_menu::analysis_menu_contents(ui, &self.state, actions, target);
+        });
     }
 
     fn graph_menu(
@@ -963,6 +985,7 @@ mod tests {
                 tr!("menu-file"),
                 tr!("menu-edit"),
                 tr!("menu-graph"),
+                tr!("menu-analysis"),
                 tr!("menu-view"),
                 tr!("menu-window")
             ],
@@ -975,6 +998,7 @@ mod tests {
                 tr!("menu-file"),
                 tr!("menu-edit"),
                 tr!("menu-workbook"),
+                tr!("menu-analysis"),
                 tr!("menu-view"),
                 tr!("menu-window")
             ],
@@ -1092,6 +1116,78 @@ mod tests {
         assert_eq!(
             clique(&mut app, &ctx, tab, copy.center),
             vec![Action::CopyObjects(vec![graph])]
+        );
+        assert_ferme(&mut app, &ctx, tab);
+        session.shutdown().unwrap();
+    }
+
+    /// Menu Analysis (#181) : grisé tant qu'aucune colonne Y n'est visée, puis
+    /// chaque entrée ouvre la fenêtre sur sa famille et sa méthode ;
+    /// « Recalculate Out of Date » reste grisé quand tout est à jour.
+    #[test]
+    fn le_menu_analyse_se_grise_sans_colonne_y_et_ouvre_la_fenetre() {
+        use crate::analysis::Preset;
+        let (session, mut app, _) = banc();
+        let book = app.state.books()[0].0;
+        app.open_tab(Tab::Book(book));
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let tab = Some(Tab::Book(book));
+        app.state.deselect_all(sheet);
+
+        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
+        for label in [
+            tr!("analysis-menu-baseline"),
+            tr!("action-analysis-correct"),
+            tr!("action-analysis-integrate"),
+            tr!("analysis-menu-fit"),
+            tr!("analysis-menu-peaks"),
+        ] {
+            assert!(!active(&menu, &label).enabled, "sans colonne : {label}");
+        }
+        assert!(
+            !active(&menu, &tr!("action-analysis-recalculate-stale")).enabled,
+            "tout est à jour"
+        );
+
+        let columns: Vec<_> = app
+            .state
+            .visible_columns(sheet)
+            .iter()
+            .map(|c| c.0)
+            .collect();
+        app.state.select_column(sheet, columns[0]);
+        app.state.extend_column_selection(sheet, columns[1]);
+        let selected = app
+            .state
+            .selection(sheet)
+            .map(|selection| selection.columns(app.state.tree(), sheet))
+            .unwrap();
+        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
+        let integrate = active(&menu, &tr!("action-analysis-integrate"));
+        assert!(integrate.enabled, "une colonne Y est sélectionnée");
+        assert_eq!(
+            clique(&mut app, &ctx, tab, integrate.center),
+            vec![Action::OpenAnalysis {
+                preset: Preset::Integrate,
+                sheet,
+                columns: selected.clone(),
+            }]
+        );
+        assert_ferme(&mut app, &ctx, tab);
+
+        let (ctx, menu) = ouvre_chemin(
+            &mut app,
+            tab,
+            &[tr!("menu-analysis"), tr!("analysis-menu-baseline")],
+        );
+        let anchors = active(&menu, &tr!("analysis-baseline-anchors"));
+        assert_eq!(
+            clique(&mut app, &ctx, tab, anchors.center),
+            vec![Action::OpenAnalysis {
+                preset: Preset::BaselineAnchors,
+                sheet,
+                columns: selected,
+            }]
         );
         assert_ferme(&mut app, &ctx, tab);
         session.shutdown().unwrap();

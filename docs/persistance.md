@@ -302,3 +302,28 @@ embarquées dans le `.stf` et le presse-papiers. Les références rompues sont
 remplacées par des identifiants réservés sans nœud dans la destination,
 jamais réutilisés, y compris après sauvegarde/rechargement. Le transport
 textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
+
+## Calculs d'analyse (#181)
+
+`FileBody::calculations` (`#[serde(default)]`, placé avant `window_geometries` et
+`save_counter`) porte les calculs de `Tree::calculations()` : un
+`CalculationRecord` par calcul, dans `crates/stokesforge-persistence/src/calculations.rs`.
+
+- L'**opération** traverse le fichier sous la forme d'un arbre générique
+  (`stokesforge_analysis::tree::Tree`, écrit en `rmpv::Value`) : un réglage ou une
+  opération nouvelle ne change pas le schéma ; champ facultatif absent (booléens, listes,
+  plages) = défaut, champ inconnu ignoré, champ essentiel (`op`, `under`,
+  `shift_initial`, `center`…) obligatoire : son absence écarte le calcul. Les nombres
+  non finis ne s'écrivent pas (`null`) : l'interface n'en accepte donc aucun.
+- Séries, annexe et sorties référencent des colonnes par `NodeId` brut ; les valeurs
+  de résultat (y compris `NaN`) et les avertissements sont écrits à plat.
+- Péremption : `manual` et `input_missing` sont gardées ; un `Failed(_)` s'écrit
+  `manual` (l'erreur n'est pas persistée : à l'ouverture un calcul automatique est
+  recalculé et retrouve son erreur, un calcul manuel reste périmé sans message).
+- Lecture tolérante (invariant 10) : un calcul dont l'opération est illisible, ou
+  dont un identifiant dépasse `MAX_NODE_ID`, est **écarté** sans échec — ses
+  colonnes restent des colonnes ordinaires. Un avertissement inconnu est ignoré.
+- Les colonnes de sortie sont des colonnes normales du classeur : le fichier garde
+  leurs valeurs, aucun recalcul n'est nécessaire à l'ouverture pour un calcul manuel.
+- Une copie d'objets (#105) n'emporte pas les calculs : les colonnes copiées
+  deviennent ordinaires.

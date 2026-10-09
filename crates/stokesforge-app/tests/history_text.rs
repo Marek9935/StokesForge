@@ -6,6 +6,7 @@
 //! Les tests bâtissent leur propre chargeur (`build_loader`) : la langue du
 //! chargeur global dépend de l'environnement (`STOKESFORGE_LANG`, préférences).
 
+use stokesforge_analysis::ops::OperationKind;
 use stokesforge_app::history_text::history_text_in;
 use stokesforge_app::i18n::{build_loader, pseudo, Language};
 use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind, PlotEditKind};
@@ -47,10 +48,13 @@ fn rank(label: &HistoryLabel) -> usize {
         HistoryLabel::Macro(_) => 22,
         HistoryLabel::EditPlotSpec(_) => 23,
         HistoryLabel::DuplicateWorksheet { .. } => 24,
+        HistoryLabel::AddCalculation(_) => 25,
+        HistoryLabel::UpdateCalculation(_) => 26,
+        HistoryLabel::RemoveCalculation { .. } => 27,
     }
 }
 
-const VARIANTS: usize = 25;
+const VARIANTS: usize = 28;
 
 /// Chaque variante, sous **chacune** de ses formes (cible connue ou non, 0, 1 et
 /// plusieurs lignes, chaque nature de groupe).
@@ -124,6 +128,22 @@ fn all_labels() -> Vec<HistoryLabel> {
     }
     labels.extend(MacroKind::ALL.map(HistoryLabel::Macro));
     labels.extend(PlotEditKind::ALL.map(HistoryLabel::EditPlotSpec));
+    for kind in OperationKind::ALL {
+        labels.push(HistoryLabel::AddCalculation(kind));
+        labels.push(HistoryLabel::UpdateCalculation(kind));
+        for with_columns in [false, true] {
+            labels.push(HistoryLabel::RemoveCalculation {
+                kind: Some(kind),
+                with_columns,
+            });
+        }
+    }
+    for with_columns in [false, true] {
+        labels.push(HistoryLabel::RemoveCalculation {
+            kind: None,
+            with_columns,
+        });
+    }
     labels
 }
 

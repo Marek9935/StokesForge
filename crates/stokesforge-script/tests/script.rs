@@ -1030,7 +1030,7 @@ print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, imp
     assert_eq!(
         lignes[0],
         "['BrokenReferenceError', 'ConcurrentWriteError', 'Handle', 'InvalidValueError', \
-         'UnknownPathError', 'add_shape', 'children', 'column', 'create_column', 'create_workbook', \
+         'UnknownPathError', 'add_shape', 'analysis', 'children', 'column', 'create_column', 'create_workbook', \
          'create_worksheet', 'import_file', 'info', 'plot', 'remove', 'remove_shape', 'rename', 'resolve', 'root', \
          'set_column', 'set_column_meta', 'set_values', 'undo', 'values']"
     );

@@ -65,6 +65,8 @@
 )]
 
 #[cfg(feature = "python")]
+mod analysis;
+#[cfg(feature = "python")]
 mod bridge;
 #[cfg(feature = "python")]
 mod capture;

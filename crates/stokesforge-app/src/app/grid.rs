@@ -661,13 +661,22 @@ fn column_letter_widget(
             .with(("stokesforge_column_letter_row", column.raw()));
         let response = ui.interact(rect, id, egui::Sense::click_and_drag());
         let letter_text = format!("{letter}({})", role_label(role));
+        // Colonne d'un calcul pas à jour (#181, M9 a) : lettre teintée, la
+        // raison dans l'info-bulle.
+        let stale_text = state.column_stale_text(column);
+        let letter_color = if stale_text.is_some() {
+            crate::theme::stale_color(ui.visuals().dark_mode)
+        } else {
+            crate::theme::gutter_text_color()
+        };
         ui.put(
             rect,
-            egui::Label::new(
-                egui::RichText::new(letter_text).color(crate::theme::gutter_text_color()),
-            )
-            .selectable(false),
+            egui::Label::new(egui::RichText::new(letter_text).color(letter_color))
+                .selectable(false),
         );
+        if let Some(text) = stale_text {
+            response.clone().on_hover_text(text);
+        }
         let modifiers = ui.input(|i| i.modifiers);
         let press_here = press_started_in(ui, rect);
         if response.clicked() || response.drag_started() {
@@ -731,6 +740,15 @@ fn column_properties_menu(
         plot_menu(ui, actions, sheet, target_columns);
         send_to_graph_menu(ui, state.tree(), actions, sheet, target_columns);
         add_column_entry(ui, sheet, actions);
+        super::analysis_menu::analysis_submenu(
+            ui,
+            state,
+            actions,
+            super::analysis_menu::AnalysisTarget {
+                sheet,
+                columns: target_columns,
+            },
+        );
     });
     if let Some(menu) = &menu {
         grid_clipboard_section(ui, &mut sections, state, actions, sheet, menu);
@@ -738,6 +756,7 @@ fn column_properties_menu(
     sections.section(ui, true, |ui| {
         column_type_role_menus(ui, state, actions, target_columns);
     });
+    super::analysis_menu::calculation_section(ui, &mut sections, state, actions, target_columns);
     if let Some(menu) = &menu {
         grid_erase_section(ui, &mut sections, state, actions, sheet, menu);
     }
@@ -2361,6 +2380,7 @@ fn display_cell_widget(
     row: usize,
 ) {
     let text = state.cell_text(column, row);
+    let stale = state.column_staleness(column).is_some();
     let selected = state.is_selected(sheet, column, row);
     let rect = ui.available_rect_before_wrap();
     let response = ui.interact(rect, ui.id().with("cell"), egui::Sense::click_and_drag());
@@ -2399,6 +2419,12 @@ fn display_cell_widget(
             .max_rect(rect.shrink2(egui::vec2(4.0, 0.0)))
             .layout(layout),
         |ui| {
+            // Une colonne pas à jour est entièrement grisée (#181, M9 a).
+            let text = if stale {
+                egui::RichText::new(text).color(ui.visuals().weak_text_color())
+            } else {
+                egui::RichText::new(text)
+            };
             ui.add(egui::Label::new(text).selectable(false).truncate());
         },
     );

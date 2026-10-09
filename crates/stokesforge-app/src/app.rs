@@ -133,6 +133,10 @@
 //! tourne — sans quoi, egui ne redessinant que sur événement d'entrée, la fin
 //! du script n'apparaîtrait qu'au prochain mouvement de souris.
 
+mod analysis_dialog;
+mod analysis_forms;
+mod analysis_menu;
+mod analysis_preview;
 mod contents;
 mod curve_settings;
 mod dialogs;
@@ -152,6 +156,7 @@ mod object_manager_ui;
 mod panel_tests;
 mod plot_settings;
 mod project_manager;
+mod results_pane;
 mod script_console;
 mod shortcuts;
 mod tab;
@@ -169,6 +174,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::file_picker::{FilePicker, PickRequest};
+use analysis_dialog::{analysis_window, calculation_delete_window};
 use dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
 use file_drop::{
     begin_file_drop, finish_file_drop, open_project_in_new_window, remember_recent_imports,
@@ -1086,6 +1092,8 @@ impl StokesForgeApp {
         // `self.state.plot_settings()` est `Some`.
         plot_settings_window(ctx, &mut self.state);
         column_metadata_window(ctx, &self.state, actions);
+        analysis_window(ctx, &mut self.state, actions);
+        calculation_delete_window(ctx, &self.state, actions);
     }
 
     /// Applique les changements de pile seulement après la peinture des fenêtres.

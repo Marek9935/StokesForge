@@ -4,8 +4,13 @@
 
 use std::collections::BTreeSet;
 
+use stokesforge_analysis::correct::CorrectOp;
+use stokesforge_analysis::ops::{Operation, OperationKind};
 use stokesforge_commands::{ColumnRef, Command, HistoryLabel, MacroKind, PlotEditKind};
-use stokesforge_core::{Column, ColumnMeta, ColumnType, NodeId, Project, ValueBlock, WindowMeta};
+use stokesforge_core::{
+    CalculationDraft, Column, ColumnMeta, ColumnType, NodeId, Project, SeriesRef, ValueBlock,
+    WindowMeta,
+};
 use stokesforge_plot::{PlotSpec, SavedColors};
 
 struct World {
@@ -72,10 +77,13 @@ fn rank(command: &Command) -> usize {
         Command::EditPlotSpec { .. } => 23,
         Command::DuplicateWorksheet { .. } => 24,
         Command::InsertCopy { .. } => 25,
+        Command::AddCalculation { .. } => 26,
+        Command::UpdateCalculation { .. } => 27,
+        Command::RemoveCalculation { .. } => 28,
     }
 }
 
-const VARIANTS: usize = 26;
+const VARIANTS: usize = 29;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -293,7 +301,75 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
             },
             HistoryLabel::SetSavedColors,
         ),
+        (
+            Command::AddCalculation {
+                draft: calc_draft(w),
+            },
+            HistoryLabel::AddCalculation(OperationKind::Correct),
+        ),
+        (
+            // Calcul inconnu de l'arbre : la famille se lit dans le brouillon.
+            Command::UpdateCalculation {
+                id: NodeId::from_raw(9_999),
+                draft: calc_draft(w),
+            },
+            HistoryLabel::UpdateCalculation(OperationKind::Correct),
+        ),
+        (
+            Command::RemoveCalculation {
+                id: NodeId::from_raw(9_999),
+                with_columns: true,
+            },
+            HistoryLabel::RemoveCalculation {
+                kind: None,
+                with_columns: true,
+            },
+        ),
     ]
+}
+
+fn calc_draft(w: &World) -> CalculationDraft {
+    CalculationDraft {
+        operation: Operation::Correct {
+            op: CorrectOp::Divide,
+        },
+        series: vec![SeriesRef {
+            x: Some(w.first),
+            y: w.third,
+            sigma: None,
+        }],
+        aux: None,
+        outputs: vec![],
+        results: vec![],
+        keep_results: false,
+        auto_recalc: true,
+    }
+}
+
+/// Le `Display` anglais des libellés de calcul (journaux, CLI).
+#[test]
+fn calculation_labels_display_in_english() {
+    assert_eq!(
+        HistoryLabel::AddCalculation(OperationKind::Baseline).to_string(),
+        "Add Baseline Calculation"
+    );
+    assert_eq!(
+        HistoryLabel::UpdateCalculation(OperationKind::Peaks).to_string(),
+        "Edit Peak Decomposition Calculation"
+    );
+    let remove = |kind, with_columns| HistoryLabel::RemoveCalculation { kind, with_columns };
+    assert_eq!(
+        remove(Some(OperationKind::Fit), true).to_string(),
+        "Delete Fit Calculation"
+    );
+    assert_eq!(
+        remove(Some(OperationKind::Fit), false).to_string(),
+        "Detach Fit Calculation"
+    );
+    assert_eq!(remove(None, false).to_string(), "Detach Calculation");
+    for kind in OperationKind::ALL {
+        assert!(!HistoryLabel::AddCalculation(kind).to_string().is_empty());
+    }
 }
 
 /// Chaque variante de `Command` produit son libellé — et les exemples couvrent

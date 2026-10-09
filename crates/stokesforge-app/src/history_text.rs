@@ -11,6 +11,7 @@
 //! `Display` de `HistoryLabel` (anglais, pour les journaux et le CLI) double le
 //! catalogue `en` ; `tests/shell.rs` vérifie qu'ils disent la même chose.
 
+use stokesforge_analysis::ops::OperationKind;
 use stokesforge_commands::{HistoryLabel, MacroKind, PlotEditKind};
 
 use i18n_embed::fluent::FluentLanguageLoader;
@@ -21,6 +22,24 @@ use crate::i18n::loader;
 /// (inatteignable : une feuille ne porte pas 9×10¹⁸ lignes).
 fn number(count: usize) -> i64 {
     i64::try_from(count).unwrap_or(i64::MAX)
+}
+
+/// Le nom d'une famille d'opération d'analyse, dans la langue du chargeur.
+fn kind_title(loader: &FluentLanguageLoader, kind: OperationKind) -> String {
+    macro_rules! tr {
+        ($($arguments:tt)*) => {
+            crate::tr!(in loader; $($arguments)*)
+        };
+    }
+    match kind {
+        OperationKind::Baseline => tr!("analysis-kind-baseline"),
+        OperationKind::Correct => tr!("analysis-kind-correct"),
+        OperationKind::Integrate => tr!("analysis-kind-integrate"),
+        OperationKind::Fit => tr!("analysis-kind-fit"),
+        OperationKind::Peaks => tr!("analysis-kind-peaks"),
+        OperationKind::Reconvolution => tr!("analysis-kind-reconvolution"),
+        OperationKind::DirectDeconvolution => tr!("analysis-kind-direct-deconvolution"),
+    }
 }
 
 /// La phrase d'un libellé d'historique, dans la langue courante.
@@ -106,6 +125,34 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::ReorderObject => tr!("history-plot-reorder-object"),
         },
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
+        HistoryLabel::AddCalculation(kind) => {
+            tr!("history-add-calculation", kind = kind_title(loader, *kind))
+        }
+        HistoryLabel::UpdateCalculation(kind) => {
+            tr!("history-edit-calculation", kind = kind_title(loader, *kind))
+        }
+        HistoryLabel::RemoveCalculation {
+            kind: Some(kind),
+            with_columns: true,
+        } => tr!(
+            "history-delete-calculation",
+            kind = kind_title(loader, *kind)
+        ),
+        HistoryLabel::RemoveCalculation {
+            kind: Some(kind),
+            with_columns: false,
+        } => tr!(
+            "history-detach-calculation",
+            kind = kind_title(loader, *kind)
+        ),
+        HistoryLabel::RemoveCalculation {
+            kind: None,
+            with_columns: true,
+        } => tr!("history-delete-calculation-any"),
+        HistoryLabel::RemoveCalculation {
+            kind: None,
+            with_columns: false,
+        } => tr!("history-detach-calculation-any"),
         HistoryLabel::Macro(kind) => match kind {
             MacroKind::PasteCells => tr!("history-macro-paste-cells"),
             MacroKind::PasteObjects => tr!("history-macro-paste-objects"),

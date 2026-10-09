@@ -1,0 +1,772 @@
+//! Représentation **arborescente** d'une [`Operation`] : la forme sous laquelle
+//! la trace d'un calcul traverse le modèle et le fichier `.stf`.
+//!
+//! Pourquoi un arbre générique plutôt que des types de transport ou `serde` :
+//! ce crate reste sans dépendance (donc sans `serde`), et la persistance, qui
+//! a déjà `serde_json`, convertit un [`Tree`] en JSON en une trentaine de
+//! lignes. Une opération nouvelle (ou un réglage nouveau) ne change donc **pas**
+//! le schéma du fichier : un champ **facultatif** absent (booléens, listes,
+//! plages) reprend sa valeur par défaut à la lecture, un champ inconnu est
+//! ignoré ; un champ **essentiel** (`op`, `under`, `shift_initial`,
+//! `center`…) est obligatoire et son absence écarte le calcul (invariant 10 :
+//! un défaut de donnée dégrade, il ne plante pas).
+
+use crate::baseline::{BaselineMethod, BaselineOp, Interpolation};
+use crate::correct::CorrectOp;
+use crate::deconv::{DirectMethod, ReconvSpec};
+use crate::error::AnalysisError;
+use crate::fit::{FitSpec, ParamSetting};
+use crate::integrate::{IntegrateSpec, Under};
+use crate::model::Model;
+use crate::ops::{AutoDetect, Operation};
+use crate::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec};
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Tree {
+    Null,
+    Bool(bool),
+    Num(f64),
+    Text(String),
+    List(Vec<Tree>),
+    Map(Vec<(String, Tree)>),
+}
+
+// ── Écriture ───────────────────────────────────────────────────────────
+
+#[derive(Default)]
+struct W(Vec<(String, Tree)>);
+
+impl W {
+    fn kind(kind: &str) -> W {
+        let mut w = W::default();
+        w.0.push(("kind".into(), Tree::Text(kind.into())));
+        w
+    }
+    fn put(mut self, k: &str, t: Tree) -> W {
+        self.0.push((k.into(), t));
+        self
+    }
+    fn num(self, k: &str, v: f64) -> W {
+        self.put(k, num(v))
+    }
+    fn opt(self, k: &str, v: Option<f64>) -> W {
+        self.put(k, v.map_or(Tree::Null, num))
+    }
+    fn text(self, k: &str, v: &str) -> W {
+        self.put(k, Tree::Text(v.into()))
+    }
+    fn bool(self, k: &str, v: bool) -> W {
+        self.put(k, Tree::Bool(v))
+    }
+    fn done(self) -> Tree {
+        Tree::Map(self.0)
+    }
+}
+
+/// Un nombre non fini n'est pas représentable en JSON : il devient « absent ».
+fn num(v: f64) -> Tree {
+    if v.is_finite() {
+        Tree::Num(v)
+    } else {
+        Tree::Null
+    }
+}
+
+fn pair(a: f64, b: f64) -> Tree {
+    Tree::List(vec![num(a), num(b)])
+}
+
+fn range_tree(r: Option<(f64, f64)>) -> Tree {
+    r.map_or(Tree::Null, |(a, b)| pair(a, b))
+}
+
+fn model_tree(m: &Model) -> Tree {
+    match m {
+        Model::Linear => W::kind("linear").done(),
+        Model::Polynomial { degree } => W::kind("polynomial").num("degree", *degree as f64).done(),
+        Model::Exponential => W::kind("exponential").done(),
+        Model::ExponentialOffset => W::kind("exponential_offset").done(),
+        Model::Exponential2 => W::kind("exponential2").done(),
+        Model::Logarithm => W::kind("logarithm").done(),
+        Model::Power => W::kind("power").done(),
+        Model::Gaussian => W::kind("gaussian").done(),
+        Model::Lorentzian => W::kind("lorentzian").done(),
+        Model::Custom { formula } => W::kind("custom").text("formula", formula).done(),
+    }
+}
+
+fn settings_tree(p: &[ParamSetting]) -> Tree {
+    Tree::List(
+        p.iter()
+            .map(|s| {
+                W::default()
+                    .opt("initial", s.initial)
+                    .bool("fixed", s.fixed)
+                    .opt("min", s.min)
+                    .opt("max", s.max)
+                    .bool("shared", s.shared)
+                    .done()
+            })
+            .collect(),
+    )
+}
+
+impl Operation {
+    /// L'opération sous forme d'arbre ; [`Operation::from_tree`] est son
+    /// inverse exact (aux nombres non finis près, écrits « absents »).
+    pub fn to_tree(&self) -> Tree {
+        match self {
+            Operation::Baseline {
+                method,
+                op,
+                keep_baseline,
+            } => {
+                let m = match method {
+                    BaselineMethod::Line { p1, p2 } => W::kind("line")
+                        .put("p1", pair(p1.0, p1.1))
+                        .put("p2", pair(p2.0, p2.1))
+                        .done(),
+                    BaselineMethod::Zones { zones, degree } => W::kind("zones")
+                        .put(
+                            "zones",
+                            Tree::List(zones.iter().map(|z| pair(z.0, z.1)).collect()),
+                        )
+                        .num("degree", *degree as f64)
+                        .done(),
+                    BaselineMethod::Anchors {
+                        points,
+                        interpolation,
+                    } => W::kind("anchors")
+                        .put(
+                            "points",
+                            Tree::List(points.iter().map(|p| pair(p.0, p.1)).collect()),
+                        )
+                        .text(
+                            "interpolation",
+                            match interpolation {
+                                Interpolation::Segments => "segments",
+                                Interpolation::Spline => "spline",
+                            },
+                        )
+                        .done(),
+                };
+                W::kind("baseline")
+                    .put("method", m)
+                    .text(
+                        "op",
+                        match op {
+                            BaselineOp::Subtract => "subtract",
+                            BaselineOp::Divide => "divide",
+                        },
+                    )
+                    .bool("keep_baseline", *keep_baseline)
+                    .done()
+            }
+            Operation::Correct { op } => W::kind("correct")
+                .text(
+                    "op",
+                    match op {
+                        CorrectOp::Divide => "divide",
+                        CorrectOp::Multiply => "multiply",
+                        CorrectOp::Subtract => "subtract",
+                    },
+                )
+                .done(),
+            Operation::Integrate { spec } => W::kind("integrate")
+                .put(
+                    "ranges",
+                    Tree::List(spec.ranges.iter().map(|r| pair(r.0, r.1)).collect()),
+                )
+                .text(
+                    "under",
+                    match spec.under {
+                        Under::Zero => "zero",
+                        Under::Line => "line",
+                    },
+                )
+                .bool("cumulative", spec.cumulative)
+                .bool("normalize", spec.normalize)
+                .done(),
+            Operation::Fit {
+                spec,
+                range,
+                residuals,
+            } => W::kind("fit")
+                .put("model", model_tree(&spec.model))
+                .put("params", settings_tree(&spec.params))
+                .put("range", range_tree(*range))
+                .bool("residuals", *residuals)
+                .done(),
+            Operation::Peaks {
+                spec,
+                auto,
+                range,
+                residuals,
+            } => W::kind("peaks")
+                .text(
+                    "shape",
+                    match spec.shape {
+                        PeakShape::Gaussian => "gaussian",
+                        PeakShape::Lorentzian => "lorentzian",
+                        PeakShape::Voigt => "voigt",
+                    },
+                )
+                .text(
+                    "background",
+                    match spec.background {
+                        PeakBackground::None => "none",
+                        PeakBackground::Constant => "constant",
+                        PeakBackground::Linear => "linear",
+                    },
+                )
+                .put(
+                    "seeds",
+                    Tree::List(
+                        spec.seeds
+                            .iter()
+                            .map(|s| {
+                                W::default()
+                                    .num("center", s.center)
+                                    .opt("height", s.height)
+                                    .opt("fwhm", s.fwhm)
+                                    .done()
+                            })
+                            .collect(),
+                    ),
+                )
+                .bool("link_widths", spec.link_widths)
+                .opt("center_window", spec.center_window)
+                .put(
+                    "auto",
+                    auto.map_or(Tree::Null, |a| {
+                        W::default()
+                            .num("min_prominence", a.min_prominence)
+                            .num("max_peaks", a.max_peaks as f64)
+                            .done()
+                    }),
+                )
+                .put("range", range_tree(*range))
+                .bool("residuals", *residuals)
+                .done(),
+            Operation::Reconvolution { spec, residuals } => W::kind("reconvolution")
+                .num("components", spec.components as f64)
+                .put("params", settings_tree(&spec.params))
+                .num("shift_initial", spec.shift_initial)
+                .bool("fit_shift", spec.fit_shift)
+                .put("window", range_tree(spec.window))
+                .bool("residuals", *residuals)
+                .done(),
+            Operation::DirectDeconvolution { method, shift } => {
+                let m = match method {
+                    DirectMethod::RichardsonLucy { iterations } => W::kind("richardson_lucy")
+                        .num("iterations", *iterations as f64)
+                        .done(),
+                    DirectMethod::Wiener { noise } => W::kind("wiener").opt("noise", *noise).done(),
+                };
+                W::kind("direct_deconvolution")
+                    .put("method", m)
+                    .num("shift", *shift)
+                    .done()
+            }
+        }
+    }
+}
+
+// ── Lecture ────────────────────────────────────────────────────────────
+
+fn bad(name: &str) -> AnalysisError {
+    AnalysisError::InvalidParameter { name: name.into() }
+}
+
+struct R<'a>(&'a [(String, Tree)]);
+
+impl<'a> R<'a> {
+    fn of(t: &'a Tree, name: &str) -> Result<R<'a>, AnalysisError> {
+        match t {
+            Tree::Map(m) => Ok(R(m)),
+            _ => Err(bad(name)),
+        }
+    }
+    fn get(&self, k: &str) -> Option<&'a Tree> {
+        self.0.iter().find(|(n, _)| n == k).map(|(_, t)| t)
+    }
+    fn req(&self, k: &str) -> Result<&'a Tree, AnalysisError> {
+        match self.get(k) {
+            None | Some(Tree::Null) => Err(bad(k)),
+            Some(t) => Ok(t),
+        }
+    }
+    fn num(&self, k: &str) -> Result<f64, AnalysisError> {
+        match self.req(k)? {
+            Tree::Num(v) => Ok(*v),
+            _ => Err(bad(k)),
+        }
+    }
+    fn opt_num(&self, k: &str) -> Result<Option<f64>, AnalysisError> {
+        match self.get(k) {
+            None | Some(Tree::Null) => Ok(None),
+            Some(Tree::Num(v)) => Ok(Some(*v)),
+            _ => Err(bad(k)),
+        }
+    }
+    fn usize(&self, k: &str) -> Result<usize, AnalysisError> {
+        let v = self.num(k)?;
+        if v >= 0.0 && v.fract() == 0.0 && v < 1e9 {
+            Ok(v as usize)
+        } else {
+            Err(bad(k))
+        }
+    }
+    /// Un booléen absent vaut `default`.
+    fn bool(&self, k: &str, default: bool) -> Result<bool, AnalysisError> {
+        match self.get(k) {
+            None | Some(Tree::Null) => Ok(default),
+            Some(Tree::Bool(b)) => Ok(*b),
+            _ => Err(bad(k)),
+        }
+    }
+    fn text(&self, k: &str) -> Result<&'a str, AnalysisError> {
+        match self.req(k)? {
+            Tree::Text(s) => Ok(s),
+            _ => Err(bad(k)),
+        }
+    }
+    fn kind(&self) -> Result<&'a str, AnalysisError> {
+        self.text("kind")
+    }
+    fn list(&self, k: &str) -> Result<&'a [Tree], AnalysisError> {
+        match self.get(k) {
+            None | Some(Tree::Null) => Ok(&[]),
+            Some(Tree::List(l)) => Ok(l),
+            _ => Err(bad(k)),
+        }
+    }
+    fn pair(&self, k: &str) -> Result<(f64, f64), AnalysisError> {
+        as_pair(self.req(k)?, k)
+    }
+    fn opt_pair(&self, k: &str) -> Result<Option<(f64, f64)>, AnalysisError> {
+        match self.get(k) {
+            None | Some(Tree::Null) => Ok(None),
+            Some(t) => as_pair(t, k).map(Some),
+        }
+    }
+}
+
+fn as_pair(t: &Tree, name: &str) -> Result<(f64, f64), AnalysisError> {
+    match t {
+        Tree::List(l) if l.len() == 2 => match (&l[0], &l[1]) {
+            (Tree::Num(a), Tree::Num(b)) => Ok((*a, *b)),
+            _ => Err(bad(name)),
+        },
+        _ => Err(bad(name)),
+    }
+}
+
+fn pairs(r: &R<'_>, k: &str) -> Result<Vec<(f64, f64)>, AnalysisError> {
+    r.list(k)?.iter().map(|t| as_pair(t, k)).collect()
+}
+
+fn model_of(t: &Tree) -> Result<Model, AnalysisError> {
+    let r = R::of(t, "model")?;
+    Ok(match r.kind()? {
+        "linear" => Model::Linear,
+        "polynomial" => Model::Polynomial {
+            degree: r.usize("degree")? as u32,
+        },
+        "exponential" => Model::Exponential,
+        "exponential_offset" => Model::ExponentialOffset,
+        "exponential2" => Model::Exponential2,
+        "logarithm" => Model::Logarithm,
+        "power" => Model::Power,
+        "gaussian" => Model::Gaussian,
+        "lorentzian" => Model::Lorentzian,
+        "custom" => Model::Custom {
+            formula: r.text("formula")?.to_string(),
+        },
+        _ => return Err(bad("model")),
+    })
+}
+
+fn settings_of(r: &R<'_>) -> Result<Vec<ParamSetting>, AnalysisError> {
+    r.list("params")?
+        .iter()
+        .map(|t| {
+            let s = R::of(t, "params")?;
+            Ok(ParamSetting {
+                initial: s.opt_num("initial")?,
+                fixed: s.bool("fixed", false)?,
+                min: s.opt_num("min")?,
+                max: s.opt_num("max")?,
+                shared: s.bool("shared", false)?,
+            })
+        })
+        .collect()
+}
+
+impl Operation {
+    pub fn from_tree(t: &Tree) -> Result<Operation, AnalysisError> {
+        let r = R::of(t, "operation")?;
+        Ok(match r.kind()? {
+            "baseline" => {
+                let m = R::of(r.req("method")?, "method")?;
+                let method = match m.kind()? {
+                    "line" => BaselineMethod::Line {
+                        p1: m.pair("p1")?,
+                        p2: m.pair("p2")?,
+                    },
+                    "zones" => BaselineMethod::Zones {
+                        zones: pairs(&m, "zones")?,
+                        degree: m.usize("degree")? as u32,
+                    },
+                    "anchors" => BaselineMethod::Anchors {
+                        points: pairs(&m, "points")?,
+                        interpolation: match m.text("interpolation")? {
+                            "segments" => Interpolation::Segments,
+                            "spline" => Interpolation::Spline,
+                            _ => return Err(bad("interpolation")),
+                        },
+                    },
+                    _ => return Err(bad("method")),
+                };
+                Operation::Baseline {
+                    method,
+                    op: match r.text("op")? {
+                        "subtract" => BaselineOp::Subtract,
+                        "divide" => BaselineOp::Divide,
+                        _ => return Err(bad("op")),
+                    },
+                    keep_baseline: r.bool("keep_baseline", false)?,
+                }
+            }
+            "correct" => Operation::Correct {
+                op: match r.text("op")? {
+                    "divide" => CorrectOp::Divide,
+                    "multiply" => CorrectOp::Multiply,
+                    "subtract" => CorrectOp::Subtract,
+                    _ => return Err(bad("op")),
+                },
+            },
+            "integrate" => Operation::Integrate {
+                spec: IntegrateSpec {
+                    ranges: pairs(&r, "ranges")?,
+                    under: match r.text("under")? {
+                        "zero" => Under::Zero,
+                        "line" => Under::Line,
+                        _ => return Err(bad("under")),
+                    },
+                    cumulative: r.bool("cumulative", false)?,
+                    normalize: r.bool("normalize", false)?,
+                },
+            },
+            "fit" => Operation::Fit {
+                spec: FitSpec {
+                    model: model_of(r.req("model")?)?,
+                    params: settings_of(&r)?,
+                },
+                range: r.opt_pair("range")?,
+                residuals: r.bool("residuals", false)?,
+            },
+            "peaks" => {
+                let seeds = r
+                    .list("seeds")?
+                    .iter()
+                    .map(|t| {
+                        let s = R::of(t, "seeds")?;
+                        Ok(PeakSeed {
+                            center: s.num("center")?,
+                            height: s.opt_num("height")?,
+                            fwhm: s.opt_num("fwhm")?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, AnalysisError>>()?;
+                let auto = match r.get("auto") {
+                    None | Some(Tree::Null) => None,
+                    Some(t) => {
+                        let a = R::of(t, "auto")?;
+                        Some(AutoDetect {
+                            min_prominence: a.num("min_prominence")?,
+                            max_peaks: a.usize("max_peaks")?,
+                        })
+                    }
+                };
+                Operation::Peaks {
+                    spec: PeaksSpec {
+                        shape: match r.text("shape")? {
+                            "gaussian" => PeakShape::Gaussian,
+                            "lorentzian" => PeakShape::Lorentzian,
+                            "voigt" => PeakShape::Voigt,
+                            _ => return Err(bad("shape")),
+                        },
+                        background: match r.text("background")? {
+                            "none" => PeakBackground::None,
+                            "constant" => PeakBackground::Constant,
+                            "linear" => PeakBackground::Linear,
+                            _ => return Err(bad("background")),
+                        },
+                        seeds,
+                        link_widths: r.bool("link_widths", false)?,
+                        center_window: r.opt_num("center_window")?,
+                    },
+                    auto,
+                    range: r.opt_pair("range")?,
+                    residuals: r.bool("residuals", false)?,
+                }
+            }
+            "reconvolution" => Operation::Reconvolution {
+                spec: ReconvSpec {
+                    components: r.usize("components")?,
+                    params: settings_of(&r)?,
+                    shift_initial: r.num("shift_initial")?,
+                    fit_shift: r.bool("fit_shift", false)?,
+                    window: r.opt_pair("window")?,
+                },
+                residuals: r.bool("residuals", false)?,
+            },
+            "direct_deconvolution" => {
+                let m = R::of(r.req("method")?, "method")?;
+                Operation::DirectDeconvolution {
+                    method: match m.kind()? {
+                        "richardson_lucy" => DirectMethod::RichardsonLucy {
+                            iterations: m.usize("iterations")?,
+                        },
+                        "wiener" => DirectMethod::Wiener {
+                            noise: m.opt_num("noise")?,
+                        },
+                        _ => return Err(bad("method")),
+                    },
+                    shift: r.num("shift")?,
+                }
+            }
+            _ => return Err(bad("kind")),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn all_operations() -> Vec<Operation> {
+        let settings = vec![
+            ParamSetting {
+                initial: Some(1.5),
+                fixed: true,
+                min: Some(0.0),
+                max: None,
+                shared: false,
+            },
+            ParamSetting {
+                shared: true,
+                ..Default::default()
+            },
+        ];
+        let mut v = vec![
+            Operation::Baseline {
+                method: BaselineMethod::Line {
+                    p1: (1.0, 2.0),
+                    p2: (3.0, 4.5),
+                },
+                op: BaselineOp::Subtract,
+                keep_baseline: true,
+            },
+            Operation::Baseline {
+                method: BaselineMethod::Zones {
+                    zones: vec![(0.0, 1.0), (5.0, 6.0)],
+                    degree: 2,
+                },
+                op: BaselineOp::Divide,
+                keep_baseline: false,
+            },
+            Operation::Baseline {
+                method: BaselineMethod::Anchors {
+                    points: vec![(0.0, 1.0), (2.0, 3.0)],
+                    interpolation: Interpolation::Spline,
+                },
+                op: BaselineOp::Subtract,
+                keep_baseline: false,
+            },
+            Operation::Baseline {
+                method: BaselineMethod::Anchors {
+                    points: vec![(0.0, 1.0), (2.0, 3.0)],
+                    interpolation: Interpolation::Segments,
+                },
+                op: BaselineOp::Subtract,
+                keep_baseline: false,
+            },
+            Operation::Integrate {
+                spec: IntegrateSpec {
+                    ranges: vec![(1.0, 2.0)],
+                    under: Under::Line,
+                    cumulative: true,
+                    normalize: false,
+                },
+            },
+            Operation::Integrate {
+                spec: IntegrateSpec {
+                    ranges: vec![],
+                    under: Under::Zero,
+                    cumulative: false,
+                    normalize: true,
+                },
+            },
+            Operation::Peaks {
+                spec: PeaksSpec {
+                    shape: PeakShape::Voigt,
+                    background: PeakBackground::Linear,
+                    seeds: vec![
+                        PeakSeed {
+                            center: 1.0,
+                            height: Some(2.0),
+                            fwhm: None,
+                        },
+                        PeakSeed {
+                            center: 4.0,
+                            height: None,
+                            fwhm: Some(0.5),
+                        },
+                    ],
+                    link_widths: true,
+                    center_window: Some(0.25),
+                },
+                auto: Some(AutoDetect {
+                    min_prominence: 0.1,
+                    max_peaks: 4,
+                }),
+                range: Some((0.0, 10.0)),
+                residuals: true,
+            },
+            Operation::Reconvolution {
+                spec: ReconvSpec {
+                    components: 2,
+                    params: settings.clone(),
+                    shift_initial: -0.3,
+                    fit_shift: true,
+                    window: Some((1.0, 9.0)),
+                },
+                residuals: true,
+            },
+            Operation::DirectDeconvolution {
+                method: DirectMethod::RichardsonLucy { iterations: 30 },
+                shift: 0.1,
+            },
+            Operation::DirectDeconvolution {
+                method: DirectMethod::Wiener { noise: Some(1e-3) },
+                shift: 0.0,
+            },
+            Operation::DirectDeconvolution {
+                method: DirectMethod::Wiener { noise: None },
+                shift: 0.0,
+            },
+        ];
+        for c in [CorrectOp::Divide, CorrectOp::Multiply, CorrectOp::Subtract] {
+            v.push(Operation::Correct { op: c });
+        }
+        for m in [
+            Model::Linear,
+            Model::Polynomial { degree: 4 },
+            Model::Exponential,
+            Model::ExponentialOffset,
+            Model::Exponential2,
+            Model::Logarithm,
+            Model::Power,
+            Model::Gaussian,
+            Model::Lorentzian,
+            Model::Custom {
+                formula: "a*exp(-x/b)".into(),
+            },
+        ] {
+            v.push(Operation::Fit {
+                spec: FitSpec {
+                    model: m,
+                    params: settings.clone(),
+                },
+                range: Some((1.0, 2.0)),
+                residuals: true,
+            });
+        }
+        v.push(Operation::Fit {
+            spec: FitSpec {
+                model: Model::Linear,
+                params: vec![],
+            },
+            range: None,
+            residuals: false,
+        });
+        v
+    }
+
+    #[test]
+    fn chaque_operation_fait_l_aller_retour() {
+        for op in all_operations() {
+            let tree = op.to_tree();
+            assert_eq!(Operation::from_tree(&tree).unwrap(), op, "{tree:?}");
+        }
+    }
+
+    #[test]
+    fn les_champs_absents_prennent_leur_valeur_par_defaut_et_les_inconnus_sont_ignores() {
+        let tree = Tree::Map(vec![
+            ("kind".into(), Tree::Text("integrate".into())),
+            ("under".into(), Tree::Text("zero".into())),
+            ("champ_futur".into(), Tree::Num(1.0)),
+        ]);
+        let op = Operation::from_tree(&tree).unwrap();
+        assert_eq!(
+            op,
+            Operation::Integrate {
+                spec: IntegrateSpec {
+                    ranges: vec![],
+                    under: Under::Zero,
+                    cumulative: false,
+                    normalize: false
+                }
+            }
+        );
+    }
+
+    #[test]
+    fn un_arbre_invalide_est_une_erreur_nommee_pas_une_panique() {
+        let cases = [
+            Tree::Null,
+            Tree::Map(vec![]),
+            Tree::Map(vec![("kind".into(), Tree::Text("inconnue".into()))]),
+            Tree::Map(vec![
+                ("kind".into(), Tree::Text("correct".into())),
+                ("op".into(), Tree::Text("modulo".into())),
+            ]),
+            Tree::Map(vec![
+                ("kind".into(), Tree::Text("reconvolution".into())),
+                ("components".into(), Tree::Num(-1.0)),
+            ]),
+        ];
+        for c in cases {
+            assert!(
+                matches!(
+                    Operation::from_tree(&c),
+                    Err(AnalysisError::InvalidParameter { .. })
+                ),
+                "{c:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn un_nombre_non_fini_s_ecrit_absent() {
+        let op = Operation::Fit {
+            spec: FitSpec {
+                model: Model::Linear,
+                params: vec![ParamSetting {
+                    min: Some(f64::NEG_INFINITY),
+                    ..Default::default()
+                }],
+            },
+            range: None,
+            residuals: false,
+        };
+        let back = Operation::from_tree(&op.to_tree()).unwrap();
+        match back {
+            Operation::Fit { spec, .. } => assert_eq!(spec.params[0].min, None),
+            _ => unreachable!(),
+        }
+    }
+}

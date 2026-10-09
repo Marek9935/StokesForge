@@ -140,6 +140,59 @@ pub fn import_comment_line_color() -> Color32 {
     Color32::from_rgb(200, 80, 200)
 }
 
+/// Teinte d'une colonne calculée qui n'est plus à jour (lettre d'en-tête et
+/// cellules), #181.
+pub fn stale_color(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(230, 170, 70)
+    } else {
+        Color32::from_rgb(170, 100, 0)
+    }
+}
+
+/// Courbe de résultat de l'aperçu d'analyse (ajustement, signal corrigé,
+/// somme des pics), #181.
+pub fn preview_result_color(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(255, 120, 90)
+    } else {
+        Color32::from_rgb(200, 50, 30)
+    }
+}
+
+/// Courbe d'aide de l'aperçu d'analyse (ligne de base, fond), #181.
+pub fn preview_helper_color(dark: bool) -> Color32 {
+    if dark {
+        Color32::from_rgb(120, 200, 255)
+    } else {
+        Color32::from_rgb(20, 100, 190)
+    }
+}
+
+/// Repère posé sur l'aperçu d'analyse (point d'ancrage, pic de départ), #181.
+pub fn preview_marker_color() -> Color32 {
+    Color32::from_rgb(230, 150, 20)
+}
+
+/// Fond translucide d'une zone ou d'une plage de l'aperçu d'analyse, #181.
+pub fn preview_zone_fill() -> Color32 {
+    Color32::from_rgba_unmultiplied(230, 150, 20, 48)
+}
+
+/// Couleur du pic `index` (à partir de 1) dans l'aperçu d'analyse, #181.
+pub fn preview_peak_color(index: usize) -> Color32 {
+    const LIGHT: [(u8, u8, u8); 6] = [
+        (31, 119, 180),
+        (44, 160, 44),
+        (148, 103, 189),
+        (140, 86, 75),
+        (227, 119, 194),
+        (23, 190, 207),
+    ];
+    let (r, g, b) = LIGHT[index.saturating_sub(1) % LIGHT.len()];
+    Color32::from_rgb(r, g, b)
+}
+
 /// Rouge foncé et discret du contour d'un dialogue modal qui vient de
 /// refuser un clic ([`crate::app`], `modal_dialog`).
 pub fn blocked_flash_color() -> Color32 {
