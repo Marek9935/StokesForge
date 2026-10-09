@@ -80,11 +80,13 @@ pub enum MacroKind {
     SetColumnsType,
     /// Changer le rôle de plusieurs colonnes d'un coup.
     SetColumnsRole,
+    /// Un calcul d'analyse et le tracé de ses colonnes sur un graphe (#200).
+    AnalysisToGraph,
 }
 
 impl MacroKind {
     /// Toutes les natures de groupe, pour les tests exhaustifs.
-    pub const ALL: [MacroKind; 15] = [
+    pub const ALL: [MacroKind; 16] = [
         MacroKind::PasteCells,
         MacroKind::PasteObjects,
         MacroKind::DuplicateObjects,
@@ -100,6 +102,7 @@ impl MacroKind {
         MacroKind::Script,
         MacroKind::SetColumnsType,
         MacroKind::SetColumnsRole,
+        MacroKind::AnalysisToGraph,
     ];
 }
 
@@ -299,6 +302,7 @@ impl fmt::Display for MacroKind {
             MacroKind::Script => "Run Script",
             MacroKind::SetColumnsType => "Change Column Types",
             MacroKind::SetColumnsRole => "Change Column Roles",
+            MacroKind::AnalysisToGraph => "Analyze and Plot",
         })
     }
 }

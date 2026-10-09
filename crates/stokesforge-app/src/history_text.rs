@@ -173,6 +173,7 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             MacroKind::Script => tr!("history-macro-script"),
             MacroKind::SetColumnsType => tr!("history-macro-set-columns-type"),
             MacroKind::SetColumnsRole => tr!("history-macro-set-columns-role"),
+            MacroKind::AnalysisToGraph => tr!("history-macro-analysis-to-graph"),
         },
     }
 }

@@ -119,6 +119,13 @@ L'interface du traitement mathématique est répartie ainsi :
   et pousse un `UpdateCalculation` : **un pas d'historique par geste**, aucun
   si la poignée n'a pas bougé. Le nœud de l'Object Manager n'existe pas (un
   calcul n'est pas un nœud).
+
+- L'aperçu est peint à la main (pas de graphe du projet) et **calculé sur un fil
+  de travail** (#201, `analysis_preview.rs`, `PreviewJobs`) : un seul fil à la
+  fois, la demande la plus récente remplace celle qui attend, l'image attend
+  40 ms au plus puis montre l'ancien résultat marqué « Calculating… » ; le fil
+  réveille le viewport une fois à sa fin, jamais de réveil périodique. Un
+  calcul déjà lancé n'est pas interrompu : son résultat périmé est ignoré.
 - Colonnes périmées : grisées dans la grille, lettre teintée (`theme::stale_color`)
   et info-bulle ; le volet Results (replié par défaut) liste les calculs
   conservés (portée Feuille / Classeur) avec Edit / Recalculate / Delete.
@@ -133,6 +140,14 @@ L'interface du traitement mathématique est répartie ainsi :
   suit l'échelle des données) ; une aire s'affiche avec le produit des unités de
   X et de Y quand les deux existent (`value_unit`) ; la fenêtre des pics borne
   les centres (`center_window`, aussi `pyst.analysis.peaks`).
+- Finitions (#200) : « Add to graph » (case de la sortie, visible quand un
+  graphique montre la courbe ; `AppState::graphs_plotting`) crée le calcul **et**
+  trace ses colonnes (hors résidus, `PanelSpec::push_series_batch` via
+  `AddSeriesToGraph`) dans une seule macro `MacroKind::AnalysisToGraph` ;
+  Show / Keep in Results se souvient du dernier choix d'une session à l'autre
+  (`preferences.json`, `analysis_keep_results`) ; l'en-tête d'une colonne pas à
+  jour porte l'icône `Icon::Stale` (Phosphor `warning`, rôle neutre) à gauche de
+  sa lettre teintée.
 - Le choix du type d'analyse se fait dans la fenêtre (liste « Analysis type »,
   `family_chooser`) tant qu'elle crée un calcul ; un calcul rouvert garde sa
   famille (#202).

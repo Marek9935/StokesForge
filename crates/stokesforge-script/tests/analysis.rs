@@ -285,6 +285,71 @@ print('ok')
     assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
 }
 
+/// #201 : `y` peut être une liste — un seul calcul multi-séries, rendu série par
+/// série, annulé d'un seul coup ; `shared=[…]` en fait un ajustement global.
+#[test]
+fn un_lot_est_un_seul_calcul_multi_series_annulable_d_un_coup() {
+    let banc = banc();
+    let outcome = run(
+        &banc,
+        r#"
+import numpy as np
+book = pyst.create_workbook('Lot')
+sheet = pyst.create_worksheet(book, 'S')
+t = pyst.create_column(sheet, 'T')
+pyst.set_values(t, np.linspace(0, 10, 101))
+pyst.set_column_meta(t, role='x')
+ts = np.linspace(0, 10, 101)
+ys = []
+for k, amp in enumerate([2.0, 5.0, 9.0]):
+    c = pyst.create_column(sheet, 'Y%d' % k)
+    pyst.set_values(c, amp * np.exp(-ts / 3.0))
+    ys.append(c)
+r = pyst.analysis.fit(ys, t, model='exponential')
+assert len(r['series']) == 3, r
+for item, amp in zip(r['series'], [2.0, 5.0, 9.0]):
+    assert abs(item['values']['param.A'] - amp) < 1e-4, item['values']
+    assert 'fit' in item['columns'], item['columns']
+g = pyst.analysis.fit(ys, [t, t, t], model='exponential', shared=['tau'])
+taus = [item['values']['param.tau'] for item in g['series']]
+assert max(taus) - min(taus) < 1e-12, taus
+assert abs(taus[0] - 3.0) < 1e-4, taus
+print('ok')
+"#,
+    );
+    assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
+    let snapshot = banc.session.snapshot().unwrap();
+    let calcs: Vec<_> = snapshot.tree.calculations().values().collect();
+    assert_eq!(calcs.len(), 2, "un calcul par appel, pas par série");
+    assert!(calcs.iter().all(|c| c.series.len() == 3));
+    // Le script entier est un groupe d'annulation : un seul Ctrl+Z défait les
+    // deux lots et leurs colonnes.
+    banc.session.undo().unwrap();
+    assert!(banc
+        .session
+        .snapshot()
+        .unwrap()
+        .tree
+        .calculations()
+        .is_empty());
+}
+
+#[test]
+fn un_lot_mal_forme_est_refuse_avec_un_message() {
+    let banc = banc();
+    for (source, needle) in [
+        ("pyst.analysis.fit([], x)", "empty"),
+        ("pyst.analysis.fit([y, y], [x])", "one per series"),
+        ("pyst.analysis.fit([y, 3], x)", "only handles"),
+        ("pyst.analysis.fit(3, x)", "handle or a list"),
+    ] {
+        let outcome = banc.engine.run(&format!("{SETUP}{source}")).unwrap();
+        let error = format!("{:?}", outcome.error);
+        assert!(outcome.error.is_some(), "{source} devait échouer");
+        assert!(error.contains(needle), "{source} : {error}");
+    }
+}
+
 /// scipy fait partie de la pile embarquée (#191) : un script `pyst` ajuste une
 /// exponentielle avec `scipy.optimize.curve_fit` et retrouve les paramètres,
 /// puis les écrit dans une colonne annulable. L'interface n'en dépend pas ;

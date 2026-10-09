@@ -440,6 +440,7 @@ history-macro-add-worksheet = Ajouter une feuille
 history-macro-script = Exécuter le script
 history-macro-set-columns-type = Changer le type des colonnes
 history-macro-set-columns-role = Changer le rôle des colonnes
+history-macro-analysis-to-graph = Analyser et tracer
 
 ## Annuler et rétablir
 
@@ -1300,6 +1301,8 @@ analysis-direct-noise = Rapport de bruit
 analysis-output-baseline-column = Écrire la ligne de base
 analysis-output-peak-columns = Écrire une colonne par pic
 analysis-output-sum-column = Écrire la somme des pics
+analysis-output-to-graph = Ajouter au graphique
+    .hint = Trace les nouvelles colonnes sur le graphique qui montre cette courbe, dans la même étape d'annulation
 analysis-output-show = Montrer
     .hint = Écrit les colonnes seulement ; les valeurs ne sont pas gardées
 analysis-output-keep = Garder dans les résultats
@@ -1318,6 +1321,7 @@ analysis-warning-step-not-uniform = Le pas de X n'est pas constant : le résult
 analysis-warning-irf-step = La réponse a un autre pas de X que les données
 analysis-warning-negative-clipped = { $count } points négatifs ont été ramenés à zéro
 analysis-warning-undetermined = { $count } paramètre(s) ne sont pas déterminés par les données : aucune incertitude n'est donnée
+analysis-calculating = Calcul en cours…
 analysis-skipped-rows = { $count } lignes sans X, Y ou erreur valide ont été ignorées
 analysis-delete-title = Supprimer le calcul
 analysis-delete-confirm = Supprimer le calcul « { $name } » ?

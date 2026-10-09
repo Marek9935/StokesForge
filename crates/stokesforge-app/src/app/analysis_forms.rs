@@ -14,7 +14,7 @@ use stokesforge_analysis::integrate::Under;
 use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::OperationKind;
 use stokesforge_analysis::peaks::{PeakBackground, PeakShape};
-use stokesforge_core::Tree;
+use stokesforge_core::{NodeId, Tree};
 
 use crate::analysis::{
     aux_candidates, aux_for, kind_title, series_label, AnalysisForm, BaselineShape,
@@ -164,13 +164,19 @@ fn caption(ui: &mut egui::Ui, text: String) {
 }
 
 /// Tout le formulaire : entrée, famille, sortie.
-pub(super) fn form_body(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
+pub(super) fn form_body(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    form: &mut AnalysisForm,
+    tree: &Tree,
+    graphs: &[(NodeId, String)],
+) {
     input_block(ui, id, form, tree);
     ui.add_space(6.0);
     family_chooser(ui, id, form);
     family_block(ui, id, form, tree);
     ui.add_space(6.0);
-    output_block(ui, form);
+    output_block(ui, id, form, graphs);
 }
 
 fn input_block(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
@@ -691,7 +697,12 @@ fn direct_form(ui: &mut egui::Ui, form: &mut AnalysisForm) {
     });
 }
 
-fn output_block(ui: &mut egui::Ui, form: &mut AnalysisForm) {
+fn output_block(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    form: &mut AnalysisForm,
+    graphs: &[(NodeId, String)],
+) {
     theme::section_title(ui, tr!("analysis-block-output"));
     // Les colonnes que cette famille peut écrire en plus de la principale.
     match form.kind {
@@ -713,6 +724,9 @@ fn output_block(ui: &mut egui::Ui, form: &mut AnalysisForm) {
         }
         _ => {}
     }
+    if form.editing.is_none() && !graphs.is_empty() {
+        graph_target(ui, id, form, graphs);
+    }
     ui.radio_value(&mut form.keep_results, false, tr!("analysis-output-show"))
         .on_hover_text(tr!("analysis-output-show", "hint"));
     ui.radio_value(&mut form.keep_results, true, tr!("analysis-output-keep"))
@@ -726,6 +740,39 @@ fn output_block(ui: &mut egui::Ui, form: &mut AnalysisForm) {
     }
     if !form.auto_recalc && form.series.len() > stokesforge_analysis::ops::HEAVY_BATCH {
         caption(ui, tr!("analysis-output-heavy"));
+    }
+}
+
+/// « Add to graph » (#200) : la case, et le choix du graphique quand plusieurs
+/// montrent la courbe. Le graphique retenu reste valide : un choix qui n'est plus
+/// parmi les candidats retombe sur le premier.
+fn graph_target(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    form: &mut AnalysisForm,
+    graphs: &[(NodeId, String)],
+) {
+    if !form
+        .graph
+        .is_some_and(|g| graphs.iter().any(|(id, _)| *id == g))
+    {
+        form.graph = graphs.first().map(|(id, _)| *id);
+    }
+    ui.checkbox(&mut form.add_to_graph, tr!("analysis-output-to-graph"))
+        .on_hover_text(tr!("analysis-output-to-graph", "hint"));
+    if form.add_to_graph && graphs.len() > 1 {
+        let shown = graphs
+            .iter()
+            .find(|(id, _)| Some(*id) == form.graph)
+            .map(|(_, name)| name.clone())
+            .unwrap_or_default();
+        egui::ComboBox::from_id_salt(id.with("target-graph"))
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                for (graph, name) in graphs {
+                    ui.selectable_value(&mut form.graph, Some(*graph), name);
+                }
+            });
     }
 }
 
