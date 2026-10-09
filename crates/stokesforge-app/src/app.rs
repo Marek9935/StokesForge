@@ -160,6 +160,7 @@ mod project_manager;
 mod results_pane;
 mod script_console;
 mod shortcuts;
+mod stale_export;
 mod tab;
 mod tab_strip;
 #[cfg(test)]
@@ -194,6 +195,7 @@ use shortcuts::{
     SHORTCUT_IMPORT_QWERTY, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT, SHORTCUT_OPEN,
     SHORTCUT_RUN_SCRIPT, SHORTCUT_SAVE, SHORTCUT_SAVE_AS,
 };
+use stale_export::stale_export_window;
 use tab::{active_tab_kind, tab_for_window, tab_node, Tab};
 use window_detach::{
     snapshot_stamp, DetachedProjectManagerRequests, DetachedTab, ProjectManagerViewModel,
@@ -1095,6 +1097,7 @@ impl StokesForgeApp {
         column_metadata_window(ctx, &self.state, actions);
         analysis_window(ctx, &mut self.state, actions);
         calculation_delete_window(ctx, &self.state, actions);
+        stale_export_window(ctx, &self.state, actions);
     }
 
     /// Applique les changements de pile seulement après la peinture des fenêtres.

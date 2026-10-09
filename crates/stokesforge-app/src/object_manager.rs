@@ -521,6 +521,9 @@ pub struct SeriesRow {
     pub label: String,
     pub spec: SeriesSpec,
     pub selected: bool,
+    /// Une colonne de la série vient d'un calcul pas à jour et le graphe
+    /// veut l'avertissement (#198).
+    pub stale: bool,
 }
 #[derive(Debug, Clone, Copy)]
 pub enum ObjectKind {
@@ -740,6 +743,8 @@ pub fn object_tree_with_selection(
                                 label: series_label(s, tree),
                                 spec: s.clone(),
                                 selected: selected == Some(VisibilityTarget::Series(target)),
+                                stale: spec.stale_warning
+                                    && stokesforge_core::resolve_series(tree, s).stale,
                             }
                         })
                         .collect(),

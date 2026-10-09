@@ -198,6 +198,15 @@ autres gardent leur incertitude), X tous égaux (pente indéterminée), aucun
 paramètre déterminé (`SingularSystem`), ajustement bien posé (aucun
 avertissement), ligne à σ vide ou nul écartée et comptée.
 
+### Séries pas à jour sur le graphe (#198)
+
+`stokesforge-core/tests/calculations.rs` (`une_serie_tracee_depuis_un_calcul_perime…` :
+drapeau posé, levé au recalcul, éteint par `stale_warning`) ;
+`stokesforge-persistence/tests/calculations.rs` et `schema.rs` (aller-retour du
+réglage, fichier ancien = actif) ; `stokesforge-app/src/app/stale_export.rs`
+(les quatre réponses de la confirmation, SVG grisé `#9a9a9a` ou non, graphe sans
+avertissement exporté sans demander, ligne de l'Object Manager marquée).
+
 ### Mutants éprouvés (#181, calculs d'analyse)
 
 Même mécanisme, autre mémo (`CalcFingerprint`, `CalcMemo`). `b22` joue les pas

@@ -593,6 +593,8 @@ plot-general-title =
 plot-title-color = Title color
 plot-general-background = Background
 plot-general-dark-note = Auto colors turn white on a dark background
+plot-stale-warning = Warn about out-of-date data
+    .hint = Greys out the curves of calculations that are out of date and marks them, on screen and in exports
 
 # Plot Area tab
 
@@ -1329,6 +1331,15 @@ analysis-warning-step-not-uniform = The X step is not constant: the result may b
 analysis-warning-irf-step = The response has a different X step than the data
 analysis-warning-negative-clipped = { $count } negative points were set to zero
 analysis-warning-undetermined = { $count } parameter(s) are not determined by the data: no uncertainty is given
+stale-series-hint = Out of date: its calculation needs to be recalculated
+stale-export-title = Out-of-date data
+stale-export-message = This graph shows { $count } calculation(s) that are out of date.
+stale-export-anyway = Export Anyway
+    .hint = Exports the graph as shown, with grey curves and a warning mark
+stale-export-without-warning = Export Without Warning
+    .hint = Exports the graph with normal colors and no warning mark
+stale-export-recalculate = Recalculate and Export
+    .hint = Brings the calculations up to date first, then exports
 analysis-calculating = Calculating…
 analysis-skipped-rows = { $count } rows without a valid X, Y or error were ignored
 analysis-delete-title = Delete calculation

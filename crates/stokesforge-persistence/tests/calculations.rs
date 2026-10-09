@@ -111,3 +111,25 @@ fn les_identifiants_continuent_apres_un_rechargement() {
     assert_ne!(fresh, id);
     assert_ne!(fresh, book);
 }
+
+#[test]
+fn le_reglage_d_avertissement_d_un_graphe_survit_a_un_aller_retour() {
+    for wanted in [true, false] {
+        let mut project = project_with_calculation();
+        let spec = stokesforge_plot::PlotSpec {
+            stale_warning: wanted,
+            ..Default::default()
+        };
+        let graph = project.add_graph(project.root(), None, spec).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.stf");
+        save(&project, &path).unwrap();
+        let back = load(&path).unwrap();
+        let stokesforge_core::NodeKind::Graph { spec, .. } =
+            back.tree().node(graph).unwrap().kind()
+        else {
+            panic!("un graphe attendu");
+        };
+        assert_eq!(spec.stale_warning, wanted);
+    }
+}

@@ -96,6 +96,9 @@ pub struct Prepared<'s> {
     /// Nombre de points retirés par la décimation, renseigné après coup par
     /// le pipeline.
     pub decimated: usize,
+    /// Une colonne de la série vient d'un calcul pas à jour et le graphe en
+    /// avertit (#198) : trait grisé et marqueur « ! ».
+    pub stale: bool,
 }
 
 impl Prepared<'_> {
@@ -152,6 +155,7 @@ pub fn prepare<'s>(
         broken: resolved.broken(),
         unknown_type: matches!(spec.plot_type, PlotType::Unknown(_)),
         decimated: 0,
+        stale: resolved.stale,
     };
     if prepared.broken || prepared.unknown_type {
         return prepared;

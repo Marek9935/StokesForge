@@ -152,6 +152,10 @@ pub struct ResolvedSeries<'s> {
     /// Vrai si les colonnes résolues n'avaient pas toutes la même longueur :
     /// le tracé porte alors sur leur préfixe commun plutôt que d'être refusé.
     pub truncated: bool,
+    /// Vrai si une colonne tracée est écrite par un calcul d'analyse pas à jour
+    /// (#198). Le rendu n'en sait pas plus : il grise la série et pose son
+    /// marqueur ; d'où vient la péremption reste du modèle.
+    pub stale: bool,
 }
 
 impl<'s> ResolvedSeries<'s> {
@@ -269,6 +273,22 @@ fn resolve_numeric(tree: &Tree, id: NodeId) -> Option<Arc<Vec<f64>>> {
 /// Résout une série. Ne lève jamais : une référence rompue est un état
 /// (port de `resolve_series`, `resolve.py` ligne 165).
 pub fn resolve_series<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries<'s> {
+    let mut resolved = resolve_series_data(tree, series);
+    resolved.stale = [Some(series.y), series.x, series.x_error, series.y_error]
+        .into_iter()
+        .flatten()
+        .any(|column| column_is_stale(tree, column));
+    resolved
+}
+
+/// Vrai si `column` est écrite par un calcul d'analyse pas à jour.
+fn column_is_stale(tree: &Tree, column: NodeId) -> bool {
+    tree.calculation_of_column(column)
+        .and_then(|(id, _)| tree.calculation(id))
+        .is_some_and(|calc| calc.stale.is_some())
+}
+
+fn resolve_series_data<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries<'s> {
     let label = series_label(series, tree);
     if let Some(row) = series.row {
         return resolve_row_series(tree, series, row, label);
@@ -316,6 +336,7 @@ pub fn resolve_series<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries
             y_error: None,
             missing,
             truncated: false,
+            stale: false,
         };
     }
 
@@ -357,6 +378,7 @@ pub fn resolve_series<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries
         y_error: y_error.map(|values| conform_error_values(values, n)),
         missing,
         truncated,
+        stale: false,
     }
 }
 
@@ -381,6 +403,7 @@ fn resolve_row_series<'s>(
         y_error: None,
         missing: vec![MissingRole::Y],
         truncated: false,
+        stale: false,
     };
     let Some(sheet) =
         resolve_column(tree, series.y).and_then(|_| tree.parent(series.y).ok().flatten())
@@ -413,6 +436,7 @@ fn resolve_row_series<'s>(
         y_error: None,
         missing: Vec::new(),
         truncated: false,
+        stale: false,
     }
 }
 
@@ -454,14 +478,18 @@ pub fn resolve_panel<'s>(tree: &Tree, panel: &'s PanelSpec) -> ResolvedPanel<'s>
 /// clonage d'`Arc` par colonne référencée, jamais une copie des données
 /// (port de `resolve_spec`, `resolve.py` ligne 227).
 pub fn resolve_spec<'s>(tree: &Tree, spec: &'s PlotSpec) -> ResolvedPlot<'s> {
-    ResolvedPlot {
-        spec,
-        panels: spec
-            .panels
-            .iter()
-            .map(|panel| resolve_panel(tree, panel))
-            .collect(),
+    let mut panels: Vec<ResolvedPanel<'s>> = spec
+        .panels
+        .iter()
+        .map(|panel| resolve_panel(tree, panel))
+        .collect();
+    // Le graphe peut renoncer à l'avertissement des séries pas à jour (#198).
+    if !spec.stale_warning {
+        for series in panels.iter_mut().flat_map(|panel| panel.series.iter_mut()) {
+            series.stale = false;
+        }
     }
+    ResolvedPlot { spec, panels }
 }
 
 /// Largeur des barres : celle demandée si elle est positive, sinon 80 % du

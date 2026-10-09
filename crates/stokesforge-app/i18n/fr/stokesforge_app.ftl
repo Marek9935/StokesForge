@@ -585,6 +585,8 @@ plot-general-title =
 plot-title-color = Couleur du titre
 plot-general-background = Fond
 plot-general-dark-note = Les couleurs auto passent au blanc sur fond sombre
+plot-stale-warning = Avertir si des données ne sont pas à jour
+    .hint = Grise les courbes des calculs pas à jour et les marque, à l'écran et dans les exports
 
 # Onglet Zone de tracé
 
@@ -1321,6 +1323,15 @@ analysis-warning-step-not-uniform = Le pas de X n'est pas constant : le résult
 analysis-warning-irf-step = La réponse a un autre pas de X que les données
 analysis-warning-negative-clipped = { $count } points négatifs ont été ramenés à zéro
 analysis-warning-undetermined = { $count } paramètre(s) ne sont pas déterminés par les données : aucune incertitude n'est donnée
+stale-series-hint = Pas à jour : son calcul doit être refait
+stale-export-title = Données pas à jour
+stale-export-message = Ce graphique montre { $count } calcul(s) pas à jour.
+stale-export-anyway = Exporter quand même
+    .hint = Exporte le graphique tel qu'il s'affiche, courbes grisées et marqueur d'avertissement
+stale-export-without-warning = Exporter sans avertissement
+    .hint = Exporte le graphique avec ses couleurs normales, sans marqueur
+stale-export-recalculate = Recalculer puis exporter
+    .hint = Remet d'abord les calculs à jour, puis exporte
 analysis-calculating = Calcul en cours…
 analysis-skipped-rows = { $count } lignes sans X, Y ou erreur valide ont été ignorées
 analysis-delete-title = Supprimer le calcul

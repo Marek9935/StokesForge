@@ -74,7 +74,7 @@ use crate::tr;
 use crate::user_colors::UserColors;
 
 mod analysis;
-pub use analysis::CalculationDelete;
+pub use analysis::{CalculationDelete, StaleExport};
 
 /// Ce que l'utilisateur peut demander. La couche fenêtre ne fait que produire
 /// ces valeurs ; elle ne touche jamais l'acteur directement.
@@ -461,6 +461,9 @@ pub enum Action {
     RequestDeleteCalculation(NodeId),
     /// Réponse à la confirmation de [`Action::RequestDeleteCalculation`].
     ConfirmDeleteCalculation(CalculationDelete),
+    /// Réponse à la confirmation d'un export de graphe qui montre des séries
+    /// pas à jour (#198, maquette M9 a).
+    ConfirmStaleExport(StaleExport),
     /// Crée un graphe à partir des colonnes sélectionnées d'une feuille de
     /// classeur — menu contextuel de l'en-tête de colonne. Le nouveau graphe
     /// est ajouté dans le même dossier parent que le classeur ([`Command::
@@ -2426,6 +2429,9 @@ pub struct AppState {
     analysis_keep_results: bool,
     /// Calcul dont la suppression attend confirmation (M8).
     pending_calculation_delete: Option<NodeId>,
+    /// L'export (ou la copie) d'un graphe qui montre des séries pas à jour, en
+    /// attente de la réponse de l'utilisateur (#198).
+    pending_stale_export: Option<Action>,
     /// Import en cours sur un fil de fond.
     import_job: Option<ImportJob>,
     /// Dernier import réussi, pour le reprendre dans l'assistant.
@@ -2536,6 +2542,7 @@ impl AppState {
             analysis: None,
             analysis_keep_results: keep_results_default,
             pending_calculation_delete: None,
+            pending_stale_export: None,
             import_job: None,
             last_import: None,
             recent_to_record: Vec::new(),
@@ -4309,6 +4316,7 @@ impl AppState {
             Action::DetachCalculation(id) => self.detach_calculation(id),
             Action::RequestDeleteCalculation(id) => self.request_delete_calculation(id),
             Action::ConfirmDeleteCalculation(choice) => self.confirm_delete_calculation(choice),
+            Action::ConfirmStaleExport(choice) => self.confirm_stale_export(choice),
             Action::PlotColumns {
                 sheet,
                 columns,
@@ -4546,8 +4554,9 @@ impl AppState {
                 self.replace_saved_colors(target, next);
             }
             Action::PickFile(_) => {}
-            Action::ExportGraph { path, spec } => self.export_graph(path, &spec),
-            Action::CopyGraphFigure { spec } => self.copy_graph_figure(&spec),
+            Action::ExportGraph { .. } | Action::CopyGraphFigure { .. } => {
+                self.export_unless_stale(action)
+            }
             Action::SetAnnotation {
                 graph,
                 target,
@@ -4694,6 +4703,7 @@ impl AppState {
                     self.pending_sheet_delete = None;
                     self.pending_row_drop = None;
                     self.pending_calculation_delete = None;
+                    self.pending_stale_export = None;
                     self.pending_object_delete.clear();
                     self.object_clipboard_output = None;
                     self.copied_objects.clear();

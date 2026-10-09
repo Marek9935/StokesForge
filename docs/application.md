@@ -39,6 +39,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app.rs` | orchestration : `StokesForgeApp` et ses champs, `new` (disposition initiale, restauration de l'état des fenêtres), `ui()` et l'**ordre des panneaux**, `collect_shortcuts` (raccourcis globaux, consommés avant les widgets), application différée des actions et ouvertures après la peinture, confirmations bloquantes (nouveau projet, suppression de feuille), drainage des fenêtres détachées, capture et auto-fermeture de vérification. Aucun module de `src/app/` ne lui emprunte d'aide : ce qu'ils partagent vit dans `tab.rs`, `window_detach.rs` ou `crate::color_picker` (#128) |
 | `app/menus.rs` | barre de menu (`menu_bar` appelle `file_menu`, `edit_menu`, `workbook_menu`, `graph_menu`, `view_menu`, `window_menu`) et barre d'état (`status_bar`) |
 | `app/analysis_menu.rs` | menu Analysis (#181) : `analysis_menu_contents` (barre de menus), `analysis_entry` (clic droit de colonne : une entrée `Analysis…`, #202), `calculation_section` (Edit / Recalculate / Detach / Delete sur une colonne calculée) |
+| `app/stale_export.rs` | confirmation d'un export ou d'une copie de figure qui montre des séries pas à jour (#198) |
 | `app/analysis_dialog.rs` | fenêtre d'analyse (`modal_dialog_with`, deux colonnes : formulaire + aperçu) et confirmation de suppression d'un calcul (`calculation_delete_window`) |
 | `app/analysis_forms.rs` | les formulaires par famille (`form_body`, `value_row`, tableau des paramètres) |
 | `app/analysis_preview.rs` | l'aperçu peint à la main : outils Points / Zone / Zoom, aimant (Maj), moyenne (Maj + molette), bande des résidus, cache en mémoire temporaire d'egui |
@@ -115,6 +116,18 @@ L'interface du traitement mathématique est répartie ainsi :
 - Colonnes périmées : grisées dans la grille, lettre teintée (`theme::stale_color`)
   et info-bulle ; le volet Results (replié par défaut) liste les calculs
   conservés (portée Feuille / Classeur) avec Edit / Recalculate / Delete.
+- Séries pas à jour sur le graphe (#198) : le cœur résout le drapeau
+  (`ResolvedSeries.stale` : une des colonnes X, Y ou d'erreur sort d'un calcul
+  pas à jour) et le rendu l'applique sans rien savoir du modèle — trait grisé
+  (`#9a9a9a`) et triangle d'avertissement juste au-dessus de son dernier point ; la ligne de
+  série de l'Object Manager porte l'icône `Icon::Stale`. Le réglage vit dans le
+  graphe (`PlotSpec::stale_warning`, case « Warn about out-of-date data » de la
+  page Graph des propriétés, défaut actif, fichier ancien = actif). Exporter ou
+  copier la figure d'un graphe qui montre un tel calcul demande d'abord
+  (`app/stale_export.rs`, `AppState::pending_stale_export`) : Export Anyway,
+  Export Without Warning (même figure, sans gris ni marqueur), Recalculate and
+  Export, Cancel. Ni commande ni historique pour la confirmation elle-même ; le
+  recalcul passe par les commandes habituelles.
 - Les erreurs viennent de `errors::analysis::error_message` (match exhaustif).
 - Fenêtre d'ajustement (#204) : trois exponentielles distinctes (`Exponential`,
   `Exponential with Plateau`, `Two Exponentials`, mêmes noms que `pyst` :

@@ -83,6 +83,10 @@ pub const PAPER: (u8, u8, u8) = (0xff, 0xff, 0xff);
 /// Gris des séries à référence brisée : présentes, et visiblement inertes.
 pub const BROKEN: (u8, u8, u8) = (0x9a, 0x9a, 0x9a);
 
+/// Fond et contour du triangle d'une série pas à jour (#198) : ambre et brun.
+pub const STALE_FILL: (u8, u8, u8) = (0xf2, 0xb1, 0x34);
+pub const STALE_EDGE: (u8, u8, u8) = (0x5a, 0x3a, 0x00);
+
 /// Au-delà de ce nombre de tirets pour une seule polyligne, le motif est
 /// abandonné au profit d'un trait plein.
 ///
@@ -118,6 +122,46 @@ pub fn stroke_width(width: f64) -> u32 {
     } else {
         1
     }
+}
+
+/// Le même trait en gris : une série pas à jour (#198) se lit comme une série
+/// dont la référence est rompue, sans la perdre.
+pub fn grayed(line: &LineSpec) -> LineSpec {
+    let (r, g, b) = BROKEN;
+    LineSpec {
+        color: format!("#{r:02x}{g:02x}{b:02x}"),
+        ..line.clone()
+    }
+}
+
+/// Le marqueur d'une série pas à jour : un triangle d'avertissement portant un
+/// « ! », centré sur `at`. Dessiné avec des primitives (aucun texte, donc
+/// aucune mesure ni police) pour être identique sur tous les backends.
+pub fn stale_marker<DB: DrawingBackend>(
+    area: &DrawingArea<DB, Shift>,
+    at: BackendCoord,
+) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+    const HALF: i32 = 8;
+    let (x, y) = at;
+    let top = (x, y - HALF);
+    let left = (x - HALF, y + HALF - 2);
+    let right = (x + HALF, y + HALF - 2);
+    let fill = ShapeStyle {
+        color: rgba(opaque(STALE_FILL)),
+        filled: true,
+        stroke_width: 1,
+    };
+    let edge = ShapeStyle {
+        color: rgba(opaque(STALE_EDGE)),
+        filled: false,
+        stroke_width: 1,
+    };
+    area.draw(&Polygon::new(vec![top, left, right], fill))?;
+    area.draw(&PathElement::new(vec![top, left, right, top], edge))?;
+    // Le « ! » : un trait et un point.
+    area.draw(&PathElement::new(vec![(x, y - 3), (x, y + 2)], edge))?;
+    area.draw(&Circle::new((x, y + 5), 1, edge))?;
+    Ok(())
 }
 
 /// Le style de trait d'une série, prêt pour Plotters.

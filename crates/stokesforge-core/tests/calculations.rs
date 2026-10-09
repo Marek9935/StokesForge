@@ -509,3 +509,63 @@ fn refresh_dit_s_il_a_ecrit_quelque_chose() {
         .unwrap();
     assert!(diff);
 }
+
+/// Un graphe qui trace la colonne de sortie d'un calcul et la colonne source.
+fn graph_des_deux(f: &mut Fixture, stale_warning: bool) -> (NodeId, NodeId) {
+    let id = f
+        .project
+        .add_calculation(draft(
+            f,
+            vec![out(0, "corrected", vec![1.0, 2.0, 3.0], "Y1 (corr.)")],
+        ))
+        .unwrap();
+    let produced = f.project.tree().calculation(id).unwrap().outputs[0]
+        .column
+        .unwrap();
+    let mut spec = stokesforge_plot::PlotSpec {
+        stale_warning,
+        ..Default::default()
+    };
+    let panel = spec.panels.get_mut(0).unwrap();
+    panel
+        .series
+        .push(stokesforge_plot::SeriesSpec::new(produced));
+    panel.series.push(stokesforge_plot::SeriesSpec::new(f.y2));
+    f.project.add_graph(f.project.root(), None, spec).unwrap();
+    (id, produced)
+}
+
+fn drapeaux(f: &Fixture) -> Vec<bool> {
+    let graph = f.project.tree().children(f.project.root()).unwrap()[1];
+    let stokesforge_core::NodeKind::Graph { spec, .. } =
+        f.project.tree().node(graph).unwrap().kind()
+    else {
+        panic!("un graphe attendu");
+    };
+    stokesforge_core::resolve_spec(f.project.tree(), spec).panels[0]
+        .series
+        .iter()
+        .map(|s| s.stale)
+        .collect()
+}
+
+#[test]
+fn une_serie_tracee_depuis_un_calcul_perime_est_marquee_et_le_graphe_peut_y_renoncer() {
+    let mut f = fixture();
+    let (id, _) = graph_des_deux(&mut f, true);
+    assert_eq!(drapeaux(&f), [false, false], "calcul à jour : rien");
+    f.project
+        .set_calculation_stale(id, Some(Staleness::Manual))
+        .unwrap();
+    assert_eq!(drapeaux(&f), [true, false], "seule la sortie est marquée");
+    f.project.refresh_calculation(id, &[None], vec![]).unwrap();
+    assert_eq!(drapeaux(&f), [false, false], "recalculé : plus de marque");
+
+    // Le graphe qui a désactivé l'avertissement ne marque plus rien.
+    let mut g = fixture();
+    let (id, _) = graph_des_deux(&mut g, false);
+    g.project
+        .set_calculation_stale(id, Some(Staleness::Manual))
+        .unwrap();
+    assert_eq!(drapeaux(&g), [false, false]);
+}

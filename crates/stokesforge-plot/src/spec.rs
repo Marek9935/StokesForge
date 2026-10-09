@@ -164,6 +164,10 @@ pub struct PlotSpec {
     pub title_anchor: Option<TextAnchor>,
     /// Police et corps du titre du graphe (issue #78).
     pub title_font: TextFont,
+    /// Signaler les séries dont une colonne vient d'un calcul pas à jour : trait
+    /// grisé et triangle « ! » (#198). Réglage du graphe, gardé avec lui ; la
+    /// confirmation à l'export en propose une copie sans avertissement.
+    pub stale_warning: bool,
     /// Version du format de ce spec.
     pub format_version: u32,
 }
@@ -272,6 +276,7 @@ impl Default for PlotSpec {
             title_visible: true,
             title_anchor: None,
             title_font: TextFont::default(),
+            stale_warning: true,
             format_version: SPEC_FORMAT_VERSION,
         }
     }

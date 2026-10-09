@@ -676,6 +676,10 @@ pub(crate) struct PlotSpecRecord {
     /// ancien, donc ceux du graphe.
     #[serde(default)]
     pub(crate) title_font: TextFontRecord,
+    /// Avertissement des séries pas à jour (#198) : absent d'un fichier plus
+    /// ancien, donc actif.
+    #[serde(default = "visible_by_default")]
+    pub(crate) stale_warning: bool,
     pub(crate) format_version: u32,
 }
 
@@ -706,6 +710,7 @@ impl Default for PlotSpecRecord {
             title_visible: true,
             title_anchor: None,
             title_font: TextFontRecord::default(),
+            stale_warning: true,
             format_version: 1, // stokesforge_plot::SPEC_FORMAT_VERSION
         }
     }
@@ -1167,6 +1172,10 @@ mod tests {
             "un ancien graphe garde son titre visible"
         );
         assert_eq!(relu.title_color, "");
+        assert!(
+            relu.stale_warning,
+            "un ancien graphe garde l'avertissement des données pas à jour"
+        );
     }
 }
 

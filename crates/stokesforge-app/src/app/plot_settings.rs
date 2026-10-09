@@ -344,6 +344,11 @@ fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerE
         env,
     );
     ui.weak(tr!("plot-general-dark-note"));
+    ui.add_space(6.0);
+    commit |= ui
+        .checkbox(&mut spec.stale_warning, tr!("plot-stale-warning"))
+        .on_hover_text(tr!("plot-stale-warning", "hint"))
+        .changed();
     commit
 }
 

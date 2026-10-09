@@ -13,7 +13,7 @@ use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{Node, NodeId, NodeKind, SeriesRef};
 use stokesforge_plot::PlotType;
 
-use super::{current_plot_spec, history_text, series_from_columns, AppState};
+use super::{current_plot_spec, history_text, series_from_columns, Action, AppState};
 use crate::analysis::{issue_message, AnalysisForm, Preset};
 use crate::errors;
 use crate::tr;
@@ -26,6 +26,20 @@ pub enum CalculationDelete {
     /// Retire le calcul et ses colonnes de sortie.
     WithColumns,
     /// Ne fait rien.
+    Cancel,
+}
+
+/// La réponse à la confirmation d'un export qui montre des séries pas à jour
+/// (#198, M9 a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StaleExport {
+    /// Exporte la figure telle qu'elle s'affiche : séries grisées et marqueur.
+    Anyway,
+    /// Exporte la figure sans l'avertissement (couleurs normales, pas de marqueur).
+    WithoutWarning,
+    /// Recalcule d'abord les calculs pas à jour, puis exporte.
+    Recalculate,
+    /// N'exporte rien.
     Cancel,
 }
 
@@ -307,5 +321,104 @@ impl AppState {
                 detail = errors::analysis::error_message(error)
             ),
         })
+    }
+}
+
+impl AppState {
+    /// Les calculs pas à jour dont une colonne est tracée par les séries
+    /// visibles de `spec` ; vide quand le graphe a désactivé l'avertissement.
+    pub fn stale_calculations_in(&self, spec: &stokesforge_plot::PlotSpec) -> Vec<NodeId> {
+        if !spec.stale_warning {
+            return Vec::new();
+        }
+        let tree = &self.snapshot.tree;
+        let resolved = stokesforge_core::resolve::resolve_spec(tree, spec);
+        let mut calculations = Vec::new();
+        for series in resolved
+            .panels
+            .iter()
+            .flat_map(|panel| panel.series.iter())
+            .filter(|series| series.stale && series.spec.visible)
+        {
+            let spec = series.spec;
+            for column in [Some(spec.y), spec.x, spec.x_error, spec.y_error]
+                .into_iter()
+                .flatten()
+            {
+                if let Some((id, _)) = tree.calculation_of_column(column) {
+                    if tree.calculation(id).is_some_and(|c| c.stale.is_some())
+                        && !calculations.contains(&id)
+                    {
+                        calculations.push(id);
+                    }
+                }
+            }
+        }
+        calculations
+    }
+
+    /// L'export (ou la copie) en attente de confirmation, avec le nombre de
+    /// calculs pas à jour qu'il montre.
+    pub fn pending_stale_export(&self) -> Option<usize> {
+        let spec = match self.pending_stale_export.as_ref()? {
+            Action::ExportGraph { spec, .. } | Action::CopyGraphFigure { spec } => spec,
+            _ => return None,
+        };
+        Some(self.stale_calculations_in(spec).len())
+    }
+
+    /// Exporte ou copie tout de suite si la figure est à jour ; sinon met
+    /// l'action en attente et laisse la fenêtre demander (#198).
+    pub(super) fn export_unless_stale(&mut self, action: Action) {
+        let stale = match &action {
+            Action::ExportGraph { spec, .. } | Action::CopyGraphFigure { spec } => {
+                !self.stale_calculations_in(spec).is_empty()
+            }
+            _ => false,
+        };
+        if stale {
+            self.pending_stale_export = Some(action);
+        } else {
+            self.run_export(action);
+        }
+    }
+
+    fn run_export(&mut self, action: Action) {
+        match action {
+            Action::ExportGraph { path, spec } => self.export_graph(path, &spec),
+            Action::CopyGraphFigure { spec } => self.copy_graph_figure(&spec),
+            _ => {}
+        }
+    }
+
+    /// Réponse à la confirmation d'export.
+    pub(super) fn confirm_stale_export(&mut self, choice: StaleExport) {
+        let Some(mut action) = self.pending_stale_export.take() else {
+            return;
+        };
+        match choice {
+            StaleExport::Cancel => return,
+            StaleExport::Anyway => {}
+            StaleExport::WithoutWarning => {
+                if let Action::ExportGraph { spec, .. } | Action::CopyGraphFigure { spec } =
+                    &mut action
+                {
+                    spec.stale_warning = false;
+                }
+            }
+            StaleExport::Recalculate => {
+                let stale = match &action {
+                    Action::ExportGraph { spec, .. } | Action::CopyGraphFigure { spec } => {
+                        self.stale_calculations_in(spec)
+                    }
+                    _ => Vec::new(),
+                };
+                self.recalculate_calculations(&stale);
+                if self.status.as_ref().is_some_and(|s| s.is_error) {
+                    return;
+                }
+            }
+        }
+        self.run_export(action);
     }
 }

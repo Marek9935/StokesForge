@@ -804,6 +804,18 @@ décalage reste inférieur à un pixel ; la mise en page n'est pas touchée
 (`paint` avec rectangle logique = rectangle affiché) le calage n'est pas
 appliqué.
 
+## Séries pas à jour (#198)
+
+Le rendu ne sait rien du modèle : le cœur pose `ResolvedSeries.stale`
+(`resolve_series`, annulé par `resolve_spec` quand `PlotSpec::stale_warning`
+est faux) et `series::Prepared.stale` le porte jusqu'au dessin. Une série
+marquée est tracée comme une série brisée (réutilise le paramètre `broken` de
+`paint`, trait gris `STALE_FILL`/`STALE_EDGE`) et reçoit un triangle d'alerte
+fait de primitives (`paint::stale_marker`, sans mesure de texte) juste au-dessus
+de son dernier point (`pipeline::stale_marker_at`, ramené dans la zone de tracé). Les
+deux backends en héritent ; le test de bout en bout est dans
+`stokesforge-app/src/app/stale_export.rs`.
+
 ## Visibilité et sélection (#81–85)
 
 Le filtre `SeriesSpec::visible` précède préparation, autoscale et légende.

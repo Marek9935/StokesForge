@@ -1674,7 +1674,11 @@ fn paint_series<DB: DrawingBackend>(
                 .iter()
                 .map(|(left, right, top)| (map((*left, *top)), map((*right, baseline))))
                 .collect();
-            paint::bars(screen, &rects, &spec.line, ink)?;
+            if series.stale {
+                paint::bars(screen, &rects, &paint::grayed(&spec.line), ink)?;
+            } else {
+                paint::bars(screen, &rects, &spec.line, ink)?;
+            }
             // `a` est le coin côté valeur, `b` le coin côté ligne de base :
             // l'extrémité libre de la barre (la place de sa poignée de
             // sélection, #98) se lit avant que le rectangle soit normalisé.
@@ -1697,6 +1701,11 @@ fn paint_series<DB: DrawingBackend>(
                     })
                 })
                 .unzip();
+            if series.stale {
+                if let Some(&tip) = geometry.bar_tips.last() {
+                    paint::stale_marker(screen, stale_marker_at(tip, bounds))?;
+                }
+            }
             Ok((0, geometry))
         }
         Geometry::Curve { points, whiskers } => {
@@ -1738,12 +1747,12 @@ fn paint_series<DB: DrawingBackend>(
                 match bounds {
                     Some(bounds) => {
                         for run in clip::clip_polyline_f64(bounds, &precise) {
-                            paint::polyline_f64(screen, &run, &spec.line, false)?;
+                            paint::polyline_f64(screen, &run, &spec.line, series.stale)?;
                             geometry.paths.push(quantized_path(&run));
                         }
                     }
                     None => {
-                        paint::polyline_f64(screen, &precise, &spec.line, false)?;
+                        paint::polyline_f64(screen, &precise, &spec.line, series.stale)?;
                         geometry.paths.push(quantized_path(&precise));
                     }
                 }
@@ -1753,7 +1762,11 @@ fn paint_series<DB: DrawingBackend>(
                     .iter()
                     .map(|(from, to)| (map(*from), map(*to)))
                     .collect();
-                paint::whiskers(screen, &segments, &spec.line)?;
+                if series.stale {
+                    paint::whiskers(screen, &segments, &paint::grayed(&spec.line))?;
+                } else {
+                    paint::whiskers(screen, &segments, &spec.line)?;
+                }
                 for (a, b) in segments {
                     match bounds {
                         Some(bounds) => {
@@ -1776,7 +1789,7 @@ fn paint_series<DB: DrawingBackend>(
                 && spec.symbol.shape != stokesforge_plot::SymbolShape::None
             {
                 let mapped: Vec<_> = drawn_points.iter().map(|point| map(*point)).collect();
-                paint::symbols(screen, &mapped, &spec.symbol, false)?;
+                paint::symbols(screen, &mapped, &spec.symbol, series.stale)?;
                 geometry.points = mapped
                     .into_iter()
                     .filter(|&(x, y)| {
@@ -1789,8 +1802,33 @@ fn paint_series<DB: DrawingBackend>(
                     })
                     .collect();
             }
+            if series.stale {
+                if let Some(&last) = drawn_points.last() {
+                    paint::stale_marker(screen, stale_marker_at(map(last), bounds))?;
+                }
+            }
             Ok((removed, geometry))
         }
+    }
+}
+
+/// Où poser le marqueur d'une série pas à jour : juste au-dessus de son dernier
+/// point (il ne le cache pas), ramené dans le rectangle de tracé.
+fn stale_marker_at(point: (i32, i32), bounds: Option<PixelBounds>) -> (i32, i32) {
+    const INSET: i32 = 10;
+    let (x, y) = (point.0, point.1 - 12);
+    match bounds {
+        Some(b) => (
+            x.clamp(
+                b.x_min as i32 + INSET,
+                (b.x_max as i32 - INSET).max(b.x_min as i32 + INSET),
+            ),
+            y.clamp(
+                b.y_min as i32 + INSET,
+                (b.y_max as i32 - INSET).max(b.y_min as i32 + INSET),
+            ),
+        ),
+        None => (x, y),
     }
 }
 
