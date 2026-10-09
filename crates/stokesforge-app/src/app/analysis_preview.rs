@@ -16,10 +16,24 @@
 //!   curseur ; double clic : cadrage d'origine ;
 //! - clic droit : retire le repère visé.
 //!
-//! Le calcul de l'aperçu est mémorisé (formulaire + révision du modèle) : une
-//! image où rien ne change ne le refait pas.
+//! # Le calcul n'est pas fait dans `ui()` (#201)
+//!
+//! L'aperçu se calcule sur **un fil de travail** (un seul à la fois, nommé
+//! `stokesforge-analysis-preview`) : un ajustement multi-pics sur des dizaines de
+//! milliers de points ne gèle plus la fenêtre. Chaque image compare le
+//! formulaire et la révision du modèle à ceux du dernier résultat ; s'ils
+//! diffèrent, la demande est posée **en remplaçant** celle qui attendait (le
+//! résultat obsolète est jeté, un calcul en cours n'est pas interrompu mais son
+//! résultat est ignoré s'il ne correspond plus). L'image attend le fil
+//! [`INLINE_WAIT`] au plus : un petit calcul rend son résultat dans la même
+//! image, sans clignotement ; un gros laisse l'ancien résultat (marqué « en
+//! cours ») et le fil réveille le viewport **une fois** à sa fin — aucun réveil
+//! périodique au repos.
+//!
+//! Une image où rien ne change ne refait rien.
 
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use eframe::egui;
 use stokesforge_core::{Computed, Tree};
@@ -153,13 +167,181 @@ pub(super) struct PreviewOutcome {
     pub warnings: Vec<stokesforge_analysis::ops::Warning>,
     pub skipped: usize,
     pub issue: Option<Issue>,
+    /// Le calcul est en cours : les valeurs montrées sont celles d'avant.
+    pub pending: bool,
 }
 
-#[derive(Clone)]
+/// Combien de temps une image attend le fil de calcul avant d'afficher
+/// l'ancien résultat. Les tests attendent le résultat pour être déterministes.
+#[cfg(not(test))]
+const INLINE_WAIT: Duration = Duration::from_millis(40);
+#[cfg(test)]
+const INLINE_WAIT: Duration = Duration::from_secs(30);
+
+/// Un résultat d'aperçu et ce pour quoi il a été calculé.
 struct PreviewCache {
     form: AnalysisForm,
     revision: u64,
     result: Result<Computed, Issue>,
+}
+
+impl PreviewCache {
+    fn matches(&self, form: &AnalysisForm, revision: u64) -> bool {
+        self.revision == revision && self.form.same_preview(form)
+    }
+}
+
+/// Ce que le fil de calcul doit calculer.
+struct Request {
+    form: AnalysisForm,
+    revision: u64,
+    tree: Arc<Tree>,
+}
+
+#[derive(Default)]
+struct JobState {
+    /// Un fil de calcul tourne.
+    running: bool,
+    /// La demande la plus récente, posée pendant qu'un calcul tournait.
+    next: Option<Request>,
+    /// Le dernier résultat terminé.
+    finished: Option<Arc<PreviewCache>>,
+    /// Ce qui a été demandé le plus récemment : on ne redemande pas la même
+    /// chose à chaque image.
+    requested: Option<(AnalysisForm, u64)>,
+}
+
+/// Le calcul d'une demande ; une fonction pour que les tests y mettent un calcul
+/// lent et comptable.
+type Compute = fn(&Request) -> Result<Computed, Issue>;
+
+fn compute_preview(request: &Request) -> Result<Computed, Issue> {
+    request.form.preview(&request.tree)
+}
+
+/// Le fil de calcul d'une fenêtre d'analyse, gardé dans la mémoire d'egui.
+struct PreviewJobs {
+    state: Mutex<JobState>,
+    done: Condvar,
+    compute: Compute,
+}
+
+impl PreviewJobs {
+    fn new(compute: Compute) -> Self {
+        Self {
+            state: Mutex::new(JobState::default()),
+            done: Condvar::new(),
+            compute,
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, JobState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Demande le calcul de `form` à `revision`, sauf s'il a déjà été demandé.
+    fn request(
+        self: &Arc<Self>,
+        context: &egui::Context,
+        form: &AnalysisForm,
+        tree: &Arc<Tree>,
+        revision: u64,
+    ) {
+        let mut state = self.lock();
+        if state
+            .requested
+            .as_ref()
+            .is_some_and(|(asked, rev)| *rev == revision && asked.same_preview(form))
+        {
+            return;
+        }
+        state.requested = Some((form.clone(), revision));
+        let request = Request {
+            form: form.clone(),
+            revision,
+            tree: tree.clone(),
+        };
+        if state.running {
+            state.next = Some(request);
+            return;
+        }
+        state.running = true;
+        drop(state);
+        let (jobs, ctx) = (self.clone(), context.clone());
+        let fallback = Request {
+            form: request.form.clone(),
+            revision,
+            tree: request.tree.clone(),
+        };
+        let spawned = std::thread::Builder::new()
+            .name("stokesforge-analysis-preview".into())
+            .spawn(move || jobs.work(&ctx, request));
+        if spawned.is_err() {
+            // Aucun fil disponible : le calcul se fait sur l'appelant, comme
+            // avant #201, plutôt que de ne jamais rendre de résultat.
+            self.work(context, fallback);
+        }
+    }
+
+    /// Le corps du fil : calcule la demande, publie, enchaîne sur la plus
+    /// récente s'il y en a une, puis s'arrête.
+    fn work(&self, context: &egui::Context, mut request: Request) {
+        loop {
+            let result = (self.compute)(&request);
+            let mut state = self.lock();
+            state.finished = Some(Arc::new(PreviewCache {
+                form: request.form,
+                revision: request.revision,
+                result,
+            }));
+            self.done.notify_all();
+            context.request_repaint();
+            match state.next.take() {
+                Some(next) => request = next,
+                None => {
+                    state.running = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Le dernier résultat terminé, quel qu'il soit.
+    fn latest(&self) -> Option<Arc<PreviewCache>> {
+        self.lock().finished.clone()
+    }
+
+    /// Attend au plus `timeout` le résultat de `form` à `revision`.
+    fn wait_for(
+        &self,
+        form: &AnalysisForm,
+        revision: u64,
+        timeout: Duration,
+    ) -> Option<Arc<PreviewCache>> {
+        let deadline = Instant::now() + timeout;
+        let mut state = self.lock();
+        loop {
+            if let Some(done) = state
+                .finished
+                .as_ref()
+                .filter(|c| c.matches(form, revision))
+            {
+                return Some(done.clone());
+            }
+            if !state.running {
+                return None;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            state = self
+                .done
+                .wait_timeout(state, left)
+                .unwrap_or_else(|e| e.into_inner())
+                .0;
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -183,24 +365,38 @@ pub(super) fn preview(
     revision: u64,
 ) -> PreviewOutcome {
     form.clamp_current();
-    let cache_id = id.with("cache");
-    // Un `Arc` : relire le cache à chaque image ne copie pas les courbes.
-    let cached = ui.data_mut(|d| d.get_temp::<Arc<PreviewCache>>(cache_id));
-    let cache = match cached {
-        Some(cache) if cache.form.same_preview(form) && cache.revision == revision => cache,
-        _ => {
-            let cache = Arc::new(PreviewCache {
-                form: form.clone(),
-                revision,
-                result: form.preview(tree),
-            });
-            ui.data_mut(|d| d.insert_temp(cache_id, cache.clone()));
-            cache
+    let jobs_id = id.with("jobs");
+    let jobs = match ui.data_mut(|d| d.get_temp::<Arc<PreviewJobs>>(jobs_id)) {
+        Some(jobs) => jobs,
+        None => {
+            let jobs = Arc::new(PreviewJobs::new(compute_preview));
+            ui.data_mut(|d| d.insert_temp(jobs_id, jobs.clone()));
+            jobs
         }
     };
+    let up_to_date = jobs.latest().filter(|c| c.matches(form, revision));
+    let cache = match up_to_date {
+        Some(cache) => cache,
+        None => {
+            jobs.request(ui.ctx(), form, tree, revision);
+            jobs.wait_for(form, revision, INLINE_WAIT)
+                .or_else(|| jobs.latest())
+                .unwrap_or_else(|| {
+                    // Rien n'a encore été calculé (fil indisponible ou premier
+                    // calcul long) : un résultat vide, marqué en cours.
+                    Arc::new(PreviewCache {
+                        form: form.clone(),
+                        revision: u64::MAX,
+                        result: Ok(Computed::default()),
+                    })
+                })
+        }
+    };
+    let pending = !cache.matches(form, revision);
     let rank = form.preview_rank();
     let outcome = match &cache.result {
         Ok(computed) => PreviewOutcome {
+            pending,
             values: computed
                 .results
                 .get(rank)
@@ -215,6 +411,7 @@ pub(super) fn preview(
             issue: None,
         },
         Err(issue) => PreviewOutcome {
+            pending,
             issue: Some(issue.clone()),
             ..PreviewOutcome::default()
         },
@@ -583,6 +780,66 @@ fn seeds_of(form: &AnalysisForm) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::analysis::Preset;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn form_and_tree() -> (AnalysisForm, Arc<Tree>) {
+        let project = stokesforge_core::Project::new("Aperçu").unwrap();
+        let form = AnalysisForm::new(
+            &Preset::Fit(stokesforge_analysis::model::Model::Linear),
+            Vec::new(),
+            false,
+        );
+        (form, project.tree().clone())
+    }
+
+    static ORDER: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+    static COMPUTED: AtomicUsize = AtomicUsize::new(0);
+
+    fn slow_and_recorded(request: &Request) -> Result<Computed, Issue> {
+        std::thread::sleep(Duration::from_millis(150));
+        ORDER.lock().unwrap().push(request.revision);
+        COMPUTED.fetch_add(1, Ordering::SeqCst);
+        Ok(Computed::default())
+    }
+
+    /// Demander ne bloque pas l'image ; pendant un calcul, les demandes
+    /// intermédiaires sont remplacées par la plus récente, et le résultat d'une
+    /// demande périmée n'est jamais pris pour le bon (#201).
+    #[test]
+    fn le_calcul_de_l_apercu_ne_bloque_pas_et_garde_la_demande_la_plus_recente() {
+        let (form, tree) = form_and_tree();
+        let context = egui::Context::default();
+        let jobs = Arc::new(PreviewJobs::new(slow_and_recorded));
+
+        let started = Instant::now();
+        jobs.request(&context, &form, &tree, 1);
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "demander ne calcule pas : {:?}",
+            started.elapsed()
+        );
+        assert!(
+            jobs.wait_for(&form, 1, Duration::from_millis(10)).is_none(),
+            "l'image n'attend pas un calcul long"
+        );
+        // Deux demandes pendant le calcul : seule la dernière sera calculée.
+        jobs.request(&context, &form, &tree, 2);
+        jobs.request(&context, &form, &tree, 3);
+        let done = jobs
+            .wait_for(&form, 3, Duration::from_secs(10))
+            .expect("la demande la plus récente est calculée");
+        assert_eq!(done.revision, 3);
+        assert_eq!(*ORDER.lock().unwrap(), vec![1, 3], "la demande 2 est jetée");
+        assert_eq!(COMPUTED.load(Ordering::SeqCst), 2);
+        // Témoin : le résultat de la demande 2 n'existe pas, il ne se confond pas
+        // avec celui de la 3.
+        assert!(!jobs.latest().unwrap().matches(&form, 2));
+        // Redemander la même chose ne relance rien.
+        jobs.request(&context, &form, &tree, 3);
+        std::thread::sleep(Duration::from_millis(250));
+        assert_eq!(COMPUTED.load(Ordering::SeqCst), 2);
+    }
 
     #[test]
     fn le_cadre_entoure_les_valeurs_finies_avec_une_marge() {

@@ -1329,6 +1329,7 @@ analysis-warning-step-not-uniform = The X step is not constant: the result may b
 analysis-warning-irf-step = The response has a different X step than the data
 analysis-warning-negative-clipped = { $count } negative points were set to zero
 analysis-warning-undetermined = { $count } parameter(s) are not determined by the data: no uncertainty is given
+analysis-calculating = Calculating…
 analysis-skipped-rows = { $count } rows without a valid X, Y or error were ignored
 analysis-delete-title = Delete calculation
 analysis-delete-confirm = Delete the calculation “{ $name }”?

@@ -83,6 +83,10 @@ fn values_panel(
                         .color(theme::preview_result_color(ui.visuals().dark_mode)),
                 );
             }
+            if outcome.pending {
+                ui.label(egui::RichText::new(tr!("analysis-calculating")).weak());
+                return;
+            }
             if outcome.skipped > 0 {
                 ui.label(
                     egui::RichText::new(tr!(

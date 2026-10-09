@@ -1321,6 +1321,7 @@ analysis-warning-step-not-uniform = Le pas de X n'est pas constant : le résult
 analysis-warning-irf-step = La réponse a un autre pas de X que les données
 analysis-warning-negative-clipped = { $count } points négatifs ont été ramenés à zéro
 analysis-warning-undetermined = { $count } paramètre(s) ne sont pas déterminés par les données : aucune incertitude n'est donnée
+analysis-calculating = Calcul en cours…
 analysis-skipped-rows = { $count } lignes sans X, Y ou erreur valide ont été ignorées
 analysis-delete-title = Supprimer le calcul
 analysis-delete-confirm = Supprimer le calcul « { $name } » ?

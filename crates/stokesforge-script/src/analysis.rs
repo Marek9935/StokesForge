@@ -14,11 +14,19 @@
 //! `"peak.height.1"`…), `errors` (erreur type des valeurs qui en ont une) et
 //! `warnings` (phrases anglaises). Les clés sont celles du crate de calcul.
 //!
-//! # Limites de cette première surface
+//! # Lots (#201)
 //!
-//! Une série par appel (pas de lot ni d'ajustement global) ; les noms longs
-//! des colonnes sont en anglais (la langue de l'interface ne passe pas par les
-//! scripts).
+//! `y` accepte une poignée **ou une liste** de poignées : le lot est un seul
+//! calcul multi-séries, comme dans la fenêtre d'analyse, annulé d'un seul
+//! Ctrl+Z. `x` et `sigma` valent pour toutes les séries (une poignée) ou une
+//! par série (une liste de même longueur). Le résultat d'un lot est
+//! `{"series": [dict, …]}`, un dictionnaire par série dans l'ordre de `y` ;
+//! `fit(shared=[noms])` en fait un ajustement global.
+//!
+//! # Limite
+//!
+//! Les noms longs des colonnes sont en anglais (la langue de l'interface ne
+//! passe pas par les scripts).
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
@@ -94,37 +102,39 @@ fn long_name(tree: &Tree, y: NodeId) -> String {
 
 fn draft(
     tree: &Tree,
-    series: &SeriesRef,
+    series: &[SeriesRef],
     op: Operation,
     aux: Option<AuxRef>,
     computed: Computed,
     keep_results: bool,
     auto_recalc: bool,
 ) -> CalculationDraft {
-    let name = long_name(tree, series.y);
-    let unit = tree
-        .node(series.y)
-        .and_then(|n| n.as_column())
-        .map(|c| c.meta().unit.clone())
-        .unwrap_or_default();
     let outputs = computed
         .columns
         .iter()
-        .map(|c| OutputDraft {
-            series: c.series,
-            key: c.key.clone(),
-            index: c.index,
-            meta: ColumnMeta {
-                long_name: format!("{name} ({})", suffix(&c.key, c.index)),
-                unit: unit.clone(),
-                ..ColumnMeta::default()
-            },
-            data: c.data.clone(),
+        .map(|c| {
+            let source = series[c.series].y;
+            let unit = tree
+                .node(source)
+                .and_then(|n| n.as_column())
+                .map(|col| col.meta().unit.clone())
+                .unwrap_or_default();
+            OutputDraft {
+                series: c.series,
+                key: c.key.clone(),
+                index: c.index,
+                meta: ColumnMeta {
+                    long_name: format!("{} ({})", long_name(tree, source), suffix(&c.key, c.index)),
+                    unit,
+                    ..ColumnMeta::default()
+                },
+                data: c.data.clone(),
+            }
         })
         .collect();
     CalculationDraft {
         operation: op,
-        series: vec![series.clone()],
+        series: series.to_vec(),
         aux,
         outputs,
         results: if keep_results {
@@ -141,59 +151,177 @@ fn host<T>(result: Result<T, impl std::fmt::Display>) -> PyResult<T> {
     result.map_err(|e| invalid(e.to_string()))
 }
 
-/// Les poignées d'entrée, validées contre l'instantané.
-struct Inputs<'a> {
-    y: &'a Handle,
-    x: Option<&'a Handle>,
-    sigma: Option<&'a Handle>,
-    aux: Option<(&'a Handle, Option<&'a Handle>)>,
+/// Une poignée lue d'un argument, avant validation contre l'instantané.
+type Raw = (NodeId, u64);
+
+/// Les poignées d'entrée : une ou plusieurs séries (un **lot**, un seul calcul
+/// multi-séries comme dans la fenêtre d'analyse, #201).
+struct Inputs {
+    /// `y` était une liste : le résultat est rendu série par série.
+    batch: bool,
+    y: Vec<Raw>,
+    /// Un X par série (le même répété quand un seul est donné).
+    x: Vec<Option<Raw>>,
+    sigma: Vec<Option<Raw>>,
+    aux: Option<(Raw, Option<Raw>)>,
 }
 
-/// Enregistre l'opération et rend le dictionnaire de résultats.
+fn raw(handle: &Handle) -> Raw {
+    (handle.id, handle.epoch)
+}
+
+/// `Handle` ou liste de `Handle`.
+fn handles(name: &str, object: &Bound<'_, PyAny>) -> PyResult<(Vec<Raw>, bool)> {
+    if let Ok(one) = object.cast::<Handle>() {
+        return Ok((vec![raw(one.get())], false));
+    }
+    let many: Vec<Bound<'_, PyAny>> = object
+        .extract()
+        .map_err(|_| invalid(format!("{name} must be a handle or a list of handles")))?;
+    if many.is_empty() {
+        return Err(invalid(format!("{name} is an empty list")));
+    }
+    let list = many
+        .iter()
+        .map(|item| {
+            item.cast::<Handle>()
+                .map(|h| raw(h.get()))
+                .map_err(|_| invalid(format!("{name} must hold only handles")))
+        })
+        .collect::<PyResult<Vec<_>>>()?;
+    Ok((list, true))
+}
+
+impl Inputs {
+    /// Rassemble les arguments `y`, `x`, `sigma` (chacun une poignée ou une
+    /// liste) : une poignée seule pour `x` ou `sigma` vaut pour toutes les séries.
+    fn new(
+        y: &Bound<'_, PyAny>,
+        x: Option<&Bound<'_, PyAny>>,
+        sigma: Option<&Bound<'_, PyAny>>,
+        aux: Option<(&Handle, Option<&Handle>)>,
+    ) -> PyResult<Self> {
+        let (y, batch) = handles("y", y)?;
+        let spread = |name: &str, arg: Option<&Bound<'_, PyAny>>| -> PyResult<Vec<Option<Raw>>> {
+            let Some(arg) = arg else {
+                return Ok(vec![None; y.len()]);
+            };
+            let (list, many) = handles(name, arg)?;
+            match (many, list.len()) {
+                (false, _) => Ok(vec![Some(list[0]); y.len()]),
+                (true, n) if n == y.len() => Ok(list.into_iter().map(Some).collect()),
+                (true, n) => Err(invalid(format!(
+                    "{name} has {n} handles but y has {}: give one handle or one per series",
+                    y.len()
+                ))),
+            }
+        };
+        let x = spread("x", x)?;
+        let sigma = spread("sigma", sigma)?;
+        Ok(Self {
+            batch,
+            y,
+            x,
+            sigma,
+            aux: aux.map(|(r, rx)| (raw(r), rx.map(raw))),
+        })
+    }
+
+    fn all(&self) -> impl Iterator<Item = Raw> + '_ {
+        self.y
+            .iter()
+            .copied()
+            .chain(self.x.iter().flatten().copied())
+            .chain(self.sigma.iter().flatten().copied())
+            .chain(
+                self.aux
+                    .iter()
+                    .flat_map(|(y, x)| std::iter::once(*y).chain(*x)),
+            )
+    }
+}
+
+/// Le dictionnaire d'une série : `columns`, `values`, `errors`, `warnings`.
+fn series_dict<'py>(
+    py: Python<'py>,
+    calc: &stokesforge_core::Calculation,
+    series: usize,
+    result: &stokesforge_core::SeriesResult,
+    epoch: u64,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    let columns = PyDict::new(py);
+    for out in calc.outputs.iter().filter(|o| o.series == series) {
+        if let Some(id) = out.column {
+            let key = match out.index {
+                Some(i) if out.key == "peak" => format!("peak.{i}"),
+                _ => out.key.clone(),
+            };
+            columns.set_item(key, Py::new(py, Handle { id, epoch })?)?;
+        }
+    }
+    let numbers = PyDict::new(py);
+    let errors = PyDict::new(py);
+    for v in &result.values {
+        let key = match v.index {
+            Some(i) => format!("{}.{i}", v.key),
+            None => v.key.clone(),
+        };
+        numbers.set_item(&key, v.value)?;
+        if let Some(e) = v.error {
+            errors.set_item(&key, e)?;
+        }
+    }
+    let warnings = PyList::empty(py);
+    for w in &result.warnings {
+        warnings.append(match w {
+            Warning::SignalStepNotUniform => "the X step is not constant".to_string(),
+            Warning::IrfStepMismatch => "the response has a different X step".to_string(),
+            Warning::NegativeClipped(n) => format!("{n} negative points were set to zero"),
+            Warning::Undetermined(n) => {
+                format!("{n} parameter(s) are not determined by the data (no uncertainty)")
+            }
+        })?;
+    }
+    dict.set_item("columns", columns)?;
+    dict.set_item("values", numbers)?;
+    dict.set_item("errors", errors)?;
+    dict.set_item("warnings", warnings)?;
+    Ok(dict)
+}
+
+/// Enregistre l'opération et rend le dictionnaire de résultats : à plat pour
+/// une série, `{"series": [dict, …]}` pour un lot.
 fn run(
     py: Python<'_>,
     op: Operation,
-    inputs: Inputs<'_>,
+    inputs: Inputs,
     keep_results: bool,
     auto_recalc: bool,
 ) -> PyResult<Py<PyDict>> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
-    let ids = (
-        (inputs.y.id, inputs.y.epoch),
-        inputs.x.map(|h| (h.id, h.epoch)),
-        inputs.sigma.map(|h| (h.id, h.epoch)),
-        inputs
-            .aux
-            .map(|(y, x)| ((y.id, y.epoch), x.map(|h| (h.id, h.epoch)))),
-    );
+    let batch = inputs.batch;
     let outcome = py
         .detach(|| -> Result<_, HostError> {
             let session = context.session();
             let prepare = |snapshot: &stokesforge_session::Snapshot| {
-                for (id, epoch) in [Some(ids.0), ids.1, ids.2, ids.3.map(|a| a.0)]
-                    .into_iter()
-                    .flatten()
-                    .chain(ids.3.and_then(|a| a.1))
-                {
+                for (id, epoch) in inputs.all() {
                     checked_node(snapshot, id, epoch)?;
                 }
-                let series = SeriesRef {
-                    x: ids.1.map(|h| h.0),
-                    y: ids.0 .0,
-                    sigma: ids.2.map(|h| h.0),
-                };
-                let aux = ids.3.map(|(y, x)| AuxRef {
+                let series: Vec<SeriesRef> = (0..inputs.y.len())
+                    .map(|i| SeriesRef {
+                        x: inputs.x[i].map(|h| h.0),
+                        y: inputs.y[i].0,
+                        sigma: inputs.sigma[i].map(|h| h.0),
+                    })
+                    .collect();
+                let aux = inputs.aux.map(|(y, x)| AuxRef {
                     x: x.map(|h| h.0),
                     y: y.0,
                 });
-                let computed = compute(
-                    &snapshot.tree,
-                    &op,
-                    std::slice::from_ref(&series),
-                    aux.as_ref(),
-                )
-                .map_err(|e| HostError::InvalidValue(e.to_string()))?;
+                let computed = compute(&snapshot.tree, &op, &series, aux.as_ref())
+                    .map_err(|e| HostError::InvalidValue(e.to_string()))?;
                 Ok::<_, HostError>((series, aux, computed))
             };
             let snapshot = session.snapshot().map_err(HostError::from_session)?;
@@ -210,7 +338,7 @@ fn run(
                 tree = snapshot.tree.clone();
                 known = snapshot.tree.calculations().keys().copied().collect();
             }
-            let values = computed.results.first().cloned().unwrap_or_default();
+            let values = computed.results.clone();
             let draft = draft(
                 &tree,
                 &series,
@@ -237,44 +365,16 @@ fn run(
         })
         .map_err(to_py_error)?;
     let (calc, values, epoch) = outcome;
+    if !batch {
+        let one = values.first().cloned().unwrap_or_default();
+        return Ok(series_dict(py, &calc, 0, &one, epoch)?.unbind());
+    }
+    let list = PyList::empty(py);
+    for (i, result) in values.iter().enumerate() {
+        list.append(series_dict(py, &calc, i, result, epoch)?)?;
+    }
     let result = PyDict::new(py);
-    let columns = PyDict::new(py);
-    for out in &calc.outputs {
-        if let Some(id) = out.column {
-            let key = match out.index {
-                Some(i) if out.key == "peak" => format!("peak.{i}"),
-                _ => out.key.clone(),
-            };
-            columns.set_item(key, Py::new(py, Handle { id, epoch })?)?;
-        }
-    }
-    let numbers = PyDict::new(py);
-    let errors = PyDict::new(py);
-    for v in &values.values {
-        let key = match v.index {
-            Some(i) => format!("{}.{i}", v.key),
-            None => v.key.clone(),
-        };
-        numbers.set_item(&key, v.value)?;
-        if let Some(e) = v.error {
-            errors.set_item(&key, e)?;
-        }
-    }
-    let warnings = PyList::empty(py);
-    for w in &values.warnings {
-        warnings.append(match w {
-            Warning::SignalStepNotUniform => "the X step is not constant".to_string(),
-            Warning::IrfStepMismatch => "the response has a different X step".to_string(),
-            Warning::NegativeClipped(n) => format!("{n} negative points were set to zero"),
-            Warning::Undetermined(n) => {
-                format!("{n} parameter(s) are not determined by the data (no uncertainty)")
-            }
-        })?;
-    }
-    result.set_item("columns", columns)?;
-    result.set_item("values", numbers)?;
-    result.set_item("errors", errors)?;
-    result.set_item("warnings", warnings)?;
+    result.set_item("series", list)?;
     Ok(result.unbind())
 }
 
@@ -286,8 +386,8 @@ fn run(
 #[allow(clippy::too_many_arguments)]
 fn baseline(
     py: Python<'_>,
-    y: &Handle,
-    x: Option<&Handle>,
+    y: &Bound<'_, PyAny>,
+    x: Option<&Bound<'_, PyAny>>,
     method: &str,
     points: Option<Vec<(f64, f64)>>,
     zones: Option<Vec<(f64, f64)>>,
@@ -343,12 +443,7 @@ fn baseline(
     run(
         py,
         operation,
-        Inputs {
-            y,
-            x,
-            sigma: None,
-            aux: None,
-        },
+        Inputs::new(y, x, None, None)?,
         keep_results,
         auto_recalc,
     )
@@ -362,9 +457,9 @@ fn baseline(
 #[allow(clippy::too_many_arguments)]
 fn correct(
     py: Python<'_>,
-    y: &Handle,
+    y: &Bound<'_, PyAny>,
     reference: &Handle,
-    x: Option<&Handle>,
+    x: Option<&Bound<'_, PyAny>>,
     reference_x: Option<&Handle>,
     op: &str,
     keep_results: bool,
@@ -382,12 +477,7 @@ fn correct(
     run(
         py,
         Operation::Correct { op },
-        Inputs {
-            y,
-            x,
-            sigma: None,
-            aux: Some((reference, reference_x)),
-        },
+        Inputs::new(y, x, None, Some((reference, reference_x)))?,
         keep_results,
         auto_recalc,
     )
@@ -400,8 +490,8 @@ fn correct(
 #[allow(clippy::too_many_arguments)]
 fn integrate(
     py: Python<'_>,
-    y: &Handle,
-    x: Option<&Handle>,
+    y: &Bound<'_, PyAny>,
+    x: Option<&Bound<'_, PyAny>>,
     ranges: Option<Vec<(f64, f64)>>,
     under: &str,
     cumulative: bool,
@@ -423,12 +513,7 @@ fn integrate(
     run(
         py,
         Operation::Integrate { spec },
-        Inputs {
-            y,
-            x,
-            sigma: None,
-            aux: None,
-        },
+        Inputs::new(y, x, None, None)?,
         keep_results,
         auto_recalc,
     )
@@ -440,20 +525,21 @@ fn integrate(
 /// une formule (`model="a*exp(-x/b)+c"`). `initial`, `bounds` (nom →
 /// `(min, max)`) et `fixed` (noms) règlent les paramètres ; `sigma` pondère.
 #[pyfunction]
-#[pyo3(signature = (y, x=None, *, model="linear", degree=3, initial=None, bounds=None, fixed=None, fit_range=None, residuals=false, sigma=None, keep_results=false, auto_recalc=true))]
+#[pyo3(signature = (y, x=None, *, model="linear", degree=3, initial=None, bounds=None, fixed=None, shared=None, fit_range=None, residuals=false, sigma=None, keep_results=false, auto_recalc=true))]
 #[allow(clippy::too_many_arguments)]
 fn fit(
     py: Python<'_>,
-    y: &Handle,
-    x: Option<&Handle>,
+    y: &Bound<'_, PyAny>,
+    x: Option<&Bound<'_, PyAny>>,
     model: &str,
     degree: u32,
     initial: Option<std::collections::HashMap<String, f64>>,
     bounds: Option<std::collections::HashMap<String, (f64, f64)>>,
     fixed: Option<Vec<String>>,
+    shared: Option<Vec<String>>,
     fit_range: Option<(f64, f64)>,
     residuals: bool,
-    sigma: Option<&Handle>,
+    sigma: Option<&Bound<'_, PyAny>>,
     keep_results: bool,
     auto_recalc: bool,
 ) -> PyResult<Py<PyDict>> {
@@ -473,12 +559,18 @@ fn fit(
     };
     let compiled = host(model.compile())?;
     let names: Vec<String> = compiled.params().iter().map(|p| p.name.clone()).collect();
-    let (initial, bounds, fixed) = (
+    let (initial, bounds, fixed, shared) = (
         initial.unwrap_or_default(),
         bounds.unwrap_or_default(),
         fixed.unwrap_or_default(),
+        shared.unwrap_or_default(),
     );
-    for name in initial.keys().chain(bounds.keys()).chain(fixed.iter()) {
+    for name in initial
+        .keys()
+        .chain(bounds.keys())
+        .chain(fixed.iter())
+        .chain(shared.iter())
+    {
         if !names.contains(name) {
             return Err(invalid(format!(
                 "the model has no parameter \"{name}\": its parameters are {}",
@@ -493,7 +585,7 @@ fn fit(
             fixed: fixed.contains(name),
             min: bounds.get(name).map(|b| b.0),
             max: bounds.get(name).map(|b| b.1),
-            shared: false,
+            shared: shared.contains(name),
         })
         .collect();
     let operation = Operation::Fit {
@@ -504,12 +596,7 @@ fn fit(
     run(
         py,
         operation,
-        Inputs {
-            y,
-            x,
-            sigma,
-            aux: None,
-        },
+        Inputs::new(y, x, sigma, None)?,
         keep_results,
         auto_recalc,
     )
@@ -524,8 +611,8 @@ fn fit(
 #[allow(clippy::too_many_arguments)]
 fn peaks(
     py: Python<'_>,
-    y: &Handle,
-    x: Option<&Handle>,
+    y: &Bound<'_, PyAny>,
+    x: Option<&Bound<'_, PyAny>>,
     shape: &str,
     background: &str,
     centers: Option<Vec<f64>>,
@@ -586,12 +673,7 @@ fn peaks(
     run(
         py,
         operation,
-        Inputs {
-            y,
-            x,
-            sigma: None,
-            aux: None,
-        },
+        Inputs::new(y, x, None, None)?,
         keep_results,
         auto_recalc,
     )
@@ -604,9 +686,9 @@ fn peaks(
 #[allow(clippy::too_many_arguments)]
 fn reconvolve(
     py: Python<'_>,
-    y: &Handle,
+    y: &Bound<'_, PyAny>,
     response: &Handle,
-    x: Option<&Handle>,
+    x: Option<&Bound<'_, PyAny>>,
     response_x: Option<&Handle>,
     components: usize,
     shift: f64,
@@ -629,12 +711,7 @@ fn reconvolve(
     run(
         py,
         Operation::Reconvolution { spec, residuals },
-        Inputs {
-            y,
-            x,
-            sigma: None,
-            aux: Some((response, response_x)),
-        },
+        Inputs::new(y, x, None, Some((response, response_x)))?,
         keep_results,
         auto_recalc,
     )
@@ -647,9 +724,9 @@ fn reconvolve(
 #[allow(clippy::too_many_arguments)]
 fn deconvolve(
     py: Python<'_>,
-    y: &Handle,
+    y: &Bound<'_, PyAny>,
     response: &Handle,
-    x: Option<&Handle>,
+    x: Option<&Bound<'_, PyAny>>,
     response_x: Option<&Handle>,
     method: &str,
     iterations: usize,
@@ -670,12 +747,7 @@ fn deconvolve(
     run(
         py,
         Operation::DirectDeconvolution { method, shift },
-        Inputs {
-            y,
-            x,
-            sigma: None,
-            aux: Some((response, response_x)),
-        },
+        Inputs::new(y, x, None, Some((response, response_x)))?,
         keep_results,
         auto_recalc,
     )
@@ -683,16 +755,18 @@ fn deconvolve(
 
 /// Documentation du module `pyst.analysis`.
 const MODULE_DOC: &str = "\
-Calculs d'analyse de StokesForge : une série par appel, enregistrée comme un calcul du projet.
+Calculs d'analyse de StokesForge : un appel, un calcul du projet. y peut être une poignée ou une liste
+(lot : un seul calcul multi-séries, résultat {'series': [...]}), x et sigma une poignée ou une liste.
 
     pyst.analysis.baseline(y, x=None, *, method='anchors', points=None, zones=None, degree=1,
                            interpolation='segments', op='subtract', keep_baseline=False)
     pyst.analysis.correct(y, reference, x=None, reference_x=None, *, op='divide')
     pyst.analysis.integrate(y, x=None, *, ranges=None, under='zero', cumulative=False, normalize=False)
     pyst.analysis.fit(y, x=None, *, model='linear', degree=3, initial=None, bounds=None, fixed=None,
-                      fit_range=None, residuals=False, sigma=None)
+                      shared=None, fit_range=None, residuals=False, sigma=None)
     pyst.analysis.peaks(y, x=None, *, shape='gaussian', background='constant', centers=None,
-                        link_widths=False, prominence=0.05, max_peaks=6, fit_range=None, residuals=False)
+                        link_widths=False, center_window=None, prominence=0.05, max_peaks=6,
+                        fit_range=None, residuals=False)
     pyst.analysis.reconvolve(y, response, x=None, response_x=None, *, components=1, shift=0.0, ...)
     pyst.analysis.deconvolve(y, response, x=None, response_x=None, *, method='richardson-lucy', ...)
 

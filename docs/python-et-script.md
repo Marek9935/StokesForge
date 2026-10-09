@@ -53,6 +53,17 @@ les `atexit` Python ne s'exécutent pas.
 `stokesforge-pyhello` existe pour prouver que cette isolation tient une fois
 empaquetée (`scripts/pyhello-dist.sh`, environnement nettoyé).
 
+### `pyst.analysis` : lots et ajustement global (#201)
+
+`y` peut être une liste de poignées : un seul calcul multi-séries, comme dans la
+fenêtre d'analyse (un Ctrl+Z, une ligne de Results). `x` et `sigma` valent pour
+toutes les séries (une poignée) ou une par série (liste de même longueur ;
+sinon `InvalidValueError`). Le résultat d'un lot est
+`{"series": [{columns, values, errors, warnings}, …]}`, dans l'ordre de `y` ;
+une poignée seule garde le dictionnaire à plat. `fit(shared=['tau'])` ajuste
+globalement. Témoins : `un_lot_est_un_seul_calcul_multi_series_annulable_d_un_coup`,
+`un_lot_mal_forme_est_refuse_avec_un_message`.
+
 ### `pyst.analysis.fit` : modèles (#204)
 
 `model=` accepte `linear`, `polynomial` (`degree`), `exponential`

@@ -106,8 +106,12 @@ L'interface du traitement mathématique est répartie ainsi :
   ouverte sur erreur.
 - Les surfaces de `src/app/` : `analysis_menu`, `analysis_dialog`,
   `analysis_forms`, `analysis_preview`, `results_pane` (table des modules plus haut).
-- L'aperçu est peint à la main (pas de graphe du projet) et **calculé sur le fil
-  de l'interface** : acceptable aux tailles actuelles, suivi en issue.
+- L'aperçu est peint à la main (pas de graphe du projet) et **calculé sur un fil
+  de travail** (#201, `analysis_preview.rs`, `PreviewJobs`) : un seul fil à la
+  fois, la demande la plus récente remplace celle qui attend, l'image attend
+  40 ms au plus puis montre l'ancien résultat marqué « Calculating… » ; le fil
+  réveille le viewport une fois à sa fin, jamais de réveil périodique. Un
+  calcul déjà lancé n'est pas interrompu : son résultat périmé est ignoré.
 - Colonnes périmées : grisées dans la grille, lettre teintée (`theme::stale_color`)
   et info-bulle ; le volet Results (replié par défaut) liste les calculs
   conservés (portée Feuille / Classeur) avec Edit / Recalculate / Delete.
