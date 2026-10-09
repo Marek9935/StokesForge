@@ -80,7 +80,7 @@ l'Object Manager et la fenêtre des séries se partagent) : `set_series_group`
 `move_group`, `apply_group_gradient`. Un groupe n'est toujours pas un nœud ni
 une commande : l'interface passe par `EditPlotSpec` (motifs `RenameGroup`,
 `DissolveGroup`, `RemoveGroup`, `ReorderGroup`, `ReorderSeries`), `pyst` par
-`SetPlotSpec`.
+`SetPlotSpec` (`group_series` rassemble des séries en un groupe neuf, #196 ; surface : `docs/python-et-script.md`, § Groupes de séries).
 
 **Nuanciers (#178).** `stokesforge_plot::gradient` : `GRADIENT_PRESETS` (bleu →
 rouge, noir → rouge…) et `gradient_colors(arrêts, n)`, couleurs `#RRGGBB`

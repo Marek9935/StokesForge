@@ -355,6 +355,57 @@ impl PanelSpec {
         Some(self.apply_slots(&slots, index))
     }
 
+    /// Rassemble les séries `indices` (rangs distincts, dans l'ordre voulu)
+    /// dans un groupe neuf, qui prend la place de la première rencontrée dans
+    /// la liste (#196). Un groupe d'où elles viennent et qu'elles vident
+    /// disparaît avec son nom. Rend le numéro du groupe ; `None`, sans rien
+    /// changer, si `indices` est vide, hors du panneau ou répète un rang.
+    pub fn group_series(&mut self, indices: &[usize]) -> Option<u32> {
+        let mut seen = indices.to_vec();
+        seen.sort_unstable();
+        seen.dedup();
+        if indices.is_empty() || seen.len() != indices.len() || seen.last()? >= &self.series.len() {
+            return None;
+        }
+        let id = self.next_group_id();
+        let mut slots = Vec::new();
+        let mut placed = false;
+        for slot in self.slots() {
+            let touched = match &slot {
+                SeriesSlot::Single(i) => indices.contains(i),
+                SeriesSlot::Group { members, .. } => members.iter().any(|m| indices.contains(m)),
+            };
+            match slot {
+                SeriesSlot::Single(i) if !touched => slots.push(SeriesSlot::Single(i)),
+                SeriesSlot::Single(_) => {}
+                SeriesSlot::Group { id: other, members } => {
+                    let kept: Vec<usize> = members
+                        .into_iter()
+                        .filter(|m| !indices.contains(m))
+                        .collect();
+                    if !kept.is_empty() {
+                        slots.push(SeriesSlot::Group {
+                            id: other,
+                            members: kept,
+                        });
+                    }
+                }
+            }
+            if touched && !placed {
+                placed = true;
+                slots.push(SeriesSlot::Group {
+                    id,
+                    members: indices.to_vec(),
+                });
+            }
+        }
+        for &index in indices {
+            self.series[index].group = Some(id);
+        }
+        self.apply_slots(&slots, 0);
+        Some(id)
+    }
+
     /// Sort la série `index` de son groupe (#197).
     pub fn leave_group(&mut self, index: usize) -> Option<usize> {
         self.series.get(index)?.group?;
@@ -725,5 +776,51 @@ mod group_tests {
         assert_eq!(colonnes(&panel), [5, 6, 1, 2, 3, 4]);
         assert!(!panel.move_group(2, true), "butée");
         assert!(!panel.move_group(9, true), "inexistant");
+    }
+
+    #[test]
+    fn rassembler_des_series_cree_un_groupe_a_la_place_de_la_premiere() {
+        let mut panel = panneau(); // 1, [2 3], 4, [5 6]
+                                   // « 4 » (rang 3) et « 1 » (rang 0), dans cet ordre : le groupe prend la
+                                   // place de « 1 », la première rencontrée dans la liste.
+        let id = panel.group_series(&[3, 0]).expect("groupe");
+        assert_eq!(id, 3);
+        assert_eq!(colonnes(&panel), [4, 1, 2, 3, 5, 6]);
+        assert_eq!(panel.group_members(id), [0, 1]);
+        assert_eq!(
+            panel.group_members(1),
+            [2, 3],
+            "les autres groupes sont intacts"
+        );
+    }
+
+    #[test]
+    fn rassembler_vide_un_groupe_d_origine_et_oublie_son_nom() {
+        let mut panel = panneau();
+        panel.rename_group(1, "Vieux");
+        let id = panel.group_series(&[1, 2, 3]).expect("groupe");
+        assert_eq!(panel.group_ids(), [id, 2], "le groupe 1 a disparu");
+        assert!(panel.group_names.is_empty());
+        assert_eq!(colonnes(&panel), [1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn rassembler_partiellement_un_groupe_garde_le_reste_et_son_nom() {
+        let mut panel = panneau();
+        panel.rename_group(1, "Reste");
+        let id = panel.group_series(&[1, 3]).expect("groupe");
+        assert_eq!(panel.group_label(1), Some("Reste"));
+        assert_eq!(panel.group_members(1).len(), 1);
+        assert_eq!(panel.group_members(id).len(), 2);
+    }
+
+    #[test]
+    fn rassembler_refuse_une_demande_incorrecte_sans_rien_changer() {
+        let mut panel = panneau();
+        let avant = panel.clone();
+        assert_eq!(panel.group_series(&[]), None);
+        assert_eq!(panel.group_series(&[1, 1]), None);
+        assert_eq!(panel.group_series(&[0, 9]), None);
+        assert_eq!(panel, avant);
     }
 }

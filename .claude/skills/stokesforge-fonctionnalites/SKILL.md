@@ -105,8 +105,9 @@ manques encore vérifiés au 2026-10-08, écrits dans `docs/application.md` :
   « Quitter le groupe » ; un groupe a un nom, se replie dans l'Object Manager
   comme dans la fenêtre, se renomme (F2), se dissout ou se supprime avec ses
   séries, #197) et nuanciers (#178, enregistrables dans le projet ou
-  pour l'utilisateur) ; les scripts `pyst` ajoutent une série à la fois, donc ne
-  créent pas de groupe (#196) ;
+  pour l'utilisateur) ; les scripts `pyst` créent, lisent et règlent
+  les groupes (`plot([y1, y2])`, `series_groups`, `group_series`, `rename_group`,
+  `ungroup`, `remove_group`, `set_group_style`, `apply_gradient`, #196) ;
 - les fenêtres ouvertes et leur mode ne sont pas restaurés au démarrage (seules
   position et taille le sont) ;
 - une seule cellule éditable à la fois par fenêtre.

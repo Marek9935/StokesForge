@@ -1026,12 +1026,13 @@ except pyst.BrokenReferenceError:
 // --- Compléments : la surface reste minuscule et documentée -----------------
 
 #[test]
-fn la_surface_expose_dix_neuf_appels_et_quatre_erreurs() {
+fn la_surface_expose_vingt_huit_appels_et_quatre_erreurs() {
     // A2 (`guide-de-correction-robustesse.md` §F6) a ajouté une quatrième
     // exception, `ConcurrentWriteError` — ce test s'appelait
     // « ...et_trois_erreurs » et n'énumérait que les trois premières ; son
     // nom et sa liste attendue suivent le vocabulaire d'erreurs à jour.
     // Les lots Python #66 et #67 étendent navigation, lectures et mutations.
+    // Les groupes de séries (#196) ajoutent neuf appels.
     // La liste reste exacte et chaque appel doit être documenté.
     let banc = banc();
     let outcome = executer(
@@ -1040,7 +1041,7 @@ fn la_surface_expose_dix_neuf_appels_et_quatre_erreurs() {
 import pyst as importe
 print(sorted(nom for nom in dir(importe) if not nom.startswith("_")))
 print(importe.__doc__ is not None)
-print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, importe.set_column, importe.undo, importe.import_file, importe.root, importe.children, importe.info, importe.values, importe.create_workbook, importe.create_worksheet, importe.create_column, importe.rename, importe.remove, importe.set_values, importe.set_column_meta, importe.plot, importe.add_shape, importe.remove_shape)))
+print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, importe.set_column, importe.undo, importe.import_file, importe.root, importe.children, importe.info, importe.values, importe.create_workbook, importe.create_worksheet, importe.create_column, importe.rename, importe.remove, importe.set_values, importe.set_column_meta, importe.plot, importe.add_shape, importe.remove_shape, importe.series, importe.series_groups, importe.group_series, importe.set_series_group, importe.rename_group, importe.ungroup, importe.remove_group, importe.set_group_style, importe.apply_gradient)))
 "#,
     );
 
@@ -1048,12 +1049,14 @@ print(all(fonction.__doc__ for fonction in (importe.resolve, importe.column, imp
     assert_eq!(
         lignes[0],
         "['BrokenReferenceError', 'ConcurrentWriteError', 'Handle', 'InvalidValueError', \
-         'UnknownPathError', 'add_shape', 'analysis', 'children', 'column', 'create_column', 'create_workbook', \
-         'create_worksheet', 'import_file', 'info', 'plot', 'remove', 'remove_shape', 'rename', 'resolve', 'root', \
-         'set_column', 'set_column_meta', 'set_values', 'undo', 'values']"
+         'UnknownPathError', 'add_shape', 'analysis', 'apply_gradient', 'children', 'column', 'create_column', \
+         'create_workbook', 'create_worksheet', 'group_series', 'import_file', 'info', 'plot', 'remove', \
+         'remove_group', 'remove_shape', 'rename', 'rename_group', 'resolve', 'root', 'series', 'series_groups', \
+         'set_column', 'set_column_meta', 'set_group_style', 'set_series_group', 'set_values', 'undo', \
+         'ungroup', 'values']"
     );
     assert_eq!(lignes[1], "True", "le module est documenté");
-    assert_eq!(lignes[2], "True", "les dix-neuf appels sont documentés");
+    assert_eq!(lignes[2], "True", "les vingt-huit appels sont documentés");
 }
 
 #[test]

@@ -7,6 +7,8 @@
 //! Sans option `title`, un nouveau graphe reste sans titre (#103) ; ajouter
 //! une série à un graphe existant conserve son titre.
 //! Le premier panneau est étendu sans réécrire les autres ni ses réglages.
+//! Plusieurs colonnes `y` en une fois (#196) forment un groupe, comme les
+//! séries ajoutées ensemble depuis l'interface (`push_series_batch`).
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -27,6 +29,9 @@ type Target = (NodeId, u64);
 /// Données Rust seulement : elles traversent Python::detach, jamais un objet Python.
 struct Request {
     references: Vec<Target>,
+    /// Une série par entrée : colonne y, colonne x propre (ou partagée) et nom.
+    members: Vec<Member>,
+    group_name: Option<String>,
     graph: Option<Target>,
     parent: Option<Target>,
     name: Option<String>,
@@ -41,12 +46,23 @@ struct Request {
     y_range: Option<(f64, f64)>,
 }
 
-fn invalid(message: impl Into<String>) -> PyErr {
+/// Les colonnes d'une série du lot ; `label` vide = nom automatique.
+struct Member {
+    y: NodeId,
+    x: Option<NodeId>,
+    label: String,
+}
+
+pub(crate) fn invalid(message: impl Into<String>) -> PyErr {
     InvalidValueError::new_err(message.into())
 }
 
 /// Crée un graphe natif et rend sa poignée ; graph= ajoute au premier panneau.
-/// y est une colonne ; x=None utilise l'indice de ligne. Options : plot_type
+/// y est une colonne, ou une liste d'au moins deux colonnes qui forment un
+/// groupe de séries (#196) ; x=None utilise l'indice de ligne, x peut être une
+/// colonne partagée ou une liste de même longueur que y. Avec plusieurs
+/// séries, label est une liste (un nom par série) et group_name nomme le
+/// groupe ; x_error/y_error ne servent qu'à une série seule. Options : plot_type
 /// (line, scatter, line_scatter, bar, histogram, error_bar), color (#RRGGBB ou
 /// #RRGGBBAA), line_style (none, solid, dash, dot, dash_dot), line_width,
 /// symbol (none, circle, square, triangle, diamond, plus, cross), symbol_size,
@@ -58,8 +74,8 @@ fn invalid(message: impl Into<String>) -> PyErr {
 #[pyo3(signature = (y, x=None, *, graph=None, name=None, parent=None, **options))]
 pub(crate) fn plot(
     py: Python<'_>,
-    y: &Handle,
-    x: Option<&Handle>,
+    y: &Bound<'_, PyAny>,
+    x: Option<&Bound<'_, PyAny>>,
     graph: Option<&Handle>,
     name: Option<String>,
     parent: Option<&Handle>,
@@ -71,12 +87,37 @@ pub(crate) fn plot(
         return Err(invalid("name and parent apply only when creating a graph"));
     }
     let target = |h: &Handle| (h.id, h.epoch);
+    let ys = column_handles(y, "y")?;
+    let xs = match x {
+        None => vec![None; ys.len()],
+        Some(x) => {
+            let xs = column_handles(x, "x")?;
+            match xs.len() {
+                1 => vec![Some(xs[0]); ys.len()],
+                n if n == ys.len() => xs.into_iter().map(Some).collect(),
+                _ => return Err(invalid("x must be one column or one column per y")),
+            }
+        }
+    };
+    let mut references: Vec<Target> = ys.clone();
+    references.extend(xs.iter().flatten().copied());
+    let mut labels: Option<Vec<String>> = None;
     let mut request = Request {
-        references: vec![target(y)],
+        references,
+        members: ys
+            .iter()
+            .zip(&xs)
+            .map(|(y, x)| Member {
+                y: y.0,
+                x: x.map(|x| x.0),
+                label: String::new(),
+            })
+            .collect(),
+        group_name: None,
         graph: graph.map(target),
         parent: parent.map(target),
         name,
-        series: SeriesSpec::new(y.id),
+        series: SeriesSpec::new(ys[0].0),
         color: None,
         title: None,
         x_title: None,
@@ -86,10 +127,6 @@ pub(crate) fn plot(
         x_range: None,
         y_range: None,
     };
-    if let Some(x) = x {
-        request.series.x = Some(x.id);
-        request.references.push(target(x));
-    }
     if let Some(options) = options {
         for (key, value) in options.iter() {
             let key: String = key.extract()?;
@@ -119,20 +156,15 @@ pub(crate) fn plot(
                     if stokesforge_plot::parse_hex(&color).is_none() { return Err(invalid("color must be a hexadecimal RGB or RGBA color")); }
                     request.color = Some(color);
                 }
-                "line_style" => request.series.line.style = match string()?.as_str() {
-                    "none" => LineStyle::None, "solid" => LineStyle::Solid,
-                    "dash" => LineStyle::Dash, "dot" => LineStyle::Dot, "dash_dot" => LineStyle::DashDot,
-                    _ => return Err(invalid("unknown line_style: use none, solid, dash, dot or dash_dot")),
-                },
+                "line_style" => request.series.line.style = parse_line_style(&string()?)?,
                 "line_width" => request.series.line.width = positive()?,
                 "symbol_size" => request.series.symbol.size = positive()?,
-                "symbol" => request.series.symbol.shape = match string()?.as_str() {
-                    "none" => SymbolShape::None, "circle" => SymbolShape::Circle,
-                    "square" => SymbolShape::Square, "triangle" => SymbolShape::Triangle,
-                    "diamond" => SymbolShape::Diamond, "plus" => SymbolShape::Plus, "cross" => SymbolShape::Cross,
-                    _ => return Err(invalid("unknown symbol: use none, circle, square, triangle, diamond, plus or cross")),
-                },
-                "label" => request.series.name = string()?,
+                "symbol" => request.series.symbol.shape = parse_symbol(&string()?)?,
+                "label" => labels = Some(match value.extract::<Vec<String>>() {
+                    Ok(list) => list,
+                    Err(_) => vec![string()?],
+                }),
+                "group_name" => request.group_name = Some(string()?),
                 "title" => request.title = Some(string()?),
                 "x_title" => request.x_title = Some(string()?),
                 "y_title" => request.y_title = Some(string()?),
@@ -154,6 +186,9 @@ pub(crate) fn plot(
                 },
                 "x_error" | "y_error" => {
                     let handle = value.extract::<PyRef<'_, Handle>>().map_err(|_| invalid(format!("{key} must be a column handle")))?;
+                    if request.members.len() > 1 {
+                        return Err(invalid(format!("{key} applies to a single series")));
+                    }
                     request.references.push(target(&handle));
                     if key == "x_error" { request.series.x_error = Some(handle.id); } else { request.series.y_error = Some(handle.id); }
                 }
@@ -165,10 +200,69 @@ pub(crate) fn plot(
             }
         }
     }
+    if let Some(labels) = labels {
+        if labels.len() != request.members.len() {
+            return Err(invalid(
+                "label must be one string, or a list with one name per series",
+            ));
+        }
+        for (member, label) in request.members.iter_mut().zip(labels) {
+            member.label = label;
+        }
+    }
+    if request.group_name.is_some() && request.members.len() < 2 {
+        return Err(invalid("group_name needs several series"));
+    }
     let (id, epoch) = py
         .detach(|| plot_native(&context, request))
         .map_err(to_py_error)?;
     Ok(Handle { id, epoch })
+}
+
+pub(crate) fn parse_line_style(name: &str) -> PyResult<LineStyle> {
+    Ok(match name {
+        "none" => LineStyle::None,
+        "solid" => LineStyle::Solid,
+        "dash" => LineStyle::Dash,
+        "dot" => LineStyle::Dot,
+        "dash_dot" => LineStyle::DashDot,
+        _ => {
+            return Err(invalid(
+                "unknown line_style: use none, solid, dash, dot or dash_dot",
+            ))
+        }
+    })
+}
+
+pub(crate) fn parse_symbol(name: &str) -> PyResult<SymbolShape> {
+    Ok(match name {
+        "none" => SymbolShape::None,
+        "circle" => SymbolShape::Circle,
+        "square" => SymbolShape::Square,
+        "triangle" => SymbolShape::Triangle,
+        "diamond" => SymbolShape::Diamond,
+        "plus" => SymbolShape::Plus,
+        "cross" => SymbolShape::Cross,
+        _ => {
+            return Err(invalid(
+                "unknown symbol: use none, circle, square, triangle, diamond, plus or cross",
+            ))
+        }
+    })
+}
+
+/// Une poignée de colonne, ou une liste de poignées.
+fn column_handles(value: &Bound<'_, PyAny>, what: &str) -> PyResult<Vec<Target>> {
+    if let Ok(handle) = value.extract::<PyRef<'_, Handle>>() {
+        return Ok(vec![(handle.id, handle.epoch)]);
+    }
+    let list = value
+        .extract::<Vec<PyRef<'_, Handle>>>()
+        .map_err(|_| invalid(format!("{what} must be a column handle or a list of them")))?;
+    if list.is_empty() {
+        return Err(invalid(format!("{what} must not be an empty list")));
+    }
+    Ok(list.iter().map(|h| (h.id, h.epoch)).collect())
 }
 
 fn update_axis(
@@ -239,25 +333,42 @@ fn build_spec(
         .panels
         .get_mut(0)
         .ok_or_else(|| HostError::InvalidValue("graph has no panel".into()))?;
-    let mut series = request.series.clone();
-    let color = request
-        .color
-        .clone()
-        .unwrap_or_else(|| stokesforge_plot::palette_color(panel.series.len()).into());
-    series.line.color.clone_from(&color);
-    series.symbol.color = color;
+    let batch: Vec<SeriesSpec> = request
+        .members
+        .iter()
+        .enumerate()
+        .map(|(rank, member)| {
+            let mut series = request.series.clone();
+            series.y = member.y;
+            series.x = member.x;
+            series.name.clone_from(&member.label);
+            let color = request.color.clone().unwrap_or_else(|| {
+                stokesforge_plot::palette_color(panel.series.len() + rank).into()
+            });
+            series.line.color.clone_from(&color);
+            series.symbol.color = color;
+            series
+        })
+        .collect();
     update_axis(
         &mut panel.bottom,
         &request.x_title,
         request.x_scale,
         request.x_range,
     )?;
-    let y_axis = panel.axis_mut(series.axis.side());
+    let axis = request.series.axis;
+    let y_axis = panel.axis_mut(axis.side());
     update_axis(y_axis, &request.y_title, request.y_scale, request.y_range)?;
-    if series.axis == SeriesAxis::Right {
+    if axis == SeriesAxis::Right {
         y_axis.visible = true;
     }
-    panel.series.push(series);
+    let first = panel.series.len();
+    panel.push_series_batch(batch);
+    if let Some(name) = &request.group_name {
+        if let Some(group) = panel.series[first].group {
+            panel.rename_group(group, name);
+        }
+    }
     Ok(spec)
 }
 

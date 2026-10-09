@@ -247,7 +247,7 @@ racine ; sans `x`, l'abscisse est l'indice de ligne. `parent` accepte un
 dossier, `name` choisit le nom (automatique `GraphN` sinon). `graph=g` ajoute
 une série au premier panneau d'un graphe existant et conserve ses autres
 panneaux, séries et réglages ; `name` et `parent` sont alors refusés. Un appel
-ajoute une seule série : il ne crée jamais de groupe de séries (#177 ; gérer les groupes depuis `pyst` : #196).
+ajoute une série, ou plusieurs si `y` est une liste de colonnes : ces séries forment un groupe (§ Groupes de séries, #196).
 Sans option `title`, un graphe neuf n'a pas de titre ; le nom du graphe
 sert à identifier sa fenêtre, pas à titrer la figure (#103).
 
@@ -298,6 +298,38 @@ les ajouts et retraits d'objets. Nature, époque et panneau sont revalidés apr�
 réservation ; aucun client concurrent ne peut écraser le spec pendant cette
 écriture. Des coordonnées non finies, un type, axe, style ou rang invalide
 sont refusés sans mutation. Contrat : `tests/script.rs` et `tests/graphs.rs`.
+
+### Groupes de séries (#196)
+
+`pyst.plot([y1, y2, …], x)` crée **un groupe**, comme les séries ajoutées
+ensemble depuis l'interface (`PanelSpec::push_series_batch`) ; une liste d'une
+seule colonne n'en crée pas. `x` est `None` (indice de ligne), une colonne
+partagée ou une liste de même longueur que `y`. `label` est une chaîne pour
+une série, une liste (un nom par série) pour un lot ; `group_name` nomme le
+groupe (refusé pour une série seule) ; `x_error`/`y_error` ne servent qu'à une
+série seule. Les couleurs automatiques suivent la palette, série après série.
+
+| Appel | Effet |
+|---|---|
+| `series(g, *, panel=(0, 0))` | liste de dictionnaires `index`, `name`, `group` (`None` si seule), `color`, `visible`, `y` (poignée) |
+| `series_groups(g, *, panel)` | liste de `id`, `name` (`None` = nom automatique), `members` (rangs) |
+| `group_series(g, indices, *, name=None, panel)` | groupe neuf à la place de la première série ; rend son numéro. Les séries quittent leur ancien groupe, qui disparaît avec son nom s'il est vide |
+| `set_series_group(g, index, group, *, panel)` | entre à la suite des membres, ou sort du groupe avec `None` ; rend le nouveau rang |
+| `rename_group(g, group, name, *, panel)` | `""` rend le nom automatique |
+| `ungroup(g, group, *, panel)` | dissout : les séries restent, style gardé |
+| `remove_group(g, group, *, panel)` | supprime le groupe **et ses séries** |
+| `set_group_style(g, group, *, panel, line_style, line_width, symbol, symbol_size)` | pose chaque option donnée sur tous les membres |
+| `apply_gradient(g, group, gradient, *, panel)` | `gradient` : identifiant d'un nuancier fourni (`blue-red`…), nom d'un nuancier enregistré **dans le projet**, ou liste d'arrêts `#RRGGBB` |
+
+Un numéro de groupe est celui du spec : stable tant que le groupe existe. Les
+gestes rejouent ceux de l'interface (`PanelSpec::group_series`,
+`set_series_group`, `dissolve_group`, `remove_group`, `apply_group_gradient`) ;
+les groupes restent contigus. Les nuanciers enregistrés au niveau de
+l'utilisateur (hors projet) ne sont pas visibles d'un script, qui reste
+reproductible. Toutes ces écritures sont des `SetPlotSpec` du groupe `Script`
+(motif d'`add_shape` : validation avant et après réservation). Contrat :
+`tests/graphs.rs` (groupes en un appel, lecture, gestes et annulation d'un seul
+`undo`, refus sans mutation, poignées périmées).
 
 ### CLI sans fenêtre (#71)
 

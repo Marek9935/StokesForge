@@ -419,7 +419,11 @@ impl ShapeArgs {
 }
 
 /// Le spec du graphe `id`, après les contrôles d'époque et de nature.
-fn graph_spec(snapshot: &Snapshot, id: NodeId, epoch: u64) -> Result<PlotSpec, HostError> {
+pub(crate) fn graph_spec(
+    snapshot: &Snapshot,
+    id: NodeId,
+    epoch: u64,
+) -> Result<PlotSpec, HostError> {
     let node = checked_node(snapshot, id, epoch)?;
     match node.kind() {
         stokesforge_core::node::NodeKind::Graph { spec, .. } => Ok(spec.clone()),
@@ -430,7 +434,11 @@ fn graph_spec(snapshot: &Snapshot, id: NodeId, epoch: u64) -> Result<PlotSpec, H
     }
 }
 
-fn set_graph_spec(session: &SessionHandle, graph: NodeId, spec: PlotSpec) -> Result<(), HostError> {
+pub(crate) fn set_graph_spec(
+    session: &SessionHandle,
+    graph: NodeId,
+    spec: PlotSpec,
+) -> Result<(), HostError> {
     session
         .execute(Command::SetPlotSpec { graph, spec })
         .map(|_| ())
@@ -439,7 +447,7 @@ fn set_graph_spec(session: &SessionHandle, graph: NodeId, spec: PlotSpec) -> Res
 
 /// Le calque ordinaire (non superposé) de la case `(row, column)` : celui que
 /// désigne `panel=(ligne, colonne)` côté Python (#167).
-fn base_layer_at(spec: &PlotSpec, row: usize, column: usize) -> Option<usize> {
+pub(crate) fn base_layer_at(spec: &PlotSpec, row: usize, column: usize) -> Option<usize> {
     spec.panels
         .iter()
         .position(|p| p.row == row && p.column == column && p.overlay.is_none())
