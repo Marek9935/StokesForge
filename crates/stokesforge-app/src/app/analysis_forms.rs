@@ -167,7 +167,7 @@ fn caption(ui: &mut egui::Ui, text: String) {
 pub(super) fn form_body(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     input_block(ui, id, form, tree);
     ui.add_space(6.0);
-    theme::section_title(ui, kind_title(form.kind));
+    family_chooser(ui, id, form);
     family_block(ui, id, form, tree);
     ui.add_space(6.0);
     output_block(ui, form);
@@ -245,6 +245,31 @@ fn input_block(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &
             caption(ui, tr!("analysis-field-no-candidate"));
         }
     }
+}
+
+/// Le titre de la famille ; à la création, une liste déroulante qui en change à
+/// chaud (#202 : le clic droit ouvre la fenêtre sans famille choisie). Un
+/// calcul rouvert garde sa famille : seule sa méthode se change.
+fn family_chooser(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
+    if form.editing.is_some() {
+        theme::section_title(ui, kind_title(form.kind));
+        return;
+    }
+    theme::section_title(ui, tr!("analysis-block-type"));
+    let before = form.kind;
+    egui::ComboBox::from_id_salt(id.with("family"))
+        .selected_text(kind_title(form.kind))
+        .show_ui(ui, |ui| {
+            for kind in OperationKind::ALL {
+                ui.selectable_value(&mut form.kind, kind, kind_title(kind));
+            }
+        });
+    if form.kind != before {
+        let chosen = form.kind;
+        form.set_kind(chosen);
+        form.tool = form.natural_tool();
+    }
+    ui.add_space(6.0);
 }
 
 fn family_block(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {

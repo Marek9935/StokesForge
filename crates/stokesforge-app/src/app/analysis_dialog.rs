@@ -377,6 +377,36 @@ mod tests {
         }
     }
 
+    /// La fenêtre ouverte depuis le clic droit (#202) change de famille à chaud.
+    #[test]
+    fn la_liste_operation_change_de_famille_a_chaud() {
+        use stokesforge_analysis::ops::OperationKind;
+        let ctx = contexte();
+        let (session, mut state, sheet, ids) = banc();
+        state.dispatch(Action::OpenAnalysis {
+            preset: Preset::BaselineLine,
+            sheet,
+            columns: vec![ids[0], ids[1]],
+        });
+        frame(&ctx, &mut state);
+        let (output, _) = frame(&ctx, &mut state);
+        let all = textes(&output.shapes);
+        let combo = texte_exact(&all, &kind_title(OperationKind::Baseline));
+        let mut actions = Vec::new();
+        cliquer(&ctx, combo.centre, egui::PointerButton::Primary, |ui| {
+            analysis_window(ui.ctx(), &mut state, &mut actions);
+        });
+        let (output, _) = frame(&ctx, &mut state);
+        let all = textes(&output.shapes);
+        let fit = texte_exact(&all, &kind_title(OperationKind::Fit));
+        cliquer(&ctx, fit.centre, egui::PointerButton::Primary, |ui| {
+            analysis_window(ui.ctx(), &mut state, &mut actions);
+        });
+        frame(&ctx, &mut state);
+        assert_eq!(state.analysis_form().unwrap().kind, OperationKind::Fit);
+        session.shutdown().unwrap();
+    }
+
     #[test]
     fn creer_se_grise_tant_qu_un_reglage_manque_puis_valide() {
         let ctx = contexte();

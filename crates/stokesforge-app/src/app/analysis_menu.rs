@@ -1,7 +1,7 @@
 //! Le menu Analysis (#181, maquettes M1 et M2) : la barre de menus et le clic
 //! droit d'une colonne partagent **un seul contenu**, `analysis_menu_contents`
-//! (grammaire de `docs/menus.md` : le menu du haut l'enveloppe, le clic droit
-//! l'affiche sous `Analysis ▸`).
+//! (grammaire de `docs/menus.md`) ; le menu du haut l'enveloppe. Le clic droit
+//! d'une colonne n'a qu'une entrée `Analysis…` qui ouvre la fenêtre (#202).
 //!
 //! Chaque entrée pousse [`Action::OpenAnalysis`] avec la famille et la méthode
 //! préchoisies ; la fenêtre (`analysis_dialog.rs`) fait le reste. Tant qu'aucune
@@ -212,17 +212,25 @@ pub(super) fn analysis_menu_contents(
     });
 }
 
-/// L'entrée `Analysis ▸` du clic droit d'une colonne : le même contenu que le
-/// menu du haut, enveloppé dans un sous-menu.
-pub(super) fn analysis_submenu(
+/// L'entrée `Analysis…` du clic droit d'une colonne (#202) : ouvre la fenêtre
+/// d'analyse, dont la liste « Analysis type » choisit la famille. Un sous-menu
+/// aurait fait trois niveaux (Analysis ▸ Fit ▸ modèle), au-delà de la
+/// profondeur 2 de la grammaire ; le menu du haut garde les entrées par méthode.
+pub(super) fn analysis_entry(
     ui: &mut egui::Ui,
     state: &AppState,
     actions: &mut Vec<Action>,
     target: AnalysisTarget,
 ) {
-    ui.menu_button(tr!("menu-analysis"), |ui| {
-        analysis_menu_contents(ui, state, actions, Some(target));
-    });
+    open_entry(
+        ui,
+        actions,
+        Some(target),
+        has_y(state, target.columns),
+        tr!("action-analysis-open"),
+        tr!("action-analysis-open", "hint"),
+        Preset::BaselineLine,
+    );
 }
 
 /// Les gestes d'un calcul, sur une colonne qu'il produit : modifier,

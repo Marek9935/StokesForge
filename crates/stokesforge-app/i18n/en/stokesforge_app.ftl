@@ -1129,6 +1129,9 @@ analysis-issue-missing-column = A column of this calculation no longer exists
 
 ## Analysis — menu (#181)
 menu-analysis = Analysis
+analysis-block-type = Analysis type
+action-analysis-open = Analysis…
+    .hint = Opens the analysis window; choose the type of analysis there
 analysis-needs-y = Select at least one Y column first
 analysis-menu-baseline = Baseline
 analysis-baseline-linear = Linear…

@@ -1121,6 +1121,9 @@ analysis-issue-missing-column = Une colonne de ce calcul n'existe plus
 
 ## Analysis — menu (#181)
 menu-analysis = Analyse
+analysis-block-type = Type d'analyse
+action-analysis-open = Analyse…
+    .hint = Ouvre la fenêtre d'analyse ; le type d'analyse s'y choisit
 analysis-needs-y = Sélectionnez d'abord au moins une colonne Y
 analysis-menu-baseline = Ligne de base
 analysis-baseline-linear = Droite…
