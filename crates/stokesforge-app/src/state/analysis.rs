@@ -181,3 +181,28 @@ impl AppState {
         tr!("analysis-title", kind = kind, column = source)
     }
 }
+
+impl AppState {
+    /// Les calculs qui gardent leurs résultats (« Keep in Results ») pour le
+    /// classeur `book` — ceux dont la première série vit dans une de ses
+    /// feuilles —, restreints à `sheet` quand elle est donnée (volet Results,
+    /// M7).
+    pub fn kept_calculations(&self, book: NodeId, sheet: Option<NodeId>) -> Vec<NodeId> {
+        let tree = &self.snapshot.tree;
+        tree.calculations()
+            .iter()
+            .filter(|(_, calc)| calc.keep_results)
+            .filter(|(_, calc)| {
+                let Some(first) = calc.series.first() else {
+                    return false;
+                };
+                let Some(sheet_of) = tree.node(first.y).and_then(Node::parent) else {
+                    return false;
+                };
+                tree.node(sheet_of).and_then(Node::parent) == Some(book)
+                    && sheet.is_none_or(|wanted| wanted == sheet_of)
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    }
+}

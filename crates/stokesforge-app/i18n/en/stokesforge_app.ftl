@@ -1281,3 +1281,13 @@ analysis-delete-with-columns = Delete with Columns
 analysis-field-x = X
 analysis-field-y = Y
 analysis-fit-custom-example = a*exp(-x/b)+c
+
+## Results pane (#181)
+results-title = Results ({ $count })
+results-expand = Show the results
+results-collapse = Hide the results
+results-scope-sheet = This sheet
+results-scope-book = Workbook
+results-empty = No kept results here
+results-no-values = This calculation produced no values
+results-stale-suffix = { $title } (out of date)

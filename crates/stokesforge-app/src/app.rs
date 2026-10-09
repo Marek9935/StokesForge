@@ -156,6 +156,7 @@ mod object_manager_ui;
 mod panel_tests;
 mod plot_settings;
 mod project_manager;
+mod results_pane;
 mod script_console;
 mod shortcuts;
 mod tab;
