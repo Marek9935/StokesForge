@@ -107,8 +107,26 @@ fn banc_exclusif() -> Banc {
     ))
 }
 
+/// Isole le magasin de modèles d'import de la machine qui exécute les tests.
+///
+/// `pyst.import_file` lit `import_recipes.json` du dossier de configuration de
+/// l'utilisateur ; un modèle enregistré nommé « Jasco » passait devant le
+/// modèle intégré « Jasco (point-virgule) » et faisait échouer le choix
+/// automatique (#195). `XDG_CONFIG_HOME` est un état du *processus* : on le
+/// pose une seule fois, vers un dossier vide gardé jusqu'à la fin du binaire,
+/// avant tout banc, donc sans course entre tests parallèles ni restauration.
+fn configuration_hermetique() {
+    static DOSSIER: OnceLock<tempfile::TempDir> = OnceLock::new();
+    DOSSIER.get_or_init(|| {
+        let dossier = tempfile::tempdir().expect("dossier de configuration temporaire");
+        std::env::set_var("XDG_CONFIG_HOME", dossier.path());
+        dossier
+    });
+}
+
 /// Monte le projet « Demo », son acteur et un moteur de script branché dessus.
 fn monter(acces: Acces) -> Banc {
+    configuration_hermetique();
     let mut project = Project::new("Demo").expect("projet Demo");
     let root = project.root();
     project

@@ -355,6 +355,13 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
   vérifie que l'action poussée. Pour exercer les actions de réglage (#139),
   `AppState::new_with_preferences` injecte un `Preferences::load_from` sur
   un fichier de dossier temporaire, sans modifier l'environnement global.
+- Un test ne lit pas non plus les modèles d'import ni les fichiers récents de
+  la machine (`import_recipes.json`, `import_recent.json`) : un modèle
+  enregistré « Jasco » passait devant le modèle intégré et faisait échouer le
+  choix automatique (#195). Il redirige `XDG_CONFIG_HOME` vers un dossier
+  temporaire — sous verrou si le test restaure la valeur
+  (`stokesforge-import/src/store.rs`), ou une seule fois par processus avant
+  tout banc (`configuration_hermetique`, `stokesforge-script/tests/script.rs`).
 - `stokesforge-clipboard` (#149) : la décision des réponses X11 (`x11::answer`) et les noms de formats Windows/macOS se testent sans serveur ; l'offre X11 se teste contre un **vrai serveur** (`tests/x11.rs`, `#[ignore]`, `DISPLAY` requis, XWayland suffit : `cargo test -p stokesforge-clipboard --test x11 -- --ignored`). Wayland, Windows et macOS n'ont pas de test automatique : Wayland exige un compositeur et une entrée réelle (serial), les deux autres ne sont que compilés (`cargo check --target …`). Un test X11 d'un destinataire ne teste pas `response_type` d'un `SelectionNotify` : un événement venu de `SendEvent` porte le bit 0x80.
 - Les tests et leurs commentaires sont en français, comme le reste.
 
