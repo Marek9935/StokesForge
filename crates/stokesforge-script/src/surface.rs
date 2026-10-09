@@ -685,6 +685,8 @@ Surface de script de StokesForge : navigation, lecture, écriture, annulation et
     pyst.remove_shape(graph, index, *, panel=(0, 0)) -> None
     pyst.undo()                     -> bool (False si rien à annuler)
     pyst.import_file(path, recipe=None) -> list[Handle] (feuilles d'un nouveau classeur)
+    pyst.analysis.baseline / correct / integrate / fit / peaks / reconvolve /
+        deconvolve(y, x=None, ...) -> dict (voir help(pyst.analysis))
 
 Erreurs : UnknownPathError, BrokenReferenceError, InvalidValueError,
           ConcurrentWriteError.
@@ -744,6 +746,7 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
         "ConcurrentWriteError",
         py.get_type::<ConcurrentWriteError>(),
     )?;
+    crate::analysis::install(py, &module)?;
     py.import("sys")?
         .getattr("modules")?
         .set_item("pyst", &module)?;

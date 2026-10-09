@@ -93,6 +93,11 @@ impl HostError {
             // une valeur invalide au même titre qu'un type incompatible, pas
             // une référence cassée ni un conflit de version.
             CoreError::FormulaColumnReadOnly { .. } => HostError::InvalidValue(error.to_string()),
+            // Même raison pour une colonne écrite par un calcul d'analyse (#181) :
+            // `pyst.analysis` la recalcule, un script ne l'écrit pas à la main.
+            CoreError::CalculatedColumnReadOnly { .. } => {
+                HostError::InvalidValue(error.to_string())
+            }
         }
     }
 

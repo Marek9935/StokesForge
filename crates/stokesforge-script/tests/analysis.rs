@@ -1,0 +1,249 @@
+//! `pyst.analysis` (#181) : les mêmes calculs que le menu Analysis, depuis un
+//! script — mêmes colonnes, même trace, un seul groupe d'annulation.
+#![cfg(feature = "python")]
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use stokesforge_analysis::ops::OperationKind;
+use stokesforge_core::{Column, ColumnMeta, ColumnRole, NodeId, Project};
+use stokesforge_python::interpreter::{self, EmbeddedPython};
+use stokesforge_script::{ScriptEngine, ScriptOutcome};
+use stokesforge_session::{Session, SessionHandle};
+
+struct Banc {
+    engine: Arc<ScriptEngine>,
+    session: SessionHandle,
+    _actor: Session,
+    sheet: NodeId,
+}
+
+/// Une feuille `[Book1]Sheet1` : X = 0..20, Y = 2x + 1, Ref = 2.
+fn banc() -> Banc {
+    let mut project = Project::new("Analyse").unwrap();
+    project.add_workbook(project.root(), Some("Book1")).unwrap();
+    let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
+    let xs: Vec<f64> = (0..21).map(f64::from).collect();
+    let ys: Vec<f64> = xs.iter().map(|x| 2.0 * x + 1.0).collect();
+    let x = project
+        .add_column(sheet, None, Some("X"), Column::from_f64(&xs))
+        .unwrap();
+    project
+        .add_column(sheet, None, Some("Y"), Column::from_f64(&ys))
+        .unwrap();
+    project
+        .add_column(sheet, None, Some("Ref"), Column::from_f64(&[2.0; 21]))
+        .unwrap();
+    project
+        .set_column_meta(
+            x,
+            ColumnMeta {
+                role: ColumnRole::X,
+                ..ColumnMeta::default()
+            },
+        )
+        .unwrap();
+    let actor = Session::spawn(project, None).unwrap();
+    let session = actor.handle();
+    let prefix = std::env::var_os(interpreter::HOME_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../vendor/python/extracted/python")
+        });
+    let engine =
+        Arc::new(ScriptEngine::spawn(session.clone(), EmbeddedPython::with_home(prefix)).unwrap());
+    Banc {
+        engine,
+        session,
+        _actor: actor,
+        sheet,
+    }
+}
+
+const SETUP: &str = "
+x = pyst.resolve('[Book1]Sheet1!X')
+y = pyst.resolve('[Book1]Sheet1!Y')
+ref = pyst.resolve('[Book1]Sheet1!Ref')
+";
+
+fn run(banc: &Banc, source: &str) -> ScriptOutcome {
+    let outcome = banc.engine.run(&format!("{SETUP}{source}")).unwrap();
+    assert!(outcome.error.is_none(), "{:?}", outcome.error);
+    outcome
+}
+
+fn columns(banc: &Banc) -> usize {
+    let snapshot = banc.session.snapshot().unwrap();
+    snapshot.tree.children(banc.sheet).unwrap().len()
+}
+
+#[test]
+fn un_ajustement_rend_les_parametres_et_ecrit_une_colonne_annulable() {
+    let banc = banc();
+    let before = columns(&banc);
+    let outcome = run(
+        &banc,
+        r#"
+r = pyst.analysis.fit(y, x, model='linear', residuals=True)
+assert abs(r['values']['param.slope'] - 2.0) < 1e-6, r['values']
+assert abs(r['values']['param.intercept'] - 1.0) < 1e-6, r['values']
+assert 'param.slope' in r['errors']
+assert set(r['columns']) == {'fit', 'residuals'}, r['columns']
+assert abs(pyst.column(r['columns']['fit'])[3] - 7.0) < 1e-6
+print('ok')
+"#,
+    );
+    assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
+    assert_eq!(columns(&banc), before + 2);
+    let snapshot = banc.session.snapshot().unwrap();
+    let calc = snapshot.tree.calculations().values().next().unwrap();
+    assert_eq!(calc.operation.kind(), OperationKind::Fit);
+    assert!(calc.auto_recalc);
+    // Un seul Ctrl+Z annule le calcul et ses colonnes.
+    banc.session.undo().unwrap();
+    assert_eq!(columns(&banc), before);
+    assert!(banc
+        .session
+        .snapshot()
+        .unwrap()
+        .tree
+        .calculations()
+        .is_empty());
+}
+
+#[test]
+fn integrale_correction_ligne_de_base_et_pics_ecrivent_leurs_colonnes() {
+    let banc = banc();
+    let outcome = run(
+        &banc,
+        r#"
+i = pyst.analysis.integrate(y, x, cumulative=True)
+assert abs(i['values']['area.total'] - 420.0) < 1e-6, i['values']
+assert 'cumulative' in i['columns']
+c = pyst.analysis.correct(y, ref, x, op='divide')
+assert abs(pyst.column(c['columns']['corrected'])[4] - 4.5) < 1e-9
+b = pyst.analysis.baseline(y, x, method='line', points=[(0, 1), (20, 41)], keep_baseline=True)
+assert set(b['columns']) == {'corrected', 'baseline'}
+assert max(abs(v) for v in pyst.column(b['columns']['corrected'])) < 1e-9
+print('ok')
+"#,
+    );
+    assert!(outcome.stdout.contains("ok"));
+    let snapshot = banc.session.snapshot().unwrap();
+    assert_eq!(snapshot.tree.calculations().len(), 3);
+    // Les noms longs disent la source.
+    let corrected = snapshot
+        .tree
+        .calculations()
+        .values()
+        .find(|c| c.operation.kind() == OperationKind::Correct)
+        .unwrap()
+        .outputs[0]
+        .column
+        .unwrap();
+    let meta = snapshot
+        .tree
+        .node(corrected)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .meta()
+        .clone();
+    assert_eq!(meta.long_name, "Y (corrected)");
+}
+
+#[test]
+fn un_argument_invalide_leve_invalid_value_error_sans_rien_ecrire() {
+    let banc = banc();
+    let before = columns(&banc);
+    for bad in [
+        "pyst.analysis.fit(y, x, model='a*')",
+        "pyst.analysis.fit(y, x, model='linear', initial={'zz': 1.0})",
+        "pyst.analysis.baseline(y, x, method='line', points=[(0, 1)])",
+        "pyst.analysis.baseline(y, x, op='nope')",
+        "pyst.analysis.integrate(y, x, under='sideways')",
+        "pyst.analysis.peaks(y, x, prominence=0.0)",
+        "pyst.analysis.reconvolve(y, ref, x, components=9)",
+    ] {
+        run(
+            &banc,
+            &format!(
+                "
+try:
+    {bad}
+except pyst.InvalidValueError:
+    pass
+else:
+    raise AssertionError('call accepted')
+"
+            ),
+        );
+    }
+    assert_eq!(columns(&banc), before);
+    assert!(banc
+        .session
+        .snapshot()
+        .unwrap()
+        .tree
+        .calculations()
+        .is_empty());
+}
+
+#[test]
+fn une_colonne_de_calcul_refuse_l_ecriture_directe() {
+    let banc = banc();
+    run(
+        &banc,
+        r#"
+r = pyst.analysis.integrate(y, x, cumulative=True)
+col = r['columns']['cumulative']
+try:
+    pyst.set_values(col, [1.0, 2.0])
+except pyst.InvalidValueError as e:
+    assert 'calculation' in str(e), e
+else:
+    raise AssertionError('write accepted')
+"#,
+    );
+}
+
+#[test]
+fn le_calcul_se_recalcule_quand_la_source_change() {
+    let banc = banc();
+    run(
+        &banc,
+        r#"
+r = pyst.analysis.correct(y, ref, x, op='divide')
+out = r['columns']['corrected']
+assert pyst.column(out)[2] == 2.5
+pyst.set_values(ref, [4.0] * 21)
+assert pyst.column(out)[2] == 1.25, list(pyst.column(out))[:4]
+"#,
+    );
+}
+
+#[test]
+fn les_pics_sont_detectes_et_chaque_pic_a_sa_colonne() {
+    let banc = banc();
+    let outcome = run(
+        &banc,
+        r#"
+import numpy as np
+book = pyst.create_workbook('Spectre')
+sheet = pyst.create_worksheet(book, 'S')
+sx = pyst.create_column(sheet, 'Lambda')
+sy = pyst.create_column(sheet, 'Counts')
+xs = np.linspace(0, 10, 201)
+ys = 3 * np.exp(-0.5 * ((xs - 3) / 0.4) ** 2) + 2 * np.exp(-0.5 * ((xs - 7) / 0.4) ** 2) + 0.1
+pyst.set_values(sx, xs)
+pyst.set_values(sy, ys)
+pyst.set_column_meta(sx, role='x')
+r = pyst.analysis.peaks(sy, sx, shape='gaussian', background='constant', max_peaks=2)
+assert set(r['columns']) >= {'peak.1', 'peak.2', 'peaks_sum', 'background'}, r['columns']
+centers = sorted([r['values']['peak.center.1'], r['values']['peak.center.2']])
+assert abs(centers[0] - 3) < 0.05 and abs(centers[1] - 7) < 0.05, centers
+print('ok')
+"#,
+    );
+    assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
+}

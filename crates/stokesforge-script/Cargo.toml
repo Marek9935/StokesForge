@@ -14,6 +14,7 @@ default = []
 # compile vide, ne tire aucune dépendance PyO3, et la CI reste verte sur une
 # machine sans interpréteur vendorisé.
 python = [
+    "dep:stokesforge-analysis",
     "dep:stokesforge-core",
     "dep:stokesforge-commands",
     "dep:stokesforge-plot",
@@ -27,6 +28,7 @@ python = [
 ]
 
 [dependencies]
+stokesforge-analysis = { version = "0.0.0", path = "../stokesforge-analysis", optional = true }
 stokesforge-core = { version = "0.0.0", path = "../stokesforge-core", optional = true }
 stokesforge-commands = { version = "0.0.0", path = "../stokesforge-commands", optional = true }
 stokesforge-plot = { version = "0.0.0", path = "../stokesforge-plot", optional = true }
