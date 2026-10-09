@@ -62,10 +62,24 @@ else
     "$PY" -I -m pip install --no-deps --only-binary=:all: --upgrade "numpy==$NUMPY_VERSION"
 fi
 
-# --- 4. Vérification finale -------------------------------------------------
+# --- 4. scipy épinglé (#191) -------------------------------------------------
+# Mêmes garde-fous que numpy : `--no-deps` (numpy est déjà là, au verrou) et
+# `--only-binary=:all:` (jamais de compilation locale).
+CURRENT_SCIPY="$("$PY" -I -c 'import scipy; print(scipy.__version__)' 2>/dev/null || true)"
+if [[ "$CURRENT_SCIPY" == "$SCIPY_VERSION" ]]; then
+    echo "[vendor] scipy $SCIPY_VERSION déjà installé dans le préfixe embarqué"
+else
+    echo "[vendor] installation de scipy==$SCIPY_VERSION"
+    "$PY" -I -m pip install --no-deps --only-binary=:all: --upgrade "scipy==$SCIPY_VERSION"
+fi
+
+# --- 5. Vérification finale -------------------------------------------------
 "$PY" -I -c "
-import numpy, sys
+import numpy, scipy, sys
 assert numpy.__version__ == '$NUMPY_VERSION', numpy.__version__
-print('[vendor] OK  python', sys.version.split()[0], ' numpy', numpy.__version__)
+assert scipy.__version__ == '$SCIPY_VERSION', scipy.__version__
+from scipy.optimize import curve_fit
+print('[vendor] OK  python', sys.version.split()[0], ' numpy', numpy.__version__, ' scipy', scipy.__version__)
 print('[vendor] numpy chargé depuis', numpy.__file__)
+print('[vendor] scipy chargé depuis', scipy.__file__)
 "

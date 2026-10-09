@@ -247,3 +247,41 @@ print('ok')
     );
     assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
 }
+
+/// scipy fait partie de la pile embarquée (#191) : un script `pyst` ajuste une
+/// exponentielle avec `scipy.optimize.curve_fit` et retrouve les paramètres,
+/// puis les écrit dans une colonne annulable. L'interface n'en dépend pas ;
+/// c'est le témoin que la roue est bien chargée depuis le préfixe embarqué.
+#[test]
+fn scipy_ajuste_une_exponentielle_depuis_un_script() {
+    let banc = banc();
+    let before = columns(&banc);
+    let outcome = run(
+        &banc,
+        r#"
+import numpy as np
+import scipy
+from scipy.optimize import curve_fit
+
+assert 'site-packages' in scipy.__file__, scipy.__file__
+t = np.linspace(0.0, 10.0, 80)
+signal = 1.5 + 4.0 * np.exp(-t / 2.5)
+
+def model(t, offset, amplitude, tau):
+    return offset + amplitude * np.exp(-t / tau)
+
+popt, _ = curve_fit(model, t, signal, p0=(1.0, 1.0, 1.0))
+assert np.allclose(popt, (1.5, 4.0, 2.5), rtol=1e-6), popt
+
+book = pyst.resolve('[Book1]Sheet1')
+col = pyst.create_column(book, 'curve_fit')
+pyst.set_values(col, model(np.arange(21.0), *popt))
+assert abs(pyst.column(col)[0] - 5.5) < 1e-6
+print('scipy', scipy.__version__)
+"#,
+    );
+    assert!(outcome.stdout.contains("scipy 1."), "{}", outcome.stdout);
+    assert_eq!(columns(&banc), before + 1);
+    banc.session.undo().unwrap();
+    assert_eq!(columns(&banc), before);
+}

@@ -111,13 +111,15 @@ Chaque distribution contient :
   bibliothèques natives, provenance et texte du runtime réellement livré ;
 - `licenses/numpy/`, tous les textes livrés par la roue numpy, y compris
   ceux de ses composants natifs. Les `.dist-info/licenses` restent aussi
-  dans le runtime.
+  dans le runtime ;
+- `licenses/scipy/LICENSE.txt`, le texte de la roue scipy, qui reprend les
+  licences de ses composants natifs (OpenBLAS, libgfortran, libquadmath…).
 
 Les notices natives de Python viennent de l'archive complète correspondant au
 verrou, sont versionnées et leur mise à jour est décrite dans
 [`vendor/python/licenses/README.md`](../vendor/python/licenses/README.md).
 Le packaging refuse un jeu de notices qui ne correspond plus au verrou, ou
-un runtime sans les textes de CPython et numpy. Une livraison doit également
+un runtime sans les textes de CPython, numpy et scipy. Une livraison doit également
 fournir les sources correspondantes selon les licences applicables ; le
 fichier de notices n'est pas une archive de sources.
 
