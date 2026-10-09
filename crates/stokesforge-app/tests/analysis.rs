@@ -250,3 +250,91 @@ fn editing_keeps_the_metadata_the_user_gave_to_an_output() {
     let draft = edit.draft(project.tree()).unwrap();
     assert_eq!(draft.outputs[0].meta.long_name, "My own name");
 }
+
+#[test]
+fn preview_gestures_write_into_the_active_family() {
+    let f = fixture();
+    // Droite par deux points : le troisième remplace le plus ancien.
+    let mut form = AnalysisForm::new(&Preset::BaselineLine, series(&f), false);
+    for p in [(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)] {
+        form.add_point(p.0, p.1);
+    }
+    assert_eq!(form.setup.baseline.points, vec![(2.0, 2.0), (3.0, 3.0)]);
+    // Ancrages : triés par X.
+    let mut form = AnalysisForm::new(&Preset::BaselineAnchors, series(&f), false);
+    form.add_point(5.0, 1.0);
+    form.add_point(1.0, 2.0);
+    assert_eq!(form.setup.baseline.points, vec![(1.0, 2.0), (5.0, 1.0)]);
+    assert!(form.remove_near(5.2, 0.5));
+    assert!(!form.remove_near(9.0, 0.5), "trop loin");
+    assert_eq!(form.setup.baseline.points, vec![(1.0, 2.0)]);
+    // Zones : bornes remises dans l'ordre, une zone vide est ignorée.
+    let mut form = AnalysisForm::new(&Preset::BaselinePolynomial, series(&f), false);
+    form.add_zone(8.0, 2.0);
+    form.add_zone(4.0, 4.0);
+    assert_eq!(form.setup.baseline.zones, vec![(2.0, 8.0)]);
+    assert!(
+        form.remove_near(5.0, 0.0),
+        "une zone se retire par un point dedans"
+    );
+    // Plage d'ajustement : une seule.
+    let mut form = AnalysisForm::new(&Preset::Fit(Model::Linear), series(&f), false);
+    form.add_zone(1.0, 3.0);
+    form.add_zone(5.0, 9.0);
+    assert_eq!(form.setup.fit.range, Some((5.0, 9.0)));
+    // Pics : positions triées.
+    let mut form = AnalysisForm::new(&Preset::Peaks, series(&f), false);
+    form.add_point(7.0, 1.0);
+    form.add_point(3.0, 1.0);
+    let centers: Vec<f64> = form.setup.peaks.seeds.iter().map(|s| s.center).collect();
+    assert_eq!(centers, vec![3.0, 7.0]);
+}
+
+#[test]
+fn the_natural_tool_follows_the_family() {
+    use stokesforge_app::analysis::PreviewTool;
+    let f = fixture();
+    let tool = |preset: Preset| AnalysisForm::new(&preset, series(&f), false).tool;
+    assert_eq!(tool(Preset::BaselineAnchors), PreviewTool::Points);
+    assert_eq!(tool(Preset::BaselinePolynomial), PreviewTool::Zone);
+    assert_eq!(tool(Preset::Integrate), PreviewTool::Zone);
+    assert_eq!(tool(Preset::Peaks), PreviewTool::Points);
+}
+
+#[test]
+fn reference_candidates_exclude_the_processed_series_and_pair_their_x() {
+    use stokesforge_app::analysis::{aux_candidates, aux_for, series_points};
+    let mut f = fixture();
+    let sheet = f.project.tree().node(f.y).unwrap().parent().unwrap();
+    let other = f
+        .project
+        .add_column(sheet, None, Some("C"), Column::from_f64(&[1.0, 1.0, 1.0]))
+        .unwrap();
+    f.project
+        .set_column_meta(
+            f.x,
+            ColumnMeta {
+                role: stokesforge_core::ColumnRole::X,
+                ..ColumnMeta::default()
+            },
+        )
+        .unwrap();
+    let tree = f.project.tree();
+    let candidates = aux_candidates(tree, &series(&f));
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].0, other);
+    assert!(candidates[0].1.contains('C'), "{}", candidates[0].1);
+    assert_eq!(aux_for(tree, other).x, Some(f.x));
+    let (xs, ys) = series_points(tree, &series(&f)[0]);
+    assert_eq!((xs.len(), ys.len()), (21, 21));
+}
+
+#[test]
+fn value_labels_name_known_keys_and_keep_unknown_ones() {
+    use stokesforge_app::analysis::value_label;
+    i18n::set_language(Language::English);
+    assert_eq!(value_label("param.tau", None), "tau");
+    assert_eq!(value_label("stat.r_squared", None), "R²");
+    assert_eq!(value_label("peak.center", Some(2)), "Peak 2: center");
+    assert_eq!(value_label("something.new", None), "something.new");
+}

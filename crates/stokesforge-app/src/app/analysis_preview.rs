@@ -1,0 +1,660 @@
+//! L'aperçu de la fenêtre d'analyse (#181, maquettes M3 et M4) : la série
+//! montrée, le résultat du calcul en direct (ligne de base, ajustement, pics,
+//! résidus) et les repères posés (points, zones, positions de pics).
+//!
+//! L'aperçu se peint lui-même — il ne passe pas par `GraphView` : il n'a ni
+//! calque, ni légende, ni historique, et ses clics **écrivent dans le
+//! formulaire** (`AnalysisForm::add_point`, `add_zone`, `remove_near`), pas
+//! dans le modèle. Sa géométrie (`View`, `snap`) est pure et testée.
+//!
+//! # Gestes
+//!
+//! - outil *Points* : un clic pose un point ; **Maj** l'aimante sur la courbe
+//!   avec une moyenne locale de N points, **Maj + molette** règle N (M4 b) ;
+//! - outil *Zone* : glisser trace une zone ou une plage ;
+//! - outil *Zoom* : glisser cadre un rectangle ; molette : zoom autour du
+//!   curseur ; double clic : cadrage d'origine ;
+//! - clic droit : retire le repère visé.
+//!
+//! Le calcul de l'aperçu est mémorisé (formulaire + révision du modèle) : une
+//! image où rien ne change ne le refait pas.
+
+use std::sync::Arc;
+
+use eframe::egui;
+use stokesforge_core::{Computed, Tree};
+
+use crate::analysis::{
+    issue_message, series_points, series_rows, AnalysisForm, Issue, PreviewTool, AVERAGE_RANGE,
+};
+use crate::theme;
+use crate::tr;
+
+/// Le cadre de données visible : `[x0, x1] × [y0, y1]`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct View {
+    pub x0: f64,
+    pub x1: f64,
+    pub y0: f64,
+    pub y1: f64,
+}
+
+impl View {
+    /// Le cadre qui contient les valeurs finies de `xs` et `ys`, avec 5 % de
+    /// marge ; un cadre d'étendue nulle est élargi.
+    pub(super) fn around(xs: &[f64], ys: &[f64]) -> View {
+        fn bounds(values: &[f64]) -> (f64, f64) {
+            let mut lo = f64::INFINITY;
+            let mut hi = f64::NEG_INFINITY;
+            for v in values.iter().copied().filter(|v| v.is_finite()) {
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+            if lo > hi {
+                (0.0, 1.0)
+            } else if lo == hi {
+                (lo - 0.5, hi + 0.5)
+            } else {
+                let margin = (hi - lo) * 0.05;
+                (lo - margin, hi + margin)
+            }
+        }
+        let (x0, x1) = bounds(xs);
+        let (y0, y1) = bounds(ys);
+        View { x0, x1, y0, y1 }
+    }
+
+    pub(super) fn to_screen(self, rect: egui::Rect, x: f64, y: f64) -> egui::Pos2 {
+        let u = (x - self.x0) / (self.x1 - self.x0);
+        let v = (y - self.y0) / (self.y1 - self.y0);
+        egui::pos2(
+            rect.left() + (u as f32) * rect.width(),
+            rect.bottom() - (v as f32) * rect.height(),
+        )
+    }
+
+    pub(super) fn to_data(self, rect: egui::Rect, p: egui::Pos2) -> (f64, f64) {
+        let u = f64::from((p.x - rect.left()) / rect.width());
+        let v = f64::from((rect.bottom() - p.y) / rect.height());
+        (
+            self.x0 + u * (self.x1 - self.x0),
+            self.y0 + v * (self.y1 - self.y0),
+        )
+    }
+
+    /// Le cadre agrandi (`factor` > 1) ou rétréci autour de `anchor`, qui
+    /// reste au même endroit de l'écran.
+    pub(super) fn zoomed(self, anchor: (f64, f64), factor: f64) -> View {
+        let scale = |lo: f64, hi: f64, at: f64| (at + (lo - at) * factor, at + (hi - at) * factor);
+        let (x0, x1) = scale(self.x0, self.x1, anchor.0);
+        let (y0, y1) = scale(self.y0, self.y1, anchor.1);
+        View { x0, x1, y0, y1 }
+    }
+
+    /// Le cadre dont deux coins sont `a` et `b` (coordonnées de données).
+    pub(super) fn between(a: (f64, f64), b: (f64, f64)) -> View {
+        View {
+            x0: a.0.min(b.0),
+            x1: a.0.max(b.0),
+            y0: a.1.min(b.1),
+            y1: a.1.max(b.1),
+        }
+    }
+}
+
+/// Le point de la courbe le plus proche de `x`, avec Y moyenné sur `n` points
+/// centrés sur lui (aimantation de Maj, M4 b). `None` pour une courbe vide.
+pub(super) fn snap(xs: &[f64], ys: &[f64], x: f64, n: usize) -> Option<(f64, f64)> {
+    let nearest = xs
+        .iter()
+        .enumerate()
+        .min_by(|a, b| (a.1 - x).abs().total_cmp(&(b.1 - x).abs()))?
+        .0;
+    let half = n.max(1) / 2;
+    let lo = nearest.saturating_sub(half);
+    let hi = (nearest + half + 1).min(ys.len());
+    let window = &ys[lo..hi];
+    Some((
+        xs[nearest],
+        window.iter().sum::<f64>() / window.len() as f64,
+    ))
+}
+
+/// Le pas « rond » d'une graduation pour couvrir `span` en environ 5 pas.
+pub(super) fn tick_step(span: f64) -> f64 {
+    let raw = span / 5.0;
+    if !raw.is_finite() || raw <= 0.0 {
+        return 1.0;
+    }
+    let magnitude = 10f64.powf(raw.log10().floor());
+    let fraction = raw / magnitude;
+    let nice = if fraction < 1.5 {
+        1.0
+    } else if fraction < 3.5 {
+        2.0
+    } else if fraction < 7.5 {
+        5.0
+    } else {
+        10.0
+    };
+    nice * magnitude
+}
+
+fn format_tick(value: f64, step: f64) -> String {
+    let decimals = (-step.log10().floor()).max(0.0) as usize;
+    format!("{value:.decimals$}")
+}
+
+/// Ce que l'aperçu rend à la fenêtre : les valeurs de la série montrée, ou ce
+/// qui empêche de calculer.
+#[derive(Debug, Clone, Default)]
+pub(super) struct PreviewOutcome {
+    pub values: Vec<stokesforge_core::ResultValue>,
+    pub warnings: Vec<stokesforge_analysis::ops::Warning>,
+    pub skipped: usize,
+    pub issue: Option<Issue>,
+}
+
+#[derive(Clone)]
+struct PreviewCache {
+    form: AnalysisForm,
+    revision: u64,
+    result: Result<Computed, Issue>,
+}
+
+#[derive(Clone, Copy)]
+struct StoredView {
+    key: (usize, u64),
+    view: View,
+}
+
+/// Recadre l'aperçu sur ses données (bouton « Reset View »).
+pub(super) fn reset_view(ui: &mut egui::Ui, id: egui::Id) {
+    ui.data_mut(|d| d.remove::<StoredView>(id.with("view")));
+}
+
+/// Peint l'aperçu dans l'espace restant de `ui` et applique ses gestes au
+/// formulaire.
+pub(super) fn preview(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    form: &mut AnalysisForm,
+    tree: &Arc<Tree>,
+    revision: u64,
+) -> PreviewOutcome {
+    form.clamp_current();
+    let cache_id = id.with("cache");
+    let cached = ui.data_mut(|d| d.get_temp::<PreviewCache>(cache_id));
+    let cache = match cached {
+        Some(cache) if cache.form == *form && cache.revision == revision => cache,
+        _ => {
+            let cache = PreviewCache {
+                form: form.clone(),
+                revision,
+                result: form.preview(tree),
+            };
+            ui.data_mut(|d| d.insert_temp(cache_id, cache.clone()));
+            cache
+        }
+    };
+    let rank = form.preview_rank();
+    let outcome = match &cache.result {
+        Ok(computed) => PreviewOutcome {
+            values: computed
+                .results
+                .get(rank)
+                .map(|r| r.values.clone())
+                .unwrap_or_default(),
+            warnings: computed
+                .results
+                .get(rank)
+                .map(|r| r.warnings.clone())
+                .unwrap_or_default(),
+            skipped: computed.results.get(rank).map_or(0, |r| r.skipped),
+            issue: None,
+        },
+        Err(issue) => PreviewOutcome {
+            issue: Some(issue.clone()),
+            ..PreviewOutcome::default()
+        },
+    };
+
+    let Some(series) = form.series.get(form.current).cloned() else {
+        return outcome;
+    };
+    let (xs, ys) = series_points(tree, &series);
+    let (rows_x, _) = series_rows(tree, &series);
+    let computed = cache.result.as_ref().ok();
+    let column = |key: &str, index: Option<usize>| -> Option<&Vec<f64>> {
+        computed?
+            .columns
+            .iter()
+            .find(|c| c.series == rank && c.key == key && c.index == index)
+            .map(|c| &c.data)
+    };
+
+    // Le cadre : mémorisé par série, recadré au double clic.
+    let view_id = id.with("view");
+    let key = (form.current, series.y.raw());
+    let mut view = ui
+        .data_mut(|d| d.get_temp::<StoredView>(view_id))
+        .filter(|s| s.key == key)
+        .map(|s| s.view)
+        .unwrap_or_else(|| {
+            let mut all_y = ys.clone();
+            for k in ["corrected", "deconvolved"] {
+                if let Some(c) = column(k, None) {
+                    all_y.extend(c.iter().copied());
+                }
+            }
+            View::around(&xs, &all_y)
+        });
+
+    let dark = ui.visuals().dark_mode;
+    let size = ui.available_size().max(egui::vec2(120.0, 120.0));
+    let (outer, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+    let residuals = column("residuals", None);
+    let plot_rect = {
+        let mut r = outer.shrink2(egui::vec2(8.0, 4.0));
+        r.min.x += 44.0;
+        r.max.y -= 18.0;
+        if residuals.is_some() {
+            r.max.y -= r.height() * 0.22;
+        }
+        r
+    };
+    let painter = ui.painter_at(outer);
+    painter.rect_filled(outer, 2.0, ui.visuals().extreme_bg_color);
+    painter.rect_stroke(
+        plot_rect,
+        0.0,
+        ui.visuals().widgets.noninteractive.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+    let text_color = ui.visuals().text_color();
+    let font = egui::FontId::proportional(11.0);
+
+    // Graduations.
+    let step_x = tick_step(view.x1 - view.x0);
+    let step_y = tick_step(view.y1 - view.y0);
+    let mut x = (view.x0 / step_x).ceil() * step_x;
+    while x <= view.x1 {
+        let p = view.to_screen(plot_rect, x, view.y0);
+        painter.text(
+            egui::pos2(p.x, plot_rect.bottom() + 2.0),
+            egui::Align2::CENTER_TOP,
+            format_tick(x, step_x),
+            font.clone(),
+            text_color,
+        );
+        x += step_x;
+    }
+    let mut y = (view.y0 / step_y).ceil() * step_y;
+    while y <= view.y1 {
+        let p = view.to_screen(plot_rect, view.x0, y);
+        painter.text(
+            egui::pos2(plot_rect.left() - 3.0, p.y),
+            egui::Align2::RIGHT_CENTER,
+            format_tick(y, step_y),
+            font.clone(),
+            text_color,
+        );
+        y += step_y;
+    }
+
+    let plot = painter.with_clip_rect(plot_rect);
+    let curve = |plot: &egui::Painter, ys: &[f64], stroke: egui::Stroke| {
+        let mut run: Vec<egui::Pos2> = Vec::new();
+        let flush = |run: &mut Vec<egui::Pos2>| {
+            if run.len() > 1 {
+                plot.add(egui::Shape::line(std::mem::take(run), stroke));
+            } else {
+                run.clear();
+            }
+        };
+        for (x, y) in rows_x.iter().zip(ys) {
+            if x.is_finite() && y.is_finite() {
+                run.push(view.to_screen(plot_rect, *x, *y));
+            } else {
+                flush(&mut run);
+            }
+        }
+        flush(&mut run);
+    };
+
+    // Zones et plages.
+    let frame = view;
+    let band = move |plot: &egui::Painter, a: f64, b: f64| {
+        let l = frame.to_screen(plot_rect, a, frame.y0).x;
+        let r = frame.to_screen(plot_rect, b, frame.y0).x;
+        plot.rect_filled(
+            egui::Rect::from_x_y_ranges(l..=r, plot_rect.y_range()),
+            0.0,
+            theme::preview_zone_fill(),
+        );
+    };
+    for (a, b) in zones_of(form) {
+        band(&plot, a, b);
+    }
+
+    // Données, puis résultats.
+    let data_stroke = egui::Stroke::new(1.2, text_color);
+    {
+        let (_, all_y) = series_rows(tree, &series);
+        curve(&plot, &all_y, data_stroke);
+    }
+    let helper = egui::Stroke::new(1.5, theme::preview_helper_color(dark));
+    let result = egui::Stroke::new(1.8, theme::preview_result_color(dark));
+    for k in ["baseline", "background"] {
+        if let Some(c) = column(k, None) {
+            curve(&plot, c, helper);
+        }
+    }
+    for k in ["fit", "corrected", "peaks_sum", "deconvolved"] {
+        if let Some(c) = column(k, None) {
+            curve(&plot, c, result);
+        }
+    }
+    if let Some(Ok(computed)) = Some(&cache.result) {
+        for c in computed
+            .columns
+            .iter()
+            .filter(|c| c.series == rank && c.key == "peak")
+        {
+            let index = c.index.unwrap_or(1);
+            curve(
+                &plot,
+                &c.data,
+                egui::Stroke::new(1.0, theme::preview_peak_color(index)),
+            );
+        }
+    }
+
+    // Repères posés.
+    let marker = theme::preview_marker_color();
+    for (px, py) in marks_of(form) {
+        let p = view.to_screen(plot_rect, px, py);
+        plot.circle(p, 4.0, marker, egui::Stroke::new(1.0, text_color));
+    }
+    for cx in seeds_of(form) {
+        let top = view.to_screen(plot_rect, cx, view.y1);
+        let bottom = view.to_screen(plot_rect, cx, view.y0);
+        plot.line_segment([top, bottom], egui::Stroke::new(1.0, marker));
+    }
+
+    // Résidus sous la courbe.
+    if let Some(res) = residuals {
+        let strip = egui::Rect::from_min_max(
+            egui::pos2(plot_rect.left(), plot_rect.bottom() + 18.0),
+            egui::pos2(plot_rect.right(), outer.bottom() - 4.0),
+        );
+        let bound = res
+            .iter()
+            .copied()
+            .filter(|v| v.is_finite())
+            .fold(0.0_f64, |m, v| m.max(v.abs()))
+            .max(f64::MIN_POSITIVE);
+        let sub = View {
+            x0: view.x0,
+            x1: view.x1,
+            y0: -bound * 1.1,
+            y1: bound * 1.1,
+        };
+        painter.rect_stroke(
+            strip,
+            0.0,
+            ui.visuals().widgets.noninteractive.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        let clip = painter.with_clip_rect(strip);
+        let zero = sub.to_screen(strip, view.x0, 0.0).y;
+        clip.hline(strip.x_range(), zero, egui::Stroke::new(0.5, text_color));
+        let mut run: Vec<egui::Pos2> = Vec::new();
+        for (x, r) in rows_x.iter().zip(res) {
+            if x.is_finite() && r.is_finite() {
+                run.push(sub.to_screen(strip, *x, *r));
+            } else if run.len() > 1 {
+                clip.add(egui::Shape::line(std::mem::take(&mut run), result));
+            } else {
+                run.clear();
+            }
+        }
+        if run.len() > 1 {
+            clip.add(egui::Shape::line(run, result));
+        }
+        painter.text(
+            egui::pos2(strip.left() + 3.0, strip.top() + 1.0),
+            egui::Align2::LEFT_TOP,
+            tr!("analysis-preview-residuals"),
+            font.clone(),
+            text_color,
+        );
+    }
+
+    // Ce qui empêche de calculer : dit au centre de l'aperçu.
+    if let Some(issue) = &outcome.issue {
+        plot.text(
+            plot_rect.center_top() + egui::vec2(0.0, 8.0),
+            egui::Align2::CENTER_TOP,
+            issue_message(issue),
+            egui::FontId::proportional(13.0),
+            theme::preview_result_color(dark),
+        );
+    }
+
+    // Gestes.
+    let shift = ui.input(|i| i.modifiers.shift);
+    let hover = response.hover_pos().filter(|p| plot_rect.contains(*p));
+    if let Some(pos) = hover {
+        let (hx, hy) = view.to_data(plot_rect, pos);
+        let mut label = format!("x = {hx:.6}\ny = {hy:.6}");
+        if shift && form.tool == PreviewTool::Points {
+            if let Some((sx, sy)) = snap(&xs, &ys, hx, form.average) {
+                let p = view.to_screen(plot_rect, sx, sy);
+                plot.circle_stroke(p, 6.0, egui::Stroke::new(1.5, marker));
+                label = format!(
+                    "x = {sx:.6}\ny = {sy:.6}\n{}",
+                    tr!(
+                        "analysis-preview-average",
+                        count = i64::try_from(form.average).unwrap_or(i64::MAX)
+                    )
+                );
+            }
+        }
+        painter.text(
+            plot_rect.right_top() + egui::vec2(-4.0, 4.0),
+            egui::Align2::RIGHT_TOP,
+            label,
+            font.clone(),
+            text_color,
+        );
+        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+        if scroll != 0.0 {
+            if shift {
+                let step = if scroll > 0.0 { 2 } else { -2 };
+                let next = (form.average as i64 + step)
+                    .clamp(*AVERAGE_RANGE.start() as i64, *AVERAGE_RANGE.end() as i64);
+                form.average = next as usize;
+            } else {
+                let factor = f64::from(-scroll * 0.004).exp();
+                view = view.zoomed((hx, hy), factor);
+            }
+        }
+    }
+
+    let origin = ui.input(|i| i.pointer.press_origin());
+    if response.dragged_by(egui::PointerButton::Primary) {
+        if let (Some(from), Some(to)) = (origin, response.interact_pointer_pos()) {
+            match form.tool {
+                PreviewTool::Zone => {
+                    band(
+                        &plot,
+                        view.to_data(plot_rect, from).0,
+                        view.to_data(plot_rect, to).0,
+                    );
+                }
+                PreviewTool::Zoom => {
+                    plot.rect_stroke(
+                        egui::Rect::from_two_pos(from, to),
+                        0.0,
+                        egui::Stroke::new(1.0, marker),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                PreviewTool::Points => {}
+            }
+        }
+    }
+    if response.drag_stopped_by(egui::PointerButton::Primary) {
+        if let (Some(from), Some(to)) = (origin, response.interact_pointer_pos()) {
+            let a = view.to_data(plot_rect, from);
+            let b = view.to_data(plot_rect, to);
+            match form.tool {
+                PreviewTool::Zone => form.add_zone(a.0, b.0),
+                PreviewTool::Zoom if (from - to).abs().max_elem() > 4.0 => {
+                    view = View::between(a, b);
+                }
+                _ => {}
+            }
+        }
+    }
+    if response.clicked_by(egui::PointerButton::Primary) && form.tool == PreviewTool::Points {
+        if let Some(pos) = hover {
+            let (cx, cy) = view.to_data(plot_rect, pos);
+            let (px, py) = if shift {
+                snap(&xs, &ys, cx, form.average).unwrap_or((cx, cy))
+            } else {
+                (cx, cy)
+            };
+            form.add_point(px, py);
+        }
+    }
+    if response.secondary_clicked() {
+        if let Some(pos) = hover {
+            let (cx, _) = view.to_data(plot_rect, pos);
+            let tolerance = (view.x1 - view.x0) * 8.0 / f64::from(plot_rect.width());
+            form.remove_near(cx, tolerance);
+        }
+    }
+    if response.double_clicked() {
+        ui.data_mut(|d| d.remove::<StoredView>(view_id));
+    } else {
+        ui.data_mut(|d| d.insert_temp(view_id, StoredView { key, view }));
+    }
+    outcome
+}
+
+/// Les zones, plages et fenêtres du formulaire à teinter.
+fn zones_of(form: &AnalysisForm) -> Vec<(f64, f64)> {
+    use stokesforge_analysis::ops::OperationKind as K;
+    let s = &form.setup;
+    match form.kind {
+        K::Baseline => s.baseline.zones.clone(),
+        K::Integrate => s.integrate.ranges.clone(),
+        K::Fit => s.fit.range.into_iter().collect(),
+        K::Peaks => s.peaks.range.into_iter().collect(),
+        K::Reconvolution => s.reconv.spec.window.into_iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Les points posés (droite, points d'ancrage).
+fn marks_of(form: &AnalysisForm) -> Vec<(f64, f64)> {
+    use crate::analysis::BaselineShape;
+    use stokesforge_analysis::ops::OperationKind as K;
+    match form.kind {
+        K::Baseline if form.setup.baseline.shape != BaselineShape::Zones => {
+            form.setup.baseline.points.clone()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Les positions de départ des pics.
+fn seeds_of(form: &AnalysisForm) -> Vec<f64> {
+    use stokesforge_analysis::ops::OperationKind as K;
+    match form.kind {
+        K::Peaks => form.setup.peaks.seeds.iter().map(|s| s.center).collect(),
+        _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn le_cadre_entoure_les_valeurs_finies_avec_une_marge() {
+        let view = View::around(&[0.0, 10.0, f64::NAN], &[1.0, 3.0]);
+        assert_eq!((view.x0, view.x1), (-0.5, 10.5));
+        assert!((view.y0 - 0.9).abs() < 1e-12 && (view.y1 - 3.1).abs() < 1e-12);
+        let flat = View::around(&[2.0, 2.0], &[]);
+        assert_eq!((flat.x0, flat.x1), (1.5, 2.5));
+        assert_eq!(
+            (flat.y0, flat.y1),
+            (0.0, 1.0),
+            "aucune donnée : cadre unité"
+        );
+    }
+
+    #[test]
+    fn ecran_et_donnees_sont_des_fonctions_inverses() {
+        let view = View {
+            x0: 0.0,
+            x1: 10.0,
+            y0: -1.0,
+            y1: 1.0,
+        };
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 100.0));
+        let p = view.to_screen(rect, 2.5, 0.5);
+        let (x, y) = view.to_data(rect, p);
+        assert!((x - 2.5).abs() < 1e-4 && (y - 0.5).abs() < 1e-4);
+        assert_eq!(view.to_screen(rect, 0.0, -1.0), rect.left_bottom());
+        assert_eq!(view.to_screen(rect, 10.0, 1.0), rect.right_top());
+    }
+
+    #[test]
+    fn le_zoom_garde_le_point_ancre_fixe() {
+        let view = View {
+            x0: 0.0,
+            x1: 10.0,
+            y0: 0.0,
+            y1: 10.0,
+        };
+        let zoomed = view.zoomed((2.0, 4.0), 0.5);
+        assert_eq!((zoomed.x0, zoomed.x1), (1.0, 6.0));
+        assert_eq!((zoomed.y0, zoomed.y1), (2.0, 7.0));
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 100.0));
+        let before = view.to_screen(rect, 2.0, 4.0);
+        let after = zoomed.to_screen(rect, 2.0, 4.0);
+        assert!((before - after).length() < 1e-3, "l'ancre reste à l'écran");
+        // L'ancre garde sa position **relative** : (2-0)/10 == (2-1)/5.
+        assert!(
+            ((2.0 - view.x0) / (view.x1 - view.x0) - (2.0 - zoomed.x0) / (zoomed.x1 - zoomed.x0))
+                .abs()
+                < 1e-12
+        );
+    }
+
+    #[test]
+    fn l_aimantation_prend_le_point_le_plus_proche_et_moyenne_autour() {
+        let xs = [0.0, 1.0, 2.0, 3.0, 4.0];
+        let ys = [10.0, 20.0, 60.0, 20.0, 10.0];
+        assert_eq!(snap(&xs, &ys, 2.2, 1), Some((2.0, 60.0)));
+        let (x, y) = snap(&xs, &ys, 2.2, 3).unwrap();
+        assert_eq!(x, 2.0);
+        assert!((y - 100.0 / 3.0).abs() < 1e-12);
+        // Au bord, la fenêtre se tronque au lieu de déborder.
+        assert_eq!(snap(&xs, &ys, -5.0, 3), Some((0.0, 15.0)));
+        assert_eq!(snap(&[], &[], 1.0, 3), None);
+    }
+
+    #[test]
+    fn les_graduations_sont_rondes() {
+        assert_eq!(tick_step(10.0), 2.0);
+        assert_eq!(tick_step(1.0), 0.2);
+        assert_eq!(tick_step(0.0), 1.0);
+        assert_eq!(format_tick(0.4, 0.2), "0.4");
+        assert_eq!(format_tick(6.0, 2.0), "6");
+    }
+}

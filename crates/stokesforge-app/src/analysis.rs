@@ -449,6 +449,7 @@ impl AnalysisForm {
             average: DEFAULT_AVERAGE,
         };
         form.apply_default_auto();
+        form.tool = form.natural_tool();
         form
     }
 
@@ -986,5 +987,289 @@ pub fn issue_message(issue: &Issue) -> String {
         Issue::BadModel(detail) => tr!("analysis-issue-bad-model", detail = detail.as_str()),
         Issue::MissingColumn => tr!("analysis-issue-missing-column"),
         Issue::Failed(error) => crate::errors::analysis::error_message(error),
+    }
+}
+
+impl ReconvSetup {
+    /// Les noms des paramètres, dans l'ordre des réglages : fond, une
+    /// amplitude et une durée de vie par composante, puis le décalage.
+    pub fn param_names(&self) -> Vec<String> {
+        let mut names = vec!["bkg".to_string()];
+        for i in 1..=self.spec.components {
+            names.push(format!("A{i}"));
+            names.push(format!("tau{i}"));
+        }
+        names.push("shift".to_string());
+        names
+    }
+}
+
+impl AnalysisForm {
+    /// L'outil qui sert le plus souvent à la famille et à la forme courantes :
+    /// des zones pour les plages et le fond, des points sinon.
+    pub fn natural_tool(&self) -> PreviewTool {
+        match self.kind {
+            OperationKind::Baseline if self.setup.baseline.shape == BaselineShape::Zones => {
+                PreviewTool::Zone
+            }
+            OperationKind::Integrate | OperationKind::Fit | OperationKind::Reconvolution => {
+                PreviewTool::Zone
+            }
+            _ => PreviewTool::Points,
+        }
+    }
+
+    /// Un clic de l'outil « points » en `(x, y)` : un point d'ancrage ou de
+    /// droite, ou la position de départ d'un pic.
+    pub fn add_point(&mut self, x: f64, y: f64) {
+        match self.kind {
+            OperationKind::Baseline => {
+                let b = &mut self.setup.baseline;
+                match b.shape {
+                    BaselineShape::TwoPoints => {
+                        b.points.push((x, y));
+                        if b.points.len() > 2 {
+                            b.points.remove(0);
+                        }
+                    }
+                    BaselineShape::Anchors => {
+                        b.points.push((x, y));
+                        b.points.sort_by(|p, q| p.0.total_cmp(&q.0));
+                    }
+                    BaselineShape::Zones => {}
+                }
+            }
+            OperationKind::Peaks => {
+                self.setup.peaks.seeds.push(PeakSeed {
+                    center: x,
+                    height: None,
+                    fwhm: None,
+                });
+                self.setup
+                    .peaks
+                    .seeds
+                    .sort_by(|p, q| p.center.total_cmp(&q.center));
+            }
+            _ => {}
+        }
+    }
+
+    /// Une zone tracée de `a` à `b` : zone de fond, plage d'intégration,
+    /// plage d'ajustement ou fenêtre de reconvolution.
+    pub fn add_zone(&mut self, a: f64, b: f64) {
+        let range = (a.min(b), a.max(b));
+        if range.0 == range.1 {
+            return;
+        }
+        match self.kind {
+            OperationKind::Baseline if self.setup.baseline.shape == BaselineShape::Zones => {
+                self.setup.baseline.zones.push(range);
+            }
+            OperationKind::Integrate => self.setup.integrate.ranges.push(range),
+            OperationKind::Fit => self.setup.fit.range = Some(range),
+            OperationKind::Peaks => self.setup.peaks.range = Some(range),
+            OperationKind::Reconvolution => self.setup.reconv.spec.window = Some(range),
+            _ => {}
+        }
+    }
+
+    /// Retire ce que le clic droit vise en `x` : le point ou le pic à moins de
+    /// `tolerance`, ou la zone qui contient `x`. Rend vrai si quelque chose a
+    /// été retiré.
+    pub fn remove_near(&mut self, x: f64, tolerance: f64) -> bool {
+        fn nearest(values: impl Iterator<Item = f64>, x: f64, tolerance: f64) -> Option<usize> {
+            values
+                .enumerate()
+                .map(|(i, v)| (i, (v - x).abs()))
+                .filter(|(_, d)| *d <= tolerance)
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(i, _)| i)
+        }
+        fn containing(ranges: &[(f64, f64)], x: f64) -> Option<usize> {
+            ranges.iter().position(|(a, b)| *a <= x && x <= *b)
+        }
+        match self.kind {
+            OperationKind::Baseline => {
+                let b = &mut self.setup.baseline;
+                if b.shape == BaselineShape::Zones {
+                    containing(&b.zones, x).map(|i| b.zones.remove(i)).is_some()
+                } else {
+                    nearest(b.points.iter().map(|p| p.0), x, tolerance)
+                        .map(|i| b.points.remove(i))
+                        .is_some()
+                }
+            }
+            OperationKind::Peaks => {
+                let p = &mut self.setup.peaks;
+                if let Some(i) = nearest(p.seeds.iter().map(|s| s.center), x, tolerance) {
+                    p.seeds.remove(i);
+                    true
+                } else if p.range.is_some_and(|(a, b)| a <= x && x <= b) {
+                    p.range = None;
+                    true
+                } else {
+                    false
+                }
+            }
+            OperationKind::Integrate => {
+                let r = &mut self.setup.integrate.ranges;
+                containing(r, x).map(|i| r.remove(i)).is_some()
+            }
+            OperationKind::Fit => {
+                let hit = self.setup.fit.range.is_some_and(|(a, b)| a <= x && x <= b);
+                if hit {
+                    self.setup.fit.range = None;
+                }
+                hit
+            }
+            OperationKind::Reconvolution => {
+                let hit = self
+                    .setup
+                    .reconv
+                    .spec
+                    .window
+                    .is_some_and(|(a, b)| a <= x && x <= b);
+                if hit {
+                    self.setup.reconv.spec.window = None;
+                }
+                hit
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Les valeurs de X et de Y de **chaque ligne** d'une série, `NaN` pour une
+/// cellule vide ou textuelle ; sans colonne X, le numéro de ligne à partir de 1
+/// (comme le calcul).
+pub fn series_rows(tree: &Tree, series: &SeriesRef) -> (Vec<f64>, Vec<f64>) {
+    let numbers = |id: NodeId| -> Vec<f64> {
+        tree.node(id)
+            .and_then(|n| n.as_column())
+            .map(|c| (0..c.len()).map(|r| c.values().number_at(r)).collect())
+            .unwrap_or_default()
+    };
+    let ys = numbers(series.y);
+    let mut xs = match series.x {
+        Some(x) => numbers(x),
+        None => (1..=ys.len()).map(|r| r as f64).collect(),
+    };
+    xs.resize(ys.len(), f64::NAN);
+    (xs, ys)
+}
+
+/// Les points `(x, y)` finis d'une série, dans l'ordre des lignes.
+pub fn series_points(tree: &Tree, series: &SeriesRef) -> (Vec<f64>, Vec<f64>) {
+    let (xs, ys) = series_rows(tree, series);
+    xs.into_iter()
+        .zip(ys)
+        .filter(|(x, y)| x.is_finite() && y.is_finite())
+        .unzip()
+}
+
+/// Le nom d'une série pour la fenêtre : « Feuille / nom long (B) ».
+pub fn series_label(tree: &Tree, series: &SeriesRef) -> String {
+    let short = short_name(tree, series.y);
+    let long = long_name(tree, series.y);
+    if long == short {
+        short
+    } else {
+        format!("{long} ({short})")
+    }
+}
+
+/// Les colonnes Y que la fenêtre propose comme référence ou comme réponse
+/// instrumentale : celles du classeur de la première série, hors les séries
+/// traitées elles-mêmes. Le nom dit la feuille.
+pub fn aux_candidates(tree: &Tree, series: &[SeriesRef]) -> Vec<(NodeId, String)> {
+    let Some(first) = series.first() else {
+        return Vec::new();
+    };
+    let Some(book) = tree
+        .node(first.y)
+        .and_then(|n| n.parent())
+        .and_then(|sheet| tree.node(sheet))
+        .and_then(|n| n.parent())
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for sheet in tree.children(book).unwrap_or_default().iter().copied() {
+        let sheet_name = short_name(tree, sheet);
+        for column in tree.children(sheet).unwrap_or_default().iter().copied() {
+            let is_y = tree
+                .node(column)
+                .and_then(|n| n.as_column())
+                .is_some_and(|c| c.meta().role == stokesforge_core::ColumnRole::Y);
+            if is_y && !series.iter().any(|s| s.y == column) {
+                out.push((
+                    column,
+                    format!("{sheet_name} / {}", series_label_of(tree, column)),
+                ));
+            }
+        }
+    }
+    out
+}
+
+fn series_label_of(tree: &Tree, column: NodeId) -> String {
+    series_label(
+        tree,
+        &SeriesRef {
+            x: None,
+            y: column,
+            sigma: None,
+        },
+    )
+}
+
+/// La colonne annexe `y` avec le X le plus proche à sa gauche dans sa feuille.
+pub fn aux_for(tree: &Tree, y: NodeId) -> AuxRef {
+    let x = tree.node(y).and_then(|n| n.parent()).and_then(|sheet| {
+        let columns = tree.children(sheet).ok()?;
+        let at = columns.iter().position(|c| *c == y)?;
+        columns[..at].iter().rev().copied().find(|c| {
+            tree.node(*c)
+                .and_then(|n| n.as_column())
+                .is_some_and(|col| col.meta().role == stokesforge_core::ColumnRole::X)
+        })
+    });
+    AuxRef { x, y }
+}
+
+/// Le libellé d'une valeur calculée (`area`, `param.tau`, `stat.r_squared`…),
+/// avec son rang pour les valeurs par plage ou par pic. Une clé inconnue
+/// s'affiche brute : rien ne disparaît.
+pub fn value_label(key: &str, index: Option<usize>) -> String {
+    let n = index.map_or(0, |i| i64::try_from(i).unwrap_or(i64::MAX));
+    if let Some(name) = key.strip_prefix("param.") {
+        return name.to_string();
+    }
+    match key {
+        "area" => tr!("analysis-value-area", index = n),
+        "area.from" => tr!("analysis-value-area-from", index = n),
+        "area.to" => tr!("analysis-value-area-to", index = n),
+        "area.total" => tr!("analysis-value-area-total"),
+        "count.out_of_reference" => tr!("analysis-value-out-of-reference"),
+        "stat.points" => tr!("analysis-value-points"),
+        "stat.r_squared" => tr!("analysis-value-r-squared"),
+        "stat.reduced_chi2" => tr!("analysis-value-reduced-chi2"),
+        "stat.dof" => tr!("analysis-value-dof"),
+        "stat.tau_amplitude" => tr!("analysis-value-tau-amplitude"),
+        "stat.tau_intensity" => tr!("analysis-value-tau-intensity"),
+        "stat.noise_ratio" => tr!("analysis-value-noise-ratio"),
+        "baseline.points" => tr!("analysis-value-baseline-points"),
+        "baseline.slope" => tr!("analysis-value-baseline-slope"),
+        "baseline.intercept" => tr!("analysis-value-baseline-intercept"),
+        "peak.height" => tr!("analysis-value-peak-height", index = n),
+        "peak.center" => tr!("analysis-value-peak-center", index = n),
+        "peak.fwhm" => tr!("analysis-value-peak-fwhm", index = n),
+        "peak.fwhm_gauss" => tr!("analysis-value-peak-fwhm-gauss", index = n),
+        "peak.fwhm_lorentz" => tr!("analysis-value-peak-fwhm-lorentz", index = n),
+        "peak.area" => tr!("analysis-value-peak-area", index = n),
+        "peak.area_percent" => tr!("analysis-value-peak-area-percent", index = n),
+        "background.y0" => tr!("analysis-value-background-y0"),
+        "background.slope" => tr!("analysis-value-background-slope"),
+        other => other.to_string(),
     }
 }
