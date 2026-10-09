@@ -1089,6 +1089,17 @@ fn group_rename_of(
         .filter(|rename| rename.target == target)
 }
 
+/// Pour les tests des autres surfaces (raccourcis du graphe) : un renommage
+/// du groupe `target` est-il en attente ?
+#[cfg(test)]
+pub(super) fn group_rename_pending(
+    ctx: &egui::Context,
+    graph: NodeId,
+    target: stokesforge_plot::SeriesGroupRef,
+) -> bool {
+    group_rename_of(ctx, graph, target).is_some()
+}
+
 /// Ouvre l'éditeur du nom du groupe `group` dans l'arbre.
 pub(super) fn open_group_name_editor(
     ctx: &egui::Context,
