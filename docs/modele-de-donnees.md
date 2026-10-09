@@ -206,7 +206,9 @@ couleurs enregistrées, avec un `NodeId` du même allocateur (jamais réutilisé
   (une entrée a disparu), `Failed` (le calcul échoue). Une sortie supprimée
   reste pendante et se relit « sortie supprimée » ; supprimer une entrée n'édite
   pas les calculs qui la citent.
-- Une colonne calculée est **en lecture seule** (`CoreError::CalculatedColumnReadOnly`).
+- Une colonne calculée est **en lecture seule** pour les cellules, le type et la
+  suppression de cellules (`CoreError::CalculatedColumnReadOnly`) ; ses métadonnées
+  restent éditables, hors formule.
 - Écriture : commandes ([`commandes-et-historique.md`](commandes-et-historique.md)) ;
   recalcul ciblé par empreinte, comme les formules (invariant 11) ; fichier :
   [`persistance.md`](persistance.md).

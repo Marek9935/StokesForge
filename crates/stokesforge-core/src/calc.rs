@@ -23,7 +23,10 @@
 //! devient pendante, et c'est la lecture qui la traite. Une **entrée**
 //! supprimée rend le calcul périmé ([`Staleness::InputMissing`]) ; une
 //! **sortie** supprimée reste dans `outputs` avec `column` pointant un nœud
-//! absent, et se relit « sortie supprimée » (M8 C).
+//! absent, et se relit « sortie supprimée » (M8 C). Une seule exception, pour
+//! que rien ne traîne : `Project::remove` retire le calcul dont **toutes** les
+//! colonnes Y d'entrée ont disparu (annuler la suppression le ramène avec
+//! l'arbre).
 //!
 //! # Ce qui est écrit hors historique
 //!

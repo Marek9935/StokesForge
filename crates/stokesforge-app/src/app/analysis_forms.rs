@@ -23,10 +23,19 @@ use crate::analysis::{
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::{theme, tr};
 
-/// Un nombre réel modifiable, sans bornes.
+/// Un nombre réel modifiable, sans bornes mais **fini** : « inf » ou « nan »
+/// ne s'écrivent pas dans le fichier (ils y deviennent `null`) et feraient
+/// perdre le calcul au rechargement.
 fn number(ui: &mut egui::Ui, value: &mut f64) -> bool {
-    ui.add(egui::DragValue::new(value).max_decimals(8).speed(0.01))
-        .changed()
+    let before = *value;
+    let changed = ui
+        .add(egui::DragValue::new(value).max_decimals(8).speed(0.01))
+        .changed();
+    if !value.is_finite() {
+        *value = before;
+        return false;
+    }
+    changed
 }
 
 /// Un nombre facultatif : un champ texte vide vaut « automatique ». Le texte en
@@ -47,7 +56,12 @@ fn optional_number(ui: &mut egui::Ui, id: egui::Id, value: &mut Option<f64>) -> 
         let parsed = if text.trim().is_empty() {
             Some(None)
         } else {
-            text.trim().replace(',', ".").parse::<f64>().ok().map(Some)
+            text.trim()
+                .replace(',', ".")
+                .parse::<f64>()
+                .ok()
+                .filter(|v| v.is_finite())
+                .map(Some)
         };
         if let Some(next) = parsed {
             changed = next != *value;

@@ -253,6 +253,9 @@ d'opération est une donnée, `OperationKind`).
 - `RemoveCalculation { with_columns: false }` « détache » : les colonnes restent,
   ordinaires et de nouveau éditables.
 - Une colonne produite par un calcul est **en lecture seule** pour les commandes de
-  cellules (`CoreError::CalculatedColumnReadOnly`, contrôle de `check_writable_cells`).
+  cellules, de type et de suppression de cellules (`CoreError::CalculatedColumnReadOnly`,
+  `check_writable_cells` et `check_not_calculated`). Seuls restent permis le nom, l'unité
+  et les autres métadonnées (hors formule) ; un recalcul dont la sortie refuserait quand
+  même le résultat marque le calcul `Failed(OutputUnwritable)`.
 - Le recalcul automatique (`Project::refresh_calculation`, côté session) ne passe pas
   par l'historique : c'est une mise à jour dérivée, comme le recalcul des formules.

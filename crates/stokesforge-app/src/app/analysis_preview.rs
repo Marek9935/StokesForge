@@ -184,15 +184,16 @@ pub(super) fn preview(
 ) -> PreviewOutcome {
     form.clamp_current();
     let cache_id = id.with("cache");
-    let cached = ui.data_mut(|d| d.get_temp::<PreviewCache>(cache_id));
+    // Un `Arc` : relire le cache à chaque image ne copie pas les courbes.
+    let cached = ui.data_mut(|d| d.get_temp::<Arc<PreviewCache>>(cache_id));
     let cache = match cached {
-        Some(cache) if cache.form == *form && cache.revision == revision => cache,
+        Some(cache) if cache.form.same_preview(form) && cache.revision == revision => cache,
         _ => {
-            let cache = PreviewCache {
+            let cache = Arc::new(PreviewCache {
                 form: form.clone(),
                 revision,
                 result: form.preview(tree),
-            };
+            });
             ui.data_mut(|d| d.insert_temp(cache_id, cache.clone()));
             cache
         }

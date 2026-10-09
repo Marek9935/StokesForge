@@ -5,9 +5,11 @@
 //! ce crate reste sans dépendance (donc sans `serde`), et la persistance, qui
 //! a déjà `serde_json`, convertit un [`Tree`] en JSON en une trentaine de
 //! lignes. Une opération nouvelle (ou un réglage nouveau) ne change donc **pas**
-//! le schéma du fichier : un champ absent reprend sa valeur par défaut à la
-//! lecture, un champ inconnu est ignoré (invariant 10 : un défaut de donnée
-//! dégrade, il ne plante pas).
+//! le schéma du fichier : un champ **facultatif** absent (booléens, listes,
+//! plages) reprend sa valeur par défaut à la lecture, un champ inconnu est
+//! ignoré ; un champ **essentiel** (`op`, `under`, `shift_initial`,
+//! `center`…) est obligatoire et son absence écarte le calcul (invariant 10 :
+//! un défaut de donnée dégrade, il ne plante pas).
 
 use crate::baseline::{BaselineMethod, BaselineOp, Interpolation};
 use crate::correct::CorrectOp;

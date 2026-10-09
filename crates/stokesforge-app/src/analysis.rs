@@ -295,9 +295,14 @@ impl ReconvSetup {
     }
 
     /// Ajuste la longueur de la liste des réglages au nombre de composantes.
+    /// Le décalage est le **dernier** paramètre : on le met de côté, on
+    /// redimensionne les composantes, puis on le remet en queue — sinon ses
+    /// réglages (départ, fixé, bornes) glisseraient sur la composante ajoutée.
     pub fn resize_params(&mut self) {
         let count = self.param_count();
-        self.spec.params.resize(count, ParamSetting::default());
+        let shift = self.spec.params.pop().unwrap_or_default();
+        self.spec.params.resize(count - 1, ParamSetting::default());
+        self.spec.params.push(shift);
     }
 }
 
@@ -453,6 +458,17 @@ impl AnalysisForm {
         form
     }
 
+    /// Les deux formulaires donnent-ils le même aperçu ? L'outil de la souris, la
+    /// moyenne locale, la destination et les cases de sortie ne changent pas ce
+    /// qui est calculé : l'aperçu ne se recalcule pas pour eux.
+    pub fn same_preview(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.current == other.current
+            && self.aux == other.aux
+            && self.series == other.series
+            && self.setup == other.setup
+    }
+
     /// Le formulaire qui rouvre un calcul existant (« Edit Calculation… »).
     pub fn from_calculation(id: NodeId, calc: &Calculation) -> Self {
         let mut form = Self::new(
@@ -465,6 +481,8 @@ impl AnalysisForm {
         form.auto_recalc = calc.auto_recalc;
         form.auto_recalc_chosen = true;
         form.setup.load(&calc.operation);
+        // La pondération n'est pas dans l'opération : elle se lit dans les séries.
+        form.setup.fit.weighted = calc.series.iter().any(|s| s.sigma.is_some());
         let has = |key: &str| calc.outputs.iter().any(|o| o.key == key);
         form.setup.peaks.peak_columns = has("peak");
         form.setup.peaks.sum_column = has("peaks_sum");

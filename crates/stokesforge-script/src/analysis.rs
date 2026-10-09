@@ -199,11 +199,16 @@ fn run(
             let snapshot = session.snapshot().map_err(HostError::from_session)?;
             let (mut series, mut aux, mut computed) = prepare(&snapshot)?;
             let mut tree = snapshot.tree.clone();
+            // Les calculs d'avant : le nôtre est celui qui s'y ajoute, même si un
+            // autre client en crée un au même moment.
+            let mut known: std::collections::BTreeSet<NodeId> =
+                snapshot.tree.calculations().keys().copied().collect();
             if context.begin_write()? {
                 // Le groupe vient de s'ouvrir : relire pour valider l'époque.
                 let snapshot = session.snapshot().map_err(HostError::from_session)?;
                 (series, aux, computed) = prepare(&snapshot)?;
                 tree = snapshot.tree.clone();
+                known = snapshot.tree.calculations().keys().copied().collect();
             }
             let values = computed.results.first().cloned().unwrap_or_default();
             let draft = draft(
@@ -223,7 +228,7 @@ fn run(
                 .tree
                 .calculations()
                 .iter()
-                .next_back()
+                .rfind(|(id, _)| !known.contains(id))
                 .map(|(_, c)| c.clone())
                 .ok_or_else(|| {
                     HostError::InvalidValue("the calculation was not recorded".into())

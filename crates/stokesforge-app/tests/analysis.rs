@@ -338,3 +338,63 @@ fn value_labels_name_known_keys_and_keep_unknown_ones() {
     assert_eq!(value_label("peak.center", Some(2)), "Peak 2: center");
     assert_eq!(value_label("something.new", None), "something.new");
 }
+
+#[test]
+fn editing_a_weighted_fit_keeps_its_weighting() {
+    let mut f = fixture();
+    let sheet = f.project.tree().parent(f.y).unwrap().unwrap();
+    let sigma = f
+        .project
+        .add_column(sheet, None, Some("C"), Column::from_f64(&[0.1; 21]))
+        .unwrap();
+    let with_sigma = vec![SeriesRef {
+        x: Some(f.x),
+        y: f.y,
+        sigma: Some(sigma),
+    }];
+    let mut form = AnalysisForm::new(&Preset::Fit(Model::Linear), with_sigma, false);
+    form.setup.fit.weighted = true;
+    let id = f
+        .project
+        .add_calculation(form.draft(f.project.tree()).unwrap())
+        .unwrap();
+    let calc = f.project.tree().calculation(id).unwrap().clone();
+    let again = AnalysisForm::from_calculation(id, &calc);
+    assert!(again.setup.fit.weighted, "la pondération survit à Edit");
+    assert_eq!(again.effective_series(), form.effective_series());
+}
+
+#[test]
+fn changing_the_components_keeps_the_shift_settings_at_the_end() {
+    let f = fixture();
+    let mut form = AnalysisForm::new(&Preset::Reconvolution, series(&f), false);
+    let last = form.setup.reconv.spec.params.len() - 1;
+    form.setup.reconv.spec.params[last].fixed = true;
+    form.setup.reconv.spec.params[last].initial = Some(0.25);
+    let marked = form.setup.reconv.spec.params[last].clone();
+    for components in [2, 3, 1] {
+        form.setup.reconv.spec.components = components;
+        form.setup.reconv.resize_params();
+        let params = &form.setup.reconv.spec.params;
+        assert_eq!(params.len(), 2 + 2 * components);
+        assert_eq!(params.last().unwrap(), &marked, "{components} composantes");
+        assert_ne!(params[params.len() - 2], marked);
+    }
+}
+
+#[test]
+fn the_preview_is_not_recomputed_for_the_tool_or_the_average() {
+    use stokesforge_app::analysis::PreviewTool;
+    let f = fixture();
+    let form = AnalysisForm::new(&Preset::BaselineLine, series(&f), false);
+    let mut other = form.clone();
+    other.tool = PreviewTool::Zoom;
+    other.average = form.average + 3;
+    other.keep_results = !form.keep_results;
+    assert!(
+        form.same_preview(&other),
+        "outil et moyenne ne changent pas l'aperçu"
+    );
+    other.setup.baseline.points.push((1.0, 1.0));
+    assert!(!form.same_preview(&other), "un point posé le change");
+}
