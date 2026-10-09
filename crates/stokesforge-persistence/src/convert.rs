@@ -1042,3 +1042,71 @@ pub(crate) fn node_to_record(node: &Node) -> NodeRecord {
         kind: kind_to_record(node.kind()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Un calque à deux groupes de deux séries, le premier nommé « Été ».
+    fn calque_a_deux_groupes() -> PanelSpec {
+        let mut panel = PanelSpec::default();
+        for pair in [[1, 2], [3, 4]] {
+            panel.push_series_batch(
+                pair.iter()
+                    .map(|n| SeriesSpec::new(NodeId::from_raw(*n)))
+                    .collect(),
+            );
+        }
+        assert!(panel.rename_group(1, "Été"));
+        panel
+    }
+
+    fn groupes(panel: &PanelSpec) -> Vec<Option<u32>> {
+        panel.series.iter().map(|s| s.group).collect()
+    }
+
+    /// #209 : un nom de groupe vide lu dans le fichier est écarté (le groupe
+    /// garde son nom automatique) ; témoin : le nom non vide voisin reste.
+    #[test]
+    fn un_nom_de_groupe_vide_est_ecarte_au_chargement() {
+        let mut record = panel_spec_to_record(&calque_a_deux_groupes());
+        record.group_names.push(GroupNameRecord {
+            group: 2,
+            name: String::new(),
+        });
+        let panel = record_to_panel_spec(record).unwrap();
+        assert_eq!(
+            panel.group_names,
+            [(1, "Été".to_string())].into(),
+            "seul le nom vide disparaît"
+        );
+        assert_eq!(groupes(&panel), [Some(1), Some(1), Some(2), Some(2)]);
+    }
+
+    /// #209 : un fichier écrit avant les noms de groupe (#197), sans le champ
+    /// `group_names`, se relit avec ses groupes et sans nom ; témoin : le même
+    /// enregistrement avec le champ garde le nom.
+    #[test]
+    fn un_calque_sans_noms_de_groupe_se_relit_avec_ses_groupes() {
+        let octets = rmp_serde::to_vec_named(&panel_spec_to_record(&calque_a_deux_groupes()))
+            .expect("encodage");
+        let relu: PanelSpecRecord = rmp_serde::from_slice(&octets).expect("relecture");
+        let panel = record_to_panel_spec(relu).unwrap();
+        assert_eq!(panel.group_names, [(1, "Été".to_string())].into());
+
+        let mut valeur = rmpv::decode::read_value(&mut std::io::Cursor::new(octets)).unwrap();
+        let rmpv::Value::Map(champs) = &mut valeur else {
+            panic!("un calque s'écrit en table");
+        };
+        let avant = champs.len();
+        champs.retain(|(cle, _)| cle.as_str() != Some("group_names"));
+        assert_eq!(champs.len(), avant - 1, "le champ existait");
+        let mut ancien = Vec::new();
+        rmpv::encode::write_value(&mut ancien, &valeur).unwrap();
+        let relu: PanelSpecRecord =
+            rmp_serde::from_slice(&ancien).expect("un ancien calque se relit");
+        let panel = record_to_panel_spec(relu).unwrap();
+        assert!(panel.group_names.is_empty());
+        assert_eq!(groupes(&panel), [Some(1), Some(1), Some(2), Some(2)]);
+    }
+}
