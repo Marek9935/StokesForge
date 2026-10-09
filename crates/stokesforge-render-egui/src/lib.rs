@@ -1010,6 +1010,44 @@ impl GraphView {
         Some((panel.index, x, y))
     }
 
+    /// Le pixel egui d'un point de données `(x, y)` du calque `panel`
+    /// (#199) — réciproque de [`Self::data_at`] — et le rectangle de sa zone
+    /// de tracé à l'écran. Cherché dans la **dernière** figure tracée.
+    pub fn data_to_screen(&self, panel: usize, x: f64, y: f64) -> Option<Pos2> {
+        let (transform, display, scale) = self.panel_screen(panel)?;
+        let (px, py) = transform.data_to_pixel(x, y)?;
+        Some(display.min + egui::vec2(px as f32, py as f32) * scale)
+    }
+
+    /// La zone de tracé du calque `panel` à l'écran (#199).
+    pub fn plot_rect_screen(&self, panel: usize) -> Option<Rect> {
+        let drawn = self
+            .last
+            .as_ref()?
+            .panels
+            .iter()
+            .find(|p| p.index == panel)?;
+        let (display, scale) = (self.display_rect?, self.display_scale()?);
+        let min = display.min
+            + egui::vec2(drawn.pixel_origin.0 as f32, drawn.pixel_origin.1 as f32) * scale;
+        let size = egui::vec2(drawn.pixel_size.0 as f32, drawn.pixel_size.1 as f32) * scale;
+        Some(Rect::from_min_size(min, size))
+    }
+
+    fn panel_screen(&self, panel: usize) -> Option<(PanelTransform, Rect, f32)> {
+        let drawn = self
+            .last
+            .as_ref()?
+            .panels
+            .iter()
+            .find(|p| p.index == panel)?;
+        Some((
+            PanelTransform::of(drawn)?,
+            self.display_rect?,
+            self.display_scale()?,
+        ))
+    }
+
     /// Le point de données au centre de la zone de tracé du calque actif
     /// (#161), ou du premier panneau tracé si celui-ci ne l'est pas — où
     /// poser un texte ajouté par la barre de menus.

@@ -4,7 +4,7 @@
 
 use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::OperationKind;
-use stokesforge_app::analysis::Preset;
+use stokesforge_app::analysis::{Edge, HandleSlot, Preset, RangeSet};
 use stokesforge_app::i18n::{self, Language};
 use stokesforge_app::state::{Action, AppState, CalculationDelete};
 use stokesforge_core::{Column, ColumnMeta, ColumnRole, NodeId, Project};
@@ -215,6 +215,48 @@ fn a_manual_calculation_goes_out_of_date_and_recalculates_on_demand() {
     s.state
         .dispatch(Action::RecalculateCalculations(Vec::new()));
     assert!(s.state.stale_calculations().is_empty());
+}
+
+#[test]
+fn dragging_a_handle_is_one_undoable_step_that_changes_the_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    open(&mut s, Preset::Integrate);
+    {
+        let form = s.state.analysis_form_mut().unwrap();
+        form.add_zone(2.0, 4.0);
+        form.setup.integrate.cumulative = true;
+    }
+    s.state.dispatch(Action::ApplyAnalysis);
+    let id = only_calculation(&s);
+    let range = |s: &Setup| match &s.state.tree().calculation(id).unwrap().operation {
+        stokesforge_analysis::ops::Operation::Integrate { spec } => spec.ranges.clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(range(&s), vec![(2.0, 4.0)]);
+
+    s.state.dispatch(Action::MoveCalculationHandle {
+        calculation: id,
+        slot: HandleSlot::Edge(RangeSet::Integrate, 0, Edge::Hi),
+        x: 6.0,
+        y: 0.0,
+    });
+    assert!(!s.state.status().unwrap().is_error);
+    assert_eq!(range(&s), vec![(2.0, 6.0)]);
+
+    // Un seul pas : annuler ramène l'ancienne plage.
+    s.state.dispatch(Action::Undo);
+    assert_eq!(range(&s), vec![(2.0, 4.0)]);
+
+    // Une poignée qui n'a pas bougé n'écrit rien dans l'historique.
+    s.state.dispatch(Action::MoveCalculationHandle {
+        calculation: id,
+        slot: HandleSlot::Edge(RangeSet::Integrate, 0, Edge::Hi),
+        x: 4.0,
+        y: 0.0,
+    });
+    s.state.dispatch(Action::Redo);
+    assert_eq!(range(&s), vec![(2.0, 6.0)], "le Redo est resté disponible");
 }
 
 fn graphs_count(s: &Setup) -> usize {

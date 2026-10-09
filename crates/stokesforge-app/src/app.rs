@@ -135,6 +135,7 @@
 
 mod analysis_dialog;
 mod analysis_forms;
+mod analysis_handles;
 mod analysis_menu;
 mod analysis_preview;
 mod contents;

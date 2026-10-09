@@ -851,6 +851,46 @@ mod tests {
         assert!(centre(&output, "A").y > centre(&output, "D").y);
     }
 
+    /// #209 : rejoindre un groupe **par la liste déroulante** de la fenêtre —
+    /// et non par `set_series_group` appelé directement — range la série à la
+    /// suite des membres, et l'éditeur garde la même série (`*index = moved`
+    /// dans `membership_editor`). Témoin : avant le choix, la série réglée est
+    /// au rang 0, qu'elle quitte.
+    #[test]
+    fn la_liste_deroulante_fait_rejoindre_un_groupe_et_l_editeur_suit_la_serie() {
+        let ctx = super::super::test_support::contexte();
+        let mut panel = calque_avec_groupe();
+        let mut selected = 0; // « A », hors groupe
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let liste = centre(&output, &tr!("curve-group-none"));
+        assert!(
+            !clic(&ctx, &mut panel, &mut selected, liste),
+            "ouvrir la liste ne change rien"
+        );
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let pos = centre(
+            &output,
+            &tr!("curve-group-entry", group = "Lots", count = 3),
+        );
+        assert!(
+            clic(&ctx, &mut panel, &mut selected, pos),
+            "le choix demande la validation"
+        );
+        let noms: Vec<&str> = panel.series.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(noms, ["B", "C", "D", "A"], "A rejoint la fin du groupe");
+        assert_eq!(panel.series[3].group, Some(1));
+        assert_eq!(selected, 3);
+        assert_eq!(panel.series[selected].name, "A", "l'éditeur suit la série");
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        assert!(
+            super::super::test_support::textes(&output.shapes)
+                .iter()
+                .any(|t| t.texte == tr!("curve-group-entry", group = "Lots", count = 4)),
+            "la liste montre désormais le groupe de la série"
+        );
+    }
+
     /// #197 : Descendre le groupe garde la série réglée (la même, pas le même
     /// rang) dans l'éditeur.
     #[test]
