@@ -304,7 +304,7 @@ fn membership_editor(
         }
     }
     if let Some(group) = panel.series[*index].group {
-        commit |= group_editor(ui, panel, layer, group);
+        commit |= group_editor(ui, panel, layer, group, index);
         let count = panel.group_members(group).len();
         ui.horizontal(|ui| {
             ui.label(tr!("curve-scope-field"));
@@ -325,8 +325,16 @@ fn membership_editor(
 
 /// Les gestes du groupe `group` (#197) : son nom, son rang dans l'ordre de
 /// tracé, sa dissolution (les séries restent) et sa suppression avec ses
-/// séries. Rend `true` si le groupe a changé.
-fn group_editor(ui: &mut egui::Ui, panel: &mut PanelSpec, layer: usize, group: u32) -> bool {
+/// séries. `index` est la série réglée : il suit son contenu quand le groupe
+/// change de rang, et retombe sur la place du groupe quand il est supprimé.
+/// Rend `true` si le groupe a changé.
+fn group_editor(
+    ui: &mut egui::Ui,
+    panel: &mut PanelSpec,
+    layer: usize,
+    group: u32,
+    index: &mut usize,
+) -> bool {
     let mut commit = false;
     // Le texte en cours de frappe ne vit que le temps du focus : le reste du
     // temps, le champ relit le modèle (nom changé ailleurs, autre groupe).
@@ -369,9 +377,19 @@ fn group_editor(ui: &mut egui::Ui, panel: &mut PanelSpec, layer: usize, group: u
                 .add_enabled(panel.can_move_group(group, up), egui::Button::new(label))
                 .on_hover_text(hint)
                 .clicked()
-                && panel.move_group(group, up)
             {
-                commit = true;
+                let place = panel
+                    .group_members(group)
+                    .iter()
+                    .position(|member| member == index);
+                if panel.move_group(group, up) {
+                    if let Some(member) =
+                        place.and_then(|p| panel.group_members(group).get(p).copied())
+                    {
+                        *index = member;
+                    }
+                    commit = true;
+                }
             }
         }
     });
@@ -388,9 +406,12 @@ fn group_editor(ui: &mut egui::Ui, panel: &mut PanelSpec, layer: usize, group: u
             .button(tr!("curve-group-delete"))
             .on_hover_text(tr!("curve-group-delete", "hint"))
             .clicked()
-            && panel.remove_group(group)
         {
-            commit = true;
+            let first = panel.group_members(group).first().copied().unwrap_or(0);
+            if panel.remove_group(group) {
+                *index = first.min(panel.series.len().saturating_sub(1));
+                commit = true;
+            }
         }
     });
     commit
@@ -828,5 +849,28 @@ mod tests {
         );
         let (output, _) = page(&ctx, &mut panel, &mut ui_selected, Vec::new());
         assert!(centre(&output, "A").y > centre(&output, "D").y);
+    }
+
+    /// #197 : Descendre le groupe garde la série réglée (la même, pas le même
+    /// rang) dans l'éditeur.
+    #[test]
+    fn descendre_le_groupe_garde_la_serie_reglee() {
+        let ctx = super::super::test_support::contexte();
+        let mut panel = calque_avec_groupe();
+        let mut suite = SeriesSpec::new(NodeId::from_raw(5));
+        suite.name = "E".into();
+        panel.series.push(suite);
+        let mut selected = 1; // « B », premier membre du groupe
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        let pos = centre(&output, &tr!("curve-group-move-down"));
+        assert!(clic(&ctx, &mut panel, &mut selected, pos));
+        let noms: Vec<&str> = panel.series.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            noms,
+            ["A", "E", "B", "C", "D"],
+            "témoin : le groupe a bougé"
+        );
+        assert_eq!(panel.series[selected].name, "B");
     }
 }

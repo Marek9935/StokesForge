@@ -1369,7 +1369,8 @@ impl StokesForgeApp {
             Action::NewProject { .. } | Action::ConfirmNewProject(true)
         );
         // L'historique et les gestes qui changent le rang des séries ou la
-        // composition d'un groupe (#197) font suivre la sélection par contenu.
+        // composition d'un groupe (#197, dont sa suppression : plusieurs
+        // séries partent à la fois) font suivre la sélection par contenu.
         let history_selections: Vec<_> = if matches!(
             action,
             Action::Undo
@@ -1377,6 +1378,10 @@ impl StokesForgeApp {
                 | Action::MoveSeries { .. }
                 | Action::MoveSeriesGroup { .. }
                 | Action::UngroupSeries { .. }
+                | Action::RemovePlotObject {
+                    target: crate::object_manager::VisibilityTarget::SeriesGroup(_),
+                    ..
+                }
         ) {
             let graphs =
                 self.graph_views
@@ -1932,6 +1937,100 @@ mod tests {
         app.dispatch_actions(&context, vec![Action::Undo]);
         assert!(app.state.tree().contains(book));
         assert!(!app.floating_tabs.contains(&Tab::Book(book)));
+    }
+
+    /// #197 : A, [B C], D. Supprimer ou déplacer un groupe change le rang de
+    /// plusieurs séries à la fois ; la sélection suit son contenu.
+    fn graphe_a_groupe() -> (Session, NodeId) {
+        let (session, graph) = graphe();
+        let handle = session.handle();
+        let snapshot = handle.snapshot().unwrap();
+        let stokesforge_core::NodeKind::Graph { spec, .. } =
+            snapshot.tree.node(graph).unwrap().kind()
+        else {
+            panic!("graphe attendu");
+        };
+        let mut spec = spec.clone();
+        let panel = spec.panels.get_mut(0).unwrap();
+        let model = panel.series[0].clone();
+        panel.series = ["A", "B", "C", "D"]
+            .iter()
+            .enumerate()
+            .map(|(rank, name)| {
+                let mut s = model.clone();
+                s.name = (*name).to_owned();
+                s.group = (rank == 1 || rank == 2).then_some(1);
+                s
+            })
+            .collect();
+        handle
+            .execute(stokesforge_commands::Command::SetPlotSpec { graph, spec })
+            .unwrap();
+        (session, graph)
+    }
+
+    fn nom_selectionne(app: &StokesForgeApp, graph: NodeId) -> Option<String> {
+        let rank = app.selected_series(graph)?;
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph)?;
+        Some(spec.panels[rank.panel].series[rank.index].name.clone())
+    }
+
+    fn selectionner(app: &mut StokesForgeApp, graph: NodeId, index: usize) {
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.with_graph_view(graph, |view| {
+            view.select_series(Some(stokesforge_plot::SeriesRef::new(0, index)), &spec);
+        });
+    }
+
+    #[test]
+    fn supprimer_un_groupe_fait_suivre_la_serie_selectionnee() {
+        let context = egui::Context::default();
+        let group = stokesforge_plot::SeriesGroupRef::new(0, 1);
+        let remove = |graph| Action::RemovePlotObject {
+            graph,
+            target: crate::object_manager::VisibilityTarget::SeriesGroup(group),
+        };
+        for (selected, expected) in [(3, Some("D")), (0, Some("A")), (1, None)] {
+            let (session, graph) = graphe_a_groupe();
+            let state = AppState::new(session.handle(), String::new()).unwrap();
+            let mut app = StokesForgeApp::new(state);
+            selectionner(&mut app, graph, selected);
+            app.dispatch_actions(&context, vec![remove(graph)]);
+            let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+            assert_eq!(spec.panels[0].series.len(), 2, "groupe et séries supprimés");
+            assert_eq!(
+                nom_selectionne(&app, graph).as_deref(),
+                expected,
+                "série {selected} sélectionnée avant la suppression"
+            );
+            session.shutdown().unwrap();
+        }
+    }
+
+    #[test]
+    fn deplacer_un_groupe_fait_suivre_la_serie_selectionnee() {
+        let context = egui::Context::default();
+        let (session, graph) = graphe_a_groupe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        selectionner(&mut app, graph, 2);
+        app.dispatch_actions(
+            &context,
+            vec![Action::MoveSeriesGroup {
+                graph,
+                group: stokesforge_plot::SeriesGroupRef::new(0, 1),
+                up: false,
+            }],
+        );
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let names: Vec<&str> = spec.panels[0]
+            .series
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        assert_eq!(names, ["A", "D", "B", "C"], "témoin : le groupe a bougé");
+        assert_eq!(nom_selectionne(&app, graph).as_deref(), Some("C"));
+        session.shutdown().unwrap();
     }
 
     #[test]

@@ -580,3 +580,26 @@ for action in (lambda: pyst.series(g), lambda: pyst.series_groups(g), lambda: py
     assert_eq!(*after.tree, *before.tree);
     assert_eq!(after.history, before.history);
 }
+
+/// Un geste de groupe sans effet n'ouvre pas de macro et n'écrit pas d'historique.
+#[test]
+fn un_geste_de_groupe_sans_effet_n_ecrit_rien() {
+    let b = banc();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y], x, name='Graph1', group_name='Lots')\npyst.apply_gradient(g, 1, 'blue-red')"),
+    );
+    let before = b.session.snapshot().unwrap();
+    run(
+        &b,
+        "gid = pyst.series_groups(g)[0]['id']
+pyst.rename_group(g, gid, 'Lots')
+assert pyst.set_series_group(g, 1, gid) == 1
+pyst.set_group_style(g, gid)
+pyst.apply_gradient(g, gid, 'blue-red')
+",
+    );
+    let after = b.session.snapshot().unwrap();
+    assert_eq!(after.revision, before.revision);
+    assert_eq!(after.history, before.history);
+}

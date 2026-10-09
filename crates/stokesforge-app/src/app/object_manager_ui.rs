@@ -132,10 +132,13 @@ pub(super) fn select_manager_target(
 /// de la grammaire de `docs/menus.md`, une section sans objet pour la cible
 /// étant **absente** :
 ///
-/// 1. principale — Show Data (courbe), Edit Text / Reset Position (textes) ;
-/// 2. organiser — Rename, Move Up/Down, Hide (courbe), Bring to Front /
-///    Send to Back (objet), Hide (texte, axe, groupes) ;
-/// 3. supprimer — Delete (courbe, texte libre, objet) ;
+/// 1. principale — Show Data (courbe), Edit Text / Reset Position (textes),
+///    Select Members (groupe) ;
+/// 2. organiser — Rename (courbe, groupe), Move Up/Down (courbe, groupe),
+///    Ungroup (groupe), Hide (courbe), Bring to Front / Send to Back (objet),
+///    Hide (texte, axe, groupe) ;
+/// 3. supprimer — Delete (courbe, texte libre, objet), Delete Group (groupe
+///    et ses séries) ;
 /// 4. `Properties…`, toujours en dernier.
 pub(super) fn object_node_menu(
     ui: &mut egui::Ui,

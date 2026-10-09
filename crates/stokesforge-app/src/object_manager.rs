@@ -794,6 +794,41 @@ mod tests {
         assert_eq!(T::Axes(0).contents(&spec).len(), 4);
         assert_eq!(T::Axes(1).contents(&spec).len(), 2);
     }
+    /// #197 : un groupe reste contigu au glisser-déposer — on ne dépose une
+    /// série que parmi ses voisines de même groupe (ou parmi les séries seules).
+    #[test]
+    fn le_depot_d_une_serie_respecte_les_groupes() {
+        use crate::object_manager::series_drop;
+        use stokesforge_plot::{PanelSpec, Panels};
+        // A, [B C], D, E
+        let mut panel = PanelSpec::at(0, 0);
+        panel.series = (1..=5)
+            .map(|n| {
+                let mut s = SeriesSpec::new(NodeId::from_raw(n));
+                s.group = (n == 2 || n == 3).then_some(1);
+                s
+            })
+            .collect();
+        let spec = PlotSpec::empty("Test").with_panels(Panels::new(vec![panel]));
+        let at = |index| SeriesRef::new(0, index);
+        assert_eq!(series_drop(&spec, at(3), at(4), true), Some(4), "témoin");
+        assert_eq!(
+            series_drop(&spec, at(1), at(2), true),
+            Some(2),
+            "dans le groupe"
+        );
+        assert_eq!(
+            series_drop(&spec, at(0), at(1), false),
+            None,
+            "dans un groupe"
+        );
+        assert_eq!(
+            series_drop(&spec, at(1), at(3), true),
+            None,
+            "hors du groupe"
+        );
+    }
+
     /// #176 : les lignes haut et droite d'un calque ordinaire commandent le
     /// miroir ; un calque superposé qui occupe le côté grise la case.
     #[test]

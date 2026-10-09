@@ -21,7 +21,8 @@ use crate::surface::{to_py_error, Handle};
 
 type Panel = (usize, usize);
 
-/// Modifie le panneau `panel` du graphe et rend ce que `edit` calcule. `edit`
+/// Modifie le panneau `panel` du graphe et rend ce que `edit` calcule ; un
+/// geste qui ne change pas le spec n'écrit rien. `edit`
 /// tourne sur l'instantané lu avant la réservation du groupe d'écritures, puis
 /// de nouveau sur celui qu'elle fige si elle vient d'ouvrir la macro (#67).
 fn edit_panel<T>(
@@ -32,7 +33,8 @@ fn edit_panel<T>(
     edit: impl Fn(&mut PanelSpec, &Snapshot) -> Result<T, HostError>,
 ) -> Result<T, HostError> {
     let prepare = |snapshot: &Snapshot| {
-        let mut spec = bridge::graph_spec(snapshot, graph, epoch)?;
+        let before = bridge::graph_spec(snapshot, graph, epoch)?;
+        let mut spec = before.clone();
         let layer = bridge::base_layer_at(&spec, panel.0, panel.1).ok_or_else(|| {
             HostError::InvalidValue(format!(
                 "the graph has no panel at row {}, column {}",
@@ -44,16 +46,24 @@ fn edit_panel<T>(
             .get_mut(layer)
             .ok_or_else(|| HostError::InvalidValue("the graph has no such panel".to_owned()))?;
         let value = edit(panel, snapshot)?;
-        Ok::<_, HostError>((spec, value))
+        // Un geste sans effet n'écrit rien : pas d'entrée d'historique vide,
+        // pas de macro ouverte pour rien.
+        let changed = spec != before;
+        Ok::<_, HostError>((spec, value, changed))
     };
     let session = context.session();
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
-    let (mut spec, mut value) = prepare(&snapshot)?;
+    let (mut spec, mut value, mut changed) = prepare(&snapshot)?;
+    if !changed {
+        return Ok(value);
+    }
     if context.begin_write()? {
         let snapshot = session.snapshot().map_err(HostError::from_session)?;
-        (spec, value) = prepare(&snapshot)?;
+        (spec, value, changed) = prepare(&snapshot)?;
     }
-    bridge::set_graph_spec(session, graph, spec)?;
+    if changed {
+        bridge::set_graph_spec(session, graph, spec)?;
+    }
     Ok(value)
 }
 
