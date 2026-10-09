@@ -284,3 +284,39 @@ fn une_formule_ne_se_pose_pas_sur_une_colonne_produite() {
         )
         .unwrap();
 }
+
+/// Le type et la suppression de cellules changent la forme d'une colonne
+/// produite : le recalcul les défairait, ou échouerait sans rien dire.
+#[test]
+fn le_type_et_la_suppression_de_cellules_d_une_sortie_sont_refuses() {
+    let mut w = world();
+    add(&mut w, vec![1.0, 2.0, 3.0]);
+    let id = calc_id(&w);
+    let out = w.project.tree().calculation(id).unwrap().outputs[0]
+        .column
+        .unwrap();
+    let before = w.project.tree().clone();
+    for command in [
+        Command::SetColumnType {
+            column: out,
+            column_type: stokesforge_core::ColumnType::Mixed,
+        },
+        Command::DeleteCells {
+            columns: vec![w.x, out],
+            at: 0,
+            count: 1,
+        },
+    ] {
+        let err = w.history.execute(&mut w.project, command).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                stokesforge_commands::CommandError::Core(
+                    CoreError::CalculatedColumnReadOnly { .. }
+                )
+            ),
+            "{err:?}"
+        );
+        assert_eq!(w.project.tree(), &before, "aucun état partiel");
+    }
+}

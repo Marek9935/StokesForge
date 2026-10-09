@@ -95,9 +95,10 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use stokesforge_analysis::ops::Operation;
+use stokesforge_analysis::AnalysisError;
 use stokesforge_core::{
-    compute, evaluate_formula, topological_order, Calculation, ColumnType, ColumnValues,
-    ComputeError, Formula, NodeId, NumericStatus, Project, Staleness, ValueBlock,
+    compute, evaluate_formula, topological_order, AuxRef, Calculation, ColumnType, ColumnValues,
+    ComputeError, Formula, NodeId, NumericStatus, Project, SeriesRef, Staleness, ValueBlock,
 };
 
 /// Façon dont l'acteur recalcule les colonnes-formule après chaque requête
@@ -656,6 +657,11 @@ struct CalcFingerprint {
 #[derive(Debug, Clone, PartialEq)]
 struct CalcDefinition {
     operation: Operation,
+    /// La structure des entrées, pas seulement la liste à plat de leurs
+    /// colonnes : `{x: None, y: A, σ: B}` et `{x: A, y: B, σ: None}` lisent les
+    /// mêmes colonnes dans des rôles différents.
+    series: Vec<SeriesRef>,
+    aux: Option<AuxRef>,
     auto_recalc: bool,
     keep_results: bool,
     outputs: Vec<(NodeId, Option<u64>)>,
@@ -674,6 +680,8 @@ fn calc_fingerprint(project: &Project, calc: &Calculation) -> Result<CalcFingerp
         inputs,
         definition: CalcDefinition {
             operation: calc.operation.clone(),
+            series: calc.series.clone(),
+            aux: calc.aux.clone(),
             auto_recalc: calc.auto_recalc,
             keep_results: calc.keep_results,
             outputs: calc
@@ -884,9 +892,21 @@ impl Recalculator {
                     calc.aux.as_ref(),
                 ) {
                     Ok(computed) => {
-                        let changed = project
-                            .refresh_calculation_from(id, computed)
-                            .unwrap_or(false);
+                        let changed = match project.refresh_calculation_from(id, computed) {
+                            Ok(changed) => changed,
+                            Err(_) => {
+                                // Une sortie refuse le résultat (type changé,
+                                // colonne protégée) : le dire, au lieu de
+                                // mémoriser une empreinte et de laisser la
+                                // colonne figée sans signe.
+                                let _ = project.set_calculation_stale(
+                                    id,
+                                    Some(Staleness::Failed(AnalysisError::OutputUnwritable)),
+                                );
+                                self.remember(project, id, &calc, fingerprint);
+                                return false;
+                            }
+                        };
                         // L'empreinte d'après écriture : celle que le prochain
                         // passage doit retrouver si personne n'y touche.
                         if let Some((after, fresh)) = project

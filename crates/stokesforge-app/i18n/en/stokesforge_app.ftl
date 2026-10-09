@@ -1070,6 +1070,23 @@ error-analysis-empty-response = The instrument response has no usable signal. Ch
 error-analysis-empty-range = The range holds no point. Widen it
 error-analysis-invalid-parameter = The value of { $name } is invalid
 error-analysis-length-mismatch = A series and its X column do not have the same number of rows
+error-analysis-output-unwritable = A result column no longer accepts the result. Delete that column or detach the calculation
+error-analysis-no-peak = No peak to fit. Place a peak on the preview or lower the minimum prominence
+error-analysis-bad-sigma = The error column holds a missing, zero or negative value. Fix it or turn weighting off
+error-analysis-bad-signal = This signal cannot be deconvolved: its mean is not positive or its X steps are too uneven. Check the data
+error-analysis-bad-components = The number of components must be between 1 and 4
+error-analysis-bad-degree = The degree must be between 1 and 9
+error-analysis-bad-iterations = The number of iterations must be between 1 and 5000
+error-analysis-bad-noise = The noise ratio must be a positive number
+error-analysis-bad-max-peaks = The maximum number of peaks is 100
+error-analysis-expr-empty = The expression is empty
+error-analysis-expr-unexpected-char = Unexpected character '{ $symbol }' at position { $position }
+error-analysis-expr-unexpected-end = The expression ends too early (position { $position })
+error-analysis-expr-unexpected-token = Unexpected symbol at position { $position }
+error-analysis-expr-unbalanced = Unbalanced parentheses (position { $position })
+error-analysis-expr-bad-number = Malformed number at position { $position }
+error-analysis-expr-unknown-function = Unknown function { $name } at position { $position }
+error-analysis-expr-wrong-arguments = { $name } takes { $expected } argument(s), { $found } given (position { $position })
 
 ## Analysis — status messages and what is missing (#181)
 status-analysis-no-series = Select at least one Y column to analyze

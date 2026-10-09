@@ -423,3 +423,71 @@ fn modifier_un_calcul_manuel_perime_le_met_a_jour_sans_le_reperimer() {
     assert_eq!(apres.tree.calculation(id).unwrap().stale, None);
     assert!((pente(&apres, id) - 2.0).abs() < 1e-9);
 }
+
+/// Une sortie qui n'accepte plus le résultat (un fichier abîmé, un type forcé
+/// hors commande) marque le calcul en échec au lieu de rester figée sans signe.
+#[test]
+fn une_sortie_qui_refuse_le_resultat_marque_le_calcul_en_echec() {
+    for mode in modes() {
+        let mut project = Project::new("Demo").unwrap();
+        let root = project.root();
+        project.add_workbook(root, Some("Book1")).unwrap();
+        let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
+        let x = project
+            .add_column(sheet, None, Some("X"), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .unwrap();
+        let y = project
+            .add_column(sheet, None, Some("Y"), Column::from_f64(&[2.0, 4.0, 6.0]))
+            .unwrap();
+        let series = vec![SeriesRef {
+            x: Some(x),
+            y,
+            sigma: None,
+        }];
+        let op = ajustement();
+        let computed = compute(project.tree(), &op, &series, None).unwrap();
+        let outputs = computed
+            .columns
+            .iter()
+            .map(|c| OutputDraft {
+                series: c.series,
+                key: c.key.clone(),
+                index: c.index,
+                meta: ColumnMeta::default(),
+                data: c.data.clone(),
+            })
+            .collect();
+        let id = project
+            .add_calculation(CalculationDraft {
+                operation: op,
+                series,
+                aux: None,
+                outputs,
+                results: computed.results,
+                keep_results: true,
+                auto_recalc: true,
+            })
+            .unwrap();
+        let out = project.tree().calculation(id).unwrap().outputs[0]
+            .column
+            .unwrap();
+        project
+            .set_column_type(out, stokesforge_core::ColumnType::Mixed)
+            .unwrap();
+
+        let session = Session::spawn_with_recalc(project, None, mode).unwrap();
+        let handle = session.handle();
+        handle.execute(saisir(y, &[1.0, 2.0, 3.0])).unwrap();
+        let snapshot = handle.snapshot().unwrap();
+        assert!(
+            matches!(
+                snapshot.tree.calculation(id).unwrap().stale,
+                Some(Staleness::Failed(
+                    stokesforge_analysis::AnalysisError::OutputUnwritable
+                ))
+            ),
+            "{mode:?} : {:?}",
+            snapshot.tree.calculation(id).unwrap().stale
+        );
+    }
+}

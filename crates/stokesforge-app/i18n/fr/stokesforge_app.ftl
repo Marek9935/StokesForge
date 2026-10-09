@@ -1062,6 +1062,23 @@ error-analysis-empty-response = La réponse instrumentale n'a aucun signal utili
 error-analysis-empty-range = La plage ne contient aucun point. Élargissez-la
 error-analysis-invalid-parameter = La valeur de { $name } est invalide
 error-analysis-length-mismatch = Une série et sa colonne X n'ont pas le même nombre de lignes
+error-analysis-output-unwritable = Une colonne de résultat n'accepte plus le résultat. Supprimez cette colonne ou détachez le calcul
+error-analysis-no-peak = Aucun pic à ajuster. Posez un pic sur l'aperçu ou baissez la proéminence minimale
+error-analysis-bad-sigma = La colonne d'erreurs contient une valeur manquante, nulle ou négative. Corrigez-la ou désactivez la pondération
+error-analysis-bad-signal = Ce signal ne peut pas être déconvolué : sa moyenne n'est pas positive ou ses pas en X sont trop irréguliers. Vérifiez les données
+error-analysis-bad-components = Le nombre de composantes doit être compris entre 1 et 4
+error-analysis-bad-degree = Le degré doit être compris entre 1 et 9
+error-analysis-bad-iterations = Le nombre d'itérations doit être compris entre 1 et 5000
+error-analysis-bad-noise = Le rapport de bruit doit être un nombre positif
+error-analysis-bad-max-peaks = Le nombre maximal de pics est 100
+error-analysis-expr-empty = L'expression est vide
+error-analysis-expr-unexpected-char = Caractère inattendu « { $symbol } » en position { $position }
+error-analysis-expr-unexpected-end = L'expression se termine trop tôt (position { $position })
+error-analysis-expr-unexpected-token = Symbole inattendu en position { $position }
+error-analysis-expr-unbalanced = Parenthèses non appariées (position { $position })
+error-analysis-expr-bad-number = Nombre mal formé en position { $position }
+error-analysis-expr-unknown-function = Fonction inconnue { $name } en position { $position }
+error-analysis-expr-wrong-arguments = { $name } prend { $expected } argument(s), { $found } donné(s) (position { $position })
 
 ## Analysis — status messages and what is missing (#181)
 status-analysis-no-series = Sélectionnez au moins une colonne Y à analyser

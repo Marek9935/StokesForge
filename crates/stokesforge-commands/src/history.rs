@@ -1190,6 +1190,7 @@ impl History {
                 column,
                 column_type,
             } => {
+                check_not_calculated(project, column)?;
                 let before_state = project.set_column_type(column, column_type)?;
                 let after_state = column_state(project, column)?;
                 Ok(Entry::Data {
@@ -1230,6 +1231,10 @@ impl History {
                 })
             }
             Command::DeleteCells { columns, at, count } => {
+                // Avant toute mutation : un refus ne laisse aucun état partiel.
+                for column in &columns {
+                    check_not_calculated(project, *column)?;
+                }
                 // Colonne par colonne, indépendamment — contrairement à
                 // `DeleteRows`, `columns` n'est pas nécessairement "toutes
                 // les colonnes de la feuille" : c'est la sélection explicite
@@ -1602,6 +1607,21 @@ fn entry_has_no_effect(entry: &Entry) -> bool {
         },
         Entry::Macro { .. } => false,
     }
+}
+
+/// Une colonne produite par un calcul d'analyse (#181) refuse aussi les
+/// écritures qui changeraient sa forme (type, cellules supprimées) : le
+/// recalcul les défairait, ou échouerait sans le dire (`TypeMismatch` sur une
+/// colonne passée en texte).
+fn check_not_calculated(project: &Project, column: NodeId) -> CommandResult<()> {
+    if let Some((calculation, _)) = project.tree().calculation_of_column(column) {
+        return Err(CoreError::CalculatedColumnReadOnly {
+            column,
+            calculation,
+        }
+        .into());
+    }
+    Ok(())
 }
 
 /// Les deux refus que toute écriture de cellules — `SetCells` comme

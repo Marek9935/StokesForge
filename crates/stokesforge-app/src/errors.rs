@@ -563,6 +563,7 @@ pub mod formula {
 
 /// Erreurs d'un calcul d'analyse (`stokesforge-analysis`, #181).
 pub mod analysis {
+    use stokesforge_analysis::expr::{ExprError, ExprErrorKind};
     use stokesforge_analysis::AnalysisError;
 
     use crate::tr;
@@ -582,7 +583,10 @@ pub mod analysis {
             ),
             AnalysisError::DuplicateX => tr!("error-analysis-duplicate-x"),
             AnalysisError::BadExpression(detail) => {
-                tr!("error-analysis-bad-expression", detail = detail.to_string())
+                tr!(
+                    "error-analysis-bad-expression",
+                    detail = expr_message(detail)
+                )
             }
             AnalysisError::NoFreeParameter => tr!("error-analysis-no-free-parameter"),
             AnalysisError::EmptyBounds { name, min, max } => tr!(
@@ -616,10 +620,60 @@ pub mod analysis {
             AnalysisError::EmptyReference => tr!("error-analysis-empty-reference"),
             AnalysisError::EmptyResponse => tr!("error-analysis-empty-response"),
             AnalysisError::EmptyRange => tr!("error-analysis-empty-range"),
-            AnalysisError::InvalidParameter { name } => {
-                tr!("error-analysis-invalid-parameter", name = name.as_str())
-            }
+            // Le nom est une clé interne du crate de calcul : chacune de celles
+            // que l'utilisateur peut provoquer a sa phrase.
+            AnalysisError::InvalidParameter { name } => match name.as_str() {
+                "peaks" => tr!("error-analysis-no-peak"),
+                "sigma" => tr!("error-analysis-bad-sigma"),
+                "signal" => tr!("error-analysis-bad-signal"),
+                "components" => tr!("error-analysis-bad-components"),
+                "degree" => tr!("error-analysis-bad-degree"),
+                "iterations" => tr!("error-analysis-bad-iterations"),
+                "noise" => tr!("error-analysis-bad-noise"),
+                "max_peaks" => tr!("error-analysis-bad-max-peaks"),
+                other => tr!("error-analysis-invalid-parameter", name = other),
+            },
             AnalysisError::LengthMismatch => tr!("error-analysis-length-mismatch"),
+            AnalysisError::OutputUnwritable => tr!("error-analysis-output-unwritable"),
+        }
+    }
+
+    /// La phrase d'une erreur de lecture d'expression de modèle, avec sa position.
+    pub fn expr_message(error: &ExprError) -> String {
+        let position = number(error.position);
+        match &error.kind {
+            ExprErrorKind::Empty => tr!("error-analysis-expr-empty"),
+            ExprErrorKind::UnexpectedChar(symbol) => tr!(
+                "error-analysis-expr-unexpected-char",
+                symbol = symbol.to_string(),
+                position = position
+            ),
+            ExprErrorKind::UnexpectedEnd => {
+                tr!("error-analysis-expr-unexpected-end", position = position)
+            }
+            ExprErrorKind::UnexpectedToken => {
+                tr!("error-analysis-expr-unexpected-token", position = position)
+            }
+            ExprErrorKind::UnbalancedParenthesis => {
+                tr!("error-analysis-expr-unbalanced", position = position)
+            }
+            ExprErrorKind::BadNumber => tr!("error-analysis-expr-bad-number", position = position),
+            ExprErrorKind::UnknownFunction(name) => tr!(
+                "error-analysis-expr-unknown-function",
+                name = name.as_str(),
+                position = position
+            ),
+            ExprErrorKind::WrongArgumentCount {
+                name,
+                expected,
+                found,
+            } => tr!(
+                "error-analysis-expr-wrong-arguments",
+                name = name.as_str(),
+                expected = number(*expected),
+                found = number(*found),
+                position = position
+            ),
         }
     }
 
@@ -664,6 +718,7 @@ pub mod analysis {
                     name: "peaks".into(),
                 },
                 AnalysisError::LengthMismatch,
+                AnalysisError::OutputUnwritable,
             ];
             // Un `match` sans `_` : une variante sans exemple ne compile pas.
             for sample in &samples {
@@ -683,11 +738,12 @@ pub mod analysis {
                     | AnalysisError::EmptyResponse
                     | AnalysisError::EmptyRange
                     | AnalysisError::InvalidParameter { .. }
-                    | AnalysisError::LengthMismatch => {}
+                    | AnalysisError::LengthMismatch
+                    | AnalysisError::OutputUnwritable => {}
                 }
                 crate::errors::tests_support::check(sample, &error_message(sample));
             }
-            assert_eq!(samples.len(), 16);
+            assert_eq!(samples.len(), 17);
         }
     }
 }

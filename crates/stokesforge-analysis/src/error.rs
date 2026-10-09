@@ -45,4 +45,6 @@ pub enum AnalysisError {
     InvalidParameter { name: String },
     #[error("a series has a different number of rows than its X column")]
     LengthMismatch,
+    #[error("an output column no longer accepts the result")]
+    OutputUnwritable,
 }

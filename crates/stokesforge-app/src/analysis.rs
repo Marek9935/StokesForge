@@ -382,8 +382,8 @@ pub enum Issue {
     NeedsPoints { needed: usize, have: usize },
     /// Une zone de fond au moins.
     NeedsZone,
-    /// Le modèle libre est vide ou illisible.
-    BadModel(String),
+    /// Le modèle libre est illisible (`Some`) ou sans paramètre (`None`).
+    BadModel(Option<stokesforge_analysis::expr::ExprError>),
     /// Une colonne citée n'existe plus.
     MissingColumn,
     /// Le calcul lui-même a échoué.
@@ -552,8 +552,9 @@ impl AnalysisForm {
                 }
             }
             OperationKind::Fit => match self.setup.fit.model.compile() {
-                Err(error) => Some(Issue::BadModel(error.to_string())),
-                Ok(m) if m.param_count() == 0 => Some(Issue::BadModel(String::new())),
+                Err(AnalysisError::BadExpression(error)) => Some(Issue::BadModel(Some(error))),
+                Err(other) => Some(Issue::Failed(other)),
+                Ok(m) if m.param_count() == 0 => Some(Issue::BadModel(None)),
                 Ok(_) => None,
             },
             _ => None,
@@ -983,8 +984,11 @@ pub fn issue_message(issue: &Issue) -> String {
             have = i64::try_from(*have).unwrap_or(i64::MAX)
         ),
         Issue::NeedsZone => tr!("analysis-issue-needs-zone"),
-        Issue::BadModel(detail) if detail.is_empty() => tr!("analysis-issue-no-parameter"),
-        Issue::BadModel(detail) => tr!("analysis-issue-bad-model", detail = detail.as_str()),
+        Issue::BadModel(None) => tr!("analysis-issue-no-parameter"),
+        Issue::BadModel(Some(error)) => tr!(
+            "analysis-issue-bad-model",
+            detail = crate::errors::analysis::expr_message(error)
+        ),
         Issue::MissingColumn => tr!("analysis-issue-missing-column"),
         Issue::Failed(error) => crate::errors::analysis::error_message(error),
     }
