@@ -266,6 +266,9 @@ fn run(
             Warning::SignalStepNotUniform => "the X step is not constant".to_string(),
             Warning::IrfStepMismatch => "the response has a different X step".to_string(),
             Warning::NegativeClipped(n) => format!("{n} negative points were set to zero"),
+            Warning::Undetermined(n) => {
+                format!("{n} parameter(s) are not determined by the data (no uncertainty)")
+            }
         })?;
     }
     result.set_item("columns", columns)?;

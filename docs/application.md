@@ -112,6 +112,12 @@ L'interface du traitement mathématique est répartie ainsi :
   et info-bulle ; le volet Results (replié par défaut) liste les calculs
   conservés (portée Feuille / Classeur) avec Edit / Recalculate / Delete.
 - Les erreurs viennent de `errors::analysis::error_message` (match exhaustif).
+- Lignes écartées et comptées (`skipped`) : X ou Y non fini, et, en ajustement
+  pondéré, σ vide, nul ou négatif (#205) — jamais un échec de tout l'ajustement.
+  Un paramètre que les données ne déterminent pas (colonne du jacobien nulle ou
+  combinaison des précédentes) n'a pas d'incertitude et lève
+  `Warning::Undetermined(n)` ; si aucun paramètre libre n'est déterminé,
+  l'ajustement est refusé (`SingularSystem`, #203).
 
 ### Menus thématiques (#114)
 

@@ -191,6 +191,13 @@ les siens.
 | colonnes lues ignorées (toujours la longueur des ordinaires) | `le_resultat_suit_la_longueur_des_colonnes_lues`, `allonger_une_colonne_non_lue_ne_change_pas_la_formule`, `deplacer_une_source_vers_une_autre_feuille`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — pas `b22` |
 | colonnes-formule comptées dans la longueur de repli | `une_constante_suit_les_colonnes_ordinaires`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — pas `b22` |
 
+### Fiabilité des ajustements (#203, #205)
+
+`stokesforge-analysis/tests/indetermine.rs` : paramètre sans effet (avertit, les
+autres gardent leur incertitude), X tous égaux (pente indéterminée), aucun
+paramètre déterminé (`SingularSystem`), ajustement bien posé (aucun
+avertissement), ligne à σ vide ou nul écartée et comptée.
+
 ### Mutants éprouvés (#181, calculs d'analyse)
 
 Même mécanisme, autre mémo (`CalcFingerprint`, `CalcMemo`). `b22` joue les pas

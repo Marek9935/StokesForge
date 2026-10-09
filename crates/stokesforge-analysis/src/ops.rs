@@ -198,6 +198,9 @@ pub enum Warning {
     IrfStepMismatch,
     /// Points négatifs ramenés à 0 (Richardson-Lucy).
     NegativeClipped(usize),
+    /// Paramètres libres que les données ne déterminent pas : leur incertitude
+    /// est omise (#203).
+    Undetermined(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -229,6 +232,12 @@ impl Outcome {
         self.columns.push(OutColumn { key, index, data });
     }
 
+    fn warn_undetermined(&mut self, count: usize) {
+        if count > 0 {
+            self.warnings.push(Warning::Undetermined(count));
+        }
+    }
+
     fn stats(&mut self, points: usize, r2: f64, reduced_chi2: f64, dof: usize) {
         self.value("stat.points", None, points as f64, None);
         self.value("stat.r_squared", None, r2, None);
@@ -257,8 +266,11 @@ fn align(input: &SeriesInput) -> Aligned {
     let (mut sx, mut sy, mut rows, mut sig) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut skipped = 0;
     for i in 0..len {
-        let ok = x_all[i].is_finite() && input.y[i].is_finite();
         let s = input.sigma.as_ref().and_then(|s| s.get(i).copied());
+        // Une ligne pondérée dont σ est vide, nul ou négatif est écartée et
+        // comptée, comme une ligne dont X ou Y manque (#205).
+        let sigma_ok = input.sigma.is_none() || s.is_some_and(|v| v.is_finite() && v > 0.0);
+        let ok = x_all[i].is_finite() && input.y[i].is_finite() && sigma_ok;
         if ok {
             sx.push(x_all[i]);
             sy.push(input.y[i]);
@@ -490,6 +502,7 @@ pub fn run(
                 o.value("stat.tau_amplitude", None, r.tau_amplitude_weighted, None);
                 o.value("stat.tau_intensity", None, r.tau_intensity_weighted, None);
                 o.stats(r.points, r.r_squared, r.reduced_chi2, r.dof);
+                o.warn_undetermined(r.undetermined);
                 // `fitted` est aligné sur le signal trié : on le relit à chaque X de
                 // l'entrée (interpolation linéaire, exacte aux nœuds), y compris
                 // aux lignes dont Y est vide.
@@ -586,6 +599,7 @@ fn run_fit(
             o.value(format!("param.{name}"), None, fs.values[j], fs.errors[j]);
         }
         o.stats(fs.points, fs.r_squared, fs.reduced_chi2, fs.dof);
+        o.warn_undetermined(fs.undetermined);
         let fitted = a.eval_in(range, |x| model.eval(&fs.values, x));
         if residuals {
             let y = a.y_rows(&inputs[k]);
@@ -648,6 +662,7 @@ fn run_peaks(
         o.value(format!("background.{name}"), None, *v, *e);
     }
     o.stats(r.points, r.r_squared, r.reduced_chi2, r.dof);
+    o.warn_undetermined(r.undetermined);
     for i in 0..r.model.peak_count() {
         o.column(
             "peak",

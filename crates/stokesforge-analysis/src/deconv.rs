@@ -380,6 +380,8 @@ pub struct Reconvolution {
     pub r_squared: f64,
     pub reduced_chi2: f64,
     pub dof: usize,
+    /// Nombre de paramètres libres que les données ne déterminent pas (#203).
+    pub undetermined: usize,
     /// Durée de vie moyenne pondérée par les amplitudes `ΣAτ/ΣA`.
     pub tau_amplitude_weighted: f64,
     /// Durée de vie moyenne pondérée par l'intensité `ΣAτ²/ΣAτ`.
@@ -521,6 +523,7 @@ pub fn reconvolve(
         r_squared: sol.terms[0].r_squared,
         reduced_chi2: sol.reduced_chi2,
         dof: sol.dof,
+        undetermined: sol.undetermined.iter().filter(|u| **u).count(),
         tau_amplitude_weighted: sat / sa,
         tau_intensity_weighted: sat2 / sat,
         warnings,
