@@ -1354,6 +1354,14 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             });
         },
     );
+    // Les aperçus se recalculent après une pause de frappe (T1, #224).
+    let now = ctx.input(|input| input.time);
+    if let Some(wait) = state
+        .import_state_mut()
+        .and_then(|import| import.debounce_preview(ctx.text_edit_focused(), now))
+    {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait + 0.01));
+    }
     let mut requests = requests.into_inner();
     match outcome {
         DialogOutcome::Open => {}

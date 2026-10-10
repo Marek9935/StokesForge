@@ -23,6 +23,7 @@ use crate::quantities;
 use crate::state::{series_list_label, Action};
 use crate::tr;
 
+use super::inplace_edit;
 use crate::color_picker::{saved_colors_id, SavedColorRequest};
 
 /// L'éditeur sur place d'un texte libre, ouvert sur une vue.
@@ -246,6 +247,7 @@ pub(super) fn text_editor_ui(
         egui::vec2((size.x + 32.0).max(180.0), (size.y + 8.0).max(24.0)),
     );
     let mut accept = false;
+    let mut cancelled = false;
     let field_id = id.with("field");
     let area = egui::Area::new(id.with("area"))
         .order(egui::Order::Foreground)
@@ -253,22 +255,32 @@ pub(super) fn text_editor_ui(
         .constrain(true)
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
-                let response = ui.add(
+                // Le contrat commun : tout le texte sélectionné à l'ouverture,
+                // Entrée et Tab valident, Échap annule. Le « clic ailleurs »
+                // reste décidé plus bas (`outside`), le champ vit dans une
+                // couche à part.
+                let shown = inplace_edit::show(
+                    ui,
+                    field_id,
                     egui::TextEdit::singleline(&mut editor.buffer)
-                        .id(field_id)
                         .desired_width(field.width())
                         .hint_text(tr!("plot-text-placeholder")),
+                    inplace_edit::Opening::SelectAll,
+                    inplace_edit::FocusLoss::Ignored,
+                    None,
                 );
-                if editor.focus {
-                    response.request_focus();
-                    editor.focus = false;
-                }
-                if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-                    accept = true;
+                editor.focus = false;
+                match shown.end {
+                    Some(
+                        inplace_edit::EditEnd::Enter { .. } | inplace_edit::EditEnd::Tab { .. },
+                    ) => accept = true,
+                    Some(inplace_edit::EditEnd::Cancel) => cancelled = true,
+                    _ => {}
                 }
             });
         });
-    let cancel = ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let cancel = cancelled
+        || ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     let outside = ctx
         .input(|input| {
             input
@@ -409,6 +421,7 @@ pub(super) fn annotation_editor_ui(
     };
 
     let mut accept = false;
+    let mut cancelled = false;
     let toolbar = egui::Area::new(id.with("toolbar"))
         .order(egui::Order::Foreground)
         .fixed_pos(field.rect.min - egui::vec2(0.0, 36.0))
@@ -472,10 +485,12 @@ pub(super) fn annotation_editor_ui(
             ui.painter()
                 .rect_stroke(field.rect, 2.0, outline, egui::StrokeKind::Inside);
             let padding = (field.font_size * 0.3).round() as i8;
+            let fresh = inplace_edit::begin(ui.ctx(), field_id);
             let response = ui.put(
                 field.rect,
                 egui::TextEdit::singleline(&mut editor.draft.text)
                     .id(field_id)
+                    .event_filter(inplace_edit::KEYS)
                     .font(egui::FontId::proportional(field.font_size))
                     .frame(egui::Frame::NONE)
                     .margin(egui::Margin::same(padding))
@@ -489,19 +504,33 @@ pub(super) fn annotation_editor_ui(
                     })
                     .hint_text(tr!("plot-text-placeholder")),
             );
-            if editor.focus {
-                response.request_focus();
-                editor.focus = false;
-            }
-            if response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-                accept = true;
+            inplace_edit::measured(ui.ctx(), field_id, &editor.draft.text);
+            // Le contrat commun, sauf le clic ailleurs : l'éditeur porte des
+            // réglages (taille, rotation, couleur) qui prennent le focus sans
+            // finir la saisie, `outside` décide (plus bas).
+            let end = inplace_edit::finish(
+                ui,
+                &response,
+                fresh,
+                inplace_edit::Opening::SelectAll,
+                inplace_edit::FocusLoss::Ignored,
+                None,
+            );
+            editor.focus = false;
+            match end {
+                Some(inplace_edit::EditEnd::Enter { .. } | inplace_edit::EditEnd::Tab { .. }) => {
+                    accept = true;
+                }
+                Some(inplace_edit::EditEnd::Cancel) => cancelled = true,
+                _ => {}
             }
         });
 
     actions.extend(env.requests.into_iter().map(SavedColorRequest::into_action));
 
     // Échap : le sélecteur de couleur ouvert le consomme d'abord pour lui.
-    let cancel = ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let cancel = cancelled
+        || ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     // Un clic hors de l'éditeur (et hors de toute couche surgissante, comme
     // le sélecteur de couleur) valide.
     let pressed_at = ctx.input(|input| {

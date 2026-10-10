@@ -1392,6 +1392,10 @@ pub struct CellEdit {
     pub row: usize,
     /// Texte tapé jusqu'ici.
     pub buffer: String,
+    /// L'édition s'est ouverte sur une frappe (le tampon est ce qui vient d'être
+    /// tapé) : le champ garde alors son curseur au lieu de tout sélectionner à
+    /// l'ouverture (T4, #224).
+    pub typed: bool,
 }
 
 /// Champ de [`stokesforge_core::ColumnMeta`] éditable dans l'en-tête empilé d'une
@@ -1807,6 +1811,8 @@ pub struct HeaderEdit {
     pub field: HeaderField,
     /// Texte tapé jusqu'ici.
     pub buffer: String,
+    /// Voir [`CellEdit::typed`].
+    pub typed: bool,
 }
 
 /// Saisie en cours dans une note. Le pendant exact de [`CellEdit`] pour
@@ -2145,9 +2151,54 @@ pub struct ImportState {
     /// Recette telle qu'elle était au chargement du modèle : sert à dire
     /// qu'elle a été modifiée sans être enregistrée.
     baseline: stokesforge_import::ImportRecipe,
+    /// Aperçu retenu pendant une frappe (T1, #224) : la recette telle qu'elle
+    /// était avant la frappe et l'instant du dernier changement ; tant qu'il
+    /// est là, les aperçus se calculent sur cette recette, pas sur `recipe`.
+    held_preview: Option<(stokesforge_import::ImportRecipe, f64)>,
+    /// La recette à la dernière image, pour reconnaître un changement.
+    seen_recipe: stokesforge_import::ImportRecipe,
     /// Octets des fichiers choisis, lus une seule fois par chemin (le fichier
     /// n'est plus relu à chaque image).
     bytes: std::cell::RefCell<ImportBytesCache>,
+}
+
+/// Pause de frappe avant qu'un aperçu se recalcule (T1, #224), en secondes.
+pub const PREVIEW_PAUSE_SECONDS: f64 = 0.3;
+
+impl ImportState {
+    /// La recette sur laquelle se calculent les aperçus : celle d'avant la
+    /// frappe tant que la pause n'est pas écoulée, sinon la recette courante.
+    pub fn preview_recipe(&self) -> &stokesforge_import::ImportRecipe {
+        self.held_preview
+            .as_ref()
+            .map_or(&self.recipe, |(recipe, _)| recipe)
+    }
+
+    /// À appeler une fois par image, **après** la peinture des champs. `typing` :
+    /// un champ texte a le focus ; `now` : l'instant de l'image. Pendant une
+    /// frappe, un changement de la recette ne se voit dans les aperçus qu'après
+    /// [`PREVIEW_PAUSE_SECONDS`] sans autre changement ; hors frappe (liste,
+    /// case, bouton) il est immédiat. Rend le temps restant avant la mise à
+    /// jour, à demander comme prochaine image.
+    pub fn debounce_preview(&mut self, typing: bool, now: f64) -> Option<f64> {
+        if !typing {
+            self.held_preview = None;
+            self.seen_recipe = self.recipe.clone();
+            return None;
+        }
+        if self.recipe != self.seen_recipe {
+            let before = std::mem::replace(&mut self.seen_recipe, self.recipe.clone());
+            let shown = self.held_preview.take().map_or(before, |(held, _)| held);
+            self.held_preview = Some((shown, now));
+        }
+        let (_, changed_at) = self.held_preview.as_ref()?;
+        let remaining = PREVIEW_PAUSE_SECONDS - (now - changed_at);
+        if remaining <= 0.0 {
+            self.held_preview = None;
+            return None;
+        }
+        Some(remaining)
+    }
 }
 
 /// Réglage proposé par le clic droit sur une ligne de l'aperçu.
@@ -3701,6 +3752,7 @@ impl AppState {
             column,
             field,
             buffer,
+            typed: false,
         });
     }
 
@@ -3764,6 +3816,7 @@ impl AppState {
             column,
             row,
             buffer,
+            typed: false,
         });
     }
 
@@ -4796,6 +4849,8 @@ impl AppState {
             confirm_delete: None,
             recent: stokesforge_import::RecentFiles::load(),
             baseline: recipe.clone(),
+            held_preview: None,
+            seen_recipe: recipe.clone(),
             recipe,
             bytes: Default::default(),
         });
@@ -5623,7 +5678,8 @@ impl AppState {
         let state = self.import_state.as_ref()?;
         let path = self.import_preview_path()?;
         let result = self.import_bytes(&path).and_then(|bytes| {
-            stokesforge_import::parse(&bytes, &state.recipe).map_err(ImportReadError::Parse)
+            stokesforge_import::parse(&bytes, state.preview_recipe())
+                .map_err(ImportReadError::Parse)
         });
         Some(result)
     }
@@ -5642,7 +5698,8 @@ impl AppState {
         let state = self.import_state.as_ref()?;
         let path = self.import_preview_path()?;
         let result = self.import_bytes(&path).and_then(|bytes| {
-            stokesforge_import::preview(&bytes, &state.recipe).map_err(ImportReadError::Parse)
+            stokesforge_import::preview(&bytes, state.preview_recipe())
+                .map_err(ImportReadError::Parse)
         });
         Some(result)
     }

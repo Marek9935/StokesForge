@@ -139,6 +139,13 @@ Sur une sélection de **colonnes entières** d'un classeur → « Plot », « Se
 lignes (une courbe par ligne). « Reset Zoom » n'est plus au clic droit : barre
 d'outils, menu « Graph », bouton du graphe zoomé ou double-clic. Le même menu
 d'objet sert dans l'Object Manager et sous « Graph » → « Selection ».
+Renommer sur place (grille, onglets de feuille, Project Manager, titres du
+graphe) suit un seul geste : le nom entier est sélectionné, Entrée ou un clic
+ailleurs valident, Échap annule, Tab valide et passe au suivant ; un nom vide ou
+déjà pris reste ouvert sous un cadre rouge. Dans le Project Manager : F2, ou un
+clic lent sur un nom déjà sélectionné. Une virgule décimale se tape partout où
+l'on saisit un nombre (« 2,5 » devient 2.5) ; le séparateur des graduations d'un
+graphe se règle dans Propriétés › Axes (« Virgule décimale »).
 Dans le Project Manager, un **dossier** se renomme, se colle et se supprime au
 clic droit ; une **fenêtre** propose Show/Hide, Copy/Paste, Rename/Duplicate,
 Delete. Dans un classeur, Undo/Redo ne sont plus au clic droit (menu « Edit »,

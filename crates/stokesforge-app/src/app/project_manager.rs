@@ -21,6 +21,7 @@ use crate::state::{Action, ProjectTreeNode, WindowKind};
 use crate::tr;
 use stokesforge_core::NodeId;
 
+use super::inplace_edit;
 use super::list_row::list_row;
 use super::menu_sections::MenuSections;
 use super::shortcuts::{shortcut_text_delete, SHORTCUT_DUPLICATE_SHEET, SHORTCUT_RENAME_OBJECT};
@@ -64,6 +65,10 @@ struct PmMemory {
     rename: Vec<NodeId>,
     renamed: Vec<(NodeId, String)>,
     text: Option<String>,
+    /// Dernier clic simple sur une fenêtre déjà seule sélectionnée : s'il n'est
+    /// pas suivi d'un second clic avant [`SLOW_CLICK_SECONDS`], c'est un clic
+    /// lent, donc un renommage (K4, #224).
+    slow_click: Option<(Tab, f64)>,
     order: Vec<Tab>,
     next_order: Vec<Tab>,
 }
@@ -225,6 +230,10 @@ pub(super) fn object_menu(
     });
 }
 
+/// Délai d'un clic lent (K4) : plus long que l'intervalle d'un double-clic
+/// d'egui, pour qu'un double-clic (ouvrir, fermer) n'ouvre jamais le champ.
+const SLOW_CLICK_SECONDS: f64 = 0.5;
+
 fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
     let ctx = ui.ctx();
     let memory_key = memory_id(ctx);
@@ -239,6 +248,25 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
         value
     });
     let ids = selected_ids(interaction.selection, &memory.order);
+    // Clic lent : le délai écoulé sans second clic, le nom se renomme comme à F2.
+    if let Some((tab, at)) = memory.slow_click {
+        let now = ctx.input(|input| input.time);
+        if now - at >= SLOW_CLICK_SECONDS {
+            memory.slow_click = None;
+            if memory.rename.is_empty() && interaction.selection.len() == 1 {
+                memory.rename = ids.clone();
+                memory.renamed.clear();
+                memory.text = None;
+                ctx.request_repaint();
+            }
+        } else if !interaction.selection.contains(&tab) {
+            memory.slow_click = None;
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                SLOW_CLICK_SECONDS - (now - at) + 0.02,
+            ));
+        }
+    }
     if pending.is_some() || (memory.focus && memory.rename.is_empty() && !ctx.text_edit_focused()) {
         let parent = pending.unwrap_or(interaction.root);
         let mut paste = None;
@@ -303,7 +331,7 @@ pub(super) fn project_manager_contents_from_tree(
     let response = egui::ScrollArea::vertical().show(ui, |ui| {
         crate::tree_lines::begin_tree(ui);
         for node in tree {
-            project_tree_node_ui(ui, node, interaction);
+            project_tree_node_ui(ui, node, tree, interaction);
         }
     });
     ui.ctx().data_mut(|data| {
@@ -329,50 +357,81 @@ fn is_renaming(ctx: &egui::Context, memory_key: egui::Id, id: NodeId) -> bool {
         .is_some_and(|m| m.rename.first() == Some(&id))
 }
 
-/// Le champ de renommage en place d'une ligne (fenêtre ou dossier) : Entrée
-/// valide, Échap annule, la perte du focus valide ; tous les noms saisis
-/// partent en une seule `Action::RenameObjects` après la dernière ligne.
+/// Pourquoi ce nom est refusé (T4, cadre rouge) : vide, ou déjà pris par un
+/// autre enfant du même dossier.
+fn rename_refusal(siblings: &[ProjectTreeNode], id: NodeId, name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Some(tr!("field-refused-name-empty"));
+    }
+    let taken = siblings.iter().any(|node| {
+        let (other, text) = match node {
+            ProjectTreeNode::Folder { id, name, .. } | ProjectTreeNode::Window { id, name, .. } => {
+                (*id, name.as_str())
+            }
+        };
+        other != id && text == name
+    });
+    taken.then(|| tr!("field-refused-name-taken"))
+}
+
+/// Le champ de renommage en place d'une ligne (fenêtre ou dossier), au contrat
+/// commun de [`inplace_edit`](super::inplace_edit) : tout le nom sélectionné,
+/// Entrée, Tab ou un clic ailleurs valident et passent à la ligne suivante de la
+/// sélection, Échap abandonne tout. Un nom vide ou déjà pris reste ouvert sous
+/// un cadre rouge. Tous les noms saisis partent en une seule
+/// `Action::RenameObjects` après la dernière ligne.
 fn rename_editor(
     ui: &mut egui::Ui,
     interaction: &mut PmInteraction,
     memory_key: egui::Id,
     id: NodeId,
     name: &str,
+    siblings: &[ProjectTreeNode],
 ) -> egui::Response {
     let mut memory = ui
         .ctx()
         .data(|data| data.get_temp::<PmMemory>(memory_key))
         .unwrap_or_default();
-    let fresh = memory.text.is_none();
     let text = memory.text.get_or_insert_with(|| name.to_string());
-    let response = ui.add(
-        egui::TextEdit::singleline(text)
-            .id(egui::Id::new(("pm_rename", id)))
-            .desired_width(ui.available_width()),
+    let refusal = rename_refusal(siblings, id, text);
+    let shown = inplace_edit::show(
+        ui,
+        egui::Id::new(("pm_rename", id)),
+        egui::TextEdit::singleline(text).desired_width(ui.available_width()),
+        inplace_edit::Opening::SelectAll,
+        inplace_edit::FocusLoss::Ends,
+        refusal.as_deref(),
     );
-    if fresh {
-        response.request_focus();
-    }
-    let escape = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-    let enter = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-    if escape {
-        memory.rename.clear();
-        memory.renamed.clear();
-        memory.text = None;
-    } else if enter || (!fresh && response.lost_focus()) {
-        response.surrender_focus();
-        memory.renamed.push((id, text.clone()));
-        memory.rename.remove(0);
-        if memory.rename.is_empty() {
-            interaction
-                .actions
-                .push(Action::RenameObjects(std::mem::take(&mut memory.renamed)));
+    if let Some(end) = shown.end {
+        let refused = rename_refusal(siblings, id, text).is_some();
+        match inplace_edit::resolve(end, text.trim() == name, refused) {
+            inplace_edit::Resolution::Stay => {}
+            inplace_edit::Resolution::Close {
+                end: inplace_edit::EditEnd::Cancel,
+                ..
+            } => {
+                memory.rename.clear();
+                memory.renamed.clear();
+                memory.text = None;
+            }
+            inplace_edit::Resolution::Close { write, .. } => {
+                if write {
+                    memory.renamed.push((id, text.clone()));
+                }
+                memory.rename.remove(0);
+                if memory.rename.is_empty() && !memory.renamed.is_empty() {
+                    interaction
+                        .actions
+                        .push(Action::RenameObjects(std::mem::take(&mut memory.renamed)));
+                }
+                memory.text = None;
+            }
         }
-        memory.text = None;
     }
     ui.ctx()
         .data_mut(|data| data.insert_temp(memory_key, memory));
-    response
+    shown.response
 }
 
 /// Peint récursivement un nœud de [`ProjectTreeNode`] et ses enfants ; rend
@@ -380,6 +439,7 @@ fn rename_editor(
 fn project_tree_node_ui(
     ui: &mut egui::Ui,
     node: &ProjectTreeNode,
+    siblings: &[ProjectTreeNode],
     interaction: &mut PmInteraction,
 ) -> f32 {
     let memory_key = memory_id(ui.ctx());
@@ -394,7 +454,7 @@ fn project_tree_node_ui(
             .show_header(ui, |ui| {
                 ui.add(icon_image(Icon::Folder, IconRole::Folder));
                 if is_renaming(ui.ctx(), memory_key, *id) {
-                    rename_editor(ui, interaction, memory_key, *id, name);
+                    rename_editor(ui, interaction, memory_key, *id, name, siblings);
                     return;
                 }
                 let response = ui.label(name);
@@ -417,7 +477,7 @@ fn project_tree_node_ui(
                         branch.mark(ui.weak(tr!("project-folder-empty")).rect.center().y);
                     }
                     for child in children {
-                        branch.mark(project_tree_node_ui(ui, child, interaction));
+                        branch.mark(project_tree_node_ui(ui, child, children, interaction));
                     }
                 });
             });
@@ -437,7 +497,7 @@ fn project_tree_node_ui(
                 data.insert_temp(memory_key, memory);
             });
             if is_renaming(ui.ctx(), memory_key, *id) {
-                return rename_editor(ui, interaction, memory_key, *id, name)
+                return rename_editor(ui, interaction, memory_key, *id, name, siblings)
                     .rect
                     .center()
                     .y;
@@ -489,6 +549,8 @@ fn project_tree_node_ui(
                     }
                     memory.anchor = Some(tab);
                 } else {
+                    let alone = selected && interaction.selection.len() == 1;
+                    memory.slow_click = alone.then(|| (tab, ui.input(|input| input.time)));
                     interaction.selection.clear();
                     interaction.selection.insert(tab);
                     memory.anchor = Some(tab);
@@ -539,6 +601,12 @@ fn project_tree_node_ui(
                     viewport,
                 );
             });
+            if response.double_clicked() {
+                ui.ctx().data_mut(|data| {
+                    data.get_temp_mut_or_default::<PmMemory>(memory_key)
+                        .slow_click = None;
+                });
+            }
             if response.double_clicked() && interaction.active_tab == Some(tab) {
                 interaction.close_requests.push(tab);
             }
@@ -784,7 +852,20 @@ pub(super) mod tests {
             tree: &[ProjectTreeNode],
             events: Vec<egui::Event>,
         ) -> egui::FullOutput {
+            self.paint_at(context, tree, events, None)
+        }
+
+        /// Comme [`Banc::paint`], à l'instant `time` : les gestes qui dépendent
+        /// du délai (clic lent) ne peuvent pas se piloter à l'horloge réelle.
+        fn paint_at(
+            &self,
+            context: &egui::Context,
+            tree: &[ProjectTreeNode],
+            events: Vec<egui::Event>,
+            time: Option<f64>,
+        ) -> egui::FullOutput {
             let input = egui::RawInput {
+                time,
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
                     egui::vec2(400.0, 400.0),
@@ -1107,6 +1188,8 @@ pub(super) mod tests {
         };
         paint(&context, vec![key(egui::Key::F2)]);
         assert!(context.text_edit_focused());
+        // Le nom est sélectionné à l'ouverture : la frappe le remplace.
+        paint(&context, vec![egui::Event::Text("Neuf".to_string())]);
         paint(&context, vec![key(egui::Key::Enter)]);
         assert_eq!(banc.actions.take().len(), 1);
         assert!(
@@ -1460,6 +1543,7 @@ pub(super) mod tests {
         click_at(&context, rename, egui::Modifiers::NONE, paint);
         paint(&context, Vec::new());
         paint(&context, Vec::new());
+        paint(&context, vec![egui::Event::Text("Séries".to_string())]);
         paint(
             &context,
             vec![egui::Event::Key {
@@ -1472,7 +1556,7 @@ pub(super) mod tests {
         );
         assert_eq!(
             *banc.actions.borrow(),
-            vec![Action::RenameObjects(vec![(dossier, "Mesures".into())])],
+            vec![Action::RenameObjects(vec![(dossier, "Séries".into())])],
             "le dossier se renomme sur place"
         );
     }
@@ -1565,5 +1649,72 @@ pub(super) mod tests {
             banc.open_requests.borrow().is_empty(),
             "déplier un dossier n'ouvre aucune fenêtre"
         );
+    }
+
+    /// Un clic lent (K4) sur une fenêtre déjà seule sélectionnée ouvre son
+    /// renommage ; un double-clic, jamais ; le champ s'ouvre sur le nom
+    /// sélectionné.
+    #[test]
+    fn un_clic_lent_sur_un_nom_selectionne_le_renomme_pas_un_double_clic() {
+        let (_session, book, _graph, tree) = project_manager_fixture();
+        for double in [false, true] {
+            let context = egui::Context::default();
+            let banc = Banc::new(None, HashSet::from([book]));
+            let horloge = std::cell::Cell::new(1.0);
+            let paint = |ctx: &egui::Context, events| {
+                horloge.set(horloge.get() + 0.01);
+                banc.paint_at(ctx, &tree, events, Some(horloge.get()))
+            };
+            let first = paint(&context, Vec::new());
+            let pos = find_text_center(&first.shapes, "Book1");
+            click_at(&context, pos, egui::Modifiers::NONE, paint);
+            if double {
+                click_at(&context, pos, egui::Modifiers::NONE, paint);
+            }
+            paint(&context, Vec::new());
+            assert!(!context.text_edit_focused(), "pas encore (double={double})");
+            horloge.set(horloge.get() + 0.6);
+            paint(&context, Vec::new());
+            paint(&context, Vec::new());
+            assert_eq!(
+                context.text_edit_focused(),
+                !double,
+                "le renommage s'ouvre après un clic lent seulement (double={double})"
+            );
+        }
+    }
+
+    /// Un nom déjà pris par un frère garde le champ ouvert : Entrée n'envoie
+    /// rien ; un nom libre est écrit.
+    #[test]
+    fn un_nom_deja_pris_garde_le_champ_ouvert() {
+        let (_session, book, _graph, tree) = project_manager_fixture();
+        let context = egui::Context::default();
+        let banc = Banc::new(None, HashSet::from([book]));
+        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        paint(&context, vec![]);
+        let memory_key = memory_id(&context);
+        context.data_mut(|data| {
+            let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap();
+            memory.focus = true;
+            data.insert_temp(memory_key, memory);
+        });
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        paint(&context, vec![key(egui::Key::F2)]);
+        paint(&context, vec![egui::Event::Text("Graph1".to_string())]);
+        paint(&context, vec![key(egui::Key::Enter)]);
+        paint(&context, Vec::new());
+        assert!(banc.actions.borrow().is_empty(), "nom pris : rien d'écrit");
+        assert!(context.text_edit_focused(), "le champ reste ouvert");
+
+        paint(&context, vec![egui::Event::Text("Libre".to_string())]);
+        paint(&context, vec![key(egui::Key::Enter)]);
+        assert_eq!(banc.actions.borrow().len(), 1);
     }
 }

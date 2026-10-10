@@ -36,6 +36,7 @@ use super::graph_text_edit::{
     ContextText,
 };
 use super::graph_window::open_shape_properties;
+use super::inplace_edit;
 use super::list_row::{list_row_label, list_row_text, list_row_text_color, ListRowBackground};
 use super::menu_sections::MenuSections;
 use super::shortcuts::{
@@ -1081,7 +1082,6 @@ struct GroupRename {
     target: stokesforge_plot::SeriesGroupRef,
     original: String,
     buffer: String,
-    focus: bool,
 }
 
 fn group_rename_id(graph: NodeId) -> egui::Id {
@@ -1129,14 +1129,14 @@ pub(super) fn open_group_name_editor(
                 target: group,
                 original: name.clone(),
                 buffer: name,
-                focus: true,
             },
         );
     });
 }
 
-/// Le champ du nom à la place du libellé : Entrée ou un clic ailleurs valide
-/// (une seule action, et aucune si le nom n'a pas changé), Échap annule.
+/// Le champ du nom à la place du libellé, au contrat commun de
+/// [`inplace_edit`](super::inplace_edit) : Entrée, Tab ou un clic ailleurs
+/// valident (une seule action, et aucune si le nom n'a pas changé), Échap annule.
 fn group_name_editor(
     ui: &mut egui::Ui,
     graph: NodeId,
@@ -1145,38 +1145,31 @@ fn group_name_editor(
     actions: &mut Vec<Action>,
 ) {
     let id = group_rename_id(graph);
-    let field = ui.add(
-        egui::TextEdit::singleline(&mut rename.buffer)
-            .id(id.with("field"))
-            .desired_width(160.0),
+    let shown = inplace_edit::show(
+        ui,
+        id.with("field"),
+        egui::TextEdit::singleline(&mut rename.buffer).desired_width(160.0),
+        inplace_edit::Opening::SelectAll,
+        inplace_edit::FocusLoss::Ends,
+        None,
     );
-    if rename.focus {
-        field.request_focus();
-        // Le nom en cours est sélectionné : taper le remplace.
-        let mut state = egui::TextEdit::load_state(ui.ctx(), field.id).unwrap_or_default();
-        let end = rename.buffer.chars().count();
-        state
-            .cursor
-            .set_char_range(Some(egui::text::CCursorRange::two(
-                egui::text::CCursor::new(0),
-                egui::text::CCursor::new(end),
-            )));
-        state.store(ui.ctx(), field.id);
-        rename.focus = false;
-    }
-    if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-        ui.data_mut(|data| data.remove::<GroupRename>(id));
-    } else if field.lost_focus() {
-        if rename.buffer != rename.original {
-            actions.push(Action::RenameSeriesGroup {
-                graph,
-                group: group.target,
-                name: rename.buffer.clone(),
-            });
+    match shown
+        .end
+        .map(|end| inplace_edit::resolve(end, rename.buffer == rename.original, false))
+    {
+        Some(inplace_edit::Resolution::Close { write, .. }) => {
+            if write {
+                actions.push(Action::RenameSeriesGroup {
+                    graph,
+                    group: group.target,
+                    name: rename.buffer.clone(),
+                });
+            }
+            ui.data_mut(|data| data.remove::<GroupRename>(id));
         }
-        ui.data_mut(|data| data.remove::<GroupRename>(id));
-    } else {
-        ui.data_mut(|data| data.insert_temp(id, rename));
+        _ => ui.data_mut(|data| {
+            data.insert_temp(id, rename);
+        }),
     }
 }
 

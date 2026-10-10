@@ -33,7 +33,7 @@ les règles R1–R16 de `textes-interface.md`.
 | brique « nombre » (`number_field`) + table des grandeurs (`quantities`) | seul champ numérique | **en place** (#220) |
 | garde : aucun `DragValue` ni `Slider` (`aucun_champ_numerique_hors_de_la_brique`) | | **en place** (#220) |
 | formateur des nombres (`stokesforge_core::number_format`) | seul formatage affiché | **en place** (#222) |
-| brique d'édition sur place | un seul contrat T4 | à venir (#224) |
+| brique d'édition sur place (`app/inplace_edit.rs`) | un seul contrat T4 ; aperçus à pause de 0,3 s | **en place** (#224) |
 | garde : aucune bulle nue sur un champ de formulaire | | à venir (#225) |
 | garde : aucun `add_enabled` sans raison | | à venir (#226) |
 | brique « formulaire » (grille à deux colonnes), largeurs et espacements de `theme.rs` | | à venir (#227) |
@@ -186,7 +186,7 @@ champs numériques existants (`DragValue`, #220), la contrainte entre champs
 - **Chemins** (D5) : nom du fichier seul dans les messages, chemin complet en
   bulle.
 
-## Champs texte et édition sur place — à venir (#224)
+## Champs texte et édition sur place — en place (#224)
 
 - **Application** (T1 → R11) : à Entrée ou en quittant le champ. Exception :
   les aperçus (analyse, import) se recalculent à la frappe, texte et nombres,
@@ -195,7 +195,27 @@ champs numériques existants (`DragValue`, #220), la contrainte entre champs
   l'ouverture ; Entrée et clic ailleurs valident, Échap annule, Tab valide et
   passe au suivant.
 - **Renommer dans le Project Manager** (K4) : F2, ou un clic lent sur un nom
-  déjà sélectionné.
+  déjà sélectionné (0,5 s sans second clic ; un double-clic n'ouvre jamais le
+  champ).
+
+Comment c'est tenu :
+
+- **`app/inplace_edit.rs`** (`begin` / `show` / `finish`, `resolve`) lit le
+  focus et les touches d'un champ posé par l'appelant et en rend la fin
+  (`EditEnd` : Entrée, Tab, ailleurs, Échap) ; il consomme Entrée, Tab et Échap
+  (jamais relus plus bas). `resolve` est la décision pure : saisie refusée →
+  le champ reste ouvert sous le cadre rouge de `field_state` (Entrée, Tab) ou
+  l'ancienne valeur revient (clic ailleurs) ; texte inchangé → rien n'écrit.
+- Appelants : cellules et en-têtes de la grille (`FocusLoss::Ends`, ouverture
+  par frappe = `KeepCursor`), onglets de feuille (nom vide ou pris refusé ; Tab
+  ouvre l'onglet voisin), Project Manager (nom vide ou pris refusé ; Entrée,
+  Tab et clic ailleurs passent à la ligne suivante de la sélection), groupe de
+  séries de l'Object Manager, titres et textes libres du graphe
+  (`FocusLoss::Ignored` : leur barre de réglages prend le focus sans finir la
+  saisie, le « ailleurs » reste décidé par l'éditeur).
+- Aperçus : l'analyse (`analysis_preview::PREVIEW_PAUSE`) et l'import
+  (`ImportState::debounce_preview`, pause seulement pendant la frappe dans un
+  champ texte ; liste, case et bouton sont immédiats).
 
 ## Messages et aide — à venir (#225, #230)
 

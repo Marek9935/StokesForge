@@ -59,6 +59,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/graph_window.rs` | fenêtre de graphe : `graph_view_contents` (commun flottant/détaché), `graph_drop_target`, menu contextuel de la figure, `annotation_interactions`, ordre et propriétés des objets, `request_graph_export` |
 | `app/graph_text_edit.rs` | éditeurs sur place (texte libre, titre, nom de légende) et mise en forme en attente demandée par la barre de format |
 | `app/file_drop.rs` | dépôt de fichiers : `begin_file_drop`, `claim_file_drop`, `finish_file_drop` (un emplacement par viewport), `open_project_in_new_window` |
+| `app/inplace_edit.rs` | **le** contrat de l'édition sur place (#224) : ouverture sélectionnée, Entrée/Tab/clic ailleurs valident, Échap annule ; décision pure `resolve` |
 | `app/import_wizard.rs` | assistant d'import : `import_window`, ses six étapes ; choix du modèle/fichiers et réglages du format en sections, l'aperçu coloré par rôle, les libellés des choix |
 | `app/plot_settings.rs` | propriétés du graphe : `plot_settings_window`, ses onglets, un éditeur par page, l'aide à la syntaxe des formules (`formula_field`, `formula_help`) ; `column_metadata_window` |
 | `app/hover_help.rs` | brique commune de l'aide au survol d'un champ (#197) : `hover_help`, l'icône grisée à droite du champ dont la bulle montre le rappel |

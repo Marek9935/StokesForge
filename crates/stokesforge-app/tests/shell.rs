@@ -2919,6 +2919,47 @@ fn opening_import_starts_from_the_first_saved_recipe_or_a_permissive_default() {
     assert_eq!(import.recipe.decimal, DecimalStyle::Comma);
 }
 
+/// T1 (#224) : pendant une frappe, les aperçus de l'import gardent la recette
+/// d'avant jusqu'à 0,3 s sans changement ; hors frappe, un changement est
+/// immédiat.
+#[test]
+fn the_import_preview_waits_for_a_typing_pause_but_not_for_other_controls() {
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    state.open_import(book);
+    let import = state.import_state_mut().expect("fenêtre d'import ouverte");
+    let before = import.recipe.comment_prefix.clone();
+    assert_eq!(import.debounce_preview(true, 10.0), None, "rien n'a changé");
+
+    // Une frappe : l'aperçu reste sur l'ancienne recette.
+    import.recipe.comment_prefix = "#".to_string();
+    let wait = import
+        .debounce_preview(true, 10.0)
+        .expect("une pause court");
+    assert!((wait - 0.3).abs() < 1e-9);
+    assert_eq!(import.preview_recipe().comment_prefix, before);
+
+    // Une autre frappe repousse l'échéance.
+    import.recipe.comment_prefix = "##".to_string();
+    assert!(import.debounce_preview(true, 10.2).is_some());
+    assert_eq!(import.preview_recipe().comment_prefix, before);
+    assert!(
+        import.debounce_preview(true, 10.4).is_some(),
+        "0,2 s seulement"
+    );
+
+    // La pause écoulée, l'aperçu suit la recette.
+    assert_eq!(import.debounce_preview(true, 10.55), None);
+    assert_eq!(import.preview_recipe().comment_prefix, "##");
+
+    // Hors frappe (liste, case) : immédiat.
+    import.recipe.comment_prefix = ";".to_string();
+    assert_eq!(import.debounce_preview(false, 11.0), None);
+    assert_eq!(import.preview_recipe().comment_prefix, ";");
+}
+
 /// « Nouveau modèle » repart d'une recette permissive, même après avoir
 /// chargé/modifié un modèle existant.
 #[test]

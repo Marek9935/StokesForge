@@ -150,6 +150,7 @@ mod graph_window;
 mod grid;
 mod hover_help;
 mod import_wizard;
+mod inplace_edit;
 mod list_row;
 mod menu_sections;
 mod menus;

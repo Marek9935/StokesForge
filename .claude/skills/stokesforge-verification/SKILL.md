@@ -95,6 +95,11 @@ Garde **en place** du standard d'interface (#217) : `aucun_champ_numerique_hors_
 (`stokesforge-app/tests/gardes.rs`, #220 : ni `DragValue` ni `Slider`, sans
 dérogation).
 
+Brique **en place** de l'édition sur place (#224) : `app/inplace_edit.rs` (tests de
+`resolve` et du geste dans son module ; chaque surface teste son usage : onglets,
+Project Manager, grille). Aucune garde ne la verrouille encore ; la garde
+`consume_key` hors de `app/shortcuts.rs` (#231) devra l'excepter.
+
 Gardes **à venir** du standard d'interface (#217) : bulle nue sur un champ (#225), `add_enabled` sans
 raison (#226), `add_space` littéral hors de `theme.rs` (#227), `consume_key`
 hors de `app/shortcuts.rs` (#231). Elles **n'existent pas encore** : ne pas

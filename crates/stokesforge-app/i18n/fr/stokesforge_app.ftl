@@ -1472,6 +1472,8 @@ field-clamped-max = Ramené au maximum, { $limit }
 field-refused-number = Saisissez un nombre
 field-refused-integer = Saisissez un nombre entier
 field-refused-use-auto = Utilisez Plage auto
+field-refused-name-empty = Le nom ne peut pas être vide
+field-refused-name-taken = Ce nom est déjà utilisé
 
 # Champ numérique : bulle du ▼ (#220).
 number-presets = Valeurs courantes

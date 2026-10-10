@@ -461,6 +461,9 @@ mod tests {
         session.shutdown().unwrap();
 
         // Une correction sans référence : « Create » est grisé, rien ne part.
+        // Contexte neuf : l'aperçu garde sa mémoire (résultat, pause de frappe)
+        // d'une fenêtre à l'autre.
+        let ctx = contexte();
         let (session, mut state, sheet, ids) = banc();
         state.dispatch(Action::OpenAnalysis {
             preset: Preset::Correct,

@@ -355,6 +355,37 @@ pub(super) fn reset_view(ui: &mut egui::Ui, id: egui::Id) {
     ui.data_mut(|d| d.remove::<StoredView>(id.with("view")));
 }
 
+/// La pause de frappe après laquelle un aperçu se recalcule (T1, #224), en
+/// secondes. Texte **et** nombres : chaque frappe d'un champ ne relance pas le
+/// calcul.
+pub(super) const PREVIEW_PAUSE: f64 = 0.3;
+
+/// Le formulaire est-il resté inchangé depuis [`PREVIEW_PAUSE`] ? Le formulaire
+/// de l'image précédente et l'instant de son dernier changement sont gardés
+/// en mémoire d'egui ; tant qu'il bouge, une image est demandée à la fin de la
+/// pause (aucun réveil périodique au repos).
+fn settled(ui: &egui::Ui, id: egui::Id, form: &AnalysisForm) -> bool {
+    let key = id.with("preview_pause");
+    let now = ui.input(|input| input.time);
+    let since = ui.data_mut(|data| {
+        let (last, since) = data
+            .get_temp::<(AnalysisForm, f64)>(key)
+            .unwrap_or_else(|| (form.clone(), f64::NEG_INFINITY));
+        let since = if last.same_preview(form) { since } else { now };
+        data.insert_temp(key, (form.clone(), since));
+        since
+    });
+    let waited = now - since;
+    if waited < PREVIEW_PAUSE {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(
+                PREVIEW_PAUSE - waited + 0.01,
+            ));
+        return false;
+    }
+    true
+}
+
 /// Peint l'aperçu dans l'espace restant de `ui` et applique ses gestes au
 /// formulaire.
 pub(super) fn preview(
@@ -375,9 +406,12 @@ pub(super) fn preview(
         }
     };
     let up_to_date = jobs.latest().filter(|c| c.matches(form, revision));
-    let cache = match up_to_date {
-        Some(cache) => cache,
-        None => {
+    let cache = match (up_to_date, jobs.latest()) {
+        (Some(cache), _) => cache,
+        // Un aperçu se recalcule après une pause de frappe (T1, #224) : tant
+        // que le formulaire bouge, on garde l'ancien résultat, marqué en cours.
+        (None, Some(latest)) if !settled(ui, id, form) => latest,
+        (None, _) => {
             jobs.request(ui.ctx(), form, tree, revision);
             jobs.wait_for(form, revision, INLINE_WAIT)
                 .or_else(|| jobs.latest())
@@ -839,6 +873,37 @@ mod tests {
         jobs.request(&context, &form, &tree, 3);
         std::thread::sleep(Duration::from_millis(250));
         assert_eq!(COMPUTED.load(Ordering::SeqCst), 2);
+    }
+
+    /// L'aperçu se recalcule après une pause de 0,3 s sans changement (T1,
+    /// #224) : le premier calcul est immédiat, un changement relance le
+    /// compte à rebours, la pause écoulée l'autorise.
+    #[test]
+    fn l_apercu_attend_une_pause_de_frappe_avant_de_se_recalculer() {
+        let (mut form, _) = form_and_tree();
+        let context = egui::Context::default();
+        let id = egui::Id::new("apercu");
+        let at = |time: f64, form: &AnalysisForm| {
+            let mut settled_now = false;
+            let input = egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| settled_now = settled(ui, id, form));
+            output.textures_delta.clear();
+            settled_now
+        };
+        assert!(at(1.0, &form), "le premier calcul n'attend pas");
+        assert!(at(1.05, &form), "rien n'a changé");
+        form.current += 1;
+        assert!(!at(2.0, &form), "un changement relance le compte à rebours");
+        assert!(
+            !at(2.0 + PREVIEW_PAUSE - 0.05, &form),
+            "la pause n'est pas écoulée"
+        );
+        assert!(at(2.0 + PREVIEW_PAUSE + 0.01, &form), "pause écoulée");
+        form.current += 1;
+        assert!(!at(3.0, &form), "chaque frappe repousse l'échéance");
     }
 
     #[test]

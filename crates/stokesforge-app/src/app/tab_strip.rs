@@ -25,6 +25,7 @@ use crate::icons::{icon_button, Icon, IconRole};
 use crate::theme;
 use crate::tr;
 
+use super::inplace_edit;
 use super::menu_sections::MenuSections;
 use super::shortcuts::SHORTCUT_DUPLICATE_SHEET;
 
@@ -357,51 +358,78 @@ fn tab_strip_arrows(
     (step, arrows)
 }
 
-fn tab_strip_rename<K: Copy + std::hash::Hash + std::fmt::Debug>(
+/// Pourquoi ce nom d'onglet est refusé (T4, cadre rouge) : vide, ou déjà pris
+/// par un autre onglet de la bande.
+fn tab_name_refusal<K: PartialEq>(tabs: &[(K, String)], id: &K, name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        Some(tr!("field-refused-name-empty"))
+    } else if tabs.iter().any(|(other, text)| other != id && text == name) {
+        Some(tr!("field-refused-name-taken"))
+    } else {
+        None
+    }
+}
+
+/// Le renommage en place d'un onglet : le contrat commun de
+/// [`inplace_edit`](super::inplace_edit) (tout le nom sélectionné, Entrée ou
+/// clic ailleurs valident, Échap annule, Tab valide) ; un nom vide ou déjà pris
+/// garde le champ ouvert sous un cadre rouge.
+fn tab_strip_rename<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
     ui: &mut egui::Ui,
     id: K,
     name: &str,
+    tabs: &[(K, String)],
     requests: &mut TabStripRequests<K>,
 ) -> egui::Response {
     let buffer_id = ui.id().with(("tab_rename_buffer", id));
-    let fresh = ui
-        .memory(|memory| memory.data.get_temp::<String>(buffer_id))
-        .is_none();
     let mut text = ui
         .memory(|memory| memory.data.get_temp::<String>(buffer_id))
         .unwrap_or_else(|| name.to_owned());
     let width = (name.chars().count().max(6) as f32 * 8.0).min(240.0);
-    let edit_id = buffer_id.with("edit");
-    let output = egui::TextEdit::singleline(&mut text)
-        .id(edit_id)
-        .font(egui::FontId::proportional(12.0))
-        .desired_width(width)
-        .show(ui);
-    if fresh {
-        output.response.request_focus();
-        let mut state = output.state;
-        state
-            .cursor
-            .set_char_range(Some(egui::text::CCursorRange::two(
-                egui::text::CCursor::new(0),
-                egui::text::CCursor::new(text.chars().count()),
-            )));
-        state.store(ui.ctx(), edit_id);
-    }
-    let escape = ui.input(|input| input.key_pressed(egui::Key::Escape));
-    if escape {
-        ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
-        requests.events.push(TabEvent::CancelRename);
-    } else if ui.input(|input| input.key_pressed(egui::Key::Enter))
-        || (!fresh && (output.response.lost_focus() || !output.response.has_focus()))
+    let refusal = tab_name_refusal(tabs, &id, &text);
+    let shown = inplace_edit::show(
+        ui,
+        buffer_id.with("edit"),
+        egui::TextEdit::singleline(&mut text)
+            .font(egui::FontId::proportional(12.0))
+            .desired_width(width),
+        inplace_edit::Opening::SelectAll,
+        inplace_edit::FocusLoss::Ends,
+        refusal.as_deref(),
+    );
+    let refused = tab_name_refusal(tabs, &id, &text).is_some();
+    match shown
+        .end
+        .map(|end| inplace_edit::resolve(end, text.trim() == name, refused))
     {
-        output.response.surrender_focus();
-        ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
-        requests.events.push(TabEvent::CommitRename(id, text));
-    } else {
-        ui.memory_mut(|memory| memory.data.insert_temp(buffer_id, text));
+        Some(inplace_edit::Resolution::Close { write, end }) => {
+            ui.memory_mut(|memory| memory.data.remove::<String>(buffer_id));
+            requests.events.push(if write {
+                TabEvent::CommitRename(id, text)
+            } else {
+                TabEvent::CancelRename
+            });
+            // Tab passe au renommage de l'onglet voisin (Maj+Tab : le précédent).
+            if let inplace_edit::EditEnd::Tab { shift } = end {
+                let at = tabs.iter().position(|(other, _)| *other == id);
+                let next = at.and_then(|at| {
+                    if shift {
+                        at.checked_sub(1)
+                    } else {
+                        Some(at + 1)
+                    }
+                });
+                if let Some((next, _)) = next.and_then(|at| tabs.get(at)) {
+                    requests.events.push(TabEvent::BeginRename(*next));
+                }
+            }
+        }
+        _ => {
+            ui.memory_mut(|memory| memory.data.insert_temp(buffer_id, text));
+        }
     }
-    output.response.response
+    shown.response
 }
 
 fn tab_strip_tab<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
@@ -413,7 +441,7 @@ fn tab_strip_tab<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
 ) -> egui::Response {
     let renaming = config.ops.is_some_and(|ops| ops.renaming == Some(id));
     if renaming {
-        tab_strip_rename(ui, id, name, requests)
+        tab_strip_rename(ui, id, name, config.tabs, requests)
     } else {
         let response = tab_strip_label(ui, name, config.selected == id, config.side);
         response.context_menu(|ui| tab_strip_tab_menu(ui, id, config, requests));
@@ -621,7 +649,7 @@ fn scroll_tab_strip_to_selected(
 
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::contexte;
+    use super::super::test_support::{contexte, touche};
     use super::*;
 
     /// Dix onglets « Feuille N », de clés `0..10`.
@@ -1321,5 +1349,51 @@ mod tests {
             ],
         );
         assert_eq!(demandes, vec![TabEvent::CancelRename]);
+    }
+
+    /// Un nom déjà pris ou vide garde le champ ouvert (Entrée ne valide pas) ;
+    /// Tab sur un nom valide l'écrit et ouvre le renommage de l'onglet suivant,
+    /// Maj+Tab celui du précédent (T4, #224).
+    #[test]
+    fn le_renommage_refuse_un_nom_pris_et_tab_passe_a_l_onglet_voisin() {
+        let ops = TabOps {
+            renaming: Some(1),
+            can_delete: true,
+        };
+        let (_, demandes) = gestes(
+            Some(&ops),
+            vec![
+                Vec::new(),
+                vec![egui::Event::Text("Feuille 2".to_string())],
+                vec![touche(egui::Key::Enter)],
+            ],
+        );
+        assert!(demandes.is_empty(), "un nom pris n'est pas validé");
+
+        let (_, demandes) = gestes(
+            Some(&ops),
+            vec![
+                Vec::new(),
+                vec![egui::Event::Text("Spectres".to_string())],
+                vec![touche(egui::Key::Tab)],
+            ],
+        );
+        assert_eq!(
+            demandes,
+            vec![
+                TabEvent::CommitRename(1, "Spectres".to_string()),
+                TabEvent::BeginRename(2)
+            ]
+        );
+
+        // Sans changement, Tab ne valide rien mais passe quand même au suivant.
+        let (_, demandes) = gestes(
+            Some(&ops),
+            vec![Vec::new(), Vec::new(), vec![touche(egui::Key::Tab)]],
+        );
+        assert_eq!(
+            demandes,
+            vec![TabEvent::CancelRename, TabEvent::BeginRename(2)]
+        );
     }
 }

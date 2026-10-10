@@ -29,6 +29,7 @@ use crate::state::{
 use crate::{icons, tr};
 
 use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
+use super::inplace_edit;
 use super::menu_sections::MenuSections;
 use super::shortcuts::{
     shortcut_text_backspace, shortcut_text_delete, SHORTCUT_COPY, SHORTCUT_COPY_FULL_COLUMNS,
@@ -1095,43 +1096,32 @@ fn header_field_widget(
             let Some(edit) = state.header_editing_mut() else {
                 return;
             };
-            let response = ui.add(
+            let opening = if edit.typed {
+                inplace_edit::Opening::KeepCursor
+            } else {
+                inplace_edit::Opening::SelectAll
+            };
+            // Le contrat commun de l'édition sur place (#224) ; il consomme
+            // Entrée, Tab et Échap, que le bloc de raccourcis plus bas ne doit
+            // pas revoir (#38).
+            let shown = inplace_edit::show(
+                ui,
+                ui.id().with("header_edit"),
                 egui::TextEdit::singleline(&mut edit.buffer)
                     .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY)
-                    // #38 : même filtre que la cellule — voir `GRID_KEYS`.
-                    .event_filter(GRID_KEYS),
+                    .desired_width(f32::INFINITY),
+                opening,
+                inplace_edit::FocusLoss::Ends,
+                None,
             );
-            // Même piège que [`cell_widget`] : lire `lost_focus()` avant de
-            // décider de redemander le focus, sous peine de se le redonner
-            // à soi-même juste après qu'Entrée l'ait fait perdre en interne
-            // au `TextEdit`, et de ne plus jamais valider.
-            let lost_focus = response.lost_focus();
-            if !response.has_focus() && !lost_focus {
-                response.request_focus();
-            }
-            // Tab ne fait plus perdre le focus au champ (filtre `GRID_KEYS`) :
-            // même lecture explicite que dans [`cell_widget`].
-            let tab_pressed =
-                response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Tab));
-            if tab_pressed {
-                response.surrender_focus();
-            }
-            if lost_focus || tab_pressed {
-                if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-                    state.cancel_header_edit();
-                } else {
-                    // `consume_key`, pas `key_pressed` : Tab valide *et*
-                    // déplace la sélection tout de suite (`move_selection_tab`/
-                    // `AddColumnAndSelectHeaderField` ci-dessous), avant que
-                    // le bloc de raccourcis clavier de `grid_contents` (qui
-                    // tourne après, une fois l'édition refermée par ce
-                    // `return`) ne revoie passer le même Tab — même piège
-                    // que `cell_widget`.
-                    let shift = ui.input(|i| i.modifiers.shift);
-                    let tab = ui.input_mut(|input| {
-                        input.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
-                    });
+            match shown.end {
+                None => {}
+                Some(inplace_edit::EditEnd::Cancel) => state.cancel_header_edit(),
+                Some(end) => {
+                    let (tab, shift) = match end {
+                        inplace_edit::EditEnd::Tab { shift } => (true, shift),
+                        _ => (false, false),
+                    };
                     state.commit_header_edit();
                     if tab && !shift && is_last_visible_column(state, sheet, column) {
                         // Tab valide sur n'importe quel champ d'en-tête de
@@ -1943,11 +1933,13 @@ fn start_grid_typing(ui: &egui::Ui, state: &mut AppState, sheet: NodeId) {
             state.begin_edit(column, row);
             if let Some(edit) = state.editing_mut() {
                 edit.buffer = typed;
+                edit.typed = true;
             }
         } else if let Some((column, field)) = state.selected_header_field(sheet) {
             state.begin_header_edit(column, field);
             if let Some(edit) = state.header_editing_mut() {
                 edit.buffer = typed;
+                edit.typed = true;
             }
         }
     }
@@ -2277,75 +2269,40 @@ fn edit_cell_widget(
     let Some(edit) = state.editing_mut() else {
         return;
     };
-    let response = ui.add(
+    let opening = if edit.typed {
+        inplace_edit::Opening::KeepCursor
+    } else {
+        inplace_edit::Opening::SelectAll
+    };
+    // Le contrat commun de l'édition sur place (#224) : focus et sélection à
+    // l'ouverture, Entrée, Tab et Échap **consommés** ici (avant le bloc de
+    // raccourcis de `grid_contents`, qui les relirait et déplacerait la
+    // sélection une seconde fois : Entrée sur la ligne 2 atterrissait sur la
+    // ligne 4). Échap referme sans rien écrire ; toute autre fin valide, et
+    // Entrée/Maj+Entrée/Tab/Maj+Tab déplacent aussi la sélection, comme dans
+    // tout tableur.
+    let shown = inplace_edit::show(
+        ui,
+        ui.id().with("cell_edit"),
         egui::TextEdit::singleline(&mut edit.buffer)
             .frame(egui::Frame::NONE)
-            .desired_width(f32::INFINITY)
-            // #38 : Tab ne doit pas faire sortir le focus du champ
-            // vers le reste de l'interface — voir `GRID_KEYS` ; c'est
-            // ce widget qui le lit (`tab_pressed`) pour valider.
-            .event_filter(GRID_KEYS),
+            .desired_width(f32::INFINITY),
+        opening,
+        inplace_edit::FocusLoss::Ends,
+        None,
     );
-    // `Response::has_focus`/`lost_focus` sont recalculés à chaque
-    // appel à partir de l'état *courant* du focus (pas un instantané
-    // figé) : il faut donc lire `lost_focus()` **avant** de
-    // potentiellement redemander le focus, sous peine de se
-    // redonner nous-mêmes le focus qu'on vient de perdre (Entrée
-    // fait perdre le focus au `TextEdit` en interne) et de faire
-    // rentrer `lost_focus()` à `false` — plus aucune validation
-    // n'aurait alors lieu, la cellule restant bloquée en édition et,
-    // avec elle, `AppState::editing()` bloquant à son tour tous les
-    // raccourcis clavier de la grille (voir la garde en tête de
-    // `grid_contents`).
-    let lost_focus = response.lost_focus();
-    // Sans ceci, un `TextEdit` qui vient d'apparaître (édition
-    // ouverte par double-clic ou, depuis le bug 1, par une frappe
-    // sur une cellule sélectionnée) ne reçoit le focus clavier
-    // qu'après un clic dessus — egui ne le lui donne pas
-    // automatiquement à l'apparition.
-    if !response.has_focus() && !lost_focus {
-        response.request_focus();
-    }
-    // Avec le filtre `GRID_KEYS`, Tab ne fait plus perdre le focus au
-    // champ (c'était lui, auparavant, qui signalait la validation) :
-    // on lit la touche, et on rend le focus nous-mêmes — la grille le
-    // reprend à la fin de l'édition (`grid_contents`).
-    let tab_pressed = response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Tab));
-    if tab_pressed {
-        response.surrender_focus();
-    }
-    if !lost_focus && !tab_pressed {
+    let Some(end) = shown.end else {
         return;
-    }
-    // Échap referme la saisie sans rien écrire ; toute autre perte
-    // de focus (clic ailleurs, Tab, Entrée) valide — et, pour
-    // Entrée/Maj+Entrée/Tab/Maj+Tab, déplace aussi la sélection vers
-    // la cellule suivante, comme dans tout tableur (déplacement
-    // clavier complet : voir le bloc de raccourcis hors édition dans
-    // `grid_contents` pour les flèches directionnelles, qui ne
-    // s'appliquent qu'à une cellule déjà sélectionnée mais pas en
-    // édition — `TextEdit` capture lui-même les flèches pour
-    // déplacer le curseur de texte pendant la saisie).
-    if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    };
+    if end == inplace_edit::EditEnd::Cancel {
         state.cancel_edit();
         return;
     }
-    let shift = ui.input(|i| i.modifiers.shift);
-    // `consume_key`, pas `key_pressed` : cette cellule valide *et*
-    // déplace la sélection tout de suite (`select_cell`/
-    // `move_selection*` ci-dessous), avant que le bloc de
-    // raccourcis clavier de `grid_contents` (qui tourne après, une
-    // fois `state.editing()` redevenu `None` par le `cancel_edit`
-    // ci-dessous) ne voie passer la même image. Sans consommer la
-    // touche ici, ce bloc plus tard dans la même image relisait le
-    // même Entrée/Tab (`key_pressed` ne retire rien des
-    // événements) et déplaçait la sélection une deuxième fois —
-    // Entrée sur la ligne 2 atterrissait sur la ligne 4, pas 3.
-    // `Modifiers::NONE` matche Entrée avec ou sans Maj
-    // (`Modifiers::matches_logically` ignore Maj/Alt en trop quand
-    // le motif ne les demande pas).
-    let enter = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-    let tab = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
+    let (enter, tab, shift) = match end {
+        inplace_edit::EditEnd::Enter { shift } => (true, false, shift),
+        inplace_edit::EditEnd::Tab { shift } => (false, true, shift),
+        _ => (false, false, false),
+    };
     let pending = state
         .editing()
         .filter(|edit| edit.column == column && edit.row == row)

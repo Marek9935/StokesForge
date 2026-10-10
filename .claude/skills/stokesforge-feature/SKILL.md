@@ -436,7 +436,19 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   lit une saisie, `show_issue` pour un défaut connu (Typst…), teintes
   `theme::field_refused_color` / `field_clamped_color` ; jamais un cadre peint à
   la main ;
-- un **nombre** se saisit par `number_field::number_field` avec une grandeur de
+- un champ qui **s'ouvre sur place** (renommer, éditer une cellule, un titre)
+  passe par `app/inplace_edit.rs` (#224, T4) : `show` (ou `begin` + `finish`
+  quand la mise en page est posée par l'appelant), `resolve` pour la décision
+  pure ; tout le texte sélectionné à l'ouverture, Entrée / clic ailleurs
+  valident, Échap annule, Tab valide et passe au suivant, nom refusé = champ
+  ouvert sous cadre rouge — jamais un `TextEdit` dont on relit à la main
+  `lost_focus` et Entrée. Un aperçu (analyse, import) se recalcule après 0,3 s
+  de pause ;
+- une **virgule décimale** se lit par `stokesforge_core::number_format::parse_input`
+  (champs nombre, cellules ; une virgule seule et sans point), jamais par
+  `str::parse::<f64>` sur une saisie ; le séparateur d'un graphe est
+  `PlotSpec::decimal_comma` (#223) ;
+- un **nombre** se saisit par `number_field::number_field" avec une grandeur de
   `quantities.rs` (bornes, pas, décimales, valeurs du `▼`) — jamais `DragValue`
   ni `Slider` (`aucun_champ_numerique_hors_de_la_brique`) ; une grandeur neuve
   s'ajoute à la table, l'unité va dans le libellé ;

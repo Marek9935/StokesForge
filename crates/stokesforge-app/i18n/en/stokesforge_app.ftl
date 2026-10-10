@@ -1480,6 +1480,8 @@ field-clamped-max = Set to the maximum, { $limit }
 field-refused-number = Enter a number
 field-refused-integer = Enter a whole number
 field-refused-use-auto = Use Auto range
+field-refused-name-empty = The name cannot be empty
+field-refused-name-taken = This name is already used
 
 # Champ numérique : bulle du ▼ (#220).
 number-presets = Common values
