@@ -156,3 +156,33 @@ fn le_temoin_naif_reproduit_bien_lheuristique_de_plotters() {
     let (largeur, hauteur) = naive_estimate("0,5", 20.0);
     assert!(largeur > 0 && hauteur > 0);
 }
+
+#[test]
+fn le_separateur_decimal_du_graphe_vaut_pour_l_export() {
+    let mut projet = projet();
+    // Un axe de 0 à 1 : des graduations décimales (0.2, 0.4…) à coup sûr.
+    if let Some(panel) = projet.spec.panels.get_mut(0) {
+        panel.left.auto_range = false;
+        panel.left.range_min = Some(0.0);
+        panel.left.range_max = Some(1.0);
+    }
+    let rendre = |projet: &Projet| {
+        render_spec(
+            tree(projet),
+            &projet.spec,
+            (800, 600),
+            &TextMeasurer::default(),
+        )
+        .expect("export")
+    };
+    // Témoin : au point, des graduations décimales existent et aucune virgule
+    // ne figure dans un nombre.
+    let au_point = rendre(&projet);
+    assert!(au_point.contains("\n0.2\n"), "graduation décimale au point");
+    assert!(!au_point.contains("\n0,2\n"));
+
+    projet.spec.decimal_comma = true;
+    let a_la_virgule = rendre(&projet);
+    assert!(a_la_virgule.contains("\n0,2\n"), "graduation à la virgule");
+    assert!(!a_la_virgule.contains("\n0.2\n"));
+}

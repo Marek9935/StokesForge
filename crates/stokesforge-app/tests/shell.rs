@@ -403,6 +403,40 @@ fn the_grid_paints_six_digits_but_edits_and_copies_the_exact_value() {
     );
 }
 
+/// #223 : la virgule est lue comme un point décimal dans une cellule Numeric ;
+/// l'interface réécrit toujours avec le point. « 1,000 » est lu 1 (R6).
+#[test]
+fn a_decimal_comma_is_read_in_a_numeric_cell_and_shown_with_a_point() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 1,
+        text: "42,5".to_string(),
+    });
+    assert_eq!(cell(&state, temps, 1), Cell::Float(42.5));
+    assert_eq!(state.cell_text(temps, 1), "42.5");
+
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 2,
+        text: "1,000".to_string(),
+    });
+    assert_eq!(cell(&state, temps, 2), Cell::Float(1.0));
+
+    // Témoin : une virgule ambiguë n'est pas un nombre, la colonne devient mixte
+    // plutôt que de perdre le texte.
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 3,
+        text: "1,2,3".to_string(),
+    });
+    assert_eq!(state.cell_text(temps, 3), "1,2,3");
+}
+
 #[test]
 fn committing_a_numeric_cell_writes_it_and_names_the_undo() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");

@@ -65,12 +65,7 @@ fn optional_number(ui: &mut egui::Ui, id: egui::Id, value: &mut Option<f64>) -> 
         let parsed = if text.trim().is_empty() {
             Some(None)
         } else {
-            text.trim()
-                .replace(',', ".")
-                .parse::<f64>()
-                .ok()
-                .filter(|v| v.is_finite())
-                .map(Some)
+            stokesforge_core::number_format::parse_input(&text).map(Some)
         };
         if let Some(next) = parsed {
             changed = next != *value;

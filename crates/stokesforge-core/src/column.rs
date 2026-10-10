@@ -739,12 +739,9 @@ fn parse_f64_text(text: &str) -> Option<f64> {
         "nan" | "+nan" | "-nan" => return Some(f64::NAN),
         _ => {}
     }
-    match trimmed.parse::<f64>() {
-        Ok(value) if value.is_finite() => Some(value),
-        // Débordement réel (`"1e400"`) ou échec d'analyse : refusé, jamais
-        // silencieusement `+inf`/`-inf`.
-        Ok(_) | Err(_) => None,
-    }
+    // Débordement réel (`"1e400"`) ou échec d'analyse : refusé, jamais
+    // silencieusement `+inf`/`-inf`. La virgule décimale est lue (#223).
+    crate::number_format::parse_input(trimmed)
 }
 
 /// Formate un `f64` pour l'affichage ou pour `Column::set_column_type`

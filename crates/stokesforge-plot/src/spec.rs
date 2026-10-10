@@ -168,6 +168,10 @@ pub struct PlotSpec {
     /// grisé et triangle « ! » (#198). Réglage du graphe, gardé avec lui ; la
     /// confirmation à l'export en propose une copie sans avertissement.
     pub stale_warning: bool,
+    /// Séparateur décimal des graduations : `false` = point, `true` = virgule
+    /// (#223, N4 → R9). Réglage **du graphe**, indépendant de la langue de
+    /// l'interface ; vaut pour l'écran et les exports.
+    pub decimal_comma: bool,
     /// Version du format de ce spec.
     pub format_version: u32,
 }
@@ -277,6 +281,7 @@ impl Default for PlotSpec {
             title_anchor: None,
             title_font: TextFont::default(),
             stale_warning: true,
+            decimal_comma: false,
             format_version: SPEC_FORMAT_VERSION,
         }
     }

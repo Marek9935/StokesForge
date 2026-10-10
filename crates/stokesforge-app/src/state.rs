@@ -944,9 +944,9 @@ fn value_block_from_tsv_column(
                 .iter()
                 .map(|row| row.get(col_index).map(String::as_str).unwrap_or("").trim())
                 .collect();
-            let promoting = texts
-                .iter()
-                .any(|text| !text.is_empty() && text.parse::<f64>().is_err());
+            let promoting = texts.iter().any(|text| {
+                !text.is_empty() && stokesforge_core::number_format::parse_input(text).is_none()
+            });
             if promoting {
                 let cells = texts
                     .iter()
@@ -960,7 +960,7 @@ fn value_block_from_tsv_column(
                         if text.is_empty() {
                             f64::NAN
                         } else {
-                            text.parse::<f64>().unwrap_or(f64::NAN)
+                            stokesforge_core::number_format::parse_input(text).unwrap_or(f64::NAN)
                         }
                     })
                     .collect();
@@ -6578,11 +6578,11 @@ impl AppState {
                     // d'effacer une cellule numérique.
                     (ValueBlock::Float(vec![f64::NAN]), false)
                 } else {
-                    match trimmed.parse::<f64>() {
-                        Ok(value) => (ValueBlock::Float(vec![value]), false),
+                    match stokesforge_core::number_format::parse_input(trimmed) {
+                        Some(value) => (ValueBlock::Float(vec![value]), false),
                         // Le bloc est texte : `SetCellsPromoting` élargira
                         // la colonne en `Mixed` pour l'accueillir.
-                        Err(_) => (
+                        None => (
                             ValueBlock::Mixed(vec![MixedCell::Text(trimmed.to_string())]),
                             true,
                         ),

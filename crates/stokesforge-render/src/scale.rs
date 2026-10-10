@@ -108,6 +108,7 @@ fn decimals_for(points: &[f64]) -> usize {
 pub struct TickFormat {
     scale: AxisScale,
     decimals: usize,
+    comma: bool,
 }
 
 impl TickFormat {
@@ -117,14 +118,29 @@ impl TickFormat {
             AxisScale::Linear => decimals_for(&linear_key_points(range, label_count(scale, range))),
             AxisScale::Log => 0,
         };
-        Self { scale, decimals }
+        Self {
+            scale,
+            decimals,
+            comma: false,
+        }
+    }
+
+    /// Écrit la virgule comme séparateur décimal (#223, réglage du graphe).
+    pub fn with_decimal_comma(mut self, comma: bool) -> Self {
+        self.comma = comma;
+        self
     }
 
     /// L'étiquette d'une graduation, dans l'espace transformé.
     pub fn format(&self, t: f64) -> String {
-        match self.scale {
+        let text = match self.scale {
             AxisScale::Linear => format_linear_tick(t, self.decimals),
             AxisScale::Log => format_decade(t),
+        };
+        if self.comma {
+            text.replace('.', ",")
+        } else {
+            text
         }
     }
 }
@@ -406,5 +422,16 @@ mod tests {
         let inverted = aligned_range((840.0, -40.0), (126.0, -6.0)).expect("aligné");
         assert!(inverted.0 > inverted.1);
         assert_eq!(aligned_range((-40.0, 840.0), (126.0, -6.0)), None);
+    }
+
+    #[test]
+    fn la_virgule_remplace_le_point_dans_les_graduations() {
+        let lineaire = TickFormat::new(AxisScale::Linear, (0.0, 1.0));
+        let virgule = lineaire.with_decimal_comma(true);
+        assert_eq!(lineaire.format(0.5), "0.5");
+        assert_eq!(virgule.format(0.5), "0,5");
+        // Une échelle log écrit aussi ses puissances décimales avec la virgule.
+        let log = TickFormat::new(AxisScale::Log, (-2.0, 2.0)).with_decimal_comma(true);
+        assert_eq!(log.format(-1.0), "0,1");
     }
 }

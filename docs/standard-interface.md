@@ -141,19 +141,23 @@ champs numériques existants (`DragValue`, #220), la contrainte entre champs
   rouge et message Typst en bulle.
 - Jamais d'effacement ni de correction muette.
 
-## Virgule décimale — à venir (#223)
+## Virgule décimale — en place (#223)
 
 - « , » et « . » acceptés dans un champ qui contient **un seul nombre** et
   dans les cellules Numeric (N4, N5 → R6). À la validation, la virgule devient
   un point : l'interface affiche toujours le point. Effet assumé : en anglais,
   « 1,000 » est lu 1.
 - Formules et listes de valeurs : point obligatoire (la virgule y sépare).
-- Cellule Mixed : suit la règle Numeric pour un nombre à virgule (à confirmer
-  à l'implémentation).
+- Cellule Mixed : suit la règle Numeric (décidé) — « 1,5 » devient le nombre
+  1.5. Une seule lecture, `stokesforge_core::number_format::parse_input`,
+  partagée par la brique nombre, la grille et `Text → Numeric` ; la virgule
+  est acceptée s'il y en a **une** et aucun point, sinon refus.
 - **Séparateur des graphes** (N4 → R9) : réglage **par graphe** (Graph
-  Properties › Axes › Display), indépendant de la langue, pour axes,
-  graduations, légende et exports. Un graphe neuf prend le défaut des
-  Preferences, le point au départ (#148).
+  Properties › Axes › Display, `PlotSpec::decimal_comma`, annulable par
+  `EditPlotSpec`), indépendant de la langue, pour axes,
+  graduations et exports (la légende n'écrit aucun nombre aujourd'hui). Un
+  graphe neuf prend le point ; le défaut des Preferences reste à livrer avec
+  #148.
 
 ## Affichage des nombres — en place (#222)
 

@@ -133,3 +133,26 @@ fn le_reglage_d_avertissement_d_un_graphe_survit_a_un_aller_retour() {
         assert_eq!(spec.stale_warning, wanted);
     }
 }
+
+#[test]
+fn le_separateur_decimal_d_un_graphe_survit_a_un_aller_retour_et_vaut_point_par_defaut() {
+    for wanted in [true, false] {
+        let mut project = project_with_calculation();
+        let spec = stokesforge_plot::PlotSpec {
+            decimal_comma: wanted,
+            ..Default::default()
+        };
+        let graph = project.add_graph(project.root(), None, spec).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.stf");
+        save(&project, &path).unwrap();
+        let back = load(&path).unwrap();
+        let stokesforge_core::NodeKind::Graph { spec, .. } =
+            back.tree().node(graph).unwrap().kind()
+        else {
+            panic!("un graphe attendu");
+        };
+        assert_eq!(spec.decimal_comma, wanted);
+    }
+    assert!(!stokesforge_plot::PlotSpec::default().decimal_comma);
+}

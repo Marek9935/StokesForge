@@ -507,6 +507,7 @@ pub fn draw_on<DB: DrawingBackend>(
             plan,
             bases.get(&cell_index),
             &overlay_panels,
+            plot.spec.decimal_comma,
         )?;
         if panel.spec.overlay.is_none() {
             bases.insert(cell_index, frame);
@@ -800,6 +801,7 @@ fn draw_panel<DB: DrawingBackend>(
     plan: CellPlan,
     base: Option<&BaseFrame<DB>>,
     legend_overlays: &[&ResolvedPanel<'_>],
+    decimal_comma: bool,
 ) -> Result<(DrawnPanel, Projection, BaseFrame<DB>), DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = panel.spec;
     // Un calque superposé sans calque à recouvrir se trace comme un calque
@@ -1017,8 +1019,8 @@ fn draw_panel<DB: DrawingBackend>(
             axis.display_label()
         }
     };
-    let tick_x = scale::TickFormat::new(x_scale, x_range);
-    let tick_y = scale::TickFormat::new(y_scale, y_range);
+    let tick_x = scale::TickFormat::new(x_scale, x_range).with_decimal_comma(decimal_comma);
+    let tick_y = scale::TickFormat::new(y_scale, y_range).with_decimal_comma(decimal_comma);
     let format_x = |value: &f64| tick_x.format(*value);
     let format_y = |value: &f64| tick_y.format(*value);
     // Sans libellés (#176) : les tirets restent, les nombres disparaissent.
@@ -1076,7 +1078,7 @@ fn draw_panel<DB: DrawingBackend>(
     }
 
     if let Some(range) = y2_range {
-        let tick_y2 = scale::TickFormat::new(y2_scale, range);
+        let tick_y2 = scale::TickFormat::new(y2_scale, range).with_decimal_comma(decimal_comma);
         let format_y2 = |value: &f64| {
             if spec.right.tick_labels {
                 tick_y2.format(*value)

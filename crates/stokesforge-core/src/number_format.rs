@@ -15,6 +15,9 @@
 //! `1000000`. Les zéros de fin ne s'écrivent jamais, `-0` non plus. L'exposant
 //! typographique (1×10⁻⁵) est l'affaire de la figure (Typst), pas d'ici.
 //!
+//! La **lecture** d'un nombre saisi est [`parse_input`] (#223) : la virgule y
+//! vaut point décimal ; l'interface réécrit toujours avec le point.
+//!
 //! Pur : aucune dépendance d'interface, aucune locale — le séparateur est
 //! toujours le point.
 
@@ -31,6 +34,24 @@ pub const UNCERTAINTY_DIGITS: usize = 2;
 const POSITIONAL_MIN_EXP: i32 = -4;
 /// Exposant décimal maximal de la forme positionnelle (inclus : 9,99e5).
 const POSITIONAL_MAX_EXP: i32 = 5;
+
+/// Lit **un seul nombre fini** saisi à la main (#223, N4/N5 → R6) : « , » et
+/// « . » sont deux écritures du séparateur décimal. Le texte est rogné ; la
+/// virgule est lue comme un point quand elle est **seule** et sans point
+/// (`1,5` → 1.5, mais `1,000` → 1 : effet assumé ; `1,000.5` ou `1,2,3` sont
+/// refusés). `None` si le texte n'est pas un nombre fini.
+///
+/// Réservé aux champs d'un nombre et aux cellules : les formules et les listes
+/// de valeurs gardent le point, la virgule y sépare.
+pub fn parse_input(text: &str) -> Option<f64> {
+    let trimmed = text.trim();
+    let value = if trimmed.matches(',').count() == 1 && !trimmed.contains('.') {
+        trimmed.replacen(',', ".", 1).parse::<f64>().ok()?
+    } else {
+        trimmed.parse::<f64>().ok()?
+    };
+    value.is_finite().then_some(value)
+}
 
 /// Résultats et graduations : 3 chiffres significatifs.
 pub fn format_results(value: f64) -> String {
@@ -318,5 +339,42 @@ mod tests {
     fn une_valeur_nulle_garde_la_decimale_de_l_incertitude() {
         assert_eq!(format_with_uncertainty(0.0, Some(0.034)), "0.000 ± 0.034");
         assert_eq!(format_with_uncertainty(-1e-9, Some(0.5)), "0.00 ± 0.50");
+    }
+
+    #[test]
+    fn la_virgule_seule_vaut_le_point_decimal() {
+        assert_eq!(parse_input("1,5"), Some(1.5));
+        assert_eq!(parse_input(" -0,25 "), Some(-0.25));
+        assert_eq!(parse_input("1e-3"), Some(0.001));
+        assert_eq!(parse_input("2,5e3"), Some(2500.0));
+    }
+
+    #[test]
+    fn le_point_reste_lu_comme_avant_et_mille_vaut_un() {
+        assert_eq!(parse_input("1.5"), Some(1.5));
+        // Effet assumé (R6) : « 1,000 » est lu 1.
+        assert_eq!(parse_input("1,000"), Some(1.0));
+    }
+
+    #[test]
+    fn l_ambigu_et_le_non_fini_sont_refuses() {
+        for refused in [
+            "1,000.5", "1.000,5", "1,2,3", "", ",", "a,5", "1e400", "nan", "inf",
+        ] {
+            assert_eq!(parse_input(refused), None, "{refused:?}");
+        }
+    }
+
+    #[test]
+    fn une_cellule_mixte_lit_la_virgule_comme_un_nombre() {
+        use crate::column::MixedCell;
+        assert_eq!(
+            MixedCell::from_text(Some("1,5".into())),
+            MixedCell::Number(1.5)
+        );
+        assert!(matches!(
+            MixedCell::from_text(Some("1,5 V".into())),
+            MixedCell::Text(_)
+        ));
     }
 }

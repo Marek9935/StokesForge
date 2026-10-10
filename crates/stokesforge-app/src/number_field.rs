@@ -434,10 +434,10 @@ fn read(quantity: &Quantity, text: &str) -> Verdict<Entry> {
     if quantity.auto == AutoKind::Group && trimmed.is_empty() {
         return Verdict::Refused(tr!("field-refused-use-auto"));
     }
-    let Ok(parsed) = trimmed.parse::<f64>() else {
+    let Some(parsed) = stokesforge_core::number_format::parse_input(trimmed) else {
         return refused(quantity);
     };
-    if !parsed.is_finite() || (quantity.integer && parsed.fract() != 0.0) {
+    if quantity.integer && parsed.fract() != 0.0 {
         return refused(quantity);
     }
     if parsed < quantity.min {
@@ -495,6 +495,19 @@ mod tests {
         assert_eq!(format_value(-0.001, 2), "0");
         assert_eq!(format_value(100.0, 0), "100");
         assert_eq!(format_value(0.3, 8), "0.3");
+    }
+
+    #[test]
+    fn la_virgule_decimale_est_lue_comme_le_point() {
+        // #223 : « 2,5 » vaut 2.5 ; une virgule ambiguë reste refusée.
+        assert_eq!(
+            read(&quantities::AXIS_BOUND, "2,5"),
+            Verdict::Valid(Entry::Value(2.5))
+        );
+        assert!(matches!(
+            read(&quantities::AXIS_BOUND, "1,2,3"),
+            Verdict::Refused(_)
+        ));
     }
 
     #[test]

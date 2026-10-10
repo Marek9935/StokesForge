@@ -695,6 +695,7 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
         title_anchor: spec.title_anchor.map(anchor_to_record),
         title_font: font_to_record(&spec.title_font),
         stale_warning: spec.stale_warning,
+        decimal_comma: spec.decimal_comma,
         format_version: spec.format_version,
     }
 }
@@ -733,6 +734,7 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
         title_anchor: record.title_anchor.map(record_to_anchor),
         title_font: record_to_font(record.title_font),
         stale_warning: record.stale_warning,
+        decimal_comma: record.decimal_comma,
         format_version: record.format_version,
     })
 }

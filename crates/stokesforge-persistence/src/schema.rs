@@ -680,6 +680,10 @@ pub(crate) struct PlotSpecRecord {
     /// ancien, donc actif.
     #[serde(default = "visible_by_default")]
     pub(crate) stale_warning: bool,
+    /// Séparateur décimal des graduations (#223) : absent d'un fichier plus
+    /// ancien, donc le point.
+    #[serde(default)]
+    pub(crate) decimal_comma: bool,
     pub(crate) format_version: u32,
 }
 
@@ -711,6 +715,7 @@ impl Default for PlotSpecRecord {
             title_anchor: None,
             title_font: TextFontRecord::default(),
             stale_warning: true,
+            decimal_comma: false,
             format_version: 1, // stokesforge_plot::SPEC_FORMAT_VERSION
         }
     }

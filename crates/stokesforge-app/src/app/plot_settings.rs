@@ -284,6 +284,7 @@ fn plot_settings_contents(
                             panel,
                             &mut chosen_axis,
                             published_axis_bounds(ui.ctx(), settings.graph, edit.selected_panel),
+                            &mut spec.decimal_comma,
                             &mut env,
                         );
                     }
@@ -387,6 +388,7 @@ fn axes_settings_page(
     panel: &mut PanelSpec,
     chosen_axis: &mut PlotAxis,
     bounds: Option<PanelBounds>,
+    decimal_comma: &mut bool,
     env: &mut PickerEnv,
 ) -> bool {
     let mut commit = false;
@@ -436,6 +438,11 @@ fn axes_settings_page(
         });
         axis_editor(ui, axis, computed, env)
     };
+    // Réglage du graphe entier (#223), rangé sous l'affichage des axes.
+    commit |= ui
+        .checkbox(decimal_comma, tr!("plot-axes-decimal-comma"))
+        .on_hover_text(tr!("plot-axes-decimal-comma", "hint"))
+        .changed();
     commit
 }
 
