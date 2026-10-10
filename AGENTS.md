@@ -44,6 +44,10 @@ confirmation pour les choix courants couverts par la demande.
 - Les skills de projet dans `.agents/skills/` renvoient aux sources maintenues
   dans `.claude/skills/`. Consulter le skill pertinent selon la table de
   `.codex/README.md` et ses références utiles, sans charger toute la collection.
+- Standard de comportement (#217) : champs, messages, dialogues, confirmations,
+  grisage, clavier et souris suivent `docs/standard-interface.md`, source
+  unique. Section *à venir* (#219–#232) : la règle vaut déjà pour tout code
+  neuf, mais sa brique ou sa garde n'existe pas encore.
 - Menus et clics droits (#152) : la grammaire de `docs/menus.md` est la source
   unique (sections dans l'ordre canonique, séparateurs par
   `MenuSections::section` seulement — garde

@@ -91,6 +91,14 @@ Ils ne vérifient pas un comportement mais une propriété de frontière. S'ils
 | `stokesforge-app/src/i18n.rs` (tests) | complétude `fr ⊆ en` avec les mêmes arguments, pseudo-langue `en-XA`, pluriels et typographie françaises ; **bloquant** : une clé ajoutée à `en` s'ajoute à `fr` dans le même commit |
 | `stokesforge-commands/tests/memory_pinning.rs` | l'historique n'épingle pas de gros buffers |
 
+Gardes **à venir** du standard d'interface (#217) : `DragValue`/`Slider` hors
+de la brique nombre (#220), bulle nue sur un champ (#225), `add_enabled` sans
+raison (#226), `add_space` littéral hors de `theme.rs` (#227), `consume_key`
+hors de `app/shortcuts.rs` (#231). Elles **n'existent pas encore** : ne pas
+les citer comme vertes. Le commit qui en écrit une la déplace dans le tableau
+ci-dessus et la passe à *en place* dans
+[`docs/standard-interface.md`](../../../docs/standard-interface.md).
+
 ### Reproduction vs garde-fou
 
 Une **reproduction** échoue délibérément et porte `#[ignore]` avec son motif

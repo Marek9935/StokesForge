@@ -63,6 +63,16 @@ droit se range dans une section de [`docs/menus.md`](../../docs/menus.md)
 mots), `stokesforge-fonctionnalites` (les gestes décrits) et
 `stokesforge-bug-report` (signaler contre la grammaire) s'y réfèrent.
 
+**Suivre le standard de comportement.** Champs, messages, dialogues,
+confirmations, grisage, clavier et souris suivent
+[`docs/standard-interface.md`](../../docs/standard-interface.md) (#217). La
+page marque chaque section *en place* ou *à venir* (issues #219–#232) : une
+règle *à venir* vaut déjà pour tout code neuf, mais une brique ou une garde
+*à venir* n'existe pas et ne s'appelle pas. Les skills `stokesforge-feature`
+(§2 novies), `stokesforge-textes-interface` (les mots),
+`stokesforge-verification` (gardes à venir) et `stokesforge-bug-report`
+(signaler contre la règle) s'y réfèrent.
+
 **Demander plutôt que trancher.** L'utilisateur n'est pas développeur : il
 arbitre des comportements observables, jamais des structures de code. Un
 commentaire disant « choix volontaire » ferme *une* alternative, pas toutes —

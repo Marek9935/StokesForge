@@ -36,6 +36,28 @@ fichier ou d'une colonne : il suit les mêmes règles s'il est écrit par Stokes
 6. **Une règle ou un terme nouveau** : l'ajouter au glossaire dans le même
    commit (règle transversale de `.claude/skills/README.md`).
 
+## Messages, bulles, raisons : le standard de comportement (#217)
+
+*Où* et *quand* un texte apparaît est fixé par
+[`docs/standard-interface.md`](../../../docs/standard-interface.md) ; ce skill
+dit *comment* l'écrire. Points qui touchent les mots :
+
+- **raison d'un grisage** : dit quoi faire (« Select a series first »),
+  attribut `.disabled` de la clé ;
+- **bulle d'un bouton** : à icône seule, nom, effet et raccourci ; à texte,
+  effet et raccourci sans répéter le libellé ; **pas de bulle nue sur un
+  champ** (icône « ? » ou texte en clair de 2 lignes au plus) ;
+- **saisie ramenée ou refusée** : « Set to the maximum, 20 », « Use Auto
+  range » ; la bulle dit la règle ;
+- **texte d'exemple d'un champ vide** : la valeur prise si vide (« Auto »,
+  « Group 2 ») ou un exemple de syntaxe, jamais une consigne ;
+- **état vide** : ce qui manque et le geste pour le créer ;
+- **unité** dans le libellé (« Line width (pt) »), jamais en suffixe ;
+- confirmation : Cancel + verbe (Delete, Discard Changes), jamais « Keep »
+  seul.
+
+Les codes R1–R16 de #217 ne sont pas les règles R1–R16 du guide des textes.
+
 ## Icônes : l'info-bulle est le texte
 
 Une icône seule ne dit rien : son info-bulle est un texte visible comme un

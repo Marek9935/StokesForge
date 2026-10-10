@@ -43,6 +43,16 @@ qu'il viole (nommer la règle dans l'issue). La brique de sections
 empêchent déjà les traits à la main ; si la grammaire elle-même paraît
 mauvaise, c'est une question à poser à l'utilisateur, pas un bug.
 
+## Un champ, un message, un dialogue qui réagit mal : le comparer au standard
+
+Un champ qui efface une saisie fausse, un nombre corrigé sans rien dire, une
+erreur de dialogue dans la barre d'état, un bouton grisé muet, une
+confirmation pour un geste annulable, un double-clic qui ferme : **lire
+[`docs/standard-interface.md`](../../../docs/standard-interface.md)** (#217) et
+nommer la règle violée (son code, N6, F3…). Si la section est *à venir*, le
+défaut appartient déjà à son issue (#219–#232) : la compléter plutôt qu'en
+ouvrir une autre.
+
 ## 0. Regarder, si c'est visuel
 
 Position, contour, alignement, troncature, chevauchement, surbrillance,

@@ -421,6 +421,32 @@ par défaut, un rôle coloré seulement pour un type d'objet, une action
 destructive ou un état à repérer. Une icône nouvelle : `docs/icones.md`
 (planche-contact à faire valider). Verrou : `aucune_icone_hors_du_composant`.
 
+## 2 novies. Comportement de l'interface : le standard (#217)
+
+[`docs/standard-interface.md`](../../../docs/standard-interface.md) est la
+**source unique** de la façon dont réagissent champs, messages, dialogues,
+clavier et souris. Le lire avant de poser un champ, un message, un dialogue,
+une confirmation, un grisage ou un geste clavier/souris. Réflexes :
+
+- un nombre ou un texte s'applique à Entrée ou en quittant le champ, Échap rend
+  l'ancienne valeur, une entrée d'historique par validation ; une saisie
+  illisible est **refusée** (cadre rouge, bulle), une valeur hors bornes
+  **ramenée** (cadre orange) — jamais d'effacement ni de correction muette ;
+- tout élément grisé dit pourquoi et quoi faire (`.disabled`) ;
+- une erreur dans un dialogue va dans son pied, jamais dans la barre d'état ;
+- une suppression annulable ne demande pas de confirmation ;
+- aucun slider, unité dans le libellé, pas de bulle nue sur un champ (icône
+  « ? » de `hover_help`).
+
+**État des briques.** La page tient un tableau *en place* / *à venir* (issues
+#219–#232). Une brique *à venir* (brique « nombre », formulaire en grille,
+éditeur sur place, registre des touches…) **n'existe pas encore** : ne pas
+l'appeler. Une règle *à venir* est déjà la règle pour tout code neuf ou
+modifié ; l'écrire avec les moyens existants, sans recopier un voisin qui
+déroge. Le commit qui crée une brique ou une garde la passe à *en place* dans
+la page, l'ajoute à ce skill et à la table des gardes de
+`stokesforge-verification`, dans le même commit.
+
 ## 3. Les quatre surfaces d'une action — ce que Qt donnait gratuitement
 
 Une `QAction` reliée à un `QUndoStack` portait d'un coup le raccourci, l'entrée
@@ -594,6 +620,7 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] icônes : composant `icons.rs`, info-bulle `tr!`, seulement si elle apporte quelque chose (`docs/icones.md`) ; logo prévu de l'action nommé dans le compte rendu (#110)
 - [ ] calque visé par son indice dans `PlotSpec::panels` (calque actif), jamais par `(row, column)` ; ajout de séries par l'`Action` du dépôt
 - [ ] couleurs : `color_picker::color_field` avec l'usage et le `PickerEnv`, vide = automatique
+- [ ] champs, messages, dialogues, grisage, clavier conformes à `docs/standard-interface.md` (§2 novies) ; brique *à venir* non appelée ; brique ou garde créée → passée à *en place* dans la page et les skills
 - [ ] existant réutilisé plutôt que dupliqué
 - [ ] mutation du modèle → `Command` annulable (skill **stokesforge-commande**)
 - [ ] logique dans `state.rs`, glu egui seulement dans la couche `app` (`app.rs` et `src/app/`)

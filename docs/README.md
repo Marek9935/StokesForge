@@ -34,6 +34,7 @@ page qui contredit le code a tort.
 | ajouter ou afficher une icône (rôles de couleur, planche-contact) | [`icones.md`](icones.md) |
 | ajouter ou ranger une entrée de menu ou de clic droit | [`menus.md`](menus.md) (grammaire), puis [`application.md`](application.md) § Menus thématiques |
 | écrire ou modifier un texte visible (libellé, infobulle, message) | [`textes-interface.md`](textes-interface.md) |
+| poser un champ, un message, un dialogue, une confirmation, un grisage, un geste clavier ou souris | [`standard-interface.md`](standard-interface.md) (comportement, #217) |
 | écrire ou lancer un test, comprendre la CI | [`tests.md`](tests.md) |
 | licence, contributions, interfaces d'extension et notices tierces | [`licence-et-extensions.md`](licence-et-extensions.md) |
 

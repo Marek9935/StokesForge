@@ -84,6 +84,7 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 | Acteur, concurrence, instantanés | `docs/session.md` | `stokesforge-session`, commandes et persistance appelées |
 | Tracé, axes, légendes, export, Typst | `docs/rendu.md` | `stokesforge-render` d'abord, puis `stokesforge-render-egui` / `stokesforge-render-svg`, `stokesforge-core/src/resolve.rs` |
 | Menus et clics droits | `docs/menus.md` (grammaire), `docs/application.md` (§ Menus thématiques) | `stokesforge-app/src/app/menu_sections.rs`, `menus.rs`, `object_manager_ui.rs`, `project_manager.rs`, `grid.rs`, `graph_window.rs`, `tab_strip.rs` |
+| Comportement de l'interface (champs, messages, dialogues, grisage, clavier) | `docs/standard-interface.md` (#217, sections *en place* / *à venir*) | le module de la surface dans `src/app/`, `app/dialogs.rs`, `app/shortcuts.rs`, `theme.rs` |
 | Fenêtre, grille, raccourcis | `docs/application.md` (§ Découpage du code) | `stokesforge-app/src/state.rs`, le module de la surface dans `src/app/` (`app.rs` pour l'orchestration seule), `selection.rs`, `object_manager.rs`, `theme.rs` ; `stokesforge-session` |
 | Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app/src/state.rs` et `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
 | Python embarqué et scripts `pyst` | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
