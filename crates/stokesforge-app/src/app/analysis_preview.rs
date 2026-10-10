@@ -360,19 +360,31 @@ pub(super) fn reset_view(ui: &mut egui::Ui, id: egui::Id) {
 /// calcul.
 pub(super) const PREVIEW_PAUSE: f64 = 0.3;
 
+/// Au-delà de ce temps sans image peinte, la fenêtre a été fermée puis
+/// rouverte : le formulaire n'est pas en cours de frappe.
+const REOPEN_GAP: f64 = 1.0;
+
 /// Le formulaire est-il resté inchangé depuis [`PREVIEW_PAUSE`] ? Le formulaire
-/// de l'image précédente et l'instant de son dernier changement sont gardés
-/// en mémoire d'egui ; tant qu'il bouge, une image est demandée à la fin de la
-/// pause (aucun réveil périodique au repos).
+/// de l'image précédente, l'instant de son dernier changement et celui de la
+/// dernière image sont gardés en mémoire d'egui ; tant qu'il bouge, une image
+/// est demandée à la fin de la pause (aucun réveil périodique au repos). À
+/// l'ouverture d'une fenêtre, l'aperçu se calcule tout de suite : il n'y a pas
+/// de frappe à attendre.
 fn settled(ui: &egui::Ui, id: egui::Id, form: &AnalysisForm) -> bool {
     let key = id.with("preview_pause");
     let now = ui.input(|input| input.time);
     let since = ui.data_mut(|data| {
-        let (last, since) = data
-            .get_temp::<(AnalysisForm, f64)>(key)
-            .unwrap_or_else(|| (form.clone(), f64::NEG_INFINITY));
-        let since = if last.same_preview(form) { since } else { now };
-        data.insert_temp(key, (form.clone(), since));
+        let (last, since, seen) = data
+            .get_temp::<(AnalysisForm, f64, f64)>(key)
+            .unwrap_or_else(|| (form.clone(), f64::NEG_INFINITY, now));
+        let since = if now - seen > REOPEN_GAP {
+            f64::NEG_INFINITY
+        } else if last.same_preview(form) {
+            since
+        } else {
+            now
+        };
+        data.insert_temp(key, (form.clone(), since, now));
         since
     });
     let waited = now - since;
@@ -904,6 +916,11 @@ mod tests {
         assert!(at(2.0 + PREVIEW_PAUSE + 0.01, &form), "pause écoulée");
         form.current += 1;
         assert!(!at(3.0, &form), "chaque frappe repousse l'échéance");
+        form.current += 1;
+        assert!(
+            at(10.0, &form),
+            "une fenêtre rouverte se calcule tout de suite, sans frappe à attendre"
+        );
     }
 
     #[test]

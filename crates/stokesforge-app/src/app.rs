@@ -1654,6 +1654,102 @@ mod tests {
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
     use stokesforge_session::Session;
 
+    /// Le Project Manager suit la fenêtre sur laquelle on appuie dès la
+    /// pression, souris maintenue, et surligne sa ligne dans l'image réclamée
+    /// par la pression, sans attendre un mouvement de souris.
+    #[test]
+    fn la_selection_du_project_manager_suit_la_pression_sur_une_fenetre() {
+        use eframe::App as _;
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let book = window_stack::window_nodes(&state.project_tree())
+            .into_iter()
+            .find(|(_, kind)| *kind == crate::state::WindowKind::Book)
+            .map(|(id, _)| Tab::Book(id))
+            .unwrap();
+        let tab = Tab::Graph(graph);
+        let mut app = StokesForgeApp::new(state);
+        app.floating_tabs = vec![book, tab];
+        app.window_positions.insert(tab, egui::pos2(0.0, 0.0));
+        app.window_positions.insert(book, egui::pos2(640.0, 300.0));
+        let ctx = egui::Context::default();
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut now = 0.0;
+        let mut run = |app: &mut StokesForgeApp, events: Vec<egui::Event>| {
+            now += 0.05;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1400.0, 900.0),
+                    )),
+                    time: Some(now),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.ui(ui, &mut frame),
+            );
+            output.textures_delta.clear();
+            output
+        };
+        for _ in 0..5 {
+            run(&mut app, Vec::new());
+        }
+        assert_eq!(app.pm_selection, HashSet::from([tab]));
+        let output = run(&mut app, Vec::new());
+        let title = |output: &egui::FullOutput, wanted: &str, left: bool| {
+            output.shapes.iter().find_map(|sh| match &sh.shape {
+                egui::Shape::Text(t)
+                    if t.galley.job.text == wanted && (t.pos.x < 300.0) == left =>
+                {
+                    Some(t.pos)
+                }
+                _ => None,
+            })
+        };
+        let on_book =
+            title(&output, "Book1", false).expect("titre du classeur") + egui::vec2(10.0, 30.0);
+        run(&mut app, vec![egui::Event::PointerMoved(on_book)]);
+        let mut output = run(
+            &mut app,
+            vec![egui::Event::PointerButton {
+                pos: on_book,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        // Seules les images que l'application réclame ont lieu, comme sous eframe.
+        let mut extra = 0;
+        while output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+            == std::time::Duration::ZERO
+            && extra < 10
+        {
+            output = run(&mut app, Vec::new());
+            extra += 1;
+        }
+        assert_eq!(app.pm_selection, HashSet::from([book]));
+        let row = title(&output, "Book1", true).expect("ligne du classeur").y;
+        let highlighted: Vec<f32> = output
+            .shapes
+            .iter()
+            .filter_map(|sh| match &sh.shape {
+                egui::Shape::Rect(r) if r.fill == theme::list_row_selected_fill() => {
+                    Some(r.rect.center().y)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            matches!(highlighted.as_slice(), [y] if (y - row).abs() < 15.0),
+            "seule la ligne du classeur est surlignée : {highlighted:?} / {row}"
+        );
+        session.shutdown().unwrap();
+    }
+
     /// Piège 1 de #115 : l'ordre des panneaux dans `ui()` fait la mise en
     /// page. Barre de menu en haut et barre d'état en bas, sur toute la
     /// largeur ; la console de script, posée avant le Project Manager, court
