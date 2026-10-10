@@ -923,6 +923,19 @@ impl From<ScriptOutcome> for ScriptOutput {
 /// usuel.
 pub const MISSING_TEXT_DISPLAY: &str = "\u{00A0}";
 
+/// Lit une saisie dans une colonne `Numeric` ou `DateTime` (#218) : un nombre
+/// (virgule décimale admise) ; en plus, pour `DateTime`, une date (ISO ou
+/// `JJ/MM/AAAA [HH:MM]`, jour d'abord) lue en timestamp POSIX. Un nombre nu
+/// reste donc un timestamp, comme avant #218.
+fn parse_numeric_cell(kind: ColumnType, text: &str) -> Option<f64> {
+    if kind == ColumnType::DateTime {
+        if let Some(value) = stokesforge_core::datetime::parse_datetime(text) {
+            return Some(value);
+        }
+    }
+    stokesforge_core::number_format::parse_input(text)
+}
+
 /// Construit le bloc de valeurs d'une colonne collée depuis un TSV : la
 /// colonne d'indice `col_index` de chaque ligne de `rows`, convertie selon
 /// `kind` avec la même tolérance que [`AppState::commit_cell`] — un texte qui
@@ -945,7 +958,7 @@ fn value_block_from_tsv_column(
                 .map(|row| row.get(col_index).map(String::as_str).unwrap_or("").trim())
                 .collect();
             let promoting = texts.iter().any(|text| {
-                !text.is_empty() && stokesforge_core::number_format::parse_input(text).is_none()
+                !text.is_empty() && parse_numeric_cell(kind, text).is_none()
             });
             if promoting {
                 let cells = texts
@@ -960,7 +973,7 @@ fn value_block_from_tsv_column(
                         if text.is_empty() {
                             f64::NAN
                         } else {
-                            stokesforge_core::number_format::parse_input(text).unwrap_or(f64::NAN)
+                            parse_numeric_cell(kind, text).unwrap_or(f64::NAN)
                         }
                     })
                     .collect();
@@ -1029,6 +1042,11 @@ fn cell_in(tree: &Tree, column: NodeId, row: usize, number: fn(f64) -> String) -
     }
     match column.get(row) {
         Cell::Float(value) if value.is_nan() => String::new(),
+        // Date/Time (#218) : ISO 8601, la même forme à l'écran, à l'édition et
+        // au copier ; hors de l'an 0–9999, le nombre brut plutôt qu'une date fausse.
+        Cell::Float(value) if column.column_type() == ColumnType::DateTime => {
+            stokesforge_core::datetime::format_datetime(value).unwrap_or_else(|| number(value))
+        }
         Cell::Float(value) => number(value),
         Cell::Text(None) => MISSING_TEXT_DISPLAY.to_string(),
         Cell::Text(Some(text)) => text,
@@ -6635,7 +6653,7 @@ impl AppState {
                     // d'effacer une cellule numérique.
                     (ValueBlock::Float(vec![f64::NAN]), false)
                 } else {
-                    match stokesforge_core::number_format::parse_input(trimmed) {
+                    match parse_numeric_cell(kind, trimmed) {
                         Some(value) => (ValueBlock::Float(vec![value]), false),
                         // Le bloc est texte : `SetCellsPromoting` élargira
                         // la colonne en `Mixed` pour l'accueillir.

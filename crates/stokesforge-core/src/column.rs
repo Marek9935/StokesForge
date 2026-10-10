@@ -1139,7 +1139,8 @@ impl Column {
 
     /// Change le type et convertit les données. Rend `(ancien type, anciennes valeurs)` —
     /// **snapshot** volontaire : la conversion est destructrice dans les deux sens.
-    /// `Numeric ↔ DateTime` : aucun changement de valeurs. Même type → aucun changement, rend
+    /// `Numeric ↔ DateTime` : aucun changement de valeurs (un nombre reste le
+    /// timestamp POSIX qu'il était, #218). Même type → aucun changement, rend
     /// quand même `(type, clone des valeurs)`.
     ///
     /// # Vers et depuis `Mixed`
@@ -1172,7 +1173,13 @@ impl Column {
                     .map(|cell| match cell {
                         MixedCell::Empty => f64::NAN,
                         MixedCell::Number(value) => *value,
-                        MixedCell::Text(text) => parse_f64_text(text).unwrap_or(f64::NAN),
+                        // Vers Date/Time (#218), un texte qui est une date se lit
+                        // en timestamp avant d'être tenté comme nombre.
+                        MixedCell::Text(text) => (column_type == ColumnType::DateTime)
+                            .then(|| crate::datetime::parse_datetime(text))
+                            .flatten()
+                            .or_else(|| parse_f64_text(text))
+                            .unwrap_or(f64::NAN),
                     })
                     .collect();
                 ColumnValues::Float(Arc::new(converted))

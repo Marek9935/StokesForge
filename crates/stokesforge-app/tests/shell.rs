@@ -403,6 +403,61 @@ fn the_grid_paints_six_digits_but_edits_and_copies_the_exact_value() {
     );
 }
 
+/// #218 : une colonne Date/Time s'affiche, s'édite et se copie en ISO 8601 ;
+/// `10/10/2026 14:30` (jour d'abord) est lu en timestamp ; un nombre nu reste
+/// un timestamp ; un texte qui n'est pas une date promeut la colonne en Mixed.
+#[test]
+fn a_datetime_cell_shows_iso_and_reads_day_first_dates() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    state.dispatch(Action::SetColumnType {
+        column: temps,
+        column_type: ColumnType::DateTime,
+    });
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 0,
+        text: "10/10/2026 14:30".to_string(),
+    });
+    assert_eq!(state.cell_display(temps, 0), "2026-10-10 14:30");
+    assert_eq!(state.cell_text(temps, 0), "2026-10-10 14:30");
+    let iso = match cell(&state, temps, 0) {
+        Cell::Float(value) => value,
+        other => panic!("timestamp attendu, reçu {other:?}"),
+    };
+
+    // Jour d'abord : 10/11/2026 est le 10 novembre.
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 1,
+        text: "10/11/2026".to_string(),
+    });
+    assert_eq!(state.cell_text(temps, 1), "2026-11-10 00:00");
+    // La forme ISO se relit à l'identique.
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 2,
+        text: "2026-10-10 14:30".to_string(),
+    });
+    assert_eq!(cell(&state, temps, 2), Cell::Float(iso));
+    // Un nombre nu reste un timestamp POSIX.
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 3,
+        text: "86400".to_string(),
+    });
+    assert_eq!(state.cell_text(temps, 3), "1970-01-02 00:00");
+    // Mois d'abord (13e mois) : pas une date, la colonne devient Mixed.
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 3,
+        text: "10/13/2026".to_string(),
+    });
+    assert_eq!(column_type(&state, temps), ColumnType::Mixed);
+}
+
 /// #223 : la virgule est lue comme un point décimal dans une cellule Numeric ;
 /// l'interface réécrit toujours avec le point. « 1,000 » est lu 1 (R6).
 #[test]

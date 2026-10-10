@@ -195,7 +195,7 @@ champs numériques existants (`DragValue`, #220), la contrainte entre champs
   (1×10⁻⁵), notation `e` dans la grille et les champs. Les graduations restent en
   notation `e` (elles ne passent pas par Typst) : l'exposant typographique des
   graduations n'est pas livré.
-- **Dates** (D4) : ISO 8601 (`2026-10-10 14:05`) ; formes de saisie : #218.
+- **Dates** (D4) : ISO 8601 (`2026-10-10 14:05`) ; formes de saisie (#218, en place) : ISO `2026-10-10 14:30` et `JJ/MM/AAAA [HH:MM[:SS]]` (`10/10/2026 14:30`), **jour d'abord**, jamais mois d'abord ; un nombre nu reste un timestamp POSIX ; le reste promeut la colonne en Mixed, comme tout texte non numérique. Lecteur et formateur uniques : `stokesforge_core::datetime` (grille, collage, conversion Mixed → Date/Time) ; `stokesforge-import` en garde une copie, accordée par un test de `stokesforge-importer`.
 - **Chemins** (D5) : nom du fichier seul dans les messages, chemin complet en
   bulle.
 

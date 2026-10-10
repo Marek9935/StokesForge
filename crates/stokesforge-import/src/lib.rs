@@ -27,6 +27,9 @@ pub mod builtin;
 pub mod choose;
 mod data_end;
 mod datetime;
+
+#[doc(hidden)]
+pub use datetime::parse_datetime as parse_datetime_for_accord;
 pub mod decode;
 mod layout;
 pub mod metadata;

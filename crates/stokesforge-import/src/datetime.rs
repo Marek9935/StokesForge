@@ -13,7 +13,7 @@
 //! inventée.
 
 /// Timestamp POSIX (secondes, UTC) du texte, ou `None`.
-pub(crate) fn parse_datetime(text: &str) -> Option<f64> {
+pub fn parse_datetime(text: &str) -> Option<f64> {
     let text = text.trim();
     if text.is_empty() {
         return None;

@@ -309,3 +309,36 @@ pub fn make_import_column(
     });
     Some(column)
 }
+
+#[cfg(test)]
+mod accord_dates {
+    /// #218 : le lecteur de dates du cœur (grille, collage, script) et celui de
+    /// l'import sont deux copies ; elles lisent les mêmes textes pareil.
+    #[test]
+    fn le_lecteur_de_dates_du_coeur_accorde_celui_de_l_import() {
+        for text in [
+            "2026-10-10",
+            "2026-10-10 14:30",
+            "2026-10-10T14:30:05",
+            "2026-10-10 14:30:05,25",
+            "10/10/2026 14:30",
+            "10/11/2026",
+            "25/11/24 15:17:22",
+            "25.11.2024",
+            "15:17:22",
+            "01/13/2026",
+            "31/04/2024",
+            "2024-02-29",
+            "1900-02-29",
+            "abc",
+            "1.5",
+            "",
+        ] {
+            assert_eq!(
+                stokesforge_core::datetime::parse_datetime(text).map(f64::to_bits),
+                stokesforge_import::parse_datetime_for_accord(text).map(f64::to_bits),
+                "{text:?}"
+            );
+        }
+    }
+}

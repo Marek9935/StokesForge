@@ -387,6 +387,8 @@ poignée rendue conserve l'époque de cet instantané.
 | `row_count` | longueur d'une colonne ; maximum des longueurs pour une feuille (zéro si vide) ; `None` ailleurs |
 | `column` | dictionnaire ci-dessous pour une colonne ; `None` ailleurs |
 
+`values` et `set_values` d'une colonne `datetime` restent des nombres (timestamps POSIX, secondes) : seule la grille affiche et lit les dates (#218).
+
 Les métadonnées `column` portent `type` (`numeric`, `datetime`, `mixed`),
 `role` (`x`, `y`, `x2`, `y2`, `z`, `x_error`, `y_error`, `label`, `none`), `long_name`,
 `unit`, `comment`, `x_prime` (nombre ou `None`, #164, lecture seule), `display_format`,

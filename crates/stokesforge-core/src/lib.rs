@@ -58,6 +58,7 @@ pub mod formula;
 pub mod id;
 pub mod name;
 pub mod node;
+pub mod datetime;
 pub mod number_format;
 pub mod path;
 pub mod project;
