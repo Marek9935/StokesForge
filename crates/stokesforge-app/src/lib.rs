@@ -49,6 +49,7 @@ pub mod file_picker;
 pub mod history_text;
 pub mod i18n;
 pub mod icons;
+pub mod list_frame;
 pub mod number_field;
 pub mod object_format;
 pub mod object_manager;

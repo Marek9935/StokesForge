@@ -266,6 +266,20 @@ pub fn edit_text_hinted<T>(
     hint: &str,
     parse: impl Fn(&str) -> Verdict<T>,
 ) -> Edited<T> {
+    edit_text_with_arrow(ui, id_salt, width, current, hint, 0.0, parse)
+}
+
+/// [`edit_text_hinted`] avec `arrow_room` points libres à droite du texte, pour
+/// la flèche d'un champ à liste peinte dans le cadre (#234).
+pub fn edit_text_with_arrow<T>(
+    ui: &mut egui::Ui,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    width: f32,
+    current: &str,
+    hint: &str,
+    arrow_room: f32,
+    parse: impl Fn(&str) -> Verdict<T>,
+) -> Edited<T> {
     let id = field_id(ui, id_salt);
     let ctx = ui.ctx().clone();
     let now = ui.input(|input| input.time);
@@ -280,6 +294,10 @@ pub fn edit_text_hinted<T>(
         egui::TextEdit::singleline(&mut buffer)
             .id(id)
             .hint_text(hint)
+            .margin(egui::Margin {
+                right: 4 + arrow_room as i8,
+                ..egui::Margin::symmetric(4, 2)
+            })
             .desired_width(width),
     );
     let focused = response.has_focus();

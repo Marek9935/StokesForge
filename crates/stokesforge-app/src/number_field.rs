@@ -14,8 +14,12 @@
 //! - liste fermée : ↑/↓ d'un pas, Maj+↑/↓ d'un grand pas ; Alt+↓ ouvre la liste ;
 //! - liste ouverte : la molette la fait défiler, ↑/↓ surligne, Entrée choisit,
 //!   Échap la ferme (sans toucher à la valeur) ;
-//! - molette sur le champ : un pas par cran, **seulement** si le champ a le
-//!   focus et que le curseur est dessus ; sinon elle fait défiler la fenêtre.
+//! - molette (#233, #235) : le **survol** suffit, sans focus, et **seulement**
+//!   sur un champ à liste : un cran = la valeur proposée voisine (`step_preset`),
+//!   une valeur hors liste saute à l'entrée voisine, aux extrémités elle reste.
+//!   Un champ sans liste ne réagit jamais : la fenêtre défile ;
+//! - aspect (#234) : cadre unique, flèche pleine à l'intérieur à droite, fond de
+//!   saisie du thème ; voir [`crate::list_frame`].
 //!
 //! La liste est une `egui::Area` à elle, pas `egui::Popup` : egui ne retient
 //! qu'une fenêtre surgissante ouverte par viewport, donc dans un dialogue modal
@@ -43,7 +47,7 @@ use eframe::egui;
 use stokesforge_core::number_format::{format_exact, format_grid};
 
 use crate::field_state::{self, Bound, Verdict};
-use crate::icons::{icon_button, Icon, IconRole};
+use crate::list_frame;
 use crate::quantities::{AutoKind, Quantity};
 use crate::tr;
 
@@ -214,12 +218,18 @@ fn number_field_core<T: Number>(
         None if focused => format_exact(current),
         None => format_grid(current),
     };
-    let edited = field_state::edit_text_hinted(
+    let arrow_room = if has_presets {
+        list_frame::ARROW_ROOM
+    } else {
+        0.0
+    };
+    let edited = field_state::edit_text_with_arrow(
         ui,
         id_salt,
         FIELD_WIDTH,
         &shown,
         auto_hint.unwrap_or(""),
+        arrow_room,
         |text| read(quantity, text),
     );
     let response = edited.response;
@@ -240,23 +250,28 @@ fn number_field_core<T: Number>(
         select_all(&ctx, id, shown.chars().count());
     }
 
-    // — Molette : un pas par cran, au focus et sous le curseur seulement. —
-    if response.has_focus() && response.hovered() && !presets.open {
+    // — Molette (#233, #235) : le survol suffit, sans focus ; un cran = la
+    // valeur proposée voisine. Un champ sans liste n'y réagit jamais : la
+    // fenêtre défile. —
+    if has_presets && response.hovered() && !presets.open {
         let notches = wheel_notches(ui);
         if notches != 0 {
-            current = step_value(quantity, current, notches);
-            changed = true;
+            let moved = step_preset(quantity, current, notches);
+            if moved != current {
+                current = moved;
+                changed = true;
+            }
         }
     }
 
     // — La liste de valeurs. —
     if has_presets {
-        let button = icon_button(
-            ui,
-            Icon::CaretDown,
-            IconRole::Neutral,
-            tr!("number-presets"),
-        );
+        // La flèche pleine est dans le cadre du champ (#234), cliquable.
+        let arrow = list_frame::arrow_rect(response.rect);
+        let button = ui
+            .interact(arrow, list_id.with("arrow"), egui::Sense::click())
+            .on_hover_text(tr!("number-presets"));
+        list_frame::paint_arrow(ui, arrow, &button);
         if button.clicked() {
             presets.open = !presets.open;
             presets.highlighted = nearest_preset(quantity, current);
@@ -373,6 +388,35 @@ fn step_value(quantity: &Quantity, value: f64, steps: i32) -> f64 {
     };
     let moved = (value + unit).clamp(quantity.min, quantity.max);
     (moved * 1e9).round() / 1e9
+}
+
+/// `value` déplacée de `notches` entrées de la liste proposée (positif = vers
+/// le haut). Une valeur hors liste saute à l'entrée voisine dans le sens du
+/// cran ; aux extrémités, elle reste.
+fn step_preset(quantity: &Quantity, value: f64, notches: i32) -> f64 {
+    const EPS: f64 = 1e-9;
+    let mut current = value;
+    for _ in 0..notches.unsigned_abs() {
+        let next = if notches > 0 {
+            quantity
+                .presets
+                .iter()
+                .copied()
+                .find(|p| *p > current + EPS)
+        } else {
+            quantity
+                .presets
+                .iter()
+                .copied()
+                .rev()
+                .find(|p| *p < current - EPS)
+        };
+        match next {
+            Some(preset) => current = preset,
+            None => break,
+        }
+    }
+    current
 }
 
 /// L'indice de la valeur proposée la plus proche de `value`.
@@ -680,6 +724,7 @@ mod tests {
         quantite: Quantity,
         temps: f64,
         id: Option<egui::Id>,
+        champ: Option<egui::Rect>,
     }
 
     impl Banc {
@@ -692,6 +737,7 @@ mod tests {
                 quantite,
                 temps: 0.0,
                 id: None,
+                champ: None,
             }
         }
 
@@ -709,7 +755,12 @@ mod tests {
                 focused: true,
                 ..Default::default()
             };
-            let (valeur, quantite, id_champ) = (&mut self.valeur, self.quantite, &mut self.id);
+            let (valeur, quantite, id_champ, rect_champ) = (
+                &mut self.valeur,
+                self.quantite,
+                &mut self.id,
+                &mut self.champ,
+            );
             let mut changed = false;
             let mut sortie = self.ctx.run_ui(input, |ui| {
                 ui.horizontal(|ui| {
@@ -718,7 +769,9 @@ mod tests {
                     if focus {
                         ui.memory_mut(|m| m.request_focus(id));
                     }
-                    changed = number_field(ui, "champ", valeur, &quantite).changed;
+                    let reponse = number_field(ui, "champ", valeur, &quantite);
+                    *rect_champ = Some(reponse.response.rect);
+                    changed = reponse.changed;
                 });
             });
             sortie.textures_delta.clear();
@@ -858,27 +911,64 @@ mod tests {
     }
 
     #[test]
-    fn la_molette_ne_change_que_le_champ_qui_a_le_focus_sous_le_curseur() {
+    fn la_molette_suit_la_liste_au_survol_sans_focus() {
         let mut banc = Banc::new(2.0, quantities::LINE_WIDTH);
         let centre = egui::pos2(20.0, 12.0);
-        // Curseur dessus, sans focus : la molette reste à la fenêtre.
-        banc.image(vec![egui::Event::PointerMoved(centre)], false);
-        banc.image(vec![cran(1.0)], false);
-        assert_eq!(banc.valeur, 2.0);
-        // Focus, curseur ailleurs : idem.
-        banc.focaliser();
+        // Curseur ailleurs : la molette reste à la fenêtre.
         banc.image(
             vec![egui::Event::PointerMoved(egui::pos2(300.0, 250.0))],
             false,
         );
         banc.image(vec![cran(1.0)], false);
         assert_eq!(banc.valeur, 2.0);
-        // Focus et curseur dessus : un pas par cran.
+        // Survol, sans focus : un cran = l'entrée voisine (2 → 3, puis 1,5).
         banc.image(vec![egui::Event::PointerMoved(centre)], false);
         banc.image(vec![cran(1.0)], false);
-        assert!((banc.valeur - 2.1).abs() < 1e-9, "{}", banc.valeur);
+        assert_eq!(banc.valeur, 3.0);
         banc.image(vec![cran(-2.0)], false);
-        assert!((banc.valeur - 1.9).abs() < 1e-9, "{}", banc.valeur);
+        assert_eq!(banc.valeur, 1.5);
+    }
+
+    #[test]
+    fn step_preset_saute_hors_liste_et_s_arrete_aux_extremites() {
+        let q = quantities::LINE_WIDTH; // 0,5 · 1 · 1,5 · 2 · 3 · 4
+        assert_eq!(step_preset(&q, 2.3, 1), 3.0);
+        assert_eq!(step_preset(&q, 2.3, -1), 2.0);
+        assert_eq!(step_preset(&q, 4.0, 1), 4.0);
+        assert_eq!(step_preset(&q, 0.5, -3), 0.5);
+        assert_eq!(step_preset(&q, 7.0, 1), 7.0);
+        assert_eq!(step_preset(&q, 7.0, -1), 4.0);
+        assert_eq!(step_preset(&q, 1.0, 3), 3.0);
+    }
+
+    #[test]
+    fn un_champ_sans_liste_ignore_la_molette() {
+        let mut banc = Banc::new(2.0, quantities::FREE);
+        banc.image(
+            vec![egui::Event::PointerMoved(egui::pos2(20.0, 12.0))],
+            false,
+        );
+        banc.image(vec![cran(1.0)], false);
+        assert_eq!(banc.valeur, 2.0);
+        banc.focaliser();
+        let (_, changed) = banc.image(vec![cran(1.0)], false);
+        assert!(!changed);
+        assert_eq!(banc.valeur, 2.0);
+    }
+
+    #[test]
+    fn la_fleche_pleine_est_dans_le_cadre_du_champ_a_liste() {
+        let mut banc = Banc::new(2.0, quantities::LINE_WIDTH);
+        let (sortie, _) = banc.image(Vec::new(), false);
+        let champ = banc.champ.expect("rect du champ");
+        let fleche = sortie.shapes.iter().find_map(|peint| match &peint.shape {
+            egui::Shape::Path(path) if path.fill != egui::Color32::TRANSPARENT => {
+                Some(egui::Rect::from_points(&path.points))
+            }
+            _ => None,
+        });
+        let fleche = fleche.expect("triangle plein");
+        assert!(champ.contains_rect(fleche), "{fleche:?} hors de {champ:?}");
     }
 
     #[test]

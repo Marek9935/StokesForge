@@ -1655,9 +1655,9 @@ mod tests {
         }
     }
 
-    /// Molette sur le champ (focus et curseur dessus) : un pas par cran ; trois
-    /// crans d'affilée ne font qu'**une** entrée d'historique, un seul Annuler
-    /// rend la valeur d'avant.
+    /// Molette sur le champ à liste : un cran = la valeur proposée voisine
+    /// (2,5 → 3 → 4, puis 4 aux extrémités) ; trois crans d'affilée ne font
+    /// qu'**une** entrée d'historique, un seul Annuler rend la valeur d'avant.
     #[test]
     fn des_crans_de_molette_ne_font_qu_une_entree_d_historique() {
         let mut banc = banc(|spec| panneau(spec).series[0].line.width = 2.5);
@@ -1678,9 +1678,9 @@ mod tests {
         }
         une_image(&context, &mut banc.state, Vec::new());
         let largeur = |spec: &PlotSpec| spec.panels[0].series[0].line.width;
-        assert!((largeur(&banc.brouillon()) - 2.8).abs() < 1e-9);
+        assert_eq!(largeur(&banc.brouillon()), 4.0);
         banc.state.close_plot_settings();
-        assert!((largeur(&banc.modele()) - 2.8).abs() < 1e-9);
+        assert_eq!(largeur(&banc.modele()), 4.0);
         banc.state.dispatch(Action::Undo);
         assert_eq!(banc.modele(), original, "un seul Annuler");
     }
@@ -1715,9 +1715,10 @@ mod tests {
         );
     }
 
-    /// Sans focus, la molette ne change pas le champ : elle reste à la fenêtre.
+    /// Le survol suffit (#235) : sans focus, un cran sur le champ à liste passe à
+    /// la valeur proposée suivante.
     #[test]
-    fn la_molette_sans_focus_ne_change_pas_le_champ() {
+    fn la_molette_au_survol_sans_focus_suit_la_liste() {
         let mut banc = banc(|spec| panneau(spec).series[0].line.width = 2.5);
         banc.ouvrir(PlotSettingsTab::Series, None);
         let context = contexte();
@@ -1737,7 +1738,7 @@ mod tests {
             ],
         );
         une_image(&context, &mut banc.state, Vec::new());
-        assert_eq!(banc.brouillon().panels[0].series[0].line.width, 2.5);
+        assert_eq!(banc.brouillon().panels[0].series[0].line.width, 3.0);
     }
 
     /// Doc de [`plot_settings_window`] : une case à cocher valide tout de

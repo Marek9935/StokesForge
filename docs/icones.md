@@ -112,6 +112,8 @@ les limites du cadrage, distinctes des coins de maximisation. « New Project »
 Object Manager (#82) réutilise l'icône `Graph` en rôle neutre pour son bouton
 de barre : son infobulle porte le nom du panneau. Les panneaux fixes (#100) réutilisent `Detach`, `Reattach` et les chevrons
 `CaretLeft`/`CaretRight`/`CaretUp`/`CaretDown` pour le repli ; aucune icône ajoutée.
+
+La flèche d'un champ à liste (#234) n'est **pas** une icône : triangle plein peint par `list_frame::paint_arrow`, comme celui de la `ComboBox`.
 Leurs en-têtes ne proposent ni `Close` ni `Maximize`.
 
 L'aide au survol d'un champ (#197, `app/hover_help.rs`) utilise `question`

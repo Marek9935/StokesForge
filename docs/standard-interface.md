@@ -49,7 +49,7 @@ Déjà en place et réutilisées par ce standard : `modal_dialog_with`
 (`app/dialogs.rs`), `hover_help` (`app/hover_help.rs`), `theme::section_title`,
 `MenuSections::section`, `color_field`.
 
-## Champs numériques — en place (#220, Auto #221), reste N11
+## Champs numériques — en place (#220, Auto #221, #233–#235), reste N11
 
 Brique : `stokesforge_app::number_field::number_field(ui, sel, &mut valeur,
 &quantities::GRANDEUR)` (`src/number_field.rs`), table : `src/quantities.rs`
@@ -68,17 +68,20 @@ proposées). Une grandeur neuve s'ajoute à la table, jamais à l'appel ; les 28
   - Liste ouverte : la molette fait défiler la liste, ↑/↓ surligne, Entrée
     choisit, Échap ferme.
   - Dans un dialogue modal, la liste respecte #9 (une `egui::Area` à soi).
-- **Molette** (N2, X1 → R1 ; **à venir**, #233, #235) : seul un champ **à liste**
+- **Molette** (N2, X1 → R1 ; en place, #233, #235) : seul un champ **à liste**
   réagit, au **survol** (focus inutile) ; un cran = l'entrée suivante ou
   précédente de la liste (1, 1,5, 2, 3, 4…), une valeur tapée hors liste saute à
-  l'entrée voisine. Un champ **sans liste** (borne d'axe, paramètre
-  d'ajustement) n'est jamais changé par la molette : la fenêtre défile. Des
-  crans d'affilée forment **une seule** entrée d'historique. *Aujourd'hui* :
-  focus **et** curseur, un pas fixe de la table par cran, tout champ.
-- **Aspect d'un champ à liste** (N1, N9 ; **à venir**, #234) : un cadre unique,
-  flèche pleine à l'intérieur, comme la liste déroulante ; **fond blanc** si le
-  champ est éditable au clavier, **fond gris** si seule la liste choisit. Fonds
-  tirés du thème.
+  l'entrée voisine, aux extrémités la valeur reste. Un champ **sans liste**
+  (borne d'axe, paramètre d'ajustement) n'est jamais changé par la molette : la
+  fenêtre défile, comme quand le curseur quitte le champ. Des crans d'affilée
+  forment **une seule** entrée d'historique. Ctrl+molette reste le zoom.
+  `number_field::step_preset`.
+- **Aspect d'un champ à liste** (N1, N9 ; en place, #234) : un cadre unique,
+  flèche pleine à l'intérieur à droite, comme la liste déroulante ; **fond
+  blanc** si le champ est éditable au clavier, **fond gris** si seule la liste
+  choisit. Fonds tirés du thème (`list_frame::editable_fill` / `list_only_fill`).
+  Le champ nombre l'applique ; la liste éditable de la barre de format (corps
+  de texte, encore une `ComboBox`) le suivra avec sa migration.
 - **Application** (N3) : à Entrée ou en quittant le champ ; Échap rend
   l'ancienne valeur ; une entrée d'historique par validation.
 - **Une grandeur, une définition** (N8) : une table unique donne bornes, pas,
