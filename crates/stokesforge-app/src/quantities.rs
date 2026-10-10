@@ -12,6 +12,19 @@
 //! Un `▼` n'apparaît que si la grandeur a des [`Quantity::presets`] ; une borne
 //! d'axe ou un paramètre d'ajustement n'en ont pas.
 
+/// Ce qu'une grandeur fait du mot `auto` et d'un champ vidé (#221, C4/R10).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutoKind {
+    /// Pas d'Auto : `auto` et un champ vidé sont refusés (N6).
+    None,
+    /// La valeur elle-même a un Auto : un champ vidé ou `auto` la rend
+    /// automatique, et le champ affiche alors « Auto (…) » en gris.
+    Field,
+    /// L'Auto est celui d'un groupe lié (Min/Max d'axe, case « Auto range ») :
+    /// `auto` l'active pour tout le groupe, un champ vidé est refusé.
+    Group,
+}
+
 /// La définition d'une grandeur numérique.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quantity {
@@ -29,6 +42,8 @@ pub struct Quantity {
     pub integer: bool,
     /// Valeurs proposées par le `▼`, dans l'ordre d'affichage.
     pub presets: &'static [f64],
+    /// Ce que la grandeur fait de `auto` et d'un champ vidé.
+    pub auto: AutoKind,
 }
 
 impl Quantity {
@@ -42,6 +57,7 @@ impl Quantity {
             decimals,
             integer: false,
             presets: &[],
+            auto: AutoKind::None,
         }
     }
 
@@ -55,12 +71,18 @@ impl Quantity {
             decimals: 0,
             integer: true,
             presets: &[],
+            auto: AutoKind::None,
         }
     }
 
     /// La même grandeur bornée à `min..=max`.
     pub const fn between(self, min: f64, max: f64) -> Self {
         Self { min, max, ..self }
+    }
+
+    /// La même grandeur, avec l'Auto donné.
+    pub const fn with_auto(self, auto: AutoKind) -> Self {
+        Self { auto, ..self }
     }
 
     /// La même grandeur avec ses valeurs proposées.
@@ -71,6 +93,9 @@ impl Quantity {
 
 /// Une valeur libre : abscisse, ordonnée, borne d'axe, paramètre d'ajustement.
 pub const FREE: Quantity = Quantity::real(0.1, 1.0, 8);
+
+/// Une borne d'axe : libre, et liée à la case « Auto range » de son axe.
+pub const AXIS_BOUND: Quantity = FREE.with_auto(AutoKind::Group);
 
 /// Épaisseur d'un trait de série, en points : 0 à 20, décimales au clavier.
 pub const LINE_WIDTH: Quantity = Quantity::real(0.1, 1.0, 2)

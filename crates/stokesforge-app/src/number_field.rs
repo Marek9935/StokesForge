@@ -21,6 +21,13 @@
 //! qu'une fenêtre surgissante ouverte par viewport, donc dans un dialogue modal
 //! la liste refermerait la fenêtre parente (issue #9, comme `color_button`).
 //!
+//! # Auto (#221)
+//!
+//! Une grandeur a un Auto ([`AutoKind`]) : `Field` — champ vidé ou mot `auto`
+//! rend la valeur automatique ([`auto_number_field`], texte grisé « Auto (…) ») ;
+//! `Group` — le mot `auto` coche l'Auto du groupe ([`NumberResponse::auto`]),
+//! un champ vidé est refusé. Sans Auto, le mot et le champ vidé sont refusés.
+//!
 //! # Historique
 //!
 //! Chaque pas de flèche ou de molette est un changement rendu à l'appelant
@@ -36,7 +43,7 @@ use eframe::egui;
 
 use crate::field_state::{self, Bound, Verdict};
 use crate::icons::{icon_button, Icon, IconRole};
-use crate::quantities::Quantity;
+use crate::quantities::{AutoKind, Quantity};
 use crate::tr;
 
 /// Largeur d'un champ numérique, en points (la « courte » de L2, #227).
@@ -87,6 +94,16 @@ pub struct NumberResponse {
     /// La valeur a changé cette image : saisie validée, pas de flèche, cran de
     /// molette ou choix dans la liste.
     pub changed: bool,
+    /// L'utilisateur a demandé l'Auto cette image (champ vidé ou mot `auto`,
+    /// selon [`AutoKind`]) : l'appelant rend la valeur ou le groupe automatique.
+    pub auto: bool,
+}
+
+/// Ce qu'une saisie dit : un nombre, ou l'Auto (#221).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Entry {
+    Value(f64),
+    Auto,
 }
 
 /// L'état de la liste de valeurs d'un champ.
@@ -104,6 +121,39 @@ pub fn number_field<T: Number>(
     id_salt: impl std::hash::Hash + std::fmt::Debug + Copy,
     value: &mut T,
     quantity: &Quantity,
+) -> NumberResponse {
+    number_field_core(ui, id_salt, value, quantity, None)
+}
+
+/// Un champ dont la valeur peut être automatique (#221) : `None` montre `hint`
+/// en gris (« Auto (0–4000) », la valeur calculée) ; vider le champ ou taper
+/// `auto` la remet à `None` (grandeur [`AutoKind::Field`]). Une saisie lisible
+/// la fixe à `Some`.
+pub fn auto_number_field<T: Number>(
+    ui: &mut egui::Ui,
+    id_salt: impl std::hash::Hash + std::fmt::Debug + Copy,
+    value: &mut Option<T>,
+    quantity: &Quantity,
+    hint: &str,
+) -> NumberResponse {
+    let mut scratch = value.map_or(0.0, |v| v.to_f64());
+    let shown_auto = value.is_none().then_some(hint);
+    let mut response = number_field_core(ui, id_salt, &mut scratch, quantity, shown_auto);
+    if response.auto {
+        *value = None;
+        response.changed = true;
+    } else if response.changed {
+        *value = Some(T::from_f64(scratch));
+    }
+    response
+}
+
+fn number_field_core<T: Number>(
+    ui: &mut egui::Ui,
+    id_salt: impl std::hash::Hash + std::fmt::Debug + Copy,
+    value: &mut T,
+    quantity: &Quantity,
+    auto_hint: Option<&str>,
 ) -> NumberResponse {
     let ctx = ui.ctx().clone();
     let id = field_state::field_id(ui, id_salt);
@@ -156,18 +206,31 @@ pub fn number_field<T: Number>(
     }
 
     // — Le champ. —
-    let shown = format_value(current, quantity.decimals);
-    let edited = field_state::edit_text(ui, id_salt, FIELD_WIDTH, &shown, |text| {
-        read(quantity, text)
-    });
+    let shown = match auto_hint {
+        Some(_) => String::new(),
+        None => format_value(current, quantity.decimals),
+    };
+    let edited = field_state::edit_text_hinted(
+        ui,
+        id_salt,
+        FIELD_WIDTH,
+        &shown,
+        auto_hint.unwrap_or(""),
+        |text| read(quantity, text),
+    );
     let response = edited.response;
     if close_list {
         response.request_focus();
     }
     let typed = edited.value.is_some();
-    if let Some(value) = edited.value {
-        current = value;
-        changed = true;
+    let mut auto = false;
+    match edited.value {
+        Some(Entry::Value(value)) => {
+            current = value;
+            changed = true;
+        }
+        Some(Entry::Auto) => auto = true,
+        None => {}
     }
     if response.gained_focus() {
         select_all(&ctx, id, shown.chars().count());
@@ -238,7 +301,11 @@ pub fn number_field<T: Number>(
             field_state::discard_draft(&ctx, id);
         }
     }
-    NumberResponse { response, changed }
+    NumberResponse {
+        response,
+        changed,
+        auto,
+    }
 }
 
 /// Consomme `key` avec exactement `modifiers`.
@@ -350,8 +417,20 @@ fn preset_popup_contents(
 
 /// Lit une saisie : un nombre fini, entier si la grandeur l'est, ramené aux
 /// bornes.
-fn read(quantity: &Quantity, text: &str) -> Verdict<f64> {
-    let Ok(parsed) = text.trim().parse::<f64>() else {
+fn read(quantity: &Quantity, text: &str) -> Verdict<Entry> {
+    let trimmed = text.trim();
+    // L'Auto : champ vidé (la valeur elle-même en a un) ou le mot `auto` (la
+    // valeur ou son groupe). Ailleurs, ni l'un ni l'autre n'est lisible.
+    if quantity.auto == AutoKind::Field && trimmed.is_empty() {
+        return Verdict::Valid(Entry::Auto);
+    }
+    if quantity.auto != AutoKind::None && trimmed.eq_ignore_ascii_case("auto") {
+        return Verdict::Valid(Entry::Auto);
+    }
+    if quantity.auto == AutoKind::Group && trimmed.is_empty() {
+        return Verdict::Refused(tr!("field-refused-use-auto"));
+    }
+    let Ok(parsed) = trimmed.parse::<f64>() else {
         return refused(quantity);
     };
     if !parsed.is_finite() || (quantity.integer && parsed.fract() != 0.0) {
@@ -359,22 +438,22 @@ fn read(quantity: &Quantity, text: &str) -> Verdict<f64> {
     }
     if parsed < quantity.min {
         return Verdict::Clamped {
-            value: quantity.min,
+            value: Entry::Value(quantity.min),
             bound: Bound::Min,
             limit: format_value(quantity.min, quantity.decimals),
         };
     }
     if parsed > quantity.max {
         return Verdict::Clamped {
-            value: quantity.max,
+            value: Entry::Value(quantity.max),
             bound: Bound::Max,
             limit: format_value(quantity.max, quantity.decimals),
         };
     }
-    Verdict::Valid(parsed)
+    Verdict::Valid(Entry::Value(parsed))
 }
 
-fn refused(quantity: &Quantity) -> Verdict<f64> {
+fn refused(quantity: &Quantity) -> Verdict<Entry> {
     Verdict::Refused(if quantity.integer {
         tr!("field-refused-integer")
     } else {
@@ -425,12 +504,44 @@ mod tests {
     }
 
     #[test]
+    fn auto_est_accepte_selon_la_grandeur() {
+        let champ = quantities::FREE.with_auto(AutoKind::Field);
+        for texte in ["", "  ", "auto", "Auto", " AUTO "] {
+            assert_eq!(
+                read(&champ, texte),
+                Verdict::Valid(Entry::Auto),
+                "{texte:?}"
+            );
+        }
+        assert_eq!(read(&champ, "5"), Verdict::Valid(Entry::Value(5.0)));
+        // Une borne de groupe accepte le mot, pas le champ vidé.
+        let groupe = &quantities::AXIS_BOUND;
+        assert_eq!(read(groupe, "auto"), Verdict::Valid(Entry::Auto));
+        assert!(matches!(read(groupe, ""), Verdict::Refused(_)));
+        assert!(matches!(read(groupe, "  "), Verdict::Refused(_)));
+    }
+
+    /// Témoin : une grandeur sans Auto refuse le mot comme le champ vidé.
+    #[test]
+    fn sans_auto_le_mot_et_le_champ_vide_sont_refuses() {
+        for texte in ["auto", "Auto", ""] {
+            assert!(
+                matches!(read(&quantities::LINE_WIDTH, texte), Verdict::Refused(_)),
+                "{texte:?}"
+            );
+        }
+    }
+
+    #[test]
     fn un_entier_refuse_les_decimales_mais_pas_un_point_zero() {
         assert!(matches!(
             read(&quantities::MAX_PEAKS, "2.5"),
             Verdict::Refused(_)
         ));
-        assert_eq!(read(&quantities::MAX_PEAKS, "3.0"), Verdict::Valid(3.0));
+        assert_eq!(
+            read(&quantities::MAX_PEAKS, "3.0"),
+            Verdict::Valid(Entry::Value(3.0))
+        );
     }
 
     #[test]
@@ -443,7 +554,10 @@ mod tests {
         else {
             panic!("35 dépasse 20");
         };
-        assert_eq!((value, bound, limit.as_str()), (20.0, Bound::Max, "20"));
+        assert_eq!(
+            (value, bound, limit.as_str()),
+            (Entry::Value(20.0), Bound::Max, "20")
+        );
         assert!(matches!(
             read(&quantities::LINE_WIDTH, "-1"),
             Verdict::Clamped {
@@ -455,7 +569,10 @@ mod tests {
 
     #[test]
     fn des_decimales_au_clavier_sont_gardees() {
-        assert_eq!(read(&quantities::LINE_WIDTH, "2.75"), Verdict::Valid(2.75));
+        assert_eq!(
+            read(&quantities::LINE_WIDTH, "2.75"),
+            Verdict::Valid(Entry::Value(2.75))
+        );
     }
 
     #[test]

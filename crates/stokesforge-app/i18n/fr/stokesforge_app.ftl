@@ -616,6 +616,7 @@ plot-axes-reverse =
 plot-axes-auto-range =
     Plage auto
     .hint = Calculée d'après les données
+    .disabled = Décochez Plage auto pour fixer les bornes
 plot-axes-min = Min
 plot-axes-max = Max
 plot-axes-display-section = Affichage
@@ -1468,6 +1469,7 @@ field-clamped-min = Ramené au minimum, { $limit }
 field-clamped-max = Ramené au maximum, { $limit }
 field-refused-number = Saisissez un nombre
 field-refused-integer = Saisissez un nombre entier
+field-refused-use-auto = Utilisez Plage auto
 
 # Champ numérique : bulle du ▼ (#220).
 number-presets = Valeurs courantes

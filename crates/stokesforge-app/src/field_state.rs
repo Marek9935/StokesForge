@@ -253,6 +253,19 @@ pub fn edit_text<T>(
     current: &str,
     parse: impl Fn(&str) -> Verdict<T>,
 ) -> Edited<T> {
+    edit_text_hinted(ui, id_salt, width, current, "", parse)
+}
+
+/// [`edit_text`] avec un texte grisé quand le champ est vide : un champ qui a un
+/// Auto y montre « Auto (0–4000) » (#221).
+pub fn edit_text_hinted<T>(
+    ui: &mut egui::Ui,
+    id_salt: impl std::hash::Hash + std::fmt::Debug,
+    width: f32,
+    current: &str,
+    hint: &str,
+    parse: impl Fn(&str) -> Verdict<T>,
+) -> Edited<T> {
     let id = field_id(ui, id_salt);
     let ctx = ui.ctx().clone();
     let now = ui.input(|input| input.time);
@@ -266,6 +279,7 @@ pub fn edit_text<T>(
     let response = ui.add(
         egui::TextEdit::singleline(&mut buffer)
             .id(id)
+            .hint_text(hint)
             .desired_width(width),
     );
     let focused = response.has_focus();

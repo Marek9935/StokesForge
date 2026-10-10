@@ -26,6 +26,7 @@ use crate::tr;
 
 use super::curve_settings::curve_settings_page;
 use super::dialogs::{modal_dialog, DialogOutcome};
+use super::graph_window::{published_axis_bounds, PanelBounds};
 use super::hover_help::hover_help;
 use super::tab_strip::{tab_strip, TabStripSide};
 
@@ -278,7 +279,13 @@ fn plot_settings_contents(
                         let Some(panel) = spec.panels.get_mut(edit.selected_panel) else {
                             return;
                         };
-                        commit |= axes_settings_page(ui, panel, &mut chosen_axis, &mut env);
+                        commit |= axes_settings_page(
+                            ui,
+                            panel,
+                            &mut chosen_axis,
+                            published_axis_bounds(ui.ctx(), settings.graph, edit.selected_panel),
+                            &mut env,
+                        );
                     }
                     // Les séries ont leur fenêtre : voir plus haut.
                     PlotSettingsTab::Series => {}
@@ -379,6 +386,7 @@ fn axes_settings_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
     chosen_axis: &mut PlotAxis,
+    bounds: Option<PanelBounds>,
     env: &mut PickerEnv,
 ) -> bool {
     let mut commit = false;
@@ -421,7 +429,12 @@ fn axes_settings_page(
     commit |= if mirror {
         mirror_axis_editor(ui, axis)
     } else {
-        axis_editor(ui, axis, env)
+        let computed = bounds.and_then(|bounds| match *chosen_axis {
+            PlotAxis::Bottom => bounds.bottom,
+            PlotAxis::Left => bounds.left,
+            _ => bounds.right,
+        });
+        axis_editor(ui, axis, computed, env)
     };
     commit
 }
@@ -566,7 +579,12 @@ fn mirror_axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
 /// unité), son échelle (logarithmique, inversée, bornes) et son affichage
 /// (axe, grille). Rend `true` si le brouillon doit être validé — voir la doc
 /// de tête de [`plot_settings_window`].
-fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> bool {
+fn axis_editor(
+    ui: &mut egui::Ui,
+    axis: &mut AxisSpec,
+    computed: Option<(f64, f64)>,
+    env: &mut PickerEnv,
+) -> bool {
     let mut commit = false;
     section_title(ui, tr!("plot-axes-title-section"));
     commit |= formula_field(
@@ -608,28 +626,54 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
         .checkbox(&mut axis.inverted, tr!("plot-axes-reverse"))
         .on_hover_text(tr!("plot-axes-reverse", "hint"))
         .changed();
-    commit |= ui
+    let auto_changed = ui
         .checkbox(&mut axis.auto_range, tr!("plot-axes-auto-range"))
         .on_hover_text(tr!("plot-axes-auto-range", "hint"))
         .changed();
-    if !axis.auto_range {
-        let mut min = axis.range_min.unwrap_or(0.0);
-        let mut max = axis.range_max.unwrap_or(0.0);
-        let min_changed = ui
-            .horizontal(|ui| {
-                ui.label(tr!("plot-axes-min"));
-                number_field(ui, "axis_min", &mut min, &quantities::FREE).changed
-            })
-            .inner;
-        let max_changed = ui
-            .horizontal(|ui| {
-                ui.label(tr!("plot-axes-max"));
-                number_field(ui, "axis_max", &mut max, &quantities::FREE).changed
-            })
-            .inner;
+    commit |= auto_changed;
+    if auto_changed && !axis.auto_range {
+        // Décocher reprend les bornes calculées comme valeurs (G4).
+        if let Some((low, high)) = computed {
+            axis.range_min = Some(low);
+            axis.range_max = Some(high);
+        }
+    }
+    // Min et Max restent visibles : grisés sous « Auto range », avec les
+    // bornes calculées (#221, #170 §1).
+    let auto = axis.auto_range;
+    let (mut min, mut max) = if auto {
+        computed
+            .or(axis.range_min.zip(axis.range_max))
+            .unwrap_or((0.0, 0.0))
+    } else {
+        (axis.range_min.unwrap_or(0.0), axis.range_max.unwrap_or(0.0))
+    };
+    let mut changed = false;
+    let mut auto_asked = false;
+    ui.add_enabled_ui(!auto, |ui| {
+        for (label, salt, value) in [
+            (tr!("plot-axes-min"), "axis_min", &mut min),
+            (tr!("plot-axes-max"), "axis_max", &mut max),
+        ] {
+            let response = ui
+                .horizontal(|ui| {
+                    ui.label(label);
+                    number_field(ui, salt, value, &quantities::AXIS_BOUND)
+                })
+                .inner;
+            changed |= response.changed;
+            auto_asked |= response.auto;
+        }
+    })
+    .response
+    .on_disabled_hover_text(tr!("plot-axes-auto-range", "disabled"));
+    if auto_asked {
+        axis.auto_range = true;
+        commit = true;
+    } else if !auto && changed {
         axis.range_min = Some(min);
         axis.range_max = Some(max);
-        commit |= min_changed || max_changed;
+        commit = true;
     }
 
     section_title(ui, tr!("plot-axes-display-section"));
@@ -1930,6 +1974,45 @@ mod tests {
             "peindre n'enregistre aucune couleur"
         );
         (commit, peints)
+    }
+
+    fn peindre_axe(
+        context: &egui::Context,
+        axis: &mut stokesforge_plot::AxisSpec,
+        calcule: Option<(f64, f64)>,
+    ) -> (bool, Vec<Texte>) {
+        let mut env = PickerEnv {
+            project: Default::default(),
+            user: Default::default(),
+            requests: Vec::new(),
+        };
+        let mut commit = true;
+        let peints = textes(&image(context, Vec::new(), |ui| {
+            commit = super::axis_editor(ui, axis, calcule, &mut env);
+        }));
+        (commit, peints)
+    }
+
+    /// #221 : sous « Auto range », Min et Max restent visibles (grisés) et
+    /// montrent les bornes calculées, sans les écrire dans le spec. Témoin :
+    /// hors Auto, ils montrent les bornes saisies et non les calculées.
+    #[test]
+    fn sous_auto_range_min_et_max_montrent_les_bornes_calculees() {
+        let context = contexte();
+        let mut axe = stokesforge_plot::AxisSpec::default();
+        assert!(axe.auto_range);
+        let (commit, peints) = peindre_axe(&context, &mut axe, Some((0.0, 4000.0)));
+        assert!(!commit, "peindre ne valide rien");
+        assert!(est_peint(&peints, &tr!("plot-axes-min")));
+        assert!(est_peint(&peints, "4000"), "{peints:?}");
+        assert_eq!((axe.range_min, axe.range_max), (None, None));
+
+        axe.auto_range = false;
+        axe.range_min = Some(-5.0);
+        axe.range_max = Some(7.0);
+        let (_, peints) = peindre_axe(&context, &mut axe, Some((0.0, 4000.0)));
+        assert!(est_peint(&peints, "7"), "{peints:?}");
+        assert!(!est_peint(&peints, "4000"), "{peints:?}");
     }
 
     /// #11 : l'onglet « Thème » se dessine (thèmes, fond, texte, axes) sans

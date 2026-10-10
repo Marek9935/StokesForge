@@ -48,7 +48,7 @@ Déjà en place et réutilisées par ce standard : `modal_dialog_with`
 (`app/dialogs.rs`), `hover_help` (`app/hover_help.rs`), `theme::section_title`,
 `MenuSections::section`, `color_field`.
 
-## Champs numériques — en place (#220), reste N11 et Auto (#221)
+## Champs numériques — en place (#220, Auto #221), reste N11
 
 Brique : `stokesforge_app::number_field::number_field(ui, sel, &mut valeur,
 &quantities::GRANDEUR)` (`src/number_field.rs`), table : `src/quantities.rs`
@@ -84,7 +84,15 @@ proposées). Une grandeur neuve s'ajoute à la table, jamais à l'appel ; les 28
   **second** champ. Une contrainte entre deux champs est refusée ; seule une
   borne fixe est ramenée.
 
-### Auto (C4, R10, G4) — à venir (#221)
+### Auto (C4, R10, G4) — en place (#221)
+
+Mécanique : `quantities::AutoKind` (`None`, `Field`, `Group`) sur la grandeur,
+`number_field::auto_number_field` (valeur `Option`, texte grisé « Auto (…) »)
+pour un `Field`, `NumberResponse::auto` pour un `Group` (`AXIS_BOUND`). Les
+bornes calculées viennent de `DrawnPanel` (`stokesforge-render`), publiées par
+`graph_window::publish_axis_bounds`. Reste à migrer : le corps de texte de la
+barre de format (liste « Auto », C4).
+
 
 - Choix dans une liste : entrée « Auto » en tête.
 - Nombre ou texte qui a un Auto : champ vidé = Auto, affiché « Auto (0–4000) »

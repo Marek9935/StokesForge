@@ -945,7 +945,7 @@ fn aucun_champ_numerique_hors_de_la_brique() {
          `quantities.rs` : {fautifs:?}"
     );
     // La brique existe.
-    assert!(fonction_unique(&sources, "number_field")
+    assert!(fonction_unique(&sources, "number_field_core")
         .corps
         .contains("edit_text"));
 }

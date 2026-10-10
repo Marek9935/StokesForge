@@ -624,6 +624,7 @@ plot-axes-reverse =
 plot-axes-auto-range =
     Auto range
     .hint = Computed from the data
+    .disabled = Uncheck Auto range to set the bounds
 plot-axes-min = Min
 plot-axes-max = Max
 plot-axes-display-section = Display
@@ -1476,6 +1477,7 @@ field-clamped-min = Set to the minimum, { $limit }
 field-clamped-max = Set to the maximum, { $limit }
 field-refused-number = Enter a number
 field-refused-integer = Enter a whole number
+field-refused-use-auto = Use Auto range
 
 # Champ numérique : bulle du ▼ (#220).
 number-presets = Common values

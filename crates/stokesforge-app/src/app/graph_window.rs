@@ -309,6 +309,7 @@ pub(super) fn graph_view_contents(
     }
     match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
+            publish_axis_bounds(ui.ctx(), view, graph_id);
             if let Some(spec) = crate::state::current_plot_spec(&snapshot.tree, graph_id) {
                 layer_badges(&figure_ui, view, &spec, graph_id, outer);
             }
@@ -373,6 +374,57 @@ pub(super) fn graph_view_contents(
             );
         }
     }
+}
+
+/// Les bornes que le dernier tracé a retenues pour les axes d'un calque, en
+/// valeurs de données et dans l'ordre croissant (#221). Calculées par
+/// `stokesforge-render` (`DrawnPanel`), jamais refaites ici.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct PanelBounds {
+    /// Indice du calque dans `PlotSpec::panels`.
+    pub index: usize,
+    pub bottom: Option<(f64, f64)>,
+    pub left: Option<(f64, f64)>,
+    pub right: Option<(f64, f64)>,
+}
+
+fn axis_bounds_id(graph: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_axis_bounds", graph))
+}
+
+fn ascending((a, b): (f64, f64)) -> (f64, f64) {
+    (a.min(b), a.max(b))
+}
+
+/// Publie les bornes du dernier tracé de `graph` : la fenêtre des propriétés,
+/// qui n'a pas la [`GraphView`], les montre grisées sous « Auto range ».
+fn publish_axis_bounds(ctx: &egui::Context, view: &GraphView, graph: NodeId) {
+    let Some(drawn) = view.last_drawn() else {
+        return;
+    };
+    let bounds: Vec<PanelBounds> = drawn
+        .panels
+        .iter()
+        .map(|panel| PanelBounds {
+            index: panel.index,
+            bottom: Some(ascending(panel.x_range)),
+            left: Some(ascending(panel.y_range)),
+            right: panel.y2_range.map(ascending),
+        })
+        .collect();
+    ctx.data_mut(|data| data.insert_temp(axis_bounds_id(graph), bounds));
+}
+
+/// Les bornes publiées pour le calque `panel` de `graph` ; `None` faute de vue
+/// peinte.
+pub(super) fn published_axis_bounds(
+    ctx: &egui::Context,
+    graph: NodeId,
+    panel: usize,
+) -> Option<PanelBounds> {
+    ctx.data(|data| data.get_temp::<Vec<PanelBounds>>(axis_bounds_id(graph)))?
+        .into_iter()
+        .find(|bounds| bounds.index == panel)
 }
 
 /// Le calque actif de `graph`, tel que sa dernière vue peinte l'a publié
