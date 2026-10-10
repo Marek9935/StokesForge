@@ -533,6 +533,10 @@ coût, risque, ce que ça casse. Jamais une question ouverte qui renvoie le
 travail. Et ne pas demander ce qui a un défaut évident : là, choisir, le dire
 en une ligne, avancer.
 
+À partir de **six choix** à faire trancher, publier le formulaire de
+décisions au lieu d'`AskUserQuestion` :
+[`../stokesforge-bug-report/references/formulaire-de-decisions.md`](../stokesforge-bug-report/references/formulaire-de-decisions.md).
+
 ## 4. Tests — et, si c'est visuel, regarder
 
 Toute logique ajoutée dans `state.rs` se teste dans

@@ -40,6 +40,11 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
   `stokesforge-bug-report`, `stokesforge-bug-fix`, `stokesforge-feature` et
   `stokesforge-verification` : les tests couvrent la géométrie, **pas
   l'apparence**.
+- [`formulaire-de-decisions.md`](stokesforge-bug-report/references/formulaire-de-decisions.md)
+  et son gabarit [`formulaire-de-decisions.html`](stokesforge-bug-report/references/formulaire-de-decisions.html)
+  — faire trancher **six choix ou plus** par une page de décisions (une carte
+  par décision : contexte, avant, après, avantage et défaut de chaque option).
+  Utilisée par tous les skills qui posent des questions.
 
 ## Règles transversales, apprises à l'usage
 
@@ -63,6 +68,16 @@ arbitre des comportements observables, jamais des structures de code. Un
 commentaire disant « choix volontaire » ferme *une* alternative, pas toutes —
 si la demande diffère de l'option rejetée, c'est une question à poser, pas un
 classement à faire.
+
+**Six choix ou plus : un formulaire, pas une liste.** L'utilisateur est
+dyslexique ; il décide mieux une carte à la fois, en puces courtes avec un
+schéma. Jusqu'à cinq choix, `AskUserQuestion`. Au-delà, publier le
+[formulaire de décisions](stokesforge-bug-report/references/formulaire-de-decisions.md) :
+pour chaque décision, le **contexte** (où, quand, décisions liées),
+l'**avant** vérifié dans le code avec son schéma, puis chaque option avec son
+**après** schématisé, son avantage et son **défaut** — recommandation
+comprise. Relire ensuite les réponses, signaler les incohérences et le défaut
+de chaque choix non recommandé.
 
 **Partir de la brique commune, jamais de l'existant qui déroge.** Une fenêtre,
 un dialogue, un assistant se construisent avec les briques du projet

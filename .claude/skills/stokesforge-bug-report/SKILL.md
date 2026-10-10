@@ -200,6 +200,13 @@ implémentations, non.
 
 Une seule question groupée vaut mieux que cinq questions séparées.
 
+**Six choix ou plus** (tri d'un vrac de retours, arbitrages d'interface,
+incohérences relevées) : pas d'`AskUserQuestion` ni de liste dans le terminal,
+mais le formulaire de décisions,
+[`references/formulaire-de-decisions.md`](references/formulaire-de-decisions.md)
+— contexte, avant, après, avantage et défaut de chaque option, schéma à
+chaque étape.
+
 ## 5. Format du rapport
 
 Le tableau de tri (§1) d'abord. Puis, **pour les seuls bugs non évidents** :
