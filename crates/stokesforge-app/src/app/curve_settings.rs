@@ -34,6 +34,7 @@ use crate::state::{series_list_label, Action, SaveTarget};
 use crate::theme::section_title;
 use crate::tr;
 
+use super::hover_help::help_text;
 use super::list_row::list_row;
 use super::plot_settings::series_editor;
 
@@ -344,13 +345,12 @@ fn group_editor(
         .unwrap_or_else(|| panel.group_label(group).unwrap_or_default().to_string());
     ui.horizontal(|ui| {
         ui.label(tr!("curve-group-name-field"));
-        let field = ui
-            .add(
-                egui::TextEdit::singleline(&mut name)
-                    .hint_text(tr!("curve-group-name", number = group))
-                    .desired_width(160.0),
-            )
-            .on_hover_text(tr!("curve-group-name-field", "hint"));
+        let field = ui.add(
+            egui::TextEdit::singleline(&mut name)
+                .hint_text(tr!("curve-group-name", number = group))
+                .desired_width(160.0),
+        );
+        help_text(ui, tr!("curve-group-name-field", "hint"));
         if field.lost_focus() && panel.rename_group(group, &name) {
             commit = true;
         }

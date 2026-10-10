@@ -452,6 +452,10 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   `quantities.rs` (bornes, pas, décimales, valeurs du `▼`) — jamais `DragValue`
   ni `Slider` (`aucun_champ_numerique_hors_de_la_brique`) ; une grandeur neuve
   s'ajoute à la table, l'unité va dans le libellé ;
+- le **rappel d'un champ** (case, radio, texte, nombre) est l'icône « ? » :
+  `app/hover_help.rs` (`help_beside` autour du champ, `help_text` après) ; jamais
+  `on_hover_text` sur un champ (`aucune_bulle_nue_sur_un_champ_de_formulaire`,
+  #225) ; la bulle nue reste aux boutons, icônes, onglets, menus ;
 - un **nombre affiché** passe par `stokesforge_core::number_format`
   (`format_results` 3 chiffres, `format_grid` 6, `format_exact` pour éditer et
   copier, `format_with_uncertainty`, `format_tick`) — jamais un `format!`

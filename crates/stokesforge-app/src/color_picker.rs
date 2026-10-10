@@ -57,6 +57,7 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 pub use stokesforge_plot::ColorUsage;
 use stokesforge_plot::{SavedColors, CURVE_PALETTES};
 
+use crate::app::hover_help::help_text;
 use crate::number_field::number_field;
 use crate::quantities;
 use crate::state::{AppState, SaveTarget};
@@ -831,8 +832,9 @@ fn picker_contents(
     let hex_response = ui
         .horizontal(|ui| {
             ui.label(tr!("color-hex"));
-            ui.add(egui::TextEdit::singleline(&mut hex_text).desired_width(90.0))
-                .on_hover_text(tr!("color-hex", "hint"))
+            let response = ui.add(egui::TextEdit::singleline(&mut hex_text).desired_width(90.0));
+            help_text(ui, tr!("color-hex", "hint"));
+            response
         })
         .inner;
     if hex_response.has_focus() {

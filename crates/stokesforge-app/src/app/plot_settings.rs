@@ -27,7 +27,7 @@ use crate::tr;
 use super::curve_settings::curve_settings_page;
 use super::dialogs::{modal_dialog, DialogOutcome};
 use super::graph_window::{published_axis_bounds, PanelBounds};
-use super::hover_help::hover_help;
+use super::hover_help::{help_beside, hover_help};
 use super::tab_strip::{tab_strip, TabStripSide};
 
 /// Largeur par défaut de la fenêtre des propriétés d'un graphe
@@ -356,10 +356,10 @@ fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerE
     );
     ui.weak(tr!("plot-general-dark-note"));
     ui.add_space(6.0);
-    commit |= ui
-        .checkbox(&mut spec.stale_warning, tr!("plot-stale-warning"))
-        .on_hover_text(tr!("plot-stale-warning", "hint"))
-        .changed();
+    commit |= help_beside(ui, tr!("plot-stale-warning", "hint"), |ui| {
+        ui.checkbox(&mut spec.stale_warning, tr!("plot-stale-warning"))
+            .changed()
+    });
     commit
 }
 
@@ -439,10 +439,10 @@ fn axes_settings_page(
         axis_editor(ui, axis, computed, env)
     };
     // Réglage du graphe entier (#223), rangé sous l'affichage des axes.
-    commit |= ui
-        .checkbox(decimal_comma, tr!("plot-axes-decimal-comma"))
-        .on_hover_text(tr!("plot-axes-decimal-comma", "hint"))
-        .changed();
+    commit |= help_beside(ui, tr!("plot-axes-decimal-comma", "hint"), |ui| {
+        ui.checkbox(decimal_comma, tr!("plot-axes-decimal-comma"))
+            .changed()
+    });
     commit
 }
 
@@ -513,8 +513,11 @@ fn theme_editor(
 /// donne la page de référence. Une icône au bout du champ plutôt qu'un mémo
 /// repliable dessous : le lien avec le champ se voit, et l'aide ne prend plus
 /// de hauteur dans la fenêtre (voir [`super::hover_help`]).
-fn formula_help(ui: &mut egui::Ui) {
+fn formula_help(ui: &mut egui::Ui, hint: &str) {
     hover_help(ui, |ui| {
+        if !hint.is_empty() {
+            ui.label(hint);
+        }
         ui.label(bold(tr!("plot-formula-memo-header")));
         egui::Grid::new("plot_formula_help")
             .num_columns(2)
@@ -548,17 +551,14 @@ fn formula_memo_rows() -> [(&'static str, String); 7] {
 }
 
 /// Un champ texte libellé qui accepte une formule (#197), validé à la perte de
-/// focus ; `hint` est son infobulle. Tout à droite, l'icône d'aide à la syntaxe
-/// Typst ([`formula_help`]). Rend `true` si le brouillon doit être validé —
+/// focus ; `hint` est son rappel, première ligne de l'icône d'aide à la syntaxe
+/// Typst ([`formula_help`]) posée tout à droite (T6 : l'icône « ? » seule). Rend `true` si le brouillon doit être validé —
 /// voir la doc de tête de [`plot_settings_window`].
 fn formula_field(ui: &mut egui::Ui, label: &str, hint: &str, value: &mut String) -> bool {
     ui.horizontal(|ui| {
-        ui.label(label).on_hover_text(hint);
-        let lost = ui
-            .text_edit_singleline(value)
-            .on_hover_text(hint)
-            .lost_focus();
-        formula_help(ui);
+        ui.label(label);
+        let lost = ui.text_edit_singleline(value).lost_focus();
+        formula_help(ui, hint);
         lost
     })
     .inner
@@ -617,11 +617,10 @@ fn axis_editor(
 
     section_title(ui, tr!("plot-axes-scale-section"));
     let mut log_scale = axis.scale == stokesforge_plot::AxisScale::Log;
-    if ui
-        .checkbox(&mut log_scale, tr!("plot-axes-log-scale"))
-        .on_hover_text(tr!("plot-axes-log-scale", "hint"))
-        .changed()
-    {
+    if help_beside(ui, tr!("plot-axes-log-scale", "hint"), |ui| {
+        ui.checkbox(&mut log_scale, tr!("plot-axes-log-scale"))
+            .changed()
+    }) {
         axis.scale = if log_scale {
             stokesforge_plot::AxisScale::Log
         } else {
@@ -629,14 +628,14 @@ fn axis_editor(
         };
         commit = true;
     }
-    commit |= ui
-        .checkbox(&mut axis.inverted, tr!("plot-axes-reverse"))
-        .on_hover_text(tr!("plot-axes-reverse", "hint"))
-        .changed();
-    let auto_changed = ui
-        .checkbox(&mut axis.auto_range, tr!("plot-axes-auto-range"))
-        .on_hover_text(tr!("plot-axes-auto-range", "hint"))
-        .changed();
+    commit |= help_beside(ui, tr!("plot-axes-reverse", "hint"), |ui| {
+        ui.checkbox(&mut axis.inverted, tr!("plot-axes-reverse"))
+            .changed()
+    });
+    let auto_changed = help_beside(ui, tr!("plot-axes-auto-range", "hint"), |ui| {
+        ui.checkbox(&mut axis.auto_range, tr!("plot-axes-auto-range"))
+            .changed()
+    });
     commit |= auto_changed;
     if auto_changed && !axis.auto_range {
         // Décocher reprend les bornes calculées comme valeurs (G4).
@@ -2139,7 +2138,7 @@ mod tests {
     /// Peint l'icône d'aide des formules et rend son rectangle.
     fn hover_help_pour_test(ui: &mut egui::Ui) -> egui::Rect {
         let avant = ui.cursor().min;
-        formula_help(ui);
+        formula_help(ui, "");
         egui::Rect::from_min_max(avant, ui.min_rect().max)
     }
 

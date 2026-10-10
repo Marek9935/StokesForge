@@ -22,6 +22,7 @@ use crate::theme::section_title;
 use crate::tr;
 
 use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
+use super::hover_help::{help_beside, help_text};
 
 /// Libellé d'une option « Fin des données » : celui de la variante, quel que
 /// soit le texte ou le nombre qu'elle porte.
@@ -142,11 +143,7 @@ fn subheader_role_row(
     ui.push_id(id_source, |ui| {
         ui.horizontal(|ui| {
             let mut enabled = range.is_some();
-            if ui
-                .checkbox(&mut enabled, label)
-                .on_hover_text(hint)
-                .changed()
-            {
+            if help_beside(ui, hint, |ui| ui.checkbox(&mut enabled, label).changed()) {
                 *range = if enabled {
                     Some(stokesforge_import::SubheaderLineRange::single(1))
                 } else {
@@ -620,13 +617,13 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
     import_number_controls(ui, recipe);
     ui.horizontal(|ui| {
         ui.label(tr!("import-format-comment-prefix"));
-        ui.add(egui::TextEdit::singleline(&mut recipe.comment_prefix).desired_width(60.0))
-            .on_hover_text(tr!("import-format-comment-prefix", "hint"));
+        ui.add(egui::TextEdit::singleline(&mut recipe.comment_prefix).desired_width(60.0));
+        help_text(ui, tr!("import-format-comment-prefix", "hint"));
     });
     import_block_encoding_controls(ui, recipe);
     ui.horizontal(|ui| {
-        ui.label(tr!("import-format-skip-chars"))
-            .on_hover_text(tr!("import-format-skip-chars", "hint"));
+        ui.label(tr!("import-format-skip-chars"));
+        help_text(ui, tr!("import-format-skip-chars", "hint"));
         number_field(
             ui,
             "import_recipe_skip_chars",
@@ -635,8 +632,8 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
         );
     });
     ui.horizontal(|ui| {
-        ui.label(tr!("import-format-skip-lines"))
-            .on_hover_text(tr!("import-format-skip-lines", "hint"));
+        ui.label(tr!("import-format-skip-lines"));
+        help_text(ui, tr!("import-format-skip-lines", "hint"));
         number_field(
             ui,
             "import_recipe_skip_data_rows",
@@ -649,8 +646,8 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
 /// Délimiteur et paramètres de sa variante (caractère ou largeurs fixes).
 fn import_delimiter_controls(ui: &mut egui::Ui, recipe: &mut stokesforge_import::ImportRecipe) {
     ui.horizontal(|ui| {
-        ui.label(tr!("import-format-delimiter"))
-            .on_hover_text(tr!("import-format-delimiter", "hint"));
+        ui.label(tr!("import-format-delimiter"));
+        help_text(ui, tr!("import-format-delimiter", "hint"));
         egui::ComboBox::from_id_salt("stokesforge_import_separator_combo")
             .selected_text(separator_label(&recipe.separator))
             .show_ui(ui, |ui| {
@@ -688,11 +685,10 @@ fn import_delimiter_controls(ui: &mut egui::Ui, recipe: &mut stokesforge_import:
                     .map(usize::to_string)
                     .collect::<Vec<_>>()
                     .join(",");
-                if ui
-                    .add(egui::TextEdit::singleline(&mut text).desired_width(120.0))
-                    .on_hover_text(tr!("import-format-widths-hint"))
-                    .changed()
-                {
+                if help_beside(ui, tr!("import-format-widths-hint"), |ui| {
+                    ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0))
+                        .changed()
+                }) {
                     *widths = text
                         .split(',')
                         .filter_map(|part| part.trim().parse::<usize>().ok())
@@ -737,11 +733,10 @@ fn import_number_controls(ui: &mut egui::Ui, recipe: &mut stokesforge_import::Im
     ui.horizontal(|ui| {
         ui.label(tr!("import-format-missing"));
         let mut text = recipe.missing_tokens.join(", ");
-        if ui
-            .add(egui::TextEdit::singleline(&mut text).desired_width(140.0))
-            .on_hover_text(tr!("import-format-missing", "hint"))
-            .changed()
-        {
+        if help_beside(ui, tr!("import-format-missing", "hint"), |ui| {
+            ui.add(egui::TextEdit::singleline(&mut text).desired_width(140.0))
+                .changed()
+        }) {
             recipe.missing_tokens = text
                 .split(',')
                 .map(|token| token.trim().to_string())
@@ -758,8 +753,8 @@ fn import_block_encoding_controls(
 ) {
     ui.horizontal(|ui| {
         use stokesforge_import::BlockSplit;
-        ui.label(tr!("import-format-blocks"))
-            .on_hover_text(tr!("import-format-blocks", "hint"));
+        ui.label(tr!("import-format-blocks"));
+        help_text(ui, tr!("import-format-blocks", "hint"));
         let current = match &recipe.block_split {
             BlockSplit::None => tr!("import-blocks-single"),
             BlockSplit::BeforeLine(_) => tr!("import-blocks-line-start"),
@@ -858,8 +853,8 @@ fn import_step_header(
     });
     if let HeaderSkip::UntilMarker(marker) = &mut recipe.header {
         ui.horizontal(|ui| {
-            ui.label(tr!("import-header-marker"))
-                .on_hover_text(tr!("import-header-marker", "hint"));
+            ui.label(tr!("import-header-marker"));
+            help_text(ui, tr!("import-header-marker", "hint"));
             ui.text_edit_singleline(marker);
         });
     }
@@ -872,8 +867,8 @@ fn import_step_header(
                 &mut recipe.header_layout.main_header_lines,
                 &quantities::COUNT,
             );
-            ui.label(tr!("import-header-subheader-lines"))
-                .on_hover_text(tr!("import-header-subheader-lines", "hint"));
+            ui.label(tr!("import-header-subheader-lines"));
+            help_text(ui, tr!("import-header-subheader-lines", "hint"));
             number_field(
                 ui,
                 "import_recipe_header_layout_subheader_lines",
@@ -890,11 +885,12 @@ fn import_step_header(
         requests.auto_detect = true;
     }
     if recipe.header_layout.subheader_lines > 0 {
-        ui.checkbox(
-            &mut recipe.subheader_roles.same_line_name_unit,
-            tr!("import-header-combined"),
-        )
-        .on_hover_text(tr!("import-header-combined", "hint"));
+        help_beside(ui, tr!("import-header-combined", "hint"), |ui| {
+            ui.checkbox(
+                &mut recipe.subheader_roles.same_line_name_unit,
+                tr!("import-header-combined"),
+            )
+        });
         subheader_role_row(
             ui,
             "stokesforge_import_role_long_name",
@@ -926,16 +922,17 @@ fn import_step_header(
             &mut recipe.subheader_roles.x_prime,
         );
     }
-    ui.checkbox(
-        &mut recipe.has_column_header_row,
-        tr!("import-header-names-first-line"),
-    )
-    .on_hover_text(tr!("import-header-names-first-line", "hint"));
+    help_beside(ui, tr!("import-header-names-first-line", "hint"), |ui| {
+        ui.checkbox(
+            &mut recipe.has_column_header_row,
+            tr!("import-header-names-first-line"),
+        )
+    });
     ui.separator();
     data_end_row(ui, &mut recipe.data_end);
     ui.horizontal(|ui| {
-        ui.label(tr!("import-header-skip-footer"))
-            .on_hover_text(tr!("import-header-skip-footer", "hint"));
+        ui.label(tr!("import-header-skip-footer"));
+        help_text(ui, tr!("import-header-skip-footer", "hint"));
         number_field(
             ui,
             "import_recipe_footer_skip_lines",
@@ -1117,16 +1114,18 @@ fn import_step_metadata(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     };
     let recipe = &mut import.recipe;
-    ui.checkbox(
-        &mut recipe.keep_header_metadata,
-        tr!("import-metadata-keep-header"),
-    )
-    .on_hover_text(tr!("import-metadata-keep-header", "hint"));
-    ui.checkbox(
-        &mut recipe.keep_footer_metadata,
-        tr!("import-metadata-keep-footer"),
-    )
-    .on_hover_text(tr!("import-metadata-keep-footer", "hint"));
+    help_beside(ui, tr!("import-metadata-keep-header", "hint"), |ui| {
+        ui.checkbox(
+            &mut recipe.keep_header_metadata,
+            tr!("import-metadata-keep-header"),
+        )
+    });
+    help_beside(ui, tr!("import-metadata-keep-footer", "hint"), |ui| {
+        ui.checkbox(
+            &mut recipe.keep_footer_metadata,
+            tr!("import-metadata-keep-footer"),
+        )
+    });
     ui.weak(tr!("import-metadata-uncheck"));
     ui.separator();
     let is_excluded = |recipe: &stokesforge_import::ImportRecipe, key: &str| {
@@ -1236,11 +1235,10 @@ fn import_step_destination(
     ui.horizontal(|ui| {
         ui.label(tr!("import-auto-extensions"));
         let mut text = auto.extensions.join(", ");
-        if ui
-            .add(egui::TextEdit::singleline(&mut text).desired_width(120.0))
-            .on_hover_text(tr!("import-auto-extensions", "hint"))
-            .changed()
-        {
+        if help_beside(ui, tr!("import-auto-extensions", "hint"), |ui| {
+            ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0))
+                .changed()
+        }) {
             auto.extensions = text
                 .split(',')
                 .map(|e| e.trim().trim_start_matches('.').to_string())
@@ -1254,8 +1252,8 @@ fn import_step_destination(
     });
     ui.horizontal(|ui| {
         ui.label(tr!("import-auto-content"));
-        ui.add(egui::TextEdit::singleline(&mut auto.content_contains).desired_width(160.0))
-            .on_hover_text(tr!("import-auto-content", "hint"));
+        ui.add(egui::TextEdit::singleline(&mut auto.content_contains).desired_width(160.0));
+        help_text(ui, tr!("import-auto-content", "hint"));
     });
 }
 

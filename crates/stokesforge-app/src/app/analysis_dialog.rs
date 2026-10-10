@@ -201,20 +201,17 @@ pub(super) fn analysis_window(
                                 &mut form.tool,
                                 PreviewTool::Points,
                                 tr!("analysis-tool-points"),
-                            )
-                            .on_hover_text(tr!("analysis-tool-points", "hint"));
+                            );
                             ui.radio_value(
                                 &mut form.tool,
                                 PreviewTool::Zone,
                                 tr!("analysis-tool-zone"),
-                            )
-                            .on_hover_text(tr!("analysis-tool-zone", "hint"));
+                            );
                             ui.radio_value(
                                 &mut form.tool,
                                 PreviewTool::Zoom,
                                 tr!("analysis-tool-zoom"),
-                            )
-                            .on_hover_text(tr!("analysis-tool-zoom", "hint"));
+                            );
                             if icon_button(
                                 ui,
                                 Icon::ResetZoom,
@@ -225,6 +222,12 @@ pub(super) fn analysis_window(
                             {
                                 reset_view(ui, id);
                             }
+                        });
+                        // Le geste de l'outil actif, en clair sous la rangée (M1).
+                        ui.weak(match form.tool {
+                            PreviewTool::Points => tr!("analysis-tool-points", "hint"),
+                            PreviewTool::Zone => tr!("analysis-tool-zone", "hint"),
+                            PreviewTool::Zoom => tr!("analysis-tool-zoom", "hint"),
                         });
                         let plot_height = (ui.available_height() - VALUES_HEIGHT - 8.0).max(160.0);
                         let result = ui

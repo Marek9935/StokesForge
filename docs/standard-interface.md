@@ -34,7 +34,8 @@ les règles R1–R16 de `textes-interface.md`.
 | garde : aucun `DragValue` ni `Slider` (`aucun_champ_numerique_hors_de_la_brique`) | | **en place** (#220) |
 | formateur des nombres (`stokesforge_core::number_format`) | seul formatage affiché | **en place** (#222) |
 | brique d'édition sur place (`app/inplace_edit.rs`) | un seul contrat T4 ; aperçus à pause de 0,3 s | **en place** (#224) |
-| garde : aucune bulle nue sur un champ de formulaire | | à venir (#225) |
+| icône « ? » (`app/hover_help.rs` : `hover_help`, `help_text`, `help_beside`) | rappel d'un champ, posé à droite (M1, T6) | **en place** (#225) |
+| garde : aucune bulle nue sur un champ de formulaire (`aucune_bulle_nue_sur_un_champ_de_formulaire`) | case, radio, champ texte/nombre, libellé de champ ; menus et `…_contents` exemptés | **en place** (#225) |
 | garde : aucun `add_enabled` sans raison | | à venir (#226) |
 | brique « formulaire » (grille à deux colonnes), largeurs et espacements de `theme.rs` | | à venir (#227) |
 | garde : aucun `add_space` littéral hors de `theme.rs` | | à venir (#227) |
@@ -217,7 +218,7 @@ Comment c'est tenu :
   (`ImportState::debounce_preview`, pause seulement pendant la frappe dans un
   champ texte ; liste, case et bouton sont immédiats).
 
-## Messages et aide — à venir (#225, #230)
+## Messages et aide — M1–M3, T5–T6 en place (#225) ; barre d'état à venir (#230)
 
 - **Trois niveaux d'aide** (M1) : en clair (2 lignes au plus) pour un effet de
   bord, une portée, un geste sur un aperçu ; icône « ? » (`hover_help`) pour

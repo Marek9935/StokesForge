@@ -17,6 +17,7 @@ use stokesforge_analysis::peaks::{PeakBackground, PeakShape};
 use stokesforge_core::{NodeId, Tree};
 
 use super::analysis_dialog::{exact_result_label, format_value};
+use super::hover_help::{help_beside, help_text};
 use crate::analysis::{
     aux_candidates, aux_for, kind_title, series_label, with_unit, AnalysisForm, BaselineShape,
     DirectAlgorithm, Preset,
@@ -484,8 +485,9 @@ fn fit_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tre
         optional_range(ui, id.with("fit-range"), &mut f.range);
     });
     if has_sigma {
-        ui.checkbox(&mut f.weighted, tr!("analysis-fit-weighted"))
-            .on_hover_text(tr!("analysis-fit-weighted", "hint"));
+        help_beside(ui, tr!("analysis-fit-weighted", "hint"), |ui| {
+            ui.checkbox(&mut f.weighted, tr!("analysis-fit-weighted"))
+        });
     }
     ui.checkbox(&mut f.residuals, tr!("analysis-fit-residuals"));
 }
@@ -522,8 +524,9 @@ fn params_table(
                 optional_number(ui, id.with(("min", i)), &mut p.min);
                 optional_number(ui, id.with(("max", i)), &mut p.max);
                 if shareable {
-                    ui.checkbox(&mut p.shared, "")
-                        .on_hover_text(tr!("analysis-param-shared", "hint"));
+                    help_beside(ui, tr!("analysis-param-shared", "hint"), |ui| {
+                        ui.checkbox(&mut p.shared, "")
+                    });
                 }
                 ui.end_row();
             }
@@ -575,11 +578,10 @@ fn peaks_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
     ui.checkbox(&mut p.link_widths, tr!("analysis-peaks-link-widths"));
     ui.horizontal(|ui| {
         let mut bounded = p.center_window.is_some();
-        if ui
-            .checkbox(&mut bounded, tr!("analysis-peaks-center-window"))
-            .on_hover_text(tr!("analysis-peaks-center-window", "hint"))
-            .changed()
-        {
+        if help_beside(ui, tr!("analysis-peaks-center-window", "hint"), |ui| {
+            ui.checkbox(&mut bounded, tr!("analysis-peaks-center-window"))
+                .changed()
+        }) {
             p.center_window = bounded.then_some(1.0);
         }
         if let Some(window) = &mut p.center_window {
@@ -621,9 +623,8 @@ fn peaks_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
                 salt,
                 &mut p.prominence_percent,
                 &quantities::PROMINENCE_PERCENT,
-            )
-            .response
-            .on_hover_text(tr!("analysis-peaks-prominence", "hint"));
+            );
+            help_text(ui, tr!("analysis-peaks-prominence", "hint"));
         });
         ui.horizontal(|ui| {
             ui.label(tr!("analysis-peaks-max"));
@@ -735,15 +736,16 @@ fn output_block(
     if form.editing.is_none() && !graphs.is_empty() {
         graph_target(ui, id, form, graphs);
     }
-    ui.radio_value(&mut form.keep_results, false, tr!("analysis-output-show"))
-        .on_hover_text(tr!("analysis-output-show", "hint"));
-    ui.radio_value(&mut form.keep_results, true, tr!("analysis-output-keep"))
-        .on_hover_text(tr!("analysis-output-keep", "hint"));
-    if ui
-        .checkbox(&mut form.auto_recalc, tr!("analysis-output-auto"))
-        .on_hover_text(tr!("analysis-output-auto", "hint"))
-        .changed()
-    {
+    help_beside(ui, tr!("analysis-output-show", "hint"), |ui| {
+        ui.radio_value(&mut form.keep_results, false, tr!("analysis-output-show"))
+    });
+    help_beside(ui, tr!("analysis-output-keep", "hint"), |ui| {
+        ui.radio_value(&mut form.keep_results, true, tr!("analysis-output-keep"))
+    });
+    if help_beside(ui, tr!("analysis-output-auto", "hint"), |ui| {
+        ui.checkbox(&mut form.auto_recalc, tr!("analysis-output-auto"))
+            .changed()
+    }) {
         form.auto_recalc_chosen = true;
     }
     if !form.auto_recalc && form.series.len() > stokesforge_analysis::ops::HEAVY_BATCH {
@@ -766,8 +768,9 @@ fn graph_target(
     {
         form.graph = graphs.first().map(|(id, _)| *id);
     }
-    ui.checkbox(&mut form.add_to_graph, tr!("analysis-output-to-graph"))
-        .on_hover_text(tr!("analysis-output-to-graph", "hint"));
+    help_beside(ui, tr!("analysis-output-to-graph", "hint"), |ui| {
+        ui.checkbox(&mut form.add_to_graph, tr!("analysis-output-to-graph"))
+    });
     if form.add_to_graph && graphs.len() > 1 {
         let shown = graphs
             .iter()

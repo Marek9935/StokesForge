@@ -19,7 +19,7 @@ use crate::theme;
 
 /// Pose l'icône d'aide au bout de la rangée en cours ; `contents` peint la
 /// bulle qui s'affiche au survol. Rend la réponse de l'icône.
-pub(super) fn hover_help(
+pub(crate) fn hover_help(
     ui: &mut egui::Ui,
     contents: impl FnOnce(&mut egui::Ui),
 ) -> egui::Response {
@@ -29,4 +29,29 @@ pub(super) fn hover_help(
             .sense(egui::Sense::hover()),
     )
     .on_hover_ui(contents)
+}
+
+/// Le rappel d'un champ en une phrase (#225, M1) : l'icône « ? » dont la bulle
+/// n'est que `text`.
+pub(crate) fn help_text(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
+    let text = text.into();
+    hover_help(ui, |ui| {
+        ui.label(text);
+    })
+}
+
+/// Peint un champ (`add`) et pose l'icône « ? » de son rappel juste après, sur
+/// la même rangée (#225, M2 : jamais de bulle nue sur un champ). Rend ce que
+/// rend `add`, pour que `.changed()` reste lisible à l'appel.
+pub(crate) fn help_beside<R>(
+    ui: &mut egui::Ui,
+    text: impl Into<String>,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    ui.horizontal(|ui| {
+        let out = add(ui);
+        help_text(ui, text);
+        out
+    })
+    .inner
 }

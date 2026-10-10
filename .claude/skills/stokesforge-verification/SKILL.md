@@ -91,9 +91,10 @@ Ils ne vérifient pas un comportement mais une propriété de frontière. S'ils
 | `stokesforge-app/src/i18n.rs` (tests) | complétude `fr ⊆ en` avec les mêmes arguments, pseudo-langue `en-XA`, pluriels et typographie françaises ; **bloquant** : une clé ajoutée à `en` s'ajoute à `fr` dans le même commit |
 | `stokesforge-commands/tests/memory_pinning.rs` | l'historique n'épingle pas de gros buffers |
 
-Garde **en place** du standard d'interface (#217) : `aucun_champ_numerique_hors_de_la_brique`
+Gardes **en place** du standard d'interface (#217) : `aucun_champ_numerique_hors_de_la_brique`
 (`stokesforge-app/tests/gardes.rs`, #220 : ni `DragValue` ni `Slider`, sans
-dérogation).
+dérogation) et `aucune_bulle_nue_sur_un_champ_de_formulaire` (#225 : le rappel
+d'un champ est l'icône « ? », `help_beside`/`help_text`, sans dérogation).
 
 Brique **en place** de l'édition sur place (#224) : `app/inplace_edit.rs` (tests de
 `resolve` et du geste dans son module ; chaque surface teste son usage : onglets,

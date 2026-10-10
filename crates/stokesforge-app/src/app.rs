@@ -148,7 +148,7 @@ mod graph_targets;
 mod graph_text_edit;
 mod graph_window;
 mod grid;
-mod hover_help;
+pub(crate) mod hover_help;
 mod import_wizard;
 mod inplace_edit;
 mod list_row;

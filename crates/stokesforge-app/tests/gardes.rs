@@ -977,3 +977,128 @@ fn la_garde_des_champs_numeriques_voit_un_drag_value() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Aucune bulle nue sur un champ de formulaire (#225, M2)
+// ---------------------------------------------------------------------------
+
+/// Les constructions qui désignent un champ de formulaire dans la chaîne d'une
+/// bulle : case, bouton radio, champ texte, champ nombre, et le
+/// libellé traduit d'un champ (`label(tr!(…))`).
+const CHAMPS: [&str; 6] = [
+    ".checkbox(",
+    ".radio_value(",
+    "text_edit_singleline",
+    "TextEdit::",
+    "number_field",
+    ".label(tr!(",
+];
+
+/// Le début de l'instruction qui contient `position` : après le dernier `;`,
+/// `{` ou `}` de premier niveau avant elle.
+fn debut_d_instruction(masque: &[char], position: usize) -> usize {
+    let mut profondeur = 0usize;
+    for k in (0..position).rev() {
+        match masque[k] {
+            ')' | ']' => profondeur += 1,
+            '(' | '[' => {
+                if profondeur == 0 {
+                    return k + 1;
+                }
+                profondeur -= 1;
+            }
+            ';' | '{' | '}' if profondeur == 0 => return k + 1,
+            _ => {}
+        }
+    }
+    0
+}
+
+/// Les bulles (`on_hover_text`, `on_hover_ui`) posées sur un champ de
+/// formulaire hors d'un menu, `chemin:ligne`. Une bulle de bouton, d'icône,
+/// d'onglet ou de menu reste permise (M1) ; le rappel d'un champ passe par
+/// l'icône « ? » (`hover_help`).
+fn bulles_sur_un_champ(sources: &[Fichier]) -> Vec<String> {
+    let mut trouvees = Vec::new();
+    for fichier in sources {
+        let source = fichier.production();
+        let mut zones = zones_de_menu(&source.masque);
+        // Le contenu d'un menu peint par une fonction partagée (`…_contents`,
+        // `docs/menus.md`) est un menu.
+        for (position, nom) in fonctions(&source.masque) {
+            if nom_court(&nom).ends_with("_contents") {
+                zones.extend(corps(&source.masque, position));
+            }
+        }
+        for i in 0..source.masque.len() {
+            if !(commence_par(&source.masque, i, ".on_hover_text(")
+                || commence_par(&source.masque, i, ".on_hover_ui("))
+                || zones.iter().any(|(debut, fin)| *debut < i && i < *fin)
+            {
+                continue;
+            }
+            let debut = debut_d_instruction(&source.masque, i);
+            let chaine: String = source.masque[debut..i].iter().collect();
+            if CHAMPS.iter().any(|champ| chaine.contains(champ)) {
+                trouvees.push(format!(
+                    "src/{}:{}",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    trouvees
+}
+
+/// Règle #225 (`docs/standard-interface.md`, § Messages et aide, M2) : un
+/// champ de formulaire n'a jamais de bulle nue ; son rappel est l'icône « ? »
+/// (`app/hover_help.rs`), son effet ou sa portée un texte en clair.
+#[test]
+fn aucune_bulle_nue_sur_un_champ_de_formulaire() {
+    let sources = sources::sources();
+    let fautifs = bulles_sur_un_champ(&sources);
+    assert!(
+        fautifs.is_empty(),
+        "bulle nue sur un champ de formulaire : poser l'icône « ? » (`hover_help`, \
+         `help_beside`) ou un texte en clair : {fautifs:?}"
+    );
+    fonction_unique(&sources, "hover_help");
+}
+
+/// Le témoin : une bulle sur une case, un radio, un champ texte, un champ
+/// nombre ou un libellé de champ est vue ; une bulle de bouton, d'icône ou de
+/// menu, un commentaire et le code de test passent.
+#[test]
+fn la_garde_des_bulles_voit_une_bulle_sur_un_champ() {
+    for code in [
+        "fn f(ui: &mut Ui) { ui.checkbox(&mut a, t).on_hover_text(h); }",
+        "fn f(ui: &mut Ui) { ui.radio_value(&mut a, 1, t)\n.on_hover_text(h); }",
+        "fn f(ui: &mut Ui) { ui.add(TextEdit::singleline(&mut s)).on_hover_text(h); }",
+        "fn f(ui: &mut Ui) { ui.text_edit_singleline(&mut s).on_hover_ui(|ui| {}); }",
+        "fn f(ui: &mut Ui) { number_field(ui, &mut x).response.on_hover_text(h); }",
+        "fn f(ui: &mut Ui) { ui.label(tr!(\"cle\")).on_hover_text(h); }",
+        "fn f(ui: &mut Ui) { if ui.checkbox(&mut a, t).on_hover_text(h).clicked() {} }",
+    ] {
+        assert_eq!(
+            bulles_sur_un_champ(&[fichier("app/b.rs", code)]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    for code in [
+        "fn f(ui: &mut Ui) { ui.button(t).on_hover_text(h); }",
+        "fn f(ui: &mut Ui) { ui.checkbox(&mut a, t); ui.button(t).on_hover_text(h); }",
+        "fn f(ui: &mut Ui) { ui.add(icon_image(i)).on_hover_text(h); }",
+        "fn f(ui: &mut Ui) { ui.label(shown).on_hover_text(exact); }",
+        "fn vue_menu(ui: &mut Ui) { ui.checkbox(&mut a, t).on_hover_text(h); }",
+        "fn reglages_contents(ui: &mut Ui) { ui.checkbox(&mut a, t).on_hover_text(h); }",
+        "fn f(ui: &mut Ui) { // ui.checkbox(a, t).on_hover_text(h)\n }",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g(ui: &mut Ui) { ui.checkbox(a, t).on_hover_text(h); } }",
+    ] {
+        assert!(
+            bulles_sur_un_champ(&[fichier("app/b.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+}
