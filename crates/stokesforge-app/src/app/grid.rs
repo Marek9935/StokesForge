@@ -2393,7 +2393,7 @@ fn display_cell_widget(
     column: NodeId,
     row: usize,
 ) {
-    let text = state.cell_text(column, row);
+    let text = state.cell_display(column, row);
     let stale = state.column_staleness(column).is_some();
     let selected = state.is_selected(sheet, column, row);
     let rect = ui.available_rect_before_wrap();

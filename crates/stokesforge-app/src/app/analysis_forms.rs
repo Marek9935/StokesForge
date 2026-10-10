@@ -16,8 +16,9 @@ use stokesforge_analysis::ops::OperationKind;
 use stokesforge_analysis::peaks::{PeakBackground, PeakShape};
 use stokesforge_core::{NodeId, Tree};
 
+use super::analysis_dialog::{exact_result_label, format_value};
 use crate::analysis::{
-    aux_candidates, aux_for, kind_title, series_label, AnalysisForm, BaselineShape,
+    aux_candidates, aux_for, kind_title, series_label, with_unit, AnalysisForm, BaselineShape,
     DirectAlgorithm, Preset,
 };
 use crate::icons::{icon_button, Icon, IconRole};
@@ -789,9 +790,20 @@ fn graph_target(
 }
 
 /// Une valeur calculée sous l'aperçu : son libellé estompé, puis le nombre.
-pub(super) fn value_row(ui: &mut egui::Ui, label: &str, text: &str) {
+pub(super) fn value_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: f64,
+    error: Option<f64>,
+    unit: &str,
+) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(label).weak());
-        ui.label(text);
+        exact_result_label(
+            ui,
+            with_unit(format_value(value, error), unit),
+            value,
+            error,
+        );
     });
 }

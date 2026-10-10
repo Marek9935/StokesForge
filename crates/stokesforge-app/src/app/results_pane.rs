@@ -11,7 +11,7 @@
 use eframe::egui;
 use stokesforge_core::NodeId;
 
-use super::analysis_dialog::format_value;
+use super::analysis_dialog::{exact_result_label, format_value};
 use super::analysis_handles::select_calculation;
 use super::list_row::list_row;
 use crate::analysis::{kind_title, series_label, value_label, value_unit, with_unit};
@@ -208,18 +208,25 @@ fn detail(
                         ui.label(series_label(state.tree(), series));
                         let values = calc.results.get(rank);
                         for (key, index) in &columns {
-                            let text = values
-                                .and_then(|r| {
-                                    r.values.iter().find(|v| &v.key == key && v.index == *index)
-                                })
-                                .map(|v| {
-                                    with_unit(
-                                        format_value(v.value, v.error),
-                                        &value_unit(state.tree(), series, key),
-                                    )
-                                })
-                                .unwrap_or_default();
-                            ui.label(text);
+                            let found = values.and_then(|r| {
+                                r.values.iter().find(|v| &v.key == key && v.index == *index)
+                            });
+                            match found {
+                                Some(v) => {
+                                    exact_result_label(
+                                        ui,
+                                        with_unit(
+                                            format_value(v.value, v.error),
+                                            &value_unit(state.tree(), series, key),
+                                        ),
+                                        v.value,
+                                        v.error,
+                                    );
+                                }
+                                None => {
+                                    ui.label("");
+                                }
+                            }
                         }
                         ui.end_row();
                     }

@@ -40,6 +40,7 @@
 //! grandeur, zéros de fin retirés. La virgule décimale arrive avec #223.
 
 use eframe::egui;
+use stokesforge_core::number_format::{format_exact, format_grid};
 
 use crate::field_state::{self, Bound, Verdict};
 use crate::icons::{icon_button, Icon, IconRole};
@@ -208,7 +209,10 @@ fn number_field_core<T: Number>(
     // — Le champ. —
     let shown = match auto_hint {
         Some(_) => String::new(),
-        None => format_value(current, quantity.decimals),
+        // Hors saisie : 6 chiffres significatifs ; dans le champ : la valeur
+        // entière, pour qu'un Tab sans frappe n'en perde aucun (#222).
+        None if focused => format_exact(current),
+        None => format_grid(current),
     };
     let edited = field_state::edit_text_hinted(
         ui,

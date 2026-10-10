@@ -51,6 +51,7 @@ use std::thread;
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::node::NodeKind;
+use stokesforge_core::number_format::{format_exact, format_grid};
 use stokesforge_core::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeCopy, NodeId, Tree,
     ValueBlock,
@@ -922,63 +923,6 @@ impl From<ScriptOutcome> for ScriptOutput {
 /// usuel.
 pub const MISSING_TEXT_DISPLAY: &str = "\u{00A0}";
 
-/// Seuils de bascule en notation scientifique pour [`format_f64_for_display`].
-///
-/// Choisis pour que `1.602176634e-19` (charge de l'électron) et
-/// `6.022140076e23` (nombre d'Avogadro) — les deux mesures de physicien
-/// citées par la reproduction de C4 — tombent chacune du bon côté, avec une
-/// marge confortable de part et d'autre plutôt qu'un seuil collé aux deux
-/// exemples : `SCI_LOWER` largement en dessous de la plus petite magnitude
-/// « ordinaire » qu'une mesure de laboratoire prend en unités SI de base, et
-/// `SCI_UPPER` largement au-dessus.
-const SCI_LOWER: f64 = 1e-4;
-const SCI_UPPER: f64 = 1e16;
-
-/// Formate un `f64` **fini et non nul** pour l'affichage en cellule de
-/// grille — bascule en notation scientifique aux magnitudes extrêmes plutôt
-/// que de s'en remettre au seul `Display` de `f64`, qui n'émet jamais
-/// d'exposant.
-///
-/// # C4 (moitié `stokesforge-app`, `guide-de-correction-robustesse.md` §F8)
-///
-/// Une mesure de physicien comme la charge de l'électron
-/// (`1.602176634e-19`) s'écrivait, avant ce correctif, `0.0000000000000000001602176634`
-/// — trente caractères dans une colonne de grille large d'une centaine de
-/// pixels (une quinzaine de caractères ; vingt-quatre est déjà large). En
-/// dessous de [`SCI_LOWER`] ou à partir de [`SCI_UPPER`] (exclu en dessous,
-/// inclus au-dessus — une magnitude *nulle* ne bascule jamais : `0.0` reste
-/// `"0"`, pas `"0e0"`), la valeur s'écrit en notation scientifique
-/// (`{:e}` — Rust y choisit, comme pour `Display`, la représentation la plus
-/// courte qui redonne le même `f64` en le reparsant : l'aller-retour
-/// `f64 → texte → f64` reste exact bit à bit). En dehors de cette plage, le
-/// `Display` décimal habituel suffit et reste le plus lisible.
-///
-/// # §F8 — « une seule table, deux directions »
-///
-/// Le guide nomme deux appelants qui formatent aujourd'hui un `f64` sans se
-/// concerter : `AppState::cell_text` (ici, l'affichage) et
-/// `Column::set_column_type` (`Float → Text`, dans `stokesforge-core`, la
-/// conversion) — « sans quoi l'affichage et la conversion diront deux choses
-/// différentes de la même valeur ». Le correctif de `stokesforge-core` est mené en
-/// parallèle, dans un autre arbre de travail, par un autre agent ; au moment
-/// d'écrire cette fonction, `stokesforge_core::column` n'expose encore aucune
-/// fonction de formatage publique à réutiliser ici (vérifié par
-/// `grep -n "pub fn format" crates/stokesforge-core/src/column.rs`). Cette
-/// fonction reproduit donc, côté `stokesforge-app` seulement, la même idée
-/// (seuils, bascule en notation scientifique) sans prétendre être
-/// bit-à-bit identique à ce que produira l'autre moitié du correctif : les
-/// deux devront être unifiées — dans `stokesforge-core`, pour que `cell_text`
-/// délègue à la fonction publique du cœur plutôt que de la dupliquer — une
-/// fois les deux travaux fusionnés.
-fn format_f64_for_display(value: f64) -> String {
-    let magnitude = value.abs();
-    if magnitude != 0.0 && (magnitude < SCI_LOWER || magnitude >= SCI_UPPER) {
-        format!("{value:e}")
-    } else {
-        format!("{value}")
-    }
-}
-
 /// Construit le bloc de valeurs d'une colonne collée depuis un TSV : la
 /// colonne d'indice `col_index` de chaque ligne de `rows`, convertie selon
 /// `kind` avec la même tolérance que [`AppState::commit_cell`] — un texte qui
@@ -1050,6 +994,17 @@ fn value_block_from_tsv_column(
 /// d'affichage (`MISSING_TEXT_DISPLAY`, bascule scientifique A9/C4 — voir
 /// [`AppState::cell_text`] pour le détail de ces choix).
 pub(crate) fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
+    cell_in(tree, column, row, format_exact)
+}
+
+/// Ce que la grille **peint** (#222) : comme [`cell_text_in`], mais un nombre
+/// n'a que 6 chiffres significatifs. L'édition, le copier et la comparaison de
+/// saisie lisent toujours [`cell_text_in`], la valeur entière.
+pub(crate) fn cell_display_in(tree: &Tree, column: NodeId, row: usize) -> String {
+    cell_in(tree, column, row, format_grid)
+}
+
+fn cell_in(tree: &Tree, column: NodeId, row: usize, number: fn(f64) -> String) -> String {
     let Some(column) = tree.node(column).and_then(Node::as_column) else {
         return String::new();
     };
@@ -1068,13 +1023,13 @@ pub(crate) fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
         return match column.cell(row) {
             MixedCell::Empty => MISSING_TEXT_DISPLAY.to_string(),
             MixedCell::Number(value) if value.is_nan() => MISSING_TEXT_DISPLAY.to_string(),
-            MixedCell::Number(value) => format_f64_for_display(value),
+            MixedCell::Number(value) => number(value),
             MixedCell::Text(text) => text,
         };
     }
     match column.get(row) {
         Cell::Float(value) if value.is_nan() => String::new(),
-        Cell::Float(value) => format_f64_for_display(value),
+        Cell::Float(value) => number(value),
         Cell::Text(None) => MISSING_TEXT_DISPLAY.to_string(),
         Cell::Text(Some(text)) => text,
     }
@@ -1507,7 +1462,7 @@ impl HeaderField {
     /// Texte du champ dans `meta`, tel qu'on l'affiche et le copie.
     pub(crate) fn text_of(self, meta: &ColumnMeta) -> String {
         match self {
-            HeaderField::XPrime => meta.x_prime.map(format_f64_for_display).unwrap_or_default(),
+            HeaderField::XPrime => meta.x_prime.map(format_exact).unwrap_or_default(),
             HeaderField::LongName => meta.long_name.clone(),
             HeaderField::Unit => meta.unit.clone(),
             HeaderField::Comment => meta.comment.clone(),
@@ -2891,20 +2846,22 @@ impl AppState {
     /// d'authentiques réponses possibles à une question). Une chaîne vide
     /// **présente** garde `""` : c'est littéralement ce qu'elle est.
     ///
-    /// # C4 (moitié `stokesforge-app`, §F8) — le formatage numérique
+    /// # Formatage numérique
     ///
-    /// Le formatage numérique n'est plus le seul `Display` de `f64` (qui
-    /// n'émet jamais d'exposant : une mesure comme la charge de l'électron,
-    /// 1,602176634·10⁻¹⁹, s'écrivait sur 30 caractères dans une cellule de
-    /// grille large d'une quinzaine). [`format_f64_for_display`] bascule en
-    /// notation scientifique pour les magnitudes extrêmes ; voir sa
-    /// documentation pour les seuils exacts et pour ce que cette moitié doit
-    /// à l'autre — la conversion `Column::set_column_type` (`Float → Text`)
-    /// de `stokesforge-core`, corrigée séparément (§F8 : « une seule table, deux
-    /// directions »). Le vrai formatage restera un jour celui de
-    /// `ColumnMeta::display_format`, que cette phase ne lit pas.
+    /// Un nombre s'écrit en **valeur exacte** (`format_exact`, de
+    /// `stokesforge-core`, #222) : c'est le texte d'édition, de copie et de
+    /// comparaison de saisie, identique à la conversion
+    /// `Column::set_column_type` (§F8). Ce que la grille *peint* est
+    /// [`AppState::cell_display`], arrondi à 6 chiffres.
     pub fn cell_text(&self, column: NodeId, row: usize) -> String {
         cell_text_in(&self.snapshot.tree, column, row)
+    }
+
+    /// Le texte que la grille peint pour une cellule (6 chiffres significatifs,
+    /// #222). Pour tout le reste — édition, copie, comparaison —
+    /// [`AppState::cell_text`].
+    pub fn cell_display(&self, column: NodeId, row: usize) -> String {
+        cell_display_in(&self.snapshot.tree, column, row)
     }
 
     /// Vrai si `(column, row)` porte une valeur numérique — voir
@@ -8193,9 +8150,10 @@ mod tests {
     //! ont besoin d'une session réelle.
 
     use super::{
-        external_clipboard_from_text, format_f64_for_display, grid_clipboard_to_text,
-        GridClipboard, HeaderField, RelativeCopy, MISSING_TEXT_DISPLAY,
+        external_clipboard_from_text, grid_clipboard_to_text, GridClipboard, HeaderField,
+        RelativeCopy, MISSING_TEXT_DISPLAY,
     };
+    use stokesforge_core::number_format::format_exact as format_f64_for_display;
 
     /// A9 (option 2) — la convention d'affichage à elle seule : une valeur
     /// absente ne doit jamais s'afficher comme la chaîne vide qui représente

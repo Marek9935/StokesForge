@@ -32,6 +32,7 @@
 //! série entièrement négative sur un axe log ne trace rien plutôt que de
 //! faire échouer la figure.
 
+use stokesforge_core::number_format::format_tick as format_linear_tick;
 use stokesforge_plot::AxisScale;
 
 /// Image d'une valeur dans l'espace où la zone de tracé travaille.
@@ -122,21 +123,9 @@ impl TickFormat {
     /// L'étiquette d'une graduation, dans l'espace transformé.
     pub fn format(&self, t: f64) -> String {
         match self.scale {
-            AxisScale::Linear => format_fixed(t, self.decimals),
+            AxisScale::Linear => format_linear_tick(t, self.decimals),
             AxisScale::Log => format_decade(t),
         }
-    }
-}
-
-fn format_fixed(value: f64, decimals: usize) -> String {
-    if !value.is_finite() {
-        return String::new();
-    }
-    let text = format!("{value:.decimals$}");
-    // « -0 » et « -0.0 » : un zéro n'a pas de signe sur un axe.
-    match text.strip_prefix('-') {
-        Some(rest) if rest.chars().all(|c| c == '0' || c == '.') => rest.to_owned(),
-        _ => text,
     }
 }
 
@@ -388,9 +377,9 @@ mod tests {
 
     #[test]
     fn un_zero_n_a_pas_de_signe() {
-        assert_eq!(format_fixed(-0.0, 0), "0");
-        assert_eq!(format_fixed(-1e-12, 1), "0.0");
-        assert_eq!(format_fixed(-2.0, 0), "-2");
+        assert_eq!(format_linear_tick(-0.0, 0), "0");
+        assert_eq!(format_linear_tick(-1e-12, 1), "0.0");
+        assert_eq!(format_linear_tick(-2.0, 0), "-2");
     }
 
     #[test]

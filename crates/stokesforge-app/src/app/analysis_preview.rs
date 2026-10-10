@@ -156,7 +156,7 @@ pub(super) fn tick_step(span: f64) -> f64 {
 
 fn format_tick(value: f64, step: f64) -> String {
     let decimals = (-step.log10().floor()).max(0.0) as usize;
-    format!("{value:.decimals$}")
+    stokesforge_core::number_format::format_tick(value, decimals)
 }
 
 /// Ce que l'aperçu rend à la fenêtre : les valeurs de la série montrée, ou ce

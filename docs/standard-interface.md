@@ -32,7 +32,7 @@ les règles R1–R16 de `textes-interface.md`.
 | état de champ refusé / ramené (`field_state`) | cadre rouge ou orange, bulle, cycle d'un champ texte validé | **en place** (#219) |
 | brique « nombre » (`number_field`) + table des grandeurs (`quantities`) | seul champ numérique | **en place** (#220) |
 | garde : aucun `DragValue` ni `Slider` (`aucun_champ_numerique_hors_de_la_brique`) | | **en place** (#220) |
-| formateur des nombres (`stokesforge-core`) | seul formatage affiché | à venir (#222) |
+| formateur des nombres (`stokesforge_core::number_format`) | seul formatage affiché | **en place** (#222) |
 | brique d'édition sur place | un seul contrat T4 | à venir (#224) |
 | garde : aucune bulle nue sur un champ de formulaire | | à venir (#225) |
 | garde : aucun `add_enabled` sans raison | | à venir (#226) |
@@ -155,7 +155,7 @@ champs numériques existants (`DragValue`, #220), la contrainte entre champs
   graduations, légende et exports. Un graphe neuf prend le défaut des
   Preferences, le point au départ (#148).
 
-## Affichage des nombres — à venir (#222)
+## Affichage des nombres — en place (#222)
 
 - **Un seul formateur**, dans `stokesforge-core` (D1, D2 → R3) :
   - résultats et graduations : 3 chiffres significatifs, notation `e` hors de
@@ -167,8 +167,17 @@ champs numériques existants (`DragValue`, #220), la contrainte entre champs
     même décimale (`12.346 ± 0.052`) ; sans incertitude : 3 chiffres ;
   - valeur exacte d'un résultat dans une bulle au survol ; **Ctrl+C copie
     toujours la valeur exacte**, avec un point.
+- **Où** : `format_results` (3 chiffres : volet Results, bulle d'aperçu),
+  `format_grid` (6 : grille — `AppState::cell_display` —, champs au repos),
+  `format_exact` (édition, copier, comparaison de saisie : `cell_text`, champ
+  numérique actif), `format_with_uncertainty`, `format_tick` (graduations,
+  `stokesforge-render::scale`, aperçu d'analyse). Les chiffres avant la
+  virgule ne sont jamais arrondis. Un nouveau nombre affiché passe par ce
+  module, jamais par un `format!` local.
 - **Notation scientifique** (D3) : exposant typographique sur la figure
-  (1×10⁻⁵), notation `e` dans la grille et les champs.
+  (1×10⁻⁵), notation `e` dans la grille et les champs. Les graduations restent en
+  notation `e` (elles ne passent pas par Typst) : l'exposant typographique des
+  graduations n'est pas livré.
 - **Dates** (D4) : ISO 8601 (`2026-10-10 14:05`) ; formes de saisie : #218.
 - **Chemins** (D5) : nom du fichier seul dans les messages, chemin complet en
   bulle.

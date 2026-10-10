@@ -11,11 +11,12 @@
 
 use eframe::egui;
 use stokesforge_analysis::ops::Warning;
+use stokesforge_core::number_format::{format_exact, format_with_uncertainty};
 
 use super::analysis_forms::{form_body, value_row};
 use super::analysis_preview::{preview, reset_view, PreviewOutcome};
 use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
-use crate::analysis::{kind_title, value_label, value_unit, with_unit, PreviewTool};
+use crate::analysis::{kind_title, value_label, value_unit, PreviewTool};
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState, CalculationDelete};
 use crate::{theme, tr};
@@ -25,28 +26,46 @@ const FORM_WIDTH: f32 = 330.0;
 /// Hauteur réservée aux valeurs calculées sous l'aperçu.
 const VALUES_HEIGHT: f32 = 130.0;
 
-/// Un nombre lisible : sans zéros inutiles, en notation scientifique hors de
-/// `[1e-3, 1e6)`.
-pub(super) fn format_number(value: f64) -> String {
-    if !value.is_finite() {
-        return value.to_string();
-    }
-    let magnitude = value.abs();
-    if magnitude != 0.0 && !(1e-3..1e6).contains(&magnitude) {
-        return format!("{value:.4e}");
-    }
-    let text = format!("{value:.6}");
-    text.trim_end_matches('0').trim_end_matches('.').to_string()
+/// Une valeur et son erreur type, par le formateur commun (#222) :
+/// `12.346 ± 0.052`.
+pub(super) fn format_value(value: f64, error: Option<f64>) -> String {
+    format_with_uncertainty(value, error)
 }
 
-/// Une valeur et son erreur type : `12.3 ± 0.1`.
-pub(super) fn format_value(value: f64, error: Option<f64>) -> String {
+/// La valeur exacte d'un résultat, pour la bulle : `12.3456789 ± 0.0523`.
+pub(super) fn exact_text(value: f64, error: Option<f64>) -> String {
     match error {
         Some(error) if error.is_finite() => {
-            format!("{} ± {}", format_number(value), format_number(error))
+            format!("{} ± {}", format_exact(value), format_exact(error))
         }
-        _ => format_number(value),
+        _ => format_exact(value),
     }
+}
+
+/// Rend un résultat arrondi (#222) : la valeur exacte s'affiche en bulle au
+/// survol, et Ctrl+C sur le résultat survolé copie **la valeur exacte**, avec
+/// un point, sans l'unité ni l'incertitude. L'`Event::Copy` est retiré, comme
+/// le fait le Project Manager, pour ne pas déclencher aussi la copie du graphe.
+pub(super) fn exact_result_label(
+    ui: &mut egui::Ui,
+    shown: String,
+    value: f64,
+    error: Option<f64>,
+) -> egui::Response {
+    let response = ui.label(shown).on_hover_text(exact_text(value, error));
+    if response.hovered() {
+        let copy = ui.input_mut(|input| {
+            let before = input.events.len();
+            input
+                .events
+                .retain(|event| !matches!(event, egui::Event::Copy));
+            input.events.len() != before
+        });
+        if copy {
+            ui.ctx().copy_text(format_exact(value));
+        }
+    }
+    response
 }
 
 /// La phrase d'un avertissement de calcul.
@@ -100,10 +119,9 @@ fn values_panel(
                 value_row(
                     ui,
                     &value_label(&value.key, value.index),
-                    &with_unit(
-                        format_value(value.value, value.error),
-                        &series.map_or_else(String::new, |s| value_unit(tree, s, &value.key)),
-                    ),
+                    value.value,
+                    value.error,
+                    &series.map_or_else(String::new, |s| value_unit(tree, s, &value.key)),
                 );
             }
         });
@@ -309,16 +327,13 @@ mod tests {
     use stokesforge_session::Session;
 
     #[test]
-    fn les_nombres_sont_lisibles() {
-        assert_eq!(format_number(12.5), "12.5");
-        assert_eq!(format_number(3.0), "3");
-        assert_eq!(format_number(0.0), "0");
-        assert_eq!(format_number(0.000_012_3), "1.2300e-5");
-        assert_eq!(format_number(2.5e8), "2.5000e8");
-        assert_eq!(format_number(f64::NAN), "NaN");
-        assert_eq!(format_value(12.5, Some(0.25)), "12.5 ± 0.25");
-        assert_eq!(format_value(12.5, None), "12.5");
+    fn les_resultats_ont_trois_chiffres_et_l_incertitude_deux() {
+        assert_eq!(format_value(12.3456, None), "12.3");
+        assert_eq!(format_value(12.3456, Some(0.0523)), "12.346 ± 0.052");
         assert_eq!(format_value(12.5, Some(f64::NAN)), "12.5");
+        assert_eq!(format_value(0.000_012_3, None), "1.23e-5");
+        assert_eq!(exact_text(12.3456, Some(0.0523)), "12.3456 ± 0.0523");
+        assert_eq!(exact_text(0.1 + 0.2, None), "0.30000000000000004");
     }
 
     /// Une feuille X, Y, Y' : `y = 2x + 1` et une référence constante.

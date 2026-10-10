@@ -379,6 +379,30 @@ fn a_books_grid_defaults_to_its_first_sheet_and_describes_it() {
 
 // -- 2. Saisie d'une cellule --
 
+/// #222 : la grille peint 6 chiffres significatifs, mais l'édition, le copier
+/// et la comparaison de saisie gardent la valeur entière.
+#[test]
+fn the_grid_paints_six_digits_but_edits_and_copies_the_exact_value() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 1,
+        text: "12.345678901".to_string(),
+    });
+
+    assert_eq!(state.cell_display(temps, 1), "12.3457");
+    assert_eq!(state.cell_text(temps, 1), "12.345678901");
+    state.begin_edit(temps, 1);
+    assert_eq!(
+        state.editing().map(|edit| edit.buffer.clone()),
+        Some("12.345678901".to_string()),
+        "le tampon d'édition porte la valeur entière"
+    );
+}
+
 #[test]
 fn committing_a_numeric_cell_writes_it_and_names_the_undo() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
