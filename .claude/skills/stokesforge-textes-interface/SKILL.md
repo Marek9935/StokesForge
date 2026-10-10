@@ -73,6 +73,14 @@ phrase par `crates/stokesforge-app/src/errors.rs` :
 - un `detail` (cause décrite par le crate d'origine) ou un message du système
   est repris tel quel, en anglais ;
 - **jamais** `to_string()` ni `{err}` d'une erreur montrée à l'utilisateur.
+- une `std::io::Error` passe par `errors::io::error_message(&err)` (clés
+  `error-io-*`), et le message de contexte la reçoit en variable
+  (`tr!("error-template-export", cause = …)`). `ErrorKind` est
+  `#[non_exhaustive]` : cette famille garde un repli `_` (`error-io-other`),
+  seule exception à « sans `_` ».
+- les messages de la barre d'état (`AppState::notice` / `fail`) passent par
+  `tr!` (clés `status-*` pour une information, `error-*` pour un échec) ; la
+  garde `aucun_libelle_en_dur` couvre `notice` et `fail`.
 
 Rédaction : ce qui s'est passé, puis quoi faire seulement si c'est utile ;
 Sentence case, pas de point final sur une ligne unique, ni « please », ni

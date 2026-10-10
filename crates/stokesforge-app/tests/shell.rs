@@ -2291,8 +2291,9 @@ fn script_available_is_false_and_run_script_explains_why_without_the_feature() {
         status.is_error,
         "impossible d'exécuter un script n'est pas un succès silencieux"
     );
-    assert!(
-        status.text.to_lowercase().contains("python"),
+    assert_eq!(
+        status.text,
+        stokesforge_app::tr!("error-script-unavailable"),
         "le message explique pourquoi : {}",
         status.text
     );
@@ -2321,7 +2322,10 @@ fn interrupt_script_is_also_explained_without_the_feature() {
 
     let status = state.status().expect("un message explicite");
     assert!(status.is_error);
-    assert!(status.text.to_lowercase().contains("python"));
+    assert_eq!(
+        status.text,
+        stokesforge_app::tr!("error-script-unavailable")
+    );
 }
 
 #[test]
@@ -6251,7 +6255,12 @@ fn dropping_files_on_a_book_imports_them_as_one_undo_entry() {
     assert!(state.import_state().is_none(), "aucune fenêtre d'import");
     let status = state.status().expect("message de statut");
     assert!(!status.is_error);
-    assert!(status.text.contains("modèle"), "{}", status.text);
+    assert_eq!(
+        status.text,
+        stokesforge_app::tr!("status-import-dropped", count = 2, models = "Untitled"),
+        "{}",
+        status.text
+    );
     state.dispatch(Action::Undo);
     assert_eq!(state.worksheets_of(book).len(), sheets_before);
     assert!(!state.can_undo(), "un seul Ctrl+Z pour tout le dépôt");
@@ -7388,11 +7397,10 @@ fn a_multi_block_file_gives_one_sheet_per_block_and_refreshes_per_block() {
     let second = sheet_named(state.tree(), "spectres_2");
     assert_eq!(column_values(&state, first, 1), vec![10.0, 20.0]);
     assert_eq!(column_values(&state, second, 1), vec![30.0, 40.0, 50.0]);
-    assert!(state
-        .status()
-        .unwrap()
-        .text
-        .contains("1 fichier(s) importé(s) sur 1"));
+    assert_eq!(
+        state.status().unwrap().text,
+        stokesforge_app::tr!("status-import-done", imported = 1, total = 1)
+    );
 
     // Le fichier change : chaque bloc se met à jour dans sa propre feuille.
     write_csv(

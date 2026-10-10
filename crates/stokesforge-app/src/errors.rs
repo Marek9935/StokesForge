@@ -13,7 +13,7 @@
 //!
 //! Une fonction `error_message` par famille d'erreurs, chacune dans son
 //! sous-module : [`model`], [`commands`], [`session`], [`file`], [`import`],
-//! [`formula`], [`render`], [`export`], [`clipboard`] et, avec la feature `python`, `script`.
+//! [`formula`], [`render`], [`export`], [`clipboard`], [`io`] et, avec la feature `python`, `script`.
 //! Toute erreur **affichée** à l'utilisateur passe par l'une d'elles, jamais par
 //! `to_string()`.
 //!
@@ -431,6 +431,8 @@ pub mod import {
     use stokesforge_import::ImportError;
     use stokesforge_importer::{ImportFailure, ImportFailureCause};
 
+    use crate::state::ImportReadError;
+
     use crate::tr;
 
     /// La phrase d'une [`ImportError`].
@@ -439,6 +441,19 @@ pub mod import {
             ImportError::NotText => tr!("error-import-binary"),
             ImportError::Empty => tr!("error-import-empty"),
             ImportError::NoDataRows => tr!("error-import-no-data"),
+        }
+    }
+
+    /// La phrase d'une [`ImportReadError`] de l'assistant d'import.
+    pub fn read_message(error: &ImportReadError) -> String {
+        match error {
+            ImportReadError::NoImport => tr!("error-import-not-open"),
+            ImportReadError::Read { path, error } => tr!(
+                "error-import-file",
+                path = path.display().to_string(),
+                detail = super::io::error_message(error)
+            ),
+            ImportReadError::Parse(error) => error_message(error),
         }
     }
 
@@ -1146,6 +1161,79 @@ pub mod clipboard {
             assert!(phrase.contains("selection refused"), "{phrase}");
             let phrase = error_message(&ClipboardError::Unsupported("Wayland"));
             assert!(phrase.contains("Wayland"), "{phrase}");
+        }
+    }
+}
+
+/// Erreurs du système de fichiers (`std::io::Error`).
+///
+/// Aucune famille du dessous ne les traduit : l'application les met en phrase
+/// ici, par leur `ErrorKind`. Exception voulue à la règle « `match` sans `_` » :
+/// `ErrorKind` est `#[non_exhaustive]`, le repli `error-io-other` couvre tout
+/// genre non listé (et en reprend le texte brut du système).
+pub mod io {
+    use std::io::ErrorKind;
+
+    use crate::tr;
+
+    /// La cause d'une [`std::io::Error`], en groupe nominal ou verbal court,
+    /// destinée à compléter une phrase de contexte (`{ $cause }`).
+    pub fn error_message(error: &std::io::Error) -> String {
+        match error.kind() {
+            ErrorKind::NotFound => tr!("error-io-not-found"),
+            ErrorKind::PermissionDenied => tr!("error-io-permission-denied"),
+            ErrorKind::AlreadyExists => tr!("error-io-already-exists"),
+            ErrorKind::StorageFull | ErrorKind::QuotaExceeded => tr!("error-io-storage-full"),
+            ErrorKind::ReadOnlyFilesystem => tr!("error-io-read-only"),
+            ErrorKind::InvalidData => tr!("error-io-invalid-data"),
+            ErrorKind::InvalidInput => tr!("error-io-invalid-input"),
+            ErrorKind::Interrupted => tr!("error-io-interrupted"),
+            ErrorKind::UnexpectedEof => tr!("error-io-unexpected-eof"),
+            ErrorKind::IsADirectory => tr!("error-io-is-directory"),
+            ErrorKind::NotADirectory => tr!("error-io-not-directory"),
+            ErrorKind::TimedOut => tr!("error-io-timed-out"),
+            // `ErrorKind` est `#[non_exhaustive]` : un `match` exhaustif est
+            // impossible, le repli reprend le texte brut du système.
+            _ => tr!("error-io-other", detail = error.to_string()),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::errors::tests_support::check;
+
+        #[test]
+        fn chaque_genre_liste_a_sa_phrase_et_le_repli_reprend_le_texte_du_systeme() {
+            let genres = [
+                ErrorKind::NotFound,
+                ErrorKind::PermissionDenied,
+                ErrorKind::AlreadyExists,
+                ErrorKind::StorageFull,
+                ErrorKind::QuotaExceeded,
+                ErrorKind::ReadOnlyFilesystem,
+                ErrorKind::InvalidData,
+                ErrorKind::InvalidInput,
+                ErrorKind::Interrupted,
+                ErrorKind::UnexpectedEof,
+                ErrorKind::IsADirectory,
+                ErrorKind::NotADirectory,
+                ErrorKind::TimedOut,
+            ];
+            let mut phrases = std::collections::HashSet::new();
+            for genre in genres {
+                let erreur = std::io::Error::from(genre);
+                let phrase = error_message(&erreur);
+                check(&erreur, &phrase);
+                assert!(!phrase.contains("error-io"), "clé non résolue : {phrase}");
+                phrases.insert(phrase);
+            }
+            // Deux genres seulement partagent une phrase (disque plein / quota).
+            assert_eq!(phrases.len(), genres.len() - 1);
+            let autre = std::io::Error::other("Device on fire");
+            let phrase = error_message(&autre);
+            check(&autre, &phrase);
+            assert!(phrase.contains("Device on fire"), "{phrase}");
         }
     }
 }

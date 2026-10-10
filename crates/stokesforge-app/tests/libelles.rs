@@ -72,6 +72,8 @@ const APPELS: &[&str] = &[
     "monospace",
     "colored_label",
     "on_hover_text_at_pointer",
+    "notice",
+    "fail",
 ];
 
 /// Les fonctions libres de l'application qui posent un libellé (#169) :
@@ -628,6 +630,10 @@ fn la_garde_voit_un_litteral_dans_chaque_forme_d_appel() {
         r#"fn f(ui: &mut Ui) { ui.label(format!("{} {}", tr!("a"), "b")); }"#,
         r##"fn f(ui: &mut Ui) { ui.label(r#"brut"#); }"##,
         r#"fn f() { let _ = ViewportBuilder::default().with_title("StokesForge"); }"#,
+        // La barre d'état (#216) : littéral direct, par `format!`, ou à la ligne.
+        r#"fn f(&mut self) { self.notice("Terminé".to_string()); }"#,
+        r#"fn f(&mut self) { self.fail(format!("Échec : {}", e)); }"#,
+        "fn f(&mut self) {\n    self.fail(\n        \"Impossible\".to_string(),\n    );\n}",
     ] {
         assert_eq!(trouve(code).len(), 1, "non vu : {code}");
     }
@@ -652,6 +658,7 @@ fn la_garde_laisse_passer_ce_qui_n_est_pas_un_libelle() {
         r#"fn f(ui: &mut Ui) { ui.label(tr!("witness-count", count = 2)); }"#,
         r#"fn f(ui: &mut Ui) { ui.add(egui::Button::new(tr!("menu-file"))); }"#,
         r#"fn f(ui: &mut Ui) { ui.label(nom); }"#,
+        r#"fn f(&mut self) { self.fail(tr!("error-x", cause = e)); self.notice(text); }"#,
         r#"fn f(ui: &mut Ui) { ui.label("→"); }"#,
         r#"fn f(ui: &mut Ui) { ui.label(" · "); }"#,
         r#"fn f(ui: &mut Ui) { ui.label(format!("{}", n)); }"#,

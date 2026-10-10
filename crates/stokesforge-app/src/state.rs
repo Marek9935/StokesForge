@@ -2209,7 +2209,22 @@ pub enum ImportLineAction {
 }
 
 /// Octets lus par chemin (ou le message d'échec de lecture).
-type ImportBytesCache = std::collections::HashMap<PathBuf, Result<Arc<Vec<u8>>, String>>;
+type ImportBytesCache = std::collections::HashMap<PathBuf, Result<Arc<Vec<u8>>, ImportReadError>>;
+
+/// Pourquoi l'assistant d'import ne peut pas montrer un fichier : donnée, sans
+/// phrase — `errors::import::read_message` la met en phrase à l'affichage.
+#[derive(Debug, Clone)]
+pub enum ImportReadError {
+    /// L'assistant n'est pas ouvert.
+    NoImport,
+    /// Le fichier `path` n'a pas pu être lu.
+    Read {
+        path: PathBuf,
+        error: Arc<std::io::Error>,
+    },
+    /// Le contenu du fichier n'est pas un tableau lisible.
+    Parse(stokesforge_import::ImportError),
+}
 
 /// Les six étapes de l'assistant d'import, façon assistant ASCII d'Origin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -2678,9 +2693,9 @@ impl AppState {
         geometry: stokesforge_session::WindowGeometry,
     ) {
         if let Err(err) = self.handle.set_window_geometry(node, geometry) {
-            self.fail(format!(
-                "Échec de la mise à jour de la géométrie : {}",
-                errors::session::error_message(&err)
+            self.fail(tr!(
+                "error-window-geometry",
+                cause = errors::session::error_message(&err)
             ));
         }
     }
@@ -3930,9 +3945,9 @@ impl AppState {
         if self.plot_macro_open {
             self.plot_macro_open = false;
             if let Err(err) = self.handle.abort_macro() {
-                self.fail(format!(
-                    "Annulation des propriétés impossible : {}",
-                    errors::session::error_message(&err)
+                self.fail(tr!(
+                    "error-plot-settings-cancel",
+                    cause = errors::session::error_message(&err)
                 ));
             }
             self.refresh();
@@ -3951,9 +3966,9 @@ impl AppState {
         }
         match self.handle.begin_macro(MacroKind::GraphProperties) {
             Ok(_) => self.plot_macro_open = true,
-            Err(err) => self.fail(format!(
-                "Propriétés : annulation groupée indisponible ({})",
-                errors::session::error_message(&err)
+            Err(err) => self.fail(tr!(
+                "error-plot-settings-undo-group",
+                cause = errors::session::error_message(&err)
             )),
         }
     }
@@ -3961,11 +3976,7 @@ impl AppState {
     /// Message affiché quand des actions d'une fenêtre détachée sont refusées
     /// parce que la fenêtre modale des propriétés d'un graphe est ouverte.
     pub fn reject_detached_actions(&mut self) {
-        self.fail(
-            "Fenêtre des propriétés du graphe ouverte : validez-la ou annulez-la \
-             avant de modifier une fenêtre détachée"
-                .to_string(),
-        );
+        self.fail(tr!("error-plot-settings-block-detached"));
     }
 
     /// Ferme la macro de la fenêtre des propriétés (une entrée d'historique,
@@ -4182,7 +4193,10 @@ impl AppState {
             .object_manager_preferences
             .save_object_manager_settings(settings)
         {
-            self.fail(error.to_string());
+            self.fail(tr!(
+                "error-preferences-not-saved",
+                cause = errors::io::error_message(&error)
+            ));
         }
     }
 
@@ -4367,7 +4381,10 @@ impl AppState {
                     .object_manager_preferences
                     .save_object_manager_open(open)
                 {
-                    self.fail(error.to_string());
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
                 }
             }
             Action::SetObjectManagerShowTexts(show) => {
@@ -4631,7 +4648,10 @@ impl AppState {
             }),
             Action::SetSvgTextMode(mode) => {
                 if let Err(error) = self.object_manager_preferences.save_svg_text_mode(mode) {
-                    self.fail(error.to_string());
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
                 }
             }
             Action::SetPngExportScale(scale) => {
@@ -4665,8 +4685,9 @@ impl AppState {
             SaveTarget::Project => self.execute(Command::SetSavedColors { colors: next }),
             SaveTarget::User => {
                 if let Err(err) = self.user_colors.replace(next) {
-                    self.fail(format!(
-                        "Couleurs enregistrées pour cette session seulement : écriture impossible ({err})"
+                    self.fail(tr!(
+                        "error-colors-session-only",
+                        cause = errors::io::error_message(&err)
                     ));
                 }
             }
@@ -4747,10 +4768,7 @@ impl AppState {
                     Err(mpsc::TryRecvError::Empty) => None,
                     Err(mpsc::TryRecvError::Disconnected) => {
                         self.pending_script = None;
-                        self.fail(
-                            "Le fil de script a disparu sans répondre (a-t-il paniqué ?)."
-                                .to_string(),
-                        );
+                        self.fail(tr!("error-script-vanished"));
                         return;
                     }
                 },
@@ -4837,9 +4855,7 @@ impl AppState {
         // depuis l'explorateur détaché. La racine possède la macro du graphe :
         // l'import y serait absorbé si on ne refusait pas ce geste ici.
         if self.plot_settings.is_some() {
-            self.fail(
-                "Validez ou annulez les propriétés du graphe avant de déposer des fichiers".into(),
-            );
+            self.fail(tr!("error-drop-plot-settings-open"));
             return;
         }
         let plan = file_drop_plan(&paths, target_book);
@@ -4889,14 +4905,14 @@ impl AppState {
             }
         }
         if !items.is_empty() {
+            let count = items.len();
             self.apply_import(plan.destination, items);
-            let summary = self
-                .status
-                .as_ref()
-                .filter(|status| !status.is_error)
-                .map(|status| format!("{} — modèle « {} »", status.text, models.join("», «")));
-            if let Some(summary) = summary {
-                self.notice(summary);
+            if self.status.as_ref().is_some_and(|status| !status.is_error) {
+                self.notice(tr!(
+                    "status-import-dropped",
+                    count = count,
+                    models = models.join(", ")
+                ));
             }
         }
         if !bad.is_empty() {
@@ -4918,7 +4934,7 @@ impl AppState {
             return;
         }
         if self.import_job.is_some() {
-            self.fail("Un import est déjà en cours".to_string());
+            self.fail(tr!("error-import-running"));
             return;
         }
         let total = paths.len();
@@ -4944,9 +4960,12 @@ impl AppState {
                     done,
                     reply,
                 });
-                self.notice(format!("Import en cours… 0/{total} fichier(s)"));
+                self.notice(tr!("status-import-progress", done = 0, total = total));
             }
-            Err(err) => self.fail(format!("Impossible de lancer l'import : {err}")),
+            Err(err) => self.fail(tr!(
+                "error-import-start",
+                cause = errors::io::error_message(&err)
+            )),
         }
     }
 
@@ -4979,12 +4998,12 @@ impl AppState {
                     job.done.load(std::sync::atomic::Ordering::Relaxed),
                     job.total,
                 );
-                self.notice(format!("Import en cours… {done}/{total} fichier(s)"));
+                self.notice(tr!("status-import-progress", done = done, total = total));
                 false
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.import_job = None;
-                self.fail("L'import s'est interrompu avant la fin".to_string());
+                self.fail(tr!("error-import-stopped"));
                 false
             }
         }
@@ -5018,7 +5037,7 @@ impl AppState {
             })
             .collect();
         if sources.is_empty() {
-            self.fail("Cette feuille ne contient aucune colonne importée d'un fichier".to_string());
+            self.fail(tr!("error-refresh-no-imported-column"));
             return;
         }
         // Un fichier source n'est relu qu'une fois, même s'il alimente plusieurs
@@ -5064,14 +5083,11 @@ impl AppState {
             })
             .collect();
         if refreshed.is_empty() {
-            self.fail(format!(
-                "Actualisation impossible — {}",
-                failures.join(" ; ")
-            ));
+            self.fail(tr!("error-refresh-failed", failures = failures.join(" ; ")));
             return;
         }
         if self.handle.begin_macro(MacroKind::RefreshFromFile).is_err() {
-            self.fail("Impossible de grouper l'actualisation".to_string());
+            self.fail(tr!("error-refresh-group"));
             return;
         }
         // Les lignes de la feuille suivent le plus long des nouveaux contenus ;
@@ -5129,14 +5145,17 @@ impl AppState {
             updated += 1;
         }
         if self.handle.end_macro().is_err() {
-            failures.push("échec de la clôture de l'entrée d'historique".to_string());
+            failures.push(tr!("error-refresh-close-group"));
         }
         self.refresh();
-        let summary = format!("{updated} colonne(s) actualisée(s) depuis leur fichier");
         if failures.is_empty() {
-            self.notice(summary);
+            self.notice(tr!("status-refresh-done", count = updated));
         } else {
-            self.fail(format!("{summary} — {}", failures.join(" ; ")));
+            self.fail(tr!(
+                "error-refresh-partial",
+                count = updated,
+                failures = failures.join(" ; ")
+            ));
         }
     }
 
@@ -5150,7 +5169,7 @@ impl AppState {
     /// le remplacer), puis rouvre l'assistant sur ses fichiers et sa recette.
     fn reopen_last_import(&mut self) {
         let Some(last) = self.last_import.clone() else {
-            self.fail("Aucun import à reprendre".to_string());
+            self.fail(tr!("error-import-nothing-to-reopen"));
             return;
         };
         let undone = self.snapshot.history.undo_label
@@ -5176,9 +5195,9 @@ impl AppState {
             import.paths = last.paths;
         }
         self.notice(if undone {
-            "Dernier import annulé : réglez-le puis relancez-le".to_string()
+            tr!("status-import-reopened-undone")
         } else {
-            "Réglez le dernier import puis relancez-le (l'ancien reste en place)".to_string()
+            tr!("status-import-reopened-kept")
         });
     }
 
@@ -5293,7 +5312,7 @@ impl AppState {
         };
         let name = chosen.name.clone();
         self.select_import_recipe(&name);
-        self.notice(format!("Modèle « {name} » choisi d'après le fichier"));
+        self.notice(tr!("status-template-chosen", name = name));
     }
 
     /// Écrit le modèle courant dans `path` (JSON) pour le partager.
@@ -5303,17 +5322,34 @@ impl AppState {
         };
         let json = state.recipe.to_json();
         match std::fs::write(path, json) {
-            Ok(()) => self.notice(format!("Modèle exporté dans {}", path.display())),
-            Err(err) => self.fail(format!("Export du modèle impossible : {err}")),
+            Ok(()) => self.notice(tr!(
+                "status-template-exported",
+                path = path.display().to_string()
+            )),
+            Err(err) => self.fail(tr!(
+                "error-template-export",
+                cause = errors::io::error_message(&err)
+            )),
         }
     }
 
     /// Lit un modèle exporté dans `path`, l'ajoute à la liste (en remplaçant
     /// celui de même nom) et l'enregistre, puis en fait la recette courante.
     pub fn import_import_recipe(&mut self, path: &std::path::Path) {
-        let recipe = std::fs::read_to_string(path)
-            .map_err(|err| format!("{}: {err}", path.display()))
-            .and_then(|text| stokesforge_import::ImportRecipe::from_json(&text));
+        let recipe = match std::fs::read_to_string(path) {
+            Ok(text) => stokesforge_import::ImportRecipe::from_json(&text).map_err(|detail| {
+                tr!(
+                    "error-template-import-invalid",
+                    path = path.display().to_string(),
+                    detail = detail
+                )
+            }),
+            Err(err) => Err(tr!(
+                "error-template-import-read",
+                path = path.display().to_string(),
+                cause = errors::io::error_message(&err)
+            )),
+        };
         let mut recipe = match recipe {
             Ok(recipe) => recipe,
             Err(message) => {
@@ -5332,8 +5368,11 @@ impl AppState {
         state.recipe = recipe;
         state.save_as_name = name.clone();
         match saved {
-            Ok(()) => self.notice(format!("Modèle « {name} » importé")),
-            Err(err) => self.fail(format!("Modèle importé mais non enregistré : {err}")),
+            Ok(()) => self.notice(tr!("status-template-imported", name = name)),
+            Err(err) => self.fail(tr!(
+                "error-template-import-not-saved",
+                cause = errors::io::error_message(&err)
+            )),
         }
     }
 
@@ -5373,15 +5412,21 @@ impl AppState {
 
     /// Octets du fichier `path`, lus une seule fois puis gardés : l'aperçu
     /// est recalculé à chaque image, le disque ne doit pas l'être.
-    fn import_bytes(&self, path: &std::path::Path) -> Result<Arc<Vec<u8>>, String> {
-        let state = self.import_state.as_ref().ok_or("aucun import en cours")?;
+    fn import_bytes(&self, path: &std::path::Path) -> Result<Arc<Vec<u8>>, ImportReadError> {
+        let state = self
+            .import_state
+            .as_ref()
+            .ok_or(ImportReadError::NoImport)?;
         let mut cache = state.bytes.borrow_mut();
         cache
             .entry(path.to_path_buf())
             .or_insert_with(|| {
                 std::fs::read(path)
                     .map(Arc::new)
-                    .map_err(|err| format!("{}: {err}", path.display()))
+                    .map_err(|error| ImportReadError::Read {
+                        path: path.to_path_buf(),
+                        error: Arc::new(error),
+                    })
             })
             .clone()
     }
@@ -5406,7 +5451,7 @@ impl AppState {
     /// Ce que l'import donnerait pour chaque fichier choisi, avec la recette
     /// courante : `Ok` avec le nombre de lignes, ou l'erreur qui l'attend —
     /// montré **avant** le clic sur Importer.
-    pub fn import_file_statuses(&self) -> Vec<(PathBuf, Result<usize, String>)> {
+    pub fn import_file_statuses(&self) -> Vec<(PathBuf, Result<usize, ImportReadError>)> {
         let Some(state) = self.import_state.as_ref() else {
             return Vec::new();
         };
@@ -5417,7 +5462,7 @@ impl AppState {
                 let status = self.import_bytes(path).and_then(|bytes| {
                     stokesforge_import::parse(&bytes, &state.recipe)
                         .map(|table| table.row_count())
-                        .map_err(|err| errors::import::error_message(&err))
+                        .map_err(ImportReadError::Parse)
                 });
                 (path.clone(), status)
             })
@@ -5459,7 +5504,9 @@ impl AppState {
 
     /// Colonnes du résultat d'import du fichier montré, avec leurs premières
     /// valeurs — étape « Colonnes ».
-    pub fn import_column_previews(&self) -> Option<Result<Vec<ImportColumnPreview>, String>> {
+    pub fn import_column_previews(
+        &self,
+    ) -> Option<Result<Vec<ImportColumnPreview>, ImportReadError>> {
         let table = self.import_preview()?;
         Some(table.map(|table| {
             table
@@ -5568,7 +5615,7 @@ impl AppState {
         };
         let name = state.save_as_name.trim().to_string();
         if name.is_empty() {
-            self.fail("Le modèle doit avoir un nom pour être enregistré".to_string());
+            self.fail(tr!("error-template-name-required"));
             return;
         }
         state.recipe.name = name;
@@ -5576,14 +5623,17 @@ impl AppState {
         let save_result = state.store.save();
         let saved_name = state.recipe.name.clone();
         if let Err(err) = save_result {
-            self.fail(format!("Échec de l'enregistrement du modèle : {err}"));
+            self.fail(tr!(
+                "error-template-save",
+                cause = errors::io::error_message(&err)
+            ));
             return;
         }
         // Le témoin « modifié » compare au dernier enregistrement réussi,
         // pas seulement au modèle chargé à l'ouverture. En cas d'échec,
         // garder l'ancienne référence pour ne pas annoncer une sauvegarde.
         state.baseline = state.recipe.clone();
-        self.notice(format!("Modèle « {saved_name} » enregistré"));
+        self.notice(tr!("status-template-saved", name = saved_name));
     }
 
     /// Supprime le modèle `name` du `RecipeStore` et persiste le store sur
@@ -5594,10 +5644,13 @@ impl AppState {
         };
         state.store.remove(name);
         if let Err(err) = state.store.save() {
-            self.fail(format!("Échec de la suppression du modèle : {err}"));
+            self.fail(tr!(
+                "error-template-delete",
+                cause = errors::io::error_message(&err)
+            ));
             return;
         }
-        self.notice(format!("Modèle « {name} » supprimé"));
+        self.notice(tr!("status-template-deleted", name = name));
     }
 
     /// Aperçu du **premier** fichier choisi, reparsé avec les réglages
@@ -5607,12 +5660,13 @@ impl AppState {
     /// été choisi ; `Some(Err(_))` si la lecture ou l'analyse du fichier a
     /// échoué (fichier illisible traité comme une erreur d'analyse pour ne
     /// pas multiplier les types d'échec exposés à la fenêtre).
-    pub fn import_preview(&self) -> Option<Result<stokesforge_import::ParsedTable, String>> {
+    pub fn import_preview(
+        &self,
+    ) -> Option<Result<stokesforge_import::ParsedTable, ImportReadError>> {
         let state = self.import_state.as_ref()?;
         let path = self.import_preview_path()?;
         let result = self.import_bytes(&path).and_then(|bytes| {
-            stokesforge_import::parse(&bytes, &state.recipe)
-                .map_err(|err| errors::import::error_message(&err))
+            stokesforge_import::parse(&bytes, &state.recipe).map_err(ImportReadError::Parse)
         });
         Some(result)
     }
@@ -5625,12 +5679,13 @@ impl AppState {
     /// y compris sur un gros fichier (le travail cellule à cellule reste
     /// borné à `recipe.preview_lines`, jamais à la taille du fichier). `None`
     /// dans les mêmes conditions qu'`import_preview`.
-    pub fn import_line_preview(&self) -> Option<Result<stokesforge_import::FilePreview, String>> {
+    pub fn import_line_preview(
+        &self,
+    ) -> Option<Result<stokesforge_import::FilePreview, ImportReadError>> {
         let state = self.import_state.as_ref()?;
         let path = self.import_preview_path()?;
         let result = self.import_bytes(&path).and_then(|bytes| {
-            stokesforge_import::preview(&bytes, &state.recipe)
-                .map_err(|err| errors::import::error_message(&err))
+            stokesforge_import::preview(&bytes, &state.recipe).map_err(ImportReadError::Parse)
         });
         Some(result)
     }
@@ -5647,7 +5702,7 @@ impl AppState {
             return;
         };
         let Some(path) = self.import_preview_path() else {
-            self.fail("Choisis un fichier avant de détecter l'en-tête".to_string());
+            self.fail(tr!("error-import-choose-file-first"));
             return;
         };
         let (separator, decimal) = (import.recipe.separator.clone(), import.recipe.decimal);
@@ -5658,7 +5713,7 @@ impl AppState {
                     import.recipe.header_layout = layout;
                 }
             }
-            Err(err) => self.fail(format!("{}: {err}", path.display())),
+            Err(err) => self.fail(errors::import::read_message(&err)),
         }
     }
 
@@ -5852,9 +5907,9 @@ impl AppState {
             self.png_export_scale,
             self.svg_text_mode(),
         ) else {
-            self.fail(format!(
-                "Format d'export inconnu pour {} : choisir .svg, .pdf ou .png",
-                path.display()
+            self.fail(tr!(
+                "error-export-unknown-format",
+                path = path.display().to_string()
             ));
             return;
         };
@@ -5868,7 +5923,10 @@ impl AppState {
             &stokesforge_render_svg::FontChoice::default(),
             format,
         ) {
-            Ok(()) => self.notice(format!("Graphe exporté dans {}", path.display())),
+            Ok(()) => self.notice(tr!(
+                "status-graph-exported",
+                path = path.display().to_string()
+            )),
             Err(err) => self.fail(errors::export::error_message(&err)),
         }
     }
@@ -6048,14 +6106,14 @@ impl AppState {
     fn select_sheet(&mut self, id: NodeId) {
         let node = self.snapshot.tree.node(id);
         if !node.is_some_and(|node| node.kind().is_worksheet()) {
-            self.fail(format!("{id} n'est pas une feuille de ce projet"));
+            self.fail(tr!("error-sheet-gone"));
             return;
         }
         // Une feuille est toujours l'enfant directe d'un classeur (le seul
         // parent qu'`accepts_child` autorise) : c'est ce classeur, pas la
         // feuille elle-même, qui est la clé de `selected_sheets`.
         let Some(book) = node.and_then(Node::parent) else {
-            self.fail(format!("{id} n'a pas de classeur parent"));
+            self.fail(tr!("error-sheet-no-workbook"));
             return;
         };
         self.selected_sheets.insert(book, id);
@@ -6545,7 +6603,7 @@ impl AppState {
             .and_then(Node::as_column)
             .map(Column::column_type)
         else {
-            self.fail(format!("{column} n'est pas une colonne de ce projet"));
+            self.fail(tr!("error-column-gone"));
             return false;
         };
         // Une saisie qui ne rentre pas dans le type de la colonne ne la fait
@@ -6681,7 +6739,7 @@ impl AppState {
         }
         let grouped = ranges.len() + header_fields.len() > 1;
         if grouped && self.handle.begin_macro(MacroKind::ClearSelection).is_err() {
-            self.fail("Impossible de grouper l'effacement de la sélection".to_string());
+            self.fail(tr!("error-clear-group"));
             return;
         }
         for (column, start, count) in ranges {
@@ -6787,11 +6845,11 @@ impl AppState {
             return;
         }
         let Some(selection) = self.selection.get(&sheet) else {
-            self.fail("Aucune cellule sélectionnée pour coller".to_string());
+            self.fail(tr!("error-paste-no-cell"));
             return;
         };
         let Some(anchor) = selection.anchor(&self.snapshot.tree, sheet) else {
-            self.fail("Aucune cellule sélectionnée pour coller".to_string());
+            self.fail(tr!("error-paste-no-cell"));
             return;
         };
         let clipboard = if self.clipboard_text.as_deref() == Some(text.as_str()) {
@@ -6826,15 +6884,15 @@ impl AppState {
             return;
         }
         let Some(selection) = self.selection.get(&sheet) else {
-            self.fail("Aucune cellule sélectionnée pour coller".to_string());
+            self.fail(tr!("error-paste-no-cell"));
             return;
         };
         let Some(anchor) = selection.anchor(&self.snapshot.tree, sheet) else {
-            self.fail("Aucune cellule sélectionnée pour coller".to_string());
+            self.fail(tr!("error-paste-no-cell"));
             return;
         };
         let Some(clipboard) = self.grid_clipboard.clone() else {
-            self.notice("Rien à coller en absolu : copiez d'abord depuis la grille".to_string());
+            self.notice(tr!("status-paste-absolute-empty"));
             return;
         };
         self.apply_paste(sheet, anchor, &clipboard, true);
@@ -6872,9 +6930,7 @@ impl AppState {
         let order = self.column_order(sheet);
         let anchor_column = grid_cursor_column(anchor);
         let Some(anchor_index) = order.iter().position(|&id| id == anchor_column) else {
-            self.fail(format!(
-                "{anchor_column} n'est pas une colonne de cette feuille"
-            ));
+            self.fail(tr!("error-column-gone"));
             return;
         };
         let order_from_anchor = &order[anchor_index..];
@@ -6984,7 +7040,7 @@ impl AppState {
                     .collect();
                 let grouped = writes.len() * targets.len() > 1;
                 if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
-                    self.fail("Impossible de grouper le collage".to_string());
+                    self.fail(tr!("error-paste-group"));
                     return;
                 }
                 for &(field, cells) in &writes {
@@ -7010,7 +7066,7 @@ impl AppState {
                 let paste_row = if absolute { *start } else { anchor_row };
                 let grouped = targets.len() > 1;
                 if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
-                    self.fail("Impossible de grouper le collage".to_string());
+                    self.fail(tr!("error-paste-group"));
                     return;
                 }
                 for (index, &column) in targets.iter().enumerate() {
@@ -7083,7 +7139,7 @@ impl AppState {
             .count();
         let grouped = header_ops + body_ops > 1;
         if grouped && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
-            self.fail("Impossible de grouper le collage".to_string());
+            self.fail(tr!("error-paste-group"));
             return;
         }
         if let Some(from) = header_from {
@@ -7137,7 +7193,7 @@ impl AppState {
             .and_then(Node::as_column)
             .map(|c| c.meta().clone())
         else {
-            self.fail(format!("{column} n'est pas une colonne de ce projet"));
+            self.fail(tr!("error-column-gone"));
             return;
         };
         if !field.write_text(&mut meta, text) {
@@ -7160,7 +7216,7 @@ impl AppState {
             .and_then(Node::as_column)
             .map(|c| c.meta().clone())
         else {
-            self.fail(format!("{column} n'est pas une colonne de ce projet"));
+            self.fail(tr!("error-column-gone"));
             return;
         };
         update(&mut meta);
@@ -7234,9 +7290,7 @@ impl AppState {
 
     fn begin_creation_macro(&mut self, kind: MacroKind) -> bool {
         if self.handle.begin_macro(kind).is_err() {
-            self.fail(
-                "Impossible de grouper la création dans une seule entrée d'historique".to_string(),
-            );
+            self.fail(tr!("error-create-group"));
             return false;
         }
         true
@@ -7260,7 +7314,7 @@ impl AppState {
     ) {
         let grouped = columns.len() > 1;
         if grouped && self.handle.begin_macro(kind).is_err() {
-            self.fail("Impossible de grouper le changement des colonnes".to_string());
+            self.fail(tr!("error-columns-group"));
             return;
         }
         for &column in columns {
@@ -7275,7 +7329,7 @@ impl AppState {
     fn set_columns_role_grouped(&mut self, columns: &[NodeId], role: ColumnRole) {
         let grouped = columns.len() > 1;
         if grouped && self.handle.begin_macro(MacroKind::SetColumnsRole).is_err() {
-            self.fail("Impossible de grouper le changement des colonnes".to_string());
+            self.fail(tr!("error-columns-group"));
             return;
         }
         for &column in columns {
@@ -7288,9 +7342,9 @@ impl AppState {
 
     fn end_grouped_macro(&mut self) {
         if let Err(err) = self.handle.end_macro() {
-            self.fail(format!(
-                "Clôture de l'entrée d'historique impossible : {}",
-                errors::session::error_message(&err)
+            self.fail(tr!(
+                "error-group-close",
+                cause = errors::session::error_message(&err)
             ));
         }
         self.refresh();
@@ -7381,9 +7435,7 @@ impl AppState {
             }
         }
         if self.handle.begin_macro(MacroKind::Import).is_err() {
-            self.fail(
-                "Impossible de grouper l'import dans une seule entrée d'historique".to_string(),
-            );
+            self.fail(tr!("error-import-group"));
             return;
         }
         // Accumulées plutôt que passées à `self.fail` au fil de la boucle :
@@ -7480,11 +7532,19 @@ impl AppState {
         // toujours **pendant** que la macro est ouverte : sans ce dernier
         // rafraîchissement, `can_undo` resterait sur l'état d'avant la clôture.
         self.refresh();
-        let summary = format!("{imported} fichier(s) importé(s) sur {}", paths.len());
         if failures.is_empty() {
-            self.notice(summary);
+            self.notice(tr!(
+                "status-import-done",
+                imported = imported,
+                total = paths.len()
+            ));
         } else {
-            self.fail(format!("{summary} — {}", failures.join(" ; ")));
+            self.fail(tr!(
+                "error-import-partial",
+                imported = imported,
+                total = paths.len(),
+                failures = failures.join(" ; ")
+            ));
         }
     }
 
@@ -7679,15 +7739,15 @@ impl AppState {
     fn plot_columns(&mut self, sheet: NodeId, columns: Vec<NodeId>, plot_type: PlotType) {
         let planned = series_from_columns(&self.snapshot.tree, sheet, &columns, &plot_type, 0, 0);
         if planned.is_empty() {
-            self.fail("Aucune colonne de rôle Y dans la sélection : rien à tracer".to_string());
+            self.fail(tr!("error-plot-no-y"));
             return;
         }
         let Some(book) = self.snapshot.tree.node(sheet).and_then(Node::parent) else {
-            self.fail(format!("{sheet} n'est pas une feuille de ce projet"));
+            self.fail(tr!("error-sheet-gone"));
             return;
         };
         let Some(parent) = self.snapshot.tree.node(book).and_then(Node::parent) else {
-            self.fail(format!("{book} n'a pas de dossier parent"));
+            self.fail(tr!("error-workbook-no-folder"));
             return;
         };
         // Des courbes tracées ensemble forment un groupe (#177).
@@ -7735,15 +7795,15 @@ impl AppState {
             return;
         };
         let Some(sheet) = self.snapshot.tree.node(first).and_then(Node::parent) else {
-            self.fail(format!("{first} n'est pas une colonne de ce projet"));
+            self.fail(tr!("error-column-gone"));
             return;
         };
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
-            self.fail(format!("{graph} n'est pas un graphe de ce projet"));
+            self.fail(tr!("error-graph-gone"));
             return;
         };
         let Some(target) = spec.panels.get_mut(panel) else {
-            self.fail(format!("{graph} n'a pas de calque {panel}"));
+            self.fail(tr!("error-layer-gone"));
             return;
         };
         let plot_type = plot_type.unwrap_or_else(|| panel_plot_type(target));
@@ -7766,7 +7826,7 @@ impl AppState {
             secondary_start,
         );
         if planned.is_empty() {
-            self.fail("Aucune colonne de rôle Y dans la sélection : rien à ajouter".to_string());
+            self.fail(tr!("error-add-no-y"));
             return;
         }
         if let Some(target) = spec.panels.get_mut(panel) {
@@ -7796,12 +7856,12 @@ impl AppState {
     /// ce projet ou si `panel` n'existe pas.
     fn add_layer(&mut self, graph: NodeId, panel: usize, x_top: bool, y_right: bool) {
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
-            self.fail(format!("{graph} n'est pas un graphe de ce projet"));
+            self.fail(tr!("error-graph-gone"));
             return;
         };
         let base = overlay_base(&spec, panel);
         let Some(base_panel) = spec.panels.get(base).cloned() else {
-            self.fail(format!("{graph} n'a pas de calque {panel}"));
+            self.fail(tr!("error-layer-gone"));
             return;
         };
         spec.panels.push(PanelSpec::overlay_on(
@@ -7831,11 +7891,11 @@ impl AppState {
         axis: RowAxis,
     ) {
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
-            self.fail(format!("{graph} n'est pas un graphe de ce projet"));
+            self.fail(tr!("error-graph-gone"));
             return;
         };
         if spec.panels.get(panel).is_none() {
-            self.fail(format!("{graph} n'a pas de calque {panel}"));
+            self.fail(tr!("error-layer-gone"));
             return;
         }
         let Some(&anchor) = x_prime_columns(&self.snapshot.tree, sheet).first() else {
@@ -7912,7 +7972,7 @@ impl AppState {
             .and_then(Node::parent)
             .and_then(|book| self.snapshot.tree.node(book).and_then(Node::parent))
         else {
-            self.fail(format!("{sheet} n'est pas une feuille de ce projet"));
+            self.fail(tr!("error-sheet-gone"));
             return;
         };
         let mut panel = PanelSpec::default();
@@ -7961,11 +8021,7 @@ impl AppState {
     /// révision ne bouge pas.
     #[cfg(not(feature = "python"))]
     fn run_script(&mut self) {
-        self.fail(
-            "Impossible d'exécuter un script : ce binaire est compilé sans le pont Python \
-             (feature `python` absente)."
-                .to_string(),
-        );
+        self.fail(tr!("error-script-unavailable"));
     }
 
     /// Démarre une exécution de script sur un fil détaché, en réutilisant le
@@ -7977,15 +8033,11 @@ impl AppState {
     #[cfg(feature = "python")]
     fn run_script(&mut self) {
         if self.pending_script.is_some() {
-            self.fail("Un script est déjà en cours d'exécution.".to_string());
+            self.fail(tr!("error-script-running"));
             return;
         }
         let Some(python) = self.python.clone() else {
-            self.fail(
-                "Aucun interpréteur Python n'a été localisé pour ce binaire \
-                 (STOKESFORGE_PYTHON_HOME, ou dist/.../lib/python)."
-                    .to_string(),
-            );
+            self.fail(tr!("error-script-no-python"));
             return;
         };
         let existing_engine = self.engine.clone();
@@ -8018,9 +8070,12 @@ impl AppState {
         match spawned {
             Ok(_detached) => {
                 self.pending_script = Some(reply_rx);
-                self.notice("Script en cours d'exécution…".to_string());
+                self.notice(tr!("status-script-running"));
             }
-            Err(err) => self.fail(format!("Impossible de démarrer le fil de script : {err}")),
+            Err(err) => self.fail(tr!(
+                "error-script-start",
+                cause = errors::io::error_message(&err)
+            )),
         }
     }
 
@@ -8040,16 +8095,13 @@ impl AppState {
         let interrupted = outcome.interrupted;
         let failed = outcome.error.is_some();
         self.script_output = Some(ScriptOutput::from(outcome));
-        self.notice(
-            if interrupted {
-                "Script interrompu."
-            } else if failed {
-                "Script terminé avec une exception : voir la sortie."
-            } else {
-                "Script exécuté."
-            }
-            .to_string(),
-        );
+        self.notice(if interrupted {
+            tr!("status-script-interrupted")
+        } else if failed {
+            tr!("status-script-exception")
+        } else {
+            tr!("status-script-done")
+        });
         self.refresh();
     }
 
@@ -8057,11 +8109,7 @@ impl AppState {
     /// Python.
     #[cfg(not(feature = "python"))]
     fn interrupt_script(&mut self) {
-        self.fail(
-            "Impossible d'interrompre un script : ce binaire est compilé sans le pont Python \
-             (feature `python` absente)."
-                .to_string(),
-        );
+        self.fail(tr!("error-script-unavailable"));
     }
 
     /// Demande l'arrêt du script en cours. Ne bloque pas : pose un drapeau
@@ -8077,9 +8125,9 @@ impl AppState {
         match engine {
             Some(engine) if self.pending_script.is_some() => {
                 engine.interrupt();
-                self.notice("Interruption demandée.".to_string());
+                self.notice(tr!("status-script-interrupt-requested"));
             }
-            _ => self.notice("Aucun script en cours à interrompre.".to_string()),
+            _ => self.notice(tr!("status-script-none-running")),
         }
     }
 }

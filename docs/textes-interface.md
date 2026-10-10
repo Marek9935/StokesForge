@@ -27,7 +27,7 @@ l'interface, mais son mot est déjà fixé.
 | R6 | **Unités.** Champ de l'interface : unité entre parenthèses, symbole SI, après un espace (*Line width (pt)*). **Titre d'axe : grandeur / unité** (IUPAC), symbole ou nom : *ν̃ / cm⁻¹*, *Wavenumber / cm⁻¹* ; un titre repris d'une colonne s'écrit *Nom long / Unités*. Exposants en Unicode dans l'interface (`cm⁻¹`) ; dans un titre d'axe (Typst), `$"cm"^(-1)$`. |
 | R7 | **Libellé court, infobulle précise.** Libellé : 1 à 3 mots. Infobulle : l'effet **à la 3ᵉ personne** (« Adds a workbook », jamais « Add a workbook »), la valeur par défaut si elle compte, le raccourci ; jamais une répétition du libellé. Un geste s'écrit comme un geste (« Right-click to remove »). |
 | R8 | **Pas de point final** sur une phrase seule. Point entre deux phrases. |
-| R9 | **Message = ce qui s'est passé, puis quoi faire.** Ni « please », ni excuse, ni point d'exclamation. Jamais de jargon interne : *session, nœud, arbre, id, fil, spec, commande, entrée d'historique, jeton, recette*. |
+| R9 | **Message = ce qui s'est passé, puis quoi faire.** Ni « please », ni excuse, ni point d'exclamation. Jamais de jargon interne : *session, nœud, arbre, id, fil, spec, commande, entrée d'historique, jeton, recette*. Jamais de `{err}` : la cause d'une `io::Error` se met en phrase par `errors::io` et entre dans le message en variable (`{ $cause }`). |
 | R10 | **Pas de « (s) »** : pluriel et accord par Fluent. |
 | R11 | **Pas de deux-points** après un libellé de champ. |
 | R12 | **Typographie.** « … » (un caractère), « × » et non « x ». Guillemets « » en français, “ ” en anglais. Espace insécable avant `: ; ? !` en français. |

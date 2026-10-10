@@ -1359,3 +1359,106 @@ results-stale-suffix = { $title } (pas à jour)
 analysis-stale-manual = Pas à jour : les données sources ont changé. Recalculez pour mettre cette colonne à jour
 analysis-stale-input-missing = Pas à jour : une colonne source a été supprimée. Modifiez le calcul ou détachez cette colonne
 analysis-stale-failed = Pas à jour : le dernier recalcul a échoué ({ $detail })
+
+## Erreurs du système de fichiers (#216)
+
+error-io-not-found = Fichier ou dossier introuvable
+error-io-permission-denied = Accès refusé
+error-io-already-exists = Il existe déjà
+error-io-storage-full = Le disque est plein
+error-io-read-only = L'emplacement est en lecture seule
+error-io-invalid-data = Le contenu est invalide
+error-io-invalid-input = Emplacement ou nom invalide
+error-io-interrupted = L'opération a été interrompue
+error-io-unexpected-eof = Le fichier se termine de façon inattendue
+error-io-is-directory = C'est un dossier, pas un fichier
+error-io-not-directory = C'est un fichier, pas un dossier
+error-io-timed-out = L'opération a expiré
+error-io-other = { $detail }
+
+## Messages de la barre d'état (#216)
+
+error-window-geometry = Impossible de mettre à jour la position de la fenêtre : { $cause }
+error-plot-settings-cancel = Impossible d'annuler les propriétés du graphe : { $cause }
+error-plot-settings-undo-group = Les modifications des propriétés du graphe ne pourront pas être annulées en une fois : { $cause }
+error-plot-settings-block-detached = Les propriétés du graphe sont ouvertes. Les valider ou les annuler avant de modifier une fenêtre détachée
+error-preferences-not-saved = Impossible d'enregistrer les préférences : { $cause }
+error-colors-session-only = Les couleurs enregistrées ne seront gardées que pour cette session : { $cause }
+error-script-vanished = Le moteur de script s'est arrêté. Relancer le script
+error-drop-plot-settings-open = Valider ou annuler les propriétés du graphe avant de déposer des fichiers
+error-import-running = Un import est déjà en cours
+status-import-progress = Import en cours… { $done } sur { $total } { $total ->
+    [one] fichier
+   *[other] fichiers
+}
+error-import-start = Impossible de lancer l'import : { $cause }
+error-import-stopped = L'import s'est arrêté avant la fin
+error-refresh-no-imported-column = Cette feuille n'a aucune colonne importée d'un fichier
+error-refresh-failed = Actualisation impossible : { $failures }
+error-refresh-group = Impossible d'actualiser les colonnes
+error-refresh-close-group = l'actualisation n'a pas pu être regroupée en une seule étape d'annulation
+status-refresh-done = { $count ->
+    [one] { $count } colonne actualisée depuis son fichier
+   *[other] { $count } colonnes actualisées depuis leurs fichiers
+}
+error-refresh-partial = { $count ->
+    [one] { $count } colonne actualisée depuis son fichier
+   *[other] { $count } colonnes actualisées depuis leurs fichiers
+} : { $failures }
+error-import-nothing-to-reopen = Il n'y a aucun import à rouvrir
+status-import-reopened-undone = Dernier import annulé. Régler ses paramètres, puis le relancer
+status-import-reopened-kept = Régler les paramètres du dernier import, puis le relancer. L'import précédent reste en place
+status-template-chosen = Modèle « { $name } » choisi d'après le fichier
+status-template-exported = Modèle exporté dans { $path }
+error-template-export = Impossible d'exporter le modèle : { $cause }
+status-template-imported = Modèle « { $name } » importé
+error-template-import-not-saved = Modèle importé mais non enregistré : { $cause }
+error-template-name-required = Donner un nom au modèle pour l'enregistrer
+error-template-save = Impossible d'enregistrer le modèle : { $cause }
+status-template-saved = Modèle « { $name } » enregistré
+error-template-delete = Impossible de supprimer le modèle : { $cause }
+status-template-deleted = Modèle « { $name } » supprimé
+error-import-choose-file-first = Choisir un fichier avant de détecter l'en-tête
+error-export-unknown-format = Format d'export inconnu pour { $path }. Choisir .svg, .pdf ou .png
+status-graph-exported = Graphique exporté dans { $path }
+error-sheet-gone = Cette feuille n'est plus dans le projet
+error-sheet-no-workbook = Cette feuille n'est dans aucun classeur
+error-column-gone = Cette colonne n'est plus dans le projet
+error-workbook-no-folder = Ce classeur n'est dans aucun dossier
+error-graph-gone = Ce graphique n'est plus dans le projet
+error-layer-gone = Ce calque n'est plus dans le graphique
+error-clear-group = Impossible d'effacer la sélection
+error-paste-group = Impossible de coller
+error-columns-group = Impossible de modifier les colonnes
+error-create-group = Impossible de créer les objets
+error-import-group = Impossible d'importer les fichiers
+error-group-close = Impossible de terminer l'opération en une seule étape d'annulation : { $cause }
+error-paste-no-cell = Sélectionner une cellule où coller
+status-paste-absolute-empty = Rien à coller en absolu : copier d'abord depuis la grille
+status-import-done = { $imported ->
+    [one] { $imported } fichier importé
+   *[other] { $imported } fichiers importés
+} sur { $total }
+error-import-partial = { $imported ->
+    [one] { $imported } fichier importé
+   *[other] { $imported } fichiers importés
+} sur { $total } : { $failures }
+error-plot-no-y = Aucune colonne Y sélectionnée. Sélectionner une colonne Y à tracer
+error-add-no-y = Aucune colonne Y sélectionnée. Sélectionner une colonne Y à ajouter
+error-script-unavailable = Les scripts ne sont pas disponibles dans cette version de StokesForge
+error-script-running = Un script est déjà en cours d'exécution
+error-script-no-python = Python est introuvable. Définir STOKESFORGE_PYTHON_HOME ou réinstaller StokesForge
+status-script-running = Exécution du script…
+error-script-start = Impossible de démarrer le script : { $cause }
+status-script-interrupted = Script interrompu
+status-script-exception = Le script s'est terminé par une exception. Voir la sortie
+status-script-done = Script terminé
+status-script-interrupt-requested = Interruption demandée
+status-script-none-running = Aucun script en cours
+error-import-not-open = La fenêtre d'import est fermée
+error-template-import-read = Impossible de lire le modèle { $path } : { $cause }
+error-template-import-invalid = Le modèle { $path } n'est pas valide : { $detail }
+status-import-dropped = { $count ->
+    [one] { $count } fichier importé avec le modèle « { $models } »
+   *[other] { $count } fichiers importés avec le modèle « { $models } »
+}

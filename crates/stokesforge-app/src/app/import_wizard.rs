@@ -12,6 +12,7 @@
 use eframe::egui;
 use stokesforge_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 
+use crate::errors;
 use crate::file_picker::PickRequest;
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState, ImportDestination, ImportLineAction, ImportStep};
@@ -395,7 +396,10 @@ fn import_preview_pane(
             ui.weak(tr!("import-preview-empty"));
         }
         Some(Err(message)) => {
-            ui.colored_label(ui.visuals().error_fg_color, message);
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                errors::import::read_message(&message),
+            );
         }
         Some(Ok(file_preview)) => {
             import_line_preview_widget(ui, &file_preview, auto_cut, chosen);
@@ -591,7 +595,10 @@ fn import_file_status_rows(ui: &mut egui::Ui, state: &mut AppState) {
                     ui.weak(tr!("import-files-row-count", count = count));
                 }
                 Err(message) => {
-                    ui.colored_label(ui.visuals().error_fg_color, message);
+                    ui.colored_label(
+                        ui.visuals().error_fg_color,
+                        errors::import::read_message(message),
+                    );
                 }
             }
             if icon_button(
@@ -1013,7 +1020,10 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
             return;
         }
         Some(Err(message)) => {
-            ui.colored_label(ui.visuals().error_fg_color, message);
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                errors::import::read_message(&message),
+            );
             return;
         }
         Some(Ok(columns)) => columns,

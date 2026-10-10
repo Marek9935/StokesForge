@@ -210,6 +210,7 @@ use stokesforge_render_egui::GraphView;
 use stokesforge_session::WindowGeometry;
 
 use crate::color_picker::publish_saved_colors;
+use crate::errors;
 use crate::i18n;
 use crate::preferences::Preferences;
 use crate::state::{active_graph, Action, AppState, ImportDestination, RowAxis};
@@ -634,8 +635,10 @@ impl StokesForgeApp {
     fn save_toolbar_layout(&mut self) {
         let layout = self.toolbars.layout().to_json();
         if let Err(err) = Preferences::load().save_toolbars(layout) {
-            self.state
-                .notice(tr!("status-toolbars-not-saved", detail = err.to_string()));
+            self.state.notice(tr!(
+                "status-toolbars-not-saved",
+                detail = errors::io::error_message(&err)
+            ));
         }
     }
 
@@ -645,8 +648,10 @@ impl StokesForgeApp {
     fn choose_language(&mut self, language: i18n::Language) {
         i18n::set_language(language);
         if let Err(err) = Preferences::load().save_language(language.tag()) {
-            self.state
-                .notice(tr!("status-language-not-saved", detail = err.to_string()));
+            self.state.notice(tr!(
+                "status-language-not-saved",
+                detail = errors::io::error_message(&err)
+            ));
         }
     }
 

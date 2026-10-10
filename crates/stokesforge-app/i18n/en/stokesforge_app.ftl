@@ -1367,3 +1367,106 @@ results-stale-suffix = { $title } (out of date)
 analysis-stale-manual = Out of date: the source data changed. Recalculate to update this column
 analysis-stale-input-missing = Out of date: a source column was deleted. Edit the calculation or detach this column
 analysis-stale-failed = Out of date: the last recalculation failed ({ $detail })
+
+## Erreurs du système de fichiers (#216)
+
+error-io-not-found = File or folder not found
+error-io-permission-denied = Access denied
+error-io-already-exists = It already exists
+error-io-storage-full = The disk is full
+error-io-read-only = The location is read-only
+error-io-invalid-data = The content is invalid
+error-io-invalid-input = Invalid location or name
+error-io-interrupted = The operation was interrupted
+error-io-unexpected-eof = The file ends unexpectedly
+error-io-is-directory = This is a folder, not a file
+error-io-not-directory = This is a file, not a folder
+error-io-timed-out = The operation timed out
+error-io-other = { $detail }
+
+## Messages de la barre d'état (#216)
+
+error-window-geometry = Could not update the window position: { $cause }
+error-plot-settings-cancel = Could not cancel the graph properties: { $cause }
+error-plot-settings-undo-group = Changes to the graph properties cannot be undone together: { $cause }
+error-plot-settings-block-detached = Graph properties are open. Apply or cancel them before changing a detached window
+error-preferences-not-saved = Could not save the preferences: { $cause }
+error-colors-session-only = Saved colors will last for this session only: { $cause }
+error-script-vanished = The script engine stopped unexpectedly. Run the script again
+error-drop-plot-settings-open = Apply or cancel the graph properties before dropping files
+error-import-running = An import is already running
+status-import-progress = Importing… { $done } of { $total } { $total ->
+    [one] file
+   *[other] files
+}
+error-import-start = Could not start the import: { $cause }
+error-import-stopped = The import stopped before the end
+error-refresh-no-imported-column = This sheet has no column imported from a file
+error-refresh-failed = Could not refresh: { $failures }
+error-refresh-group = Could not refresh the columns
+error-refresh-close-group = the refresh could not be completed as a single undo step
+status-refresh-done = { $count ->
+    [one] { $count } column refreshed from its file
+   *[other] { $count } columns refreshed from their files
+}
+error-refresh-partial = { $count ->
+    [one] { $count } column refreshed from its file
+   *[other] { $count } columns refreshed from their files
+}: { $failures }
+error-import-nothing-to-reopen = There is no import to reopen
+status-import-reopened-undone = Last import undone. Adjust its settings, then run it again
+status-import-reopened-kept = Adjust the last import settings, then run it again. The previous import stays in place
+status-template-chosen = Template “{ $name }” chosen from the file
+status-template-exported = Template exported to { $path }
+error-template-export = Could not export the template: { $cause }
+status-template-imported = Template “{ $name }” imported
+error-template-import-not-saved = Template imported but not saved: { $cause }
+error-template-name-required = Give the template a name to save it
+error-template-save = Could not save the template: { $cause }
+status-template-saved = Template “{ $name }” saved
+error-template-delete = Could not delete the template: { $cause }
+status-template-deleted = Template “{ $name }” deleted
+error-import-choose-file-first = Choose a file before detecting the header
+error-export-unknown-format = Unknown export format for { $path }. Choose .svg, .pdf or .png
+status-graph-exported = Graph exported to { $path }
+error-sheet-gone = This sheet is no longer in the project
+error-sheet-no-workbook = This sheet is not in a workbook
+error-column-gone = This column is no longer in the project
+error-workbook-no-folder = This workbook is not in a folder
+error-graph-gone = This graph is no longer in the project
+error-layer-gone = This layer is no longer in the graph
+error-clear-group = Could not clear the selection
+error-paste-group = Could not paste
+error-columns-group = Could not change the columns
+error-create-group = Could not create the objects
+error-import-group = Could not import the files
+error-group-close = Could not complete the operation as a single undo step: { $cause }
+error-paste-no-cell = Select a cell to paste into
+status-paste-absolute-empty = Nothing to paste as absolute: copy from the grid first
+status-import-done = { $imported ->
+    [one] { $imported } file imported
+   *[other] { $imported } files imported
+} of { $total }
+error-import-partial = { $imported ->
+    [one] { $imported } file imported
+   *[other] { $imported } files imported
+} of { $total }: { $failures }
+error-plot-no-y = No Y column selected. Select a Y column to plot
+error-add-no-y = No Y column selected. Select a Y column to add
+error-script-unavailable = Scripts are not available in this build of StokesForge
+error-script-running = A script is already running
+error-script-no-python = Python was not found. Set STOKESFORGE_PYTHON_HOME or reinstall StokesForge
+status-script-running = Running script…
+error-script-start = Could not start the script: { $cause }
+status-script-interrupted = Script interrupted
+status-script-exception = Script ended with an exception. See the output
+status-script-done = Script finished
+status-script-interrupt-requested = Interrupt requested
+status-script-none-running = No script is running
+error-import-not-open = The import window is closed
+error-template-import-read = Could not read the template { $path }: { $cause }
+error-template-import-invalid = The template { $path } is not valid: { $detail }
+status-import-dropped = { $count ->
+    [one] { $count } file imported with template “{ $models }”
+   *[other] { $count } files imported with template “{ $models }”
+}
