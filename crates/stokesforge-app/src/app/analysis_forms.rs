@@ -21,21 +21,29 @@ use crate::analysis::{
     DirectAlgorithm, Preset,
 };
 use crate::icons::{icon_button, Icon, IconRole};
+use crate::number_field::number_field;
+use crate::quantities;
 use crate::{theme, tr};
 
-/// Un nombre réel modifiable, sans bornes mais **fini** : « inf » ou « nan »
-/// ne s'écrivent pas dans le fichier (ils y deviennent `null`) et feraient
-/// perdre le calcul au rechargement.
+/// Un nombre réel modifiable, sans bornes mais **fini** (la brique refuse
+/// « inf » et « nan » : ils deviendraient `null` dans le fichier et feraient
+/// perdre le calcul au rechargement). Son identifiant est celui de sa place
+/// dans la rangée.
 fn number(ui: &mut egui::Ui, value: &mut f64) -> bool {
-    let before = *value;
-    let changed = ui
-        .add(egui::DragValue::new(value).max_decimals(8).speed(0.01))
-        .changed();
-    if !value.is_finite() {
-        *value = before;
-        return false;
-    }
-    changed
+    let salt = ui.next_auto_id();
+    ui.skip_ahead_auto_ids(1);
+    number_field(ui, salt, value, &quantities::FREE).changed
+}
+
+/// Un entier borné par sa grandeur ; même identifiant que [`number`].
+fn whole<T: crate::number_field::Number>(
+    ui: &mut egui::Ui,
+    value: &mut T,
+    quantity: &quantities::Quantity,
+) -> bool {
+    let salt = ui.next_auto_id();
+    ui.skip_ahead_auto_ids(1);
+    number_field(ui, salt, value, quantity).changed
 }
 
 /// Un nombre facultatif : un champ texte vide vaut « automatique ». Le texte en
@@ -340,7 +348,7 @@ fn baseline_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
             range_rows(ui, id.with("zones"), &mut b.zones);
             ui.horizontal(|ui| {
                 ui.label(tr!("analysis-baseline-degree"));
-                ui.add(egui::DragValue::new(&mut b.degree).range(1..=9));
+                whole(ui, &mut b.degree, &quantities::POLYNOMIAL_DEGREE);
             });
         }
     }
@@ -438,7 +446,7 @@ fn fit_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tre
             let before = *degree;
             ui.horizontal(|ui| {
                 ui.label(tr!("analysis-fit-degree"));
-                ui.add(egui::DragValue::new(degree).range(1..=9));
+                whole(ui, degree, &quantities::POLYNOMIAL_DEGREE);
             });
             if *degree != before {
                 f.reset_params();
@@ -610,16 +618,20 @@ fn peaks_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
     if p.seeds.is_empty() {
         ui.horizontal(|ui| {
             ui.label(tr!("analysis-peaks-prominence"));
-            ui.add(
-                egui::DragValue::new(&mut p.prominence_percent)
-                    .range(0.1..=100.0)
-                    .suffix(" %"),
+            let salt = ui.next_auto_id();
+            ui.skip_ahead_auto_ids(1);
+            number_field(
+                ui,
+                salt,
+                &mut p.prominence_percent,
+                &quantities::PROMINENCE_PERCENT,
             )
+            .response
             .on_hover_text(tr!("analysis-peaks-prominence", "hint"));
         });
         ui.horizontal(|ui| {
             ui.label(tr!("analysis-peaks-max"));
-            ui.add(egui::DragValue::new(&mut p.max_peaks).range(1..=50));
+            whole(ui, &mut p.max_peaks, &quantities::MAX_PEAKS);
         });
     }
     ui.horizontal(|ui| {
@@ -635,7 +647,7 @@ fn reconv_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
     ui.horizontal(|ui| {
         ui.label(tr!("analysis-reconv-components"));
         let before = r.spec.components;
-        ui.add(egui::DragValue::new(&mut r.spec.components).range(1..=4));
+        whole(ui, &mut r.spec.components, &quantities::COMPONENTS);
         if r.spec.components != before {
             r.resize_params();
         }
@@ -680,7 +692,7 @@ fn direct_form(ui: &mut egui::Ui, form: &mut AnalysisForm) {
         DirectAlgorithm::RichardsonLucy => {
             ui.horizontal(|ui| {
                 ui.label(tr!("analysis-direct-iterations"));
-                ui.add(egui::DragValue::new(&mut d.iterations).range(1..=5000));
+                whole(ui, &mut d.iterations, &quantities::ITERATIONS);
             });
         }
         DirectAlgorithm::Wiener => {

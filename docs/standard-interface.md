@@ -30,8 +30,8 @@ les règles R1–R16 de `textes-interface.md`.
 | Élément | Rôle | État |
 |---|---|---|
 | état de champ refusé / ramené (`field_state`) | cadre rouge ou orange, bulle, cycle d'un champ texte validé | **en place** (#219) |
-| brique « nombre » + table des grandeurs | seul champ numérique | à venir (#220) |
-| garde : aucun `DragValue` ni `Slider` hors de la brique nombre | | à venir (#220) |
+| brique « nombre » (`number_field`) + table des grandeurs (`quantities`) | seul champ numérique | **en place** (#220) |
+| garde : aucun `DragValue` ni `Slider` (`aucun_champ_numerique_hors_de_la_brique`) | | **en place** (#220) |
 | formateur des nombres (`stokesforge-core`) | seul formatage affiché | à venir (#222) |
 | brique d'édition sur place | un seul contrat T4 | à venir (#224) |
 | garde : aucune bulle nue sur un champ de formulaire | | à venir (#225) |
@@ -48,7 +48,15 @@ Déjà en place et réutilisées par ce standard : `modal_dialog_with`
 (`app/dialogs.rs`), `hover_help` (`app/hover_help.rs`), `theme::section_title`,
 `MenuSections::section`, `color_field`.
 
-## Champs numériques — à venir (#220, #221)
+## Champs numériques — en place (#220), reste N11 et Auto (#221)
+
+Brique : `stokesforge_app::number_field::number_field(ui, sel, &mut valeur,
+&quantities::GRANDEUR)` (`src/number_field.rs`), table : `src/quantities.rs`
+(`Quantity` : bornes, pas, grand pas, décimales, entier ou non, valeurs
+proposées). Une grandeur neuve s'ajoute à la table, jamais à l'appel ; les 28
+`DragValue` et le `Slider` d'opacité sont migrés, la barre de format des objets
+(épaisseur) aussi (N9). Reste à migrer : le corps de texte de la barre de format
+(il a une entrée « Auto », #221).
 
 - **Une brique « nombre » unique** (N1 → R1, R12). Aspect : champ texte, avec
   `▼` **seulement** si la table des grandeurs propose des valeurs (épaisseur,

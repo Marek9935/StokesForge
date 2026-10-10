@@ -15,6 +15,8 @@ use stokesforge_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 use crate::errors;
 use crate::file_picker::PickRequest;
 use crate::icons::{icon_button, Icon, IconRole};
+use crate::number_field::number_field;
+use crate::quantities;
 use crate::state::{Action, AppState, ImportDestination, ImportLineAction, ImportStep};
 use crate::theme::section_title;
 use crate::tr;
@@ -69,13 +71,7 @@ fn data_end_row(ui: &mut egui::Ui, end: &mut stokesforge_import::DataEnd) {
                 ui.text_edit_singleline(text);
             }
             DataEnd::LinesAfterHeader(n) | DataEnd::LinesBeforeEnd(n) => {
-                let mut value = *n as i64;
-                if ui
-                    .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
-                    .changed()
-                {
-                    *n = value.max(0) as usize;
-                }
+                number_field(ui, "import_n", n, &quantities::COUNT);
             }
             _ => {}
         }
@@ -159,21 +155,14 @@ fn subheader_role_row(
             }
             if let Some(r) = range {
                 ui.label(tr!("import-header-range-from"));
-                let mut from = r.from as i64;
-                if ui
-                    .add(egui::DragValue::new(&mut from).range(1..=i64::MAX))
-                    .changed()
-                {
-                    r.from = from.max(1) as usize;
-                }
+                number_field(
+                    ui,
+                    "import_range_from",
+                    &mut r.from,
+                    &quantities::LINE_NUMBER,
+                );
                 ui.label(tr!("import-header-range-to"));
-                let mut to = r.to as i64;
-                if ui
-                    .add(egui::DragValue::new(&mut to).range(1..=i64::MAX))
-                    .changed()
-                {
-                    r.to = to.max(1) as usize;
-                }
+                number_field(ui, "import_range_to", &mut r.to, &quantities::LINE_NUMBER);
             }
         });
     });
@@ -638,24 +627,22 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
     ui.horizontal(|ui| {
         ui.label(tr!("import-format-skip-chars"))
             .on_hover_text(tr!("import-format-skip-chars", "hint"));
-        let mut value = recipe.skip_chars as i64;
-        if ui
-            .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
-            .changed()
-        {
-            recipe.skip_chars = value.max(0) as usize;
-        }
+        number_field(
+            ui,
+            "import_recipe_skip_chars",
+            &mut recipe.skip_chars,
+            &quantities::COUNT,
+        );
     });
     ui.horizontal(|ui| {
         ui.label(tr!("import-format-skip-lines"))
             .on_hover_text(tr!("import-format-skip-lines", "hint"));
-        let mut value = recipe.skip_data_rows as i64;
-        if ui
-            .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
-            .changed()
-        {
-            recipe.skip_data_rows = value.max(0) as usize;
-        }
+        number_field(
+            ui,
+            "import_recipe_skip_data_rows",
+            &mut recipe.skip_data_rows,
+            &quantities::COUNT,
+        );
     });
 }
 
@@ -879,22 +866,20 @@ fn import_step_header(
     if structured {
         ui.horizontal(|ui| {
             ui.label(tr!("import-header-lines"));
-            let mut value = recipe.header_layout.main_header_lines as i64;
-            if ui
-                .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
-                .changed()
-            {
-                recipe.header_layout.main_header_lines = value.max(0) as usize;
-            }
+            number_field(
+                ui,
+                "import_recipe_header_layout_main_header_lines",
+                &mut recipe.header_layout.main_header_lines,
+                &quantities::COUNT,
+            );
             ui.label(tr!("import-header-subheader-lines"))
                 .on_hover_text(tr!("import-header-subheader-lines", "hint"));
-            let mut value = recipe.header_layout.subheader_lines as i64;
-            if ui
-                .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
-                .changed()
-            {
-                recipe.header_layout.subheader_lines = value.max(0) as usize;
-            }
+            number_field(
+                ui,
+                "import_recipe_header_layout_subheader_lines",
+                &mut recipe.header_layout.subheader_lines,
+                &quantities::COUNT,
+            );
         });
     }
     if ui
@@ -951,13 +936,12 @@ fn import_step_header(
     ui.horizontal(|ui| {
         ui.label(tr!("import-header-skip-footer"))
             .on_hover_text(tr!("import-header-skip-footer", "hint"));
-        let mut value = recipe.footer_skip_lines as i64;
-        if ui
-            .add(egui::DragValue::new(&mut value).range(0..=i64::MAX))
-            .changed()
-        {
-            recipe.footer_skip_lines = value.max(0) as usize;
-        }
+        number_field(
+            ui,
+            "import_recipe_footer_skip_lines",
+            &mut recipe.footer_skip_lines,
+            &quantities::COUNT,
+        );
     });
     ui.separator();
     // Garder les valeurs choisies pendant le grisage pour les retrouver

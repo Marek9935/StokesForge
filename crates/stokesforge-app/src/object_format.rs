@@ -13,9 +13,6 @@
 
 use stokesforge_plot::{SeriesSpec, ShapeSpec};
 
-/// Épaisseurs de trait proposées, en points.
-pub const LINE_WIDTHS: [f64; 9] = [0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0];
-
 /// Un réglage que la barre sait poser.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObjectFormat {

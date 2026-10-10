@@ -18,6 +18,8 @@ use stokesforge_core::{NodeId, Tree};
 use stokesforge_render_egui::{GraphView, TextTarget};
 
 use crate::color_picker::{ColorUsage, PickerEnv};
+use crate::number_field::number_field;
+use crate::quantities;
 use crate::state::{series_list_label, Action};
 use crate::tr;
 
@@ -424,17 +426,18 @@ pub(super) fn annotation_editor_ui(
                         &mut env,
                     );
                     ui.label(tr!("plot-text-size"));
-                    let (low, high) = stokesforge_render_egui::AnnotationSpec::SIZE_RANGE;
-                    ui.add(
-                        egui::DragValue::new(&mut editor.draft.size)
-                            .range(low..=high)
-                            .speed(0.2),
+                    number_field(
+                        ui,
+                        ("annotation_size", id),
+                        &mut editor.draft.size,
+                        &quantities::TEXT_SIZE,
                     );
                     ui.label(tr!("plot-text-rotation"));
-                    ui.add(
-                        egui::DragValue::new(&mut editor.draft.rotation)
-                            .range(-180.0..=180.0)
-                            .speed(1.0),
+                    number_field(
+                        ui,
+                        ("annotation_rotation", id),
+                        &mut editor.draft.rotation,
+                        &quantities::ROTATION,
                     );
                     if ui
                         .button(tr!("plot-text-ok"))

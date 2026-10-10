@@ -16,6 +16,8 @@ use stokesforge_plot::{
 };
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
+use crate::number_field::number_field;
+use crate::quantities;
 use crate::state::{
     parse_x_prime, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
 };
@@ -57,8 +59,9 @@ const CURVE_SETTINGS_HEIGHT: f32 = 500.0;
 /// façons de finir une interaction :
 /// - **texte** (titres, libellés) : `lost_focus()`,
 ///   comme `note_contents`/`cell_widget` — jamais à chaque frappe ;
-/// - **glissé numérique** (épaisseur de trait, taille de marqueur, bornes
-///   d'axe) : `drag_stopped() || lost_focus()` ;
+/// - **nombre** (épaisseur de trait, taille de marqueur, bornes d'axe, brique
+///   [`crate::number_field`]) : `NumberResponse::changed` — Entrée, sortie du
+///   champ, flèche, cran de molette ou choix dans la liste ;
 /// - **case à cocher / menu déroulant** : un seul événement discret par
 ///   clic, validé tout de suite.
 ///
@@ -612,20 +615,21 @@ fn axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec, env: &mut PickerEnv) -> b
     if !axis.auto_range {
         let mut min = axis.range_min.unwrap_or(0.0);
         let mut max = axis.range_max.unwrap_or(0.0);
-        let min_response = ui.horizontal(|ui| {
-            ui.label(tr!("plot-axes-min"));
-            ui.add(egui::DragValue::new(&mut min).speed(0.1))
-        });
-        let max_response = ui.horizontal(|ui| {
-            ui.label(tr!("plot-axes-max"));
-            ui.add(egui::DragValue::new(&mut max).speed(0.1))
-        });
+        let min_changed = ui
+            .horizontal(|ui| {
+                ui.label(tr!("plot-axes-min"));
+                number_field(ui, "axis_min", &mut min, &quantities::FREE).changed
+            })
+            .inner;
+        let max_changed = ui
+            .horizontal(|ui| {
+                ui.label(tr!("plot-axes-max"));
+                number_field(ui, "axis_max", &mut max, &quantities::FREE).changed
+            })
+            .inner;
         axis.range_min = Some(min);
         axis.range_max = Some(max);
-        let min_inner = min_response.inner;
-        let max_inner = max_response.inner;
-        commit |= min_inner.drag_stopped() || min_inner.lost_focus();
-        commit |= max_inner.drag_stopped() || max_inner.lost_focus();
+        commit |= min_changed || max_changed;
     }
 
     section_title(ui, tr!("plot-axes-display-section"));
@@ -764,16 +768,18 @@ pub(super) fn series_editor(
         }
     });
 
-    let width_response = ui.horizontal(|ui| {
-        ui.label(tr!("plot-series-line-width"));
-        ui.add(
-            egui::DragValue::new(&mut series.line.width)
-                .speed(0.1)
-                .range(0.0..=20.0),
-        )
-    });
-    let width_inner = width_response.inner;
-    commit |= width_inner.drag_stopped() || width_inner.lost_focus();
+    commit |= ui
+        .horizontal(|ui| {
+            ui.label(tr!("plot-series-line-width"));
+            number_field(
+                ui,
+                "series_line_width",
+                &mut series.line.width,
+                &quantities::LINE_WIDTH,
+            )
+            .changed
+        })
+        .inner;
 
     section_title(ui, tr!("plot-series-symbol-section"));
     ui.horizontal(|ui| {
@@ -800,16 +806,18 @@ pub(super) fn series_editor(
         }
     });
 
-    let size_response = ui.horizontal(|ui| {
-        ui.label(tr!("plot-series-symbol-size"));
-        ui.add(
-            egui::DragValue::new(&mut series.symbol.size)
-                .speed(0.1)
-                .range(0.0..=40.0),
-        )
-    });
-    let size_inner = size_response.inner;
-    commit |= size_inner.drag_stopped() || size_inner.lost_focus();
+    commit |= ui
+        .horizontal(|ui| {
+            ui.label(tr!("plot-series-symbol-size"));
+            number_field(
+                ui,
+                "series_symbol_size",
+                &mut series.symbol.size,
+                &quantities::SYMBOL_SIZE,
+            )
+            .changed
+        })
+        .inner;
 
     commit |= per_series(ui, locked, |ui| {
         color_field(
@@ -1510,54 +1518,62 @@ mod tests {
 
     // -- Quand le brouillon est validé --------------------------------------
 
-    /// Glisse de 40 points vers la droite le `DragValue` qui affiche
-    /// `valeur`, en quatre images ; `pendant` lit l'état avant le
-    /// relâchement, qui vient ensuite.
-    fn glisser(
-        context: &egui::Context,
-        state: &mut AppState,
-        valeur: &str,
-        pendant: impl FnOnce(&AppState),
-    ) {
+    /// Clique dans le champ numérique qui affiche `valeur` (focus, tout le texte
+    /// sélectionné), puis rend le centre du champ pour la suite du geste.
+    fn focaliser(context: &egui::Context, state: &mut AppState, valeur: &str) -> egui::Pos2 {
         let peints = peindre_fenetre(context, state, Vec::new());
-        let depart = texte_exact(&peints, valeur).centre;
-        let mut events = vec![
-            vec![egui::Event::PointerMoved(depart)],
-            vec![clic(depart, true)],
-        ];
-        for pas in 1..=4 {
-            let pos = depart + egui::vec2(10.0 * pas as f32, 0.0);
-            events.push(vec![egui::Event::PointerMoved(pos)]);
-        }
-        for image_events in events {
-            image(context, image_events, |ui| {
-                plot_settings_window(ui.ctx(), state)
-            });
-        }
-        pendant(state);
-        let fin = depart + egui::vec2(40.0, 0.0);
-        image(context, vec![clic(fin, false)], |ui| {
+        let centre = texte_exact(&peints, valeur).centre;
+        cliquer(context, centre, egui::PointerButton::Primary, |ui| {
             plot_settings_window(ui.ctx(), state)
         });
+        centre
     }
 
-    /// Doc de [`plot_settings_window`] : un glissé numérique ne valide le
-    /// brouillon qu'au relâchement — pendant le glissé, le brouillon suit la
-    /// souris (aperçu) mais le modèle ne bouge pas ; au relâchement, le
-    /// modèle reprend le brouillon. Épaisseur du trait (série) et borne
+    fn une_image(context: &egui::Context, state: &mut AppState, events: Vec<egui::Event>) {
+        image(context, events, |ui| plot_settings_window(ui.ctx(), state));
+    }
+
+    /// Un nombre tapé ne valide le brouillon qu'à Entrée (N3) — tant que le
+    /// champ est ouvert, ni le brouillon ni le modèle ne bougent ; à Entrée,
+    /// le modèle reprend le brouillon. Épaisseur du trait (série) et borne
     /// minimale (axe).
     #[test]
-    fn un_glisse_numerique_n_est_valide_qu_au_relachement() {
-        type Lire = fn(&PlotSpec) -> f64;
-        let cas: [(PlotSettingsTab, Option<PlotAxis>, &str, Lire); 2] = [
-            (PlotSettingsTab::Series, None, "2.5", |s| {
-                s.panels[0].series[0].line.width
-            }),
-            (PlotSettingsTab::Axes, Some(PlotAxis::Left), "-3.5", |s| {
-                s.panels[0].left.range_min.unwrap()
-            }),
+    fn un_nombre_tape_n_est_valide_qu_a_entree() {
+        struct Cas {
+            tab: PlotSettingsTab,
+            axis: Option<PlotAxis>,
+            valeur: &'static str,
+            saisi: &'static str,
+            attendu: f64,
+            lire: fn(&PlotSpec) -> f64,
+        }
+        let cas = [
+            Cas {
+                tab: PlotSettingsTab::Series,
+                axis: None,
+                valeur: "2.5",
+                saisi: "3.5",
+                attendu: 3.5,
+                lire: |s| s.panels[0].series[0].line.width,
+            },
+            Cas {
+                tab: PlotSettingsTab::Axes,
+                axis: Some(PlotAxis::Left),
+                valeur: "-3.5",
+                saisi: "-1",
+                attendu: -1.0,
+                lire: |s| s.panels[0].left.range_min.unwrap(),
+            },
         ];
-        for (tab, axis, valeur, lire) in cas {
+        for Cas {
+            tab,
+            axis,
+            valeur,
+            saisi,
+            attendu,
+            lire,
+        } in cas
+        {
             let mut banc = banc(|spec| {
                 panneau(spec).series[0].line.width = 2.5;
                 let left = &mut panneau(spec).left;
@@ -1569,20 +1585,109 @@ mod tests {
             let avant = lire(&banc.modele());
             assert_eq!(Ok(avant), valeur.parse(), "{tab:?} : la valeur affichée");
             let context = contexte();
-            let graph = banc.graph;
-            glisser(&context, &mut banc.state, valeur, |state| {
-                let brouillon = lire(&state.plot_edit().unwrap().spec);
-                let modele = lire(&state.plot_spec(graph).unwrap());
-                assert!(
-                    brouillon > avant,
-                    "{tab:?} : le glissé atteint le brouillon"
-                );
-                assert_eq!(modele, avant, "{tab:?} : validé pendant le glissé");
-            });
-            let apres = lire(&banc.modele());
-            assert!(apres > avant, "{tab:?} : relâché sans validation");
-            assert_eq!(apres, lire(&banc.brouillon()));
+            focaliser(&context, &mut banc.state, valeur);
+            une_image(
+                &context,
+                &mut banc.state,
+                vec![egui::Event::Text(saisi.into())],
+            );
+            une_image(&context, &mut banc.state, Vec::new());
+            assert_eq!(
+                lire(&banc.brouillon()),
+                avant,
+                "{tab:?} : validé à la frappe"
+            );
+            assert_eq!(lire(&banc.modele()), avant, "{tab:?} : modèle touché");
+
+            une_image(&context, &mut banc.state, vec![touche(egui::Key::Enter)]);
+            assert_eq!(lire(&banc.brouillon()), attendu, "{tab:?} : Entrée");
+            assert_eq!(lire(&banc.modele()), attendu, "{tab:?} : modèle");
         }
+    }
+
+    /// Molette sur le champ (focus et curseur dessus) : un pas par cran ; trois
+    /// crans d'affilée ne font qu'**une** entrée d'historique, un seul Annuler
+    /// rend la valeur d'avant.
+    #[test]
+    fn des_crans_de_molette_ne_font_qu_une_entree_d_historique() {
+        let mut banc = banc(|spec| panneau(spec).series[0].line.width = 2.5);
+        banc.ouvrir(PlotSettingsTab::Series, None);
+        let context = contexte();
+        let original = banc.modele();
+        focaliser(&context, &mut banc.state, "2.5");
+        let cran = || {
+            vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Line,
+                delta: egui::vec2(0.0, 1.0),
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        for _ in 0..3 {
+            une_image(&context, &mut banc.state, cran());
+        }
+        une_image(&context, &mut banc.state, Vec::new());
+        let largeur = |spec: &PlotSpec| spec.panels[0].series[0].line.width;
+        assert!((largeur(&banc.brouillon()) - 2.8).abs() < 1e-9);
+        banc.state.close_plot_settings();
+        assert!((largeur(&banc.modele()) - 2.8).abs() < 1e-9);
+        banc.state.dispatch(Action::Undo);
+        assert_eq!(banc.modele(), original, "un seul Annuler");
+    }
+
+    /// F7 : le premier Échap rend au champ sa valeur (le dialogue reste ouvert),
+    /// le suivant fait Annuler du dialogue.
+    #[test]
+    fn echap_rend_la_valeur_puis_annule_le_dialogue() {
+        let mut banc = banc(|spec| panneau(spec).series[0].line.width = 2.5);
+        banc.ouvrir(PlotSettingsTab::Series, None);
+        let context = contexte();
+        focaliser(&context, &mut banc.state, "2.5");
+        une_image(
+            &context,
+            &mut banc.state,
+            vec![egui::Event::Text("9".into())],
+        );
+        une_image(&context, &mut banc.state, vec![touche(egui::Key::Escape)]);
+        une_image(&context, &mut banc.state, Vec::new());
+        assert!(
+            banc.state.plot_settings().is_some(),
+            "premier Échap : le dialogue reste"
+        );
+        assert_eq!(banc.brouillon().panels[0].series[0].line.width, 2.5);
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert!(est_peint(&peints, "2.5"), "la valeur est rendue au champ");
+
+        une_image(&context, &mut banc.state, vec![touche(egui::Key::Escape)]);
+        assert!(
+            banc.state.plot_settings().is_none(),
+            "second Échap : Annuler"
+        );
+    }
+
+    /// Sans focus, la molette ne change pas le champ : elle reste à la fenêtre.
+    #[test]
+    fn la_molette_sans_focus_ne_change_pas_le_champ() {
+        let mut banc = banc(|spec| panneau(spec).series[0].line.width = 2.5);
+        banc.ouvrir(PlotSettingsTab::Series, None);
+        let context = contexte();
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        let centre = texte_exact(&peints, "2.5").centre;
+        une_image(
+            &context,
+            &mut banc.state,
+            vec![
+                egui::Event::PointerMoved(centre),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: egui::vec2(0.0, 1.0),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        une_image(&context, &mut banc.state, Vec::new());
+        assert_eq!(banc.brouillon().panels[0].series[0].line.width, 2.5);
     }
 
     /// Doc de [`plot_settings_window`] : une case à cocher valide tout de

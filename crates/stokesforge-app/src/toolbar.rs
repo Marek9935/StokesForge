@@ -40,7 +40,9 @@ use stokesforge_plot::PlotType;
 use stokesforge_render_egui::GraphTool;
 
 use crate::color_picker::{ColorUsage, PickerEnv};
-use crate::object_format::{ObjectFormat, LINE_WIDTHS};
+use crate::number_field::number_field;
+use crate::object_format::ObjectFormat;
+use crate::quantities;
 use crate::text_format::TextFormat;
 
 /// Les barres existantes — un enum fermé : ajouter une barre, c'est ajouter une
@@ -755,28 +757,21 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
             requests.push(ToolbarRequest::Action(Box::new(request.into_action())));
         }
 
-        // Épaisseur.
-        let chosen = egui::ComboBox::from_id_salt("stokesforge_object_line_width")
-            .selected_text(format!("{}", state.line_width))
-            .width(54.0)
-            .show_ui(ui, |ui| {
-                let mut chosen = None;
-                for width in LINE_WIDTHS {
-                    if ui
-                        .selectable_label(width == state.line_width, format!("{width}"))
-                        .clicked()
-                    {
-                        chosen = Some(width);
-                    }
-                }
-                chosen
-            });
+        // Épaisseur : un champ numérique éditable avec ses valeurs courantes
+        // (choisir 3 ou taper 2,5), N9.
+        let mut width = state.line_width;
+        let field = number_field(
+            ui,
+            "stokesforge_object_line_width",
+            &mut width,
+            &quantities::SHAPE_LINE_WIDTH,
+        );
         on_hover(
-            chosen.response.clone(),
+            field.response.clone(),
             tr!("format-object-line-width"),
             Some(tr!("format-object-line-width", "hint")),
         );
-        if let Some(width) = chosen.inner.flatten() {
+        if field.changed {
             requests.push(ToolbarRequest::FormatObject(ObjectFormat::LineWidth(width)));
         }
     });

@@ -436,6 +436,10 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   lit une saisie, `show_issue` pour un défaut connu (Typst…), teintes
   `theme::field_refused_color` / `field_clamped_color` ; jamais un cadre peint à
   la main ;
+- un **nombre** se saisit par `number_field::number_field` avec une grandeur de
+  `quantities.rs` (bornes, pas, décimales, valeurs du `▼`) — jamais `DragValue`
+  ni `Slider` (`aucun_champ_numerique_hors_de_la_brique`) ; une grandeur neuve
+  s'ajoute à la table, l'unité va dans le libellé ;
 - tout élément grisé dit pourquoi et quoi faire (`.disabled`) ;
 - une erreur dans un dialogue va dans son pied, jamais dans la barre d'état ;
 - une suppression annulable ne demande pas de confirmation ;

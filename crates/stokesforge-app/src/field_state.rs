@@ -214,6 +214,28 @@ pub fn decide<T>(
 #[derive(Clone, Debug)]
 struct Draft(String);
 
+/// L'identifiant d'un champ posé par [`edit_text`] sous `id_salt` : celui de
+/// son `TextEdit` et de son état mémorisé.
+pub fn field_id(ui: &egui::Ui, id_salt: impl std::hash::Hash + std::fmt::Debug) -> egui::Id {
+    ui.make_persistent_id(id_salt)
+}
+
+/// Abandonne le brouillon du champ `id` et l'état qu'il montrait : la valeur
+/// affichée repart de celle de l'appelant. Pour un changement qui ne vient pas
+/// de la frappe (flèches, molette, choix dans une liste).
+pub fn discard_draft(ctx: &egui::Context, id: egui::Id) {
+    ctx.data_mut(|data| data.remove::<Draft>(id));
+    clear(ctx, id);
+    ctx.request_repaint();
+}
+
+/// Ce que rend [`edit_text`] : la valeur validée cette image, s'il y en a une,
+/// et la réponse du champ (focus, survol).
+pub struct Edited<T> {
+    pub value: Option<T>,
+    pub response: egui::Response,
+}
+
 /// Un champ texte d'une ligne au cycle du standard : `current` est la valeur
 /// affichée hors saisie, `parse` la lit. Rend la valeur lue quand elle est
 /// validée (Entrée ou sortie du champ), `None` sinon.
@@ -223,13 +245,15 @@ struct Draft(String);
 /// - un brouillon illisible peint le cadre rouge dès la frappe, avec la règle
 ///   en bulle ;
 /// - Échap rend l'ancienne valeur ; la sortie sans changement aussi.
+/// - `width` est la largeur du champ, en points.
 pub fn edit_text<T>(
     ui: &mut egui::Ui,
     id_salt: impl std::hash::Hash + std::fmt::Debug,
+    width: f32,
     current: &str,
     parse: impl Fn(&str) -> Verdict<T>,
-) -> Option<T> {
-    let id = ui.make_persistent_id(id_salt);
+) -> Edited<T> {
+    let id = field_id(ui, id_salt);
     let ctx = ui.ctx().clone();
     let now = ui.input(|input| input.time);
 
@@ -239,7 +263,11 @@ pub fn edit_text<T>(
     // doit ni revalider ni effacer l'état qu'a posé la première.
     let editing = draft.is_some();
     let mut buffer = draft.map_or_else(|| current.to_owned(), |draft| draft.0);
-    let response = ui.add(egui::TextEdit::singleline(&mut buffer).id(id));
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut buffer)
+            .id(id)
+            .desired_width(width),
+    );
     let focused = response.has_focus();
 
     // egui rend lui-même le focus sur Échap : le champ « a eu » le focus aussi
@@ -248,7 +276,9 @@ pub fn edit_text<T>(
         && (focused || response.lost_focus())
         && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     let left = response.lost_focus() && editing;
-    let enter = left && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    // Entrée est consommée : un dialogue qui valide sur Entrée ne doit pas se
+    // fermer avec la saisie (il regarde le focus, que le champ vient de perdre).
+    let enter = left && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     let step = decide(&buffer, current, enter, escape, left || escape, &parse);
 
     // La frappe a déjà été peinte avec le brouillon : une étape qui le rend
@@ -302,7 +332,10 @@ pub fn edit_text<T>(
     if let Some(issue) = live.or_else(|| active(&ctx, id, now)) {
         show_issue(ui, &response, &issue);
     }
-    committed
+    Edited {
+        value: committed,
+        response,
+    }
 }
 
 #[cfg(test)]
@@ -468,7 +501,7 @@ mod tests {
                 Some(false) => ui.memory_mut(|m| m.surrender_focus(id)),
                 None => {}
             }
-            if let Some(valeur) = edit_text(ui, "champ", "1", lire) {
+            if let Some(valeur) = edit_text(ui, "champ", 80.0, "1", lire).value {
                 *sortie = Some(valeur);
             }
         });

@@ -18,7 +18,9 @@ use stokesforge_render_egui::{
 use stokesforge_session::Snapshot;
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv};
+use crate::number_field::number_field;
 use crate::object_manager::{AxisRef, VisibilityTarget};
+use crate::quantities;
 use crate::state::{
     drop_payload_action, drop_rows_action, export_file_name, Action, AppState, ColumnDragPayload,
     PlotAxis, PlotSettingsTab, PlotTarget, RowDragPayload,
@@ -169,7 +171,12 @@ fn shape_properties_ui(
             ] {
                 ui.horizontal(|ui| {
                     ui.label(tr!("object-coordinate", coordinate = coordinate));
-                    ui.add(egui::DragValue::new(value).speed(0.1));
+                    number_field(
+                        ui,
+                        ("shape_coordinate", coordinate),
+                        value,
+                        &quantities::FREE,
+                    );
                 });
             }
             color_field(
@@ -192,10 +199,11 @@ fn shape_properties_ui(
             }
             ui.horizontal(|ui| {
                 ui.label(tr!("format-object-line-width"));
-                ui.add(
-                    egui::DragValue::new(&mut edit.draft.line_width)
-                        .range(0.0..=100.0)
-                        .speed(0.1),
+                number_field(
+                    ui,
+                    "shape_line_width",
+                    &mut edit.draft.line_width,
+                    &quantities::SHAPE_LINE_WIDTH,
                 );
             });
         },

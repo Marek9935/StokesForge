@@ -54,7 +54,7 @@ dit *comment* l'écrire. Points qui touchent les mots :
 - **texte d'exemple d'un champ vide** : la valeur prise si vide (« Auto »,
   « Group 2 ») ou un exemple de syntaxe, jamais une consigne ;
 - **état vide** : ce qui manque et le geste pour le créer ;
-- **unité** dans le libellé (« Line width (pt) »), jamais en suffixe ;
+- **unité** dans le libellé (« Line width (pt) », « Opacity (%) », « H (°) »), jamais en suffixe : la table des grandeurs (`quantities.rs`, #220) n'en porte pas ;
 - confirmation : Cancel + verbe (Delete, Discard Changes), jamais « Keep »
   seul.
 

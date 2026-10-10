@@ -21,6 +21,9 @@
 //! - `aucune_couleur_en_dur_hors_du_theme` (#169) : une couleur d'interface
 //!   vient de `theme.rs` (ou des `Visuals` qu'il pose), jamais d'un
 //!   `Color32::from_rgb` écrit dans une surface ;
+//! - `aucun_champ_numerique_hors_de_la_brique` (#220) : tout nombre saisi passe
+//!   par `number_field::number_field` et la table des grandeurs, jamais par
+//!   un `DragValue` ou un `Slider` d'egui, sans dérogation ;
 //! - `aucun_separateur_avant_un_titre_de_section` (#169) : un titre de
 //!   section (`theme::section_title`) sépare seul ses groupes.
 //!
@@ -900,6 +903,76 @@ fn la_garde_des_titres_voit_un_filet_avant_un_titre() {
     ] {
         assert!(
             separateurs_avant_un_titre(&[fichier("app/s.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Aucun `DragValue` ni `Slider` : la brique « nombre » (#220)
+// ---------------------------------------------------------------------------
+
+/// Les champs numériques d'egui (`DragValue`, `Slider`) écrits dans le code de
+/// production, `chemin:ligne`. Aucun fichier n'est exempté : la brique
+/// (`number_field.rs`) est elle-même un champ texte.
+fn champs_numeriques_d_egui(sources: &[Fichier]) -> Vec<String> {
+    let mut trouves = Vec::new();
+    for fichier in sources {
+        let source = fichier.production();
+        for i in 0..source.masque.len() {
+            if mot_en(&source.masque, i, "DragValue") || mot_en(&source.masque, i, "Slider") {
+                trouves.push(format!(
+                    "src/{}:{}",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    trouves
+}
+
+/// Règle #220 (`docs/standard-interface.md`, § Champs numériques) : un nombre
+/// se saisit par `number_field::number_field`, avec sa grandeur de
+/// `quantities.rs` ; bornes, pas et décimales ne s'écrivent pas sur place.
+#[test]
+fn aucun_champ_numerique_hors_de_la_brique() {
+    let sources = sources::sources();
+    let fautifs = champs_numeriques_d_egui(&sources);
+    assert!(
+        fautifs.is_empty(),
+        "`DragValue`/`Slider` d'egui : passer par `number_field::number_field` et une grandeur de \
+         `quantities.rs` : {fautifs:?}"
+    );
+    // La brique existe.
+    assert!(fonction_unique(&sources, "number_field")
+        .corps
+        .contains("edit_text"));
+}
+
+/// Le témoin : un `DragValue` ou un `Slider`, de toute forme, est vu ; un
+/// commentaire, une chaîne, un nom qui les contient et le code de test passent.
+#[test]
+fn la_garde_des_champs_numeriques_voit_un_drag_value() {
+    for code in [
+        "fn f(ui: &mut Ui) { ui.add(egui::DragValue::new(&mut x)); }",
+        "fn f(ui: &mut Ui) { ui.add(DragValue::new(&mut x).range(0..=9)); }",
+        "fn f(ui: &mut Ui) { ui.add(egui::Slider::new(&mut x, 0.0..=1.0)); }",
+    ] {
+        assert_eq!(
+            champs_numeriques_d_egui(&[fichier("app/n.rs", code)]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    for code in [
+        "fn f() {} // egui::DragValue::new(&mut x)",
+        "fn f() -> &'static str { \"DragValue\" }",
+        "fn f(x: MySlider) {}",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g(ui: &mut Ui) { ui.add(DragValue::new(&mut x)); } }",
+    ] {
+        assert!(
+            champs_numeriques_d_egui(&[fichier("app/n.rs", code)]).is_empty(),
             "faux positif : {code}"
         );
     }

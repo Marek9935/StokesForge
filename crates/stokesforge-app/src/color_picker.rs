@@ -57,6 +57,8 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 pub use stokesforge_plot::ColorUsage;
 use stokesforge_plot::{SavedColors, CURVE_PALETTES};
 
+use crate::number_field::number_field;
+use crate::quantities;
 use crate::state::{AppState, SaveTarget};
 use crate::tr;
 
@@ -748,95 +750,76 @@ fn picker_contents(
         commit |= gestures.iter().any(|gesture| gesture.finished);
 
         // -- Opacité ---------------------------------------------------------
-        let mut opacity = f32::from(a0) / 255.0 * 100.0;
-        let opacity_response = ui
+        let mut opacity = (f32::from(a0) / 255.0 * 100.0).round() as i32;
+        let opacity_changed = ui
             .horizontal(|ui| {
                 ui.label(tr!("color-opacity"));
-                ui.add(
-                    egui::Slider::new(&mut opacity, 0.0..=100.0)
-                        .suffix(" %")
-                        .max_decimals(0),
+                number_field(
+                    ui,
+                    "color_opacity",
+                    &mut opacity,
+                    &quantities::OPACITY_PERCENT,
                 )
+                .changed
             })
             .inner;
-        if opacity_response.changed() {
-            alpha = (opacity / 100.0 * 255.0).round().clamp(0.0, 255.0) as u8;
+        if opacity_changed {
+            alpha = (opacity as f32 / 100.0 * 255.0).round().clamp(0.0, 255.0) as u8;
+            commit = true;
         }
-        commit |= opacity_response.drag_stopped() || opacity_response.lost_focus();
 
         // -- RVB ---------------------------------------------------------------
         ui.add_space(4.0);
         let shown = new_rgb.unwrap_or(rgb);
         let mut channels = shown.map(i32::from);
-        let mut rgb_edit = NumericEdit::default();
+        let mut rgb_changed = false;
         ui.horizontal(|ui| {
             ui.label(tr!("color-rgb"));
-            let prefixes = [
+            let labels = [
                 tr!("color-channel-red"),
                 tr!("color-channel-green"),
                 tr!("color-channel-blue"),
             ];
-            for (channel, prefix) in channels.iter_mut().zip(prefixes) {
-                rgb_edit.track(
-                    ui.add(
-                        egui::DragValue::new(channel)
-                            .range(0..=255)
-                            .speed(0.5)
-                            .prefix(format!("{prefix} ")),
-                    ),
-                );
+            for (index, (channel, label)) in channels.iter_mut().zip(labels).enumerate() {
+                ui.label(label);
+                rgb_changed |= number_field(
+                    ui,
+                    ("color_channel", index),
+                    channel,
+                    &quantities::COLOR_CHANNEL,
+                )
+                .changed;
             }
         });
-        if rgb_edit.changed {
+        if rgb_changed {
             let edited = channels.map(|c| c.clamp(0, 255) as u8);
             new_rgb = Some(edited);
             memory.hsv = rgb_to_hsv(edited);
+            commit = true;
         }
-        commit |= rgb_edit.finished;
 
         // -- TSL ---------------------------------------------------------------
-        let (mut th, mut ts, mut tl) = rgb_to_hsl(new_rgb.unwrap_or(rgb));
-        let mut hsl_edit = NumericEdit::default();
+        let (th, ts, tl) = rgb_to_hsl(new_rgb.unwrap_or(rgb));
+        let (mut th, mut ts, mut tl) = (th.round() as i32, ts.round() as i32, tl.round() as i32);
+        let mut hsl_changed = false;
         ui.horizontal(|ui| {
             ui.label(tr!("color-hsl"));
-            hsl_edit.track(
-                ui.add(
-                    egui::DragValue::new(&mut th)
-                        .range(0.0..=360.0)
-                        .speed(1.0)
-                        .max_decimals(0)
-                        .prefix(format!("{} ", tr!("color-channel-hue")))
-                        .suffix("°"),
-                ),
-            );
-            hsl_edit.track(
-                ui.add(
-                    egui::DragValue::new(&mut ts)
-                        .range(0.0..=100.0)
-                        .speed(0.5)
-                        .max_decimals(0)
-                        .prefix(format!("{} ", tr!("color-channel-saturation")))
-                        .suffix(" %"),
-                ),
-            );
-            hsl_edit.track(
-                ui.add(
-                    egui::DragValue::new(&mut tl)
-                        .range(0.0..=100.0)
-                        .speed(0.5)
-                        .max_decimals(0)
-                        .prefix(format!("{} ", tr!("color-channel-lightness")))
-                        .suffix(" %"),
-                ),
-            );
+            ui.label(tr!("color-channel-hue"));
+            hsl_changed |= number_field(ui, "color_hue", &mut th, &quantities::HUE_DEGREES).changed;
+            ui.label(tr!("color-channel-saturation"));
+            hsl_changed |=
+                number_field(ui, "color_saturation", &mut ts, &quantities::PERCENT).changed;
+            ui.label(tr!("color-channel-lightness"));
+            hsl_changed |=
+                number_field(ui, "color_lightness", &mut tl, &quantities::PERCENT).changed;
         });
-        if hsl_edit.changed {
-            let edited = hsl_to_rgb(th, ts, tl);
+        if hsl_changed {
+            let edited = hsl_to_rgb(th as f32, ts as f32, tl as f32);
             new_rgb = Some(edited);
             let (_, s, v) = rgb_to_hsv(edited);
-            memory.hsv = (th / 360.0, s, v);
+            memory.hsv = (th as f32 / 360.0, s, v);
+            commit = true;
         }
-        commit |= hsl_edit.finished;
     }
 
     // -- Hexadécimal : appliqué seulement lisible, à la validation ---------
@@ -880,21 +863,6 @@ fn picker_contents(
         set_picker_open(ui.ctx(), popup_id, false);
     }
     commit
-}
-
-/// Suivi d'un groupe de champs numériques : modifié cette image, et geste
-/// terminé (fin de glisser, ou saisie validée).
-#[derive(Default)]
-struct NumericEdit {
-    changed: bool,
-    finished: bool,
-}
-
-impl NumericEdit {
-    fn track(&mut self, response: egui::Response) {
-        self.changed |= response.changed();
-        self.finished |= response.drag_stopped() || response.lost_focus();
-    }
 }
 
 /// Infobulle d'un échantillon : son code, ou « Aucune couleur » s'il est
