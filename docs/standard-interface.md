@@ -29,7 +29,7 @@ les règles R1–R16 de `textes-interface.md`.
 
 | Élément | Rôle | État |
 |---|---|---|
-| état de champ refusé / ramené | cadre rouge ou orange, bulle | à venir (#219) |
+| état de champ refusé / ramené (`field_state`) | cadre rouge ou orange, bulle, cycle d'un champ texte validé | **en place** (#219) |
 | brique « nombre » + table des grandeurs | seul champ numérique | à venir (#220) |
 | garde : aucun `DragValue` ni `Slider` hors de la brique nombre | | à venir (#220) |
 | formateur des nombres (`stokesforge-core`) | seul formatage affiché | à venir (#222) |
@@ -89,10 +89,33 @@ Déjà en place et réutilisées par ce standard : `modal_dialog_with`
   un Auto (Auto du groupe compris), et aucun autre texte ; ailleurs, c'est une
   saisie illisible.
 
-## Saisie refusée ou ramenée — à venir (#219)
+## Saisie refusée ou ramenée — en place (#219)
+
+Brique : `stokesforge_app::field_state` (`src/field_state.rs`, module public
+comme `color_picker`), trois étages que les briques « nombre » (#220) et
+« texte » (#224) réutilisent au lieu de repeindre un cadre :
+
+- `show_issue(ui, &response, &issue)` : cadre et bulle d'un `FieldIssue`
+  (`refused` rouge, `clamped` orange) sur un champ déjà posé — l'étage de la
+  **seule** peinture d'un défaut de champ, aussi pour une erreur venue d'ailleurs
+  (Typst, T3) ;
+- `flag` / `active` / `clear` : l'état qui survit à la saisie (orange 2 s,
+  `CLAMPED_SECONDS`) ;
+- `edit_text(ui, sel, valeur_affichée, lecture)` : le cycle complet d'un champ
+  validé, `lecture` rendant un `Verdict` (`Valid`, `Clamped`, `Refused`) ;
+  `decide` en est la décision pure.
+
+Un champ de formulaire neuf qui lit une saisie passe par `edit_text` ; une erreur
+déjà connue passe par `show_issue`. Les teintes sont `theme::field_refused_color`
+et `theme::field_clamped_color`. Reste à brancher (briques à venir) : les
+champs numériques existants (`DragValue`, #220), la contrainte entre champs
+(N11, #221), les renommages (#224), l'erreur Typst du titre (T3).
 
 - **Illisible** (`abc`, `1..2`) : cadre **rouge**, bulle qui dit la règle,
-  l'ancienne valeur revient à la sortie du champ (N6, N7 → R2, R8).
+  l'ancienne valeur revient à la sortie du champ (N6, N7 → R2, R8). Le rouge
+  se peint dès la frappe ; à Entrée le champ reste ouvert, texte gardé ; à la
+  sortie l'ancienne valeur revient et le refus reste signalé 2 s ; Échap rend
+  la valeur sans cadre.
 - **Hors bornes** : ramené à la borne, cadre **orange** (teinte
   d'avertissement) pendant 2 s, bulle « Set to the maximum, 20 ». Le rouge
   est réservé à « refusé ».

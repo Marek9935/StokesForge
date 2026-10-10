@@ -199,6 +199,19 @@ pub fn preview_peak_color(index: usize) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
+/// Cadre d'un champ dont la saisie est **refusée** (#219) : texte illisible,
+/// contrainte entre champs, erreur Typst. Le rouge est réservé à ce cas
+/// (`docs/standard-interface.md`).
+pub fn field_refused_color() -> Color32 {
+    Color32::from_rgb(200, 30, 30)
+}
+
+/// Cadre d'un champ dont la valeur a été **ramenée** à une borne (#219) : teinte
+/// d'avertissement, distincte du rouge du refus.
+pub fn field_clamped_color() -> Color32 {
+    Color32::from_rgb(220, 120, 0)
+}
+
 /// Rouge foncé et discret du contour d'un dialogue modal qui vient de
 /// refuser un clic ([`crate::app`], `modal_dialog`).
 pub fn blocked_flash_color() -> Color32 {

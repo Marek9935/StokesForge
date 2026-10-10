@@ -1462,3 +1462,7 @@ status-import-dropped = { $count ->
     [one] { $count } fichier importé avec le modèle « { $models } »
    *[other] { $count } fichiers importés avec le modèle « { $models } »
 }
+
+# Champs : valeur ramenée à une borne fixe (#219).
+field-clamped-min = Ramené au minimum, { $limit }
+field-clamped-max = Ramené au maximum, { $limit }

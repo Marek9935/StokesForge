@@ -44,6 +44,7 @@ pub mod analysis;
 pub mod app;
 pub mod color_picker;
 pub mod errors;
+pub mod field_state;
 pub mod file_picker;
 pub mod history_text;
 pub mod i18n;

@@ -431,7 +431,11 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
 - un nombre ou un texte s'applique à Entrée ou en quittant le champ, Échap rend
   l'ancienne valeur, une entrée d'historique par validation ; une saisie
   illisible est **refusée** (cadre rouge, bulle), une valeur hors bornes
-  **ramenée** (cadre orange) — jamais d'effacement ni de correction muette ;
+  **ramenée** (cadre orange) — jamais d'effacement ni de correction muette.
+  Brique *en place* (#219) : `field_state` — `edit_text` pour un champ qui
+  lit une saisie, `show_issue` pour un défaut connu (Typst…), teintes
+  `theme::field_refused_color` / `field_clamped_color` ; jamais un cadre peint à
+  la main ;
 - tout élément grisé dit pourquoi et quoi faire (`.disabled`) ;
 - une erreur dans un dialogue va dans son pied, jamais dans la barre d'état ;
 - une suppression annulable ne demande pas de confirmation ;

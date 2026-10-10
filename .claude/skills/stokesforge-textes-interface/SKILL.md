@@ -48,7 +48,9 @@ dit *comment* l'écrire. Points qui touchent les mots :
   effet et raccourci sans répéter le libellé ; **pas de bulle nue sur un
   champ** (icône « ? » ou texte en clair de 2 lignes au plus) ;
 - **saisie ramenée ou refusée** : « Set to the maximum, 20 », « Use Auto
-  range » ; la bulle dit la règle ;
+  range » ; la bulle dit la règle. Clés `field-clamped-min` / `field-clamped-max`
+  (argument `limit`, brique `field_state`, #219) ; la phrase d'un refus est
+  fournie par l'appelant (`Verdict::Refused`) ;
 - **texte d'exemple d'un champ vide** : la valeur prise si vide (« Auto »,
   « Group 2 ») ou un exemple de syntaxe, jamais une consigne ;
 - **état vide** : ce qui manque et le geste pour le créer ;
