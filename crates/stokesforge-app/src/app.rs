@@ -1750,6 +1750,90 @@ mod tests {
         session.shutdown().unwrap();
     }
 
+    /// Un clic sur une ligne du Project Manager met à jour le surlignage de la
+    /// ligne et le contour de la fenêtre dans l'image réclamée par le clic,
+    /// sans attendre un mouvement de souris.
+    #[test]
+    fn un_clic_dans_le_project_manager_se_repeint_sans_bouger_la_souris() {
+        use eframe::App as _;
+        let (session, graph) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let book = window_stack::window_nodes(&state.project_tree())
+            .into_iter()
+            .find(|(_, kind)| *kind == crate::state::WindowKind::Book)
+            .map(|(id, _)| Tab::Book(id))
+            .unwrap();
+        let tab = Tab::Graph(graph);
+        let mut app = StokesForgeApp::new(state);
+        app.floating_tabs = vec![book, tab];
+        app.window_positions.insert(tab, egui::pos2(0.0, 0.0));
+        app.window_positions.insert(book, egui::pos2(640.0, 300.0));
+        let ctx = egui::Context::default();
+        ctx.set_fonts(stokesforge_render_egui::font_definitions());
+        theme::install(&ctx);
+        egui_extras::install_image_loaders(&ctx);
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut now = 0.0;
+        let mut run = |app: &mut StokesForgeApp, events: Vec<egui::Event>| {
+            now += 0.05;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1400.0, 900.0),
+                    )),
+                    time: Some(now),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.ui(ui, &mut frame),
+            );
+            output.textures_delta.clear();
+            output
+        };
+        for _ in 0..5 {
+            run(&mut app, Vec::new());
+        }
+        let output = run(&mut app, Vec::new());
+        let row = project_manager::tests::find_text_center(&output.shapes, "Book1");
+        let button = |pressed| egui::Event::PointerButton {
+            pos: row,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        run(&mut app, vec![egui::Event::PointerMoved(row)]);
+        run(&mut app, vec![button(true)]);
+        let mut output = run(&mut app, vec![button(false)]);
+        // Seules les images que l'application réclame ont lieu, comme sous eframe.
+        let mut extra = 0;
+        while output.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+            == std::time::Duration::ZERO
+            && extra < 10
+        {
+            output = run(&mut app, Vec::new());
+            extra += 1;
+        }
+        assert_eq!(app.floating_tabs.last(), Some(&book));
+        assert_eq!(app.pm_selection, HashSet::from([book]));
+        let highlighted: Vec<f32> = output
+            .shapes
+            .iter()
+            .filter_map(|sh| match &sh.shape {
+                egui::Shape::Rect(r) if r.fill == theme::list_row_selected_fill() => {
+                    Some(r.rect.center().y)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            matches!(highlighted.as_slice(), [y] if (y - row.y).abs() < 15.0),
+            "la ligne du classeur est surlignée sans mouvement de souris : {highlighted:?} / {}",
+            row.y
+        );
+        session.shutdown().unwrap();
+    }
+
     /// Piège 1 de #115 : l'ordre des panneaux dans `ui()` fait la mise en
     /// page. Barre de menu en haut et barre d'état en bas, sur toute la
     /// largeur ; la console de script, posée avant le Project Manager, court

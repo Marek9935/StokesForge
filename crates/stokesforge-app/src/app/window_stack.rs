@@ -344,7 +344,7 @@ impl Workspace<'_> {
             let tab = self.floating_tabs[index];
             self.show_floating_tab(ui, tab, active_tab, viewport_rect);
         }
-        *self.focus_next = None;
+        let refocused = self.focus_next.take().is_some();
 
         // B2 (`retours-2026-09-23-bugs.md`) :
         // `egui::Area` amène déjà la fenêtre cliquée au premier plan
@@ -357,6 +357,16 @@ impl Workspace<'_> {
         // qu'egui vient d'établir, une fois la mutation de
         // `self.floating_tabs` de nouveau sûre (la boucle qui l'itère est
         // refermée).
+        //
+        // Une réouverture depuis le Project Manager vient de demander
+        // `move_to_top` : egui ne la reflète dans `top_layer_id` qu'à l'image
+        // suivante. Resynchroniser maintenant remettrait l'ancienne fenêtre en
+        // fin de pile (et la sélection du Project Manager avec elle) ; on
+        // attend donc l'image suivante, réclamée ici.
+        if refocused {
+            ui.ctx().request_repaint();
+            return;
+        }
         let top_layer_tab = ui.ctx().top_layer_id().and_then(|top| {
             self.floating_tabs
                 .iter()

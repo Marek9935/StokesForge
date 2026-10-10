@@ -559,6 +559,10 @@ fn project_tree_node_ui(
                 memory.focus = true;
                 ui.ctx()
                     .data_mut(|data| data.insert_temp(memory_key, memory));
+                // La demande d'ouverture s'applique après la peinture : sans
+                // image réclamée ici, le surlignage et la fenêtre active
+                // n'apparaîtraient qu'au prochain mouvement de souris.
+                ui.ctx().request_repaint();
             }
             response.context_menu(|ui| {
                 let mut sections = MenuSections::new();
