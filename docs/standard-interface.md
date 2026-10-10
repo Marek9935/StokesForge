@@ -68,13 +68,22 @@ proposées). Une grandeur neuve s'ajoute à la table, jamais à l'appel ; les 28
   - Liste ouverte : la molette fait défiler la liste, ↑/↓ surligne, Entrée
     choisit, Échap ferme.
   - Dans un dialogue modal, la liste respecte #9 (une `egui::Area` à soi).
-- **Molette** (N2, X1 → R1) : change un champ seulement s'il a le focus **et**
-  que le curseur est dessus, d'un pas par cran ; sinon elle fait défiler la
-  fenêtre. Des crans d'affilée forment **une seule** entrée d'historique.
+- **Molette** (N2, X1 → R1 ; **à venir**, #233, #235) : seul un champ **à liste**
+  réagit, au **survol** (focus inutile) ; un cran = l'entrée suivante ou
+  précédente de la liste (1, 1,5, 2, 3, 4…), une valeur tapée hors liste saute à
+  l'entrée voisine. Un champ **sans liste** (borne d'axe, paramètre
+  d'ajustement) n'est jamais changé par la molette : la fenêtre défile. Des
+  crans d'affilée forment **une seule** entrée d'historique. *Aujourd'hui* :
+  focus **et** curseur, un pas fixe de la table par cran, tout champ.
+- **Aspect d'un champ à liste** (N1, N9 ; **à venir**, #234) : un cadre unique,
+  flèche pleine à l'intérieur, comme la liste déroulante ; **fond blanc** si le
+  champ est éditable au clavier, **fond gris** si seule la liste choisit. Fonds
+  tirés du thème.
 - **Application** (N3) : à Entrée ou en quittant le champ ; Échap rend
   l'ancienne valeur ; une entrée d'historique par validation.
 - **Une grandeur, une définition** (N8) : une table unique donne bornes, pas,
-  grand pas, décimales, unité et valeurs proposées. Épaisseur : 0 à 20 pt,
+  grand pas, décimales, unité et valeurs proposées (la molette suit ces
+  valeurs, #233 ; le pas sert aux flèches du clavier). Épaisseur : 0 à 20 pt,
   décimales possibles au clavier.
 - **Barres d'outils** (N9) : listes éditables (choisir 12 ou taper 15), même
   brique.

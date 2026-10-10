@@ -452,6 +452,8 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   `quantities.rs` (bornes, pas, décimales, valeurs du `▼`) — jamais `DragValue`
   ni `Slider` (`aucun_champ_numerique_hors_de_la_brique`) ; une grandeur neuve
   s'ajoute à la table, l'unité va dans le libellé ;
+  **à venir** (#233–#235) : molette seulement sur un champ à liste, au survol,
+  en suivant les valeurs proposées ; fond blanc si éditable, gris si liste seule ;
 - le **rappel d'un champ** (case, radio, texte, nombre) est l'icône « ? » :
   `app/hover_help.rs` (`help_beside` autour du champ, `help_text` après) ; jamais
   `on_hover_text` sur un champ (`aucune_bulle_nue_sur_un_champ_de_formulaire`,
