@@ -209,7 +209,7 @@ window-deleted = { $kind } { $id } (deleted)
 status-ready = Ready
 status-history = Show the last 50 messages
 status-history-title = Messages
-status-history-empty = No messages yet
+status-history-empty = No messages yet. The messages of your actions will appear here
 status-history-time = { $time } UTC
 status-level-warning = Warning
 status-level-error = Error
@@ -674,7 +674,7 @@ plot-axes-color-note = Axis line, ticks and tick labels. Gridlines use it, faded
 
 # Series tab
 
-plot-series-empty = This graph has no series
+plot-series-empty = This graph has no series. Drag columns from a workbook onto it
 plot-series-name =
     Name
     .hint = Empty: uses the plotted column's name as is
@@ -874,8 +874,8 @@ workbook-send-to-graph-menu = Send to Graph
 
 # Workbook: grid, sheet tabs, empty states
 workbook-column-add = Add Column
-workbook-grid-no-columns = No columns in this sheet
-workbook-no-worksheets = This workbook has no sheets
+workbook-grid-no-columns = No columns in this sheet. Right-click here and choose Add Column
+workbook-no-worksheets = This workbook has no sheets. Use Add Sheet in the sheet tabs
 workbook-worksheet-add = Add Sheet
 action-rename-sheet = Rename
     .hint = Edit the sheet name
@@ -899,7 +899,7 @@ script-unavailable = — Not available in this build
 script-run = Run
 script-stop = Stop
 script-running = Running…
-script-not-run = Not run yet
+script-not-run = Not run yet. Write a script, then click Run
 script-stdout = Standard output
 script-stderr = Error output
 script-traceback = Traceback
@@ -1003,7 +1003,7 @@ format-color = Text color
 
 action-object-manager = Object Manager
     .hint = Show or hide the objects of the active graph.
-object-manager-no-graph = Activate a graph to see its objects.
+object-manager-no-graph = No graph is active. Click a graph to see its objects
 object-manager-visibility = Show or hide this content. Hidden series are excluded from the legend and automatic axis limits.
 object-manager-layer = Layer { $index }
 object-manager-group = Series
@@ -1390,7 +1390,7 @@ results-expand = Show the results
 results-collapse = Hide the results
 results-scope-sheet = This sheet
 results-scope-book = Workbook
-results-empty = No kept results here
+results-empty = No kept results here. Run a calculation from the Analysis menu
 results-no-values = This calculation produced no values
 results-stale-suffix = { $title } (out of date)
 
@@ -1597,3 +1597,8 @@ help-next-field = Confirm and go to the next field
 help-step-value = Change the number by one step
 help-step-value-ten = Change the number by ten steps
 help-open-list = Open the list of values
+
+## Work in progress (#232)
+busy-stop = Stop
+    .hint = Stops the work in progress
+status-import-stopped = Import stopped. Nothing was imported

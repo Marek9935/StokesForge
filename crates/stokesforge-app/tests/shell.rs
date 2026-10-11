@@ -7331,6 +7331,53 @@ fn a_background_import_reports_progress_then_applies_in_one_entry() {
     assert!(!state.can_undo(), "une seule entrée pour tout le lot");
 }
 
+/// Stop (#232, P2) : l'import en fond s'arrête, rien n'est créé, ni
+/// historique, et un nouvel import peut repartir aussitôt.
+#[test]
+fn stopping_a_background_import_creates_nothing() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheets_before = state.worksheets_of(book).len();
+    let files: Vec<std::path::PathBuf> = (0..3)
+        .map(|i| {
+            let file = dir.path().join(format!("stop{i}.csv"));
+            std::fs::write(&file, "1,10\n2,20\n").unwrap();
+            file
+        })
+        .collect();
+    let start = |state: &mut AppState| {
+        state.dispatch(Action::StartImport {
+            destination: ImportDestination::ActiveBook(book),
+            recipe: ImportRecipe::new("Stop"),
+            paths: files.clone(),
+        });
+    };
+
+    start(&mut state);
+    assert!(state.import_work().is_some(), "un import est en cours");
+    state.dispatch(Action::StopImport);
+    assert!(state.import_work().is_none() && state.import_progress().is_none());
+    assert!(!state.poll_import(), "rien à appliquer");
+    assert_eq!(state.worksheets_of(book).len(), sheets_before);
+    assert!(state.take_imported_paths().is_empty());
+    assert!(!state.can_undo(), "aucune entrée d'historique");
+    assert!(
+        state.status().is_some_and(|status| !status.is_error()),
+        "un arrêt voulu n'est pas une erreur"
+    );
+
+    // Témoin : un import lancé après Stop va jusqu'au bout.
+    start(&mut state);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !state.poll_import() {
+        assert!(std::time::Instant::now() < deadline, "import trop long");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(state.worksheets_of(book).len(), sheets_before + 3);
+}
+
 /// « Régler le dernier import » annule l'import s'il est encore au sommet de
 /// l'historique, puis rouvre l'assistant sur ses fichiers et sa recette.
 #[test]

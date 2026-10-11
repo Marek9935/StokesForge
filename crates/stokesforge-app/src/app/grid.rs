@@ -28,6 +28,7 @@ use crate::state::{
 };
 use crate::{icons, tr};
 
+use super::empty_state::empty_state;
 use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
 use super::inplace_edit;
 use super::menu_sections::{menu_choice, MenuSections};
@@ -1485,8 +1486,9 @@ pub(super) fn grid_contents(
     let columns = state.visible_columns(sheet);
     let row_count = state.row_count(sheet);
     if columns.is_empty() {
-        let empty = ui.centered_and_justified(|ui| {
-            ui.weak(tr!("workbook-grid-no-columns"));
+        let empty = ui.scope(|ui| {
+            ui.set_min_height(ui.available_height());
+            empty_state(ui, tr!("workbook-grid-no-columns"));
         });
         empty
             .response

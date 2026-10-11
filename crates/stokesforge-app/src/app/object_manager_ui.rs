@@ -31,6 +31,7 @@ use crate::preferences::{ObjectManagerGroup, ObjectManagerSettings};
 use crate::state::{active_graph, Action};
 use crate::tr;
 
+use super::empty_state::empty_state;
 use super::graph_text_edit::{
     open_annotation_editor, open_legend_entry_editor, open_series_name_editor, open_text_editor,
     ContextText,
@@ -542,7 +543,7 @@ pub(super) fn object_manager_contents(
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| object_manager_settings_contents(ui, settings, actions));
     let (Some(model), Some(spec)) = (model, spec) else {
-        ui.label(tr!("object-manager-no-graph"));
+        empty_state(ui, tr!("object-manager-no-graph"));
         return requests;
     };
     let focus = ui.make_persistent_id(("object_manager_keys", model.graph));

@@ -204,7 +204,7 @@ window-deleted = { $kind } { $id } (élément supprimé)
 status-ready = Prêt
 status-history = Afficher les 50 derniers messages
 status-history-title = Messages
-status-history-empty = Aucun message pour l'instant
+status-history-empty = Aucun message pour l'instant. Les messages de vos actions apparaîtront ici
 status-history-time = { $time } UTC
 status-level-warning = Avertissement
 status-level-error = Erreur
@@ -666,7 +666,7 @@ plot-axes-color-note = Trait de l'axe, graduations et étiquettes de graduation.
 
 # Onglet Séries
 
-plot-series-empty = Ce graphique n'a aucune série
+plot-series-empty = Ce graphique n'a aucune série. Glisser des colonnes d'un classeur dessus
 plot-series-name =
     Nom
     .hint = Vide : reprend tel quel le nom de la colonne tracée
@@ -866,8 +866,8 @@ workbook-send-to-graph-menu = Envoyer vers un graphique
 
 # Classeur : grille, onglets de feuilles, états vides
 workbook-column-add = Ajouter une colonne
-workbook-grid-no-columns = Aucune colonne dans cette feuille
-workbook-no-worksheets = Ce classeur n'a aucune feuille
+workbook-grid-no-columns = Aucune colonne dans cette feuille. Clic droit ici, puis Ajouter une colonne
+workbook-no-worksheets = Ce classeur n'a aucune feuille. Utiliser Ajouter une feuille dans les onglets
 workbook-worksheet-add = Ajouter une feuille
 action-rename-sheet = Renommer
     .hint = Modifier le nom de la feuille
@@ -891,7 +891,7 @@ script-unavailable = — Indisponible dans cette version
 script-run = Exécuter
 script-stop = Arrêter
 script-running = Exécution…
-script-not-run = Pas encore exécuté
+script-not-run = Pas encore exécuté. Écrire un script, puis cliquer sur Exécuter
 script-stdout = Sortie standard
 script-stderr = Sortie d'erreur
 script-traceback = Trace d'appels
@@ -995,7 +995,7 @@ format-color = Couleur du texte
 
 action-object-manager = Gestionnaire d’objets
     .hint = Afficher ou masquer les objets du graphique actif.
-object-manager-no-graph = Activer un graphique pour voir ses objets.
+object-manager-no-graph = Aucun graphique actif. Cliquer un graphique pour voir ses objets
 object-manager-visibility = Afficher ou masquer ce contenu. Les séries masquées sont exclues de la légende et des bornes automatiques des axes.
 object-manager-layer = Calque { $index }
 object-manager-group = Séries
@@ -1382,7 +1382,7 @@ results-expand = Afficher les résultats
 results-collapse = Masquer les résultats
 results-scope-sheet = Cette feuille
 results-scope-book = Classeur
-results-empty = Aucun résultat gardé ici
+results-empty = Aucun résultat gardé ici. Lancer un calcul depuis le menu Analyse
 results-no-values = Ce calcul n'a produit aucune valeur
 results-stale-suffix = { $title } (pas à jour)
 
@@ -1589,3 +1589,8 @@ help-next-field = Valider et passer au champ suivant
 help-step-value = Changer le nombre d'un pas
 help-step-value-ten = Changer le nombre de dix pas
 help-open-list = Ouvrir la liste des valeurs
+
+## Travail en cours (#232)
+busy-stop = Arrêter
+    .hint = Arrête le travail en cours
+status-import-stopped = Import arrêté. Rien n'a été importé

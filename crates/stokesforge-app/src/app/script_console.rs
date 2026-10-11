@@ -17,6 +17,7 @@ use eframe::egui;
 use crate::state::{Action, AppState, ScriptOutput};
 use crate::tr;
 
+use super::empty_state::empty_state;
 use super::shortcuts::SHORTCUT_RUN_SCRIPT;
 use super::window_chrome::{
     panel_header, show_window_contents_bounded, PanelPlacement, WindowHeaderActions,
@@ -151,8 +152,7 @@ fn script_fields_contents(
             actions.push(Action::InterruptScript);
         }
         if running {
-            ui.spinner();
-            ui.weak(tr!("script-running"));
+            super::busy::indicator(ui, &tr!("script-running"));
         }
     });
 
@@ -161,7 +161,7 @@ fn script_fields_contents(
         .max_height(SCRIPT_OUTPUT_HEIGHT)
         .show(ui, |ui| match output {
             None => {
-                ui.weak(tr!("script-not-run"));
+                empty_state(ui, tr!("script-not-run"));
             }
             Some(output) => {
                 let mut empty = true;

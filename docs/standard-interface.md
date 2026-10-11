@@ -45,7 +45,8 @@ les règles R1–R16 de `textes-interface.md`.
 | registre des touches de `app/shortcuts.rs`, `HELP`, Help › Keyboard Shortcuts | K1, K5 | **en place** (#231) |
 | garde : aucun `consume_key` hors de `app/shortcuts.rs` (`aucun_consume_key_hors_du_registre`) | | **en place** (#231) |
 | curseurs (`app/cursors.rs`) et garde `aucun_curseur_hors_du_module_des_curseurs` | X2 | **en place** (#231) |
-| briques « travail en cours » et « état vide » | | à venir (#232) |
+| brique « travail en cours » (`app/busy.rs` : `work_in_progress`, `indicator`) | P1, P2 | **en place** (#232) ; branchée sur l'import en fond et la console de script |
+| brique « état vide » (`app/empty_state.rs` : `empty_state`) | P3 | **en place** (#232) |
 
 Déjà en place et réutilisées par ce standard : `modal_dialog_with`
 (`app/dialogs.rs`), `hover_help` (`app/hover_help.rs`), `theme::section_title`,
@@ -440,14 +441,21 @@ Comment c'est tenu :
   redimensionnement sur une poignée, doigt sur un élément cliquable qui n'est
   pas un bouton.
 
-## Travaux longs et états vides — à venir (#232)
+## Travaux longs et états vides — en place (#232), reste le recalcul
 
 - Au-delà d'≈ 0,5 s : indicateur tournant + mot (« Importing… ») à l'endroit
   du résultat ; barre de progression si le nombre d'étapes est connu (P1).
 - Bouton **Stop** pour tout travail de plus de quelques secondes (import
   multiple, script, recalcul lourd) (P2).
 - **État vide** : phrase grisée centrée qui dit ce qui manque et le geste pour
-  le créer (P3).
+  le créer (P3) : `empty_state`, partout (classeur sans colonne ou sans
+  feuille, graphe sans série, Object Manager, Results, historique des messages,
+  console de script).
+- Seuils : l'indicateur après 0,5 s (`busy::SHOW_AFTER`), Stop après 3 s
+  (`busy::STOP_AFTER`). **Stop de l'import** : le fil s'arrête après le fichier
+  en cours, rien n'est créé (`AppState::stop_import`). **Stop du script** : la
+  console garde le sien (#215). **Recalcul** : pas de Stop tant que l'interface
+  appelle la session de façon bloquante (suivi dans une issue dédiée).
 
 ## Hors de cette page
 

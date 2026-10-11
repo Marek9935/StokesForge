@@ -34,6 +34,7 @@ use crate::state::{series_list_label, Action, SaveTarget};
 use crate::theme;
 use crate::tr;
 
+use super::empty_state::empty_state;
 use super::form::{choice, form, ChoiceOption, Form};
 use super::hover_help::help_text;
 use super::list_row::list_row;
@@ -82,7 +83,7 @@ pub(super) fn curve_settings_page(
     actions: &mut Vec<Action>,
 ) -> bool {
     if panel.series.is_empty() {
-        ui.weak(tr!("plot-series-empty"));
+        empty_state(ui, tr!("plot-series-empty"));
         return false;
     }
     *selected = (*selected).min(panel.series.len() - 1);

@@ -16,6 +16,7 @@ use stokesforge_core::NodeId;
 use crate::state::{Action, AppState};
 use crate::{theme, tr};
 
+use super::empty_state::empty_state;
 use super::file_drop::claim_file_drop;
 use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
 use super::grid::{
@@ -265,9 +266,7 @@ pub(super) fn book_contents(
         },
     );
     if sheets.is_empty() {
-        grid_ui.centered_and_justified(|ui| {
-            ui.weak(tr!("workbook-no-worksheets"));
-        });
+        empty_state(&mut grid_ui, tr!("workbook-no-worksheets"));
     } else {
         let vertical_bar_id = grid_ui.id().with("grid_vertical_bar");
         let horizontal_bar_id = grid_ui.id().with("grid_horizontal_bar");

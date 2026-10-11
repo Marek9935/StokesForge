@@ -8,6 +8,7 @@
 use eframe::egui;
 
 use super::dialogs::{modal_read_only, DialogOutcome};
+use super::empty_state::empty_state;
 use super::menus::status_line;
 use crate::state::{Action, AppState};
 use crate::tr;
@@ -43,7 +44,7 @@ pub(super) fn status_history_window(
         |ui| {
             let mut messages = state.status_history().peekable();
             if messages.peek().is_none() {
-                ui.weak(tr!("status-history-empty"));
+                empty_state(ui, tr!("status-history-empty"));
                 return;
             }
             egui::ScrollArea::vertical().show(ui, |ui| {

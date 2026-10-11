@@ -13,6 +13,7 @@ use stokesforge_core::NodeId;
 
 use super::analysis_dialog::{exact_result_label, format_value};
 use super::analysis_handles::select_calculation;
+use super::empty_state::empty_state;
 use super::list_row::list_row;
 use crate::analysis::{kind_title, series_label, value_label, value_unit, with_unit};
 use crate::icons::{icon_button, Icon, IconRole};
@@ -104,7 +105,7 @@ pub(super) fn results_pane(
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
                             if calculations.is_empty() {
-                                ui.label(egui::RichText::new(tr!("results-empty")).weak());
+                                empty_state(ui, tr!("results-empty"));
                             }
                             for calc in &calculations {
                                 let mut title = state.calculation_title(*calc);

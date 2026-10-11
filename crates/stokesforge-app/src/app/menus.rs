@@ -36,6 +36,7 @@ use crate::state::{active_graph, Action};
 use crate::toolbar::ToolbarId;
 use crate::tr;
 
+use super::busy::{work_in_progress, Work};
 use super::graph_text_edit::add_annotation_at;
 use super::graph_window::{graph_properties_menu, published_active_panel};
 use super::menu_sections::{menu_choice, MenuSections};
@@ -707,10 +708,26 @@ impl StokesForgeApp {
             .resizable(false)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let line = ui.scope(|ui| match self.state.status() {
-                        Some(status) => status_line(ui, status),
-                        None => {
-                            ui.weak(tr!("status-ready"));
+                    // Un travail qui dure remplace le message (#232, P1/P2) ;
+                    // sous 0,5 s la brique ne peint rien et le message
+                    // « Importing… » reste la ligne d'état.
+                    let line = ui.scope(|ui| {
+                        if let Some((elapsed, done, total)) = self.state.import_work() {
+                            let work = Work {
+                                label: tr!("status-import-progress", done = done, total = total),
+                                elapsed,
+                                progress: Some((done, total)),
+                                stop: Some(Action::StopImport),
+                            };
+                            if work_in_progress(ui, &work, actions) {
+                                return;
+                            }
+                        }
+                        match self.state.status() {
+                            Some(status) => status_line(ui, status),
+                            None => {
+                                ui.weak(tr!("status-ready"));
+                            }
                         }
                     });
                     // La zone cliquable couvre toute la ligne, par-dessus ses

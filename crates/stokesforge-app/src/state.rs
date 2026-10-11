@@ -471,6 +471,9 @@ pub enum Action {
     OpenStatusHistory,
     /// Ferme la fenêtre d'historique des messages.
     CloseStatusHistory,
+    /// Arrête l'import en fond après le fichier en cours (#232, P2) : rien
+    /// n'est créé.
+    StopImport,
     /// Ouvre Help › Keyboard Shortcuts (#231, K5).
     OpenKeyboardShortcuts,
     /// Ferme la fenêtre des raccourcis clavier.
@@ -2265,6 +2268,9 @@ struct ImportJob {
     destination: ImportDestination,
     total: usize,
     done: Arc<std::sync::atomic::AtomicUsize>,
+    /// Posé par Stop : le fil d'analyse s'arrête entre deux fichiers.
+    stop: Arc<std::sync::atomic::AtomicBool>,
+    started: std::time::Instant,
     reply: mpsc::Receiver<Vec<ImportItem>>,
 }
 
@@ -4559,6 +4565,7 @@ impl AppState {
             Action::CloseColumnMetadata => self.metadata_view = None,
             Action::OpenStatusHistory => self.status_history_open = true,
             Action::CloseStatusHistory => self.status_history_open = false,
+            Action::StopImport => self.stop_import(),
             Action::OpenKeyboardShortcuts => self.keyboard_shortcuts_open = true,
             Action::CloseKeyboardShortcuts => self.keyboard_shortcuts_open = false,
             Action::OpenAnalysis {
@@ -5195,12 +5202,17 @@ impl AppState {
         let done = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let (reply_tx, reply) = mpsc::channel();
         let worker_done = Arc::clone(&done);
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let worker_stop = Arc::clone(&stop);
         let worker_recipe = recipe.clone();
         let spawned = thread::Builder::new()
             .name("stokesforge-app-import".to_owned())
             .spawn(move || {
                 let mut parsed: Vec<ImportItem> = Vec::new();
                 for path in paths {
+                    if worker_stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
                     parsed.extend(import_items(&path, &worker_recipe));
                     worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
@@ -5212,6 +5224,8 @@ impl AppState {
                     destination,
                     total,
                     done,
+                    stop,
+                    started: std::time::Instant::now(),
                     reply,
                 });
                 self.notice(tr!("status-import-progress", done = 0, total = total));
@@ -5230,6 +5244,27 @@ impl AppState {
             job.done.load(std::sync::atomic::Ordering::Relaxed),
             job.total,
         ))
+    }
+
+    /// L'import en fond vu comme un travail à montrer (#232) : depuis combien
+    /// de temps il dure, fichiers analysés, total.
+    pub fn import_work(&self) -> Option<(std::time::Duration, usize, usize)> {
+        let job = self.import_job.as_ref()?;
+        Some((
+            job.started.elapsed(),
+            job.done.load(std::sync::atomic::Ordering::Relaxed),
+            job.total,
+        ))
+    }
+
+    /// Stop de l'import en fond (#232, P2) : le fil s'arrête après le fichier
+    /// en cours, rien n'est créé ni annulable, et le résultat partiel est
+    /// ignoré.
+    pub fn stop_import(&mut self) {
+        if let Some(job) = self.import_job.take() {
+            job.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.notice(tr!("status-import-stopped"));
+        }
     }
 
     /// À appeler à chaque image : met à jour la progression et, quand
