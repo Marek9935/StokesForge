@@ -44,7 +44,7 @@ Le graphique vide passe par `AddGraph` ; `SessionHandle::new_project`, comme
 
 Règles de chargement par domaine (quel crate/doc charger selon la tâche) : `.claude/rules.md`.
 
-Skills de projet : `.claude/skills/` — onze compétences par type de tâche
+Skills de projet : `.claude/skills/` — douze compétences par type de tâche
 (implémenter une fonctionnalité, signaler puis corriger un bug, ajouter une
 commande annulable, rendu, import, pont Python, vérifier avant de committer,
 répondre sur l'architecture ou sur les fonctionnalités, écrire un texte

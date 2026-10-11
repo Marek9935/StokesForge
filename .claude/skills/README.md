@@ -37,7 +37,8 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
   l'analogie a de faux**. Utilisée par les deux skills de réponse.
 - [`voir-l-interface.md`](stokesforge-bug-report/references/voir-l-interface.md)
   — comment *regarder* la fenêtre (`STOKESFORGE_APP_SCREENSHOT`, conversion
-  PPM → PNG) et ce que la capture ne peut pas montrer. Utilisée par
+  PPM → PNG) et ce que la capture ne peut pas montrer ; le pilotage avec
+  interaction (clics, clavier) est dans `run-stokesforge`. Utilisée par
   `stokesforge-bug-report`, `stokesforge-bug-fix`, `stokesforge-feature` et
   `stokesforge-verification` : les tests couvrent la géométrie, **pas
   l'apparence**.

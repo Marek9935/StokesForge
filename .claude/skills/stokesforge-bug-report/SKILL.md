@@ -65,8 +65,10 @@ convaincante — c'est arrivé, et la capture de l'utilisateur disait l'inverse.
 capture ne peut pas montrer :
 [`references/voir-l-interface.md`](references/voir-l-interface.md).
 
-Quand l'état en cause n'est pas capturable sans interaction (glisser, repli,
-fenêtre détachée), **demander la capture à l'utilisateur** au lieu de deviner.
+Quand l'état en cause demande une interaction simple (menu, dialogue, saisie),
+le reproduire avec [`run-stokesforge`](../run-stokesforge/SKILL.md). Quand il n'est
+pas atteignable ainsi (glisser, fenêtre détachée, Wayland natif),
+**demander la capture à l'utilisateur** au lieu de deviner.
 
 ## 1. Si c'est un vrac : trier d'abord, détailler ensuite
 

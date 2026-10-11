@@ -72,8 +72,10 @@ le français, plus long que l'anglais, le couperait aussi.
 Elle photographie **un** état, à **un** instant, dans la fenêtre principale.
 Elle ne montre pas :
 
-- un état atteint après une interaction (glisser, clic droit, repli) — il
-  faudrait piloter l'application, ce qu'aucun outil du dépôt ne fait ;
+- un état atteint après une interaction (clic droit, repli, saisie) — la
+  capture seule ne le montre pas ; [`run-stokesforge`](../../run-stokesforge/SKILL.md)
+  pilote l'application (clics, clavier, captures, sous X11/Xwayland) et couvre
+  ces cas, **pas** le glisser ;
 - une fenêtre OS détachée (`show_viewport_deferred`) ;
 - un comportement qui dépend du compositeur (position refusée sous Wayland,
   sélecteur de fichiers natif).
@@ -84,9 +86,9 @@ la demander explicitement plutôt que de deviner :
 > « Peux-tu m'envoyer une capture de l'état où ça se produit ? Je préfère
 > regarder plutôt que déduire du code. »
 
-Et si le symptôme n'est reproductible que devant un écran, l'écrire dans le
-rapport : aucun outil non interactif de ce dépôt ne peut le valider à la place
-d'un humain.
+Et si le symptôme n'est reproductible que devant un écran réel (Wayland natif,
+sélecteur de fichiers, glisser), l'écrire dans le rapport : `run-stokesforge`
+tourne en X11 et ne peut pas le valider à la place d'un humain.
 
 ## Avant / après
 

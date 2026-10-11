@@ -36,8 +36,8 @@ tester explicitement**, sinon elle valide du code mort.
 | une reproduction `#[ignore]` de robustesse | `cargo test -p stokesforge-robustesse -- --ignored` |
 | le recalcul des formules (`stokesforge-session/src/recalc.rs`), une donnée lue par une formule, une écriture de colonne | `b22` et `recalc_cible.rs` passent dans `cargo test --workspace`, mais un oracle vert ne prouve rien si le tirage ne produit pas le geste : suivre `docs/tests.md`, « Recalcul ciblé » (pas ajouté au tirage, cas nommé avec témoin, mutation de la composante) |
 | une dépendance, une ressource ou le runtime distribué | `cargo deny --locked check licenses` et génération des notices ; outils figés et packaging dans `docs/licence-et-extensions.md` ; actualiser les notices natives avec le verrou Python |
-| l'**apparence** de l'interface (contour, alignement, largeur, icône) | une capture : `STOKESFORGE_APP_SCREENSHOT` + `STOKESFORGE_APP_AUTOQUIT_MS`, voir [`../stokesforge-bug-report/references/voir-l-interface.md`](../stokesforge-bug-report/references/voir-l-interface.md). Les tests couvrent la géométrie, pas l'apparence. Pour un texte d'interface (nouveau libellé, zone convertie), refaire la capture avec `STOKESFORGE_LANG=en-XA` : un texte sans `[[ ]]` a échappé au catalogue, un `]]` manquant est un texte tronqué |
-| une vraie fenêtre (Wayland, `rfd`, multi-écran, glisser, fenêtre détachée) | rien : **aucun outil non interactif ne peut valider ça**. Le dire dans le compte rendu, ou demander une capture à l'utilisateur. |
+| l'**apparence** de l'interface (contour, alignement, largeur, icône) | une capture : `STOKESFORGE_APP_SCREENSHOT` + `STOKESFORGE_APP_AUTOQUIT_MS`, voir [`../stokesforge-bug-report/references/voir-l-interface.md`](../stokesforge-bug-report/references/voir-l-interface.md). Pour un scénario avec interaction (menu, dialogue, saisie, annulation), piloter l'application réelle : [`run-stokesforge`](../run-stokesforge/SKILL.md). Les tests couvrent la géométrie, pas l'apparence. Pour un texte d'interface (nouveau libellé, zone convertie), refaire la capture avec `STOKESFORGE_LANG=en-XA` : un texte sans `[[ ]]` a échappé au catalogue, un `]]` manquant est un texte tronqué |
+| une vraie fenêtre (Wayland, `rfd`, multi-écran, glisser, fenêtre détachée) | rien d'automatique : `run-stokesforge` tourne en X11 (Xwayland) et ne couvre ni Wayland natif, ni `rfd`, ni le glisser. Le dire dans le compte rendu, ou demander une capture à l'utilisateur. |
 
 ## Où poser un test
 
@@ -211,6 +211,7 @@ Un résultat vert sans les features concernées ne valide pas ces chemins.
 - [ ] features hors défaut touchées → contrôles ciblés `python`, y compris `stokesforge-app` si concerné
 - [ ] aucun garde-fou d'architecture affaibli ; témoins intacts
 - [ ] texte d'interface : clés dans `en`, complétude `fr = en` verte (clé écrite dans les **deux** catalogues), `aucun_libelle_en_dur` et `aucune_cle_du_catalogue_n_est_morte` verts (aucune dérogation, aucune clé orpheline), capture en `en-XA` si le texte est visuel
+- [ ] changement d'interface avec interaction (menu, dialogue, saisie, annulation) : si l'affichage est disponible, le rejouer avec [`run-stokesforge`](../run-stokesforge/SKILL.md) avant de dire « c'est fait » (conseillé, pas bloquant : X11 seulement, ni Wayland natif ni glisser) ; sinon le dire dans le compte rendu
 - [ ] `#[ignore]` retiré si une reproduction passe désormais
 - [ ] doc à jour (`//!`, page `docs/`, et fichiers de routage si les chemins ont bougé)
 - [ ] diff relu, travail en cours de l'utilisateur préservé
