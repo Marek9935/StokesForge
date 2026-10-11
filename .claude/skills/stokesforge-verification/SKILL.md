@@ -85,7 +85,7 @@ Ils ne vérifient pas un comportement mais une propriété de frontière. S'ils
 | `stokesforge-render-egui/tests/feathering.rs` | le feathering hors de la clé de cache (invariant 6) |
 | `stokesforge-app/tests/script_bridge_lazy.rs` | l'interpréteur Python ne démarre pas à l'ouverture de la fenêtre |
 | `stokesforge-app/tests/libelles.rs` | `aucun_libelle_en_dur` : aucun texte d'interface en dur. Absolue, sans dérogation ; `aucune_cle_du_catalogue_n_est_morte` (`src/i18n.rs`) : une clé de `en` sans emploi échoue |
-| `stokesforge-app/tests/gardes.rs` | aucune `egui::Window` brute ; la fenêtre des propriétés passe par la brique commune ; aucun `use …::*` hors du code de test (`aucun_import_global_hors_des_tests`, absolue) ; aucun séparateur brut dans un menu ; aspect commun #169 : bouton sélectionnable seulement dans un menu, une liste déroulante ou le sélecteur de couleur, aucune couleur en dur hors de `theme.rs` / `color_picker.rs`, aucun filet juste avant un titre de section |
+| `stokesforge-app/tests/gardes.rs` | aucune `egui::Window` brute ; la fenêtre des propriétés passe par la brique commune ; aucun `use …::*` hors du code de test (`aucun_import_global_hors_des_tests`, absolue) ; aucun séparateur brut dans un menu ; aspect commun #169 : bouton sélectionnable seulement dans un menu, une liste déroulante ou le sélecteur de couleur, aucune couleur en dur hors de `theme.rs` / `color_picker.rs`, aucun filet juste avant un titre de section ; aucun `add_space` littéral hors de `theme.rs` (#227) |
 | `stokesforge-app/src/theme.rs` (tests) | aucun `ScrollStyle` hors du thème ; aucun `strong()` d'egui, tout gras par `theme::bold` |
 | `stokesforge-app/tests/support/sources.rs` | pas un test : le lecteur **unique** des gardes qui lisent le code (récursif sur `src/`, vue de production, recherche de fonction par nom, #116). Une garde nouvelle qui lit le code passe par lui — jamais `include_str!("app.rs")` ni un fichier nommé — et pose son témoin dans un autre fichier qu'`app.rs` |
 | `stokesforge-app/src/i18n.rs` (tests) | complétude `fr ⊆ en` avec les mêmes arguments, pseudo-langue `en-XA`, pluriels et typographie françaises ; **bloquant** : une clé ajoutée à `en` s'ajoute à `fr` dans le même commit |
@@ -93,18 +93,28 @@ Ils ne vérifient pas un comportement mais une propriété de frontière. S'ils
 
 Gardes **en place** du standard d'interface (#217) : `aucun_champ_numerique_hors_de_la_brique`
 (`stokesforge-app/tests/gardes.rs`, #220 : ni `DragValue` ni `Slider`, sans
-dérogation) et `aucune_bulle_nue_sur_un_champ_de_formulaire` (#225 : le rappel
-d'un champ est l'icône « ? », `help_beside`/`help_text`, sans dérogation) et
+dérogation), `aucune_bulle_nue_sur_un_champ_de_formulaire` (#225 : le rappel
+d'un champ est l'icône « ? », `help_beside`/`help_text`, sans dérogation),
 `aucun_element_grise_sans_sa_raison` (#226 : tout `add_enabled` porte
-`.on_disabled_hover_text(tr!(…))`, clés `disabled-*`).
+`.on_disabled_hover_text(tr!(…))`, clés `disabled-*`) et
+`aucun_add_space_litteral_hors_du_theme` (#227 : un écart est
+`theme::SPACE_ITEM` ou `SPACE_SECTION`, sans dérogation ; un écart calculé
+passe).
+
+Brique **en place** du formulaire (#227) : `app/form.rs` (alignement des
+colonnes et clic d'un radio testés dans son module, `choice_layout` pur) et
+`menu_sections::menu_choice` (coche seule). Une image dont la colonne des
+libellés change est refaite (`request_discard`) : un test qui compte les
+résultats d'un champ **par passe** en voit deux à la première image ; compter
+par image (modèle : `plot_settings::tests::champ`).
 
 Brique **en place** de l'édition sur place (#224) : `app/inplace_edit.rs` (tests de
 `resolve` et du geste dans son module ; chaque surface teste son usage : onglets,
 Project Manager, grille). Aucune garde ne la verrouille encore ; la garde
 `consume_key` hors de `app/shortcuts.rs` (#231) devra l'excepter.
 
-Gardes **à venir** du standard d'interface (#217) : `add_space` littéral hors de `theme.rs` (#227), `consume_key`
-hors de `app/shortcuts.rs` (#231). Elles **n'existent pas encore** : ne pas
+Gardes **à venir** du standard d'interface (#217) : `consume_key` hors de
+`app/shortcuts.rs` (#231). Elles **n'existent pas encore** : ne pas
 les citer comme vertes. Le commit qui en écrit une la déplace dans le tableau
 ci-dessus et la passe à *en place* dans
 [`docs/standard-interface.md`](../../../docs/standard-interface.md).

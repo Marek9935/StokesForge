@@ -38,7 +38,7 @@ use crate::tr;
 
 use super::graph_text_edit::add_annotation_at;
 use super::graph_window::{graph_properties_menu, published_active_panel};
-use super::menu_sections::MenuSections;
+use super::menu_sections::{menu_choice, MenuSections};
 use super::object_manager_ui::{
     object_manager_settings_menu, object_node_menu, selected_manager_target, ObjectManagerRequest,
 };
@@ -221,10 +221,7 @@ impl StokesForgeApp {
                 ui.menu_button(tr!("menu-language"), |ui| {
                     for language in [i18n::Language::English, i18n::Language::French] {
                         let current = i18n::language() == language;
-                        if ui
-                            .selectable_label(current, language.native_name())
-                            .clicked()
-                        {
+                        if menu_choice(ui, current, language.native_name()).clicked() {
                             self.choose_language(language);
                             ui.close();
                         }
@@ -547,24 +544,24 @@ impl StokesForgeApp {
                     }
                     ui.menu_button(tr!("menu-graph-svg-text"), |ui| {
                         let current = self.state.svg_text_mode();
-                        if ui
-                            .radio(
-                                current == SvgTextMode::Text,
-                                tr!("menu-graph-svg-text-text"),
-                            )
-                            .on_hover_text(tr!("menu-graph-svg-text-text", "hint"))
-                            .clicked()
+                        if menu_choice(
+                            ui,
+                            current == SvgTextMode::Text,
+                            tr!("menu-graph-svg-text-text"),
+                        )
+                        .on_hover_text(tr!("menu-graph-svg-text-text", "hint"))
+                        .clicked()
                         {
                             actions.push(Action::SetSvgTextMode(SvgTextMode::Text));
                             ui.close();
                         }
-                        if ui
-                            .radio(
-                                current == SvgTextMode::Outlines,
-                                tr!("menu-graph-svg-text-outlines"),
-                            )
-                            .on_hover_text(tr!("menu-graph-svg-text-outlines", "hint"))
-                            .clicked()
+                        if menu_choice(
+                            ui,
+                            current == SvgTextMode::Outlines,
+                            tr!("menu-graph-svg-text-outlines"),
+                        )
+                        .on_hover_text(tr!("menu-graph-svg-text-outlines", "hint"))
+                        .clicked()
                         {
                             actions.push(Action::SetSvgTextMode(SvgTextMode::Outlines));
                             ui.close();
@@ -582,7 +579,7 @@ impl StokesForgeApp {
                                 width = width,
                                 height = height
                             );
-                            if ui.radio(current == scale, label).clicked() {
+                            if menu_choice(ui, current == scale, label).clicked() {
                                 actions.push(Action::SetPngExportScale(scale));
                                 ui.close();
                             }
@@ -1854,9 +1851,12 @@ mod tests {
         assert!(couleur_du_texte(&output, &tr!("status-ready")).is_none());
         assert_ne!(couleur_du_texte(&output, "Avis"), Some(erreur), "témoin");
 
-        app.state.set_path("/chemin/introuvable/projet.stf".into());
-        app.state.dispatch(Action::Load);
-        let status = app.state.status().expect("un chargement raté se dit");
+        // Un geste refusé (la dernière feuille d'un classeur) ; un projet
+        // illisible, lui, est un échec grave dit par un dialogue (M8, #229).
+        let book = app.state.books()[0].0;
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        app.state.dispatch(Action::DeleteSheet(sheet));
+        let status = app.state.status().expect("un refus se dit");
         assert!(status.is_error);
         let text = status.text.clone();
         let output = barre_d_etat(&app, &ctx);

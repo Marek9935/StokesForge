@@ -32,7 +32,7 @@ l'interface, mais son mot est déjà fixé.
 | R11 | **Pas de deux-points** après un libellé de champ. |
 | R12 | **Typographie.** « … » (un caractère), « × » et non « x ». Guillemets « » en français, “ ” en anglais. Espace insécable avant `: ; ? !` en français. |
 | R13 | **Français : infinitif** pour les consignes (*Choisir un fichier*). Ni tutoiement, ni « vous ». |
-| R14 | **Boutons de dialogue** : le verbe de l'action (*Delete*, *Keep*). *OK* / *Cancel* seulement pour valider / abandonner. Jamais *Yes* / *No*. Assistant : *Back*, *Next*, *Finish*. |
+| R14 | **Boutons de dialogue** : le verbe de l'action (*Delete*, *Replace*, *Discard Changes*) ; une confirmation est Cancel + verbe, jamais *Keep* seul (#229). *OK* / *Cancel* seulement pour valider / abandonner. Jamais *Yes* / *No*. Assistant : *Back*, *Next*, *Finish*. |
 | R15 | **Noms choisis par l'utilisateur ou par défaut** (*Book1*, *Sheet1*, noms de colonnes) : jamais traduits. Sans nom : *Untitled* / *Sans titre*. |
 | R16 | **Clés Fluent** : `zone-element-role` (`menu-file-open`, `plot-axes-tick-length`, `import-step-header-title`). |
 
@@ -64,7 +64,7 @@ l'interface, mais son mot est déjà fixé.
 | Anglais | Français | Définition | Refusés | Réf. |
 |---|---|---|---|---|
 | New Project | Nouveau projet | Remplacer le projet courant par un projet vide, après confirmation si nécessaire | Nouvelle session, Nouveau document | #73 |
-| Discard Changes | Abandonner les modifications | Confirmer la perte du travail non enregistré lors du remplacement du projet | Supprimer le projet, Effacer | #73 |
+| Discard Changes | Abandonner les modifications | Confirmer la perte du travail non enregistré (New Project, Open…, Quit) ; à côté de Cancel et Save | Supprimer le projet, Effacer | #73, #229 |
 | Open / Save / Save As / Quit | Ouvrir / Enregistrer / Enregistrer sous / Quitter | Commandes de fichier | Sauvegarder, Fermer (pour Quitter) | G |
 | Undo / Redo | Annuler / Rétablir | Défaire / refaire la dernière action | Refaire, Répéter | G |
 | Import / Export | Importer / Exporter | Lire un fichier d'appareil / écrire un graphique | Charger, Sauvegarder | O |

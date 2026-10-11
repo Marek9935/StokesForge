@@ -18,10 +18,13 @@ use crate::icons::{icon_button, Icon, IconRole};
 use crate::number_field::number_field;
 use crate::quantities;
 use crate::state::{Action, AppState, ImportDestination, ImportLineAction, ImportStep};
-use crate::theme::section_title;
+use crate::theme::{section_title, FIELD_WIDTH_MEDIUM, FIELD_WIDTH_SHORT};
 use crate::tr;
 
-use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
+use super::dialogs::{
+    modal_confirm, modal_wizard, ConfirmOutcome, DialogFooter, DialogOutcome, FOOTER_BUTTON_SIZE,
+};
+use super::form::{choice, choice_by, form, ChoiceOption, Form};
 use super::hover_help::{help_beside, help_text};
 
 /// Libellé d'une option « Fin des données » : celui de la variante, quel que
@@ -40,36 +43,37 @@ fn data_end_label(end: &stokesforge_import::DataEnd) -> String {
 
 /// Réglage « Fin des données » de la recette d'import (issue #4) : coupure
 /// automatique par défaut, désactivable. Le texte ou le nombre associé à
-/// l'option choisie reste dans la recette tant qu'on en change.
+/// l'option choisie reste dans la recette tant qu'on en change. Sans libellé :
+/// le titre de section « Data end » le porte (#227).
 fn data_end_row(ui: &mut egui::Ui, end: &mut stokesforge_import::DataEnd) {
     use stokesforge_import::DataEnd;
-    let label = data_end_label;
     ui.horizontal(|ui| {
-        ui.label(tr!("import-dataend"));
-        egui::ComboBox::from_id_salt("stokesforge_import_data_end")
-            .selected_text(label(end))
-            .show_ui(ui, |ui| {
-                for candidate in [
-                    DataEnd::Auto,
-                    DataEnd::None,
-                    DataEnd::FirstBlankLine,
-                    DataEnd::Marker(String::new()),
-                    DataEnd::LinesAfterHeader(100),
-                    DataEnd::LinesBeforeEnd(1),
-                ] {
-                    let same = std::mem::discriminant(&*end) == std::mem::discriminant(&candidate);
-                    let mut item = ui.selectable_label(same, label(&candidate));
-                    if matches!(candidate, DataEnd::Auto) {
-                        item = item.on_hover_text(tr!("import-dataend-auto", "hint"));
-                    }
-                    if item.clicked() && !same {
-                        *end = candidate;
-                    }
-                }
-            });
+        let options = [
+            DataEnd::Auto,
+            DataEnd::None,
+            DataEnd::FirstBlankLine,
+            DataEnd::Marker(String::new()),
+            DataEnd::LinesAfterHeader(100),
+            DataEnd::LinesBeforeEnd(1),
+        ]
+        .map(|candidate| {
+            let option = ChoiceOption::new(candidate.clone(), data_end_label(&candidate));
+            if matches!(candidate, DataEnd::Auto) {
+                option.hint(tr!("import-dataend-auto", "hint"))
+            } else {
+                option
+            }
+        });
+        choice_by(
+            ui,
+            "stokesforge_import_data_end",
+            end,
+            &options,
+            same_variant,
+        );
         match end {
             DataEnd::Marker(text) => {
-                ui.text_edit_singleline(text);
+                ui.add(egui::TextEdit::singleline(text).desired_width(FIELD_WIDTH_MEDIUM));
             }
             DataEnd::LinesAfterHeader(n) | DataEnd::LinesBeforeEnd(n) => {
                 number_field(ui, "import_n", n, &quantities::COUNT);
@@ -77,6 +81,12 @@ fn data_end_row(ui: &mut egui::Ui, end: &mut stokesforge_import::DataEnd) {
             _ => {}
         }
     });
+}
+
+/// Deux options de même variante, quel que soit ce qu'elles portent : en
+/// reprendre une garde le texte ou le nombre déjà saisi.
+fn same_variant<T>(a: &T, b: &T) -> bool {
+    std::mem::discriminant(a) == std::mem::discriminant(b)
 }
 
 /// Libellé affiché pour un [`Separator`] dans la fenêtre d'import.
@@ -424,13 +434,15 @@ fn import_step_files(ui: &mut egui::Ui, state: &mut AppState, picks: &mut Vec<Ac
     if state.import_state().is_none() {
         return;
     }
-    import_template_controls(ui, state, picks);
-    import_file_choices(ui, state, picks);
-    import_file_status_rows(ui, state);
+    form(ui, "import_files", |rows| {
+        import_template_controls(rows, state, picks);
+        import_file_choices(rows, state, picks);
+        import_file_status_rows(rows.ui(), state);
+    });
 }
 
 /// Modèle sélectionné, échanges JSON et confirmation de suppression.
-fn import_template_controls(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>) {
+fn import_template_controls(rows: &mut Form<'_>, state: &mut AppState, actions: &mut Vec<Action>) {
     let (names, current_name, modified, confirm) = {
         let Some(import) = state.import_state() else {
             return;
@@ -447,8 +459,9 @@ fn import_template_controls(ui: &mut egui::Ui, state: &mut AppState, actions: &m
             import.confirm_delete.clone(),
         )
     };
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-files-template"));
+    // Les modèles enregistrés sont des données : liste déroulante quel que
+    // soit leur nombre.
+    rows.row(tr!("import-files-template"), |ui| {
         egui::ComboBox::from_id_salt("stokesforge_import_recipe_combo")
             .selected_text(recipe_combo_text(&current_name, modified))
             .show_ui(ui, |ui| {
@@ -481,7 +494,7 @@ fn import_template_controls(ui: &mut egui::Ui, state: &mut AppState, actions: &m
             state.request_delete_import_recipe(&current_name);
         }
     });
-    ui.horizontal(|ui| {
+    rows.field(|ui| {
         if ui
             .button(tr!("import-files-export"))
             .on_hover_text(tr!("import-files-export", "hint"))
@@ -500,28 +513,34 @@ fn import_template_controls(ui: &mut egui::Ui, state: &mut AppState, actions: &m
         }
     });
     if modified {
-        ui.weak(tr!("import-files-unsaved"));
+        rows.note(tr!("import-files-unsaved"));
     }
     if let Some(name) = confirm {
-        ui.horizontal(|ui| {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                tr!("import-files-delete-confirm", name = name),
-            );
-            if ui.button(tr!("import-files-delete-yes")).clicked() {
-                state.confirm_delete_import_recipe();
-            }
-            if ui.button(tr!("import-files-delete-keep")).clicked() {
-                state.cancel_delete_import_recipe();
-            }
-        });
+        // Ctrl+Z ne rend pas un modèle supprimé : confirmation modale (F3,
+        // #229), peinte dans le contenu de l'assistant pour lire Entrée et
+        // Échap avant lui.
+        match modal_confirm(
+            rows.ui().ctx(),
+            egui::Id::new("stokesforge_import_template_delete"),
+            &tr!("import-files-delete-title"),
+            egui::vec2(420.0, 150.0),
+            &tr!("import-files-delete-yes"),
+            &tr!("import-files-delete-yes", "hint"),
+            |ui| {
+                ui.label(tr!("import-files-delete-confirm", name = name));
+            },
+        ) {
+            ConfirmOutcome::Open => {}
+            ConfirmOutcome::Confirm => state.confirm_delete_import_recipe(),
+            ConfirmOutcome::Cancel => state.cancel_delete_import_recipe(),
+        }
     }
-    ui.separator();
 }
 
 /// Ajout de fichiers et choix parmi les fichiers récemment importés.
-fn import_file_choices(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Vec<Action>) {
-    ui.horizontal(|ui| {
+fn import_file_choices(rows: &mut Form<'_>, state: &mut AppState, actions: &mut Vec<Action>) {
+    rows.section(tr!("import-files-section"));
+    rows.ui().horizontal(|ui| {
         if ui
             .button(tr!("import-files-add"))
             .on_hover_text(tr!("import-files-add", "hint"))
@@ -541,6 +560,7 @@ fn import_file_choices(ui: &mut egui::Ui, state: &mut AppState, actions: &mut Ve
         .unwrap_or_default();
     if !recent.is_empty() {
         let mut picked = None;
+        let ui = rows.ui();
         egui::ComboBox::from_id_salt("stokesforge_import_recent")
             .selected_text(tr!("import-files-recent"))
             .show_ui(ui, |ui| {
@@ -616,65 +636,66 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
         return;
     };
     let recipe = &mut import.recipe;
-    import_delimiter_controls(ui, recipe);
-    import_number_controls(ui, recipe);
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-format-comment-prefix"));
-        ui.add(egui::TextEdit::singleline(&mut recipe.comment_prefix).desired_width(60.0));
-        help_text(ui, tr!("import-format-comment-prefix", "hint"));
-    });
-    import_block_encoding_controls(ui, recipe);
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-format-skip-chars"));
-        help_text(ui, tr!("import-format-skip-chars", "hint"));
-        number_field(
-            ui,
-            "import_recipe_skip_chars",
-            &mut recipe.skip_chars,
-            &quantities::COUNT,
-        );
-    });
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-format-skip-lines"));
-        help_text(ui, tr!("import-format-skip-lines", "hint"));
-        number_field(
-            ui,
-            "import_recipe_skip_data_rows",
-            &mut recipe.skip_data_rows,
-            &quantities::COUNT,
-        );
+    form(ui, "import_format", |rows| {
+        import_delimiter_controls(rows, recipe);
+        import_number_controls(rows, recipe);
+        rows.row(tr!("import-format-comment-prefix"), |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut recipe.comment_prefix)
+                    .desired_width(FIELD_WIDTH_SHORT),
+            );
+            help_text(ui, tr!("import-format-comment-prefix", "hint"));
+        });
+        import_block_encoding_controls(rows, recipe);
+        rows.row(tr!("import-format-skip-chars"), |ui| {
+            number_field(
+                ui,
+                "import_recipe_skip_chars",
+                &mut recipe.skip_chars,
+                &quantities::COUNT,
+            );
+            help_text(ui, tr!("import-format-skip-chars", "hint"));
+        });
+        rows.row(tr!("import-format-skip-lines"), |ui| {
+            number_field(
+                ui,
+                "import_recipe_skip_data_rows",
+                &mut recipe.skip_data_rows,
+                &quantities::COUNT,
+            );
+            help_text(ui, tr!("import-format-skip-lines", "hint"));
+        });
     });
 }
 
 /// Délimiteur et paramètres de sa variante (caractère ou largeurs fixes).
-fn import_delimiter_controls(ui: &mut egui::Ui, recipe: &mut stokesforge_import::ImportRecipe) {
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-format-delimiter"));
-        help_text(ui, tr!("import-format-delimiter", "hint"));
-        egui::ComboBox::from_id_salt("stokesforge_import_separator_combo")
-            .selected_text(separator_label(&recipe.separator))
-            .show_ui(ui, |ui| {
-                for sep in [
-                    Separator::Comma,
-                    Separator::Semicolon,
-                    Separator::Tab,
-                    Separator::Whitespace,
-                    Separator::Custom('|'),
-                    Separator::FixedWidth(vec![10]),
-                    Separator::Auto,
-                ] {
-                    let same =
-                        std::mem::discriminant(&recipe.separator) == std::mem::discriminant(&sep);
-                    if ui.selectable_label(same, separator_label(&sep)).clicked() && !same {
-                        recipe.separator = sep;
-                    }
-                }
-            });
+fn import_delimiter_controls(rows: &mut Form<'_>, recipe: &mut stokesforge_import::ImportRecipe) {
+    rows.row(tr!("import-format-delimiter"), |ui| {
+        let options = [
+            Separator::Comma,
+            Separator::Semicolon,
+            Separator::Tab,
+            Separator::Whitespace,
+            Separator::Custom('|'),
+            Separator::FixedWidth(vec![10]),
+            Separator::Auto,
+        ]
+        .map(|sep| {
+            let label = separator_label(&sep);
+            ChoiceOption::new(sep, label)
+        });
+        choice_by(
+            ui,
+            "stokesforge_import_separator_combo",
+            &mut recipe.separator,
+            &options,
+            same_variant,
+        );
         match &mut recipe.separator {
             Separator::Custom(c) => {
                 let mut text = c.to_string();
                 if ui
-                    .add(egui::TextEdit::singleline(&mut text).desired_width(24.0))
+                    .add(egui::TextEdit::singleline(&mut text).desired_width(FIELD_WIDTH_SHORT))
                     .changed()
                 {
                     if let Some(first) = text.chars().last() {
@@ -689,7 +710,7 @@ fn import_delimiter_controls(ui: &mut egui::Ui, recipe: &mut stokesforge_import:
                     .collect::<Vec<_>>()
                     .join(",");
                 if help_beside(ui, tr!("import-format-widths-hint"), |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0))
+                    ui.add(egui::TextEdit::singleline(&mut text).desired_width(FIELD_WIDTH_MEDIUM))
                         .changed()
                 }) {
                     *widths = text
@@ -700,44 +721,35 @@ fn import_delimiter_controls(ui: &mut egui::Ui, recipe: &mut stokesforge_import:
             }
             _ => {}
         }
+        help_text(ui, tr!("import-format-delimiter", "hint"));
     });
 }
 
 /// Décimale, milliers et valeurs manquantes, dans leur ordre de saisie.
-fn import_number_controls(ui: &mut egui::Ui, recipe: &mut stokesforge_import::ImportRecipe) {
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-format-decimal"));
-        egui::ComboBox::from_id_salt("stokesforge_import_decimal_combo")
-            .selected_text(decimal_label(recipe.decimal))
-            .show_ui(ui, |ui| {
-                for dec in [DecimalStyle::Auto, DecimalStyle::Dot, DecimalStyle::Comma] {
-                    if ui
-                        .selectable_label(recipe.decimal == dec, decimal_label(dec))
-                        .clicked()
-                    {
-                        recipe.decimal = dec;
-                    }
-                }
-            });
-        ui.label(tr!("import-format-thousands"));
-        egui::ComboBox::from_id_salt("stokesforge_import_thousands_combo")
-            .selected_text(thousands_label(recipe.thousands))
-            .show_ui(ui, |ui| {
-                for candidate in [None, Some(' '), Some(','), Some('.'), Some('\'')] {
-                    if ui
-                        .selectable_label(recipe.thousands == candidate, thousands_label(candidate))
-                        .clicked()
-                    {
-                        recipe.thousands = candidate;
-                    }
-                }
-            });
+fn import_number_controls(rows: &mut Form<'_>, recipe: &mut stokesforge_import::ImportRecipe) {
+    // Trois choix : des radios (C1).
+    rows.row(tr!("import-format-decimal"), |ui| {
+        choice(
+            ui,
+            "stokesforge_import_decimal_combo",
+            &mut recipe.decimal,
+            &[DecimalStyle::Auto, DecimalStyle::Dot, DecimalStyle::Comma]
+                .map(|dec| ChoiceOption::new(dec, decimal_label(dec))),
+        )
     });
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-format-missing"));
+    rows.row(tr!("import-format-thousands"), |ui| {
+        choice(
+            ui,
+            "stokesforge_import_thousands_combo",
+            &mut recipe.thousands,
+            &[None, Some(' '), Some(','), Some('.'), Some('\'')]
+                .map(|candidate| ChoiceOption::new(candidate, thousands_label(candidate))),
+        )
+    });
+    rows.row(tr!("import-format-missing"), |ui| {
         let mut text = recipe.missing_tokens.join(", ");
         if help_beside(ui, tr!("import-format-missing", "hint"), |ui| {
-            ui.add(egui::TextEdit::singleline(&mut text).desired_width(140.0))
+            ui.add(egui::TextEdit::singleline(&mut text).desired_width(FIELD_WIDTH_MEDIUM))
                 .changed()
         }) {
             recipe.missing_tokens = text
@@ -751,66 +763,60 @@ fn import_number_controls(ui: &mut egui::Ui, recipe: &mut stokesforge_import::Im
 
 /// Découpage en blocs et encodage du fichier.
 fn import_block_encoding_controls(
-    ui: &mut egui::Ui,
+    rows: &mut Form<'_>,
     recipe: &mut stokesforge_import::ImportRecipe,
 ) {
-    ui.horizontal(|ui| {
+    rows.row(tr!("import-format-blocks"), |ui| {
         use stokesforge_import::BlockSplit;
-        ui.label(tr!("import-format-blocks"));
-        help_text(ui, tr!("import-format-blocks", "hint"));
-        let current = match &recipe.block_split {
-            BlockSplit::None => tr!("import-blocks-single"),
-            BlockSplit::BeforeLine(_) => tr!("import-blocks-line-start"),
-            BlockSplit::BlankLines => tr!("import-blocks-blank"),
-        };
-        egui::ComboBox::from_id_salt("stokesforge_import_blocks_combo")
-            .selected_text(current)
-            .show_ui(ui, |ui| {
-                for (candidate, label) in [
-                    (BlockSplit::None, tr!("import-blocks-single")),
-                    (
-                        BlockSplit::BeforeLine("TITLE".into()),
-                        tr!("import-blocks-line-start"),
-                    ),
-                    (BlockSplit::BlankLines, tr!("import-blocks-blank")),
-                ] {
-                    let same = std::mem::discriminant(&recipe.block_split)
-                        == std::mem::discriminant(&candidate);
-                    if ui.selectable_label(same, label).clicked() && !same {
-                        recipe.block_split = candidate;
-                    }
-                }
-            });
+        // Trois découpages : des radios (C1).
+        choice_by(
+            ui,
+            "stokesforge_import_blocks_combo",
+            &mut recipe.block_split,
+            &[
+                ChoiceOption::new(BlockSplit::None, tr!("import-blocks-single")),
+                ChoiceOption::new(
+                    BlockSplit::BeforeLine("TITLE".into()),
+                    tr!("import-blocks-line-start"),
+                ),
+                ChoiceOption::new(BlockSplit::BlankLines, tr!("import-blocks-blank")),
+            ],
+            same_variant,
+        );
         if let BlockSplit::BeforeLine(marker) = &mut recipe.block_split {
-            ui.add(egui::TextEdit::singleline(marker).desired_width(80.0));
+            ui.add(egui::TextEdit::singleline(marker).desired_width(FIELD_WIDTH_SHORT));
         }
+        help_text(ui, tr!("import-format-blocks", "hint"));
     });
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-format-encoding"));
-        egui::ComboBox::from_id_salt("stokesforge_import_encoding_combo")
-            .selected_text(encoding_label(recipe.encoding))
-            .show_ui(ui, |ui| {
-                use stokesforge_import::Encoding;
-                for candidate in [
-                    Encoding::Auto,
-                    Encoding::Utf8,
-                    Encoding::Windows1252,
-                    Encoding::Latin1,
-                    Encoding::Utf16Le,
-                    Encoding::Utf16Be,
-                ] {
-                    if ui
-                        .selectable_label(recipe.encoding == candidate, encoding_label(candidate))
-                        .clicked()
-                    {
-                        recipe.encoding = candidate;
-                    }
-                }
-            });
+    rows.row(tr!("import-format-encoding"), |ui| {
+        use stokesforge_import::Encoding;
+        choice(
+            ui,
+            "stokesforge_import_encoding_combo",
+            &mut recipe.encoding,
+            &[
+                Encoding::Auto,
+                Encoding::Utf8,
+                Encoding::Windows1252,
+                Encoding::Latin1,
+                Encoding::Utf16Le,
+                Encoding::Utf16Be,
+            ]
+            .map(|candidate| ChoiceOption::new(candidate, encoding_label(candidate))),
+        )
     });
 }
 
-/// Étape 3 : en-tête (un seul réglage) et fin des données.
+/// Le réglage d'en-tête de l'étape 3, déduit de la recette.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeaderMode {
+    None,
+    Lines,
+    Marker,
+}
+
+/// Étape 3 : en-tête (un seul réglage), fin des données et noms des colonnes,
+/// trois blocs sous leur titre (L3).
 fn import_step_header(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -823,155 +829,180 @@ fn import_step_header(
         return;
     };
     let recipe = &mut import.recipe;
+    form(ui, "import_header", |rows| {
+        import_header_controls(rows, recipe, has_files, requests);
+        rows.section(tr!("import-dataend"));
+        rows.field(|ui| data_end_row(ui, &mut recipe.data_end));
+        rows.row(tr!("import-header-skip-footer"), |ui| {
+            number_field(
+                ui,
+                "import_recipe_footer_skip_lines",
+                &mut recipe.footer_skip_lines,
+                &quantities::COUNT,
+            );
+            help_text(ui, tr!("import-header-skip-footer", "hint"));
+        });
+        // Garder les valeurs choisies pendant le grisage pour les retrouver
+        // quand les noms ne viennent plus de la première ligne.
+        rows.enabled(!recipe.has_column_header_row, |rows| {
+            rows.section(tr!("import-column-names"));
+            let mut is_header_key = matches!(recipe.name_source, NameSource::HeaderKey(_));
+            if rows.field(|ui| {
+                choice(
+                    ui,
+                    "stokesforge_import_name_source",
+                    &mut is_header_key,
+                    &[
+                        ChoiceOption::new(false, tr!("import-header-name-file")),
+                        ChoiceOption::new(true, tr!("import-header-name-key")),
+                    ],
+                )
+            }) {
+                recipe.name_source = if is_header_key {
+                    NameSource::HeaderKey(String::new())
+                } else {
+                    NameSource::Filename
+                };
+            }
+            if let NameSource::HeaderKey(key) = &mut recipe.name_source {
+                rows.row(tr!("import-header-key"), |ui| {
+                    ui.add(egui::TextEdit::singleline(key).desired_width(FIELD_WIDTH_MEDIUM));
+                });
+            }
+        });
+    });
+}
+
+/// Le bloc « Header » de l'étape 3 : mode, lignes, rôles des sous-en-têtes.
+fn import_header_controls(
+    rows: &mut Form<'_>,
+    recipe: &mut stokesforge_import::ImportRecipe,
+    has_files: bool,
+    requests: &mut ImportWizardRequests,
+) {
     // Comme `parse` : le découpage structuré ne compte que s'il a des lignes
     // (l'ancien drapeau `auto_detect` seul ne suffit pas).
     let structured =
         recipe.header_layout.main_header_lines > 0 || recipe.header_layout.subheader_lines > 0;
     let is_marker = matches!(recipe.header, HeaderSkip::UntilMarker(_));
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-header-mode"));
-        if ui
-            .radio(!structured && !is_marker, tr!("import-option-none"))
-            .clicked()
-        {
-            recipe.header = HeaderSkip::None;
-            recipe.header_layout = stokesforge_import::HeaderLayout::default();
+    rows.section(tr!("import-header-mode"));
+    let mut mode = if is_marker {
+        HeaderMode::Marker
+    } else if structured {
+        HeaderMode::Lines
+    } else {
+        HeaderMode::None
+    };
+    if rows.field(|ui| {
+        choice(
+            ui,
+            "stokesforge_import_header_mode",
+            &mut mode,
+            &[
+                ChoiceOption::new(HeaderMode::None, tr!("import-option-none")),
+                ChoiceOption::new(HeaderMode::Lines, tr!("import-header-mode-lines")),
+                ChoiceOption::new(HeaderMode::Marker, tr!("import-header-mode-marker")),
+            ],
+        )
+    }) {
+        match mode {
+            HeaderMode::None => {
+                recipe.header = HeaderSkip::None;
+                recipe.header_layout = stokesforge_import::HeaderLayout::default();
+            }
+            HeaderMode::Lines => {
+                recipe.header = HeaderSkip::None;
+                recipe.header_layout.main_header_lines = 1;
+            }
+            HeaderMode::Marker => {
+                recipe.header_layout = stokesforge_import::HeaderLayout::default();
+                recipe.header = HeaderSkip::UntilMarker(String::new());
+            }
         }
-        if ui
-            .radio(structured, tr!("import-header-mode-lines"))
-            .clicked()
-            && !structured
-        {
-            recipe.header = HeaderSkip::None;
-            recipe.header_layout.main_header_lines = 1;
-        }
-        if ui
-            .radio(is_marker, tr!("import-header-mode-marker"))
-            .clicked()
-            && !is_marker
-        {
-            recipe.header_layout = stokesforge_import::HeaderLayout::default();
-            recipe.header = HeaderSkip::UntilMarker(String::new());
-        }
-    });
+    }
     if let HeaderSkip::UntilMarker(marker) = &mut recipe.header {
-        ui.horizontal(|ui| {
-            ui.label(tr!("import-header-marker"));
+        rows.row(tr!("import-header-marker"), |ui| {
+            ui.add(egui::TextEdit::singleline(marker).desired_width(FIELD_WIDTH_MEDIUM));
             help_text(ui, tr!("import-header-marker", "hint"));
-            ui.text_edit_singleline(marker);
         });
     }
     if structured {
-        ui.horizontal(|ui| {
-            ui.label(tr!("import-header-lines"));
+        rows.row(tr!("import-header-lines"), |ui| {
             number_field(
                 ui,
                 "import_recipe_header_layout_main_header_lines",
                 &mut recipe.header_layout.main_header_lines,
                 &quantities::COUNT,
             );
-            ui.label(tr!("import-header-subheader-lines"));
-            help_text(ui, tr!("import-header-subheader-lines", "hint"));
+        });
+        rows.row(tr!("import-header-subheader-lines"), |ui| {
             number_field(
                 ui,
                 "import_recipe_header_layout_subheader_lines",
                 &mut recipe.header_layout.subheader_lines,
                 &quantities::COUNT,
             );
+            help_text(ui, tr!("import-header-subheader-lines", "hint"));
         });
     }
-    if ui
-        .add_enabled(has_files, egui::Button::new(tr!("import-header-detect")))
-        .on_hover_text(tr!("import-header-detect", "hint"))
-        .on_disabled_hover_text(tr!("disabled-add-file-first"))
-        .clicked()
-    {
+    if rows.field(|ui| {
+        ui.add_enabled(has_files, egui::Button::new(tr!("import-header-detect")))
+            .on_hover_text(tr!("import-header-detect", "hint"))
+            .on_disabled_hover_text(tr!("disabled-add-file-first"))
+            .clicked()
+    }) {
         requests.auto_detect = true;
     }
     if recipe.header_layout.subheader_lines > 0 {
-        help_beside(ui, tr!("import-header-combined", "hint"), |ui| {
-            ui.checkbox(
-                &mut recipe.subheader_roles.same_line_name_unit,
-                tr!("import-header-combined"),
-            )
-        });
-        subheader_role_row(
-            ui,
-            "stokesforge_import_role_long_name",
-            tr!("import-header-role-long-name"),
-            tr!("import-header-role-long-name", "hint"),
-            &mut recipe.subheader_roles.long_name,
+        rows.checkbox(
+            &mut recipe.subheader_roles.same_line_name_unit,
+            tr!("import-header-combined"),
+            Some(tr!("import-header-combined", "hint")),
         );
-        if !recipe.subheader_roles.same_line_name_unit {
+        rows.field(|ui| {
             subheader_role_row(
                 ui,
-                "stokesforge_import_role_unit",
-                tr!("import-header-role-units"),
-                tr!("import-header-role-units", "hint"),
-                &mut recipe.subheader_roles.unit,
-            );
-        }
-        subheader_role_row(
-            ui,
-            "stokesforge_import_role_comment",
-            tr!("import-header-role-comments"),
-            tr!("import-header-role-comments", "hint"),
-            &mut recipe.subheader_roles.comment,
-        );
-        subheader_role_row(
-            ui,
-            "stokesforge_import_role_x_prime",
-            tr!("import-header-role-x-prime"),
-            tr!("import-header-role-x-prime", "hint"),
-            &mut recipe.subheader_roles.x_prime,
-        );
-    }
-    help_beside(ui, tr!("import-header-names-first-line", "hint"), |ui| {
-        ui.checkbox(
-            &mut recipe.has_column_header_row,
-            tr!("import-header-names-first-line"),
-        )
-    });
-    ui.separator();
-    data_end_row(ui, &mut recipe.data_end);
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-header-skip-footer"));
-        help_text(ui, tr!("import-header-skip-footer", "hint"));
-        number_field(
-            ui,
-            "import_recipe_footer_skip_lines",
-            &mut recipe.footer_skip_lines,
-            &quantities::COUNT,
-        );
-    });
-    ui.separator();
-    // Garder les valeurs choisies pendant le grisage pour les retrouver
-    // quand les noms ne viennent plus de la première ligne.
-    ui.add_enabled_ui(!recipe.has_column_header_row, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(tr!("import-column-names"));
-            let mut is_filename = matches!(recipe.name_source, NameSource::Filename);
-            let mut is_header_key = matches!(recipe.name_source, NameSource::HeaderKey(_));
-            if ui
-                .radio_value(&mut is_filename, true, tr!("import-header-name-file"))
-                .clicked()
-            {
-                recipe.name_source = NameSource::Filename;
-            }
-            if ui
-                .radio_value(&mut is_header_key, true, tr!("import-header-name-key"))
-                .clicked()
-            {
-                recipe.name_source = NameSource::HeaderKey(String::new());
-            }
+                "stokesforge_import_role_long_name",
+                tr!("import-header-role-long-name"),
+                tr!("import-header-role-long-name", "hint"),
+                &mut recipe.subheader_roles.long_name,
+            )
         });
-        if let NameSource::HeaderKey(key) = &mut recipe.name_source {
-            ui.horizontal(|ui| {
-                ui.label(tr!("import-header-key"));
-                ui.text_edit_singleline(key);
+        if !recipe.subheader_roles.same_line_name_unit {
+            rows.field(|ui| {
+                subheader_role_row(
+                    ui,
+                    "stokesforge_import_role_unit",
+                    tr!("import-header-role-units"),
+                    tr!("import-header-role-units", "hint"),
+                    &mut recipe.subheader_roles.unit,
+                )
             });
         }
-    });
+        rows.field(|ui| {
+            subheader_role_row(
+                ui,
+                "stokesforge_import_role_comment",
+                tr!("import-header-role-comments"),
+                tr!("import-header-role-comments", "hint"),
+                &mut recipe.subheader_roles.comment,
+            )
+        });
+        rows.field(|ui| {
+            subheader_role_row(
+                ui,
+                "stokesforge_import_role_x_prime",
+                tr!("import-header-role-x-prime"),
+                tr!("import-header-role-x-prime", "hint"),
+                &mut recipe.subheader_roles.x_prime,
+            )
+        });
+    }
+    rows.checkbox(
+        &mut recipe.has_column_header_row,
+        tr!("import-header-names-first-line"),
+        Some(tr!("import-header-names-first-line", "hint")),
+    );
 }
 
 /// Libellé de la nature choisie pour une colonne.
@@ -1130,8 +1161,8 @@ fn import_step_metadata(ui: &mut egui::Ui, state: &mut AppState) {
             tr!("import-metadata-keep-footer"),
         )
     });
+    section_title(ui, tr!("import-metadata-lines-section"));
     ui.weak(tr!("import-metadata-uncheck"));
-    ui.separator();
     let is_excluded = |recipe: &stokesforge_import::ImportRecipe, key: &str| {
         recipe
             .excluded_metadata
@@ -1178,87 +1209,114 @@ fn import_step_destination(
     let Some(import) = state.import_state_mut() else {
         return;
     };
-    section_title(ui, tr!("import-destination"));
-    if let Some(book) = import.active_book {
-        ui.radio_value(
-            &mut import.destination,
-            ImportDestination::ActiveBook(book),
-            tr!("import-destination-active"),
-        );
-    } else {
-        ui.add_enabled(
-            false,
-            egui::RadioButton::new(false, tr!("import-destination-active-none")),
-        )
-        .on_disabled_hover_text(tr!("disabled-import-no-active-book"));
-    }
-    ui.radio_value(
-        &mut import.destination,
-        ImportDestination::NewBookPerFile,
-        tr!("import-destination-new-per-file"),
-    );
-    ui.radio_value(
-        &mut import.destination,
-        ImportDestination::NewBookForAll,
-        tr!("import-destination-new-all"),
-    );
-    if matches!(import.destination, ImportDestination::ActiveBook(_)) {
-        section_title(ui, tr!("import-destination-mode"));
-        use stokesforge_import::ImportMode;
-        for (mode, label) in [
-            (ImportMode::NewSheet, tr!("import-mode-new-sheet")),
-            (ImportMode::ReplaceSheet, tr!("import-mode-replace")),
-            (ImportMode::AddColumns, tr!("import-mode-add-columns")),
-            (ImportMode::AddRows, tr!("import-mode-add-rows")),
-        ] {
-            ui.radio_value(&mut import.recipe.import_mode, mode, label);
+    form(ui, "import_destination", |rows| {
+        rows.section(tr!("import-destination"));
+        // Trois destinations dont une peut manquer (aucun classeur actif) :
+        // radios l'un sous l'autre, posés ici pour griser la première.
+        rows.field(|ui| {
+            ui.vertical(|ui| {
+                if let Some(book) = import.active_book {
+                    ui.radio_value(
+                        &mut import.destination,
+                        ImportDestination::ActiveBook(book),
+                        tr!("import-destination-active"),
+                    );
+                } else {
+                    ui.add_enabled(
+                        false,
+                        egui::RadioButton::new(false, tr!("import-destination-active-none")),
+                    )
+                    .on_disabled_hover_text(tr!("disabled-import-no-active-book"));
+                }
+                ui.radio_value(
+                    &mut import.destination,
+                    ImportDestination::NewBookPerFile,
+                    tr!("import-destination-new-per-file"),
+                );
+                ui.radio_value(
+                    &mut import.destination,
+                    ImportDestination::NewBookForAll,
+                    tr!("import-destination-new-all"),
+                );
+            });
+        });
+        if matches!(import.destination, ImportDestination::ActiveBook(_)) {
+            rows.section(tr!("import-destination-mode"));
+            use stokesforge_import::ImportMode;
+            // Quatre modes : une liste déroulante (C1).
+            rows.field(|ui| {
+                choice(
+                    ui,
+                    "stokesforge_import_mode",
+                    &mut import.recipe.import_mode,
+                    &[
+                        ChoiceOption::new(ImportMode::NewSheet, tr!("import-mode-new-sheet")),
+                        ChoiceOption::new(ImportMode::ReplaceSheet, tr!("import-mode-replace")),
+                        ChoiceOption::new(ImportMode::AddColumns, tr!("import-mode-add-columns")),
+                        ChoiceOption::new(ImportMode::AddRows, tr!("import-mode-add-rows")),
+                    ],
+                )
+            });
         }
-    }
-    if import.paths.len() > 1 {
-        section_title(ui, tr!("import-destination-multiple"));
-        use stokesforge_import::FilesLayout;
-        for (layout, label) in [
-            (FilesLayout::SheetPerFile, tr!("import-layout-per-file")),
-            (FilesLayout::SideBySide, tr!("import-layout-side-by-side")),
-            (FilesLayout::SharedX, tr!("import-layout-shared-x")),
-        ] {
-            ui.radio_value(&mut import.recipe.files_layout, layout, label);
+        if import.paths.len() > 1 {
+            rows.section(tr!("import-destination-multiple"));
+            use stokesforge_import::FilesLayout;
+            rows.field(|ui| {
+                choice(
+                    ui,
+                    "stokesforge_import_files_layout",
+                    &mut import.recipe.files_layout,
+                    &[
+                        ChoiceOption::new(FilesLayout::SheetPerFile, tr!("import-layout-per-file")),
+                        ChoiceOption::new(
+                            FilesLayout::SideBySide,
+                            tr!("import-layout-side-by-side"),
+                        ),
+                        ChoiceOption::new(FilesLayout::SharedX, tr!("import-layout-shared-x")),
+                    ],
+                )
+            });
         }
-    }
-    ui.separator();
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-destination-template-name"));
-        ui.text_edit_singleline(&mut import.save_as_name);
-        if ui.button(tr!("import-destination-save")).clicked() {
-            requests.save_recipe = true;
-        }
-    });
-    ui.weak(tr!("import-destination-saved-note"));
-    section_title(ui, tr!("import-destination-auto"))
-        .on_hover_text(tr!("import-destination-auto", "hint"));
-    let auto = &mut import.recipe.auto_match;
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-auto-extensions"));
-        let mut text = auto.extensions.join(", ");
-        if help_beside(ui, tr!("import-auto-extensions", "hint"), |ui| {
-            ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0))
-                .changed()
-        }) {
-            auto.extensions = text
-                .split(',')
-                .map(|e| e.trim().trim_start_matches('.').to_string())
-                .filter(|e| !e.is_empty())
-                .collect();
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-auto-name"));
-        ui.add(egui::TextEdit::singleline(&mut auto.name_contains).desired_width(120.0));
-    });
-    ui.horizontal(|ui| {
-        ui.label(tr!("import-auto-content"));
-        ui.add(egui::TextEdit::singleline(&mut auto.content_contains).desired_width(160.0));
-        help_text(ui, tr!("import-auto-content", "hint"));
+        rows.section(tr!("import-destination-template-section"));
+        rows.row(tr!("import-destination-template-name"), |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut import.save_as_name)
+                    .desired_width(FIELD_WIDTH_MEDIUM),
+            );
+            if ui.button(tr!("import-destination-save")).clicked() {
+                requests.save_recipe = true;
+            }
+        });
+        rows.note(tr!("import-destination-saved-note"));
+        rows.section(tr!("import-destination-auto"))
+            .on_hover_text(tr!("import-destination-auto", "hint"));
+        let auto = &mut import.recipe.auto_match;
+        rows.row(tr!("import-auto-extensions"), |ui| {
+            let mut text = auto.extensions.join(", ");
+            if help_beside(ui, tr!("import-auto-extensions", "hint"), |ui| {
+                ui.add(egui::TextEdit::singleline(&mut text).desired_width(FIELD_WIDTH_MEDIUM))
+                    .changed()
+            }) {
+                auto.extensions = text
+                    .split(',')
+                    .map(|e| e.trim().trim_start_matches('.').to_string())
+                    .filter(|e| !e.is_empty())
+                    .collect();
+            }
+        });
+        rows.row(tr!("import-auto-name"), |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut auto.name_contains)
+                    .desired_width(FIELD_WIDTH_MEDIUM),
+            );
+        });
+        rows.row(tr!("import-auto-content"), |ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut auto.content_contains)
+                    .desired_width(FIELD_WIDTH_MEDIUM),
+            );
+            help_text(ui, tr!("import-auto-content", "hint"));
+        });
     });
 }
 
@@ -1270,7 +1328,8 @@ fn import_step_destination(
 /// pour un format connu. **Dialogue modal de la brique commune**
 /// ([`modal_dialog_with`], comme les propriétés du graphe), peint depuis
 /// [`StokesForgeApp::ui`](eframe::App::ui) tant que [`AppState::import_state`] est `Some` ; la croix
-/// et Échap valent « Annuler », Entrée « Terminer ».
+/// et Échap valent « Annuler », Entrée « Terminer ». Pied d'assistant
+/// ([`modal_wizard`], F6) : Cancel à gauche, Back · Next · Finish à droite.
 pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Action>) {
     let Some(step) = state.import_state().map(|import| import.step) else {
         return;
@@ -1281,12 +1340,14 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
     // Les deux fermetures de la brique (contenu, boutons du pied) écrivent
     // dans les mêmes demandes, l'une après l'autre : `RefCell`.
     let requests = std::cell::RefCell::new(ImportWizardRequests::default());
+    // Grisé, Finish dit pourquoi (G1, F10) : dans le pied et dans sa bulle
+    // (`accept_disabled`).
     let (finish_label, finish_hint) = (
         tr!("import-button-finish"),
         tr!("import-button-finish", "hint"),
     );
     let add_file_first = tr!("disabled-add-file-first");
-    let outcome = modal_dialog_with(
+    let outcome = modal_wizard(
         ctx,
         egui::Id::new("stokesforge_import_wizard"),
         &tr!("import-window-title"),
@@ -1298,11 +1359,12 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             accept_disabled: Some(&add_file_first),
         },
         |footer| {
-            // Ajoutés de droite à gauche : « Next » puis « Back ».
+            // Ajoutés de droite à gauche, contre Finish : « Next » puis
+            // « Back » (F6 : Back · Next · Finish groupés à droite).
             if footer
                 .add_enabled(
                     step != ImportStep::Destination,
-                    egui::Button::new(tr!("import-button-next")).min_size(egui::vec2(84.0, 24.0)),
+                    egui::Button::new(tr!("import-button-next")).min_size(FOOTER_BUTTON_SIZE),
                 )
                 .on_disabled_hover_text(tr!("disabled-import-last-step"))
                 .clicked()
@@ -1312,7 +1374,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             if footer
                 .add_enabled(
                     step != ImportStep::Files,
-                    egui::Button::new(tr!("import-button-back")).min_size(egui::vec2(84.0, 24.0)),
+                    egui::Button::new(tr!("import-button-back")).min_size(FOOTER_BUTTON_SIZE),
                 )
                 .on_disabled_hover_text(tr!("disabled-import-first-step"))
                 .clicked()
@@ -2188,6 +2250,45 @@ mod tests {
         );
     }
 
+    /// F3–F5 (#229) : supprimer un modèle (Ctrl+Z ne le rend pas) passe par
+    /// une confirmation modale par-dessus l'assistant, Cancel par défaut :
+    /// Entrée l'annule sans valider l'assistant (qui reste ouvert) ; le verbe
+    /// supprime. Plus de « Keep ».
+    #[test]
+    fn supprimer_un_modele_passe_par_une_confirmation_modale() {
+        let mut banc = banc(true);
+        let context = contexte();
+        let mut actions = Vec::new();
+        banc.state.request_delete_import_recipe("Jasco");
+        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+        assert!(est_peint(&peints, &tr!("import-files-delete-title")));
+        texte_exact(&peints, &tr!("import-files-delete-yes"));
+        peindre_assistant(
+            &context,
+            &mut banc.state,
+            &mut actions,
+            vec![touche(egui::Key::Enter)],
+        );
+        let import = banc.state.import_state().expect("l'assistant reste ouvert");
+        assert!(import.confirm_delete.is_none(), "Entrée = Cancel");
+        assert!(actions.is_empty(), "l'assistant n'a rien validé");
+
+        banc.state.request_delete_import_recipe("Jasco");
+        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+        let verbe = texte_exact(&peints, &tr!("import-files-delete-yes")).centre;
+        cliquer(&context, verbe, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        });
+        assert!(
+            banc.state
+                .import_state()
+                .expect("ouvert")
+                .confirm_delete
+                .is_none(),
+            "le verbe a répondu"
+        );
+    }
+
     /// Le champ associé à un délimiteur conserve sa valeur en reprenant la
     /// même variante. Changer d'option prouve que le clic atteint la liste.
     #[test]
@@ -2223,9 +2324,12 @@ mod tests {
         let peints = textes(&image(context, Vec::new(), |ui| {
             super::import_step_format(ui, state)
         }));
+        // La liste ouverte se peint par-dessus le formulaire, donc en dernier :
+        // un même libellé peut aussi être celui d'un radio (« Comma » de la
+        // décimale).
         let choix = peints
             .iter()
-            .find(|texte| texte.texte == libelle && texte.centre != liste)
+            .rfind(|texte| texte.texte == libelle && texte.centre != liste)
             .unwrap_or_else(|| panic!("{libelle:?} absent de la liste ouverte"))
             .centre;
         cliquer(context, choix, egui::PointerButton::Primary, |ui| {

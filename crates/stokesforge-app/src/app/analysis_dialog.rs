@@ -16,7 +16,7 @@ use stokesforge_core::number_format::{format_exact, format_with_uncertainty};
 use super::analysis_forms::{form_body, value_row};
 use super::analysis_preview::{preview, reset_view, PreviewOutcome};
 use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
-use crate::analysis::{kind_title, value_label, value_unit, PreviewTool};
+use crate::analysis::{issue_message, kind_title, value_label, value_unit, PreviewTool};
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState, CalculationDelete};
 use crate::{theme, tr};
@@ -165,8 +165,14 @@ pub(super) fn analysis_window(
     let failed = ctx
         .data(|data| data.get_temp::<bool>(failed_id))
         .unwrap_or(false);
-    let accept_enabled = form.issues().is_empty() && !failed;
-    let accept_disabled = tr!("disabled-analysis-issues");
+    let issues = form.issues();
+    let accept_enabled = issues.is_empty() && !failed;
+    // Grisé, le bouton dit pourquoi (G1, F10) : dans le pied et dans sa
+    // bulle — le premier manque du formulaire, sinon l'aperçu en échec.
+    let accept_disabled = match issues.first() {
+        Some(issue) => issue_message(issue),
+        None => tr!("disabled-analysis-issues"),
+    };
 
     let outcome = modal_dialog_with(
         ctx,
@@ -294,7 +300,7 @@ pub(super) fn calculation_delete_window(
         },
         |ui| {
             ui.label(tr!("analysis-delete-confirm", name = name.as_str()));
-            ui.add_space(6.0);
+            ui.add_space(crate::theme::SPACE_ITEM);
             ui.label(
                 egui::RichText::new(tr!(
                     "analysis-delete-columns",

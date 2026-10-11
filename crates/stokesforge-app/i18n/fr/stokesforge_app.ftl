@@ -44,9 +44,26 @@ action-new-project = Nouveau projet
     .hint = Crée un projet vide dans cette fenêtre
 action-add-graph = Ajouter un graphique
     .hint = Ajoute un graphique vide avec une zone de tracé
-new-project-confirm = Abandonner les modifications non enregistrées et créer un projet vide ?
-new-project-discard = Abandonner les modifications
-    .hint = Remplace le projet courant ; cette action ne peut pas être annulée
+unsaved-title = Modifications non enregistrées
+unsaved-new = Enregistrer les modifications de ce projet avant d'en créer un nouveau ?
+unsaved-open = Enregistrer les modifications de ce projet avant d'en ouvrir un autre ?
+unsaved-quit = Enregistrer les modifications de ce projet avant de quitter ?
+unsaved-discard = Abandonner les modifications
+    .hint = Perd les modifications depuis le dernier enregistrement ; cette action ne peut pas être annulée
+unsaved-save = Enregistrer
+    .hint = Enregistre le projet, puis continue (Entrée)
+alert-save-failed-title = Projet non enregistré
+alert-save-failed = Le projet n'a pas pu être enregistré. Ses modifications sont conservées.
+alert-save-as = Enregistrer sous…
+    .hint = Enregistre le projet dans un autre fichier
+alert-open-failed-title = Projet non ouvert
+alert-open-failed = Le projet n'a pas pu être ouvert. Le projet courant n'a pas changé.
+alert-open-another = Ouvrir un autre…
+    .hint = Choisit un autre fichier de projet
+overwrite-title = Remplacer le fichier
+overwrite-confirm = « { $name } » existe déjà. Le remplacer ?
+overwrite-replace = Remplacer
+    .hint = Écrase le fichier existant ; cette action ne peut pas être annulée
 action-import = Importer…
     .hint = Lit des fichiers d'appareil dans des feuilles
 action-refresh-from-source = Actualiser depuis la source
@@ -230,9 +247,10 @@ import-files-reset = Réinitialiser
     .hint = Repart des réglages par défaut
 import-files-delete = Supprimer…
     .hint = Supprime ce modèle enregistré
-import-files-delete-confirm = Supprimer le modèle « { $name } » ?
+import-files-delete-title = Supprimer le modèle
+import-files-delete-confirm = Supprimer le modèle « { $name } » ? Cette action ne peut pas être annulée.
 import-files-delete-yes = Supprimer
-import-files-delete-keep = Garder
+    .hint = Supprime le modèle enregistré ; cette action ne peut pas être annulée
 import-files-export = Exporter le modèle…
     .hint = Enregistre ce modèle dans un fichier JSON
 import-files-export-title = Exporter le modèle
@@ -245,6 +263,7 @@ import-files-add = Ajouter des fichiers…
     .hint = Choisit les fichiers à importer
 import-files-add-title = Choisir les fichiers à importer
 import-files-drop = ou déposer des fichiers dans la fenêtre
+import-files-section = Fichiers
 import-files-recent = Fichiers récents…
 import-files-none = Aucun fichier choisi
 import-files-row-count =
@@ -331,6 +350,7 @@ import-metadata-keep-header = Garder l'en-tête
 import-metadata-keep-footer = Garder le pied de page
     .hint = Conserve le pied de page du fichier comme métadonnées
 import-metadata-uncheck = Décocher une clé ou une section pour l'écarter
+import-metadata-lines-section = Métadonnées du fichier
 import-metadata-none = Aucune métadonnée avec les réglages actuels
 
 # Étape 6 : destination et modèle.
@@ -349,6 +369,7 @@ import-layout-per-file = Une feuille par fichier
 import-layout-side-by-side = Une feuille, côte à côte (X Y X Y…)
 import-layout-shared-x = Une feuille, X du premier fichier partagé
 import-destination-template-name = Nom du modèle
+import-destination-template-section = Enregistrer comme modèle
 import-destination-save = Enregistrer le modèle
 import-destination-saved-note = Les modèles enregistrés sont proposés au prochain import
 import-destination-auto = Sélection auto
@@ -540,6 +561,9 @@ dialog-ok =
 dialog-cancel =
     Annuler
     .hint = Abandonne les modifications (Échap)
+dialog-close =
+    Fermer
+    .hint = Ferme cette fenêtre (Entrée)
 
 # Fenêtre et onglets
 
@@ -847,11 +871,7 @@ sheet-invalid = { $id } n'est pas une feuille de ce projet
 sheet-rename-empty = Le nom d'une feuille ne peut pas être vide ; « { $name } » conservé
 sheet-rename-taken = Une feuille nommée « { $name } » existe déjà dans ce classeur ; « { $old } » conservé
 sheet-delete-last = Un classeur garde au moins une feuille
-sheet-delete-title = Supprimer la feuille
-sheet-delete-confirm = Supprimer la feuille « { $name } » et ses colonnes ?
-sheet-delete-used = Tracée par : { $graphs }
-sheet-delete-accept = Supprimer
-    .hint = Supprimer la feuille ; Annuler la rétablit
+sheet-delete-used = Feuille supprimée ; elle était tracée par { $graphs }. Annuler la rétablit
 matrix-unavailable = L'édition des matrices n'est pas encore disponible
 note-deleted = Cette note a été supprimée
 
@@ -870,7 +890,7 @@ script-no-output = (aucune sortie)
 # Sélecteur de couleur
 color-none = Aucune couleur (transparent)
 color-none-swatch = Aucune couleur (transparent, sans fond dans les exports)
-color-custom = + Personnalisée
+color-custom = Couleur personnalisée
     .hint = Choisit n'importe quelle couleur et son opacité, et l'enregistre
 color-shades-dark = Nuances plus foncées
 color-shades-light = Nuances plus claires
@@ -1017,9 +1037,7 @@ history-macro-move-objects = Déplacer des objets
 
 object-rename-empty = Le nom est vide, le nom précédent a été conservé
 object-clipboard-invalid = Le presse-papiers ne contient aucun objet StokesForge valide
-object-delete-title = Supprimer des objets
-object-delete-confirm = Supprimer { $names } ?
-object-delete-used = Utilisés par les graphiques : { $graphs }
+object-delete-used = Supprimé ; données utilisées par { $graphs }. Annuler les rétablit
 
 action-rename-project-object = Renommer
 action-duplicate-project-object = Dupliquer

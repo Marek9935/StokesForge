@@ -247,6 +247,21 @@ Quatre rôles, quatre aspects, chacun par sa brique (tableau complet dans
   sélecteur de couleur : `selectable_label` / `selectable_value` d'egui, et
   nulle part ailleurs (garde `aucun_bouton_selectionnable_hors_d_un_menu`) ;
 - **bascule d'outil** d'une barre : `Button::selected` (`toolbar::tool_button`).
+- **formulaire** (#227) : `form(ui, sel, |rows| …)` de `app/form.rs`, une
+  grille à deux colonnes — `rows.row(libellé, |ui| champ)`, cases et notes
+  dans la colonne des champs (`rows.checkbox`, `rows.note`, `rows.field`),
+  couleur par `rows.color`, titre par `rows.section` (jamais un trait seul
+  entre deux blocs, L3), rangées grisées par `rows.enabled` ; pas de section
+  repliable (L5 : onglets). Largeurs : `theme::FieldWidth` (`Short` ~80,
+  `Medium` ~160, `Full`) ; écarts : `theme::SPACE_ITEM` / `SPACE_SECTION`,
+  jamais `add_space(<nombre>)` (`aucun_add_space_litteral_hors_du_theme`) ;
+- **choix exclusif fixe** dans un formulaire : `choice` / `choice_by`
+  (`ChoiceOption`, rappel `hint` facultatif) décide seul radios (2–3 options,
+  côte à côte si chaque libellé tient en 3 mots) ou liste déroulante (dès 4) ;
+  une liste de **données** (colonnes, graphiques, modèles) reste une
+  `ComboBox`. Dans un **menu** : `menu_sections::menu_choice`, coche seule,
+  jamais un radio (C3) ; une **bascule** est une case à cocher, libellé à
+  droite (C5).
 
 Gras : `theme::bold` seulement ; `RichText::strong` / `ui.strong` ne
 changent que la couleur et sont interdits (`aucun_strong_d_egui_hors_du_theme`).
@@ -341,7 +356,7 @@ parente (issue #9). `color_button` tient l'état ouvert/fermé lui-même et
 ferme sur Échap ou clic extérieur ; s'en inspirer.
 
 **Le sélecteur s'ouvre replié** (issue #10) : palette, couleurs enregistrées
-et hexadécimal seulement ; « + Custom » déplie nuancier, opacité,
+et hexadécimal seulement ; la case « Custom color » (C5, #227) déplie nuancier, opacité,
 RGB/HSL et Save Color. Tout nouvel élément lourd du sélecteur va dans la
 partie dépliée (`if custom`), et l'état se remet à zéro à la fermeture
 (`set_picker_open`).
@@ -389,13 +404,29 @@ ou Maximiser. Réutiliser les lectures/requêtes de `window_detach.rs` ; le
 moteur de script reste dans l’AppState principal.
 
 **Aucune exception, y compris pour un assistant à plusieurs étapes.**
-L'assistant d'import (`import_window`) est un dialogue modal comme les
-propriétés du graphe : `modal_dialog_with(ctx, id, titre, taille, DialogFooter
-{ accept_label, accept_hint, accept_enabled }, boutons_du_pied, contenu)`. Le
-bouton par défaut peut changer de libellé et se griser (*Finish* grisé sans
-fichier) ; des boutons supplémentaires se posent à gauche de *Cancel* par la
-fermeture `boutons_du_pied` (*Back*, *Next*). Entrée valide,
-Échap annule. **Avant d'écrire une fenêtre, dialogue ou assistant : partir de
+Trois formes, un seul corps (`modal_frame`, #228) :
+`modal_dialog_with(ctx, id, titre, taille, DialogFooter { accept_label,
+accept_hint, accept_enabled, accept_disabled }, secondaires, contenu)` — pied `[secondaires]
+[message] [Cancel] [principal]` (F6) ; `modal_wizard(…, boutons_d_étape, …)` —
+`[Cancel] [message] [Back · Next] [Finish]`, l'assistant d'import (boutons
+d'étape ajoutés de droite à gauche) ; `modal_read_only(ctx, id, titre, taille,
+contenu)` — un seul bouton Close (F2), pour une fenêtre qui ne change rien.
+Entrée valide, Échap annule — sauf l'Échap qui sort d'un champ texte (F7).
+**Bouton principal grisé** : `accept_disabled` est sa **raison** (clé
+`disabled-*`, ce qu'il faut faire, #226), écrite dans le pied et en bulle
+(F10) ; `accept_hint` reste la bulle du bouton actif.
+**Erreur d'un geste du dialogue** : `AppState::fail` l'écrit d'office dans le
+pied tant qu'un dialogue de contenu est ouvert (`dialog_error`, M7) — jamais
+`status` ; un test d'état lit `state.dialog_error()`, et une décision « le
+geste a-t-il échoué ? » lit `last_action_failed`, jamais `status().is_error`.
+Confirmations (#229) : `modal_confirm` (Cancel par défaut ; le verbe
+seulement par son bouton), `modal_save_changes` (« Discard Changes · Cancel ·
+Save », Entrée = Save), `modal_alert` (M8) — voir la liste des réflexes plus
+bas ; un **choix** (axe d'un dépôt, calcul avec ou sans colonnes) reste un
+`modal_dialog_with`.
+Taille et position (F8) et premier champ focalisé (F9) sont faits par la
+brique : rien à écrire, mais un premier champ de saisie doit être un vrai
+`TextEdit` du dialogue (c'est ce que le focus initial cherche). **Avant d'écrire une fenêtre, dialogue ou assistant : partir de
 `modal_dialog_with` (dialogue) ou `show_window_in_layer` (fenêtre de contenu).**
 Si la brique manque d'un réglage, l'étendre (c'est ce qui a été fait pour
 l'import) plutôt que de la contourner. Un code existant qui déroge n'est
@@ -466,9 +497,17 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   `cell_text` ;
 - tout élément grisé dit pourquoi et quoi faire : `.on_disabled_hover_text(tr!(…))` sur l'élément lui-même (clé `disabled-*` ou `.disabled` de l'action), jamais sur un groupe ; garde `aucun_element_grise_sans_sa_raison` (#226) ;
 - une erreur dans un dialogue va dans son pied, jamais dans la barre d'état ;
-- une suppression annulable ne demande pas de confirmation ;
+- une suppression annulable ne demande pas de confirmation ; ce que Ctrl+Z
+  ne rattrape pas passe par `modal_confirm` (Cancel par défaut : Entrée et
+  Échap l'actionnent, verbe destructeur rouge au survol/focus), un projet non
+  enregistré par `modal_save_changes` (Entrée = Save), un échec grave hors
+  fenêtre par `modal_alert` (M8 : Close + action) — peints depuis
+  `app/confirmations.rs`, ou dans le contenu du dialogue qu'ils recouvrent ;
 - aucun slider, unité dans le libellé, pas de bulle nue sur un champ (icône
-  « ? » de `hover_help`).
+  « ? » de `hover_help`) ;
+- un **formulaire** se pose par `app/form.rs` (grille à deux colonnes, choix
+  radio/liste par `choice`, #227), un choix de menu par `menu_choice`, un
+  écart par `theme::SPACE_ITEM` / `SPACE_SECTION`.
 
 **État des briques.** La page tient un tableau *en place* / *à venir* (issues
 #219–#232). Une brique *à venir* (brique « nombre », formulaire en grille,
@@ -648,7 +687,7 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] état d'`AppState` nouveau recopié dans la vue détachée s'il doit y valoir ; raccourci global essayé avec un graphe actif et un classeur détaché
 - [ ] dessin et événements dans le module de la surface (`src/app/<surface>.rs`), code de fenêtre dans le `window_*.rs` concerné, rien de nouveau dans `app.rs` hors orchestration ; surface nouvelle dans son propre module, à imports explicites, ajoutée à la table de `docs/application.md` (§2 octies)
 - [ ] barres de défilement : aucun style local, place lue via `theme::scroll_bar_allocated_width`
-- [ ] onglets par `tab_strip`, listes par `list_row`, titres par `theme::section_title`, gras par `theme::bold`, couleurs d'état par `theme.rs` (§2 ter bis)
+- [ ] onglets par `tab_strip`, listes par `list_row`, titres par `theme::section_title`, gras par `theme::bold`, couleurs d'état par `theme.rs`, formulaire par `app/form.rs` (grille, `choice`), écarts par `theme::SPACE_*` (§2 ter bis)
 - [ ] icônes : composant `icons.rs`, info-bulle `tr!`, seulement si elle apporte quelque chose (`docs/icones.md`) ; logo prévu de l'action nommé dans le compte rendu (#110)
 - [ ] calque visé par son indice dans `PlotSpec::panels` (calque actif), jamais par `(row, column)` ; ajout de séries par l'`Action` du dépôt
 - [ ] couleurs : `color_picker::color_field` avec l'usage et le `PickerEnv`, vide = automatique

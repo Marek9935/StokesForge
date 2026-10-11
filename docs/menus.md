@@ -44,6 +44,10 @@ Une section vide disparaît avec ses séparateurs.
   ou au moins **3** entrées secondaires d'une même famille. Jamais 1 entrée ;
   2 entrées se posent à plat. Les actions importantes ou fréquentes sont
   directes.
+- **Choix exclusif** (C3, #227) : une **coche seule** devant l'option
+  courante, jamais un bouton radio ni le fond d'un bouton sélectionné ; il se
+  peint par `menu_sections::menu_choice`. Les cases à cocher restent aux
+  bascules d'affichage.
 - **Profondeur 2** : le menu et un sous-menu. Au clic droit c'est strict ;
   dans la barre, le menu du haut compte comme le menu (une seule exception
   assumée : View › Object Manager › Expand by Default, enveloppe d'un contenu

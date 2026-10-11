@@ -52,7 +52,7 @@ use crate::quantities::{AutoKind, Quantity};
 use crate::tr;
 
 /// Largeur d'un champ numérique, en points (la « courte » de L2, #227).
-pub const FIELD_WIDTH: f32 = 80.0;
+pub const FIELD_WIDTH: f32 = crate::theme::FIELD_WIDTH_SHORT;
 
 /// Une valeur que la brique sait lire et écrire. Les entiers arrondissent.
 pub trait Number: Copy {

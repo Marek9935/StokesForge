@@ -16,6 +16,10 @@
 //! mais momentanément impossible, avec info-bulle `.disabled`) : une section
 //! absente ne s'appelle pas du tout, une section grisée se peint avec ses
 //! entrées grisées.
+//!
+//! Un choix exclusif dans un menu (Type ▸, Role ▸, langue, texte du SVG) se
+//! peint par [`menu_choice`] : une **coche seule** devant l'option courante,
+//! sans radio ni fond de sélection (C3, #227).
 
 use eframe::egui;
 
@@ -57,10 +61,114 @@ fn section_separator(ui: &mut egui::Ui) {
     ui.add(egui::Separator::default().spacing(4.0));
 }
 
+/// Une option d'un choix exclusif dans un menu (C3, `docs/menus.md`) : une
+/// coche dans la marge devant l'option courante, rien devant les autres —
+/// jamais un radio ni le fond d'un bouton sélectionné. La marge est réservée
+/// pour toutes les options, qui restent alignées. Au survol, le fond d'une
+/// entrée de menu. L'accessibilité la décrit comme un bouton radio, coché ou
+/// non.
+pub(super) fn menu_choice(
+    ui: &mut egui::Ui,
+    selected: bool,
+    text: impl Into<egui::WidgetText>,
+) -> egui::Response {
+    let spacing = ui.spacing();
+    let (padding, mark, gap) = (
+        spacing.button_padding,
+        spacing.icon_width,
+        spacing.icon_spacing,
+    );
+    let galley = text.into().into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Button,
+    );
+    let size = egui::vec2(
+        padding.x * 2.0 + mark + gap + galley.size().x,
+        galley.size().y.max(mark) + padding.y * 2.0,
+    );
+    let width = size.x.max(ui.available_width());
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, size.y), egui::Sense::click());
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(
+            egui::WidgetType::RadioButton,
+            ui.is_enabled(),
+            selected,
+            galley.text(),
+        )
+    });
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        if response.hovered() || response.has_focus() {
+            ui.painter()
+                .rect_filled(rect, visuals.corner_radius, visuals.weak_bg_fill);
+        }
+        let box_rect = egui::Rect::from_center_size(
+            egui::pos2(rect.left() + padding.x + mark / 2.0, rect.center().y),
+            egui::Vec2::splat(mark),
+        )
+        .shrink(mark / 5.0);
+        if selected {
+            ui.painter().add(egui::Shape::line(
+                vec![
+                    egui::pos2(box_rect.left(), box_rect.center().y),
+                    egui::pos2(box_rect.center().x - 1.0, box_rect.bottom()),
+                    egui::pos2(box_rect.right(), box_rect.top()),
+                ],
+                visuals.fg_stroke,
+            ));
+        }
+        let text_pos = egui::pos2(
+            rect.left() + padding.x + mark + gap,
+            rect.center().y - galley.size().y / 2.0,
+        );
+        ui.painter().galley(text_pos, galley, visuals.text_color());
+    }
+    response
+}
+
 #[cfg(test)]
 mod tests {
-    use super::super::test_support::{contexte, image_de};
+    use super::super::test_support::{contexte, image, image_de, textes};
     use super::*;
+
+    /// C3 : une coche (un trait de trois points) devant la seule option
+    /// courante, aucun cercle de radio ni fond de sélection, et les libellés
+    /// des options alignés. Témoin : sans option courante, aucune coche.
+    #[test]
+    fn un_choix_de_menu_coche_seulement_l_option_courante() {
+        let context = contexte();
+        let coches = |courante: Option<usize>| {
+            let formes = image(&context, Vec::new(), |ui| {
+                for (index, texte) in ["Un", "Deux"].into_iter().enumerate() {
+                    menu_choice(ui, courante == Some(index), texte);
+                }
+            });
+            let traits = formes
+                .iter()
+                .filter(|forme| {
+                    matches!(&forme.shape, egui::Shape::Path(chemin) if chemin.points.len() == 3)
+                })
+                .count();
+            let ronds = formes
+                .iter()
+                .filter(|forme| matches!(forme.shape, egui::Shape::Circle(_)))
+                .count();
+            (traits, ronds, textes(&formes))
+        };
+        let (traits, ronds, peints) = coches(Some(1));
+        assert_eq!(traits, 1, "une coche, devant l'option courante");
+        assert_eq!(ronds, 0, "aucun radio");
+        let un = peints.iter().find(|t| t.texte == "Un").unwrap().centre;
+        let deux = peints.iter().find(|t| t.texte == "Deux").unwrap().centre;
+        assert!(deux.y > un.y);
+        assert_eq!(
+            coches(None).0,
+            0,
+            "témoin : sans option courante, pas de coche"
+        );
+    }
 
     fn separateurs(presentes: &[bool]) -> (usize, usize) {
         let context = contexte();

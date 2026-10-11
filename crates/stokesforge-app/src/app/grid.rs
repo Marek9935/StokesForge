@@ -30,7 +30,7 @@ use crate::{icons, tr};
 
 use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
 use super::inplace_edit;
-use super::menu_sections::MenuSections;
+use super::menu_sections::{menu_choice, MenuSections};
 use super::shortcuts::{
     shortcut_text_backspace, shortcut_text_delete, SHORTCUT_COPY, SHORTCUT_COPY_FULL_COLUMNS,
     SHORTCUT_CUT, SHORTCUT_EDIT_CELL, SHORTCUT_PASTE, SHORTCUT_PASTE_ABSOLUTE, SHORTCUT_SELECT_ALL,
@@ -894,9 +894,7 @@ pub(super) fn column_type_role_menus(
         // pour toute saisie directe dans une colonne numérique.
         ui.menu_button(tr!("column-type"), |ui| {
             for candidate in [ColumnType::Numeric, ColumnType::Mixed] {
-                if ui
-                    .selectable_label(column_type == Some(candidate), type_label(candidate))
-                    .clicked()
+                if menu_choice(ui, column_type == Some(candidate), type_label(candidate)).clicked()
                 {
                     if Some(candidate) != column_type {
                         actions.push(Action::SetColumnsType {
@@ -922,10 +920,7 @@ pub(super) fn column_type_role_menus(
                 ColumnRole::Label,
                 ColumnRole::None,
             ] {
-                if ui
-                    .selectable_label(role == Some(candidate), role_label(candidate))
-                    .clicked()
-                {
+                if menu_choice(ui, role == Some(candidate), role_label(candidate)).clicked() {
                     if Some(candidate) != role {
                         actions.push(Action::SetColumnsRole {
                             columns: target_columns.to_vec(),

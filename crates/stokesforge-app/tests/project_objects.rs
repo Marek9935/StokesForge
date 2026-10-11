@@ -119,24 +119,32 @@ fn presse_papiers_fige_et_collage_entre_projets_avec_identifiants_de_destination
     assert_eq!(destination.tree(), &before);
 }
 
+/// F3 (#229) : une suppression annulable ne demande rien ; le message nomme
+/// les graphes **restants** qui en utilisaient les données, et un seul Undo
+/// rend tout.
 #[test]
-fn suppression_confirmee_nomme_les_graphes_et_un_seul_undo_restaure_tout() {
+fn suppression_sans_confirmation_nomme_les_graphes_et_un_seul_undo_restaure_tout() {
     let (_session, mut state, book, graph, _) = fixture();
     let before = state.tree().clone();
-    state.dispatch(Action::DeleteObjects(vec![book]));
-    assert_eq!(state.pending_object_delete(), &[book]);
     assert_eq!(state.object_users(&[book]), vec!["Graph1"]);
-    assert_eq!(state.tree(), &before);
-    state.dispatch(Action::ConfirmDeleteObjects(false));
+    assert!(
+        state.object_users(&[book, graph]).is_empty(),
+        "un graphe supprimé avec ses données n'est pas nommé"
+    );
+    state.dispatch(Action::DeleteObjects(vec![book]));
+    assert!(!state.tree().contains(book));
+    assert!(state.unsaved_pending().is_none() && !state.blocking_dialog());
+    let status = state.status().expect("message");
+    assert!(!status.is_error);
+    assert!(status.text.contains("Graph1"), "{}", status.text);
+    state.dispatch(Action::Undo);
     assert_eq!(state.tree(), &before);
     state.dispatch(Action::DeleteObjects(vec![book, graph]));
-    state.dispatch(Action::ConfirmDeleteObjects(true));
     assert!(!state.tree().contains(book));
     assert!(!state.tree().contains(graph));
     state.dispatch(Action::Undo);
     assert_eq!(state.tree(), &before);
     state.dispatch(Action::DeleteObjects(vec![graph]));
-    assert!(state.pending_object_delete().is_empty());
     assert!(!state.tree().contains(graph));
 }
 

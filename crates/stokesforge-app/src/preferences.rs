@@ -1,7 +1,8 @@
 //! Préférences de l'utilisateur, gardées sur cette machine : pour l'instant la
 //! langue de l'interface (issue #41) et la disposition des barres d'outils
-//! (issue #60), ainsi que l’ouverture et les réglages de vue du gestionnaire
-//! d’objets (#82, #139).
+//! (issue #60), l’ouverture et les réglages de vue du gestionnaire d’objets
+//! (#82, #139), et la taille et la position de chaque sorte de dialogue (F8,
+//! #228).
 //!
 //! Même stockage que les couleurs de l'utilisateur ([`crate::user_colors`]) et
 //! que les recettes d'import : un fichier JSON — `preferences.json` — dans le
@@ -14,6 +15,7 @@
 //! (`{ "language": "fr" }`). La variable d'environnement `STOKESFORGE_LANG` l'emporte
 //! au démarrage (voir [`crate::i18n::choose_language`]).
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use stokesforge_render_svg::SvgTextMode;
 
@@ -87,6 +89,34 @@ impl ObjectManagerSettings {
     }
 }
 
+/// Taille et position d'un dialogue modal (F8, #228), en points : coin haut
+/// gauche et taille. Mémorisée à sa fermeture, reprise à sa prochaine
+/// ouverture (ramenée dans l'écran par le dialogue).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DialogGeometry {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl DialogGeometry {
+    /// Une géométrie utilisable : des nombres finis et une taille positive.
+    pub fn is_valid(&self) -> bool {
+        [self.x, self.y, self.width, self.height]
+            .iter()
+            .all(|value| value.is_finite())
+            && self.width > 0.0
+            && self.height > 0.0
+    }
+}
+
+/// Le nombre de sortes de dialogue dont la géométrie est gardée : au-delà, la
+/// plus ancienne clé (dans l'ordre des clés) laisse sa place. Une sorte de
+/// dialogue propre à un graphe (propriétés d'un objet) ne remplit donc pas le
+/// fichier.
+pub const MAX_DIALOG_GEOMETRIES: usize = 32;
+
 /// Forme du fichier sur disque. Un champ inconnu est ignoré, un champ absent
 /// prend sa valeur par défaut : un fichier écrit par une version plus récente
 /// reste lisible.
@@ -113,6 +143,9 @@ struct PreferencesFile {
     /// « Show » (#200, maquette M5).
     #[serde(default)]
     analysis_keep_results: Option<bool>,
+    /// Gardée brute : une entrée illisible n'efface pas les autres.
+    #[serde(default)]
+    dialogs: Option<serde_json::Value>,
 }
 
 /// Les préférences de l'utilisateur, et le fichier d'où elles viennent.
@@ -124,6 +157,7 @@ pub struct Preferences {
     svg_text: SvgTextMode,
     toolbars: Option<serde_json::Value>,
     analysis_keep_results: bool,
+    dialogs: BTreeMap<String, DialogGeometry>,
     path: Option<PathBuf>,
 }
 
@@ -166,6 +200,7 @@ impl Preferences {
             },
             toolbars: file.toolbars,
             analysis_keep_results: file.analysis_keep_results.unwrap_or(false),
+            dialogs: read_dialogs(file.dialogs),
             path,
         }
     }
@@ -264,6 +299,34 @@ impl Preferences {
         self.save_field("analysis_keep_results", keep.into())
     }
 
+    /// La taille et la position mémorisées de chaque sorte de dialogue (F8),
+    /// par clé (`app/dialogs.rs` la tire de l'identifiant du dialogue).
+    pub fn dialog_geometries(&self) -> &BTreeMap<String, DialogGeometry> {
+        &self.dialogs
+    }
+
+    /// Mémorise la géométrie d'une sorte de dialogue sans remplacer les autres
+    /// préférences ; une géométrie invalide est ignorée. Au-delà de
+    /// [`MAX_DIALOG_GEOMETRIES`] sortes, la première clé est oubliée.
+    pub fn save_dialog_geometry(
+        &mut self,
+        kind: &str,
+        geometry: DialogGeometry,
+    ) -> std::io::Result<()> {
+        if !geometry.is_valid() || self.dialogs.get(kind) == Some(&geometry) {
+            return Ok(());
+        }
+        self.dialogs.insert(kind.to_string(), geometry);
+        while self.dialogs.len() > MAX_DIALOG_GEOMETRIES {
+            let Some(first) = self.dialogs.keys().find(|key| *key != kind).cloned() else {
+                break;
+            };
+            self.dialogs.remove(&first);
+        }
+        let value = serde_json::to_value(&self.dialogs).map_err(std::io::Error::other)?;
+        self.save_field("dialogs", value)
+    }
+
     /// Écrit les réglages ensemble en conservant les préférences étrangères.
     pub fn save_object_manager_settings(
         &mut self,
@@ -319,6 +382,23 @@ impl Preferences {
     }
 }
 
+/// Les géométries de dialogue lues dans le fichier : les entrées illisibles ou
+/// invalides sont écartées une à une.
+fn read_dialogs(value: Option<serde_json::Value>) -> BTreeMap<String, DialogGeometry> {
+    let Some(serde_json::Value::Object(map)) = value else {
+        return BTreeMap::new();
+    };
+    map.into_iter()
+        .filter_map(|(kind, value)| {
+            serde_json::from_value::<DialogGeometry>(value)
+                .ok()
+                .filter(DialogGeometry::is_valid)
+                .map(|geometry| (kind, geometry))
+        })
+        .take(MAX_DIALOG_GEOMETRIES)
+        .collect()
+}
+
 /// `directories::ProjectDirs::from("", "", "StokesForge")`, dossier de
 /// configuration, fichier `preferences.json` — le même dossier que
 /// `couleurs.json` et `import_recipes.json`.
@@ -340,6 +420,66 @@ mod tests {
         let reloaded = Preferences::load_from(Some(path));
         assert!(reloaded.analysis_keep_results());
         assert_eq!(reloaded.language(), Some("fr"));
+    }
+
+    /// F8 (#228) : la géométrie d'un dialogue s'écrit sans perdre les autres
+    /// préférences et se relit ; une entrée illisible du fichier n'emporte pas
+    /// les autres, une géométrie invalide n'est pas écrite.
+    #[test]
+    fn la_geometrie_d_un_dialogue_est_ecrite_et_relue_sans_perdre_le_reste() {
+        let (_dir, path) = written(
+            r#"{ "language": "fr", "dialogs": { "abimee": { "x": "?" }, "nulle": { "x": 0, "y": 0, "width": 0, "height": 10 } } }"#,
+        );
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        assert!(preferences.dialog_geometries().is_empty());
+        let geometry = DialogGeometry {
+            x: 10.0,
+            y: 20.0,
+            width: 400.0,
+            height: 300.0,
+        };
+        preferences
+            .save_dialog_geometry("proprietes", geometry)
+            .unwrap();
+        preferences
+            .save_dialog_geometry(
+                "invalide",
+                DialogGeometry {
+                    width: f32::NAN,
+                    ..geometry
+                },
+            )
+            .unwrap();
+        let relues = Preferences::load_from(Some(path));
+        assert_eq!(relues.language(), Some("fr"));
+        assert_eq!(
+            relues.dialog_geometries().get("proprietes"),
+            Some(&geometry)
+        );
+        assert_eq!(relues.dialog_geometries().len(), 1);
+    }
+
+    /// Au-delà de [`MAX_DIALOG_GEOMETRIES`] sortes, la plus ancienne clé part ;
+    /// la sorte qui vient d'être écrite reste.
+    #[test]
+    fn les_geometries_de_dialogue_sont_plafonnees() {
+        let (_dir, path) = written("{}");
+        let mut preferences = Preferences::load_from(Some(path));
+        let geometry = DialogGeometry {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 100.0,
+        };
+        for index in 0..MAX_DIALOG_GEOMETRIES + 3 {
+            preferences
+                .save_dialog_geometry(&format!("{index:03}"), geometry)
+                .unwrap();
+        }
+        let kinds = preferences.dialog_geometries();
+        assert_eq!(kinds.len(), MAX_DIALOG_GEOMETRIES);
+        assert!(kinds.contains_key(&format!("{:03}", MAX_DIALOG_GEOMETRIES + 2)));
+        assert!(!kinds.contains_key("000"));
     }
 
     fn written(content: &str) -> (tempfile::TempDir, PathBuf) {

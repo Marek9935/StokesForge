@@ -17,6 +17,7 @@ use stokesforge_analysis::peaks::{PeakBackground, PeakShape};
 use stokesforge_core::{NodeId, Tree};
 
 use super::analysis_dialog::{exact_result_label, format_value};
+use super::form::{choice, choice_by, ChoiceOption, Form};
 use super::hover_help::{help_beside, help_text};
 use crate::analysis::{
     aux_candidates, aux_for, kind_title, series_label, with_unit, AnalysisForm, BaselineShape,
@@ -25,6 +26,7 @@ use crate::analysis::{
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::number_field::number_field;
 use crate::quantities;
+use crate::theme::FieldWidth;
 use crate::{theme, tr};
 
 /// Un nombre réel modifiable, sans bornes mais **fini** (la brique refuse
@@ -58,7 +60,7 @@ fn optional_number(ui: &mut egui::Ui, id: egui::Id, value: &mut Option<f64>) -> 
         .unwrap_or_else(|| value.map(|v| v.to_string()).unwrap_or_default());
     let response = ui.add(
         egui::TextEdit::singleline(&mut text)
-            .desired_width(70.0)
+            .desired_width(theme::FIELD_WIDTH_SHORT)
             .hint_text(tr!("analysis-field-auto")),
     );
     let mut changed = false;
@@ -168,7 +170,8 @@ fn caption(ui: &mut egui::Ui, text: String) {
     ui.label(egui::RichText::new(text).weak());
 }
 
-/// Tout le formulaire : entrée, famille, sortie.
+/// Tout le formulaire : entrée, famille, sortie, en une grille à deux
+/// colonnes (#227) dont les champs s'alignent d'un bloc à l'autre.
 pub(super) fn form_body(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -176,18 +179,25 @@ pub(super) fn form_body(
     tree: &Tree,
     graphs: &[(NodeId, String)],
 ) {
-    input_block(ui, id, form, tree);
-    ui.add_space(6.0);
-    family_chooser(ui, id, form);
-    family_block(ui, id, form, tree);
-    ui.add_space(6.0);
-    output_block(ui, id, form, graphs);
+    super::form::form(ui, id.with("rows"), |rows| {
+        input_block(rows, id, form, tree);
+        family_chooser(rows, id, form);
+        family_block(rows, id, form, tree);
+        output_block(rows, id, form, graphs);
+    });
 }
 
-fn input_block(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
-    theme::section_title(ui, tr!("analysis-block-input"));
+/// Une liste de rangées (plages, points, pics) dans la colonne des champs.
+fn field_list(rows: &mut Form<'_>, add: impl FnOnce(&mut egui::Ui)) {
+    rows.field(|ui| {
+        ui.vertical(add);
+    });
+}
+
+fn input_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
+    rows.section(tr!("analysis-block-input"));
     let count = form.series.len();
-    ui.horizontal(|ui| {
+    rows.ui().horizontal(|ui| {
         if count > 1 {
             if icon_button(
                 ui,
@@ -218,7 +228,7 @@ fn input_block(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &
     });
     if count > 1 {
         caption(
-            ui,
+            rows.ui(),
             tr!(
                 "analysis-series-position",
                 current = i64::try_from(form.current + 1).unwrap_or(i64::MAX),
@@ -239,8 +249,9 @@ fn input_block(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &
         } else {
             tr!("analysis-field-response")
         };
-        ui.horizontal(|ui| {
-            ui.label(heading);
+        // Une liste de colonnes du projet, pas un jeu d'options fixe : liste
+        // déroulante quel que soit leur nombre.
+        rows.row(heading, |ui| {
             egui::ComboBox::from_id_salt(id.with("aux"))
                 .selected_text(selected)
                 .show_ui(ui, |ui| {
@@ -253,7 +264,7 @@ fn input_block(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &
                 });
         });
         if candidates.is_empty() {
-            caption(ui, tr!("analysis-field-no-candidate"));
+            rows.note(tr!("analysis-field-no-candidate"));
         }
     }
 }
@@ -261,139 +272,136 @@ fn input_block(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &
 /// Le titre de la famille ; à la création, une liste déroulante qui en change à
 /// chaud (#202 : le clic droit ouvre la fenêtre sans famille choisie). Un
 /// calcul rouvert garde sa famille : seule sa méthode se change.
-fn family_chooser(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
+fn family_chooser(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
     if form.editing.is_some() {
-        theme::section_title(ui, kind_title(form.kind));
+        rows.section(kind_title(form.kind));
         return;
     }
-    theme::section_title(ui, tr!("analysis-block-type"));
-    let before = form.kind;
-    egui::ComboBox::from_id_salt(id.with("family"))
-        .selected_text(kind_title(form.kind))
-        .show_ui(ui, |ui| {
-            for kind in OperationKind::ALL {
-                ui.selectable_value(&mut form.kind, kind, kind_title(kind));
-            }
-        });
-    if form.kind != before {
-        let chosen = form.kind;
-        form.set_kind(chosen);
+    rows.section(tr!("analysis-block-type"));
+    let mut kind = form.kind;
+    let options = OperationKind::ALL.map(|kind| ChoiceOption::new(kind, kind_title(kind)));
+    if choice(rows.ui(), id.with("family"), &mut kind, &options) {
+        form.set_kind(kind);
         form.tool = form.natural_tool();
     }
-    ui.add_space(6.0);
 }
 
-fn family_block(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
+fn family_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     match form.kind {
-        OperationKind::Baseline => baseline_form(ui, id, form),
-        OperationKind::Correct => correct_form(ui, form),
-        OperationKind::Integrate => integrate_form(ui, id, form),
-        OperationKind::Fit => fit_form(ui, id, form, tree),
-        OperationKind::Peaks => peaks_form(ui, id, form),
-        OperationKind::Reconvolution => reconv_form(ui, id, form),
-        OperationKind::DirectDeconvolution => direct_form(ui, form),
+        OperationKind::Baseline => baseline_form(rows, id, form),
+        OperationKind::Correct => correct_form(rows, id, form),
+        OperationKind::Integrate => integrate_form(rows, id, form),
+        OperationKind::Fit => fit_form(rows, id, form, tree),
+        OperationKind::Peaks => peaks_form(rows, id, form),
+        OperationKind::Reconvolution => reconv_form(rows, id, form),
+        OperationKind::DirectDeconvolution => direct_form(rows, id, form),
     }
 }
 
-fn baseline_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
-    let before = form.setup.baseline.shape;
-    {
-        let b = &mut form.setup.baseline;
-        ui.radio_value(
-            &mut b.shape,
+fn baseline_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
+    let shapes = [
+        ChoiceOption::new(
             BaselineShape::TwoPoints,
             tr!("analysis-baseline-shape-line"),
-        );
-        ui.radio_value(
-            &mut b.shape,
-            BaselineShape::Zones,
-            tr!("analysis-baseline-shape-zones"),
-        );
-        ui.radio_value(
-            &mut b.shape,
+        ),
+        ChoiceOption::new(BaselineShape::Zones, tr!("analysis-baseline-shape-zones")),
+        ChoiceOption::new(
             BaselineShape::Anchors,
             tr!("analysis-baseline-shape-anchors"),
-        );
-    }
-    if form.setup.baseline.shape != before {
+        ),
+    ];
+    if rows.field(|ui| {
+        choice(
+            ui,
+            id.with("baseline-shape"),
+            &mut form.setup.baseline.shape,
+            &shapes,
+        )
+    }) {
         form.tool = form.natural_tool();
     }
     let b = &mut form.setup.baseline;
     match b.shape {
         BaselineShape::TwoPoints => {
-            caption(ui, tr!("analysis-baseline-hint-line"));
-            point_rows(ui, &mut b.points);
+            rows.note(tr!("analysis-baseline-hint-line"));
+            field_list(rows, |ui| point_rows(ui, &mut b.points));
         }
         BaselineShape::Anchors => {
-            caption(ui, tr!("analysis-baseline-hint-anchors"));
-            point_rows(ui, &mut b.points);
-            ui.horizontal(|ui| {
-                ui.radio_value(
+            rows.note(tr!("analysis-baseline-hint-anchors"));
+            field_list(rows, |ui| point_rows(ui, &mut b.points));
+            rows.field(|ui| {
+                choice(
+                    ui,
+                    id.with("baseline-interpolation"),
                     &mut b.interpolation,
-                    Interpolation::Segments,
-                    tr!("analysis-baseline-segments"),
-                );
-                ui.radio_value(
-                    &mut b.interpolation,
-                    Interpolation::Spline,
-                    tr!("analysis-baseline-spline"),
-                );
+                    &[
+                        ChoiceOption::new(
+                            Interpolation::Segments,
+                            tr!("analysis-baseline-segments"),
+                        ),
+                        ChoiceOption::new(Interpolation::Spline, tr!("analysis-baseline-spline")),
+                    ],
+                )
             });
         }
         BaselineShape::Zones => {
-            caption(ui, tr!("analysis-baseline-hint-zones"));
-            range_rows(ui, id.with("zones"), &mut b.zones);
-            ui.horizontal(|ui| {
-                ui.label(tr!("analysis-baseline-degree"));
-                whole(ui, &mut b.degree, &quantities::POLYNOMIAL_DEGREE);
+            rows.note(tr!("analysis-baseline-hint-zones"));
+            field_list(rows, |ui| range_rows(ui, id.with("zones"), &mut b.zones));
+            rows.row(tr!("analysis-baseline-degree"), |ui| {
+                whole(ui, &mut b.degree, &quantities::POLYNOMIAL_DEGREE)
             });
         }
     }
-    ui.horizontal(|ui| {
-        ui.radio_value(
+    rows.field(|ui| {
+        choice(
+            ui,
+            id.with("baseline-op"),
             &mut b.op,
-            BaselineOp::Subtract,
-            tr!("analysis-baseline-subtract"),
-        );
-        ui.radio_value(
-            &mut b.op,
-            BaselineOp::Divide,
-            tr!("analysis-baseline-divide"),
-        );
+            &[
+                ChoiceOption::new(BaselineOp::Subtract, tr!("analysis-baseline-subtract")),
+                ChoiceOption::new(BaselineOp::Divide, tr!("analysis-baseline-divide")),
+            ],
+        )
     });
 }
 
-fn correct_form(ui: &mut egui::Ui, form: &mut AnalysisForm) {
-    caption(ui, tr!("analysis-correct-hint"));
-    ui.horizontal(|ui| {
-        ui.radio_value(
+fn correct_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
+    rows.note(tr!("analysis-correct-hint"));
+    rows.field(|ui| {
+        choice(
+            ui,
+            id.with("correct-op"),
             &mut form.setup.correct,
-            CorrectOp::Divide,
-            tr!("analysis-correct-divide"),
-        );
-        ui.radio_value(
-            &mut form.setup.correct,
-            CorrectOp::Multiply,
-            tr!("analysis-correct-multiply"),
-        );
-        ui.radio_value(
-            &mut form.setup.correct,
-            CorrectOp::Subtract,
-            tr!("analysis-correct-subtract"),
-        );
+            &[
+                ChoiceOption::new(CorrectOp::Divide, tr!("analysis-correct-divide")),
+                ChoiceOption::new(CorrectOp::Multiply, tr!("analysis-correct-multiply")),
+                ChoiceOption::new(CorrectOp::Subtract, tr!("analysis-correct-subtract")),
+            ],
+        )
     });
 }
 
-fn integrate_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
+fn integrate_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
     let i = &mut form.setup.integrate;
-    caption(ui, tr!("analysis-integrate-hint"));
-    range_rows(ui, id.with("ranges"), &mut i.ranges);
-    ui.horizontal(|ui| {
-        ui.radio_value(&mut i.under, Under::Zero, tr!("analysis-integrate-zero"));
-        ui.radio_value(&mut i.under, Under::Line, tr!("analysis-integrate-line"));
+    rows.note(tr!("analysis-integrate-hint"));
+    field_list(rows, |ui| range_rows(ui, id.with("ranges"), &mut i.ranges));
+    rows.field(|ui| {
+        choice(
+            ui,
+            id.with("integrate-under"),
+            &mut i.under,
+            &[
+                ChoiceOption::new(Under::Zero, tr!("analysis-integrate-zero")),
+                ChoiceOption::new(Under::Line, tr!("analysis-integrate-line")),
+            ],
+        )
     });
-    ui.checkbox(&mut i.cumulative, tr!("analysis-integrate-cumulative"));
-    ui.checkbox(&mut i.normalize, tr!("analysis-integrate-normalize"));
+    rows.checkbox(
+        &mut i.cumulative,
+        tr!("analysis-integrate-cumulative"),
+        None,
+    );
+    rows.checkbox(&mut i.normalize, tr!("analysis-integrate-normalize"), None);
 }
 
 /// Le nom d'un modèle dans la liste déroulante.
@@ -412,7 +420,7 @@ fn model_name(model: &Model) -> String {
     }
 }
 
-fn fit_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
+fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     let has_sigma = form.series.iter().any(|s| s.sigma.is_some());
     let multi = form.series.len() > 1;
     let (shown_x, shown_y) = form
@@ -421,42 +429,51 @@ fn fit_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tre
         .map(|s| crate::analysis::series_points(tree, s))
         .unwrap_or_default();
     let f = &mut form.setup.fit;
-    ui.horizontal(|ui| {
-        ui.label(tr!("analysis-fit-model"));
-        egui::ComboBox::from_id_salt(id.with("model"))
-            .selected_text(model_name(&f.model))
-            .show_ui(ui, |ui| {
-                for model in Preset::fit_models() {
-                    let same = std::mem::discriminant(&model) == std::mem::discriminant(&f.model);
-                    if ui.selectable_label(same, model_name(&model)).clicked() && !same {
-                        f.set_model(model);
-                    }
-                }
-            });
-    });
+    let models: Vec<ChoiceOption<Model>> = Preset::fit_models()
+        .into_iter()
+        .map(|model| {
+            let name = model_name(&model);
+            ChoiceOption::new(model, name)
+        })
+        .collect();
+    let mut model = f.model.clone();
+    // Un modèle choisi vaut par sa variante : le degré d'un polynôme ou la
+    // formule libre en cours restent ceux du formulaire.
+    if rows.row(tr!("analysis-fit-model"), |ui| {
+        choice_by(ui, id.with("model"), &mut model, &models, |a, b| {
+            std::mem::discriminant(a) == std::mem::discriminant(b)
+        })
+    }) {
+        f.set_model(model);
+    }
     if let Some(source) = crate::analysis::model_formula_source(&f.model) {
-        let color = ui.visuals().text_color();
-        stokesforge_render_egui::formula_label(ui, source, 15.0, color);
+        rows.field(|ui| {
+            let color = ui.visuals().text_color();
+            stokesforge_render_egui::formula_label(ui, source, 15.0, color);
+        });
     }
     match &mut f.model {
         Model::Polynomial { degree } => {
             let before = *degree;
-            ui.horizontal(|ui| {
-                ui.label(tr!("analysis-fit-degree"));
-                whole(ui, degree, &quantities::POLYNOMIAL_DEGREE);
+            rows.row(tr!("analysis-fit-degree"), |ui| {
+                whole(ui, degree, &quantities::POLYNOMIAL_DEGREE)
             });
             if *degree != before {
                 f.reset_params();
             }
         }
         Model::Custom { formula } => {
-            caption(ui, tr!("analysis-fit-custom-hint"));
-            let response = ui.add(
-                egui::TextEdit::singleline(formula)
-                    .desired_width(f32::INFINITY)
-                    .hint_text(tr!("analysis-fit-custom-example")),
-            );
-            if response.changed() {
+            rows.note(tr!("analysis-fit-custom-hint"));
+            let changed = rows.field(|ui| {
+                let width = FieldWidth::Full.points(ui);
+                ui.add(
+                    egui::TextEdit::singleline(formula)
+                        .desired_width(width)
+                        .hint_text(tr!("analysis-fit-custom-example")),
+                )
+                .changed()
+            });
+            if changed {
                 f.reset_params();
             }
         }
@@ -466,30 +483,32 @@ fn fit_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm, tree: &Tre
         f.reset_params();
     }
     if f.param_count() > 0
-        && ui
-            .button(tr!("analysis-fit-auto"))
-            .on_hover_text(tr!("analysis-fit-auto", "hint"))
-            .clicked()
+        && rows.field(|ui| {
+            ui.button(tr!("analysis-fit-auto"))
+                .on_hover_text(tr!("analysis-fit-auto", "hint"))
+                .clicked()
+        })
     {
         f.auto_initial(&shown_x, &shown_y);
     }
     params_table(
-        ui,
+        rows.ui(),
         id.with("fit-params"),
         &f.param_names(),
         &mut f.params,
         multi,
     );
-    ui.horizontal(|ui| {
-        ui.label(tr!("analysis-field-range"));
+    rows.row(tr!("analysis-field-range"), |ui| {
         optional_range(ui, id.with("fit-range"), &mut f.range);
     });
     if has_sigma {
-        help_beside(ui, tr!("analysis-fit-weighted", "hint"), |ui| {
-            ui.checkbox(&mut f.weighted, tr!("analysis-fit-weighted"))
-        });
+        rows.checkbox(
+            &mut f.weighted,
+            tr!("analysis-fit-weighted"),
+            Some(tr!("analysis-fit-weighted", "hint")),
+        );
     }
-    ui.checkbox(&mut f.residuals, tr!("analysis-fit-residuals"));
+    rows.checkbox(&mut f.residuals, tr!("analysis-fit-residuals"), None);
 }
 
 /// Le tableau des paramètres d'un ajustement : valeur de départ, fixé, bornes
@@ -533,50 +552,35 @@ fn params_table(
         });
 }
 
-fn peaks_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
+fn peaks_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
     let p = &mut form.setup.peaks;
-    ui.horizontal(|ui| {
-        ui.label(tr!("analysis-peaks-shape"));
-        egui::ComboBox::from_id_salt(id.with("shape"))
-            .selected_text(match p.shape {
-                PeakShape::Gaussian => tr!("analysis-model-gaussian"),
-                PeakShape::Lorentzian => tr!("analysis-model-lorentzian"),
-                PeakShape::Voigt => tr!("analysis-peaks-voigt"),
-            })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(
-                    &mut p.shape,
-                    PeakShape::Gaussian,
-                    tr!("analysis-model-gaussian"),
-                );
-                ui.selectable_value(
-                    &mut p.shape,
-                    PeakShape::Lorentzian,
-                    tr!("analysis-model-lorentzian"),
-                );
-                ui.selectable_value(&mut p.shape, PeakShape::Voigt, tr!("analysis-peaks-voigt"));
-            });
+    // Trois formes : des radios (C1), plus une liste déroulante.
+    rows.row(tr!("analysis-peaks-shape"), |ui| {
+        choice(
+            ui,
+            id.with("shape"),
+            &mut p.shape,
+            &[
+                ChoiceOption::new(PeakShape::Gaussian, tr!("analysis-model-gaussian")),
+                ChoiceOption::new(PeakShape::Lorentzian, tr!("analysis-model-lorentzian")),
+                ChoiceOption::new(PeakShape::Voigt, tr!("analysis-peaks-voigt")),
+            ],
+        )
     });
-    ui.horizontal(|ui| {
-        ui.label(tr!("analysis-peaks-background"));
-        ui.radio_value(
+    rows.row(tr!("analysis-peaks-background"), |ui| {
+        choice(
+            ui,
+            id.with("peaks-background"),
             &mut p.background,
-            PeakBackground::None,
-            tr!("analysis-peaks-bg-none"),
-        );
-        ui.radio_value(
-            &mut p.background,
-            PeakBackground::Constant,
-            tr!("analysis-peaks-bg-constant"),
-        );
-        ui.radio_value(
-            &mut p.background,
-            PeakBackground::Linear,
-            tr!("analysis-peaks-bg-linear"),
-        );
+            &[
+                ChoiceOption::new(PeakBackground::None, tr!("analysis-peaks-bg-none")),
+                ChoiceOption::new(PeakBackground::Constant, tr!("analysis-peaks-bg-constant")),
+                ChoiceOption::new(PeakBackground::Linear, tr!("analysis-peaks-bg-linear")),
+            ],
+        )
     });
-    ui.checkbox(&mut p.link_widths, tr!("analysis-peaks-link-widths"));
-    ui.horizontal(|ui| {
+    rows.checkbox(&mut p.link_widths, tr!("analysis-peaks-link-widths"), None);
+    rows.field(|ui| {
         let mut bounded = p.center_window.is_some();
         if help_beside(ui, tr!("analysis-peaks-center-window", "hint"), |ui| {
             ui.checkbox(&mut bounded, tr!("analysis-peaks-center-window"))
@@ -589,33 +593,34 @@ fn peaks_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
             *window = window.abs();
         }
     });
-    caption(ui, tr!("analysis-peaks-hint"));
+    rows.note(tr!("analysis-peaks-hint"));
     let mut remove = None;
-    for (i, seed) in p.seeds.iter_mut().enumerate() {
-        ui.horizontal(|ui| {
-            ui.label(tr!(
-                "analysis-peaks-seed",
-                index = i64::try_from(i + 1).unwrap_or(i64::MAX)
-            ));
-            number(ui, &mut seed.center);
-            if icon_button(
-                ui,
-                Icon::Delete,
-                IconRole::Danger,
-                tr!("analysis-field-remove"),
-            )
-            .clicked()
-            {
-                remove = Some(i);
-            }
-        });
-    }
+    field_list(rows, |ui| {
+        for (i, seed) in p.seeds.iter_mut().enumerate() {
+            ui.horizontal(|ui| {
+                ui.label(tr!(
+                    "analysis-peaks-seed",
+                    index = i64::try_from(i + 1).unwrap_or(i64::MAX)
+                ));
+                number(ui, &mut seed.center);
+                if icon_button(
+                    ui,
+                    Icon::Delete,
+                    IconRole::Danger,
+                    tr!("analysis-field-remove"),
+                )
+                .clicked()
+                {
+                    remove = Some(i);
+                }
+            });
+        }
+    });
     if let Some(i) = remove {
         p.seeds.remove(i);
     }
     if p.seeds.is_empty() {
-        ui.horizontal(|ui| {
-            ui.label(tr!("analysis-peaks-prominence"));
+        rows.row(tr!("analysis-peaks-prominence"), |ui| {
             let salt = ui.next_auto_id();
             ui.skip_ahead_auto_ids(1);
             number_field(
@@ -626,138 +631,142 @@ fn peaks_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
             );
             help_text(ui, tr!("analysis-peaks-prominence", "hint"));
         });
-        ui.horizontal(|ui| {
-            ui.label(tr!("analysis-peaks-max"));
-            whole(ui, &mut p.max_peaks, &quantities::MAX_PEAKS);
+        rows.row(tr!("analysis-peaks-max"), |ui| {
+            whole(ui, &mut p.max_peaks, &quantities::MAX_PEAKS)
         });
     }
-    ui.horizontal(|ui| {
-        ui.label(tr!("analysis-field-range"));
+    rows.row(tr!("analysis-field-range"), |ui| {
         optional_range(ui, id.with("peaks-range"), &mut p.range);
     });
-    ui.checkbox(&mut p.residuals, tr!("analysis-fit-residuals"));
+    rows.checkbox(&mut p.residuals, tr!("analysis-fit-residuals"), None);
 }
 
-fn reconv_form(ui: &mut egui::Ui, id: egui::Id, form: &mut AnalysisForm) {
+fn reconv_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
     let r = &mut form.setup.reconv;
-    caption(ui, tr!("analysis-reconv-hint"));
-    ui.horizontal(|ui| {
-        ui.label(tr!("analysis-reconv-components"));
-        let before = r.spec.components;
-        whole(ui, &mut r.spec.components, &quantities::COMPONENTS);
-        if r.spec.components != before {
-            r.resize_params();
-        }
+    rows.note(tr!("analysis-reconv-hint"));
+    let before = r.spec.components;
+    rows.row(tr!("analysis-reconv-components"), |ui| {
+        whole(ui, &mut r.spec.components, &quantities::COMPONENTS)
     });
-    ui.horizontal(|ui| {
-        ui.label(tr!("analysis-reconv-shift"));
+    if r.spec.components != before {
+        r.resize_params();
+    }
+    rows.row(tr!("analysis-reconv-shift"), |ui| {
         number(ui, &mut r.spec.shift_initial);
         ui.checkbox(&mut r.spec.fit_shift, tr!("analysis-reconv-fit-shift"));
     });
     r.resize_params();
     let names = r.param_names();
     params_table(
-        ui,
+        rows.ui(),
         id.with("reconv-params"),
         &names,
         &mut r.spec.params,
         false,
     );
-    ui.horizontal(|ui| {
-        ui.label(tr!("analysis-field-range"));
+    rows.row(tr!("analysis-field-range"), |ui| {
         optional_range(ui, id.with("reconv-window"), &mut r.spec.window);
     });
-    ui.checkbox(&mut r.residuals, tr!("analysis-fit-residuals"));
+    rows.checkbox(&mut r.residuals, tr!("analysis-fit-residuals"), None);
 }
 
-fn direct_form(ui: &mut egui::Ui, form: &mut AnalysisForm) {
+fn direct_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
     let d = &mut form.setup.direct;
-    caption(ui, tr!("analysis-direct-hint"));
-    ui.horizontal(|ui| {
-        ui.radio_value(
+    rows.note(tr!("analysis-direct-hint"));
+    rows.field(|ui| {
+        choice(
+            ui,
+            id.with("direct-algorithm"),
             &mut d.algorithm,
-            DirectAlgorithm::RichardsonLucy,
-            tr!("analysis-direct-richardson-lucy"),
-        );
-        ui.radio_value(
-            &mut d.algorithm,
-            DirectAlgorithm::Wiener,
-            tr!("analysis-direct-wiener"),
-        );
+            &[
+                ChoiceOption::new(
+                    DirectAlgorithm::RichardsonLucy,
+                    tr!("analysis-direct-richardson-lucy"),
+                ),
+                ChoiceOption::new(DirectAlgorithm::Wiener, tr!("analysis-direct-wiener")),
+            ],
+        )
     });
     match d.algorithm {
         DirectAlgorithm::RichardsonLucy => {
-            ui.horizontal(|ui| {
-                ui.label(tr!("analysis-direct-iterations"));
-                whole(ui, &mut d.iterations, &quantities::ITERATIONS);
+            rows.row(tr!("analysis-direct-iterations"), |ui| {
+                whole(ui, &mut d.iterations, &quantities::ITERATIONS)
             });
         }
         DirectAlgorithm::Wiener => {
-            ui.horizontal(|ui| {
-                ui.label(tr!("analysis-direct-noise"));
+            rows.row(tr!("analysis-direct-noise"), |ui| {
                 let id = ui.id().with("noise");
-                optional_number(ui, id, &mut d.noise);
+                optional_number(ui, id, &mut d.noise)
             });
         }
     }
-    ui.horizontal(|ui| {
-        ui.label(tr!("analysis-reconv-shift"));
-        number(ui, &mut d.shift);
-    });
+    rows.row(tr!("analysis-reconv-shift"), |ui| number(ui, &mut d.shift));
 }
 
 fn output_block(
-    ui: &mut egui::Ui,
+    rows: &mut Form<'_>,
     id: egui::Id,
     form: &mut AnalysisForm,
     graphs: &[(NodeId, String)],
 ) {
-    theme::section_title(ui, tr!("analysis-block-output"));
+    rows.section(tr!("analysis-block-output"));
     // Les colonnes que cette famille peut écrire en plus de la principale.
     match form.kind {
         OperationKind::Baseline => {
-            ui.checkbox(
+            rows.checkbox(
                 &mut form.setup.baseline.baseline_column,
                 tr!("analysis-output-baseline-column"),
+                None,
             );
         }
         OperationKind::Peaks => {
-            ui.checkbox(
+            rows.checkbox(
                 &mut form.setup.peaks.peak_columns,
                 tr!("analysis-output-peak-columns"),
+                None,
             );
-            ui.checkbox(
+            rows.checkbox(
                 &mut form.setup.peaks.sum_column,
                 tr!("analysis-output-sum-column"),
+                None,
             );
         }
         _ => {}
     }
     if form.editing.is_none() && !graphs.is_empty() {
-        graph_target(ui, id, form, graphs);
+        graph_target(rows, id, form, graphs);
     }
-    help_beside(ui, tr!("analysis-output-show", "hint"), |ui| {
-        ui.radio_value(&mut form.keep_results, false, tr!("analysis-output-show"))
+    rows.field(|ui| {
+        choice(
+            ui,
+            id.with("keep-results"),
+            &mut form.keep_results,
+            &[
+                ChoiceOption::new(false, tr!("analysis-output-show"))
+                    .hint(tr!("analysis-output-show", "hint")),
+                ChoiceOption::new(true, tr!("analysis-output-keep"))
+                    .hint(tr!("analysis-output-keep", "hint")),
+            ],
+        )
     });
-    help_beside(ui, tr!("analysis-output-keep", "hint"), |ui| {
-        ui.radio_value(&mut form.keep_results, true, tr!("analysis-output-keep"))
-    });
-    if help_beside(ui, tr!("analysis-output-auto", "hint"), |ui| {
-        ui.checkbox(&mut form.auto_recalc, tr!("analysis-output-auto"))
-            .changed()
-    }) {
+    if rows.checkbox(
+        &mut form.auto_recalc,
+        tr!("analysis-output-auto"),
+        Some(tr!("analysis-output-auto", "hint")),
+    ) {
         form.auto_recalc_chosen = true;
     }
     if !form.auto_recalc && form.series.len() > stokesforge_analysis::ops::HEAVY_BATCH {
-        caption(ui, tr!("analysis-output-heavy"));
+        rows.note(tr!("analysis-output-heavy"));
     }
 }
 
 /// « Add to graph » (#200) : la case, et le choix du graphique quand plusieurs
 /// montrent la courbe. Le graphique retenu reste valide : un choix qui n'est plus
-/// parmi les candidats retombe sur le premier.
+/// parmi les candidats retombe sur le premier. Les graphiques sont des objets du
+/// projet, pas un jeu d'options fixe : liste déroulante quel que soit leur nombre.
 fn graph_target(
-    ui: &mut egui::Ui,
+    rows: &mut Form<'_>,
     id: egui::Id,
     form: &mut AnalysisForm,
     graphs: &[(NodeId, String)],
@@ -768,22 +777,26 @@ fn graph_target(
     {
         form.graph = graphs.first().map(|(id, _)| *id);
     }
-    help_beside(ui, tr!("analysis-output-to-graph", "hint"), |ui| {
-        ui.checkbox(&mut form.add_to_graph, tr!("analysis-output-to-graph"))
-    });
+    rows.checkbox(
+        &mut form.add_to_graph,
+        tr!("analysis-output-to-graph"),
+        Some(tr!("analysis-output-to-graph", "hint")),
+    );
     if form.add_to_graph && graphs.len() > 1 {
         let shown = graphs
             .iter()
             .find(|(id, _)| Some(*id) == form.graph)
             .map(|(_, name)| name.clone())
             .unwrap_or_default();
-        egui::ComboBox::from_id_salt(id.with("target-graph"))
-            .selected_text(shown)
-            .show_ui(ui, |ui| {
-                for (graph, name) in graphs {
-                    ui.selectable_value(&mut form.graph, Some(*graph), name);
-                }
-            });
+        rows.field(|ui| {
+            egui::ComboBox::from_id_salt(id.with("target-graph"))
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    for (graph, name) in graphs {
+                        ui.selectable_value(&mut form.graph, Some(*graph), name);
+                    }
+                });
+        });
     }
 }
 

@@ -15,19 +15,21 @@ use stokesforge_plot::{
     AxisSpec, LegendPosition, LineStyle, PanelSpec, PlotSpec, PlotType, SymbolShape,
 };
 
-use crate::color_picker::{color_field, ColorUsage, PickerEnv, SavedColorEdit};
+use crate::color_picker::{ColorUsage, PickerEnv, SavedColorEdit};
+use crate::icons::ICON_SIZE;
 use crate::number_field::number_field;
 use crate::quantities;
 use crate::state::{
     parse_x_prime, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
 };
-use crate::theme::{bold, section_title};
+use crate::theme::{bold, FieldWidth};
 use crate::tr;
 
 use super::curve_settings::curve_settings_page;
-use super::dialogs::{modal_dialog, DialogOutcome};
+use super::dialogs::{modal_dialog, modal_read_only, DialogOutcome};
+use super::form::{choice, form, ChoiceOption, Form};
 use super::graph_window::{published_axis_bounds, PanelBounds};
-use super::hover_help::{help_beside, hover_help};
+use super::hover_help::hover_help;
 use super::tab_strip::{tab_strip, TabStripSide};
 
 /// Largeur par défaut de la fenêtre des propriétés d'un graphe
@@ -112,10 +114,10 @@ pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
 
 /// Fenêtre de consultation des métadonnées de fichier d'une colonne (issue
 /// #5) : les lignes clé / valeur, sections comprises, en lecture seule. Même
-/// brique modale que les propriétés du graphe ; « Valider » et « Annuler »
-/// la ferment sans rien changer. Seule exception : le bouton « Utiliser
-/// comme x' » d'une valeur numérique, qui l'écrit dans la ligne x' de la
-/// colonne (#164).
+/// brique modale que les propriétés du graphe, au pied d'une fenêtre en
+/// lecture seule : un seul bouton, Close (F2, #228). Seule écriture : le
+/// bouton « Utiliser comme x' » d'une valeur numérique, qui l'écrit dans la
+/// ligne x' de la colonne (#164).
 pub(super) fn column_metadata_window(
     ctx: &egui::Context,
     state: &AppState,
@@ -134,7 +136,7 @@ pub(super) fn column_metadata_window(
             name = meta.long_name.as_str()
         )
     };
-    let outcome = modal_dialog(
+    let outcome = modal_read_only(
         ctx,
         egui::Id::new("stokesforge_column_metadata"),
         &title,
@@ -328,58 +330,63 @@ fn plot_settings_contents(
     }
 }
 
-/// Page du graphe : titre et fond, sans ajouter de sous-Ui aux widgets.
+/// Page du graphe : titre et fond, en formulaire à deux colonnes (#227).
 fn graph_settings_page(ui: &mut egui::Ui, spec: &mut PlotSpec, env: &mut PickerEnv) -> bool {
-    let mut commit = false;
-    commit |= formula_field(
-        ui,
-        &tr!("plot-general-title"),
-        &tr!("plot-general-title", "hint"),
-        &mut spec.title,
-    );
-    commit |= color_field(
-        ui,
-        &tr!("plot-title-color"),
-        &mut spec.title_color,
-        ColorUsage::Text,
-        Some(&tr!("plot-color-auto-contrast")),
-        env,
-    );
-    ui.add_space(6.0);
-    commit |= color_field(
-        ui,
-        &tr!("plot-general-background"),
-        &mut spec.background,
-        ColorUsage::Background,
-        Some(&tr!("plot-color-auto-white")),
-        env,
-    );
-    ui.weak(tr!("plot-general-dark-note"));
-    ui.add_space(6.0);
-    commit |= help_beside(ui, tr!("plot-stale-warning", "hint"), |ui| {
-        ui.checkbox(&mut spec.stale_warning, tr!("plot-stale-warning"))
-            .changed()
-    });
-    commit
+    form(ui, "plot_graph_page", |form| {
+        let mut commit = false;
+        commit |= formula_field(
+            form,
+            &tr!("plot-general-title"),
+            &tr!("plot-general-title", "hint"),
+            &mut spec.title,
+        );
+        commit |= form.color(
+            &tr!("plot-title-color"),
+            &mut spec.title_color,
+            ColorUsage::Text,
+            Some(&tr!("plot-color-auto-contrast")),
+            env,
+        );
+        commit |= form.color(
+            &tr!("plot-general-background"),
+            &mut spec.background,
+            ColorUsage::Background,
+            Some(&tr!("plot-color-auto-white")),
+            env,
+        );
+        form.note(tr!("plot-general-dark-note"));
+        commit |= form.checkbox(
+            &mut spec.stale_warning,
+            tr!("plot-stale-warning"),
+            Some(tr!("plot-stale-warning", "hint")),
+        );
+        commit
+    })
 }
 
 /// Page du calque : titre et lignes de grille.
 fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
-    let mut commit = false;
-    commit |= formula_field(
-        ui,
-        &tr!("plot-area-layer-title"),
-        &tr!("plot-area-layer-title", "hint"),
-        &mut panel.title,
-    );
-    section_title(ui, tr!("plot-area-gridlines"));
-    commit |= ui
-        .checkbox(&mut panel.bottom.grid, tr!("plot-area-gridlines-vertical"))
-        .changed();
-    commit |= ui
-        .checkbox(&mut panel.left.grid, tr!("plot-area-gridlines-horizontal"))
-        .changed();
-    commit
+    form(ui, "plot_area_page", |form| {
+        let mut commit = false;
+        commit |= formula_field(
+            form,
+            &tr!("plot-area-layer-title"),
+            &tr!("plot-area-layer-title", "hint"),
+            &mut panel.title,
+        );
+        form.section(tr!("plot-area-gridlines"));
+        commit |= form.checkbox(
+            &mut panel.bottom.grid,
+            tr!("plot-area-gridlines-vertical"),
+            None,
+        );
+        commit |= form.checkbox(
+            &mut panel.left.grid,
+            tr!("plot-area-gridlines-horizontal"),
+            None,
+        );
+        commit
+    })
 }
 
 /// Page des axes : choix local de l'axe, puis éditeur partagé.
@@ -428,20 +435,24 @@ fn axes_settings_page(
         PlotAxis::Right => &mut panel.right,
         PlotAxis::Top => &mut panel.top,
     };
-    commit |= if mirror {
-        mirror_axis_editor(ui, axis)
-    } else {
-        let computed = bounds.and_then(|bounds| match *chosen_axis {
-            PlotAxis::Bottom => bounds.bottom,
-            PlotAxis::Left => bounds.left,
-            _ => bounds.right,
-        });
-        axis_editor(ui, axis, computed, env)
-    };
-    // Réglage du graphe entier (#223), rangé sous l'affichage des axes.
-    commit |= help_beside(ui, tr!("plot-axes-decimal-comma", "hint"), |ui| {
-        ui.checkbox(decimal_comma, tr!("plot-axes-decimal-comma"))
-            .changed()
+    let computed = bounds.and_then(|bounds| match *chosen_axis {
+        PlotAxis::Bottom => bounds.bottom,
+        PlotAxis::Left => bounds.left,
+        _ => bounds.right,
+    });
+    commit |= form(ui, "plot_axis_page", |form| {
+        let mut commit = if mirror {
+            mirror_axis_editor(form, axis)
+        } else {
+            axis_editor(form, axis, computed, env)
+        };
+        // Réglage du graphe entier (#223), rangé sous l'affichage des axes.
+        commit |= form.checkbox(
+            decimal_comma,
+            tr!("plot-axes-decimal-comma"),
+            Some(tr!("plot-axes-decimal-comma", "hint")),
+        );
+        commit
     });
     commit
 }
@@ -455,53 +466,52 @@ fn theme_editor(
     spec: &mut stokesforge_plot::PlotSpec,
     env: &mut PickerEnv,
 ) -> bool {
-    let mut commit = false;
-    section_title(ui, tr!("plot-theme-themes"));
-    ui.horizontal(|ui| {
-        for theme in &stokesforge_plot::THEMES {
-            if ui.button(theme.name).clicked() {
-                spec.apply_theme(theme);
-                commit = true;
+    form(ui, "plot_theme_page", |form| {
+        let mut commit = false;
+        form.section(tr!("plot-theme-themes"));
+        form.field(|ui| {
+            for theme in &stokesforge_plot::THEMES {
+                if ui.button(theme.name).clicked() {
+                    spec.apply_theme(theme);
+                    commit = true;
+                }
             }
+        });
+        form.section(tr!("plot-theme-global-colors"));
+        commit |= form.color(
+            &tr!("plot-theme-background"),
+            &mut spec.background,
+            ColorUsage::Background,
+            Some(&tr!("plot-color-auto-white")),
+            env,
+        );
+        let mut text = spec.theme_text_color().to_string();
+        let text_committed = form.color(
+            &tr!("plot-theme-text"),
+            &mut text,
+            ColorUsage::Text,
+            Some(&tr!("plot-color-auto-contrast")),
+            env,
+        );
+        if text != spec.theme_text_color() {
+            spec.set_text_color(&text);
         }
-    });
-    section_title(ui, tr!("plot-theme-global-colors"));
-    commit |= color_field(
-        ui,
-        &tr!("plot-theme-background"),
-        &mut spec.background,
-        ColorUsage::Background,
-        Some(&tr!("plot-color-auto-white")),
-        env,
-    );
-    let mut text = spec.theme_text_color().to_string();
-    let text_committed = color_field(
-        ui,
-        &tr!("plot-theme-text"),
-        &mut text,
-        ColorUsage::Text,
-        Some(&tr!("plot-color-auto-contrast")),
-        env,
-    );
-    if text != spec.theme_text_color() {
-        spec.set_text_color(&text);
-    }
-    commit |= text_committed;
-    let mut axes = spec.theme_axes_color().to_string();
-    let axes_committed = color_field(
-        ui,
-        &tr!("plot-theme-axes"),
-        &mut axes,
-        ColorUsage::Text,
-        Some(&tr!("plot-color-auto-contrast")),
-        env,
-    );
-    if axes != spec.theme_axes_color() {
-        spec.set_axes_color(&axes);
-    }
-    commit |= axes_committed;
-    ui.weak(tr!("plot-theme-note"));
-    commit
+        commit |= text_committed;
+        let mut axes = spec.theme_axes_color().to_string();
+        let axes_committed = form.color(
+            &tr!("plot-theme-axes"),
+            &mut axes,
+            ColorUsage::Text,
+            Some(&tr!("plot-color-auto-contrast")),
+            env,
+        );
+        if axes != spec.theme_axes_color() {
+            spec.set_axes_color(&axes);
+        }
+        commit |= axes_committed;
+        form.note(tr!("plot-theme-note"));
+        commit
+    })
 }
 
 /// Le rappel de syntaxe des textes du graphe (issues #33, #197), en bulle de
@@ -550,36 +560,38 @@ fn formula_memo_rows() -> [(&'static str, String); 7] {
     ]
 }
 
-/// Un champ texte libellé qui accepte une formule (#197), validé à la perte de
-/// focus ; `hint` est son rappel, première ligne de l'icône d'aide à la syntaxe
-/// Typst ([`formula_help`]) posée tout à droite (T6 : l'icône « ? » seule). Rend `true` si le brouillon doit être validé —
-/// voir la doc de tête de [`plot_settings_window`].
-fn formula_field(ui: &mut egui::Ui, label: &str, hint: &str, value: &mut String) -> bool {
-    ui.horizontal(|ui| {
-        ui.label(label);
-        let lost = ui.text_edit_singleline(value).lost_focus();
+/// Une rangée de formulaire dont le champ texte accepte une formule (#197),
+/// validé à la perte de focus ; `hint` est son rappel, première ligne de
+/// l'icône d'aide à la syntaxe Typst ([`formula_help`]) posée tout à droite (T6
+/// : l'icône « ? » seule). Le champ prend la pleine largeur (L2), moins la
+/// place de l'icône. Rend `true` si le brouillon doit être validé — voir la
+/// doc de tête de [`plot_settings_window`].
+fn formula_field(form: &mut Form<'_>, label: &str, hint: &str, value: &mut String) -> bool {
+    form.row(label, |ui| {
+        let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
+        let lost = ui
+            .add(egui::TextEdit::singleline(value).desired_width(width))
+            .lost_focus();
         formula_help(ui, hint);
         lost
     })
-    .inner
 }
 
 /// Édite un axe miroir (#176) : il reprend l'échelle de l'axe opposé et n'a ni
 /// titre ni couleur propres ; on choisit seulement de l'afficher, avec ou sans
 /// étiquettes de graduation.
-fn mirror_axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
-    section_title(ui, tr!("plot-axes-display-section"));
-    let mut commit = ui
-        .checkbox(&mut axis.mirror, tr!("plot-axes-show-mirror"))
-        .changed();
-    commit |= ui
-        .add_enabled(
+fn mirror_axis_editor(form: &mut Form<'_>, axis: &mut AxisSpec) -> bool {
+    form.section(tr!("plot-axes-display-section"));
+    let mut commit = form.checkbox(&mut axis.mirror, tr!("plot-axes-show-mirror"), None);
+    commit |= form.field(|ui| {
+        ui.add_enabled(
             axis.mirror,
             egui::Checkbox::new(&mut axis.tick_labels, tr!("plot-axes-show-tick-labels")),
         )
         .on_disabled_hover_text(tr!("disabled-mirror-off"))
-        .changed();
-    ui.weak(tr!("plot-axes-mirror-note"));
+        .changed()
+    });
+    form.note(tr!("plot-axes-mirror-note"));
     commit
 }
 
@@ -588,27 +600,26 @@ fn mirror_axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
 /// (axe, grille). Rend `true` si le brouillon doit être validé — voir la doc
 /// de tête de [`plot_settings_window`].
 fn axis_editor(
-    ui: &mut egui::Ui,
+    form: &mut Form<'_>,
     axis: &mut AxisSpec,
     computed: Option<(f64, f64)>,
     env: &mut PickerEnv,
 ) -> bool {
     let mut commit = false;
-    section_title(ui, tr!("plot-axes-title-section"));
+    form.section(tr!("plot-axes-title-section"));
     commit |= formula_field(
-        ui,
+        form,
         &tr!("plot-axes-quantity"),
         &tr!("plot-axes-quantity", "hint"),
         &mut axis.label,
     );
     commit |= formula_field(
-        ui,
+        form,
         &tr!("plot-axes-units"),
         &tr!("plot-axes-units", "hint"),
         &mut axis.unit,
     );
-    commit |= color_field(
-        ui,
+    commit |= form.color(
         &tr!("plot-title-color"),
         &mut axis.title_color,
         ColorUsage::Text,
@@ -616,12 +627,13 @@ fn axis_editor(
         env,
     );
 
-    section_title(ui, tr!("plot-axes-scale-section"));
+    form.section(tr!("plot-axes-scale-section"));
     let mut log_scale = axis.scale == stokesforge_plot::AxisScale::Log;
-    if help_beside(ui, tr!("plot-axes-log-scale", "hint"), |ui| {
-        ui.checkbox(&mut log_scale, tr!("plot-axes-log-scale"))
-            .changed()
-    }) {
+    if form.checkbox(
+        &mut log_scale,
+        tr!("plot-axes-log-scale"),
+        Some(tr!("plot-axes-log-scale", "hint")),
+    ) {
         axis.scale = if log_scale {
             stokesforge_plot::AxisScale::Log
         } else {
@@ -629,14 +641,16 @@ fn axis_editor(
         };
         commit = true;
     }
-    commit |= help_beside(ui, tr!("plot-axes-reverse", "hint"), |ui| {
-        ui.checkbox(&mut axis.inverted, tr!("plot-axes-reverse"))
-            .changed()
-    });
-    let auto_changed = help_beside(ui, tr!("plot-axes-auto-range", "hint"), |ui| {
-        ui.checkbox(&mut axis.auto_range, tr!("plot-axes-auto-range"))
-            .changed()
-    });
+    commit |= form.checkbox(
+        &mut axis.inverted,
+        tr!("plot-axes-reverse"),
+        Some(tr!("plot-axes-reverse", "hint")),
+    );
+    let auto_changed = form.checkbox(
+        &mut axis.auto_range,
+        tr!("plot-axes-auto-range"),
+        Some(tr!("plot-axes-auto-range", "hint")),
+    );
     commit |= auto_changed;
     if auto_changed && !axis.auto_range {
         // Décocher reprend les bornes calculées comme valeurs (G4).
@@ -657,17 +671,14 @@ fn axis_editor(
     };
     let mut changed = false;
     let mut auto_asked = false;
-    ui.add_enabled_ui(!auto, |ui| {
+    form.enabled(!auto, |form| {
         for (label, salt, value) in [
             (tr!("plot-axes-min"), "axis_min", &mut min),
             (tr!("plot-axes-max"), "axis_max", &mut max),
         ] {
-            let response = ui
-                .horizontal(|ui| {
-                    ui.label(label);
-                    number_field(ui, salt, value, &quantities::AXIS_BOUND)
-                })
-                .inner;
+            let response = form.row(label, |ui| {
+                number_field(ui, salt, value, &quantities::AXIS_BOUND)
+            });
             changed |= response.changed;
             auto_asked |= response.auto;
         }
@@ -683,25 +694,22 @@ fn axis_editor(
         commit = true;
     }
 
-    section_title(ui, tr!("plot-axes-display-section"));
-    commit |= ui
-        .checkbox(&mut axis.visible, tr!("plot-axes-show-axis"))
-        .changed();
-    commit |= ui
-        .checkbox(&mut axis.tick_labels, tr!("plot-axes-show-tick-labels"))
-        .changed();
-    commit |= ui
-        .checkbox(&mut axis.grid, tr!("plot-axes-show-gridlines"))
-        .changed();
-    commit |= color_field(
-        ui,
+    form.section(tr!("plot-axes-display-section"));
+    commit |= form.checkbox(&mut axis.visible, tr!("plot-axes-show-axis"), None);
+    commit |= form.checkbox(
+        &mut axis.tick_labels,
+        tr!("plot-axes-show-tick-labels"),
+        None,
+    );
+    commit |= form.checkbox(&mut axis.grid, tr!("plot-axes-show-gridlines"), None);
+    commit |= form.color(
         &tr!("plot-axes-color"),
         &mut axis.tick_color,
         ColorUsage::Text,
         Some(&tr!("plot-color-auto-contrast")),
         env,
     );
-    ui.weak(tr!("plot-axes-color-note"));
+    form.note(tr!("plot-axes-color-note"));
     commit
 }
 
@@ -727,101 +735,76 @@ pub(super) fn series_editor(
     env: &mut PickerEnv,
     locked: bool,
 ) -> bool {
-    let mut commit = false;
-
-    commit |= per_series(ui, locked, |ui| {
-        formula_field(
-            ui,
-            &tr!("plot-series-name"),
-            &tr!("plot-series-name", "hint"),
-            &mut series.name,
-        )
-    });
-
-    commit |= per_series(ui, locked, |ui| {
+    form(ui, "plot_series_editor", |form| {
         let mut commit = false;
-        ui.horizontal(|ui| {
-            ui.label(tr!("plot-series-plot-type"));
-            match &series.plot_type {
+        commit |= per_series(form, locked, |form| {
+            formula_field(
+                form,
+                &tr!("plot-series-name"),
+                &tr!("plot-series-name", "hint"),
+                &mut series.name,
+            )
+        });
+
+        commit |= per_series(form, locked, |form| {
+            let mut commit = form.row(tr!("plot-series-plot-type"), |ui| match &series.plot_type {
                 PlotType::Unknown(_) => {
                     ui.weak(tr!("plot-series-type-unknown"));
+                    false
                 }
-                current => {
-                    let mut selected = current.clone();
-                    egui::ComboBox::new("plot_config_series_type", "")
-                        .selected_text(plot_type_label(&selected))
-                        .show_ui(ui, |ui| {
-                            for candidate in [
-                                PlotType::Scatter,
-                                PlotType::Line,
-                                PlotType::LineScatter,
-                                PlotType::Bar,
-                                PlotType::Histogram,
-                                PlotType::ErrorBar,
-                            ] {
-                                let text = plot_type_label(&candidate);
-                                let is_selected = candidate == selected;
-                                if ui.selectable_label(is_selected, text).clicked() {
-                                    selected = candidate;
-                                }
-                            }
-                        });
-                    if selected != series.plot_type {
-                        series.plot_type = selected;
-                        commit = true;
-                    }
-                }
-            }
-        });
-        commit |= ui
-            .checkbox(&mut series.visible, tr!("plot-series-show"))
-            .changed();
-        commit |= ui
-            .checkbox(
+                _ => choice(
+                    ui,
+                    "plot_config_series_type",
+                    &mut series.plot_type,
+                    &[
+                        PlotType::Scatter,
+                        PlotType::Line,
+                        PlotType::LineScatter,
+                        PlotType::Bar,
+                        PlotType::Histogram,
+                        PlotType::ErrorBar,
+                    ]
+                    .map(|candidate| {
+                        let label = plot_type_label(&candidate);
+                        ChoiceOption::new(candidate, label)
+                    }),
+                ),
+            });
+            commit |= form.checkbox(&mut series.visible, tr!("plot-series-show"), None);
+            commit |= form.checkbox(
                 &mut series.show_in_legend,
                 tr!("plot-series-show-in-legend"),
+                None,
+            );
+            commit
+        });
+
+        form.section(tr!("plot-series-line-section"));
+        commit |= per_series(form, locked, |form| {
+            form.color(
+                &tr!("plot-series-line-color"),
+                &mut series.line.color,
+                ColorUsage::Curves,
+                None,
+                env,
             )
-            .changed();
-        commit
-    });
-
-    section_title(ui, tr!("plot-series-line-section"));
-    commit |= per_series(ui, locked, |ui| {
-        color_field(
-            ui,
-            &tr!("plot-series-line-color"),
-            &mut series.line.color,
-            ColorUsage::Curves,
-            None,
-            env,
-        )
-    });
-
-    ui.horizontal(|ui| {
-        ui.label(tr!("plot-series-line-style"));
-        let mut style = series.line.style;
-        egui::ComboBox::new("plot_config_line_style", "")
-            .selected_text(line_style_label(style))
-            .show_ui(ui, |ui| {
-                for candidate in [
+        });
+        commit |= form.row(tr!("plot-series-line-style"), |ui| {
+            choice(
+                ui,
+                "plot_config_line_style",
+                &mut series.line.style,
+                &[
                     LineStyle::None,
                     LineStyle::Solid,
                     LineStyle::Dash,
                     LineStyle::Dot,
                     LineStyle::DashDot,
-                ] {
-                    ui.selectable_value(&mut style, candidate, line_style_label(candidate));
-                }
-            });
-        if style != series.line.style {
-            series.line.style = style;
-            commit = true;
-        }
-    });
-
-    commit |= ui
-        .horizontal(|ui| {
-            ui.label(tr!("plot-series-line-width"));
+                ]
+                .map(|candidate| ChoiceOption::new(candidate, line_style_label(candidate))),
+            )
+        });
+        commit |= form.row(tr!("plot-series-line-width"), |ui| {
             number_field(
                 ui,
                 "series_line_width",
@@ -829,17 +812,15 @@ pub(super) fn series_editor(
                 &quantities::LINE_WIDTH,
             )
             .changed
-        })
-        .inner;
+        });
 
-    section_title(ui, tr!("plot-series-symbol-section"));
-    ui.horizontal(|ui| {
-        ui.label(tr!("plot-series-symbol-shape"));
-        let mut shape = series.symbol.shape;
-        egui::ComboBox::new("plot_config_symbol_shape", "")
-            .selected_text(symbol_shape_label(shape))
-            .show_ui(ui, |ui| {
-                for candidate in [
+        form.section(tr!("plot-series-symbol-section"));
+        commit |= form.row(tr!("plot-series-symbol-shape"), |ui| {
+            choice(
+                ui,
+                "plot_config_symbol_shape",
+                &mut series.symbol.shape,
+                &[
                     SymbolShape::None,
                     SymbolShape::Circle,
                     SymbolShape::Square,
@@ -847,19 +828,11 @@ pub(super) fn series_editor(
                     SymbolShape::Diamond,
                     SymbolShape::Plus,
                     SymbolShape::Cross,
-                ] {
-                    ui.selectable_value(&mut shape, candidate, symbol_shape_label(candidate));
-                }
-            });
-        if shape != series.symbol.shape {
-            series.symbol.shape = shape;
-            commit = true;
-        }
-    });
-
-    commit |= ui
-        .horizontal(|ui| {
-            ui.label(tr!("plot-series-symbol-size"));
+                ]
+                .map(|candidate| ChoiceOption::new(candidate, symbol_shape_label(candidate))),
+            )
+        });
+        commit |= form.row(tr!("plot-series-symbol-size"), |ui| {
             number_field(
                 ui,
                 "series_symbol_size",
@@ -867,27 +840,24 @@ pub(super) fn series_editor(
                 &quantities::SYMBOL_SIZE,
             )
             .changed
-        })
-        .inner;
-
-    commit |= per_series(ui, locked, |ui| {
-        color_field(
-            ui,
-            &tr!("plot-series-symbol-color"),
-            &mut series.symbol.color,
-            ColorUsage::Curves,
-            Some(&tr!("plot-color-same-as-line")),
-            env,
-        )
-    });
-
-    commit
+        });
+        commit |= per_series(form, locked, |form| {
+            form.color(
+                &tr!("plot-series-symbol-color"),
+                &mut series.symbol.color,
+                ColorUsage::Curves,
+                Some(&tr!("plot-color-same-as-line")),
+                env,
+            )
+        });
+        commit
+    })
 }
 
 /// Un réglage propre à une série : grisé, avec l'info-bulle qui dit pourquoi,
 /// quand on règle le groupe entier (`locked`, voir [`series_editor`]).
-fn per_series(ui: &mut egui::Ui, locked: bool, add: impl FnOnce(&mut egui::Ui) -> bool) -> bool {
-    let out = ui.add_enabled_ui(!locked, add);
+fn per_series(form: &mut Form<'_>, locked: bool, add: impl FnOnce(&mut Form<'_>) -> bool) -> bool {
+    let out = form.enabled(!locked, add);
     if locked {
         out.response.on_hover_text(tr!("curve-scope-locked"));
     }
@@ -898,33 +868,24 @@ fn per_series(ui: &mut egui::Ui, locked: bool, add: impl FnOnce(&mut egui::Ui) -
 /// `true` si le brouillon doit être validé — voir la doc de tête de
 /// [`plot_settings_window`].
 fn legend_editor(ui: &mut egui::Ui, legend: &mut stokesforge_plot::LegendSpec) -> bool {
-    let mut commit = false;
-    commit |= ui
-        .checkbox(&mut legend.visible, tr!("plot-legend-show"))
-        .changed();
-
-    ui.horizontal(|ui| {
-        ui.label(tr!("plot-legend-position"));
-        let mut position = legend.position;
-        egui::ComboBox::new("plot_config_legend_position", "")
-            .selected_text(legend_position_label(position))
-            .show_ui(ui, |ui| {
-                for candidate in [
+    form(ui, "plot_legend_page", |form| {
+        let mut commit = form.checkbox(&mut legend.visible, tr!("plot-legend-show"), None);
+        commit |= form.row(tr!("plot-legend-position"), |ui| {
+            choice(
+                ui,
+                "plot_config_legend_position",
+                &mut legend.position,
+                &[
                     LegendPosition::TopLeft,
                     LegendPosition::TopRight,
                     LegendPosition::BottomLeft,
                     LegendPosition::BottomRight,
-                ] {
-                    ui.selectable_value(&mut position, candidate, legend_position_label(candidate));
-                }
-            });
-        if position != legend.position {
-            legend.position = position;
-            commit = true;
-        }
-    });
-
-    commit
+                ]
+                .map(|candidate| ChoiceOption::new(candidate, legend_position_label(candidate))),
+            )
+        });
+        commit
+    })
 }
 
 /// Libellé d'un [`PlotType`], y compris [`PlotType::Unknown`] (par
@@ -989,7 +950,7 @@ mod tests {
     use stokesforge_session::Session;
 
     use super::{
-        column_metadata_window, formula_field, formula_help, formula_memo_rows,
+        column_metadata_window, form, formula_field, formula_help, formula_memo_rows,
         legend_position_label, line_style_label, plot_settings_window, plot_type_label,
         symbol_shape_label, theme_editor,
     };
@@ -1766,9 +1727,15 @@ mod tests {
         let mut rendus = Vec::new();
         let mut peints = Vec::new();
         for events in images {
+            // Une image peut compter deux passes (la grille du formulaire se
+            // mesure à la première) : son résultat est celui de ses passes.
+            let mut rendu = false;
             peints = textes(&image(context, events, |ui| {
-                rendus.push(formula_field(ui, "Grandeur", "Aide", valeur));
+                rendu |= form(ui, "essai", |form| {
+                    formula_field(form, "Grandeur", "Aide", valeur)
+                });
             }));
+            rendus.push(rendu);
         }
         (rendus, peints)
     }
@@ -1996,7 +1963,9 @@ mod tests {
         };
         let mut commit = true;
         let peints = textes(&image(context, Vec::new(), |ui| {
-            commit = super::axis_editor(ui, axis, calcule, &mut env);
+            commit = form(ui, "essai", |form| {
+                super::axis_editor(form, axis, calcule, &mut env)
+            });
         }));
         (commit, peints)
     }
