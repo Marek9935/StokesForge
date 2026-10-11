@@ -381,7 +381,7 @@ Comment c'est tenu :
 - **Formulaire en grille à deux colonnes** (L1) : libellés à gauche, champs
   alignés sur une même verticale, cases dans la colonne des champs.
 - **Quatre largeurs de champ** nommées dans `theme.rs` (L2) : quelques
-  chiffres (~48 px, #237 : entier positif de trois chiffres au plus, sans
+  chiffres (~38 px, #237 : entier positif de trois chiffres au plus, sans
   liste — la brique « nombre » la prend seule, `Quantity::is_compact`),
   courte (~80 px), moyenne (~160 px), pleine.
 - **Un titre de section entre deux blocs**, jamais un trait seul (L3).

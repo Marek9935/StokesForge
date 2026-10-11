@@ -87,8 +87,8 @@ pub const SPACE_SECTION: f32 = 6.0;
 
 /// Largeur d'un champ **à quelques chiffres** (L2, #237) : un nombre entier
 /// dont la borne est connue et tient en trois chiffres (canal de couleur,
-/// pour cent, degré…), sans liste de valeurs (~48 px).
-pub const FIELD_WIDTH_DIGITS: f32 = 48.0;
+/// pour cent, degré…), sans liste de valeurs (~38 px).
+pub const FIELD_WIDTH_DIGITS: f32 = 38.0;
 
 /// Largeur d'un champ **court** (L2, #227) : un nombre, une borne, un
 /// caractère (~80 px). C'est la largeur de la brique « nombre ».
