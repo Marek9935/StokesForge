@@ -43,7 +43,12 @@ fichier ou d'une colonne : il suit les mêmes règles s'il est écrit par Stokes
 dit *comment* l'écrire. Points qui touchent les mots :
 
 - **raison d'un grisage** : dit quoi faire (« Select a series first »),
-  attribut `.disabled` de la clé ;
+  clé `disabled-*` (#226) ou attribut `.disabled` de la clé ; pour le bouton
+  principal d'un dialogue, la même phrase s'écrit aussi dans le pied
+  (`DialogFooter::accept_disabled`, #228) — courte, une ligne ;
+- **pied des dialogues** : `dialog-ok`, `dialog-cancel`, `dialog-close`
+  (lecture seule) ; une erreur d'un geste du dialogue y va d'office par
+  `fail` (clé `error-*`), jamais dans la barre d'état ;
 - **bulle d'un bouton** : à icône seule, nom, effet et raccourci ; à texte,
   effet et raccourci sans répéter le libellé ; **pas de bulle nue sur un
   champ** (icône « ? » ou texte en clair de 2 lignes au plus) ;

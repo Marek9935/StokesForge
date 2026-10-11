@@ -26,7 +26,7 @@ use crate::theme::{bold, FieldWidth};
 use crate::tr;
 
 use super::curve_settings::curve_settings_page;
-use super::dialogs::{modal_dialog, DialogOutcome};
+use super::dialogs::{modal_dialog, modal_read_only, DialogOutcome};
 use super::form::{choice, form, ChoiceOption, Form};
 use super::graph_window::{published_axis_bounds, PanelBounds};
 use super::hover_help::hover_help;
@@ -114,10 +114,10 @@ pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
 
 /// Fenêtre de consultation des métadonnées de fichier d'une colonne (issue
 /// #5) : les lignes clé / valeur, sections comprises, en lecture seule. Même
-/// brique modale que les propriétés du graphe ; « Valider » et « Annuler »
-/// la ferment sans rien changer. Seule exception : le bouton « Utiliser
-/// comme x' » d'une valeur numérique, qui l'écrit dans la ligne x' de la
-/// colonne (#164).
+/// brique modale que les propriétés du graphe, au pied d'une fenêtre en
+/// lecture seule : un seul bouton, Close (F2, #228). Seule écriture : le
+/// bouton « Utiliser comme x' » d'une valeur numérique, qui l'écrit dans la
+/// ligne x' de la colonne (#164).
 pub(super) fn column_metadata_window(
     ctx: &egui::Context,
     state: &AppState,
@@ -136,7 +136,7 @@ pub(super) fn column_metadata_window(
             name = meta.long_name.as_str()
         )
     };
-    let outcome = modal_dialog(
+    let outcome = modal_read_only(
         ctx,
         egui::Id::new("stokesforge_column_metadata"),
         &title,

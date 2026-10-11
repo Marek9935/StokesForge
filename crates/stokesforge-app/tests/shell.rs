@@ -3109,8 +3109,11 @@ fn save_import_recipe_requires_a_non_empty_name() {
     state.import_state_mut().unwrap().save_as_name = "   ".to_string();
     state.save_import_recipe();
 
-    let status = state.status().expect("un message de statut");
-    assert!(status.is_error, "un nom blanc doit être refusé");
+    // M7 (#228) : l'erreur d'un geste de l'assistant va dans son pied.
+    assert!(
+        state.dialog_error().is_some(),
+        "un nom blanc doit être refusé"
+    );
     // Les modèles fournis d'office sont listés, mais rien de l'utilisateur
     // n'a été ajouté ni écrit.
     assert!(
@@ -6273,7 +6276,8 @@ fn dropping_files_during_plot_settings_is_refused_without_touching_the_macro() {
     assert_eq!(*after.tree, *before.tree);
     assert_eq!(after.revision, before.revision);
     assert!(after.history.in_macro, "le dialogue conserve sa macro");
-    assert!(state.status().unwrap().is_error);
+    // M7 (#228) : le refus s'écrit dans le pied du dialogue ouvert.
+    assert!(state.dialog_error().is_some());
     assert!(!state.can_reopen_last_import());
     state.cancel_plot_settings();
     state.dispatch(Action::DropFiles {
@@ -6673,7 +6677,10 @@ fn un_echec_d_enregistrement_garde_le_modele_d_import_modifie() {
     std::fs::create_dir(&file).unwrap();
     state.save_import_recipe();
 
-    assert!(state.status().unwrap().is_error);
+    assert!(
+        state.dialog_error().is_some(),
+        "M7 : dans le pied de l'assistant"
+    );
     assert!(state.import_recipe_modified());
     state.import_state_mut().unwrap().recipe.skip_chars = 2;
     assert!(
@@ -7225,7 +7232,10 @@ fn a_model_can_be_exported_and_imported_from_a_file() {
     let bad = dir.path().join("pas_un_modele.json");
     std::fs::write(&bad, "{ pas du json").unwrap();
     state.import_import_recipe(&bad);
-    assert!(state.status().is_some_and(|s| s.is_error));
+    assert!(
+        state.dialog_error().is_some(),
+        "M7 : dans le pied de l'assistant"
+    );
     assert_eq!(state.import_state().unwrap().recipe.skip_chars, 4);
 }
 
@@ -9522,4 +9532,77 @@ fn changing_type_and_role_of_several_columns_is_one_undo_step() {
         type_after, type_before,
         "un seul Annuler rend les deux types"
     );
+}
+
+/// F8 (#228) : la géométrie d'un dialogue fermé s'écrit dans les préférences,
+/// hors historique et hors projet, et se relit à la session suivante.
+#[test]
+fn la_geometrie_d_un_dialogue_ferme_va_dans_les_preferences() {
+    use stokesforge_app::preferences::{DialogGeometry, Preferences};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("preferences.json");
+    let session = Session::spawn(Project::new("Vide").unwrap(), None).unwrap();
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        dir.path().join("projet.stf").display().to_string(),
+        Preferences::load_from(Some(path.clone())),
+    )
+    .unwrap();
+    let revision = state.revision();
+    let geometry = DialogGeometry {
+        x: 12.0,
+        y: 34.0,
+        width: 560.0,
+        height: 420.0,
+    };
+    state.dispatch(Action::RememberDialogGeometry {
+        kind: "import".to_string(),
+        geometry,
+    });
+    assert_eq!(state.dialog_geometries().get("import"), Some(&geometry));
+    assert_eq!(
+        Preferences::load_from(Some(path))
+            .dialog_geometries()
+            .get("import"),
+        Some(&geometry)
+    );
+    assert_eq!(state.revision(), revision, "ni commande ni historique");
+    assert!(!state.can_undo());
+    session.shutdown().unwrap();
+}
+
+/// M7 (#228) : hors de tout dialogue, une erreur reste dans la barre d'état ;
+/// un dialogue ouvert la prend dans son pied, et elle ne lui survit pas.
+#[test]
+fn une_erreur_va_dans_le_pied_du_dialogue_ouvert_seulement() {
+    let _isolation = isolate_recipe_store();
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    state.import_state_mut().unwrap().save_as_name = String::new();
+    state.save_import_recipe();
+    assert!(state.dialog_error().is_some());
+    assert!(!state.status().is_some_and(|status| status.is_error));
+    state.cancel_import();
+    assert!(state.dialog_error().is_none(), "l'erreur ne survit pas");
+
+    // Témoin : sans dialogue, une erreur (préférences impossibles à écrire :
+    // un dossier à la place du fichier) va dans la barre d'état.
+    use stokesforge_app::preferences::Preferences;
+    let session = Session::spawn(Project::new("Vide").unwrap(), None).unwrap();
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        dir.path().join("projet.stf").display().to_string(),
+        Preferences::load_from(Some(dir.path().to_path_buf())),
+    )
+    .unwrap();
+    state.dispatch(Action::SetSvgTextMode(
+        stokesforge_render_svg::SvgTextMode::Outlines,
+    ));
+    assert!(state.dialog_error().is_none());
+    assert!(
+        state.status().is_some_and(|status| status.is_error),
+        "hors dialogue, la barre d'état"
+    );
+    session.shutdown().unwrap();
 }

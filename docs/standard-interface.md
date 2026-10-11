@@ -40,7 +40,7 @@ les règles R1–R16 de `textes-interface.md`.
 | brique « formulaire » (`app/form.rs` : `form`, `Form`, `choice`), largeurs et espacements de `theme.rs` | grille à deux colonnes, choix radio/liste (C1, C2) | **en place** (#227) |
 | choix exclusif dans un menu (`menu_sections::menu_choice`) | coche seule (C3) | **en place** (#227) |
 | garde : aucun `add_space` littéral hors de `theme.rs` (`aucun_add_space_litteral_hors_du_theme`) | | **en place** (#227) |
-| zone de message du pied de `modal_dialog_with`, focus initial, taille mémorisée | | à venir (#228) |
+| zone de message du pied de `modal_dialog_with`, focus initial, taille mémorisée, `modal_wizard`, `modal_read_only` | ordre des boutons, erreur et raison dans le pied, Échap, F8, F9 | **en place** (#228) |
 | variante « confirmation » de `modal_dialog_with` | | à venir (#229) |
 | registre des touches de `app/shortcuts.rs` | | à venir (#231) |
 | garde : aucun `consume_key` hors de `app/shortcuts.rs` | | à venir (#231) |
@@ -253,12 +253,13 @@ Comment c'est tenu :
   erreur de script affiche « Script failed. See the console » dans la barre
   d'état (M10 : l'exception est marquée comme erreur) ; la raison d'un bouton
   principal grisé est dans le pied du dialogue **et** dans sa bulle (F10).
-- **Erreur dans une fenêtre modale** (M7) : jamais dans la barre d'état ; zone
-  de message du pied, à gauche des boutons, commune à tous les dialogues.
+- **Erreur dans une fenêtre modale** (M7, en place #228) : jamais dans la barre
+  d'état ; zone de message du pied, à gauche des boutons, commune à tous les
+  dialogues (`AppState::dialog_error`, `dialogs::sync_dialogs`).
 - **Échec grave hors fenêtre** (M8 ; enregistrement raté, fichier illisible) :
   dialogue bloquant avec message et action possible.
 
-## Fenêtres et dialogues — à venir (#228)
+## Fenêtres et dialogues — en place (#228)
 
 - **Application des réglages** (F1) : objet visible (graphe, série, objet,
   texte) → changement en direct, OK/Cancel ; Cancel restaure, OK = une entrée
@@ -276,6 +277,40 @@ Comment c'est tenu :
 - **Focus** (F9) : le premier champ de saisie l'a à l'ouverture.
 - **Bouton principal grisé** (F10 → R14) : raison dans le pied et en bulle ;
   une erreur affichée passe devant, la raison revient quand elle disparaît.
+
+Comment c'est tenu (`app/dialogs.rs`, tous par un même corps `modal_frame`) :
+
+- **`modal_dialog_with`** : `[secondaires] [message] [Cancel] [principal]` ;
+  **`modal_wizard`** : `[Cancel] [message] [Back · Next] [Finish]` (l'assistant
+  d'import) ; **`modal_read_only`** : `[message] [Close]` (métadonnées d'une
+  colonne). Un geste d'une fenêtre en lecture seule (« Use as x' ») reste un
+  bouton de son contenu.
+- **Raison du grisage** : `DialogFooter::accept_disabled` (#226) est la
+  raison quand `accept_enabled` est faux (clés `disabled-*` : Finish sans
+  fichier, Create d'une analyse incomplète — la raison est alors le premier
+  manque du formulaire) ; écrite dans le pied **et** dans la bulle du bouton
+  grisé ; `accept_hint` reste la bulle du bouton actif.
+- **Erreur** (M7) : `AppState::fail` l'écrit dans `dialog_error` tant qu'un
+  dialogue de contenu est ouvert (import, propriétés, analyse), jamais dans la
+  barre d'état ; `notice` l'efface, elle ne survit pas à son dialogue.
+  `sync_dialogs` (une fois par image, `show_edit_dialogs`) la publie pour le
+  pied.
+- **Échap** (F7) : celui qui sort d'un champ texte du dialogue ne l'annule pas
+  (le focus de l'image précédente fait foi : egui le rend dès le début de la
+  passe) ; la brique « nombre » consomme le sien.
+- **Taille et position** (F8) : à la fermeture, `sync_dialogs` rend
+  `Action::RememberDialogGeometry` (sorte = identifiant du dialogue),
+  `preferences.json` › `dialogs`, 32 sortes au plus ; reprises à l'ouverture,
+  ramenées dans l'écran.
+- **Focus** (F9) : une ancre invisible en tête du contenu prend le focus à
+  l'ouverture, puis le focus avance d'un widget par image jusqu'au premier
+  champ texte ; arrêt (focus rendu) au pied, hors du dialogue, après 32 widgets
+  ou au premier geste.
+
+Reste : la fenêtre des propriétés d'un objet (rectangle, flèche…) est encore
+un brouillon validé par OK au lieu d'un réglage en direct (F1,
+`graph_window::shape_properties_ui`) ; les confirmations ont leur variante
+(#229).
 
 ### Confirmations — à venir (#229)
 

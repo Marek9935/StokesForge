@@ -404,13 +404,24 @@ ou Maximiser. Réutiliser les lectures/requêtes de `window_detach.rs` ; le
 moteur de script reste dans l’AppState principal.
 
 **Aucune exception, y compris pour un assistant à plusieurs étapes.**
-L'assistant d'import (`import_window`) est un dialogue modal comme les
-propriétés du graphe : `modal_dialog_with(ctx, id, titre, taille, DialogFooter
-{ accept_label, accept_hint, accept_enabled }, boutons_du_pied, contenu)`. Le
-bouton par défaut peut changer de libellé et se griser (*Finish* grisé sans
-fichier) ; des boutons supplémentaires se posent à gauche de *Cancel* par la
-fermeture `boutons_du_pied` (*Back*, *Next*). Entrée valide,
-Échap annule. **Avant d'écrire une fenêtre, dialogue ou assistant : partir de
+Trois formes, un seul corps (`modal_frame`, #228) :
+`modal_dialog_with(ctx, id, titre, taille, DialogFooter { accept_label,
+accept_hint, accept_enabled, accept_disabled }, secondaires, contenu)` — pied `[secondaires]
+[message] [Cancel] [principal]` (F6) ; `modal_wizard(…, boutons_d_étape, …)` —
+`[Cancel] [message] [Back · Next] [Finish]`, l'assistant d'import (boutons
+d'étape ajoutés de droite à gauche) ; `modal_read_only(ctx, id, titre, taille,
+contenu)` — un seul bouton Close (F2), pour une fenêtre qui ne change rien.
+Entrée valide, Échap annule — sauf l'Échap qui sort d'un champ texte (F7).
+**Bouton principal grisé** : `accept_disabled` est sa **raison** (clé
+`disabled-*`, ce qu'il faut faire, #226), écrite dans le pied et en bulle
+(F10) ; `accept_hint` reste la bulle du bouton actif.
+**Erreur d'un geste du dialogue** : `AppState::fail` l'écrit d'office dans le
+pied tant qu'un dialogue de contenu est ouvert (`dialog_error`, M7) — jamais
+`status` ; un test d'état lit `state.dialog_error()`, et une décision « le
+geste a-t-il échoué ? » lit `last_action_failed`, jamais `status().is_error`.
+Taille et position (F8) et premier champ focalisé (F9) sont faits par la
+brique : rien à écrire, mais un premier champ de saisie doit être un vrai
+`TextEdit` du dialogue (c'est ce que le focus initial cherche). **Avant d'écrire une fenêtre, dialogue ou assistant : partir de
 `modal_dialog_with` (dialogue) ou `show_window_in_layer` (fenêtre de contenu).**
 Si la brique manque d'un réglage, l'étendre (c'est ce qui a été fait pour
 l'import) plutôt que de la contourner. Un code existant qui déroge n'est

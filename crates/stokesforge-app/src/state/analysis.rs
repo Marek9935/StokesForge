@@ -161,7 +161,9 @@ impl AppState {
             Some(graph) => self.add_calculation_to_graph(command, graph, &form),
             None => self.execute(command),
         }
-        if self.status.as_ref().is_some_and(|status| !status.is_error) {
+        // L'échec va dans le pied de la fenêtre (M7, #228) : elle reste
+        // ouverte.
+        if !self.last_action_failed() {
             self.analysis_keep_results = form.keep_results;
             // Le dernier choix devient le défaut des prochaines sessions (#200).
             // Un fichier de préférences illisible ne doit pas défaire un calcul réussi.
@@ -198,8 +200,7 @@ impl AppState {
         }
         let before: Vec<NodeId> = self.snapshot.tree.calculations().keys().copied().collect();
         self.execute(command);
-        let failed = |state: &Self| state.status.as_ref().is_some_and(|s| s.is_error);
-        if failed(self) {
+        if self.last_action_failed() {
             let _ = self.handle.abort_macro();
             self.refresh();
             return;
@@ -225,7 +226,7 @@ impl AppState {
             })
             .unwrap_or(0);
         self.add_series_to_graph(graph, panel, columns, None);
-        if failed(self) {
+        if self.last_action_failed() {
             let _ = self.handle.abort_macro();
             self.refresh();
             return;

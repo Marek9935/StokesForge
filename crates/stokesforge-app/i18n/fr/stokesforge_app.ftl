@@ -543,6 +543,9 @@ dialog-ok =
 dialog-cancel =
     Annuler
     .hint = Abandonne les modifications (Échap)
+dialog-close =
+    Fermer
+    .hint = Ferme cette fenêtre (Entrée)
 
 # Fenêtre et onglets
 

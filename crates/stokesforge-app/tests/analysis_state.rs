@@ -118,10 +118,17 @@ fn a_failing_calculation_keeps_the_window_open() {
     open(&mut s, Preset::Correct);
     s.state.dispatch(Action::ApplyAnalysis);
     assert!(s.state.analysis_form().is_some());
-    assert!(s.state.status().unwrap().is_error);
+    // M7 (#228) : l'erreur va dans le pied de la fenêtre, jamais dans la barre
+    // d'état.
+    assert!(s.state.dialog_error().is_some());
+    assert!(!s.state.status().is_some_and(|status| status.is_error));
     assert!(s.state.tree().calculations().is_empty());
     s.state.dispatch(Action::CloseAnalysis);
     assert!(s.state.analysis_form().is_none());
+    assert!(
+        s.state.dialog_error().is_none(),
+        "l'erreur ne survit pas à sa fenêtre"
+    );
 }
 
 #[test]

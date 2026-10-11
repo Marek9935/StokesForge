@@ -92,7 +92,7 @@ fn aucune_fenetre_n_est_une_egui_window_brute() {
     );
     let import = fonction_unique(&sources, "import_window");
     assert!(
-        import.corps.contains("modal_dialog_with("),
+        import.corps.contains("modal_wizard("),
         "l'assistant d'import ({}:{}) est un dialogue modal",
         import.chemin,
         import.ligne
@@ -147,8 +147,16 @@ fn la_fenetre_des_proprietes_est_construite_comme_les_autres() {
     let dialogue = fonction_unique(&sources, "modal_dialog");
     assert!(dialogue.corps.contains("modal_dialog_with("));
     let brique = fonction_unique(&sources, "modal_dialog_with");
-    assert!(brique.corps.contains("show_window_in_layer("));
-    assert!(brique.corps.contains("window_header("));
+    assert!(brique.corps.contains("modal_frame("));
+    // L'assistant et la fenêtre en lecture seule (#228) : le même corps.
+    for variante in ["modal_wizard", "modal_read_only"] {
+        assert!(fonction_unique(&sources, variante)
+            .corps
+            .contains("modal_frame("));
+    }
+    let corps = fonction_unique(&sources, "modal_frame");
+    assert!(corps.corps.contains("show_window_in_layer("));
+    assert!(corps.corps.contains("window_header("));
 }
 
 /// Le témoin de la recherche par nom : une fonction déplacée dans

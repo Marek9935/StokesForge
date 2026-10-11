@@ -551,6 +551,9 @@ dialog-ok =
 dialog-cancel =
     Cancel
     .hint = Discards the changes (Esc)
+dialog-close =
+    Close
+    .hint = Closes this window (Enter)
 
 # Window and tabs
 

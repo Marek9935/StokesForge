@@ -1106,6 +1106,7 @@ impl StokesForgeApp {
         analysis_window(ctx, &mut self.state, actions);
         calculation_delete_window(ctx, &self.state, actions);
         stale_export_window(ctx, &self.state, actions);
+        dialogs::sync_dialogs(ctx, &self.state, actions);
     }
 
     /// Applique les changements de pile seulement après la peinture des fenêtres.

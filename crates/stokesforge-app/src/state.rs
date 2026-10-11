@@ -709,6 +709,14 @@ pub enum Action {
     },
     /// Règle l'agrandissement des exports PNG ([`PNG_EXPORT_SCALES`]).
     SetPngExportScale(f32),
+    /// Mémorise la taille et la position d'une sorte de dialogue à sa
+    /// fermeture (F8, #228). Préférence de l'application : ni commande, ni
+    /// historique, ni `.stf`.
+    RememberDialogGeometry {
+        /// La sorte de dialogue (clé tirée de son identifiant).
+        kind: String,
+        geometry: crate::preferences::DialogGeometry,
+    },
     /// Règle l'écriture du texte des exports SVG, texte ou contours (#162).
     /// Préférence de l'application : ni commande, ni historique, ni `.stf`.
     SetSvgTextMode(stokesforge_render_svg::SvgTextMode),
@@ -2406,6 +2414,9 @@ pub struct AppState {
     object_manager_preferences: Preferences,
     /// Dernier message destiné à l'utilisateur.
     status: Option<StatusMessage>,
+    /// Erreur survenue pendant qu'un dialogue modal est ouvert (M7, #228) :
+    /// elle s'affiche dans le pied du dialogue, jamais dans la barre d'état.
+    dialog_error: Option<String>,
     /// Saisie de cellule en cours, s'il y en a une.
     editing: Option<CellEdit>,
     /// Saisie de note en cours, s'il y en a une (voir [`NoteEdit`]).
@@ -2571,6 +2582,7 @@ impl AppState {
             object_manager_open: preferences.object_manager_open(),
             object_manager_preferences: preferences,
             status: None,
+            dialog_error: None,
             editing: None,
             note_editing: None,
             plot_edit: None,
@@ -2727,6 +2739,29 @@ impl AppState {
     /// Dernier message destiné à l'utilisateur.
     pub fn status(&self) -> Option<&StatusMessage> {
         self.status.as_ref()
+    }
+
+    /// L'erreur à montrer dans le pied du dialogue modal ouvert (M7, #228) ;
+    /// aucune quand aucun dialogue de contenu n'est ouvert.
+    pub fn dialog_error(&self) -> Option<&str> {
+        if self.modal_dialog_open() {
+            self.dialog_error.as_deref()
+        } else {
+            None
+        }
+    }
+
+    /// Un dialogue modal de contenu est-il ouvert (import, propriétés du
+    /// graphe, analyse) ? Ses erreurs vont alors dans son pied (M7).
+    fn modal_dialog_open(&self) -> bool {
+        self.import_state.is_some() || self.plot_settings.is_some() || self.analysis.is_some()
+    }
+
+    /// La taille et la position mémorisées de chaque sorte de dialogue (F8).
+    pub fn dialog_geometries(
+        &self,
+    ) -> &std::collections::BTreeMap<String, crate::preferences::DialogGeometry> {
+        self.object_manager_preferences.dialog_geometries()
     }
 
     /// Texte actuel de la zone de script.
@@ -4236,6 +4271,11 @@ impl AppState {
     /// script Python » en tête de ce module. C'est ce qui rend cette méthode
     /// sûre à appeler depuis la boucle de rendu pour toute action.
     pub fn dispatch(&mut self, action: Action) {
+        // Une erreur de dialogue ne survit pas à son dialogue : le geste qui
+        // en ouvre un autre part d'un pied vide.
+        if !self.modal_dialog_open() {
+            self.dialog_error = None;
+        }
         match action {
             Action::Undo => self.undo(),
             Action::Redo => self.redo(),
@@ -4685,6 +4725,17 @@ impl AppState {
             Action::SetPngExportScale(scale) => {
                 if PNG_EXPORT_SCALES.contains(&scale) {
                     self.png_export_scale = scale;
+                }
+            }
+            Action::RememberDialogGeometry { kind, geometry } => {
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_dialog_geometry(&kind, geometry)
+                {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
                 }
             }
         }
@@ -5815,18 +5866,30 @@ impl AppState {
     /// contextuel (voir `app::grid::system_clipboard_text`) : cet échec
     /// naît côté plateforme, jamais dans le modèle.
     pub(crate) fn notice(&mut self, text: String) {
+        self.dialog_error = None;
         self.status = Some(StatusMessage {
             text,
             is_error: false,
         });
     }
 
-    /// Enregistre un message d'échec.
+    /// Enregistre un message d'échec : dans le pied du dialogue modal ouvert
+    /// (M7, #228), dans la barre d'état sinon.
     fn fail(&mut self, text: String) {
+        if self.modal_dialog_open() {
+            self.dialog_error = Some(text);
+            return;
+        }
         self.status = Some(StatusMessage {
             text,
             is_error: true,
         });
+    }
+
+    /// Le dernier geste a-t-il échoué ? Erreur dans le pied du dialogue ou
+    /// dans la barre d'état.
+    pub(crate) fn last_action_failed(&self) -> bool {
+        self.dialog_error.is_some() || self.status.as_ref().is_some_and(|status| status.is_error)
     }
 
     /// Envoie une commande à l'acteur et rend compte du résultat.

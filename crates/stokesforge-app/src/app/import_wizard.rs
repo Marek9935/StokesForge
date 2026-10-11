@@ -21,7 +21,7 @@ use crate::state::{Action, AppState, ImportDestination, ImportLineAction, Import
 use crate::theme::{section_title, FIELD_WIDTH_MEDIUM, FIELD_WIDTH_SHORT};
 use crate::tr;
 
-use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
+use super::dialogs::{modal_wizard, DialogFooter, DialogOutcome, FOOTER_BUTTON_SIZE};
 use super::form::{choice, choice_by, form, ChoiceOption, Form};
 use super::hover_help::{help_beside, help_text};
 
@@ -1320,7 +1320,8 @@ fn import_step_destination(
 /// pour un format connu. **Dialogue modal de la brique commune**
 /// ([`modal_dialog_with`], comme les propriétés du graphe), peint depuis
 /// [`StokesForgeApp::ui`](eframe::App::ui) tant que [`AppState::import_state`] est `Some` ; la croix
-/// et Échap valent « Annuler », Entrée « Terminer ».
+/// et Échap valent « Annuler », Entrée « Terminer ». Pied d'assistant
+/// ([`modal_wizard`], F6) : Cancel à gauche, Back · Next · Finish à droite.
 pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Action>) {
     let Some(step) = state.import_state().map(|import| import.step) else {
         return;
@@ -1331,12 +1332,14 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
     // Les deux fermetures de la brique (contenu, boutons du pied) écrivent
     // dans les mêmes demandes, l'une après l'autre : `RefCell`.
     let requests = std::cell::RefCell::new(ImportWizardRequests::default());
+    // Grisé, Finish dit pourquoi (G1, F10) : dans le pied et dans sa bulle
+    // (`accept_disabled`).
     let (finish_label, finish_hint) = (
         tr!("import-button-finish"),
         tr!("import-button-finish", "hint"),
     );
     let add_file_first = tr!("disabled-add-file-first");
-    let outcome = modal_dialog_with(
+    let outcome = modal_wizard(
         ctx,
         egui::Id::new("stokesforge_import_wizard"),
         &tr!("import-window-title"),
@@ -1348,11 +1351,12 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             accept_disabled: Some(&add_file_first),
         },
         |footer| {
-            // Ajoutés de droite à gauche : « Next » puis « Back ».
+            // Ajoutés de droite à gauche, contre Finish : « Next » puis
+            // « Back » (F6 : Back · Next · Finish groupés à droite).
             if footer
                 .add_enabled(
                     step != ImportStep::Destination,
-                    egui::Button::new(tr!("import-button-next")).min_size(egui::vec2(84.0, 24.0)),
+                    egui::Button::new(tr!("import-button-next")).min_size(FOOTER_BUTTON_SIZE),
                 )
                 .on_disabled_hover_text(tr!("disabled-import-last-step"))
                 .clicked()
@@ -1362,7 +1366,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             if footer
                 .add_enabled(
                     step != ImportStep::Files,
-                    egui::Button::new(tr!("import-button-back")).min_size(egui::vec2(84.0, 24.0)),
+                    egui::Button::new(tr!("import-button-back")).min_size(FOOTER_BUTTON_SIZE),
                 )
                 .on_disabled_hover_text(tr!("disabled-import-first-step"))
                 .clicked()
