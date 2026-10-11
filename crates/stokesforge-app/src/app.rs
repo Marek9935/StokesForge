@@ -202,7 +202,7 @@ use plot_settings::{column_metadata_window, plot_settings_window};
 use shortcuts::{
     collect_undo_redo_shortcuts, SHORTCUT_DUPLICATE_SHEET, SHORTCUT_EXPORT_GRAPH, SHORTCUT_IMPORT,
     SHORTCUT_IMPORT_QWERTY, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT, SHORTCUT_OPEN,
-    SHORTCUT_RUN_SCRIPT, SHORTCUT_SAVE, SHORTCUT_SAVE_AS,
+    SHORTCUT_REDO_Y, SHORTCUT_RUN_SCRIPT, SHORTCUT_SAVE, SHORTCUT_SAVE_AS, SHORTCUT_UNDO,
 };
 use stale_export::stale_export_window;
 use status_history::status_history_window;
@@ -1004,6 +1004,8 @@ impl StokesForgeApp {
         actions: &mut Vec<Action>,
     ) {
         let bar_env = BarEnv {
+            undo_label: self.state.undo_label(),
+            redo_label: self.state.redo_label(),
             new_project_enabled: self.state.can_new_project(),
             export_enabled: active_graph(active_tab_kind(active_tab)).is_some(),
             tools: self.tools_context(active_tab),
@@ -1017,6 +1019,8 @@ impl StokesForgeApp {
                 save_as: ctx.format_shortcut(&SHORTCUT_SAVE_AS),
                 import: SHORTCUT_IMPORT_TEXT.to_string(),
                 export: ctx.format_shortcut(&SHORTCUT_EXPORT_GRAPH),
+                undo: ctx.format_shortcut(&SHORTCUT_UNDO),
+                redo: ctx.format_shortcut(&SHORTCUT_REDO_Y),
             },
         };
         let mut bar_requests = Vec::new();

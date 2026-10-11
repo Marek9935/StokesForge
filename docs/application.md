@@ -866,7 +866,7 @@ d'exécution du script, hors périmètre de cette tâche.
 contenu et leur place sont figés dans le logiciel, dans le panneau
 `stokesforge_toolbars` sous la barre de menu. Ni poignée, ni glisser-déposer,
 ni barre flottante ou verticale, ni logique de fenêtre étroite. Disposition en
-dur (`ToolbarId::row`) : rangée 0 = Fichier, Outils ; rangée 1 = Texte, large,
+dur (`ToolbarId::row`) : rangée 0 = Fichier, Édition (Undo/Redo, #238 : libellé d'historique et raccourci en info-bulle, grisé = « Nothing to undo/redo »), Outils ; rangée 1 = Texte, large,
 seule sur sa rangée. La barre Object Manager est supprimée (#109) : le panneau
 se commande par View et son en-tête. Chaque barre se
 masque par le menu View ; seule cette **visibilité** est une préférence

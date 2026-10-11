@@ -57,10 +57,17 @@ pub enum ToolbarId {
     Tools,
     /// Le format du texte (issue #63) : propre au graphe au premier plan.
     Text,
+    /// Annuler / Rétablir (issue #238).
+    Edit,
 }
 
 impl ToolbarId {
-    pub const ALL: [ToolbarId; 3] = [ToolbarId::File, ToolbarId::Tools, ToolbarId::Text];
+    pub const ALL: [ToolbarId; 4] = [
+        ToolbarId::File,
+        ToolbarId::Edit,
+        ToolbarId::Tools,
+        ToolbarId::Text,
+    ];
 
     /// Nom de la barre : entrée du menu View.
     pub fn label(self) -> String {
@@ -68,6 +75,7 @@ impl ToolbarId {
             ToolbarId::File => tr!("toolbar-file"),
             ToolbarId::Tools => tr!("toolbar-tools"),
             ToolbarId::Text => tr!("toolbar-text"),
+            ToolbarId::Edit => tr!("toolbar-edit"),
         }
     }
 
@@ -77,6 +85,7 @@ impl ToolbarId {
             ToolbarId::File => tr!("toolbar-file", "hint"),
             ToolbarId::Tools => tr!("toolbar-tools", "hint"),
             ToolbarId::Text => tr!("toolbar-text", "hint"),
+            ToolbarId::Edit => tr!("toolbar-edit", "hint"),
         }
     }
 }
@@ -87,7 +96,7 @@ impl ToolbarId {
     pub const fn row(self) -> usize {
         match self {
             ToolbarId::Text => 1,
-            ToolbarId::File | ToolbarId::Tools => 0,
+            ToolbarId::File | ToolbarId::Edit | ToolbarId::Tools => 0,
         }
     }
 }
@@ -239,6 +248,8 @@ pub struct ShortcutTexts {
     pub save_as: String,
     pub import: String,
     pub export: String,
+    pub undo: String,
+    pub redo: String,
 }
 
 /// Sur quoi la barre de format agit (issue #63).
@@ -323,6 +334,9 @@ pub enum ToolsContext {
 #[derive(Debug, Clone, Default)]
 pub struct BarEnv {
     /// Même garde que File > New Project et Ctrl+N.
+    /// Libellé d'historique (« Undo Rename ») ; `None` = pile vide (grisé).
+    pub undo_label: Option<String>,
+    pub redo_label: Option<String>,
     pub new_project_enabled: bool,
     /// Un graphe est au premier plan (sinon *Export* est grisé, comme le menu
     /// Graph est absent).
@@ -459,6 +473,41 @@ pub fn bar_contents(
                 export_enabled,
             ) {
                 requests.push(ToolbarRequest::ExportGraph);
+            }
+        }
+        ToolbarId::Edit => {
+            for (icon, label, name, shortcut, disabled) in [
+                (
+                    Icon::Undo,
+                    &env.undo_label,
+                    tr!("history-undo"),
+                    &env.shortcuts.undo,
+                    tr!("disabled-nothing-to-undo"),
+                ),
+                (
+                    Icon::Redo,
+                    &env.redo_label,
+                    tr!("history-redo"),
+                    &env.shortcuts.redo,
+                    tr!("disabled-nothing-to-redo"),
+                ),
+            ] {
+                let clicked = ToolbarButton {
+                    icon,
+                    role: IconRole::Neutral,
+                    label: label.clone().unwrap_or(name),
+                    hint: label.is_none().then_some(disabled),
+                    shortcut: Some(shortcut.clone()),
+                    enabled: label.is_some(),
+                }
+                .show(ui);
+                if clicked {
+                    requests.push(ToolbarRequest::Action(Box::new(if icon == Icon::Undo {
+                        Action::Undo
+                    } else {
+                        Action::Redo
+                    })));
+                }
             }
         }
         ToolbarId::Tools => tools_contents(ui, env, requests),
@@ -1089,7 +1138,7 @@ mod tests {
         assert_eq!(
             layout.rows(),
             vec![
-                vec![ToolbarId::File, ToolbarId::Tools],
+                vec![ToolbarId::File, ToolbarId::Edit, ToolbarId::Tools],
                 vec![ToolbarId::Text]
             ]
         );
@@ -1158,7 +1207,10 @@ mod tests {
         // La place reste celle du logiciel, quoi que dise le fichier.
         assert_eq!(
             layout.rows(),
-            vec![vec![ToolbarId::Tools], vec![ToolbarId::Text]]
+            vec![
+                vec![ToolbarId::Edit, ToolbarId::Tools],
+                vec![ToolbarId::Text]
+            ]
         );
         assert!(!layout.to_json().to_string().contains("placement"));
     }
@@ -1168,7 +1220,7 @@ mod tests {
         let mut layout = ToolbarLayout::default();
         layout.set_visible(ToolbarId::Text, false);
         layout.set_visible(ToolbarId::File, false);
-        assert_eq!(layout.rows(), vec![vec![ToolbarId::Tools]]);
+        assert_eq!(layout.rows(), vec![vec![ToolbarId::Edit, ToolbarId::Tools]]);
         layout.set_visible(ToolbarId::File, true);
         assert!(layout.is_visible(ToolbarId::File));
     }

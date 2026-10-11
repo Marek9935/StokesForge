@@ -91,6 +91,9 @@ pub enum Icon {
     /// Un calcul d'analyse pas à jour (#200) : triangle d'avertissement, en tête
     /// de la colonne produite et sur la série qui la trace.
     Stale,
+    /// Barre Edit (#238).
+    Undo,
+    Redo,
 }
 
 macro_rules! svg {
@@ -296,6 +299,16 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
     (Icon::Axis, IconRole::Neutral, svg!("ruler.neutral.svg")),
     (Icon::Help, IconRole::Neutral, svg!("question.neutral.svg")),
     (Icon::Stale, IconRole::Neutral, svg!("warning.neutral.svg")),
+    (
+        Icon::Undo,
+        IconRole::Neutral,
+        svg!("arrow-counter-clockwise.neutral.svg"),
+    ),
+    (
+        Icon::Redo,
+        IconRole::Neutral,
+        svg!("arrow-clockwise.neutral.svg"),
+    ),
 ];
 
 /// Inatteignable tant que chaque icône a une variante (test `le_tableau_…`).
