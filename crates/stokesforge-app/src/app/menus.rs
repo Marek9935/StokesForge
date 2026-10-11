@@ -93,6 +93,7 @@ impl StokesForgeApp {
                     self.analysis_menu(ui, actions);
                     self.view_menu(ui, actions);
                     self.window_menu(ui);
+                    help_menu(ui, actions);
                 });
         });
         if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
@@ -714,13 +715,14 @@ impl StokesForgeApp {
                     });
                     // La zone cliquable couvre toute la ligne, par-dessus ses
                     // éléments (un `Label` ne porte pas le clic).
-                    let response = ui
-                        .interact(
+                    let response = super::cursors::clickable(
+                        ui.interact(
                             line.response.rect,
                             egui::Id::new("stokesforge_status_history_click"),
                             egui::Sense::click(),
                         )
-                        .on_hover_text(tr!("status-history"));
+                        .on_hover_text(tr!("status-history")),
+                    );
                     if response.clicked() {
                         actions.push(Action::OpenStatusHistory);
                     }
@@ -750,6 +752,24 @@ pub(super) fn status_line(ui: &mut egui::Ui, status: &crate::state::StatusMessag
             ui.colored_label(ui.visuals().error_fg_color, &status.text);
         }
     }
+}
+
+/// Menu Help (#231, K5) : l'aide qui se génère du code, aujourd'hui les
+/// raccourcis clavier. Une seule entrée, directe.
+fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+    ui.menu_button(tr!("menu-help"), |ui| {
+        let mut sections = MenuSections::new();
+        sections.section(ui, true, |ui| {
+            if ui
+                .button(tr!("action-keyboard-shortcuts"))
+                .on_hover_text(tr!("action-keyboard-shortcuts", "hint"))
+                .clicked()
+            {
+                actions.push(Action::OpenKeyboardShortcuts);
+                ui.close();
+            }
+        });
+    });
 }
 
 #[cfg(test)]
@@ -1017,7 +1037,8 @@ mod tests {
                 tr!("menu-graph"),
                 tr!("menu-analysis"),
                 tr!("menu-view"),
-                tr!("menu-window")
+                tr!("menu-window"),
+                tr!("menu-help")
             ],
         );
         let book = app.state.books()[0].0;
@@ -1030,7 +1051,8 @@ mod tests {
                 tr!("menu-workbook"),
                 tr!("menu-analysis"),
                 tr!("menu-view"),
-                tr!("menu-window")
+                tr!("menu-window"),
+                tr!("menu-help")
             ],
             "témoin : le menu propre au contenu actif change à la même place",
         );
@@ -1809,6 +1831,22 @@ mod tests {
         let (_, menu) = ouvre(&mut app, None, &tr!("menu-window"));
         assert!(entree(&menu, &tr!("action-detach-project-manager")).is_none());
         assert!(active(&menu, &tr!("action-reattach-project-manager")).enabled);
+        session.shutdown().unwrap();
+    }
+
+    /// Help › Keyboard Shortcuts (#231, K5) : l'entrée existe, s'active, et
+    /// demande l'ouverture de la fenêtre des raccourcis.
+    #[test]
+    fn le_menu_aide_ouvre_les_raccourcis_clavier() {
+        let (session, mut app, graph) = banc();
+        let tab = Some(Tab::Graph(graph));
+        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-help"));
+        let entry = active(&menu, &tr!("action-keyboard-shortcuts"));
+        let pos = entry.center;
+        assert_eq!(
+            clique(&mut app, &ctx, tab, pos),
+            vec![Action::OpenKeyboardShortcuts]
+        );
         session.shutdown().unwrap();
     }
 

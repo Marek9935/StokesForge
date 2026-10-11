@@ -306,11 +306,11 @@ pub fn edit_text_with_arrow<T>(
     // quand il vient de le perdre.
     let escape = editing
         && (focused || response.lost_focus())
-        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        && ui.input_mut(|i| i.consume_shortcut(&crate::app::shortcuts::KEY_ESCAPE));
     let left = response.lost_focus() && editing;
     // Entrée est consommée : un dialogue qui valide sur Entrée ne doit pas se
     // fermer avec la saisie (il regarde le focus, que le champ vient de perdre).
-    let enter = left && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+    let enter = left && ui.input_mut(|i| i.consume_shortcut(&crate::app::shortcuts::KEY_ENTER));
     let step = decide(&buffer, current, enter, escape, left || escape, &parse);
 
     // La frappe a déjà été peinte avec le brouillon : une étape qui le rend

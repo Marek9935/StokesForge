@@ -477,6 +477,7 @@ fn tab_strip_label(
     let reserved = galley_of(ui, theme::bold(name)).size().x;
     let size = egui::vec2(reserved + 2.0 * TAB_PADDING_X, TAB_STRIP_HEIGHT);
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let response = super::cursors::clickable(response);
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, name)
     });

@@ -24,7 +24,7 @@ use stokesforge_core::NodeId;
 use super::inplace_edit;
 use super::list_row::list_row;
 use super::menu_sections::MenuSections;
-use super::shortcuts::{shortcut_text_delete, SHORTCUT_DUPLICATE_SHEET, SHORTCUT_RENAME_OBJECT};
+use super::shortcuts::{shortcut_text_delete, SHORTCUT_DUPLICATE_OBJECT, SHORTCUT_RENAME_OBJECT};
 use super::tab::{tab_for_window, tab_node, Tab};
 use super::window_chrome::{panel_header, PanelPlacement, PANEL_STRIP_THICKNESS};
 use super::StokesForgeApp;
@@ -40,12 +40,6 @@ pub(super) struct PmInteraction<'a> {
     /// Onglet ouvert ou focalisé par un simple clic — voir
     /// [`StokesForgeApp::open_tab`].
     pub(super) open_requests: &'a mut Vec<Tab>,
-    /// Onglet fermé par « Masquer » sur une entrée maximisée (garde de cohérence, même
-    /// esprit que celle de `detach_tab`).
-    pub(super) close_requests: &'a mut Vec<Tab>,
-    /// L'onglet actuellement au premier plan — voir la doc de tête du
-    /// module, § z-order. `None` si aucune fenêtre flottante n'est ouverte.
-    pub(super) active_tab: Option<Tab>,
     /// Sélection courante dans l'arbre — Ctrl/Cmd-clic en bascule
     /// l'appartenance sans ouvrir l'onglet.
     pub(super) selection: &'a mut HashSet<Tab>,
@@ -155,9 +149,8 @@ pub(super) fn object_menu(
             && ui
                 .add_enabled(
                     enabled,
-                    egui::Button::new(tr!("action-copy")).shortcut_text(ui.ctx().format_shortcut(
-                        &egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::C),
-                    )),
+                    egui::Button::new(tr!("action-copy"))
+                        .shortcut_text(ui.ctx().format_shortcut(&super::shortcuts::SHORTCUT_COPY)),
                 )
                 .on_disabled_hover_text(tr!("project-manager-selection-needed"))
                 .clicked()
@@ -204,7 +197,7 @@ pub(super) fn object_menu(
                 .add_enabled(
                     enabled,
                     egui::Button::new(tr!("action-duplicate-project-object"))
-                        .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_DUPLICATE_SHEET)),
+                        .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_DUPLICATE_OBJECT)),
                 )
                 .on_disabled_hover_text(tr!("project-manager-selection-needed"))
                 .clicked()
@@ -271,17 +264,17 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
         let mut paste = None;
         ctx.input_mut(|input| {
             if memory.focus && !ids.is_empty() {
-                if input.consume_key(egui::Modifiers::NONE, egui::Key::F2) {
+                if input.consume_shortcut(&super::shortcuts::SHORTCUT_RENAME_OBJECT) {
                     memory.rename = ids.clone();
                     memory.renamed.clear();
                     memory.text = None;
                 }
-                if input.consume_key(egui::Modifiers::COMMAND, egui::Key::D) {
+                if input.consume_shortcut(&super::shortcuts::SHORTCUT_DUPLICATE_OBJECT) {
                     interaction
                         .actions
                         .push(Action::DuplicateObjects(ids.clone()));
                 }
-                if input.consume_key(egui::Modifiers::NONE, egui::Key::Delete) {
+                if input.consume_shortcut(&super::shortcuts::KEY_DELETE) {
                     interaction.actions.push(Action::DeleteObjects(ids.clone()));
                 }
             }
@@ -664,8 +657,6 @@ impl StokesForgeApp {
         &mut self,
         ui: &mut egui::Ui,
         open_requests: &mut Vec<Tab>,
-        close_requests: &mut Vec<Tab>,
-        active_tab: Option<Tab>,
         actions: &mut Vec<Action>,
     ) {
         if self.pm_collapsed {
@@ -706,8 +697,6 @@ impl StokesForgeApp {
                     actions,
                     root: self.state.tree().root(),
                     open_requests,
-                    close_requests,
-                    active_tab,
                     selection: &mut self.pm_selection,
                     hidden: &mut self.hidden_tabs,
                 };
@@ -833,19 +822,15 @@ pub(super) mod tests {
     struct Banc {
         actions: RefCell<Vec<Action>>,
         open_requests: RefCell<Vec<Tab>>,
-        close_requests: RefCell<Vec<Tab>>,
-        active_tab: Option<Tab>,
         selection: RefCell<HashSet<Tab>>,
         hidden: RefCell<HashSet<Tab>>,
     }
 
     impl Banc {
-        fn new(active_tab: Option<Tab>, selection: HashSet<Tab>) -> Self {
+        fn new(selection: HashSet<Tab>) -> Self {
             Banc {
                 actions: RefCell::new(Vec::new()),
                 open_requests: RefCell::new(Vec::new()),
-                close_requests: RefCell::new(Vec::new()),
-                active_tab,
                 selection: RefCell::new(selection),
                 hidden: RefCell::new(HashSet::new()),
             }
@@ -882,8 +867,6 @@ pub(super) mod tests {
                 actions: &mut self.actions.borrow_mut(),
                 root: NodeId::from_raw(1),
                 open_requests: &mut self.open_requests.borrow_mut(),
-                close_requests: &mut self.close_requests.borrow_mut(),
-                active_tab: self.active_tab,
                 selection: &mut self.selection.borrow_mut(),
                 hidden: &mut self.hidden.borrow_mut(),
             };
@@ -912,7 +895,7 @@ pub(super) mod tests {
         let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
         let tree = state.project_tree();
         let context = super::super::test_support::contexte();
-        let banc = Banc::new(None, HashSet::from([book, graph, note, matrix]));
+        let banc = Banc::new(HashSet::from([book, graph, note, matrix]));
         banc.paint(&context, &tree, Vec::new());
         let output = banc.paint(&context, &tree, Vec::new());
         let rects = |output: &egui::FullOutput, fill: egui::Color32| -> Vec<egui::Rect> {
@@ -1058,8 +1041,6 @@ pub(super) mod tests {
                                 actions: &mut Vec::new(),
                                 root: app.state.tree().root(),
                                 open_requests: &mut Vec::new(),
-                                close_requests: &mut Vec::new(),
-                                active_tab: Some(graph),
                                 selection: &mut app.pm_selection,
                                 hidden: &mut HashSet::new(),
                             };
@@ -1121,7 +1102,7 @@ pub(super) mod tests {
     fn maj_selectionne_la_plage_et_les_raccourcis_agissent_sur_la_selection() {
         let (_session, book, graph, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(None, HashSet::new());
+        let banc = Banc::new(HashSet::new());
         let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
@@ -1175,7 +1156,7 @@ pub(super) mod tests {
     fn f2_ouvre_le_champ_et_entree_valide_une_seule_action() {
         let (_session, book, _graph, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(None, HashSet::from([book]));
+        let banc = Banc::new(HashSet::from([book]));
         let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let memory_key = memory_id(&context);
@@ -1231,7 +1212,6 @@ pub(super) mod tests {
         let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
         let app = RefCell::new(StokesForgeApp::new(state));
         let open = RefCell::new(Vec::new());
-        let close = RefCell::new(Vec::new());
         let context = egui::Context::default();
         let paint = |context: &egui::Context, events| {
             let input = egui::RawInput {
@@ -1243,13 +1223,8 @@ pub(super) mod tests {
                 ..Default::default()
             };
             let mut output = context.run_ui(input, |ui| {
-                app.borrow_mut().project_manager_panel(
-                    ui,
-                    &mut open.borrow_mut(),
-                    &mut close.borrow_mut(),
-                    None,
-                    &mut Vec::new(),
-                );
+                app.borrow_mut()
+                    .project_manager_panel(ui, &mut open.borrow_mut(), &mut Vec::new());
             });
             output.textures_delta.clear();
             output
@@ -1273,61 +1248,36 @@ pub(super) mod tests {
         );
         click_at(&context, book, egui::Modifiers::NONE, paint);
         assert!(open.borrow().contains(&book_tab));
-        assert!(close.borrow().is_empty());
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn le_double_clic_active_lentree_et_ne_ferme_jamais() {
+    fn le_double_clic_active_lentree_sans_modificateur() {
         let (_session, book_tab, graph_tab, tree) = project_manager_fixture();
-        let context = egui::Context::default();
-        let banc = Banc::new(Some(graph_tab), HashSet::new());
-        let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
-
-        let first = paint(&context, Vec::new());
-        let graph_pos = find_text_center(&first.shapes, "Graph1");
-        let book_pos = find_text_center(&first.shapes, "Book");
-
-        // Double-clic sur l'entrée déjà au premier plan (`active_tab` =
-        // `graph_tab`) : la (re)focalise, ne la ferme jamais (K3).
-        click_at(&context, graph_pos, egui::Modifiers::NONE, paint);
-        click_at(&context, graph_pos, egui::Modifiers::NONE, paint);
-        assert!(
-            banc.close_requests.borrow().is_empty(),
-            "un double-clic ne ferme jamais, close_requests={:?}",
-            banc.close_requests.borrow()
-        );
-        assert!(banc.open_requests.borrow().contains(&graph_tab));
-
-        // Double-clic sur une entrée qui n'est *pas* au premier plan
-        // (`active_tab` reste `graph_tab`) : ouvre/focalise, ne ferme rien.
-        // Contexte neuf : dans le même, egui compterait ces clics à la suite
-        // des deux précédents (triple clic, puis davantage) et le geste ne
-        // serait plus un double-clic — la vérification ne prouverait rien.
-        let double_click_on_book = |active_tab| {
+        let double_click = |target: &str, modifiers| {
+            // Contexte neuf : dans le même, egui compterait ces clics à la
+            // suite des précédents (triple clic, puis davantage) et le geste
+            // ne serait plus un double-clic.
             let context = egui::Context::default();
-            let banc = Banc::new(Some(active_tab), HashSet::new());
+            let banc = Banc::new(HashSet::new());
             let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
-            paint(&context, Vec::new());
-            click_at(&context, book_pos, egui::Modifiers::NONE, paint);
-            click_at(&context, book_pos, egui::Modifiers::NONE, paint);
+            let first = paint(&context, Vec::new());
+            let pos = find_text_center(&first.shapes, target);
+            click_at(&context, pos, modifiers, paint);
+            click_at(&context, pos, modifiers, paint);
             let open = banc.open_requests.borrow().clone();
-            let close = banc.close_requests.borrow().clone();
-            (open, close)
+            open
         };
-        let (open, close) = double_click_on_book(graph_tab);
-        assert!(
-            !close.contains(&book_tab),
-            "le double-clic sur une entrée qui n'est pas au premier plan ne doit pas la fermer"
-        );
-        assert!(
-            open.contains(&book_tab),
-            "le double-clic doit tout de même ouvrir/focaliser l'entrée, open_requests={open:?}"
-        );
-        // Témoin : au premier plan, le même geste ne ferme toujours rien.
-        let (open, close) = double_click_on_book(book_tab);
-        assert!(close.is_empty(), "close_requests={close:?}");
-        assert!(open.contains(&book_tab));
+        // K3 : le double-clic active la fenêtre (le Project Manager n'a plus
+        // aucun chemin de fermeture, voir `PmInteraction`).
+        let open = double_click("Graph1", egui::Modifiers::NONE);
+        assert!(open.contains(&graph_tab), "open_requests={open:?}");
+        let open = double_click("Book", egui::Modifiers::NONE);
+        assert!(open.contains(&book_tab), "open_requests={open:?}");
+        // Deux Ctrl-clics rapides basculent la sélection deux fois : ce n'est
+        // pas une ouverture.
+        let open = double_click("Book", egui::Modifiers::COMMAND);
+        assert!(open.is_empty(), "open_requests={open:?}");
     }
 
     /// Ctrl/Cmd-clic bascule l'appartenance à la sélection : il ajoute, puis
@@ -1336,7 +1286,7 @@ pub(super) mod tests {
     fn ctrl_clic_selectionne_sans_ouvrir() {
         let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(None, HashSet::new());
+        let banc = Banc::new(HashSet::new());
         let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
 
         let first = paint(&context, Vec::new());
@@ -1376,7 +1326,7 @@ pub(super) mod tests {
         // pour ce comportement-là, testé isolément) : ce test porte sur ce
         // que « Masquer »/« Afficher » font d'une sélection déjà en place,
         // pas sur la façon dont elle s'est constituée.
-        let banc = Banc::new(None, HashSet::from([graph_tab, book_tab]));
+        let banc = Banc::new(HashSet::from([graph_tab, book_tab]));
         let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
 
         paint(&context, Vec::new());
@@ -1446,7 +1396,7 @@ pub(super) mod tests {
     fn les_actions_de_visibilite_sont_dans_le_menu_contextuel_et_le_clic_simple_ouvre() {
         let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(None, HashSet::new());
+        let banc = Banc::new(HashSet::new());
         let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
 
         let first = paint(&context, Vec::new());
@@ -1463,7 +1413,6 @@ pub(super) mod tests {
             HashSet::from([graph_tab]),
             "un clic simple sélectionne sa cible (#105)"
         );
-        assert!(banc.close_requests.borrow().is_empty());
 
         // La sélection ne déplace pas les entrées sous la souris.
         let with_selection = paint(&context, Vec::new());
@@ -1484,7 +1433,7 @@ pub(super) mod tests {
     fn le_clic_droit_d_une_fenetre_est_a_plat_dans_l_ordre_des_sections() {
         let (_session, _book_tab, _graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(None, HashSet::new());
+        let banc = Banc::new(HashSet::new());
         let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
         let first = paint(&context, Vec::new());
         let graph_pos = find_text_center(&first.shapes, "Graph1");
@@ -1524,7 +1473,7 @@ pub(super) mod tests {
             children: Vec::new(),
         }];
         let context = egui::Context::default();
-        let banc = Banc::new(None, HashSet::new());
+        let banc = Banc::new(HashSet::new());
         let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
         paint(&context, Vec::new());
         let first = paint(&context, Vec::new());
@@ -1573,7 +1522,7 @@ pub(super) mod tests {
     fn une_entree_masquee_reste_listee_mais_attenuee() {
         let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(None, HashSet::new());
+        let banc = Banc::new(HashSet::new());
         banc.paint(&context, &tree, Vec::new());
         let shown = banc.paint(&context, &tree, Vec::new());
         banc.hidden.borrow_mut().insert(graph_tab);
@@ -1612,7 +1561,7 @@ pub(super) mod tests {
             },
         ];
         let context = egui::Context::default();
-        let banc = Banc::new(None, HashSet::new());
+        let banc = Banc::new(HashSet::new());
         let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
         paint(&context, Vec::new());
         let closed = paint(&context, Vec::new());
@@ -1665,7 +1614,7 @@ pub(super) mod tests {
         let (_session, book, _graph, tree) = project_manager_fixture();
         for double in [false, true] {
             let context = egui::Context::default();
-            let banc = Banc::new(None, HashSet::from([book]));
+            let banc = Banc::new(HashSet::from([book]));
             let horloge = std::cell::Cell::new(1.0);
             let paint = |ctx: &egui::Context, events| {
                 horloge.set(horloge.get() + 0.01);
@@ -1696,7 +1645,7 @@ pub(super) mod tests {
     fn un_nom_deja_pris_garde_le_champ_ouvert() {
         let (_session, book, _graph, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(None, HashSet::from([book]));
+        let banc = Banc::new(HashSet::from([book]));
         let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let memory_key = memory_id(&context);

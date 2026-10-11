@@ -232,9 +232,6 @@ pub(super) struct DetachedProjectManagerRequests {
     /// vidange ; [`StokesForgeApp::ui`](eframe::App::ui) les transfère dans son propre
     /// `open_requests` puis les vide.
     pub(super) open: Vec<Tab>,
-    /// Onglets fermés (« Masquer » d'une entrée maximisée) depuis la dernière vidange (§4) —
-    /// même schéma que `open`.
-    pub(super) close: Vec<Tab>,
     /// Vrai si le bouton « Réattacher » ou la fermeture de la fenêtre OS a
     /// été actionné depuis la dernière vidange.
     pub(super) reattach: bool,
@@ -682,7 +679,6 @@ impl StokesForgeApp {
             move |ui, _class| {
                 begin_file_drop(ui.ctx());
                 let mut opened = Vec::new();
-                let mut closed = Vec::new();
                 let mut actions = Vec::new();
                 // Lecture d'une copie plutôt que du verrou tenu pendant
                 // toute la peinture : `project_manager_contents_from_tree`
@@ -701,8 +697,6 @@ impl StokesForgeApp {
                         actions: &mut actions,
                         root: model.root.unwrap_or(NodeId::from_raw(1)),
                         open_requests: &mut opened,
-                        close_requests: &mut closed,
-                        active_tab: model.active_tab,
                         selection: &mut model.selected,
                         hidden: &mut model.hidden,
                     };
@@ -712,7 +706,6 @@ impl StokesForgeApp {
                     let mut requests = requests.lock().unwrap_or_else(|err| err.into_inner());
                     if reattach
                         || !opened.is_empty()
-                        || !closed.is_empty()
                         || model.selected != selected_before
                         || model.hidden != hidden_before
                     {
@@ -724,7 +717,6 @@ impl StokesForgeApp {
                     }
                     requests.actions.append(&mut actions);
                     requests.open.append(&mut opened);
-                    requests.close.append(&mut closed);
                     if model.selected != selected_before {
                         requests.selection = Some(model.selected);
                     }

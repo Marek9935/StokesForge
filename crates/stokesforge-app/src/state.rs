@@ -471,6 +471,10 @@ pub enum Action {
     OpenStatusHistory,
     /// Ferme la fenêtre d'historique des messages.
     CloseStatusHistory,
+    /// Ouvre Help › Keyboard Shortcuts (#231, K5).
+    OpenKeyboardShortcuts,
+    /// Ferme la fenêtre des raccourcis clavier.
+    CloseKeyboardShortcuts,
     /// Ouvre la fenêtre d'analyse (#181) sur les colonnes Y sélectionnées de
     /// `sheet`, chacune avec le X le plus proche à sa gauche. Rien ne s'ouvre
     /// sans colonne Y.
@@ -2545,6 +2549,7 @@ pub struct AppState {
     status_log: std::collections::VecDeque<StatusMessage>,
     /// La fenêtre d'historique des messages est ouverte.
     status_history_open: bool,
+    keyboard_shortcuts_open: bool,
     /// Erreur survenue pendant qu'un dialogue modal est ouvert (M7, #228) :
     /// elle s'affiche dans le pied du dialogue, jamais dans la barre d'état.
     dialog_error: Option<String>,
@@ -2717,6 +2722,7 @@ impl AppState {
             status: None,
             status_log: std::collections::VecDeque::new(),
             status_history_open: false,
+            keyboard_shortcuts_open: false,
             dialog_error: None,
             editing: None,
             note_editing: None,
@@ -4553,6 +4559,8 @@ impl AppState {
             Action::CloseColumnMetadata => self.metadata_view = None,
             Action::OpenStatusHistory => self.status_history_open = true,
             Action::CloseStatusHistory => self.status_history_open = false,
+            Action::OpenKeyboardShortcuts => self.keyboard_shortcuts_open = true,
+            Action::CloseKeyboardShortcuts => self.keyboard_shortcuts_open = false,
             Action::OpenAnalysis {
                 preset,
                 sheet,
@@ -6091,6 +6099,11 @@ impl AppState {
     /// L'historique des messages est-il ouvert ?
     pub fn status_history_open(&self) -> bool {
         self.status_history_open
+    }
+
+    /// La fenêtre des raccourcis clavier est-elle ouverte ?
+    pub fn keyboard_shortcuts_open(&self) -> bool {
+        self.keyboard_shortcuts_open
     }
 
     /// Titre de la fenêtre : nom du projet, « • » tant qu'il n'est pas

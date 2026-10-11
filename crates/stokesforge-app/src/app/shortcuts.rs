@@ -5,11 +5,50 @@
 //!
 //! Sorti d'`app.rs` tel quel (#117). La consommation globale des raccourcis,
 //! `collect_shortcuts`, reste dans `app.rs` (#115).
+//!
+//! **Registre unique des touches** (#231, K1) : toute touche que l'application
+//! consomme est une constante de ce module (`SHORTCUT_*` pour les raccourcis,
+//! `KEY_*` pour les touches nues d'un champ ou d'une liste), lue par
+//! `input.consume_shortcut(&…)`. Aucun `consume_key` ailleurs (garde
+//! `aucun_consume_key_hors_du_registre`, `tests/gardes.rs`). La fenêtre
+//! Help › Keyboard Shortcuts est générée de [`HELP`], en bas de ce fichier :
+//! un raccourci neuf s'y ajoute, sinon il reste invisible de l'utilisateur.
 
 use eframe::egui;
 
 use crate::state::Action;
 use crate::tr;
+
+/// Échap — annule la saisie en cours, ferme la liste ou le dialogue.
+pub(crate) const KEY_ESCAPE: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Escape);
+/// Entrée — valide la saisie en cours ou le dialogue.
+pub(crate) const KEY_ENTER: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Enter);
+/// Tab — valide la saisie et passe au champ suivant.
+pub(crate) const KEY_TAB: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Tab);
+/// Suppr — supprime la sélection (la grille d'abord la vide, K2).
+pub(crate) const KEY_DELETE: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Delete);
+/// Retour arrière — vide la sélection de la grille.
+pub(crate) const KEY_BACKSPACE: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Backspace);
+/// ↑ — valeur voisine d'un champ nombre ou d'une liste.
+pub(crate) const KEY_ARROW_UP: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowUp);
+/// ↓ — valeur voisine d'un champ nombre ou d'une liste.
+pub(crate) const KEY_ARROW_DOWN: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowDown);
+/// Maj+↑ — dix crans vers le haut dans un champ nombre.
+pub(crate) const KEY_SHIFT_ARROW_UP: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowUp);
+/// Maj+↓ — dix crans vers le bas dans un champ nombre.
+pub(crate) const KEY_SHIFT_ARROW_DOWN: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::ArrowDown);
+/// Alt+↓ — ouvre la liste de valeurs proposées d'un champ nombre.
+pub(crate) const KEY_ALT_ARROW_DOWN: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::ALT, egui::Key::ArrowDown);
 
 /// Ctrl+Z — annuler.
 pub(super) const SHORTCUT_UNDO: egui::KeyboardShortcut =
@@ -92,6 +131,10 @@ pub(super) const SHORTCUT_EDIT_CELL: egui::KeyboardShortcut =
 pub(super) const SHORTCUT_DUPLICATE_SHEET: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::D);
 
+/// Ctrl+D — dupliquer les objets sélectionnés du Project Manager.
+pub(super) const SHORTCUT_DUPLICATE_OBJECT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::D);
+
 /// Ctrl+C — copier la sélection de la grille.
 ///
 /// # Ces cinq raccourcis-ci ne sont **jamais** consommés
@@ -148,6 +191,142 @@ pub(super) fn shortcut_text_delete() -> String {
     tr!("shortcut-delete")
 }
 
+/// Où un raccourci s'applique : les rubriques de Help › Keyboard Shortcuts.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum HelpArea {
+    General,
+    Workbook,
+    Graph,
+    Managers,
+    Fields,
+}
+
+impl HelpArea {
+    pub(super) const ALL: [HelpArea; 5] = [
+        HelpArea::General,
+        HelpArea::Workbook,
+        HelpArea::Graph,
+        HelpArea::Managers,
+        HelpArea::Fields,
+    ];
+
+    pub(super) fn title(self) -> String {
+        match self {
+            HelpArea::General => tr!("help-area-general"),
+            HelpArea::Workbook => tr!("help-area-workbook"),
+            HelpArea::Graph => tr!("help-area-graph"),
+            HelpArea::Managers => tr!("help-area-managers"),
+            HelpArea::Fields => tr!("help-area-fields"),
+        }
+    }
+}
+
+/// Ce qui s'affiche à droite d'une ligne de l'aide.
+pub(super) enum HelpKeys {
+    /// Un raccourci à modificateur, écrit par `Context::format_shortcut`.
+    Shortcut(&'static egui::KeyboardShortcut),
+    /// Deux raccourcis équivalents.
+    Either(
+        &'static egui::KeyboardShortcut,
+        &'static egui::KeyboardShortcut,
+    ),
+    /// Une touche ou un geste qui n'est pas un raccourci à modificateur
+    /// (Suppr, la molette) : texte traduit.
+    Text(fn() -> String),
+}
+
+/// Une ligne de Help › Keyboard Shortcuts.
+pub(super) struct HelpEntry {
+    pub(super) area: HelpArea,
+    pub(super) label: fn() -> String,
+    pub(super) keys: HelpKeys,
+}
+
+impl HelpEntry {
+    /// Les touches de la ligne, telles qu'on les affiche.
+    pub(super) fn keys_text(&self, ctx: &egui::Context) -> String {
+        match &self.keys {
+            HelpKeys::Shortcut(shortcut) => ctx.format_shortcut(shortcut),
+            HelpKeys::Either(a, b) => tr!(
+                "help-keys-either",
+                first = ctx.format_shortcut(a),
+                second = ctx.format_shortcut(b)
+            ),
+            HelpKeys::Text(text) => text(),
+        }
+    }
+}
+
+macro_rules! entry {
+    ($area:ident, $label:literal, shortcut $shortcut:expr) => {
+        HelpEntry {
+            area: HelpArea::$area,
+            label: || tr!($label),
+            keys: HelpKeys::Shortcut(&$shortcut),
+        }
+    };
+    ($area:ident, $label:literal, either $a:expr, $b:expr) => {
+        HelpEntry {
+            area: HelpArea::$area,
+            label: || tr!($label),
+            keys: HelpKeys::Either(&$a, &$b),
+        }
+    };
+    ($area:ident, $label:literal, text $text:expr) => {
+        HelpEntry {
+            area: HelpArea::$area,
+            label: || tr!($label),
+            keys: HelpKeys::Text($text),
+        }
+    };
+}
+
+/// Les raccourcis que l'aide montre, dans l'ordre d'affichage de chaque
+/// rubrique. Un raccourci neuf du registre s'ajoute ici, sinon l'utilisateur
+/// ne le découvre pas (K5).
+pub(super) const HELP: &[HelpEntry] = &[
+    entry!(General, "help-undo", shortcut SHORTCUT_UNDO),
+    entry!(General, "help-redo", either SHORTCUT_REDO_Y, SHORTCUT_REDO_Z),
+    entry!(General, "help-new-project", shortcut SHORTCUT_NEW_PROJECT),
+    entry!(General, "help-open", shortcut SHORTCUT_OPEN),
+    entry!(General, "help-save", shortcut SHORTCUT_SAVE),
+    entry!(General, "help-save-as", shortcut SHORTCUT_SAVE_AS),
+    entry!(
+        General,
+        "help-import",
+        text || SHORTCUT_IMPORT_TEXT.to_string()
+    ),
+    entry!(General, "help-export-graph", shortcut SHORTCUT_EXPORT_GRAPH),
+    entry!(General, "help-run-script", shortcut SHORTCUT_RUN_SCRIPT),
+    entry!(Workbook, "help-edit-cell", shortcut SHORTCUT_EDIT_CELL),
+    entry!(Workbook, "help-select-all", shortcut SHORTCUT_SELECT_ALL),
+    entry!(Workbook, "help-copy", shortcut SHORTCUT_COPY),
+    entry!(Workbook, "help-copy-full-columns", shortcut SHORTCUT_COPY_FULL_COLUMNS),
+    entry!(Workbook, "help-cut", shortcut SHORTCUT_CUT),
+    entry!(Workbook, "help-paste", shortcut SHORTCUT_PASTE),
+    entry!(Workbook, "help-paste-absolute", shortcut SHORTCUT_PASTE_ABSOLUTE),
+    entry!(Workbook, "help-clear-cells", text shortcut_text_delete),
+    entry!(Workbook, "help-duplicate-sheet", shortcut SHORTCUT_DUPLICATE_SHEET),
+    entry!(Graph, "help-copy-graph", shortcut SHORTCUT_COPY),
+    entry!(Graph, "help-delete-object", text shortcut_text_delete),
+    entry!(Graph, "help-move-series-up", shortcut SHORTCUT_MOVE_SERIES_UP),
+    entry!(Graph, "help-move-series-down", shortcut SHORTCUT_MOVE_SERIES_DOWN),
+    entry!(Graph, "help-zoom", text || tr!("help-keys-ctrl-wheel")),
+    entry!(Managers, "help-rename", shortcut SHORTCUT_RENAME_OBJECT),
+    entry!(Managers, "help-delete-selection", text shortcut_text_delete),
+    entry!(Managers, "help-duplicate", shortcut SHORTCUT_DUPLICATE_OBJECT),
+    entry!(Fields, "help-validate", text || tr!("help-keys-enter")),
+    entry!(Fields, "help-cancel", text || tr!("help-keys-escape")),
+    entry!(Fields, "help-next-field", text || tr!("help-keys-tab")),
+    entry!(Fields, "help-step-value", text || tr!("help-keys-arrows")),
+    entry!(
+        Fields,
+        "help-step-value-ten",
+        text || tr!("help-keys-shift-arrows")
+    ),
+    entry!(Fields, "help-open-list", shortcut KEY_ALT_ARROW_DOWN),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +376,59 @@ mod tests {
             let (premieres, restes) = actions_pour(key, modifiers);
             assert_eq!(premieres, attendu, "{key:?} {modifiers:?}");
             assert!(restes.is_empty(), "{key:?} {modifiers:?} lu deux fois");
+        }
+    }
+}
+
+#[cfg(test)]
+mod help_tests {
+    use super::*;
+
+    /// Chaque rubrique de l'aide a des lignes, chaque ligne un texte de
+    /// touches non vide, dans les deux langues.
+    #[test]
+    fn l_aide_des_raccourcis_est_complete() {
+        let ctx = egui::Context::default();
+        for area in HelpArea::ALL {
+            assert!(
+                HELP.iter().any(|entry| entry.area == area),
+                "rubrique vide : {area:?}"
+            );
+        }
+        for entry in HELP {
+            assert!(!(entry.label)().is_empty());
+            assert!(!entry.keys_text(&ctx).is_empty());
+        }
+    }
+
+    /// L'aide est générée du registre : chaque constante `SHORTCUT_*`
+    /// consommée y figure. Un raccourci oublié ferait échouer ce test.
+    #[test]
+    fn chaque_raccourci_consomme_figure_dans_l_aide() {
+        let ctx = egui::Context::default();
+        let shown: Vec<String> = HELP.iter().map(|entry| entry.keys_text(&ctx)).collect();
+        for shortcut in [
+            &SHORTCUT_UNDO,
+            &SHORTCUT_REDO_Y,
+            &SHORTCUT_SAVE,
+            &SHORTCUT_SAVE_AS,
+            &SHORTCUT_OPEN,
+            &SHORTCUT_NEW_PROJECT,
+            &SHORTCUT_EXPORT_GRAPH,
+            &SHORTCUT_RUN_SCRIPT,
+            &SHORTCUT_RENAME_OBJECT,
+            &SHORTCUT_EDIT_CELL,
+            &SHORTCUT_MOVE_SERIES_UP,
+            &SHORTCUT_MOVE_SERIES_DOWN,
+            &SHORTCUT_DUPLICATE_SHEET,
+            &SHORTCUT_DUPLICATE_OBJECT,
+            &SHORTCUT_SELECT_ALL,
+        ] {
+            let text = ctx.format_shortcut(shortcut);
+            assert!(
+                shown.iter().any(|keys| keys.contains(&text)),
+                "{text} absent de l'aide"
+            );
         }
     }
 }

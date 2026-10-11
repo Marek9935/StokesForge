@@ -723,11 +723,11 @@ fn modal_frame(
     // Cancel d'une confirmation (R4). Un bouton du pied focalisé au clavier
     // reçoit Entrée lui-même : son clic passe devant.
     let escape = !popup_open
-        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        && ctx.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ESCAPE))
         && !editing_before;
     let enter = !popup_open
         && !keyboard_focus_outside_grid(ctx)
-        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        && ctx.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ENTER));
     let outcome = if header_actions.close || escape {
         FrameOutcome::Cancel
     } else if clicks.accept {

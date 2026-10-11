@@ -72,7 +72,9 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/tab_strip.rs` | brique commune de la bande d'onglets : `tab_strip`, `tab_strip_with` (`TabOps`, `TabEvent`) |
 | `app/menu_sections.rs` | brique commune des menus : `MenuSections::section` (seul trait de séparation, #155), `menu_choice` (coche seule d'un choix exclusif, C3, #227) |
 | `app/list_row.rs` | brique commune de la ligne de liste sélectionnable (#169) : `list_row`, `ListRowBackground`, `list_row_label`, `list_row_text`, `LIST_ROW_MARK` ; Project Manager, Object Manager, liste des séries des propriétés |
-| `app/shortcuts.rs` | constantes `SHORTCUT_*` et leurs rappels, consommation d'annuler/rétablir dans le viewport actif (`collect_undo_redo_shortcuts`) |
+| `app/shortcuts.rs` | **registre unique des touches** (#231) : constantes `SHORTCUT_*` et `KEY_*`, leurs rappels, tableau `HELP` qui engendre Help › Keyboard Shortcuts, consommation d'annuler/rétablir dans le viewport actif (`collect_undo_redo_shortcuts`) |
+| `app/keyboard_shortcuts_window.rs` | Help › Keyboard Shortcuts (#231, K5) : fenêtre en lecture seule, engendrée de `HELP` |
+| `app/cursors.rs` | seul module qui nomme un `CursorIcon` (#231, X2) : main ouverte/fermée, flèches de redimensionnement, doigt des éléments cliquables qui ne sont pas des boutons |
 | `app/window_chrome.rs` | cadre commun des fenêtres et panneaux : `window_header`, `panel_header`, `floating_window_frame`, contour actif, poignées, `show_window_in_layer`, `show_window_contents_bounded` |
 | `app/window_placement.rs` | placement : tailles par défaut, cascade, espace de travail fixe (`WORKSPACE_SIZE`), `clamp_to_workspace`, conversion logique → écran |
 | `app/window_stack.rs` | pile des fenêtres flottantes : `open_tab` (seul endroit qui décide ouvrir ou focaliser), ordre et calques egui, masquage, repli, maximisation, `show_workspace` |

@@ -353,8 +353,7 @@ pub(super) fn graph_view_contents(
                                 open_group_name_editor(ui.ctx(), &spec, graph_id, group);
                             }
                         }
-                        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete))
-                        {
+                        if ui.input_mut(|i| i.consume_shortcut(&super::shortcuts::KEY_DELETE)) {
                             actions.push(Action::RemovePlotObject {
                                 graph: graph_id,
                                 target: crate::object_manager::VisibilityTarget::SeriesGroup(group),
@@ -374,8 +373,7 @@ pub(super) fn graph_view_contents(
                                 );
                             }
                         }
-                        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete))
-                        {
+                        if ui.input_mut(|i| i.consume_shortcut(&super::shortcuts::KEY_DELETE)) {
                             actions.push(Action::RemovePlotObject {
                                 graph: graph_id,
                                 target: crate::object_manager::VisibilityTarget::Series(series),
@@ -905,9 +903,9 @@ fn annotation_interactions(
             let typing = keyboard_focus_outside_grid(ui.ctx());
             if let Some(target) = view.selected_annotation() {
                 if !typing
-                    && ui.ctx().input_mut(|input| {
-                        input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
-                    })
+                    && ui
+                        .ctx()
+                        .input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_DELETE))
                 {
                     actions.push(Action::RemoveAnnotation { graph, target });
                     view.clear_annotation_selection();
@@ -915,9 +913,9 @@ fn annotation_interactions(
             } else if let Some(target) = view.selected_shape() {
                 // Objets graphiques (issue #76) : même geste.
                 if !typing
-                    && ui.ctx().input_mut(|input| {
-                        input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
-                    })
+                    && ui
+                        .ctx()
+                        .input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_DELETE))
                 {
                     actions.push(Action::RemoveShape { graph, target });
                     view.select_shape(None);

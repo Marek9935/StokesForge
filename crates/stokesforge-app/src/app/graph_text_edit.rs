@@ -279,8 +279,8 @@ pub(super) fn text_editor_ui(
                 }
             });
         });
-    let cancel = cancelled
-        || ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let cancel =
+        cancelled || ctx.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ESCAPE));
     let outside = ctx
         .input(|input| {
             input
@@ -529,8 +529,8 @@ pub(super) fn annotation_editor_ui(
     actions.extend(env.requests.into_iter().map(SavedColorRequest::into_action));
 
     // Échap : le sélecteur de couleur ouvert le consomme d'abord pour lui.
-    let cancel = cancelled
-        || ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let cancel =
+        cancelled || ctx.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ESCAPE));
     // Un clic hors de l'éditeur (et hors de toute couche surgissante, comme
     // le sélecteur de couleur) valide.
     let pressed_at = ctx.input(|input| {

@@ -95,14 +95,9 @@ impl Panel {
         let ctx = ui.ctx().clone();
         let mut actions = Vec::new();
         match self {
-            Self::Project => app.show_project_manager(
-                ui,
-                &ctx,
-                None,
-                &mut Vec::new(),
-                &mut Vec::new(),
-                &mut actions,
-            ),
+            Self::Project => {
+                app.show_project_manager(ui, &ctx, None, &mut Vec::new(), &mut actions)
+            }
             Self::Object => app.object_manager_panel(ui, None, &mut actions),
             Self::Script => app.script_panel(ui, &ctx, &mut actions),
         }

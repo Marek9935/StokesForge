@@ -110,13 +110,19 @@ par image (modèle : `plot_settings::tests::champ`).
 
 Brique **en place** de l'édition sur place (#224) : `app/inplace_edit.rs` (tests de
 `resolve` et du geste dans son module ; chaque surface teste son usage : onglets,
-Project Manager, grille). Aucune garde ne la verrouille encore ; la garde
-`consume_key` hors de `app/shortcuts.rs` (#231) devra l'excepter.
+Project Manager, grille). Aucune garde ne la verrouille encore.
 
-Gardes **à venir** du standard d'interface (#217) : `consume_key` hors de
-`app/shortcuts.rs` (#231). Elles **n'existent pas encore** : ne pas
-les citer comme vertes. Le commit qui en écrit une la déplace dans le tableau
-ci-dessus et la passe à *en place* dans
+Gardes **en place** du clavier et de la souris (#231) :
+`aucun_consume_key_hors_du_registre` (ni `consume_key` ni
+`KeyboardShortcut::new` hors de `app/shortcuts.rs`) et
+`aucun_curseur_hors_du_module_des_curseurs` (`CursorIcon::` seulement dans
+`app/cursors.rs`), chacune avec son témoin ; sans dérogation. Un raccourci
+neuf se déclare dans `shortcuts.rs` **et** dans `HELP` (le test
+`chaque_raccourci_consomme_figure_dans_l_aide` en liste les constantes).
+
+Gardes **à venir** du standard d'interface (#217) : celles de #232. Elles
+**n'existent pas encore** : ne pas les citer comme vertes. Le commit qui en
+écrit une la déplace dans le tableau ci-dessus et la passe à *en place* dans
 [`docs/standard-interface.md`](../../../docs/standard-interface.md).
 
 ### Reproduction vs garde-fou

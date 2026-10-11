@@ -171,18 +171,18 @@ pub(super) fn finish(
             input.modifiers.shift,
         )
     });
-    let consume = |key| {
-        ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, key));
+    let consume = |key: &egui::KeyboardShortcut| {
+        ctx.input_mut(|input| input.consume_shortcut(key));
     };
     let end = if !fresh && (focused || lost) && escape {
-        consume(egui::Key::Escape);
+        consume(&super::shortcuts::KEY_ESCAPE);
         Some(EditEnd::Cancel)
     } else if !fresh && focused && tab {
-        consume(egui::Key::Tab);
+        consume(&super::shortcuts::KEY_TAB);
         Some(EditEnd::Tab { shift })
     } else if !fresh && lost && (enter || loss == FocusLoss::Ends) {
         if enter {
-            consume(egui::Key::Enter);
+            consume(&super::shortcuts::KEY_ENTER);
             Some(EditEnd::Enter { shift })
         } else {
             Some(EditEnd::Elsewhere)

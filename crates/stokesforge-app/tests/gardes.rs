@@ -28,7 +28,12 @@
 //!   section (`theme::section_title`) sépare seul ses groupes ;
 //! - `aucun_add_space_litteral_hors_du_theme` (#227, L4) : un écart se pose par
 //!   les deux constantes de `theme.rs` (`SPACE_ITEM`, `SPACE_SECTION`), jamais
-//!   par un nombre écrit sur place, sans dérogation.
+//!   par un nombre écrit sur place, sans dérogation ;
+//! - `aucun_consume_key_hors_du_registre` (#231, K1) : toute touche consommée
+//!   est une constante de `app/shortcuts.rs`, jamais un `consume_key` ni un
+//!   `KeyboardShortcut::new` écrit ailleurs, sans dérogation ;
+//! - `aucun_curseur_hors_du_module_des_curseurs` (#231, X2) : un
+//!   `CursorIcon::…` ne s'écrit que dans `app/cursors.rs`, sans dérogation.
 //!
 //! Chaque garde a son **témoin** : le motif interdit, posé dans un autre
 //! fichier qu'`app.rs`, est bien refusé — sans lui, une garde qui ne voit rien
@@ -1249,6 +1254,137 @@ fn add_space_litteraux(sources: &[Fichier]) -> Vec<String> {
         }
     }
     trouves
+}
+
+/// Les `consume_key(` et `KeyboardShortcut::new(` du code de production hors
+/// de `app/shortcuts.rs`, `chemin:ligne` (K1, #231).
+fn touches_hors_du_registre(sources: &[Fichier]) -> Vec<String> {
+    let mut trouvees = Vec::new();
+    for fichier in sources {
+        if fichier.chemin == "app/shortcuts.rs" {
+            continue;
+        }
+        let source = fichier.production();
+        for i in 0..source.masque.len() {
+            if commence_par(&source.masque, i, "consume_key(")
+                || commence_par(&source.masque, i, "KeyboardShortcut::new(")
+            {
+                trouvees.push(format!(
+                    "src/{}:{}",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    trouvees
+}
+
+/// Règle #231 (`docs/standard-interface.md`, § Clavier et souris, K1) : un
+/// registre unique des touches, `app/shortcuts.rs`.
+#[test]
+fn aucun_consume_key_hors_du_registre() {
+    let sources = sources::sources();
+    let fautifs = touches_hors_du_registre(&sources);
+    assert!(
+        fautifs.is_empty(),
+        "toute touche consommée est une constante de `app/shortcuts.rs` \
+         (`input.consume_shortcut(&KEY_…)`) : {fautifs:?}"
+    );
+}
+
+/// Le témoin : les deux formes sont vues hors du registre ; le registre, un
+/// commentaire et le code de test passent.
+#[test]
+fn la_garde_du_registre_des_touches_voit_une_touche_ecrite_sur_place() {
+    for code in [
+        "fn f(i: &mut InputState) { i.consume_key(Modifiers::NONE, Key::Delete); }",
+        "const S: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F5);",
+    ] {
+        assert_eq!(
+            touches_hors_du_registre(&[fichier("app/e.rs", code)]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    for code in [
+        "fn f(i: &mut InputState) { i.consume_shortcut(&KEY_DELETE); }",
+        "fn f() {} // i.consume_key(Modifiers::NONE, Key::Delete)",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g(i: &mut InputState) { i.consume_key(M, K); } }",
+    ] {
+        assert!(
+            touches_hors_du_registre(&[fichier("app/e.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+    assert!(touches_hors_du_registre(&[fichier(
+        "app/shortcuts.rs",
+        "const S: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F5);"
+    )])
+    .is_empty());
+}
+
+/// Les `CursorIcon::` du code de production hors de `app/cursors.rs`,
+/// `chemin:ligne` (X2, #231). Le type seul (`egui::CursorIcon,`) passe.
+fn curseurs_hors_du_module(sources: &[Fichier]) -> Vec<String> {
+    let mut trouves = Vec::new();
+    for fichier in sources {
+        if fichier.chemin == "app/cursors.rs" {
+            continue;
+        }
+        let source = fichier.production();
+        for i in 0..source.masque.len() {
+            if commence_par(&source.masque, i, "CursorIcon::") {
+                trouves.push(format!(
+                    "src/{}:{}",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    trouves
+}
+
+/// Règle #231 (`docs/standard-interface.md`, § Clavier et souris, X2) : un
+/// seul module nomme les curseurs.
+#[test]
+fn aucun_curseur_hors_du_module_des_curseurs() {
+    let sources = sources::sources();
+    let fautifs = curseurs_hors_du_module(&sources);
+    assert!(
+        fautifs.is_empty(),
+        "un curseur se choisit par `app/cursors.rs` (`grab`, `clickable`, `RESIZE_*`) : {fautifs:?}"
+    );
+}
+
+/// Le témoin : un curseur écrit sur place est vu ; le module, le type seul,
+/// un commentaire et le code de test passent.
+#[test]
+fn la_garde_des_curseurs_voit_un_curseur_ecrit_sur_place() {
+    assert_eq!(
+        curseurs_hors_du_module(&[fichier(
+            "app/e.rs",
+            "fn f(c: &Context) { c.set_cursor_icon(egui::CursorIcon::Grab); }"
+        )])
+        .len(),
+        1
+    );
+    for code in [
+        "fn f(z: Vec<(egui::CursorIcon, u8)>) {}",
+        "fn f() {} // egui::CursorIcon::Grab",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { let _ = egui::CursorIcon::Grab; } }",
+    ] {
+        assert!(
+            curseurs_hors_du_module(&[fichier("app/e.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+    assert!(curseurs_hors_du_module(&[fichier(
+        "app/cursors.rs",
+        "const R: egui::CursorIcon = egui::CursorIcon::ResizeNorth;"
+    )])
+    .is_empty());
 }
 
 /// Règle #227 (`docs/standard-interface.md`, § Choix, disposition, L4) : deux

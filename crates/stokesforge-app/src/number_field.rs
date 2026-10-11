@@ -46,6 +46,7 @@
 use eframe::egui;
 use stokesforge_core::number_format::{format_exact, format_grid};
 
+use crate::app::shortcuts;
 use crate::field_state::{self, Bound, Verdict};
 use crate::list_frame;
 use crate::quantities::{AutoKind, Quantity};
@@ -175,34 +176,34 @@ fn number_field_core<T: Number>(
     // Échap ferme la liste sans rendre la valeur (F7). egui retire lui-même le
     // focus au début de l'image où Échap est pressée : la liste ouverte, pas le
     // focus, dit que l'Échap est pour elle, et le champ le reprend.
-    let close_list = presets.open && key(ui, egui::Modifiers::NONE, egui::Key::Escape);
+    let close_list = presets.open && key(ui, &shortcuts::KEY_ESCAPE);
     if close_list {
         presets.open = false;
     }
     if focused && !close_list {
         // Alt+↓ est toujours pris : un pas ne doit pas le lire (egui fait
         // correspondre « aucun modificateur » à n'importe quelle combinaison).
-        let alt_down = key(ui, egui::Modifiers::ALT, egui::Key::ArrowDown);
+        let alt_down = key(ui, &shortcuts::KEY_ALT_ARROW_DOWN);
         if alt_down && has_presets && !presets.open {
             presets.open = true;
             presets.highlighted = nearest_preset(quantity, current);
         } else if presets.open {
-            if key(ui, egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            if key(ui, &shortcuts::KEY_ARROW_DOWN) {
                 presets.highlighted = (presets.highlighted + 1).min(quantity.presets.len() - 1);
             }
-            if key(ui, egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            if key(ui, &shortcuts::KEY_ARROW_UP) {
                 presets.highlighted = presets.highlighted.saturating_sub(1);
             }
-            if key(ui, egui::Modifiers::NONE, egui::Key::Enter) {
+            if key(ui, &shortcuts::KEY_ENTER) {
                 current = quantity.presets[presets.highlighted];
                 presets.open = false;
                 changed = true;
             }
         } else {
-            let steps = i32::from(key(ui, egui::Modifiers::SHIFT, egui::Key::ArrowUp)) * 10
-                - i32::from(key(ui, egui::Modifiers::SHIFT, egui::Key::ArrowDown)) * 10
-                + i32::from(key(ui, egui::Modifiers::NONE, egui::Key::ArrowUp))
-                - i32::from(key(ui, egui::Modifiers::NONE, egui::Key::ArrowDown));
+            let steps = i32::from(key(ui, &shortcuts::KEY_SHIFT_ARROW_UP)) * 10
+                - i32::from(key(ui, &shortcuts::KEY_SHIFT_ARROW_DOWN)) * 10
+                + i32::from(key(ui, &shortcuts::KEY_ARROW_UP))
+                - i32::from(key(ui, &shortcuts::KEY_ARROW_DOWN));
             if steps != 0 {
                 current = step_value(quantity, current, steps);
                 changed = true;
@@ -331,9 +332,9 @@ fn number_field_core<T: Number>(
     }
 }
 
-/// Consomme `key` avec exactement `modifiers`.
-fn key(ui: &egui::Ui, modifiers: egui::Modifiers, key: egui::Key) -> bool {
-    ui.input_mut(|input| input.consume_key(modifiers, key))
+/// Consomme la touche `shortcut` du registre.
+fn key(ui: &egui::Ui, shortcut: &egui::KeyboardShortcut) -> bool {
+    ui.input_mut(|input| input.consume_shortcut(shortcut))
 }
 
 /// Sélectionne tout le texte du champ `id` (`len` caractères).

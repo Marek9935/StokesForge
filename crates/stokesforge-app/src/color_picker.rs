@@ -508,7 +508,7 @@ pub fn color_button(
         // Échap est consommé : le dialogue qui contient le sélecteur ne doit
         // pas se fermer avec lui.
         let escape =
-            ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            ui.input_mut(|input| input.consume_shortcut(&crate::app::shortcuts::KEY_ESCAPE));
         let pressed_at = ui.input(|input| {
             input
                 .pointer

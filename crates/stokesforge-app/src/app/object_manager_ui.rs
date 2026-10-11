@@ -570,7 +570,7 @@ pub(super) fn object_manager_contents(
     if ui.memory(|m| m.focused()) == Some(focus) {
         if let Some(target) = selected {
             if target.removable(spec)
-                && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete))
+                && ui.input_mut(|i| i.consume_shortcut(&super::shortcuts::KEY_DELETE))
             {
                 actions.push(Action::RemovePlotObject {
                     graph: model.graph,
@@ -1069,11 +1069,14 @@ pub(super) fn series_shortcuts(
     actions: &mut Vec<Action>,
     requests: &mut Vec<ObjectManagerRequest>,
 ) {
-    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
+    if ctx.input_mut(|i| i.consume_shortcut(&super::shortcuts::SHORTCUT_RENAME_OBJECT)) {
         requests.push(ObjectManagerRequest::Rename(series));
     }
-    for (key, up) in [(egui::Key::ArrowUp, true), (egui::Key::ArrowDown, false)] {
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, key))
+    for (shortcut, up) in [
+        (&super::shortcuts::SHORTCUT_MOVE_SERIES_UP, true),
+        (&super::shortcuts::SHORTCUT_MOVE_SERIES_DOWN, false),
+    ] {
+        if ctx.input_mut(|i| i.consume_shortcut(shortcut))
             && spec
                 .panels
                 .get(series.panel)
@@ -1094,11 +1097,14 @@ pub(super) fn group_shortcuts(
     actions: &mut Vec<Action>,
     requests: &mut Vec<ObjectManagerRequest>,
 ) {
-    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
+    if ctx.input_mut(|i| i.consume_shortcut(&super::shortcuts::SHORTCUT_RENAME_OBJECT)) {
         requests.push(ObjectManagerRequest::RenameGroup(group));
     }
-    for (key, up) in [(egui::Key::ArrowUp, true), (egui::Key::ArrowDown, false)] {
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, key))
+    for (shortcut, up) in [
+        (&super::shortcuts::SHORTCUT_MOVE_SERIES_UP, true),
+        (&super::shortcuts::SHORTCUT_MOVE_SERIES_DOWN, false),
+    ] {
+        if ctx.input_mut(|i| i.consume_shortcut(shortcut))
             && spec
                 .panels
                 .get(group.panel)

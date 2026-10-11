@@ -147,6 +147,7 @@ pub(super) fn list_row(
         galley.size().y.max(ICON_SIZE) + 2.0 * LIST_ROW_PADDING.y,
     );
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let response = super::cursors::clickable(response);
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, text)
     });

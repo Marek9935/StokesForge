@@ -1252,10 +1252,10 @@ fn row_number_header_widget(
                 .rect_filled(rect, 0.0, gutter_fill(selected, false));
             header_row_separator(ui, rect);
             let id = ui.id().with("stokesforge_select_all");
-            let response = ui
-                .interact(rect, id, egui::Sense::click())
-                .on_hover_text(tr!("action-select-all"))
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let response = super::cursors::clickable(
+                ui.interact(rect, id, egui::Sense::click())
+                    .on_hover_text(tr!("action-select-all")),
+            );
             ui.put(
                 rect,
                 egui::Label::new(egui::RichText::new("#").color(crate::theme::gutter_text_color()))
@@ -1701,7 +1701,7 @@ fn grid_column_drag_source(
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             egui::DragAndDrop::clear_payload(&ctx);
         } else {
-            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            super::cursors::grabbing(&ctx);
             column_drag_marker(&ctx, sheet, payload.columns.len());
         }
         return;
@@ -1721,7 +1721,7 @@ fn grid_column_drag_source(
             egui::Sense::drag(),
         );
         if response.hovered() {
-            ctx.set_cursor_icon(egui::CursorIcon::Grab);
+            super::cursors::grab(&ctx);
         }
         if response.drag_started() {
             response.dnd_set_drag_payload(payload.clone());
@@ -1753,7 +1753,7 @@ fn grid_row_drag_source(
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             egui::DragAndDrop::clear_payload(&ctx);
         } else {
-            ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+            super::cursors::grabbing(&ctx);
             row_drag_marker(&ctx, sheet, payload.rows.len());
         }
         return;
@@ -1774,7 +1774,7 @@ fn grid_row_drag_source(
             egui::Sense::drag(),
         );
         if response.hovered() {
-            ctx.set_cursor_icon(egui::CursorIcon::Grab);
+            super::cursors::grab(&ctx);
         }
         if response.drag_started() {
             response.dnd_set_drag_payload(payload.clone());
@@ -1918,8 +1918,7 @@ fn grid_keyboard(
         // sélection, comme un second clic sur la case du coin.
         if ui.input_mut(|input| input.consume_shortcut(&SHORTCUT_SELECT_ALL)) {
             actions.push(Action::SelectAll { sheet });
-        } else if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-        {
+        } else if ui.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ESCAPE)) {
             state.deselect_all(sheet);
         }
         start_grid_typing(ui, state, sheet);
@@ -2117,8 +2116,8 @@ fn grid_clipboard_shortcuts(
     });
     let (delete, backspace) = ui.input_mut(|input| {
         (
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Delete),
-            input.consume_key(egui::Modifiers::NONE, egui::Key::Backspace),
+            input.consume_shortcut(&super::shortcuts::KEY_DELETE),
+            input.consume_shortcut(&super::shortcuts::KEY_BACKSPACE),
         )
     });
     // Toute la matrice de comportement (une seule case copiée devient du
@@ -2193,9 +2192,7 @@ fn row_number_widget(
     ui.painter()
         .rect_filled(rect, 0.0, gutter_fill(selected, touched));
     let id = ui.id().with(("stokesforge_row_number", row));
-    let response = ui
-        .interact(rect, id, egui::Sense::click_and_drag())
-        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    let response = super::cursors::clickable(ui.interact(rect, id, egui::Sense::click_and_drag()));
     ui.put(
         rect,
         egui::Label::new(

@@ -42,8 +42,9 @@ les règles R1–R16 de `textes-interface.md`.
 | garde : aucun `add_space` littéral hors de `theme.rs` (`aucun_add_space_litteral_hors_du_theme`) | | **en place** (#227) |
 | zone de message du pied de `modal_dialog_with`, focus initial, taille mémorisée, `modal_wizard`, `modal_read_only` | ordre des boutons, erreur et raison dans le pied, Échap, F8, F9 | **en place** (#228) |
 | confirmations et échec grave (`modal_confirm`, `modal_save_changes`, `modal_alert` ; `app/confirmations.rs`) | Cancel par défaut, trio Discard Changes · Cancel · Save, M8 | **en place** (#229) |
-| registre des touches de `app/shortcuts.rs` | | à venir (#231) |
-| garde : aucun `consume_key` hors de `app/shortcuts.rs` | | à venir (#231) |
+| registre des touches de `app/shortcuts.rs`, `HELP`, Help › Keyboard Shortcuts | K1, K5 | **en place** (#231) |
+| garde : aucun `consume_key` hors de `app/shortcuts.rs` (`aucun_consume_key_hors_du_registre`) | | **en place** (#231) |
+| curseurs (`app/cursors.rs`) et garde `aucun_curseur_hors_du_module_des_curseurs` | X2 | **en place** (#231) |
 | briques « travail en cours » et « état vide » | | à venir (#232) |
 
 Déjà en place et réutilisées par ce standard : `modal_dialog_with`
@@ -421,12 +422,14 @@ Comment c'est tenu :
   nuancier — `curve_settings.rs`) est migrée. Reste à migrer : les outils de
   l'aperçu d'analyse, le volet Results, et les préférences futures (#148).
 
-## Clavier et souris — à venir (#231)
+## Clavier et souris — en place (#231)
 
 - **Registre unique des touches** dans `app/shortcuts.rs` (K1 : F2, Suppr,
   Échap, Entrée…) ; aucun `consume_key` ailleurs.
-- **Suppr** supprime la sélection tout de suite, annulable, partout (K2). La
-  grille garde son exception (vider d'abord), documentée.
+- **Suppr** supprime la sélection tout de suite, annulable, partout (K2) :
+  Project Manager, Object Manager, figure. La grille garde son exception
+  (vider d'abord) ; les onglets de feuille n'ont pas de Suppr (le menu suffit,
+  `shortcuts.rs`).
 - **Double-clic** (K3 → R7) : texte ou nom (cellule, onglet, titre) → édition
   sur place ; objet (série, axe) → Properties ; fond vide d'un graphe → vue
   réinitialisée ; Project Manager → active ou restaure la fenêtre, **ne ferme

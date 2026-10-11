@@ -140,6 +140,7 @@ mod analysis_menu;
 mod analysis_preview;
 mod confirmations;
 mod contents;
+mod cursors;
 mod curve_settings;
 mod dialogs;
 mod figure_copy;
@@ -153,6 +154,7 @@ mod grid;
 pub(crate) mod hover_help;
 mod import_wizard;
 mod inplace_edit;
+mod keyboard_shortcuts_window;
 mod list_row;
 mod menu_sections;
 mod menus;
@@ -163,7 +165,7 @@ mod plot_settings;
 mod project_manager;
 mod results_pane;
 mod script_console;
-mod shortcuts;
+pub(crate) mod shortcuts;
 mod stale_export;
 mod status_history;
 mod tab;
@@ -192,6 +194,7 @@ use graph_text_edit::{
 use graph_window::request_graph_export;
 use grid::keyboard_focus_outside_grid;
 use import_wizard::import_window;
+use keyboard_shortcuts_window::keyboard_shortcuts_window;
 use object_manager_ui::{select_manager_target, selected_manager_target};
 use plot_settings::{column_metadata_window, plot_settings_window};
 use shortcuts::{
@@ -914,14 +917,7 @@ impl eframe::App for StokesForgeApp {
         self.show_toolbars(ui, &ctx, active_tab, &mut actions);
         self.status_bar(ui, &mut actions);
         self.script_panel(ui, &ctx, &mut actions);
-        self.show_project_manager(
-            ui,
-            &ctx,
-            active_tab,
-            &mut open_requests,
-            &mut close_requests,
-            &mut actions,
-        );
+        self.show_project_manager(ui, &ctx, active_tab, &mut open_requests, &mut actions);
         self.object_manager_panel(ui, active_tab, &mut actions);
         self.drain_detached_tabs(&ctx, &mut actions);
         self.show_workspace(
@@ -1032,7 +1028,6 @@ impl StokesForgeApp {
         ctx: &egui::Context,
         active_tab: Option<Tab>,
         open_requests: &mut Vec<Tab>,
-        close_requests: &mut Vec<Tab>,
         actions: &mut Vec<Action>,
     ) {
         if self.pm_detached {
@@ -1048,7 +1043,6 @@ impl StokesForgeApp {
                     .lock()
                     .unwrap_or_else(|err| err.into_inner());
                 open_requests.append(&mut requests.open);
-                close_requests.append(&mut requests.close);
                 actions.append(&mut requests.actions);
                 (
                     std::mem::take(&mut requests.reattach),
@@ -1078,7 +1072,7 @@ impl StokesForgeApp {
             // construction qu'il n'est jamais recouvert par lui ni ne le
             // recouvre, comme la barre de menu (`egui::Panel::top`) peinte
             // plus haut.
-            self.project_manager_panel(ui, open_requests, close_requests, active_tab, actions);
+            self.project_manager_panel(ui, open_requests, actions);
         }
     }
 
@@ -1164,6 +1158,7 @@ impl StokesForgeApp {
         plot_settings_window(ctx, &mut self.state);
         column_metadata_window(ctx, &self.state, actions);
         status_history_window(ctx, &self.state, actions);
+        keyboard_shortcuts_window(ctx, &self.state, actions);
         analysis_window(ctx, &mut self.state, actions);
         calculation_delete_window(ctx, &self.state, actions);
         stale_export_window(ctx, &self.state, actions);

@@ -173,9 +173,8 @@ pub(super) fn calculation_handles(
             painter.vline(at.x, plot.y_range(), line);
         }
         let hit = egui::Rect::from_center_size(at, egui::Vec2::splat(GRAB_RADIUS * 2.0));
-        let response = ui
-            .interact(hit, handle_id(graph, handle.slot), egui::Sense::drag())
-            .on_hover_cursor(egui::CursorIcon::Grab);
+        let response = ui.interact(hit, handle_id(graph, handle.slot), egui::Sense::drag());
+        let response = super::cursors::grab_handle(response);
         let hot = response.hovered() || response.dragged();
         painter.circle(
             at,
@@ -184,7 +183,6 @@ pub(super) fn calculation_handles(
             outline,
         );
         if response.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             if let Some((p, nx, ny)) = response
                 .interact_pointer_pos()
                 .and_then(|pos| view.data_at(pos))

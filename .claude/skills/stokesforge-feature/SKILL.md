@@ -511,7 +511,7 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
 
 **État des briques.** La page tient un tableau *en place* / *à venir* (issues
 #219–#232). Une brique *à venir* (brique « nombre », formulaire en grille,
-éditeur sur place, registre des touches…) **n'existe pas encore** : ne pas
+éditeur sur place, travail en cours…) **n'existe pas encore** : ne pas
 l'appeler. Une règle *à venir* est déjà la règle pour tout code neuf ou
 modifié ; l'écrire avec les moyens existants, sans recopier un voisin qui
 déroge. Le commit qui crée une brique ou une garde la passe à *en place* dans
@@ -525,8 +525,16 @@ de menu, son grisage et son libellé. Ici les quatre sont **séparés**, et rien
 ne garantit leur cohérence sinon la relecture. C'est le premier point à
 vérifier quand une action est ajoutée :
 
-1. **le raccourci** — une constante `SHORTCUT_*` dans `app/shortcuts.rs`,
-   déclarée là *et* consommée à la main dans `collect_shortcuts` (`app.rs`) (`input.consume_shortcut`) ;
+1. **le raccourci** — une constante `SHORTCUT_*` (ou `KEY_*` pour une touche
+   nue) dans `app/shortcuts.rs`, **registre unique** (#231, K1 : jamais de
+   `consume_key` ni de `KeyboardShortcut::new` ailleurs, garde
+   `aucun_consume_key_hors_du_registre`), consommée par `input.consume_shortcut`
+   (`collect_shortcuts` dans `app.rs` pour un raccourci global), **et** une
+   ligne de `HELP` pour Help › Keyboard Shortcuts, avec ses clés `help-*`
+   en/fr. Curseur : `app/cursors.rs` (`grab`, `clickable`, `RESIZE_*`), jamais
+   un `CursorIcon::` écrit sur place ; double-clic (K3) : texte ou nom → édition
+   sur place, objet → Properties, fond d'un graphe → vue réinitialisée,
+   Project Manager → active, ne ferme jamais ;
 2. **l'entrée de menu** (barre de menus et/ou menu contextuel), avec son
    `shortcut_text` pour rappeler le raccourci à droite ;
 3. **le grisage** (`add_enabled`), calculé depuis `AppState` ;
