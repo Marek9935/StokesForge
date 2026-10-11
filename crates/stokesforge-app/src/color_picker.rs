@@ -501,7 +501,7 @@ pub fn color_button(
             .constrain(true)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_width(PICKER_SIDE + 40.0);
+                    ui.set_width(PICKER_SIDE + 70.0);
                     commit |= picker_contents(ui, popup_id, value, usage, auto_label, env);
                 });
             });
