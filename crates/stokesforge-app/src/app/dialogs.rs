@@ -31,7 +31,8 @@
 //! - **focus initial** (F9) : le premier champ de saisie l'a à l'ouverture.
 //!   egui ne dit pas quels widgets sont des champs texte : à l'ouverture, une
 //!   ancre invisible prend le focus en tête du contenu, puis le focus avance
-//!   d'un widget par image (la navigation de Tab d'egui) jusqu'au premier
+//!   d'un widget par passe, toutes dans la même image (`request_discard` :
+//!   rien n'est peint entre deux pas ; la navigation de Tab d'egui) jusqu'au premier
 //!   champ texte du dialogue (un `TextEdit`, reconnu à l'état qu'il garde
 //!   dans la mémoire d'egui). Il s'arrête — focus rendu — au pied, hors du
 //!   dialogue, au bout de [`FOCUS_WALK_STEPS`] widgets, ou dès que
@@ -704,6 +705,14 @@ fn modal_frame(
         }
         walk.footer = clicks.ids.clone();
         ctx.data_mut(|data| data.insert_temp(walk_id, walk));
+        // Les pas du focus s'enchaînent dans la même image : egui refait la
+        // passe (sans la peindre) au lieu de montrer le focus qui saute de
+        // widget en widget. Le plafond de passes est relevé en conséquence.
+        ctx.options_mut(|options| {
+            options.max_passes = std::num::NonZeroUsize::new(usize::from(FOCUS_WALK_STEPS) + 2)
+                .unwrap_or(options.max_passes);
+        });
+        ctx.request_discard("initial focus");
         ctx.request_repaint();
     }
 
@@ -957,10 +966,9 @@ mod tests {
         layout: FooterLayout,
         actif: bool,
         events: Vec<egui::Event>,
-        contenu: impl FnOnce(&mut egui::Ui),
+        mut contenu: impl FnMut(&mut egui::Ui),
     ) -> (DialogOutcome, Vec<Texte>) {
         let mut issue = DialogOutcome::Open;
-        let mut contenu = Some(contenu);
         let sortie = image_de(context, egui::vec2(800.0, 600.0), events, |ui| {
             issue = dialog_frame(
                 ui.ctx(),
@@ -978,9 +986,7 @@ mod tests {
                     let _ = ui.button("Autre");
                 },
                 |ui| {
-                    if let Some(contenu) = contenu.take() {
-                        contenu(ui);
-                    }
+                    contenu(ui);
                 },
             );
         });
@@ -1126,6 +1132,22 @@ mod tests {
         assert_ne!(context.memory(|memory| memory.focused()), Some(champ));
         let (issue, _) = dialogue_a_champ(&context, &mut texte, vec![touche(egui::Key::Escape)]);
         assert_eq!(issue, DialogOutcome::Cancel, "le second annule");
+    }
+
+    /// F9 : les pas du focus s'enchaînent dans l'image (passes jetées), pas
+    /// un widget par image — ici deux images suffisent derrière une case.
+    #[test]
+    fn le_focus_initial_ne_prend_pas_une_image_par_widget() {
+        let context = egui::Context::default();
+        let mut texte = String::from("abc");
+        let mut champ = None;
+        for _ in 0..2 {
+            champ = dialogue_a_champ(&context, &mut texte, Vec::new()).1;
+        }
+        assert_eq!(
+            context.memory(|memory| memory.focused()),
+            Some(champ.expect("champ peint"))
+        );
     }
 
     /// F9, sans champ de saisie : le focus initial ne laisse rien de
