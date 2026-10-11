@@ -419,6 +419,11 @@ Entrée valide, Échap annule — sauf l'Échap qui sort d'un champ texte (F7).
 pied tant qu'un dialogue de contenu est ouvert (`dialog_error`, M7) — jamais
 `status` ; un test d'état lit `state.dialog_error()`, et une décision « le
 geste a-t-il échoué ? » lit `last_action_failed`, jamais `status().is_error`.
+Confirmations (#229) : `modal_confirm` (Cancel par défaut ; le verbe
+seulement par son bouton), `modal_save_changes` (« Discard Changes · Cancel ·
+Save », Entrée = Save), `modal_alert` (M8) — voir la liste des réflexes plus
+bas ; un **choix** (axe d'un dépôt, calcul avec ou sans colonnes) reste un
+`modal_dialog_with`.
 Taille et position (F8) et premier champ focalisé (F9) sont faits par la
 brique : rien à écrire, mais un premier champ de saisie doit être un vrai
 `TextEdit` du dialogue (c'est ce que le focus initial cherche). **Avant d'écrire une fenêtre, dialogue ou assistant : partir de
@@ -492,7 +497,12 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   `cell_text` ;
 - tout élément grisé dit pourquoi et quoi faire : `.on_disabled_hover_text(tr!(…))` sur l'élément lui-même (clé `disabled-*` ou `.disabled` de l'action), jamais sur un groupe ; garde `aucun_element_grise_sans_sa_raison` (#226) ;
 - une erreur dans un dialogue va dans son pied, jamais dans la barre d'état ;
-- une suppression annulable ne demande pas de confirmation ;
+- une suppression annulable ne demande pas de confirmation ; ce que Ctrl+Z
+  ne rattrape pas passe par `modal_confirm` (Cancel par défaut : Entrée et
+  Échap l'actionnent, verbe destructeur rouge au survol/focus), un projet non
+  enregistré par `modal_save_changes` (Entrée = Save), un échec grave hors
+  fenêtre par `modal_alert` (M8 : Close + action) — peints depuis
+  `app/confirmations.rs`, ou dans le contenu du dialogue qu'ils recouvrent ;
 - aucun slider, unité dans le libellé, pas de bulle nue sur un champ (icône
   « ? » de `hover_help`) ;
 - un **formulaire** se pose par `app/form.rs` (grille à deux colonnes, choix

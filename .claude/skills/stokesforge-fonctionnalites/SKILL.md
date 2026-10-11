@@ -79,8 +79,9 @@ n'existe pas encore » aussi — c'est la plus facile à se tromper.
 
 ## Ce qui n'existe pas — le dire clairement
 
-Repères #72–#74 : File › New Project (Ctrl+N, confirmation si travail non
-enregistré), File › Add Graph (graphique vide annulable) et leurs boutons de
+Repères #72–#74 : File › New Project (Ctrl+N, « Discard Changes · Cancel ·
+Save » si travail non enregistré, comme Open… et Quit/fermeture, #229 ; une
+suppression annulable — feuille, objets du Project Manager — ne demande rien), File › Add Graph (graphique vide annulable) et leurs boutons de
 barre Fichier existent. Wayland natif est le défaut avec le correctif
 transitoire `vendor/winit` / `vendor/smithay-clipboard` : même récepteur de
 dépôt et de presse-papiers, partagé entre les viewports. Un second récepteur

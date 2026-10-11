@@ -92,13 +92,34 @@ pub enum Action {
     Save,
     /// Recharge le projet depuis le fichier courant.
     Load,
-    /// Demande un projet vide ; attend une confirmation si du travail serait perdu.
+    /// Demande un projet vide ; attend la réponse « Discard Changes · Cancel ·
+    /// Save » si du travail serait perdu (F3, #229).
     NewProject {
         /// Saisie encore locale à une vue, notamment une fenêtre détachée.
         pending_edits: bool,
     },
-    /// Valide ou abandonne la demande de remplacement du projet.
-    ConfirmNewProject(bool),
+    /// Demande d'ouvrir le projet `path` (File › Open…) ; même attente que
+    /// [`Action::NewProject`]. Un échec de lecture garde le projet et le
+    /// chemin courants et se dit par un dialogue bloquant (M8).
+    OpenProject {
+        /// Fichier choisi.
+        path: String,
+        /// Saisie encore locale à une vue.
+        pending_edits: bool,
+    },
+    /// Demande de quitter (Quit, fermeture de la fenêtre) ; même attente.
+    /// Quand rien ne retient plus l'application,
+    /// [`AppState::take_quit_ready`] le dit à la fenêtre.
+    Quit {
+        /// Saisie encore locale à une vue.
+        pending_edits: bool,
+    },
+    /// Réponse au dialogue « Discard Changes · Cancel · Save » (F4).
+    ConfirmUnsaved(UnsavedChoice),
+    /// Ferme le dialogue d'un échec grave (M8).
+    DismissAlert,
+    /// Réponse à la confirmation d'écrasement d'un fichier exporté (F3).
+    ConfirmOverwrite(bool),
     /// Ajoute un graphique vide à la racine, annulable comme un tracé.
     AddGraph,
     /// Ajoute un classeur et sa feuille initiale à la racine du projet.
@@ -129,12 +150,10 @@ pub enum Action {
     /// Duplique `sheet` (colonnes comprises) juste après elle, et affiche la
     /// copie.
     DuplicateSheet(NodeId),
-    /// Demande la suppression de `sheet` : ouvre la confirmation, qui nomme
-    /// les graphes qui en tracent des colonnes. Refusée pour la dernière
-    /// feuille d'un classeur.
-    RequestDeleteSheet(NodeId),
-    /// Réponse à la confirmation de [`Action::RequestDeleteSheet`].
-    ConfirmDeleteSheet(bool),
+    /// Supprime `sheet`, sans confirmation : Ctrl+Z la rend (F3, #229) ; le
+    /// message nomme les graphes qui en traçaient des colonnes. Refusée pour
+    /// la dernière feuille d'un classeur.
+    DeleteSheet(NodeId),
     /// Renomme un objet du Project Manager après édition en place.
     RenameObject { id: NodeId, name: String },
     /// Valide tous les noms saisis pendant un seul geste de renommage.
@@ -153,10 +172,10 @@ pub enum Action {
         graph: NodeId,
         series: stokesforge_plot::SeriesRef,
     },
-    /// Demande la suppression de la sélection.
+    /// Supprime la sélection, sans confirmation : un seul Ctrl+Z la rend
+    /// (F3, #229) ; le message nomme les graphes qui en utilisaient les
+    /// données.
     DeleteObjects(Vec<NodeId>),
-    /// Répond à la confirmation de suppression.
-    ConfirmDeleteObjects(bool),
     /// Déplace la sélection en un seul geste annulable.
     MoveObjects { ids: Vec<NodeId>, parent: NodeId },
     /// Valide la saisie d'une cellule : le texte tel que tapé, à convertir
@@ -1317,6 +1336,49 @@ pub enum RowAxis {
     Present,
 }
 
+/// Le geste qui remplacerait ou fermerait un projet non enregistré (F3,
+/// #229) : il attend la réponse « Discard Changes · Cancel · Save » (F4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnsavedGesture {
+    /// File › New Project.
+    NewProject,
+    /// File › Open… : le projet choisi.
+    Open(String),
+    /// Quit, ou la fermeture de la fenêtre.
+    Quit,
+}
+
+/// La réponse au dialogue « Discard Changes · Cancel · Save » (F4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsavedChoice {
+    /// Abandonner les changements et poursuivre le geste.
+    Discard,
+    /// Ne rien faire.
+    Cancel,
+    /// Enregistrer (en demandant où si le projet n'a pas de fichier), puis
+    /// poursuivre le geste si l'enregistrement a réussi.
+    Save,
+}
+
+/// Un échec grave hors fenêtre (M8, #229) : dit par un dialogue bloquant,
+/// avec une action possible, jamais par la seule barre d'état.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Alert {
+    /// Ce qui a échoué ; décide du titre et de l'action proposée.
+    pub kind: AlertKind,
+    /// Le message d'erreur, déjà mis en phrase.
+    pub message: String,
+}
+
+/// Les échecs graves (M8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlertKind {
+    /// L'enregistrement du projet a échoué : Save As… est proposé.
+    SaveFailed,
+    /// Le projet choisi n'a pas pu être lu : Open… est proposé.
+    OpenFailed,
+}
+
 /// Dépôt de lignes qui attend la réponse au dialogue d'axe (#166).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingRowDrop {
@@ -2393,14 +2455,20 @@ pub struct AppState {
     /// Repère conservateur de l'enregistrement, sans épingler les buffers
     /// d'un ancien arbre. Une annulation demande aussi confirmation.
     saved_revision: Option<(u64, u64)>,
-    new_project_pending: bool,
+    /// Geste qui attend la réponse « Discard Changes · Cancel · Save » (F4).
+    unsaved_pending: Option<UnsavedGesture>,
+    /// Geste à poursuivre une fois le projet enregistré (réponse Save).
+    after_save: Option<UnsavedGesture>,
+    /// Plus rien ne retient l'application : la fenêtre peut se fermer.
+    quit_ready: bool,
+    /// Échec grave en attente de lecture (M8).
+    alert: Option<Alert>,
+    /// Export qui écraserait un fichier que le sélecteur n'a pas vu (F3).
+    pending_overwrite: Option<(PathBuf, Box<PlotSpec>)>,
     /// Feuille dont l'onglet est en édition de nom.
     renaming_sheet: Option<NodeId>,
-    /// Feuille dont la suppression attend confirmation.
-    pending_sheet_delete: Option<NodeId>,
     /// Dépôt de lignes en attente du choix de l'axe X (#166).
     pending_row_drop: Option<PendingRowDrop>,
-    pending_object_delete: Vec<NodeId>,
     object_clipboard_origin: String,
     object_clipboard_output: Option<String>,
     /// Les représentations de la figure à offrir au système, préparées par
@@ -2560,11 +2628,13 @@ impl AppState {
             handle,
             snapshot,
             saved_revision,
-            new_project_pending: false,
+            unsaved_pending: None,
+            after_save: None,
+            quit_ready: false,
+            alert: None,
+            pending_overwrite: None,
             renaming_sheet: None,
-            pending_sheet_delete: None,
             pending_row_drop: None,
-            pending_object_delete: Vec::new(),
             object_clipboard_origin: format!(
                 "{}:{}",
                 std::process::id(),
@@ -4280,11 +4350,26 @@ impl AppState {
             Action::Undo => self.undo(),
             Action::Redo => self.redo(),
             Action::Save => self.save(),
-            Action::Load => self.load(),
-            Action::NewProject { pending_edits } => self.request_new_project(pending_edits),
-            Action::ConfirmNewProject(accept) => {
-                if std::mem::take(&mut self.new_project_pending) && accept {
-                    self.new_project();
+            Action::Load => {
+                self.load();
+            }
+            Action::NewProject { pending_edits } => {
+                self.request_unsaved(UnsavedGesture::NewProject, pending_edits);
+            }
+            Action::OpenProject {
+                path,
+                pending_edits,
+            } => self.request_unsaved(UnsavedGesture::Open(path), pending_edits),
+            Action::Quit { pending_edits } => {
+                self.request_unsaved(UnsavedGesture::Quit, pending_edits);
+            }
+            Action::ConfirmUnsaved(choice) => self.confirm_unsaved(choice),
+            Action::DismissAlert => self.alert = None,
+            Action::ConfirmOverwrite(accept) => {
+                if let Some((path, spec)) = self.pending_overwrite.take() {
+                    if accept {
+                        self.write_graph_export(&path, &spec);
+                    }
                 }
             }
             Action::AddGraph => self.execute(Command::AddGraph {
@@ -4298,8 +4383,7 @@ impl AppState {
             Action::CommitRenameSheet { sheet, name } => self.commit_rename_sheet(sheet, &name),
             Action::CancelRenameSheet => self.renaming_sheet = None,
             Action::DuplicateSheet(sheet) => self.duplicate_sheet(sheet),
-            Action::RequestDeleteSheet(sheet) => self.request_delete_sheet(sheet),
-            Action::ConfirmDeleteSheet(accept) => self.confirm_delete_sheet(accept),
+            Action::DeleteSheet(sheet) => self.delete_sheet(sheet),
             Action::RenameObject { id, name } => self.rename_object(id, &name),
             Action::RenameObjects(changes) => self.rename_objects(changes),
             Action::CopyObjects(ids) => self.copy_objects(&ids),
@@ -4311,13 +4395,7 @@ impl AppState {
             Action::ShowSeriesData { graph, series } => {
                 self.reveal_books(series_data_books(self.tree(), graph, series));
             }
-            Action::DeleteObjects(ids) => self.request_delete_objects(ids),
-            Action::ConfirmDeleteObjects(accept) => {
-                let ids = std::mem::take(&mut self.pending_object_delete);
-                if accept {
-                    self.delete_objects(&ids);
-                }
-            }
+            Action::DeleteObjects(ids) => self.delete_objects(&ids),
             Action::MoveObjects { ids, parent } => self.move_objects(&ids, parent),
             Action::CommitCell { column, row, text } => {
                 self.commit_cell(column, row, text);
@@ -4814,11 +4892,10 @@ impl AppState {
             Ok(snapshot) => {
                 if self.snapshot.epoch != snapshot.epoch {
                     self.renaming_sheet = None;
-                    self.pending_sheet_delete = None;
                     self.pending_row_drop = None;
                     self.pending_calculation_delete = None;
                     self.pending_stale_export = None;
-                    self.pending_object_delete.clear();
+                    self.pending_overwrite = None;
                     self.object_clipboard_output = None;
                     self.copied_objects.clear();
                 }
@@ -5889,7 +5966,9 @@ impl AppState {
     /// Le dernier geste a-t-il échoué ? Erreur dans le pied du dialogue ou
     /// dans la barre d'état.
     pub(crate) fn last_action_failed(&self) -> bool {
-        self.dialog_error.is_some() || self.status.as_ref().is_some_and(|status| status.is_error)
+        self.dialog_error.is_some()
+            || self.alert.is_some()
+            || self.status.as_ref().is_some_and(|status| status.is_error)
     }
 
     /// Envoie une commande à l'acteur et rend compte du résultat.
@@ -5938,6 +6017,9 @@ impl AppState {
         }
     }
 
+    /// Enregistre ; puis poursuit le geste qui attendait l'enregistrement
+    /// (réponse Save, F4). Un échec est un échec grave (M8) : dialogue
+    /// bloquant, et le geste en attente est abandonné.
     fn save(&mut self) {
         let path = PathBuf::from(&self.path);
         match self.handle.save(&path) {
@@ -5947,8 +6029,17 @@ impl AppState {
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));
                 let text = crate::tr!("status-saved", path = self.path.as_str());
                 self.notice(text);
+                if let Some(gesture) = self.after_save.take() {
+                    self.perform_unsaved(gesture);
+                }
             }
-            Err(err) => self.fail(errors::session::error_message(&err)),
+            Err(err) => {
+                self.after_save = None;
+                self.alert = Some(Alert {
+                    kind: AlertKind::SaveFailed,
+                    message: errors::session::error_message(&err),
+                });
+            }
         }
     }
 
@@ -5993,12 +6084,25 @@ impl AppState {
     /// Voir [`Action::ExportGraph`]. Mesure et compose comme l'écran : même
     /// taille logique (`DEFAULT_SIZE`, celle où `GraphView::paint_scaled`
     /// met la figure en page), mêmes polices.
+    ///
+    /// Le sélecteur natif demande avant d'écraser le nom saisi ; l'extension
+    /// ajoutée ici donne un autre fichier, qu'il n'a pas vu : s'il existe,
+    /// l'export attend la confirmation (F3, [`Action::ConfirmOverwrite`]).
     fn export_graph(&mut self, mut path: PathBuf, spec: &PlotSpec) {
         if path.extension().is_none() {
             path.set_extension("svg");
+            if path.exists() {
+                self.pending_overwrite = Some((path, Box::new(spec.clone())));
+                return;
+            }
         }
+        self.write_graph_export(&path, spec);
+    }
+
+    /// L'écriture de l'export, sans plus de question.
+    fn write_graph_export(&mut self, path: &std::path::Path, spec: &PlotSpec) {
         let Some(format) = stokesforge_render_svg::ExportFormat::from_path(
-            &path,
+            path,
             self.png_export_scale,
             self.svg_text_mode(),
         ) else {
@@ -6011,7 +6115,7 @@ impl AppState {
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         match stokesforge_render_svg::export_to_file(
-            &path,
+            path,
             &plot,
             stokesforge_render_svg::DEFAULT_SIZE,
             &measurer,
@@ -6114,7 +6218,9 @@ impl AppState {
         self.fail(errors::clipboard::error_message(error));
     }
 
-    fn load(&mut self) {
+    /// Recharge le fichier courant. Un échec de lecture est un échec grave
+    /// (M8) : dialogue bloquant ; rend `false`.
+    fn load(&mut self) -> bool {
         let path = PathBuf::from(&self.path);
         match self.handle.load(&path) {
             Ok(_) => {
@@ -6127,8 +6233,24 @@ impl AppState {
                 self.refresh();
                 self.saved_revision =
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));
+                true
             }
-            Err(err) => self.fail(errors::session::error_message(&err)),
+            Err(err) => {
+                self.alert = Some(Alert {
+                    kind: AlertKind::OpenFailed,
+                    message: errors::session::error_message(&err),
+                });
+                false
+            }
+        }
+    }
+
+    /// Ouvre `path` ; un fichier illisible laisse le projet **et** le chemin
+    /// courants (un Ctrl+S suivant n'écrase pas le fichier choisi).
+    fn open_project(&mut self, path: String) {
+        let previous = std::mem::replace(&mut self.path, path);
+        if !self.load() {
+            self.path = previous;
         }
     }
 
@@ -6138,15 +6260,88 @@ impl AppState {
         !self.script_running() && self.import_job.is_none() && !self.snapshot.history.in_macro
     }
 
-    pub fn new_project_pending(&self) -> bool {
-        self.new_project_pending
+    /// Le geste qui attend la réponse « Discard Changes · Cancel · Save »
+    /// (F4, #229).
+    pub fn unsaved_pending(&self) -> Option<&UnsavedGesture> {
+        self.unsaved_pending.as_ref()
     }
 
-    fn request_new_project(&mut self, pending_edits: bool) {
+    /// L'échec grave à dire (M8, #229).
+    pub fn alert(&self) -> Option<&Alert> {
+        self.alert.as_ref()
+    }
+
+    /// Le fichier qu'un export écraserait, en attente de confirmation (F3).
+    pub fn pending_overwrite(&self) -> Option<&std::path::Path> {
+        self.pending_overwrite
+            .as_ref()
+            .map(|(path, _)| path.as_path())
+    }
+
+    /// Un dialogue bloquant de l'application attend-il une réponse
+    /// (confirmation, choix d'axe, échec grave) ? Rien d'autre n'agit alors.
+    pub fn blocking_dialog(&self) -> bool {
+        self.unsaved_pending.is_some()
+            || self.pending_row_drop.is_some()
+            || self.alert.is_some()
+            || self.pending_overwrite.is_some()
+    }
+
+    /// Plus rien ne retient l'application (Quit accepté) ; une seule fois.
+    pub fn take_quit_ready(&mut self) -> bool {
+        std::mem::take(&mut self.quit_ready)
+    }
+
+    /// Un geste qui remplacerait ou fermerait le projet (F3) : sans travail à
+    /// perdre il s'applique, sinon il attend la réponse « Discard Changes ·
+    /// Cancel · Save ».
+    fn request_unsaved(&mut self, gesture: UnsavedGesture, pending_edits: bool) {
         self.refresh();
-        if !self.can_new_project() {
+        if gesture == UnsavedGesture::NewProject && !self.can_new_project() {
             return;
         }
+        if self.has_unsaved_work(pending_edits) {
+            self.unsaved_pending = Some(gesture);
+        } else {
+            self.perform_unsaved(gesture);
+        }
+    }
+
+    /// Voir [`Action::ConfirmUnsaved`]. Save sans fichier : le geste attend le
+    /// fichier choisi (la fenêtre ouvre le sélecteur, puis `Action::Save`) ;
+    /// Cancel oublie aussi un geste qui attendait un enregistrement.
+    fn confirm_unsaved(&mut self, choice: UnsavedChoice) {
+        let gesture = self.unsaved_pending.take();
+        if choice == UnsavedChoice::Cancel {
+            self.after_save = None;
+            return;
+        }
+        let Some(gesture) = gesture else {
+            return;
+        };
+        match choice {
+            UnsavedChoice::Discard => self.perform_unsaved(gesture),
+            UnsavedChoice::Save => {
+                self.after_save = Some(gesture);
+                if !self.path.is_empty() {
+                    self.save();
+                }
+            }
+            UnsavedChoice::Cancel => {}
+        }
+    }
+
+    fn perform_unsaved(&mut self, gesture: UnsavedGesture) {
+        match gesture {
+            UnsavedGesture::NewProject => self.new_project(),
+            UnsavedGesture::Open(path) => self.open_project(path),
+            UnsavedGesture::Quit => self.quit_ready = true,
+        }
+    }
+
+    /// Du travail serait-il perdu : changements depuis l'enregistrement, ou
+    /// saisie en cours (ici ou dans une vue, `pending_edits`) ?
+    fn has_unsaved_work(&self, pending_edits: bool) -> bool {
         let has_content = self
             .snapshot
             .tree
@@ -6157,16 +6352,11 @@ impl AppState {
             .map_or(has_content || self.snapshot.revision != 0, |saved| {
                 saved != (self.snapshot.revision, self.snapshot.geometry_revision)
             });
-        if changed
+        changed
             || pending_edits
             || self.editing.is_some()
             || self.note_editing.is_some()
             || self.header_editing.is_some()
-        {
-            self.new_project_pending = true;
-        } else {
-            self.new_project();
-        }
     }
 
     fn new_project(&mut self) {
@@ -6226,23 +6416,20 @@ impl AppState {
         std::mem::take(&mut self.copied_objects)
     }
 
-    /// Objets en attente de confirmation de suppression.
-    pub fn pending_object_delete(&self) -> &[NodeId] {
-        &self.pending_object_delete
-    }
-
-    /// Graphes qui utilisent des colonnes des sous-arbres indiqués.
+    /// Graphes **restants** qui utilisent des colonnes des sous-arbres
+    /// indiqués (un graphe supprimé avec eux n'est pas nommé).
     pub fn object_users(&self, ids: &[NodeId]) -> Vec<String> {
-        let columns: std::collections::HashSet<_> = ids
+        let removed: std::collections::HashSet<_> = ids
             .iter()
             .flat_map(|id| self.tree().walk(*id).unwrap_or_default())
             .collect();
         self.tree()
             .walk_all()
             .into_iter()
+            .filter(|id| !removed.contains(id))
             .filter_map(|id| self.tree().node(id))
             .filter(|node| match node.kind() {
-                NodeKind::Graph { spec, .. } => columns.iter().any(|id| spec.references(*id)),
+                NodeKind::Graph { spec, .. } => removed.iter().any(|id| spec.references(*id)),
                 _ => false,
             })
             .map(|node| node.name().to_string())
@@ -6463,37 +6650,22 @@ impl AppState {
         self.refresh();
     }
 
-    fn request_delete_objects(&mut self, ids: Vec<NodeId>) {
-        let ids = self.object_targets(&ids);
-        if ids.is_empty() {
+    /// Supprime sans confirmation (F3, #229) : un seul Ctrl+Z rend tout. Le
+    /// message nomme les graphes restants qui en utilisaient les données.
+    fn delete_objects(&mut self, ids: &[NodeId]) {
+        let targets = self.object_targets(ids);
+        if targets.is_empty() {
             return;
         }
-        if ids.len() > 1
-            || ids.iter().any(|id| {
-                self.tree()
-                    .walk(*id)
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|child| {
-                        self.tree()
-                            .node(*child)
-                            .is_some_and(|n| matches!(n.kind(), NodeKind::Workbook { .. }))
-                    })
-            })
-        {
-            self.pending_object_delete = ids;
-        } else {
-            self.delete_objects(&ids);
-        }
-    }
-
-    fn delete_objects(&mut self, ids: &[NodeId]) {
-        let commands = self
-            .object_targets(ids)
+        let users = self.object_users(&targets);
+        let commands = targets
             .into_iter()
             .map(|id| Command::RemoveNode { id })
             .collect();
         self.execute_object_group(MacroKind::DeleteObjects, commands);
+        if !users.is_empty() && !self.last_action_failed() {
+            self.notice(tr!("object-delete-used", graphs = users.join(", ")));
+        }
     }
 
     fn move_objects(&mut self, ids: &[NodeId], parent: NodeId) {
@@ -6539,11 +6711,6 @@ impl AppState {
     /// Feuille dont l'onglet est en cours de renommage.
     pub fn renaming_sheet(&self) -> Option<NodeId> {
         self.renaming_sheet
-    }
-
-    /// Feuille dont la suppression attend confirmation.
-    pub fn pending_sheet_delete(&self) -> Option<NodeId> {
-        self.pending_sheet_delete
     }
 
     /// La dernière feuille d'un classeur ne se supprime pas.
@@ -6650,23 +6817,19 @@ impl AppState {
         }
     }
 
-    fn request_delete_sheet(&mut self, sheet: NodeId) {
+    /// Voir [`Action::DeleteSheet`].
+    fn delete_sheet(&mut self, sheet: NodeId) {
         if self.sheet_book(sheet).is_none() {
             self.fail(tr!("sheet-invalid", id = sheet.to_string()));
         } else if !self.can_delete_sheet(sheet) {
             self.fail(tr!("sheet-delete-last"));
         } else {
-            self.pending_sheet_delete = Some(sheet);
-        }
-    }
-
-    fn confirm_delete_sheet(&mut self, accept: bool) {
-        let Some(sheet) = self.pending_sheet_delete.take() else {
-            return;
-        };
-        if accept && self.can_delete_sheet(sheet) {
+            let users = self.sheet_users(sheet);
             self.editing = None;
             self.execute(Command::RemoveNode { id: sheet });
+            if !users.is_empty() && !self.last_action_failed() {
+                self.notice(tr!("sheet-delete-used", graphs = users.join(", ")));
+            }
         }
     }
 

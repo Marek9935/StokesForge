@@ -138,6 +138,7 @@ mod analysis_forms;
 mod analysis_handles;
 mod analysis_menu;
 mod analysis_preview;
+mod confirmations;
 mod contents;
 mod curve_settings;
 mod dialogs;
@@ -180,7 +181,6 @@ use std::time::{Duration, Instant};
 
 use crate::file_picker::{FilePicker, PickRequest};
 use analysis_dialog::{analysis_window, calculation_delete_window};
-use dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
 use file_drop::{
     begin_file_drop, finish_file_drop, open_project_in_new_window, remember_recent_imports,
 };
@@ -215,7 +215,7 @@ use crate::color_picker::publish_saved_colors;
 use crate::errors;
 use crate::i18n;
 use crate::preferences::Preferences;
-use crate::state::{active_graph, Action, AppState, ImportDestination, RowAxis};
+use crate::state::{active_graph, Action, AppState, ImportDestination, UnsavedChoice};
 use crate::toolbar::{BarEnv, ToolbarLayout, ToolbarState};
 use crate::tr;
 
@@ -367,6 +367,11 @@ pub struct StokesForgeApp {
     autoquit: Option<Duration>,
     /// Instant du premier rendu, d'où se mesure le délai d'auto-fermeture.
     first_frame: Option<Instant>,
+    /// La fenêtre a demandé à se fermer (croix, Alt+F4, Quit) : à poser à
+    /// l'état comme `Action::Quit` (#229).
+    close_requested: bool,
+    /// L'état a libéré la fermeture : la prochaine demande n'est plus retenue.
+    quit_confirmed: bool,
 }
 
 impl StokesForgeApp {
@@ -488,6 +493,8 @@ impl StokesForgeApp {
             hidden_tabs: HashSet::new(),
             autoquit,
             first_frame: None,
+            close_requested: false,
+            quit_confirmed: false,
             screenshot: std::env::var_os(SCREENSHOT_ENV).map(std::path::PathBuf::from),
             screenshot_delay: SCREENSHOT_SETTLE_FRAMES,
         }
@@ -543,11 +550,7 @@ impl StokesForgeApp {
 
     /// Consomme les raccourcis au niveau du contexte et en fait des actions.
     fn collect_shortcuts(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
-        if self.state.new_project_pending()
-            || self.state.pending_sheet_delete().is_some()
-            || self.state.pending_row_drop().is_some()
-            || !self.state.pending_object_delete().is_empty()
-        {
+        if self.state.blocking_dialog() {
             return;
         }
         let mut save_as = false;
@@ -674,13 +677,22 @@ impl StokesForgeApp {
         let Some((request, picked)) = self.file_picker.poll() else {
             return;
         };
-        let Some(paths) = picked else { return };
+        let Some(paths) = picked else {
+            // Sans fichier choisi, un geste qui attendait l'enregistrement
+            // (réponse Save, #229) est abandonné.
+            if matches!(request, PickRequest::SaveProjectAs { .. }) {
+                actions.push(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
+            }
+            return;
+        };
         let first = paths.first().cloned();
         match request {
             PickRequest::OpenProject => {
                 if let Some(path) = first {
-                    self.state.set_path(path.display().to_string());
-                    actions.push(Action::Load);
+                    actions.push(Action::OpenProject {
+                        path: path.display().to_string(),
+                        pending_edits: false,
+                    });
                 }
             }
             PickRequest::SaveProjectAs { .. } => {
@@ -823,6 +835,14 @@ impl StokesForgeApp {
         }
     }
 
+    /// Ferme la fenêtre quand l'état a accepté Quit (#229).
+    fn close_when_ready(&mut self, ctx: &egui::Context) {
+        if self.state.take_quit_ready() {
+            self.quit_confirmed = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
+
     /// Ferme la fenêtre si le délai d'auto-fermeture est écoulé.
     fn autoquit(&mut self, ctx: &egui::Context) {
         let Some(delay) = self.autoquit else {
@@ -831,6 +851,8 @@ impl StokesForgeApp {
         let start = *self.first_frame.get_or_insert_with(Instant::now);
         let elapsed = start.elapsed();
         if elapsed >= delay {
+            // Outillage de vérification : ne demande rien (#229).
+            self.quit_confirmed = true;
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         } else {
             // Sans événement d'entrée, egui ne redessine pas : il faut lui
@@ -841,6 +863,17 @@ impl StokesForgeApp {
 }
 
 impl eframe::App for StokesForgeApp {
+    /// Une fermeture de la fenêtre (croix, Alt+F4, File › Quit) passe par la
+    /// question « Discard Changes · Cancel · Save » (F3, #229) : retenue ici
+    /// (aussi fenêtre réduite, où seul `logic` tourne), elle devient
+    /// `Action::Quit`, et la fenêtre se ferme quand l'état la libère.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.quit_confirmed && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.close_requested = true;
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // `Context` est un `Arc` : le clone évite l’emprunt de lecture du Ui peint.
         let ctx = ui.ctx().clone();
@@ -857,6 +890,11 @@ impl eframe::App for StokesForgeApp {
         begin_file_drop(&ctx);
         self.poll_background_jobs(&ctx);
         self.poll_file_picker(&ctx, &mut actions);
+        if std::mem::take(&mut self.close_requested) {
+            actions.push(Action::Quit {
+                pending_edits: false,
+            });
+        }
         publish_saved_colors(&ctx, &self.state);
         graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tabs.keys());
         self.collect_shortcuts(&ctx, &mut actions);
@@ -901,6 +939,7 @@ impl eframe::App for StokesForgeApp {
         self.apply_window_requests(&ctx, open_requests, detach_requests, close_requests);
         self.blocking_confirmations(&ctx, &mut actions);
         self.dispatch_actions(&ctx, actions);
+        self.close_when_ready(&ctx);
         self.offer_figure(frame);
 
         self.sync_window_views();
@@ -1142,149 +1181,21 @@ impl StokesForgeApp {
 
     /// Une confirmation remplace toutes les actions déjà récoltées dans cette image.
     fn blocking_confirmations(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
-        if self.state.new_project_pending() {
-            // Seule la confirmation peut agir sur cette image : clavier,
-            // dépôts et requêtes des viewports détachés sont aussi bloqués.
+        if self.state.blocking_dialog() {
+            // Seul le dialogue peut agir sur cette image : clavier, dépôts et
+            // requêtes des viewports détachés sont aussi bloqués.
             actions.clear();
-            let label = tr!("new-project-discard");
-            let hint = tr!("new-project-discard", "hint");
-            let new_project_busy = tr!("disabled-new-project-busy");
-            match modal_dialog_with(
-                ctx,
-                egui::Id::new("stokesforge_new_project"),
-                &tr!("action-new-project"),
-                egui::vec2(480.0, 160.0),
-                DialogFooter {
-                    accept_label: &label,
-                    accept_hint: &hint,
-                    accept_enabled: self.state.can_new_project(),
-                    accept_disabled: Some(&new_project_busy),
-                },
-                |_| {},
-                |ui| {
-                    ui.label(tr!("new-project-confirm"));
-                },
-            ) {
-                DialogOutcome::Accept => actions.push(Action::ConfirmNewProject(true)),
-                DialogOutcome::Cancel => actions.push(Action::ConfirmNewProject(false)),
-                DialogOutcome::Open => {}
-            }
         }
-        if !self.state.pending_object_delete().is_empty() {
-            actions.clear();
-            let ids = self.state.pending_object_delete();
-            let names = ids
-                .iter()
-                .filter_map(|id| self.state.tree().node(*id))
-                .map(|n| n.name())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let users = self.state.object_users(ids);
-            let label = tr!("action-delete-project-object");
-            let hint = tr!("sheet-delete-accept", "hint");
-            match modal_dialog_with(
-                ctx,
-                egui::Id::new("stokesforge_delete_objects"),
-                &tr!("object-delete-title"),
-                egui::vec2(480.0, 170.0),
-                DialogFooter {
-                    accept_label: &label,
-                    accept_hint: &hint,
-                    accept_enabled: true,
-                    accept_disabled: None,
-                },
-                |_| {},
-                |ui| {
-                    ui.label(tr!("object-delete-confirm", names = names.as_str()));
-                    if !users.is_empty() {
-                        ui.label(tr!("object-delete-used", graphs = users.join(", ")));
-                    }
-                },
-            ) {
-                DialogOutcome::Accept => actions.push(Action::ConfirmDeleteObjects(true)),
-                DialogOutcome::Cancel => actions.push(Action::ConfirmDeleteObjects(false)),
-                DialogOutcome::Open => {}
-            }
-        }
-        if self.state.pending_row_drop().is_some() {
-            // Même blocage que les autres confirmations (#166) : « Create
-            // Axis » est le choix par défaut, « Use Present Axis » le
-            // second bouton, « Cancel » abandonne le dépôt.
-            actions.clear();
-            let label = tr!("row-drop-new-axis");
-            let hint = tr!("row-drop-new-axis", "hint");
-            let mut present = false;
-            match modal_dialog_with(
-                ctx,
-                egui::Id::new("stokesforge_row_drop"),
-                &tr!("row-drop-title"),
-                egui::vec2(480.0, 170.0),
-                DialogFooter {
-                    accept_label: &label,
-                    accept_hint: &hint,
-                    accept_enabled: true,
-                    accept_disabled: None,
-                },
-                |ui| {
-                    if ui
-                        .button(tr!("row-drop-present-axis"))
-                        .on_hover_text(tr!("row-drop-present-axis", "hint"))
-                        .clicked()
-                    {
-                        present = true;
-                    }
-                },
-                |ui| {
-                    ui.label(tr!("row-drop-confirm"));
-                },
-            ) {
-                _ if present => actions.push(Action::ConfirmRowDrop(Some(RowAxis::Present))),
-                DialogOutcome::Accept => actions.push(Action::ConfirmRowDrop(Some(RowAxis::New))),
-                DialogOutcome::Cancel => actions.push(Action::ConfirmRowDrop(None)),
-                DialogOutcome::Open => {}
-            }
-        }
-        if let Some(sheet) = self.state.pending_sheet_delete() {
-            actions.clear();
-            let name = self
-                .state
-                .tree()
-                .node(sheet)
-                .map(|node| node.name().to_string())
-                .unwrap_or_default();
-            let users = self.state.sheet_users(sheet);
-            let label = tr!("sheet-delete-accept");
-            let hint = tr!("sheet-delete-accept", "hint");
-            match modal_dialog_with(
-                ctx,
-                egui::Id::new("stokesforge_delete_sheet"),
-                &tr!("sheet-delete-title"),
-                egui::vec2(480.0, 170.0),
-                DialogFooter {
-                    accept_label: &label,
-                    accept_hint: &hint,
-                    accept_enabled: true,
-                    accept_disabled: None,
-                },
-                |_| {},
-                |ui| {
-                    ui.label(tr!("sheet-delete-confirm", name = name.as_str()));
-                    if !users.is_empty() {
-                        ui.add_space(crate::theme::SPACE_ITEM);
-                        ui.label(tr!("sheet-delete-used", graphs = users.join(", ")));
-                    }
-                },
-            ) {
-                DialogOutcome::Accept => actions.push(Action::ConfirmDeleteSheet(true)),
-                DialogOutcome::Cancel => actions.push(Action::ConfirmDeleteSheet(false)),
-                DialogOutcome::Open => {}
-            }
-        }
+        confirmations::show(ctx, &self.state, actions);
     }
 
-    /// La saisie des vues externes compte dans la confirmation de nouveau projet.
+    /// La saisie des vues externes compte dans la question « Discard Changes ·
+    /// Cancel · Save » de New Project, Open… et Quit (#229).
     fn prepare_new_project_action(&self, ctx: &egui::Context, action: Action) -> Action {
-        if let Action::NewProject { pending_edits } = action {
+        if let Action::NewProject { pending_edits }
+        | Action::OpenProject { pending_edits, .. }
+        | Action::Quit { pending_edits } = action
+        {
             // Une saisie dans un viewport détaché, ou un texte du graphe,
             // n'est pas encore dans l'instantané d'AppState. La signaler
             // pour demander confirmation même si le modèle est enregistré.
@@ -1307,7 +1218,14 @@ impl StokesForgeApp {
                         }) || model.graph_view.as_ref().is_some_and(&graph_editing)
                     })
                 });
-            Action::NewProject { pending_edits }
+            match action {
+                Action::OpenProject { path, .. } => Action::OpenProject {
+                    path,
+                    pending_edits,
+                },
+                Action::Quit { .. } => Action::Quit { pending_edits },
+                _ => Action::NewProject { pending_edits },
+            }
         } else {
             action
         }
@@ -1317,7 +1235,17 @@ impl StokesForgeApp {
     fn dispatch_actions(&mut self, ctx: &egui::Context, actions: Vec<Action>) {
         for action in actions {
             // Sans destination, « Enregistrer » demande d'abord où écrire ; la
-            // réponse du sélecteur pousse ensuite `Action::Save` (#192).
+            // réponse du sélecteur pousse ensuite `Action::Save` (#192). La
+            // réponse Save à « Discard Changes · Cancel · Save » (#229) fait
+            // de même, une fois que l'état a noté le geste à poursuivre.
+            let action = if matches!(action, Action::ConfirmUnsaved(UnsavedChoice::Save))
+                && self.state.path().is_empty()
+            {
+                self.state.dispatch(action);
+                Action::Save
+            } else {
+                action
+            };
             let action = if matches!(action, Action::Save) && self.state.path().is_empty() {
                 Action::PickFile(PickRequest::SaveProjectAs {
                     suggested: suggested_file_name(self.state.path()),
@@ -1381,9 +1309,14 @@ impl StokesForgeApp {
         };
         let revision_before = self.state.revision();
         let epoch_before = self.state.snapshot().epoch;
+        // Enregistrer peut poursuivre un New Project ou un Open… (#229).
         let replaces_project = matches!(
             action,
-            Action::NewProject { .. } | Action::ConfirmNewProject(true)
+            Action::NewProject { .. }
+                | Action::OpenProject { .. }
+                | Action::Load
+                | Action::Save
+                | Action::ConfirmUnsaved(_)
         );
         // L'historique et les gestes qui changent le rang des séries ou la
         // composition d'un groupe (#197, dont sa suppression : plusieurs
@@ -1506,11 +1439,7 @@ impl StokesForgeApp {
         if replaces_project && self.state.snapshot().epoch != epoch_before {
             self.forget_project_views(ctx);
         }
-        if self.state.new_project_pending()
-            || self.state.pending_sheet_delete().is_some()
-            || self.state.pending_row_drop().is_some()
-            || !self.state.pending_object_delete().is_empty()
-        {
+        if self.state.blocking_dialog() {
             ctx.request_repaint();
             return true;
         }
@@ -1656,6 +1585,7 @@ mod tests {
     use super::graph_window::tests::graphe;
     use super::grid::{metadata_row_visible, set_metadata_row_visible};
     use super::*;
+    use crate::state::RowAxis;
     use crate::theme;
     use stokesforge_core::{Column, Project};
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
@@ -2015,12 +1945,15 @@ mod tests {
                 commit(),
             ],
         );
-        assert!(app.state.new_project_pending());
+        assert!(app.state.unsaved_pending().is_some());
         assert_eq!(app.state.cell_text(column, 0), before);
 
         // Témoin : une fois la confirmation annulée, la même saisie agit.
-        app.dispatch_actions(&context, vec![Action::ConfirmNewProject(false), commit()]);
-        assert!(!app.state.new_project_pending());
+        app.dispatch_actions(
+            &context,
+            vec![Action::ConfirmUnsaved(UnsavedChoice::Cancel), commit()],
+        );
+        assert!(app.state.unsaved_pending().is_none());
         assert_eq!(app.state.cell_text(column, 0), "42");
         session.shutdown().unwrap();
     }
@@ -2124,12 +2057,10 @@ mod tests {
         assert!(!app.floating_tabs.contains(&Tab::Graph(graph)));
         assert!(!app.detached_tabs.contains_key(&Tab::Graph(graph)));
         app.open_tab(Tab::Book(book));
+        assert!(app.floating_tabs.contains(&Tab::Book(book)), "témoin");
+        // Une suppression annulable ne demande rien (F3, #229).
         app.dispatch_actions(&context, vec![Action::DeleteObjects(vec![book])]);
-        assert!(
-            app.floating_tabs.contains(&Tab::Book(book)),
-            "en attente de confirmation"
-        );
-        app.dispatch_actions(&context, vec![Action::ConfirmDeleteObjects(true)]);
+        assert!(!app.state.tree().contains(book));
         assert!(!app.floating_tabs.contains(&Tab::Book(book)));
         app.dispatch_actions(&context, vec![Action::Undo]);
         assert!(app.state.tree().contains(book));
@@ -2259,6 +2190,72 @@ mod tests {
         assert!(app.floating_tabs.contains(&Tab::Book(opened)));
     }
 
+    /// F3 (#229) : fermer la fenêtre (croix, Alt+F4, File › Quit) est retenu
+    /// et devient `Action::Quit` ; avec du travail non enregistré, la question
+    /// « Discard Changes · Cancel · Save » s'ouvre et la fenêtre reste ;
+    /// Discard la libère, et la demande suivante n'est plus retenue.
+    #[test]
+    fn fermer_la_fenetre_demande_avant_de_perdre_le_travail() {
+        use eframe::App as _;
+        let (session, _) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        context.set_embed_viewports(false);
+        theme::install(&context);
+        egui_extras::install_image_loaders(&context);
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut image = |app: &mut StokesForgeApp, close: bool| {
+            let mut input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1100.0, 700.0),
+                )),
+                ..Default::default()
+            };
+            if close {
+                input
+                    .viewports
+                    .entry(egui::ViewportId::ROOT)
+                    .or_default()
+                    .events
+                    .push(egui::ViewportEvent::Close);
+            }
+            let mut output = context.run_ui(input, |ui| {
+                app.logic(ui.ctx(), &mut frame);
+                app.ui(ui, &mut frame);
+            });
+            output.textures_delta.clear();
+            output
+                .viewport_output
+                .get(&egui::ViewportId::ROOT)
+                .map(|viewport| viewport.commands.clone())
+                .unwrap_or_default()
+        };
+        let commandes = image(&mut app, true);
+        assert!(commandes.contains(&egui::ViewportCommand::CancelClose));
+        assert!(!commandes.contains(&egui::ViewportCommand::Close));
+        assert_eq!(
+            app.state.unsaved_pending(),
+            Some(&crate::state::UnsavedGesture::Quit)
+        );
+        app.dispatch_actions(
+            &context,
+            vec![Action::ConfirmUnsaved(UnsavedChoice::Discard)],
+        );
+        let commandes = image(&mut app, false);
+        assert!(
+            commandes.contains(&egui::ViewportCommand::Close),
+            "Discard : la fenêtre se ferme"
+        );
+        let commandes = image(&mut app, true);
+        assert!(
+            !commandes.contains(&egui::ViewportCommand::CancelClose),
+            "la fermeture libérée n'est plus retenue"
+        );
+        session.shutdown().unwrap();
+    }
+
     #[test]
     fn la_confirmation_peinte_vide_les_actions_de_l_image() {
         let (session, _) = graphe();
@@ -2349,29 +2346,42 @@ mod tests {
         theme::install(&context);
         egui_extras::install_image_loaders(&context);
         let mut frame = eframe::Frame::_new_kittest();
-        {
-            let mut paint = |events| {
-                let input = egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1100.0, 700.0),
-                    )),
-                    events,
-                    ..Default::default()
-                };
-                let mut output = context.run_ui(input, |ui| app.ui(ui, &mut frame));
-                output.textures_delta.clear();
+        let mut paint = |app: &mut StokesForgeApp, events| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1100.0, 700.0),
+                )),
+                events,
+                ..Default::default()
             };
-            paint(vec![egui::Event::Key {
+            let mut output = context.run_ui(input, |ui| app.ui(ui, &mut frame));
+            output.textures_delta.clear();
+            output
+        };
+        paint(
+            &mut app,
+            vec![egui::Event::Key {
                 key: egui::Key::N,
                 physical_key: None,
                 pressed: true,
                 repeat: false,
                 modifiers: egui::Modifiers::COMMAND,
-            }]);
-            paint(Vec::new()); // le dialogue est maintenant peint et peut recevoir Entrée
-        }
-        assert!(app.state.new_project_pending());
+            }],
+        );
+        // Le dialogue est maintenant peint (visible à la seconde image) : on
+        // y cherche Discard Changes.
+        paint(&mut app, Vec::new());
+        let output = paint(&mut app, Vec::new());
+        let discard = super::test_support::textes(&output.shapes)
+            .into_iter()
+            .find(|texte| texte.texte == tr!("unsaved-discard"))
+            .expect("Discard Changes peint")
+            .centre;
+        assert_eq!(
+            app.state.unsaved_pending(),
+            Some(&crate::state::UnsavedGesture::NewProject)
+        );
         assert!(app.state.tree().node(graph).is_some());
         // Témoins : sans eux, les assertions de vide plus bas passeraient
         // aussi sur des tables qui n'ont jamais rien contenu.
@@ -2382,22 +2392,15 @@ mod tests {
         assert!(app.floating_rects.contains_key(&graph));
         assert!(app.floating_tabs.contains(&Tab::Graph(graph)));
         assert!(app.detached_tabs.contains_key(&Tab::Book(book)));
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1100.0, 700.0),
-            )),
-            events: vec![egui::Event::Key {
-                key: egui::Key::Enter,
-                physical_key: None,
-                pressed: true,
-                repeat: false,
-                modifiers: egui::Modifiers::NONE,
-            }],
-            ..Default::default()
+        paint(&mut app, vec![egui::Event::PointerMoved(discard)]);
+        let bouton = |pressed| egui::Event::PointerButton {
+            pos: discard,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
         };
-        let mut output = context.run_ui(input, |ui| app.ui(ui, &mut frame));
-        output.textures_delta.clear();
+        paint(&mut app, vec![bouton(true)]);
+        let output = paint(&mut app, vec![bouton(false)]);
         assert_eq!(app.state.tree().len(), 1);
         assert!(app.floating_tabs.is_empty());
         assert!(app.detached_tabs.is_empty());

@@ -122,7 +122,7 @@ fn sheet_menu(
             .on_hover_text(tr!("action-delete-sheet", "hint"))
             .on_disabled_hover_text(tr!("action-delete-sheet", "disabled"));
         if delete.clicked() {
-            actions.push(Action::RequestDeleteSheet(sheet));
+            actions.push(Action::DeleteSheet(sheet));
             ui.close();
         }
     });
@@ -260,7 +260,7 @@ pub(super) fn book_contents(
                 TabEvent::CommitRename(sheet, name) => Action::CommitRenameSheet { sheet, name },
                 TabEvent::CancelRename => Action::CancelRenameSheet,
                 TabEvent::Duplicate(sheet) => Action::DuplicateSheet(sheet),
-                TabEvent::Delete(sheet) => Action::RequestDeleteSheet(sheet),
+                TabEvent::Delete(sheet) => Action::DeleteSheet(sheet),
             })
         },
     );
@@ -829,7 +829,7 @@ mod tests {
             cliquer(&mut paint, ajouter);
             let suppression = actions
                 .iter()
-                .any(|action| matches!(action, Action::RequestDeleteSheet(s) if *s == sheet));
+                .any(|action| matches!(action, Action::DeleteSheet(s) if *s == sheet));
             assert_eq!(
                 suppression,
                 feuilles > 1,

@@ -65,7 +65,8 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/hover_help.rs` | brique commune de l'aide au survol d'un champ (#197) : `hover_help`, l'icône grisée à droite du champ dont la bulle montre le rappel |
 | `field_state.rs` (racine du crate, comme `color_picker.rs`) | brique commune de l'état d'un champ (#219) : `FieldIssue` (refusé rouge / ramené orange), `show_issue`, mémoire de 2 s (`flag`, `active`), cycle d'un champ texte validé (`edit_text`, `decide`, `Verdict`) |
 | `number_field.rs`, `quantities.rs` (racine du crate) | brique « nombre » (#220) : `number_field` (champ texte, flèche pleine dans le cadre si la grandeur a des valeurs, flèches du clavier, molette au survol qui suit la liste, liste dans une `egui::Area`) et la table des grandeurs (`Quantity`) ; construite sur `field_state::edit_text_with_arrow` ; `list_frame.rs` : flèche et fonds partagés avec les listes déroulantes (#234) |
-| `app/dialogs.rs` | brique commune des dialogues modaux : `modal_dialog`, `modal_dialog_with`, `modal_wizard` (assistant), `modal_read_only` (Close seul), corps commun `modal_frame` ; pied ordonné (F6), zone de message (erreur de `AppState::dialog_error`, sinon raison du principal grisé), Échap à deux niveaux, géométrie par sorte de dialogue dans les préférences et focus initial sur le premier champ (#228) ; `sync_dialogs`, appelé par `show_edit_dialogs`, relie pied, préférences et état |
+| `app/confirmations.rs` | dialogues bloquants de l'application (#229) : « Discard Changes · Cancel · Save », échec grave (M8), écrasement d'un export, choix d'axe d'un dépôt de lignes ; classement confirmation / choix en tête du module |
+| `app/dialogs.rs` | brique commune des dialogues modaux : `modal_dialog`, `modal_dialog_with`, `modal_wizard` (assistant), `modal_read_only` (Close seul), `modal_confirm` (Cancel par défaut, verbe destructeur), `modal_save_changes` (trio, Entrée = Save), `modal_alert` (M8), corps commun `modal_frame` ; pied ordonné (F6), zone de message (erreur de `AppState::dialog_error`, sinon raison du principal grisé), Échap à deux niveaux, géométrie par sorte de dialogue dans les préférences et focus initial sur le premier champ (#228) ; `sync_dialogs`, appelé par `show_edit_dialogs`, relie pied, préférences et état |
 | `app/form.rs` | brique commune du formulaire (#227) : `form` et `Form` (grille à deux colonnes : `row`, `field`, `checkbox`, `color`, `note`, `section`, `enabled`), choix exclusif fixe `choice` / `choice_by` (radios pour 2–3 options, liste dès 4, `choice_layout`) |
 | `app/tab_strip.rs` | brique commune de la bande d'onglets : `tab_strip`, `tab_strip_with` (`TabOps`, `TabEvent`) |
 | `app/menu_sections.rs` | brique commune des menus : `MenuSections::section` (seul trait de séparation, #155), `menu_choice` (coche seule d'un choix exclusif, C3, #227) |
@@ -310,8 +311,13 @@ la taille des fenêtres de contenu sont enregistrées dans le projet (voir
 **File › New › New Project** (« Fichier › Nouveau projet », Ctrl+N) remplace le
 projet courant dans la même fenêtre. La barre Fichier offre le même geste.
 Un projet contenant du travail non enregistré, y compris une saisie locale
-dans une fenêtre détachée ou un texte du graphique, demande confirmation ; Annuler,
-Échap ou la croix conservent le projet. Le repère est conservateur : toute
+dans une fenêtre détachée ou un texte du graphique, demande « Discard Changes ·
+Cancel · Save » (#229 ; Entrée = Save, qui enregistre puis poursuit) ; Cancel,
+Échap ou la croix conservent le projet. File › Open…, File › Quit et la
+fermeture de la fenêtre posent la même question (`Action::OpenProject`,
+`Action::Quit`, `app/confirmations.rs`) ; un projet illisible ou un
+enregistrement raté s'annonce par un dialogue bloquant (M8, `AppState::alert`)
+et garde le projet et le chemin courants. Le repère est conservateur : toute
 révision depuis l'enregistrement, y compris une annulation, ou une géométrie
 modifiée demande confirmation. Il ne conserve aucun ancien arbre en mémoire.
 Un nouveau projet encore vide ne demande pas de confirmation.
@@ -540,8 +546,8 @@ Gestes sur une feuille (#106, retrait de F2 selon #130) : double-clic sur l'ongl
 Renommer (édition en place, `AppState::renaming_sheet`, validée par Entrée ou
 en quittant le champ, abandonnée par Échap) ; Ctrl+D ou menu Dupliquer (« … copie
 N », premier numéro libre, la copie est affichée) ; Supprimer par le menu seul,
-avec confirmation qui nomme les graphes qui en tracent des colonnes, grisé
-sur la dernière feuille. Nom vide ou déjà pris : ancien nom conservé et message,
+sans confirmation (annulable, #229 ; le message nomme les graphes qui en
+traçaient des colonnes), grisé sur la dernière feuille. Nom vide ou déjà pris : ancien nom conservé et message,
 aucune entrée d'historique. Mêmes gestes dans le menu *Workbook* (miroir du clic
 droit, `workbook_menu`) ; la bande les offre par `tab_strip_with`
 (`TabOps`/`TabEvent`), qui ne touche jamais au modèle.
@@ -630,8 +636,8 @@ leur descendance. Un graphe copié dans son projet garde ses références aux
 colonnes originales. Un classeur dupliqué conserve son état ouvert ou fermé ;
 les graphes qui l'utilisent ne sont pas dupliqués. Supprimer ferme les fenêtres
 flottantes et détachées ; annuler restaure les objets sans rouvrir les fenêtres.
-Les classeurs et les sélections multiples demandent confirmation, en nommant
-les graphes utilisateurs ; une note, matrice ou graphe seul se supprime directement.
+Rien ne demande confirmation (un seul Ctrl+Z rend tout, #229) ; le message
+nomme les graphes restants qui en utilisaient les données.
 
 Copier capture le contenu au moment du geste, puis l'écrit dans le presse-papiers
 système ; le collage lit celui-ci, sans relecture des objets source. Les classeurs,
@@ -1358,8 +1364,8 @@ et non sur les lignes peintes ; la gouttière reste libre), curseurs `Grab` /
 ligne = une série** (`SeriesSpec::row`), nommée « Row n » à la création. Axe :
 un graphe **sans X** (aucune série à abscisse de colonne ni série ligne) reçoit
 les séries sur l'axe X principal du calque actif, sans question ; un graphe
-**avec X** pose le dialogue d'`StokesForgeApp::blocking_confirmations`
-(`modal_dialog_with`) — « Create Axis » (défaut) ajoute un calque superposé à
+**avec X** pose le dialogue de choix de `app/confirmations.rs`
+(`modal_dialog_with`, appelé par `StokesForgeApp::blocking_confirmations`) — « Create Axis » (défaut) ajoute un calque superposé à
 axe X en haut (`OverlaySpec { x_top, y_right: false }`), « Use Present Axis »
 garde le calque visé, « Cancel » abandonne (`Action::ConfirmRowDrop`). Une
 seule `SetPlotSpec` : un seul pas d'annulation, calque compris. **Menus** : sur

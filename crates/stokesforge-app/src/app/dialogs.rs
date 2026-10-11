@@ -22,6 +22,12 @@
 //!   préférences : reprises à l'ouverture, rendues à la fermeture par
 //!   [`sync_dialogs`] (`Action::RememberDialogGeometry`). La sorte est tirée
 //!   de l'identifiant du dialogue ;
+//! - **confirmations** (#229, F4, F5 → R4, R5) : [`modal_confirm`] — Cancel
+//!   est le bouton par défaut (encadré ; Entrée et Échap l'actionnent), le
+//!   verbe (Delete…) a le style normal et rougit au survol **et** au focus
+//!   clavier ; [`modal_save_changes`] — « Discard Changes · Cancel · Save »,
+//!   seule exception écrite : Entrée = Save ; [`modal_alert`] — l'échec grave
+//!   (M8), un bouton Close et une action possible ;
 //! - **focus initial** (F9) : le premier champ de saisie l'a à l'ouverture.
 //!   egui ne dit pas quels widgets sont des champs texte : à l'ouverture, une
 //!   ancre invisible prend le focus en tête du contenu, puis le focus avance
@@ -78,15 +84,43 @@ struct DialogGeometry {
     size: egui::Vec2,
 }
 
-/// La disposition du pied (F2, F6).
+/// La disposition du pied (F2, F4, F6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FooterLayout {
     /// `[secondaires] [message] [Cancel] [principal]`.
     Dialog,
     /// `[Cancel] [message] [Back · Next] [Finish]`.
     Wizard,
-    /// `[message] [Close]` : lecture seule (F2).
+    /// `[secondaires] [message] [Close]` : lecture seule (F2), échec grave
+    /// (M8, l'action possible en secondaire).
     ReadOnly,
+    /// `[message] [Cancel] [verbe]` : confirmation (F4, F5) ; Cancel est le
+    /// bouton par défaut, Entrée l'actionne ; le verbe est destructeur.
+    Confirm,
+    /// `[Discard Changes] [message] [Cancel] [Save]` (F4) : Entrée = Save,
+    /// Discard Changes destructeur.
+    SaveChanges,
+}
+
+/// Issue d'une image du corps commun : celle d'un [`DialogOutcome`], plus le
+/// bouton secondaire de la brique (Discard Changes).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrameOutcome {
+    Open,
+    Accept,
+    Cancel,
+    Secondary,
+}
+
+impl FrameOutcome {
+    /// Pour les dialogues sans secondaire de brique.
+    fn dialog(self) -> DialogOutcome {
+        match self {
+            Self::Open | Self::Secondary => DialogOutcome::Open,
+            Self::Accept => DialogOutcome::Accept,
+            Self::Cancel => DialogOutcome::Cancel,
+        }
+    }
 }
 
 /// Le message du pied (M7, F10) : l'erreur passe devant la raison du bouton
@@ -199,6 +233,7 @@ pub(super) fn modal_dialog_with(
         extra_buttons,
         add_contents,
     )
+    .dialog()
 }
 
 /// Un **assistant** (F6) : Cancel à gauche, les boutons d'étape
@@ -224,6 +259,7 @@ pub(super) fn modal_wizard(
         step_buttons,
         add_contents,
     )
+    .dialog()
 }
 
 /// Une fenêtre modale en **lecture seule** (F2) : un seul bouton, Close
@@ -253,6 +289,151 @@ pub(super) fn modal_read_only(
         |_| {},
         add_contents,
     )
+    .dialog()
+}
+
+/// Issue d'une image de [`modal_confirm`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ConfirmOutcome {
+    /// Toujours ouvert.
+    Open,
+    /// Le verbe (Delete…) : seulement par son bouton, jamais par Entrée.
+    Confirm,
+    /// Cancel (bouton par défaut, Entrée), croix ou Échap.
+    Cancel,
+}
+
+/// Une **confirmation** (F3–F5 → R4, R5) : seulement pour ce que Ctrl+Z ne
+/// rattrape pas. Pied `[Cancel] [verbe]` : Cancel est le bouton par défaut,
+/// encadré, et Entrée comme Échap l'actionnent ; le verbe (`verb`, sa bulle
+/// `verb_hint`) a le style normal et rougit au survol et au focus clavier.
+pub(super) fn modal_confirm(
+    ctx: &egui::Context,
+    id: egui::Id,
+    title: &str,
+    default_size: egui::Vec2,
+    verb: &str,
+    verb_hint: &str,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) -> ConfirmOutcome {
+    match modal_frame(
+        ctx,
+        id,
+        title,
+        default_size,
+        FooterLayout::Confirm,
+        DialogFooter {
+            accept_label: verb,
+            accept_hint: verb_hint,
+            accept_enabled: true,
+            accept_disabled: None,
+        },
+        |_| {},
+        add_contents,
+    ) {
+        FrameOutcome::Open | FrameOutcome::Secondary => ConfirmOutcome::Open,
+        FrameOutcome::Accept => ConfirmOutcome::Confirm,
+        FrameOutcome::Cancel => ConfirmOutcome::Cancel,
+    }
+}
+
+/// Issue d'une image de [`modal_save_changes`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum SaveChangesOutcome {
+    /// Toujours ouvert.
+    Open,
+    /// Discard Changes.
+    Discard,
+    /// Cancel, croix ou Échap.
+    Cancel,
+    /// Save (bouton par défaut : Entrée).
+    Save,
+}
+
+/// Le dialogue des changements non enregistrés (F4) : « Discard Changes ·
+/// Cancel · Save ». Exception écrite à R4 : Entrée = Save, Échap = Cancel ;
+/// Discard Changes, à gauche, rougit au survol et au focus clavier.
+pub(super) fn modal_save_changes(
+    ctx: &egui::Context,
+    id: egui::Id,
+    title: &str,
+    default_size: egui::Vec2,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) -> SaveChangesOutcome {
+    let label = tr!("unsaved-save");
+    let hint = tr!("unsaved-save", "hint");
+    match modal_frame(
+        ctx,
+        id,
+        title,
+        default_size,
+        FooterLayout::SaveChanges,
+        DialogFooter {
+            accept_label: &label,
+            accept_hint: &hint,
+            accept_enabled: true,
+            accept_disabled: None,
+        },
+        |_| {},
+        add_contents,
+    ) {
+        FrameOutcome::Open => SaveChangesOutcome::Open,
+        FrameOutcome::Accept => SaveChangesOutcome::Save,
+        FrameOutcome::Cancel => SaveChangesOutcome::Cancel,
+        FrameOutcome::Secondary => SaveChangesOutcome::Discard,
+    }
+}
+
+/// Issue d'une image de [`modal_alert`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AlertOutcome {
+    /// Toujours ouvert.
+    Open,
+    /// Close (Entrée), croix ou Échap : le message est lu.
+    Close,
+    /// L'action proposée.
+    Action,
+}
+
+/// Un **échec grave** hors fenêtre (M8) : dialogue bloquant, le message dans
+/// le contenu, un bouton Close (Entrée, Échap) et l'action possible
+/// (`action` : libellé et bulle), à gauche.
+pub(super) fn modal_alert(
+    ctx: &egui::Context,
+    id: egui::Id,
+    title: &str,
+    default_size: egui::Vec2,
+    action: (&str, &str),
+    add_contents: impl FnOnce(&mut egui::Ui),
+) -> AlertOutcome {
+    let label = tr!("dialog-close");
+    let hint = tr!("dialog-close", "hint");
+    let mut acted = false;
+    let outcome = modal_frame(
+        ctx,
+        id,
+        title,
+        default_size,
+        FooterLayout::ReadOnly,
+        DialogFooter {
+            accept_label: &label,
+            accept_hint: &hint,
+            accept_enabled: true,
+            accept_disabled: None,
+        },
+        |ui| {
+            acted = ui
+                .add(egui::Button::new(action.0).min_size(FOOTER_BUTTON_SIZE))
+                .on_hover_text(action.1)
+                .clicked();
+        },
+        add_contents,
+    );
+    match outcome {
+        _ if acted => AlertOutcome::Action,
+        FrameOutcome::Open | FrameOutcome::Secondary => AlertOutcome::Open,
+        FrameOutcome::Accept | FrameOutcome::Cancel => AlertOutcome::Close,
+    }
 }
 
 /// La sorte d'un dialogue, clé de sa géométrie dans les préférences (F8) :
@@ -347,7 +528,7 @@ fn modal_frame(
     footer_spec: DialogFooter<'_>,
     extra_buttons: impl FnOnce(&mut egui::Ui),
     add_contents: impl FnOnce(&mut egui::Ui),
-) -> DialogOutcome {
+) -> FrameOutcome {
     let screen = ctx.input(|input| input.content_rect());
     let geometry_id = id.with("geometry");
     let flash_id = id.with("flash_start");
@@ -528,8 +709,10 @@ fn modal_frame(
 
     // Échap : consommé par le sélecteur de couleur ou une liste ouverts (ils
     // le lisent avant), sinon il annule — sauf celui qui vient de sortir d'un
-    // champ texte (F7). Entrée valide, sauf pendant une saisie de texte (où
-    // elle termine la saisie).
+    // champ texte (F7). Entrée actionne le bouton par défaut, sauf pendant
+    // une saisie de texte (où elle termine la saisie) : le principal, ou
+    // Cancel d'une confirmation (R4). Un bouton du pied focalisé au clavier
+    // reçoit Entrée lui-même : son clic passe devant.
     let escape = !popup_open
         && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         && !editing_before;
@@ -537,15 +720,19 @@ fn modal_frame(
         && !keyboard_focus_outside_grid(ctx)
         && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     let outcome = if header_actions.close || escape {
-        DialogOutcome::Cancel
-    } else if (enter && footer_spec.accept_enabled) || clicks.accept {
-        DialogOutcome::Accept
-    } else if clicks.cancel {
-        DialogOutcome::Cancel
+        FrameOutcome::Cancel
+    } else if clicks.accept {
+        FrameOutcome::Accept
+    } else if clicks.secondary {
+        FrameOutcome::Secondary
+    } else if clicks.cancel || (enter && layout == FooterLayout::Confirm) {
+        FrameOutcome::Cancel
+    } else if enter && footer_spec.accept_enabled {
+        FrameOutcome::Accept
     } else {
-        DialogOutcome::Open
+        FrameOutcome::Open
     };
-    if outcome != DialogOutcome::Open {
+    if outcome != FrameOutcome::Open {
         let saved = SavedGeometry {
             x: geometry.pos.x,
             y: geometry.pos.y,
@@ -573,6 +760,8 @@ fn modal_frame(
 struct FooterClicks {
     accept: bool,
     cancel: bool,
+    /// Discard Changes (seul secondaire posé par la brique).
+    secondary: bool,
     ids: Vec<egui::Id>,
 }
 
@@ -587,20 +776,31 @@ fn paint_footer(
     extra_buttons: impl FnOnce(&mut egui::Ui),
 ) -> FooterClicks {
     let mut clicks = FooterClicks::default();
-    // Premier ajouté = le plus à droite : le bouton principal, par défaut.
-    let accept = egui::Button::new(spec.accept_label)
-        .fill(footer.visuals().selection.bg_fill)
-        .min_size(FOOTER_BUTTON_SIZE);
+    let default_fill = footer.visuals().selection.bg_fill;
+    // Premier ajouté = le plus à droite : le bouton principal — par défaut,
+    // sauf dans une confirmation, où il est destructeur et Cancel l'est (R4).
+    let confirm = layout == FooterLayout::Confirm;
     let response = footer
-        .add_enabled(spec.accept_enabled, accept)
-        .on_hover_text(spec.accept_hint)
-        .on_disabled_hover_text(spec.disabled_reason());
+        .scope(|ui| {
+            let mut accept = egui::Button::new(spec.accept_label).min_size(FOOTER_BUTTON_SIZE);
+            if confirm {
+                theme::destructive_button_visuals(ui.visuals_mut());
+            } else {
+                accept = accept.fill(default_fill);
+            }
+            ui.add_enabled(spec.accept_enabled, accept)
+                .on_hover_text(spec.accept_hint)
+                .on_disabled_hover_text(spec.disabled_reason())
+        })
+        .inner;
     clicks.ids.push(response.id);
     clicks.accept = response.clicked();
     let cancel = |ui: &mut egui::Ui, clicks: &mut FooterClicks| {
-        let response = ui
-            .add(egui::Button::new(tr!("dialog-cancel")).min_size(FOOTER_BUTTON_SIZE))
-            .on_hover_text(tr!("dialog-cancel", "hint"));
+        let mut button = egui::Button::new(tr!("dialog-cancel")).min_size(FOOTER_BUTTON_SIZE);
+        if confirm {
+            button = button.fill(default_fill);
+        }
+        let response = ui.add(button).on_hover_text(tr!("dialog-cancel", "hint"));
         clicks.ids.push(response.id);
         clicks.cancel = response.clicked();
     };
@@ -609,6 +809,29 @@ fn paint_footer(
             cancel(footer, &mut clicks);
             footer.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 extra_buttons(ui);
+                paint_footer_message(ui, message);
+            });
+        }
+        FooterLayout::Confirm => {
+            cancel(footer, &mut clicks);
+            footer.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                paint_footer_message(ui, message);
+            });
+        }
+        FooterLayout::SaveChanges => {
+            cancel(footer, &mut clicks);
+            footer.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                let response = ui
+                    .scope(|ui| {
+                        theme::destructive_button_visuals(ui.visuals_mut());
+                        ui.add(
+                            egui::Button::new(tr!("unsaved-discard")).min_size(FOOTER_BUTTON_SIZE),
+                        )
+                    })
+                    .inner
+                    .on_hover_text(tr!("unsaved-discard", "hint"));
+                clicks.ids.push(response.id);
+                clicks.secondary = response.clicked();
                 paint_footer_message(ui, message);
             });
         }
@@ -621,6 +844,7 @@ fn paint_footer(
         }
         FooterLayout::ReadOnly => {
             footer.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                extra_buttons(ui);
                 paint_footer_message(ui, message);
             });
         }
@@ -700,6 +924,31 @@ mod tests {
             .centre
     }
 
+    /// [`modal_frame`] rendu en [`DialogOutcome`].
+    #[expect(clippy::too_many_arguments)]
+    fn dialog_frame(
+        ctx: &egui::Context,
+        id: egui::Id,
+        title: &str,
+        default_size: egui::Vec2,
+        layout: FooterLayout,
+        footer_spec: DialogFooter<'_>,
+        extra_buttons: impl FnOnce(&mut egui::Ui),
+        add_contents: impl FnOnce(&mut egui::Ui),
+    ) -> DialogOutcome {
+        modal_frame(
+            ctx,
+            id,
+            title,
+            default_size,
+            layout,
+            footer_spec,
+            extra_buttons,
+            add_contents,
+        )
+        .dialog()
+    }
+
     /// Un dialogue de `layout` dont le bouton principal est `principal` (grisé
     /// avec la raison `raison` si `actif` est faux), un bouton supplémentaire
     /// « Autre » ; rend l'issue de l'image et ses textes.
@@ -713,7 +962,7 @@ mod tests {
         let mut issue = DialogOutcome::Open;
         let mut contenu = Some(contenu);
         let sortie = image_de(context, egui::vec2(800.0, 600.0), events, |ui| {
-            issue = modal_frame(
+            issue = dialog_frame(
                 ui.ctx(),
                 egui::Id::new("dialogue_pied"),
                 "Titre",
@@ -959,6 +1208,212 @@ mod tests {
             .expect("ouvert");
         assert_eq!(ouverte.pos, egui::pos2(40.0, 50.0));
         assert_eq!(ouverte.size, egui::vec2(420.0, 260.0));
+    }
+
+    /// Une confirmation (#229) : une image avec `events` ; rend l'issue et
+    /// les formes peintes.
+    fn confirmation(
+        context: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> (ConfirmOutcome, egui::FullOutput) {
+        let mut issue = ConfirmOutcome::Open;
+        let sortie = image_de(context, egui::vec2(800.0, 600.0), events, |ui| {
+            issue = modal_confirm(
+                ui.ctx(),
+                egui::Id::new("confirmation"),
+                "Supprimer le modèle",
+                egui::vec2(400.0, 160.0),
+                "Supprimer",
+                "Irréversible",
+                |ui| {
+                    ui.label("Supprimer « A » ?");
+                },
+            );
+        });
+        (issue, sortie)
+    }
+
+    /// Le trio « Discard Changes · Cancel · Save » : une image avec `events`.
+    fn trio(
+        context: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> (SaveChangesOutcome, egui::FullOutput) {
+        let mut issue = SaveChangesOutcome::Open;
+        let sortie = image_de(context, egui::vec2(800.0, 600.0), events, |ui| {
+            issue = modal_save_changes(
+                ui.ctx(),
+                egui::Id::new("trio"),
+                "Modifications",
+                egui::vec2(400.0, 160.0),
+                |ui| {
+                    ui.label("Enregistrer ?");
+                },
+            );
+        });
+        (issue, sortie)
+    }
+
+    /// Clique `cherche` (un texte peint par `peindre`) en trois images ; rend
+    /// la première issue autre que `ouvert`.
+    fn cliquer_texte<T: PartialEq + Copy>(
+        context: &egui::Context,
+        cherche: &str,
+        ouvert: T,
+        peindre: impl Fn(&egui::Context, Vec<egui::Event>) -> (T, egui::FullOutput),
+    ) -> T {
+        let (_, sortie) = peindre(context, Vec::new());
+        let pos = centre(&textes(&sortie.shapes), cherche);
+        let bouton = |pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        [
+            vec![egui::Event::PointerMoved(pos)],
+            vec![bouton(true)],
+            vec![bouton(false)],
+        ]
+        .into_iter()
+        .map(|events| peindre(context, events).0)
+        .find(|issue| *issue != ouvert)
+        .unwrap_or(ouvert)
+    }
+
+    /// R4 (#229) : dans une confirmation, Entrée **et** Échap font Cancel —
+    /// le bouton par défaut ; le verbe ne s'obtient que par son bouton
+    /// (témoin : le clic confirme).
+    #[test]
+    fn une_confirmation_s_annule_par_entree_comme_par_echap() {
+        for key in [egui::Key::Enter, egui::Key::Escape] {
+            let context = egui::Context::default();
+            for _ in 0..3 {
+                confirmation(&context, Vec::new());
+            }
+            assert_eq!(
+                confirmation(&context, vec![touche(key)]).0,
+                ConfirmOutcome::Cancel,
+                "{key:?}"
+            );
+        }
+        let context = egui::Context::default();
+        for _ in 0..3 {
+            confirmation(&context, Vec::new());
+        }
+        assert_eq!(
+            cliquer_texte(&context, "Supprimer", ConfirmOutcome::Open, confirmation),
+            ConfirmOutcome::Confirm
+        );
+    }
+
+    /// F4, exception écrite à R4 : dans « Discard Changes · Cancel · Save »,
+    /// Entrée = Save, Échap = Cancel ; Discard Changes par son bouton, à
+    /// gauche de Cancel et Save.
+    #[test]
+    fn le_trio_enregistre_par_entree_et_s_annule_par_echap() {
+        for (key, attendu) in [
+            (egui::Key::Enter, SaveChangesOutcome::Save),
+            (egui::Key::Escape, SaveChangesOutcome::Cancel),
+        ] {
+            let context = egui::Context::default();
+            for _ in 0..3 {
+                trio(&context, Vec::new());
+            }
+            assert_eq!(trio(&context, vec![touche(key)]).0, attendu, "{key:?}");
+        }
+        let context = egui::Context::default();
+        let mut sortie = None;
+        for _ in 0..3 {
+            sortie = Some(trio(&context, Vec::new()).1);
+        }
+        let peints = textes(&sortie.expect("peint").shapes);
+        let (abandon, annuler, enregistrer) = (
+            centre(&peints, &tr!("unsaved-discard")),
+            centre(&peints, &tr!("dialog-cancel")),
+            centre(&peints, &tr!("unsaved-save")),
+        );
+        assert!(abandon.x < annuler.x && annuler.x < enregistrer.x);
+        assert_eq!(
+            cliquer_texte(
+                &context,
+                &tr!("unsaved-discard"),
+                SaveChangesOutcome::Open,
+                trio
+            ),
+            SaveChangesOutcome::Discard
+        );
+    }
+
+    /// Un rectangle plein de `couleur` a-t-il été peint ?
+    fn rectangle_de(sortie: &egui::FullOutput, couleur: egui::Color32) -> bool {
+        sortie
+            .shapes
+            .iter()
+            .any(|peint| matches!(&peint.shape, egui::Shape::Rect(rect) if rect.fill == couleur))
+    }
+
+    /// R5 (#229) : le verbe destructeur a le style normal au repos, et rougit
+    /// au survol **et** au focus clavier (Tab), pointeur ailleurs.
+    #[test]
+    fn le_verbe_destructeur_rougit_au_survol_et_au_focus() {
+        let context = egui::Context::default();
+        let rouge = context.global_style().visuals.error_fg_color;
+        let mut sortie = None;
+        for _ in 0..3 {
+            sortie = Some(confirmation(&context, Vec::new()).1);
+        }
+        let sortie = sortie.expect("peint");
+        assert!(!rectangle_de(&sortie, rouge), "au repos : style normal");
+        let verbe = centre(&textes(&sortie.shapes), "Supprimer");
+        let survol = confirmation(&context, vec![egui::Event::PointerMoved(verbe)]).1;
+        assert!(rectangle_de(&survol, rouge), "survol");
+        let ailleurs = egui::pos2(5.0, 5.0);
+        let repos = confirmation(&context, vec![egui::Event::PointerMoved(ailleurs)]).1;
+        assert!(!rectangle_de(&repos, rouge), "témoin : pointeur parti");
+        let focus = (0..6).any(|_| {
+            let sortie = confirmation(&context, vec![touche(egui::Key::Tab)]).1;
+            rectangle_de(&confirmation(&context, Vec::new()).1, rouge)
+                || rectangle_de(&sortie, rouge)
+        });
+        assert!(focus, "focus clavier");
+    }
+
+    /// M8 : l'échec grave se ferme par Entrée (Close) ; son action est un
+    /// bouton à part.
+    #[test]
+    fn un_echec_grave_se_ferme_par_entree_et_propose_son_action() {
+        let alerte = |context: &egui::Context, events: Vec<egui::Event>| {
+            let mut issue = AlertOutcome::Open;
+            let sortie = image_de(context, egui::vec2(800.0, 600.0), events, |ui| {
+                issue = modal_alert(
+                    ui.ctx(),
+                    egui::Id::new("alerte"),
+                    "Échec",
+                    egui::vec2(400.0, 160.0),
+                    ("Réessayer", "Aide"),
+                    |ui| {
+                        ui.label("Raté");
+                    },
+                );
+            });
+            (issue, sortie)
+        };
+        let context = egui::Context::default();
+        for _ in 0..3 {
+            alerte(&context, Vec::new());
+        }
+        assert_eq!(
+            alerte(&context, vec![touche(egui::Key::Enter)]).0,
+            AlertOutcome::Close
+        );
+        let context = egui::Context::default();
+        for _ in 0..3 {
+            alerte(&context, Vec::new());
+        }
+        assert_eq!(
+            cliquer_texte(&context, "Réessayer", AlertOutcome::Open, alerte),
+            AlertOutcome::Action
+        );
     }
 
     /// Une image de 800 × 600 avec `events`, où `ui` dessine l'arrière-plan.

@@ -1851,9 +1851,12 @@ mod tests {
         assert!(couleur_du_texte(&output, &tr!("status-ready")).is_none());
         assert_ne!(couleur_du_texte(&output, "Avis"), Some(erreur), "témoin");
 
-        app.state.set_path("/chemin/introuvable/projet.stf".into());
-        app.state.dispatch(Action::Load);
-        let status = app.state.status().expect("un chargement raté se dit");
+        // Un geste refusé (la dernière feuille d'un classeur) ; un projet
+        // illisible, lui, est un échec grave dit par un dialogue (M8, #229).
+        let book = app.state.books()[0].0;
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        app.state.dispatch(Action::DeleteSheet(sheet));
+        let status = app.state.status().expect("un refus se dit");
         assert!(status.is_error);
         let text = status.text.clone();
         let output = barre_d_etat(&app, &ctx);

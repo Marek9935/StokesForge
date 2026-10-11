@@ -60,8 +60,13 @@ dit *comment* l'écrire. Points qui touchent les mots :
   « Group 2 ») ou un exemple de syntaxe, jamais une consigne ;
 - **état vide** : ce qui manque et le geste pour le créer ;
 - **unité** dans le libellé (« Line width (pt) », « Opacity (%) », « H (°) »), jamais en suffixe : la table des grandeurs (`quantities.rs`, #220) n'en porte pas ;
-- confirmation : Cancel + verbe (Delete, Discard Changes), jamais « Keep »
-  seul.
+- confirmation : Cancel + verbe (Delete, Replace, Discard Changes), jamais
+  « Keep » seul ; titre = le geste (« Delete Template », « Replace File »),
+  question qui nomme l'objet et dit « This cannot be undone » si c'est le
+  cas ; pas de confirmation pour un geste annulable (#229). Projet non
+  enregistré : clés `unsaved-*` (« Discard Changes · Cancel · Save ») ; échec
+  grave (M8) : `alert-*` — ce qui a échoué, ce qui est conservé, puis le
+  bouton d'action.
 
 Les codes R1–R16 de #217 ne sont pas les règles R1–R16 du guide des textes.
 

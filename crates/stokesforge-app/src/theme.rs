@@ -257,6 +257,20 @@ pub fn blocked_flash_color() -> Color32 {
     Color32::from_rgb(150, 28, 28)
 }
 
+/// Le bouton d'un geste destructeur (Delete, Discard Changes ; R5, #229) :
+/// style normal au repos, **rouge** au survol et au focus clavier (egui peint
+/// un widget focalisé avec le style `active`). À poser dans un `scope` qui ne
+/// contient que ce bouton.
+pub fn destructive_button_visuals(visuals: &mut egui::Visuals) {
+    let red = visuals.error_fg_color;
+    for state in [&mut visuals.widgets.hovered, &mut visuals.widgets.active] {
+        state.weak_bg_fill = red;
+        state.bg_fill = red;
+        state.bg_stroke.color = red;
+        state.fg_stroke.color = Color32::WHITE;
+    }
+}
+
 /// Fond de repos de la gouttière de la grille (lettres de colonnes, « # »,
 /// numéros de ligne, libellés de champ d'en-tête) — la distingue visuellement
 /// des données elles-mêmes. Dérivé de [`ACCENT`] comme le reste de la

@@ -30,8 +30,9 @@ use stokesforge_app::history_text::history_text;
 use stokesforge_app::selection::Selection;
 use stokesforge_app::state::{
     active_graph, drop_payload_action, drop_rows_action, file_drop_plan, Action, ActiveTabKind,
-    AppState, ColumnDragPayload, GridZone, HeaderField, ImportDestination, MoveDirection, PlotAxis,
-    PlotEdit, PlotSettingsTab, PlotTarget, RowAxis,
+    AlertKind, AppState, ColumnDragPayload, GridZone, HeaderField, ImportDestination,
+    MoveDirection, PlotAxis, PlotEdit, PlotSettingsTab, PlotTarget, RowAxis, UnsavedChoice,
+    UnsavedGesture,
 };
 use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind};
 use stokesforge_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
@@ -179,15 +180,16 @@ fn nouveau_projet_attend_confirmation_et_annulation_preserve_le_travail() {
     state.dispatch(Action::NewProject {
         pending_edits: false,
     });
-    assert!(state.new_project_pending());
+    assert_eq!(state.unsaved_pending(), Some(&UnsavedGesture::NewProject));
+    assert!(state.blocking_dialog());
     assert_eq!(state.tree().len(), before);
-    state.dispatch(Action::ConfirmNewProject(false));
-    assert!(!state.new_project_pending());
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
+    assert!(state.unsaved_pending().is_none());
     assert_eq!(state.tree().len(), before);
     state.dispatch(Action::NewProject {
         pending_edits: false,
     });
-    state.dispatch(Action::ConfirmNewProject(true));
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
     assert_eq!(state.tree().len(), 1);
     assert!(state.path().is_empty());
     assert!(!state.can_undo());
@@ -195,12 +197,12 @@ fn nouveau_projet_attend_confirmation_et_annulation_preserve_le_travail() {
     state.dispatch(Action::NewProject {
         pending_edits: false,
     });
-    assert!(!state.new_project_pending());
+    assert!(state.unsaved_pending().is_none());
     state.dispatch(Action::AddWorkbook);
     state.dispatch(Action::NewProject {
         pending_edits: false,
     });
-    assert!(state.new_project_pending());
+    assert!(state.unsaved_pending().is_some());
     session.shutdown().unwrap();
 }
 
@@ -212,21 +214,157 @@ fn nouveau_projet_apres_enregistrement_et_apres_echec() {
     state.dispatch(Action::NewProject {
         pending_edits: true,
     });
-    assert!(state.new_project_pending());
-    state.dispatch(Action::ConfirmNewProject(false));
+    assert!(state.unsaved_pending().is_some());
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
     state.dispatch(Action::NewProject {
         pending_edits: false,
     });
-    assert!(!state.new_project_pending());
+    assert!(state.unsaved_pending().is_none());
     assert_eq!(state.tree().len(), 1);
     state.dispatch(Action::AddGraph);
     state.set_path(dir.path().display().to_string()); // une destination qui est un dossier
     state.dispatch(Action::Save);
-    assert!(state.status().unwrap().is_error);
+    // M8 (#229) : un enregistrement raté est un échec grave, dit par un
+    // dialogue bloquant qui propose Save As….
+    let alert = state.alert().expect("échec grave");
+    assert_eq!(alert.kind, AlertKind::SaveFailed);
+    assert!(!alert.message.is_empty());
+    assert!(state.blocking_dialog());
+    state.dispatch(Action::DismissAlert);
+    assert!(state.alert().is_none());
     state.dispatch(Action::NewProject {
         pending_edits: false,
     });
-    assert!(state.new_project_pending());
+    assert!(state.unsaved_pending().is_some());
+    session.shutdown().unwrap();
+}
+
+/// F4 (#229) : la réponse Save enregistre, **puis** poursuit le geste ; un
+/// enregistrement raté l'abandonne (le travail reste) et le dit (M8).
+#[test]
+fn la_reponse_save_enregistre_puis_poursuit_le_geste() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("travail.stf");
+    state.set_path(file.display().to_string());
+    state.dispatch(Action::AddGraph);
+    state.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
+    assert!(file.is_file(), "enregistré");
+    assert_eq!(state.tree().len(), 1, "puis le nouveau projet");
+    assert!(state.unsaved_pending().is_none());
+
+    // Échec : le geste en attente est abandonné, le travail reste.
+    state.dispatch(Action::AddWorkbook);
+    let len = state.tree().len();
+    state.set_path(dir.path().display().to_string());
+    state.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
+    assert_eq!(state.tree().len(), len, "le travail reste");
+    assert_eq!(
+        state.alert().map(|alert| alert.kind),
+        Some(AlertKind::SaveFailed)
+    );
+    assert!(state.unsaved_pending().is_none());
+    // Un enregistrement réussi plus tard ne rejoue pas le geste abandonné.
+    state.dispatch(Action::DismissAlert);
+    state.set_path(file.display().to_string());
+    state.dispatch(Action::Save);
+    assert_eq!(state.tree().len(), len);
+
+    // Sans fichier : Save note le geste, que l'enregistrement poursuivra
+    // (la fenêtre demande où écrire puis pousse Action::Save) ; Cancel
+    // (sélecteur fermé sans choix) l'oublie.
+    state.dispatch(Action::AddGraph);
+    state.set_path(String::new());
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
+    assert!(!state.take_quit_ready(), "rien d'enregistré encore");
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
+    state.set_path(file.display().to_string());
+    state.dispatch(Action::Save);
+    assert!(!state.take_quit_ready(), "geste oublié");
+    state.dispatch(Action::AddGraph);
+    state.set_path(String::new());
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
+    state.set_path(file.display().to_string());
+    state.dispatch(Action::Save);
+    assert!(state.take_quit_ready(), "enregistré, puis Quit");
+    session.shutdown().unwrap();
+}
+
+/// F3 (#229) : Quit et Open… demandent seulement s'il y a du travail à
+/// perdre ; Discard poursuit. Un projet illisible garde le projet **et** le
+/// chemin courants (M8).
+#[test]
+fn quitter_et_ouvrir_ne_demandent_que_si_du_travail_serait_perdu() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start_demo(dir.path());
+    let file = dir.path().join("a.stf");
+    state.set_path(file.display().to_string());
+    state.dispatch(Action::Save);
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    assert!(state.unsaved_pending().is_none());
+    assert!(state.take_quit_ready(), "rien à perdre : Quit direct");
+    assert!(!state.take_quit_ready(), "une seule fois");
+
+    state.dispatch(Action::Quit {
+        pending_edits: true,
+    });
+    assert_eq!(state.unsaved_pending(), Some(&UnsavedGesture::Quit));
+    assert!(!state.take_quit_ready());
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+    assert!(state.take_quit_ready());
+
+    // Open… d'un fichier illisible, sans travail à perdre.
+    let len = state.tree().len();
+    let bad = dir.path().join("illisible.stf");
+    std::fs::write(&bad, "pas un projet").unwrap();
+    state.dispatch(Action::OpenProject {
+        path: bad.display().to_string(),
+        pending_edits: false,
+    });
+    assert_eq!(
+        state.alert().map(|alert| alert.kind),
+        Some(AlertKind::OpenFailed)
+    );
+    assert_eq!(state.path(), file.display().to_string(), "chemin gardé");
+    assert_eq!(state.tree().len(), len);
+    state.dispatch(Action::DismissAlert);
+
+    // Open… avec du travail : question, puis Discard ouvre.
+    let other = dir.path().join("b.stf");
+    state.set_path(other.display().to_string());
+    state.dispatch(Action::Save);
+    state.set_path(file.display().to_string());
+    state.dispatch(Action::AddGraph);
+    state.dispatch(Action::OpenProject {
+        path: other.display().to_string(),
+        pending_edits: false,
+    });
+    assert!(matches!(
+        state.unsaved_pending(),
+        Some(UnsavedGesture::Open(path)) if *path == other.display().to_string()
+    ));
+    assert_eq!(
+        state.path(),
+        file.display().to_string(),
+        "pas encore ouvert"
+    );
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+    assert_eq!(state.path(), other.display().to_string());
+    assert_eq!(state.tree().len(), len);
     session.shutdown().unwrap();
 }
 
@@ -830,7 +968,11 @@ fn a_failing_load_leaves_the_model_and_history_untouched() {
     );
     state.dispatch(Action::Load);
 
-    assert!(state.status().is_some_and(|status| status.is_error));
+    // M8 (#229) : un projet illisible est un échec grave, dit par un dialogue.
+    assert_eq!(
+        state.alert().map(|alert| alert.kind),
+        Some(AlertKind::OpenFailed)
+    );
     assert_eq!(state.snapshot().revision, revision);
     assert_eq!(**state.tree(), *tree);
     assert!(state.can_undo(), "l'historique est préservé");
@@ -851,10 +993,9 @@ fn a_stf_read_error_is_shown_through_the_catalogue() {
     std::fs::write(&truncated, b"STKF\x01").expect("écriture du fichier de test");
     state.set_path(truncated.display().to_string());
     state.dispatch(Action::Load);
-    let status = state.status().expect("un message");
-    assert!(status.is_error);
+    let alert = state.alert().expect("un échec grave (M8)");
     assert_eq!(
-        status.text,
+        alert.message,
         format!(
             "{} is damaged: header truncated before the version number",
             truncated.display()
@@ -864,11 +1005,11 @@ fn a_stf_read_error_is_shown_through_the_catalogue() {
     let foreign = dir.path().join("etranger.stokesforge");
     std::fs::write(&foreign, b"hello").expect("écriture du fichier de test");
     state.set_path(foreign.display().to_string());
+    state.dispatch(Action::DismissAlert);
     state.dispatch(Action::Load);
-    let status = state.status().expect("un message");
-    assert!(status.is_error);
+    let alert = state.alert().expect("un échec grave (M8)");
     assert_eq!(
-        status.text,
+        alert.message,
         format!("{} is not a StokesForge file", foreign.display())
     );
 }
@@ -882,7 +1023,11 @@ fn a_failing_save_reports_an_error_and_writes_nothing() {
     state.set_path(target.display().to_string());
     state.dispatch(Action::Save);
 
-    assert!(state.status().is_some_and(|status| status.is_error));
+    assert_eq!(
+        state.alert().map(|alert| alert.kind),
+        Some(AlertKind::SaveFailed),
+        "M8 : dialogue bloquant"
+    );
     assert!(!target.exists(), "rien n'a été écrit");
     assert!(!target.parent().is_some_and(Path::exists));
 }
@@ -7661,6 +7806,41 @@ fn exporter_un_graphe_zoome_ne_touche_pas_le_modele() {
     );
 }
 
+/// F3 (#229) : le sélecteur natif demande avant d'écraser le nom saisi ;
+/// l'extension `.svg` ajoutée ensuite vise un autre fichier, qu'il n'a pas
+/// vu. S'il existe, l'export attend la confirmation : Cancel le laisse
+/// intact, Replace l'écrase. Témoin : un nom avec extension n'attend rien.
+#[test]
+fn un_export_qui_ecraserait_un_fichier_non_vu_demande_confirmation() {
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    let spec = Box::new(graph_spec(&state, graph));
+    let existant = dir.path().join("figure.svg");
+    std::fs::write(&existant, "ancien").unwrap();
+    let exporte = |state: &mut AppState, nom: &str| {
+        state.dispatch(Action::ExportGraph {
+            path: dir.path().join(nom),
+            spec: spec.clone(),
+        });
+    };
+
+    exporte(&mut state, "figure");
+    assert_eq!(state.pending_overwrite(), Some(existant.as_path()));
+    assert!(state.blocking_dialog());
+    state.dispatch(Action::ConfirmOverwrite(false));
+    assert!(state.pending_overwrite().is_none());
+    assert_eq!(std::fs::read_to_string(&existant).unwrap(), "ancien");
+
+    exporte(&mut state, "figure");
+    state.dispatch(Action::ConfirmOverwrite(true));
+    assert!(std::fs::read_to_string(&existant).unwrap().contains("<svg"));
+
+    std::fs::write(&existant, "ancien").unwrap();
+    exporte(&mut state, "figure.svg");
+    assert!(state.pending_overwrite().is_none(), "vu par le sélecteur");
+    assert!(std::fs::read_to_string(&existant).unwrap().contains("<svg"));
+}
+
 /// Le format suit l'extension : PDF et PNG (à l'agrandissement réglé), `.svg`
 /// ajouté à un nom sans extension, et une extension inconnue est refusée
 /// avec un message, sans fichier écrit.
@@ -9015,10 +9195,11 @@ fn duplicating_a_sheet_copies_its_columns_and_keeps_graphs_on_the_original() {
     assert_eq!(**state.tree(), *before);
 }
 
-/// Supprimer : confirmation qui nomme les graphes, annulation possible ; la
-/// dernière feuille d'un classeur est refusée.
+/// Supprimer une feuille ne demande rien (F3, #229) : le message nomme les
+/// graphes qui la traçaient, Undo la rend ; la dernière feuille d'un classeur
+/// est refusée.
 #[test]
-fn deleting_a_sheet_asks_for_confirmation_and_keeps_the_last_sheet() {
+fn deleting_a_sheet_needs_no_confirmation_and_keeps_the_last_sheet() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
     let book = book_named(state.tree(), "Book1");
@@ -9033,24 +9214,22 @@ fn deleting_a_sheet_asks_for_confirmation_and_keeps_the_last_sheet() {
     let only = state.worksheets_of(book);
     if only.len() == 1 {
         assert!(!state.can_delete_sheet(sheet1));
-        state.dispatch(Action::RequestDeleteSheet(sheet1));
-        assert_eq!(state.pending_sheet_delete(), None);
+        state.dispatch(Action::DeleteSheet(sheet1));
+        assert!(state.tree().node(sheet1).is_some());
         assert!(state.status().is_some_and(|status| status.is_error));
     }
     state.dispatch(Action::AddWorksheet { book });
     let before = std::sync::Arc::clone(state.tree());
 
     assert!(state.can_delete_sheet(sheet1));
-    state.dispatch(Action::RequestDeleteSheet(sheet1));
-    assert_eq!(state.pending_sheet_delete(), Some(sheet1));
-    assert_eq!(state.sheet_users(sheet1).len(), 1);
-    state.dispatch(Action::ConfirmDeleteSheet(false));
-    assert_eq!(state.pending_sheet_delete(), None);
-    assert!(state.tree().node(sheet1).is_some());
-
-    state.dispatch(Action::RequestDeleteSheet(sheet1));
-    state.dispatch(Action::ConfirmDeleteSheet(true));
+    let users = state.sheet_users(sheet1);
+    assert_eq!(users.len(), 1);
+    state.dispatch(Action::DeleteSheet(sheet1));
     assert!(state.tree().node(sheet1).is_none());
+    assert!(!state.blocking_dialog());
+    let status = state.status().expect("message");
+    assert!(!status.is_error);
+    assert!(status.text.contains(&users[0]), "{}", status.text);
     state.dispatch(Action::Undo);
     assert_eq!(**state.tree(), *before);
 }

@@ -21,7 +21,9 @@ use crate::state::{Action, AppState, ImportDestination, ImportLineAction, Import
 use crate::theme::{section_title, FIELD_WIDTH_MEDIUM, FIELD_WIDTH_SHORT};
 use crate::tr;
 
-use super::dialogs::{modal_wizard, DialogFooter, DialogOutcome, FOOTER_BUTTON_SIZE};
+use super::dialogs::{
+    modal_confirm, modal_wizard, ConfirmOutcome, DialogFooter, DialogOutcome, FOOTER_BUTTON_SIZE,
+};
 use super::form::{choice, choice_by, form, ChoiceOption, Form};
 use super::hover_help::{help_beside, help_text};
 
@@ -514,18 +516,24 @@ fn import_template_controls(rows: &mut Form<'_>, state: &mut AppState, actions: 
         rows.note(tr!("import-files-unsaved"));
     }
     if let Some(name) = confirm {
-        rows.field(|ui| {
-            ui.colored_label(
-                ui.visuals().warn_fg_color,
-                tr!("import-files-delete-confirm", name = name),
-            );
-            if ui.button(tr!("import-files-delete-yes")).clicked() {
-                state.confirm_delete_import_recipe();
-            }
-            if ui.button(tr!("import-files-delete-keep")).clicked() {
-                state.cancel_delete_import_recipe();
-            }
-        });
+        // Ctrl+Z ne rend pas un modèle supprimé : confirmation modale (F3,
+        // #229), peinte dans le contenu de l'assistant pour lire Entrée et
+        // Échap avant lui.
+        match modal_confirm(
+            rows.ui().ctx(),
+            egui::Id::new("stokesforge_import_template_delete"),
+            &tr!("import-files-delete-title"),
+            egui::vec2(420.0, 150.0),
+            &tr!("import-files-delete-yes"),
+            &tr!("import-files-delete-yes", "hint"),
+            |ui| {
+                ui.label(tr!("import-files-delete-confirm", name = name));
+            },
+        ) {
+            ConfirmOutcome::Open => {}
+            ConfirmOutcome::Confirm => state.confirm_delete_import_recipe(),
+            ConfirmOutcome::Cancel => state.cancel_delete_import_recipe(),
+        }
     }
 }
 
@@ -2239,6 +2247,45 @@ mod tests {
         assert!(
             !import.paths.is_empty(),
             "témoin : des fichiers sont conservés"
+        );
+    }
+
+    /// F3–F5 (#229) : supprimer un modèle (Ctrl+Z ne le rend pas) passe par
+    /// une confirmation modale par-dessus l'assistant, Cancel par défaut :
+    /// Entrée l'annule sans valider l'assistant (qui reste ouvert) ; le verbe
+    /// supprime. Plus de « Keep ».
+    #[test]
+    fn supprimer_un_modele_passe_par_une_confirmation_modale() {
+        let mut banc = banc(true);
+        let context = contexte();
+        let mut actions = Vec::new();
+        banc.state.request_delete_import_recipe("Jasco");
+        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+        assert!(est_peint(&peints, &tr!("import-files-delete-title")));
+        texte_exact(&peints, &tr!("import-files-delete-yes"));
+        peindre_assistant(
+            &context,
+            &mut banc.state,
+            &mut actions,
+            vec![touche(egui::Key::Enter)],
+        );
+        let import = banc.state.import_state().expect("l'assistant reste ouvert");
+        assert!(import.confirm_delete.is_none(), "Entrée = Cancel");
+        assert!(actions.is_empty(), "l'assistant n'a rien validé");
+
+        banc.state.request_delete_import_recipe("Jasco");
+        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+        let verbe = texte_exact(&peints, &tr!("import-files-delete-yes")).centre;
+        cliquer(&context, verbe, egui::PointerButton::Primary, |ui| {
+            import_window(ui.ctx(), &mut banc.state, &mut actions)
+        });
+        assert!(
+            banc.state
+                .import_state()
+                .expect("ouvert")
+                .confirm_delete
+                .is_none(),
+            "le verbe a répondu"
         );
     }
 

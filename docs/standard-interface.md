@@ -41,7 +41,7 @@ les règles R1–R16 de `textes-interface.md`.
 | choix exclusif dans un menu (`menu_sections::menu_choice`) | coche seule (C3) | **en place** (#227) |
 | garde : aucun `add_space` littéral hors de `theme.rs` (`aucun_add_space_litteral_hors_du_theme`) | | **en place** (#227) |
 | zone de message du pied de `modal_dialog_with`, focus initial, taille mémorisée, `modal_wizard`, `modal_read_only` | ordre des boutons, erreur et raison dans le pied, Échap, F8, F9 | **en place** (#228) |
-| variante « confirmation » de `modal_dialog_with` | | à venir (#229) |
+| confirmations et échec grave (`modal_confirm`, `modal_save_changes`, `modal_alert` ; `app/confirmations.rs`) | Cancel par défaut, trio Discard Changes · Cancel · Save, M8 | **en place** (#229) |
 | registre des touches de `app/shortcuts.rs` | | à venir (#231) |
 | garde : aucun `consume_key` hors de `app/shortcuts.rs` | | à venir (#231) |
 | briques « travail en cours » et « état vide » | | à venir (#232) |
@@ -256,8 +256,10 @@ Comment c'est tenu :
 - **Erreur dans une fenêtre modale** (M7, en place #228) : jamais dans la barre
   d'état ; zone de message du pied, à gauche des boutons, commune à tous les
   dialogues (`AppState::dialog_error`, `dialogs::sync_dialogs`).
-- **Échec grave hors fenêtre** (M8 ; enregistrement raté, fichier illisible) :
-  dialogue bloquant avec message et action possible.
+- **Échec grave hors fenêtre** (M8, en place #229 ; enregistrement raté,
+  projet illisible) : dialogue bloquant avec message et action possible
+  (`AppState::alert`, `modal_alert` : Close, et Save As… ou Open Another…).
+  L'échec d'un export de graphe reste dans la barre d'état.
 
 ## Fenêtres et dialogues — en place (#228)
 
@@ -309,10 +311,9 @@ Comment c'est tenu (`app/dialogs.rs`, tous par un même corps `modal_frame`) :
 
 Reste : la fenêtre des propriétés d'un objet (rectangle, flèche…) est encore
 un brouillon validé par OK au lieu d'un réglage en direct (F1,
-`graph_window::shape_properties_ui`) ; les confirmations ont leur variante
-(#229).
+`graph_window::shape_properties_ui`).
 
-### Confirmations — à venir (#229)
+### Confirmations — en place (#229)
 
 - **Seulement pour ce que Ctrl+Z ne rattrape pas** (F3) : projet non
   enregistré (Nouveau, Ouvrir, Quitter, fermer la fenêtre), écraser un
@@ -324,6 +325,36 @@ un brouillon validé par OK au lieu d'un réglage en direct (F1,
   défaut encadré sur Cancel ; Delete en style normal, rouge au survol **et**
   au focus clavier. Exception écrite : dans « Discard Changes · Cancel ·
   Save », **Entrée = Save**, Échap = Cancel.
+
+Comment c'est tenu :
+
+- **Briques** (`app/dialogs.rs`, même corps `modal_frame`) :
+  `modal_confirm` — `[message] [Cancel] [verbe]`, Cancel encadré (bouton par
+  défaut), Entrée et Échap = Cancel, le verbe seulement par son bouton ;
+  `modal_save_changes` — `[Discard Changes] [message] [Cancel] [Save]`,
+  Entrée = Save ; `modal_alert` — `[action] [message] [Close]` (M8). Le style
+  destructeur est `theme::destructive_button_visuals` (rouge des styles
+  *hovered* et *active* ; egui peint un widget focalisé en *active*).
+- **Classement** (`app/confirmations.rs`) : confirmations = projet non
+  enregistré (New Project, Open…, Quit, fermeture de la fenêtre :
+  `Action::NewProject`/`OpenProject`/`Quit` → `AppState::unsaved_pending`,
+  réponse `Action::ConfirmUnsaved`), export dont l'extension `.svg` ajoutée
+  viserait un fichier existant que le sélecteur natif n'a pas vu
+  (`Action::ConfirmOverwrite` ; le sélecteur natif demande lui-même pour le
+  nom saisi), suppression d'un modèle d'import (modale peinte dans
+  l'assistant, qui lit Entrée et Échap avant lui). **Choix**, pas des
+  confirmations : l'axe X d'un dépôt de lignes, la suppression d'un calcul
+  avec ou sans ses colonnes, l'export de séries périmées — ils gardent
+  `modal_dialog_with`. Supprimer une feuille ou des objets du Project Manager
+  ne demande plus rien (`Action::DeleteSheet`, `Action::DeleteObjects`) ; le
+  message de la barre d'état nomme les graphes qui en utilisaient les données.
+- **Save** : enregistre, puis poursuit le geste (`after_save`) ; sans
+  fichier, la fenêtre demande où écrire d'abord ; un sélecteur fermé sans
+  choix ou un enregistrement raté (M8) abandonne le geste.
+- **Fermeture** : `StokesForgeApp::logic` retient toute fermeture de la
+  fenêtre (`CancelClose`) et en fait `Action::Quit` ; la fenêtre se ferme
+  quand `AppState::take_quit_ready` la libère (l'auto-fermeture de
+  vérification ne demande rien).
 
 ## Grisé — en place (#226)
 

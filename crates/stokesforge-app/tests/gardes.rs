@@ -148,8 +148,15 @@ fn la_fenetre_des_proprietes_est_construite_comme_les_autres() {
     assert!(dialogue.corps.contains("modal_dialog_with("));
     let brique = fonction_unique(&sources, "modal_dialog_with");
     assert!(brique.corps.contains("modal_frame("));
-    // L'assistant et la fenêtre en lecture seule (#228) : le même corps.
-    for variante in ["modal_wizard", "modal_read_only"] {
+    // L'assistant et la fenêtre en lecture seule (#228), les confirmations
+    // et l'échec grave (#229) : le même corps.
+    for variante in [
+        "modal_wizard",
+        "modal_read_only",
+        "modal_confirm",
+        "modal_save_changes",
+        "modal_alert",
+    ] {
         assert!(fonction_unique(&sources, variante)
             .corps
             .contains("modal_frame("));
