@@ -126,7 +126,11 @@ pub(super) fn open_shape_properties(
         ctx.data_mut(|data| {
             data.insert_temp(
                 view.id().with("shape_properties"),
-                ShapeProperties { target, draft },
+                ShapeProperties {
+                    target,
+                    draft,
+                    macro_open: false,
+                },
             )
         });
     }
@@ -136,9 +140,13 @@ pub(super) fn open_shape_properties(
 struct ShapeProperties {
     target: stokesforge_plot::ShapeRef,
     draft: stokesforge_plot::ShapeSpec,
+    /// La macro d'historique est ouverte (premier réglage appliqué).
+    macro_open: bool,
 }
 
-/// Brouillon seulement : Valider émet une action, Annuler ne touche rien.
+/// Réglages en direct (F1) : chaque changement du brouillon s'applique tout
+/// de suite dans une macro d'historique ; OK la garde (une seule entrée),
+/// Cancel l'avorte et l'objet retrouve son état d'ouverture.
 fn shape_properties_ui(
     ctx: &egui::Context,
     view: &GraphView,
@@ -157,6 +165,7 @@ fn shape_properties_ui(
         user,
         requests: Vec::new(),
     };
+    let before = edit.draft.clone();
     let outcome = modal_dialog(
         ctx,
         id.with("dialog"),
@@ -209,16 +218,29 @@ fn shape_properties_ui(
         },
     );
     actions.extend(env.requests.into_iter().map(SavedColorRequest::into_action));
+    let changed = edit.draft != before;
+    if changed {
+        if !edit.macro_open {
+            actions.push(Action::BeginShapeEdit);
+            edit.macro_open = true;
+        }
+        actions.push(Action::SetShape {
+            graph,
+            target: edit.target,
+            shape: Box::new(edit.draft.clone()),
+        });
+    }
     match outcome {
         DialogOutcome::Accept => {
-            actions.push(Action::SetShape {
-                graph,
-                target: edit.target,
-                shape: Box::new(edit.draft),
-            });
+            if edit.macro_open {
+                actions.push(Action::EndShapeEdit { keep: true });
+            }
             ctx.data_mut(|data| data.remove::<ShapeProperties>(id));
         }
         DialogOutcome::Cancel => {
+            if edit.macro_open {
+                actions.push(Action::EndShapeEdit { keep: false });
+            }
             ctx.data_mut(|data| data.remove::<ShapeProperties>(id));
         }
         DialogOutcome::Open => {

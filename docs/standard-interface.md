@@ -305,13 +305,15 @@ Comment c'est tenu (`app/dialogs.rs`, tous par un même corps `modal_frame`) :
   `preferences.json` › `dialogs`, 32 sortes au plus ; reprises à l'ouverture,
   ramenées dans l'écran.
 - **Focus** (F9) : une ancre invisible en tête du contenu prend le focus à
-  l'ouverture, puis le focus avance d'un widget par image jusqu'au premier
-  champ texte ; arrêt (focus rendu) au pied, hors du dialogue, après 32 widgets
+  l'ouverture, puis le focus avance d'un widget par passe jusqu'au premier
+  champ texte, toutes les passes dans la même image (`request_discard`, rien
+  n'est peint entre deux pas) ; arrêt (focus rendu) au pied, hors du dialogue, après 32 widgets
   ou au premier geste.
 
-Reste : la fenêtre des propriétés d'un objet (rectangle, flèche…) est encore
-un brouillon validé par OK au lieu d'un réglage en direct (F1,
-`graph_window::shape_properties_ui`).
+La fenêtre des propriétés d'un objet (rectangle, flèche…) applique aussi ses
+réglages en direct (F1) : `Action::BeginShapeEdit` ouvre la macro d'historique
+au premier changement, chaque réglage est un `SetShape`, OK referme la macro
+(`EndShapeEdit { keep: true }`, une entrée), Cancel l'avorte (`keep: false`).
 
 ### Confirmations — en place (#229)
 
@@ -413,10 +415,9 @@ Comment c'est tenu :
 - Migrés : propriétés du graphe (toutes les pages, éditeur de série partagé
   avec la fenêtre des séries), formulaire d'analyse, assistant d'import
   (fichiers, format, en-tête, métadonnées, destination ; les traits entre
-  blocs sont devenus des titres). Reste à migrer : les réglages propres à la
-  fenêtre des séries (groupe, nuancier — dont la liste « Project / User » à
-  2 options, `curve_settings.rs`), les outils de l'aperçu d'analyse, le
-  volet Results, et les préférences futures (#148).
+  blocs sont devenus des titres). La fenêtre des séries (groupe, portée,
+  nuancier — `curve_settings.rs`) est migrée. Reste à migrer : les outils de
+  l'aperçu d'analyse, le volet Results, et les préférences futures (#148).
 
 ## Clavier et souris — à venir (#231)
 

@@ -31,9 +31,10 @@ use stokesforge_plot::{
 use crate::color_picker::{color_field, gradient_strip, ColorUsage, PickerEnv};
 use crate::object_manager::group_title;
 use crate::state::{series_list_label, Action, SaveTarget};
-use crate::theme::section_title;
+use crate::theme;
 use crate::tr;
 
+use super::form::{choice, form, ChoiceOption, Form};
 use super::hover_help::help_text;
 use super::list_row::list_row;
 use super::plot_settings::series_editor;
@@ -268,68 +269,74 @@ fn membership_editor(
 ) -> bool {
     let mut commit = false;
     let group = panel.series[*index].group;
-    section_title(ui, tr!("curve-group-section"));
     let mut chosen = group;
     let mut new_group = false;
-    ui.horizontal(|ui| {
-        ui.label(tr!("curve-group-field"));
-        let entry = |id: u32| {
-            tr!(
-                "curve-group-entry",
-                group = group_title(panel, id),
-                count = panel.group_members(id).len()
-            )
-        };
-        egui::ComboBox::from_id_salt("curve_group_choice")
-            .selected_text(match group {
-                Some(id) => entry(id),
-                None => tr!("curve-group-none"),
-            })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut chosen, None, tr!("curve-group-none"));
-                for id in panel.group_ids() {
-                    ui.selectable_value(&mut chosen, Some(id), entry(id));
-                }
-                if ui.selectable_label(false, tr!("curve-group-new")).clicked() {
-                    new_group = true;
-                }
+    form(ui, "curve_membership", |f| {
+        f.section(tr!("curve-group-section"));
+        f.row(tr!("curve-group-field"), |ui| {
+            let entry = |id: u32| {
+                tr!(
+                    "curve-group-entry",
+                    group = group_title(panel, id),
+                    count = panel.group_members(id).len()
+                )
+            };
+            egui::ComboBox::from_id_salt("curve_group_choice")
+                .selected_text(match group {
+                    Some(id) => entry(id),
+                    None => tr!("curve-group-none"),
+                })
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut chosen, None, tr!("curve-group-none"));
+                    for id in panel.group_ids() {
+                        ui.selectable_value(&mut chosen, Some(id), entry(id));
+                    }
+                    if ui.selectable_label(false, tr!("curve-group-new")).clicked() {
+                        new_group = true;
+                    }
+                });
+            if ui
+                .add_enabled(group.is_some(), egui::Button::new(tr!("curve-group-leave")))
+                .on_hover_text(tr!("curve-group-leave", "hint"))
+                .on_disabled_hover_text(tr!("curve-group-leave", "disabled"))
+                .clicked()
+            {
+                chosen = None;
+            }
+        });
+        if new_group {
+            chosen = Some(panel.next_group_id());
+        }
+        if chosen != group {
+            if let Some(moved) = panel.set_series_group(*index, chosen) {
+                *index = moved;
+                commit = true;
+            }
+        }
+        if let Some(group) = panel.series[*index].group {
+            commit |= group_editor(f, panel, layer, group, index);
+            let count = panel.group_members(group).len();
+            f.row(tr!("curve-scope-field"), |ui| {
+                choice(
+                    ui,
+                    "curve_scope",
+                    scope,
+                    &[
+                        ChoiceOption::new(EditScope::Series, tr!("curve-scope-series")),
+                        ChoiceOption::new(
+                            EditScope::Group,
+                            tr!("curve-scope-group", count = count),
+                        ),
+                    ],
+                );
             });
-        if ui
-            .add_enabled(group.is_some(), egui::Button::new(tr!("curve-group-leave")))
-            .on_hover_text(tr!("curve-group-leave", "hint"))
-            .on_disabled_hover_text(tr!("curve-group-leave", "disabled"))
-            .clicked()
-        {
-            chosen = None;
+            f.note(match scope {
+                EditScope::Group => tr!("curve-scope-group-note"),
+                EditScope::Series => tr!("curve-scope-series-note"),
+            });
         }
-    });
-    if new_group {
-        chosen = Some(panel.next_group_id());
-    }
-    if chosen != group {
-        if let Some(moved) = panel.set_series_group(*index, chosen) {
-            *index = moved;
-            commit = true;
-        }
-    }
-    if let Some(group) = panel.series[*index].group {
-        commit |= group_editor(ui, panel, layer, group, index);
-        let count = panel.group_members(group).len();
-        ui.horizontal(|ui| {
-            ui.label(tr!("curve-scope-field"));
-            ui.radio_value(scope, EditScope::Series, tr!("curve-scope-series"));
-            ui.radio_value(
-                scope,
-                EditScope::Group,
-                tr!("curve-scope-group", count = count),
-            );
-        });
-        ui.weak(match scope {
-            EditScope::Group => tr!("curve-scope-group-note"),
-            EditScope::Series => tr!("curve-scope-series-note"),
-        });
-    }
-    commit
+        commit
+    })
 }
 
 /// Les gestes du groupe `group` (#197) : son nom, son rang dans l'ordre de
@@ -338,7 +345,7 @@ fn membership_editor(
 /// change de rang, et retombe sur la place du groupe quand il est supprimé.
 /// Rend `true` si le groupe a changé.
 fn group_editor(
-    ui: &mut egui::Ui,
+    f: &mut Form<'_>,
     panel: &mut PanelSpec,
     layer: usize,
     group: u32,
@@ -348,15 +355,15 @@ fn group_editor(
     // Le texte en cours de frappe ne vit que le temps du focus : le reste du
     // temps, le champ relit le modèle (nom changé ailleurs, autre groupe).
     let name_id = egui::Id::new(("curve_group_name", layer, group));
-    let mut name: String = ui
+    let mut name: String = f
+        .ui()
         .data(|d| d.get_temp(name_id))
         .unwrap_or_else(|| panel.group_label(group).unwrap_or_default().to_string());
-    ui.horizontal(|ui| {
-        ui.label(tr!("curve-group-name-field"));
+    f.row(tr!("curve-group-name-field"), |ui| {
         let field = ui.add(
             egui::TextEdit::singleline(&mut name)
                 .hint_text(tr!("curve-group-name", number = group))
-                .desired_width(160.0),
+                .desired_width(theme::FieldWidth::Medium.points(ui)),
         );
         help_text(ui, tr!("curve-group-name-field", "hint"));
         if field.lost_focus() && panel.rename_group(group, &name) {
@@ -368,7 +375,7 @@ fn group_editor(
             ui.data_mut(|d| d.remove::<String>(name_id));
         }
     });
-    ui.horizontal(|ui| {
+    f.field(|ui| {
         for up in [true, false] {
             let (label, hint) = if up {
                 (
@@ -406,7 +413,7 @@ fn group_editor(
             }
         }
     });
-    ui.horizontal(|ui| {
+    f.field(|ui| {
         if ui
             .button(tr!("curve-group-ungroup"))
             .on_hover_text(tr!("curve-group-ungroup", "hint"))
@@ -498,150 +505,152 @@ fn gradient_editor(
     let mut name: String = ui.data(|d| d.get_temp(name_id)).unwrap_or_default();
     let mut target: SaveTarget = ui.data(|d| d.get_temp(target_id)).unwrap_or_default();
 
-    section_title(ui, tr!("curve-gradient-section"));
     let mut commit = false;
     let out = ui.add_enabled_ui(enabled, |ui| {
-        ui.horizontal(|ui| {
-            ui.label(tr!("curve-gradient-field"));
-            let selected_text = match &choice {
-                GradientChoice::Preset(index) => GRADIENT_PRESETS
-                    .get(*index)
-                    .map_or_else(String::new, |preset| gradient_label(preset.id)),
-                GradientChoice::Saved(target, name) => tr!(
-                    "curve-gradient-saved",
-                    name = name.as_str(),
-                    target = target.label()
-                ),
-                GradientChoice::Custom => tr!("curve-gradient-custom"),
-            };
-            egui::ComboBox::from_id_salt("curve_gradient_combo")
-                .selected_text(selected_text)
-                .show_ui(ui, |ui| {
-                    for (index, preset) in GRADIENT_PRESETS.iter().enumerate() {
-                        ui.selectable_value(
-                            &mut choice,
-                            GradientChoice::Preset(index),
-                            gradient_label(preset.id),
-                        );
-                    }
-                    for saved_target in [SaveTarget::Project, SaveTarget::User] {
-                        for gradient in &saved_of(env, saved_target).gradients {
+        form(ui, "curve_gradient_form", |f| {
+            f.section(tr!("curve-gradient-section"));
+            f.row(tr!("curve-gradient-field"), |ui| {
+                let selected_text = match &choice {
+                    GradientChoice::Preset(index) => GRADIENT_PRESETS
+                        .get(*index)
+                        .map_or_else(String::new, |preset| gradient_label(preset.id)),
+                    GradientChoice::Saved(target, name) => tr!(
+                        "curve-gradient-saved",
+                        name = name.as_str(),
+                        target = target.label()
+                    ),
+                    GradientChoice::Custom => tr!("curve-gradient-custom"),
+                };
+                egui::ComboBox::from_id_salt("curve_gradient_combo")
+                    .selected_text(selected_text)
+                    .show_ui(ui, |ui| {
+                        for (index, preset) in GRADIENT_PRESETS.iter().enumerate() {
                             ui.selectable_value(
                                 &mut choice,
-                                GradientChoice::Saved(saved_target, gradient.name.clone()),
-                                tr!(
-                                    "curve-gradient-saved",
-                                    name = gradient.name.as_str(),
-                                    target = saved_target.label()
-                                ),
+                                GradientChoice::Preset(index),
+                                gradient_label(preset.id),
                             );
                         }
-                    }
-                    ui.selectable_value(
-                        &mut choice,
-                        GradientChoice::Custom,
-                        tr!("curve-gradient-custom"),
-                    );
-                });
-            let saved = match &choice {
-                GradientChoice::Saved(target, name) => Some((*target, name.clone())),
-                _ => None,
-            };
-            if ui
-                .add_enabled(
-                    saved.is_some(),
-                    egui::Button::new(tr!("curve-gradient-delete")),
-                )
-                .on_hover_text(tr!("curve-gradient-delete", "hint"))
-                .on_disabled_hover_text(tr!("curve-gradient-delete", "disabled"))
-                .clicked()
-            {
-                if let Some((target, name)) = saved {
-                    actions.push(Action::RemoveSavedGradient { name, target });
-                    choice = GradientChoice::Preset(0);
-                }
-            }
-        });
-        if choice == GradientChoice::Custom {
-            let mut remove = None;
-            for (index, stop) in custom.iter_mut().enumerate() {
-                ui.push_id(index, |ui| {
-                    color_field(
-                        ui,
-                        &tr!("curve-gradient-stop", number = (index + 1)),
-                        stop,
-                        ColorUsage::Curves,
-                        None,
-                        env,
-                    );
-                });
-            }
-            ui.horizontal(|ui| {
-                if ui.button(tr!("curve-gradient-add-stop")).clicked() {
-                    let last = custom.last().cloned().unwrap_or_default();
-                    custom.push(last);
-                }
-                if ui
-                    .add_enabled(
-                        custom.len() > 2,
-                        egui::Button::new(tr!("curve-gradient-remove-stop")),
-                    )
-                    .on_disabled_hover_text(tr!("disabled-gradient-min-colors"))
-                    .clicked()
-                {
-                    remove = Some(custom.len() - 1);
-                }
-            });
-            if let Some(index) = remove {
-                custom.remove(index);
-            }
-            ui.horizontal(|ui| {
-                ui.label(tr!("curve-gradient-name-field"));
-                ui.add(
-                    egui::TextEdit::singleline(&mut name)
-                        .hint_text(tr!("curve-gradient-name-field", "hint"))
-                        .desired_width(120.0),
-                );
-                egui::ComboBox::from_id_salt("curve_gradient_target")
-                    .selected_text(target.label())
-                    .show_ui(ui, |ui| {
-                        for candidate in [SaveTarget::Project, SaveTarget::User] {
-                            ui.selectable_value(&mut target, candidate, candidate.label());
+                        for saved_target in [SaveTarget::Project, SaveTarget::User] {
+                            for gradient in &saved_of(env, saved_target).gradients {
+                                ui.selectable_value(
+                                    &mut choice,
+                                    GradientChoice::Saved(saved_target, gradient.name.clone()),
+                                    tr!(
+                                        "curve-gradient-saved",
+                                        name = gradient.name.as_str(),
+                                        target = saved_target.label()
+                                    ),
+                                );
+                            }
                         }
+                        ui.selectable_value(
+                            &mut choice,
+                            GradientChoice::Custom,
+                            tr!("curve-gradient-custom"),
+                        );
                     });
+                let saved = match &choice {
+                    GradientChoice::Saved(target, name) => Some((*target, name.clone())),
+                    _ => None,
+                };
                 if ui
                     .add_enabled(
-                        !name.trim().is_empty(),
-                        egui::Button::new(tr!("curve-gradient-save")),
+                        saved.is_some(),
+                        egui::Button::new(tr!("curve-gradient-delete")),
                     )
-                    .on_hover_text(tr!("curve-gradient-save", "hint"))
-                    .on_disabled_hover_text(tr!("curve-gradient-save", "disabled"))
+                    .on_hover_text(tr!("curve-gradient-delete", "hint"))
+                    .on_disabled_hover_text(tr!("curve-gradient-delete", "disabled"))
                     .clicked()
                 {
-                    actions.push(Action::SaveGradient {
-                        name: name.trim().to_string(),
-                        stops: custom.clone(),
-                        target,
-                    });
-                    choice = GradientChoice::Saved(target, name.trim().to_string());
+                    if let Some((target, name)) = saved {
+                        actions.push(Action::RemoveSavedGradient { name, target });
+                        choice = GradientChoice::Preset(0);
+                    }
                 }
             });
-        }
-        let active = choice_stops(&choice, env, &custom);
-        gradient_strip(ui, &gradient_colors(&active, PREVIEW_STEPS));
-        if ui
-            .add_enabled(
-                group.is_some(),
-                egui::Button::new(tr!("curve-gradient-apply")),
-            )
-            .on_hover_text(tr!("curve-gradient-apply", "hint"))
-            .on_disabled_hover_text(tr!("curve-group-leave", "disabled"))
-            .clicked()
-        {
-            if let Some(group) = group {
-                commit |= panel.apply_group_gradient(group, &active);
+            if choice == GradientChoice::Custom {
+                let mut remove = None;
+                for (index, stop) in custom.iter_mut().enumerate() {
+                    f.ui().push_id(index, |ui| {
+                        color_field(
+                            ui,
+                            &tr!("curve-gradient-stop", number = (index + 1)),
+                            stop,
+                            ColorUsage::Curves,
+                            None,
+                            env,
+                        );
+                    });
+                }
+                f.field(|ui| {
+                    if ui.button(tr!("curve-gradient-add-stop")).clicked() {
+                        let last = custom.last().cloned().unwrap_or_default();
+                        custom.push(last);
+                    }
+                    if ui
+                        .add_enabled(
+                            custom.len() > 2,
+                            egui::Button::new(tr!("curve-gradient-remove-stop")),
+                        )
+                        .on_disabled_hover_text(tr!("disabled-gradient-min-colors"))
+                        .clicked()
+                    {
+                        remove = Some(custom.len() - 1);
+                    }
+                });
+                if let Some(index) = remove {
+                    custom.remove(index);
+                }
+                f.row(tr!("curve-gradient-name-field"), |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut name)
+                            .hint_text(tr!("curve-gradient-name-field", "hint"))
+                            .desired_width(theme::FieldWidth::Short.points(ui)),
+                    );
+                    super::form::choice(
+                        ui,
+                        "curve_gradient_target",
+                        &mut target,
+                        &[
+                            ChoiceOption::new(SaveTarget::Project, SaveTarget::Project.label()),
+                            ChoiceOption::new(SaveTarget::User, SaveTarget::User.label()),
+                        ],
+                    );
+                    if ui
+                        .add_enabled(
+                            !name.trim().is_empty(),
+                            egui::Button::new(tr!("curve-gradient-save")),
+                        )
+                        .on_hover_text(tr!("curve-gradient-save", "hint"))
+                        .on_disabled_hover_text(tr!("curve-gradient-save", "disabled"))
+                        .clicked()
+                    {
+                        actions.push(Action::SaveGradient {
+                            name: name.trim().to_string(),
+                            stops: custom.clone(),
+                            target,
+                        });
+                        choice = GradientChoice::Saved(target, name.trim().to_string());
+                    }
+                });
             }
-        }
+            let active = choice_stops(&choice, env, &custom);
+            gradient_strip(f.ui(), &gradient_colors(&active, PREVIEW_STEPS));
+            if f.field(|ui| {
+                ui.add_enabled(
+                    group.is_some(),
+                    egui::Button::new(tr!("curve-gradient-apply")),
+                )
+                .on_hover_text(tr!("curve-gradient-apply", "hint"))
+                .on_disabled_hover_text(tr!("curve-group-leave", "disabled"))
+                .clicked()
+            }) {
+                if let Some(group) = group {
+                    commit |= panel.apply_group_gradient(group, &active);
+                }
+            }
+        })
     });
     if !enabled {
         let reason = if group.is_some() {

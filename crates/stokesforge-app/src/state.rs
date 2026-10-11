@@ -771,6 +771,16 @@ pub enum Action {
         /// Sa nouvelle version.
         shape: Box<ShapeSpec>,
     },
+    /// Ouvre la macro d'historique de la fenêtre des propriétés d'un objet
+    /// (F1) : les réglages sont appliqués en direct, un seul Ctrl+Z les défait.
+    BeginShapeEdit,
+    /// Referme la macro de [`Action::BeginShapeEdit`] : `keep` (OK) la garde
+    /// comme une entrée d'historique, sinon (Cancel) elle est avortée et
+    /// l'objet retrouve son état d'ouverture.
+    EndShapeEdit {
+        /// OK (`true`) ou Cancel (`false`).
+        keep: bool,
+    },
     /// Retire un objet graphique (Suppr, menu).
     RemoveShape {
         /// Graphe visé.
@@ -4075,6 +4085,14 @@ impl AppState {
     /// macro (ouverture refusée, voir [`AppState::begin_plot_macro`]), les
     /// gestes déjà appliqués restent dans l'historique ordinaire.
     pub fn cancel_plot_settings(&mut self) {
+        self.abort_plot_macro();
+        self.plot_settings = None;
+        self.plot_edit = None;
+    }
+
+    /// Avorte la macro des propriétés si elle est ouverte : l'objet visé
+    /// retrouve son état d'ouverture.
+    fn abort_plot_macro(&mut self) {
         if self.plot_macro_open {
             self.plot_macro_open = false;
             if let Err(err) = self.handle.abort_macro() {
@@ -4085,8 +4103,6 @@ impl AppState {
             }
             self.refresh();
         }
-        self.plot_settings = None;
-        self.plot_edit = None;
     }
 
     /// Ouvre la macro d'historique de la fenêtre des propriétés. Un refus
@@ -4747,6 +4763,9 @@ impl AppState {
                 target,
                 shape,
             } => self.edit_annotations(graph, |spec| target.set(spec, *shape)),
+            Action::BeginShapeEdit => self.begin_plot_macro(),
+            Action::EndShapeEdit { keep: true } => self.end_plot_macro(),
+            Action::EndShapeEdit { keep: false } => self.abort_plot_macro(),
             Action::RemoveShape { graph, target } => {
                 self.edit_plot_object(graph, PlotEditKind::RemoveObject, |spec| {
                     target.remove(spec)
