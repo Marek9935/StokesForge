@@ -85,6 +85,11 @@ pub const SPACE_ITEM: f32 = 4.0;
 /// L'écart de section : voir [`SPACE_ITEM`].
 pub const SPACE_SECTION: f32 = 6.0;
 
+/// Largeur d'un champ **à quelques chiffres** (L2, #237) : un nombre entier
+/// dont la borne est connue et tient en trois chiffres (canal de couleur,
+/// pour cent, degré…), sans liste de valeurs (~48 px).
+pub const FIELD_WIDTH_DIGITS: f32 = 48.0;
+
 /// Largeur d'un champ **court** (L2, #227) : un nombre, une borne, un
 /// caractère (~80 px). C'est la largeur de la brique « nombre ».
 pub const FIELD_WIDTH_SHORT: f32 = 80.0;
@@ -93,10 +98,12 @@ pub const FIELD_WIDTH_SHORT: f32 = 80.0;
 /// (~160 px).
 pub const FIELD_WIDTH_MEDIUM: f32 = 160.0;
 
-/// Les trois largeurs nommées d'un champ de formulaire (L2) ; la pleine prend
+/// Les quatre largeurs nommées d'un champ de formulaire (L2) ; la pleine prend
 /// toute la place qui reste dans la colonne des champs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldWidth {
+    /// [`FIELD_WIDTH_DIGITS`].
+    Digits,
     /// [`FIELD_WIDTH_SHORT`].
     Short,
     /// [`FIELD_WIDTH_MEDIUM`].
@@ -109,6 +116,7 @@ impl FieldWidth {
     /// La largeur en points dans `ui` (la pleine lit la place qui reste).
     pub fn points(self, ui: &egui::Ui) -> f32 {
         match self {
+            Self::Digits => FIELD_WIDTH_DIGITS,
             Self::Short => FIELD_WIDTH_SHORT,
             Self::Medium => FIELD_WIDTH_MEDIUM,
             Self::Full => ui.available_width(),

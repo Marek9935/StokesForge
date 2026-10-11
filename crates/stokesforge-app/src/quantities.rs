@@ -75,6 +75,12 @@ impl Quantity {
         }
     }
 
+    /// Le nombre est entier, positif et tient en trois chiffres, sans liste de
+    /// valeurs : le champ prend la largeur « quelques chiffres » (L2, #237).
+    pub fn is_compact(&self) -> bool {
+        self.integer && self.min >= 0.0 && self.max < 1000.0 && self.presets.is_empty()
+    }
+
     /// La même grandeur bornée à `min..=max`.
     pub const fn between(self, min: f64, max: f64) -> Self {
         Self { min, max, ..self }

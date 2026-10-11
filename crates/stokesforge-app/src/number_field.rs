@@ -226,7 +226,11 @@ fn number_field_core<T: Number>(
     let edited = field_state::edit_text_with_arrow(
         ui,
         id_salt,
-        FIELD_WIDTH,
+        if quantity.is_compact() {
+            crate::theme::FIELD_WIDTH_DIGITS
+        } else {
+            FIELD_WIDTH
+        },
         &shown,
         auto_hint.unwrap_or(""),
         arrow_room,
@@ -529,6 +533,22 @@ mod tests {
 
     fn touche(key: egui::Key) -> egui::Event {
         touche_avec(key, egui::Modifiers::NONE)
+    }
+
+    #[test]
+    fn un_entier_de_trois_chiffres_sans_liste_prend_la_largeur_compacte() {
+        for compact in [
+            &quantities::COLOR_CHANNEL,
+            &quantities::HUE_DEGREES,
+            &quantities::PERCENT,
+            &quantities::OPACITY_PERCENT,
+        ] {
+            assert!(compact.is_compact());
+        }
+        // Plus de trois chiffres, réel ou signé : largeur courte.
+        assert!(!quantities::ITERATIONS.is_compact());
+        assert!(!quantities::FREE.is_compact());
+        assert!(!quantities::COUNT.is_compact());
     }
 
     #[test]
