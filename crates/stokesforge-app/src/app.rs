@@ -969,6 +969,12 @@ impl StokesForgeApp {
         if self.state.script_running() {
             ctx.request_repaint_after(Duration::from_millis(50));
         }
+        // Recalcul de formules que la commande n'a pas attendu (#239) : on
+        // reprend la main à sa fin ; en attendant, l'image suivante vient.
+        self.state.poll_recalc();
+        if self.state.recalc_work().is_some() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
         // Import en fond : avancement, et création des feuilles à la fin. Les
         // classeurs créés s'ouvrent comme après un import immédiat.
         if self.state.import_progress().is_some() {

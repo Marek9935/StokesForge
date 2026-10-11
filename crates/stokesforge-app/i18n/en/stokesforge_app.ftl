@@ -1602,3 +1602,5 @@ help-open-list = Open the list of values
 busy-stop = Stop
     .hint = Stops the work in progress
 status-import-stopped = Import stopped. Nothing was imported
+status-recalculating = Recalculating…
+status-recalc-stopped = Recalculation stopped. The change was undone

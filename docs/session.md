@@ -163,6 +163,27 @@ annule l'allongement de sa source.
 | l'oracle | `FormulaRecalc::Full`, le recalcul complet d'avant #193, par `Session::spawn_with_recalc` — jamais en production |
 | ce qui le tient | `tests/recalc_cible.rs` (un cas nommé par composante, avec témoin) et `stokesforge-robustesse` `b22` (deux sessions jumelles, mêmes arbres à chaque pas) |
 
+### Recalcul interruptible (#239)
+
+`SessionHandle::execute_interruptible` répond dès la commande appliquée, puis
+recalcule les formules en pouvant être arrêté ; `execute` reste de bout en
+bout bloquant (scripts, CLI, tests). Seul `AppState::execute` l'emploie.
+
+| Pièce | Rôle |
+|---|---|
+| `gauge.rs` (`RecalcGauge`) | seul état partagé **hors du canal FIFO** : numéro du recalcul en cours, drapeau Stop, condition « fini ». Pendant un recalcul l'acteur ne lit plus ses requêtes : un Stop ou un instantané passés par le canal attendraient la fin |
+| `SessionHandle::recalc_running`, `wait_recalc`, `stop_recalc(id)`, `take_recalc_end` | lecture et écriture de la jauge, sans l'acteur, donc sans jamais bloquer |
+| `Recalculator::run_interruptible` | contrôle l'arrêt entre deux feuilles, deux colonnes, deux calculs, deux tours — jamais au milieu d'une colonne. Une passe interrompue laisse un état cohérent : les colonnes écrites sont dans le mémo, les autres seront vues périmées |
+| Stop | `history.undo` (comme Ctrl+Z : la commande reste rétablissable) puis un recalcul complet normal ; `RecalcEnd::Stopped`. Dans une macro l'annulation est refusée : la commande reste, le recalcul s'achève (`Done`) |
+
+Le numéro évite qu'un Stop tardif arrête le recalcul suivant. La révision
+rendue par `execute_interruptible` est celle d'avant recalcul ; **la fin du
+recalcul en ajoute une** (les formules changent sous la même révision, et un
+cache de rendu indexé par révision resterait périmé). Les autres requêtes
+(`undo`, `save`, `snapshot`…) attendent toujours la fin du recalcul : côté
+interface, `AppState::refresh` saute l'instantané tant qu'un recalcul court.
+Seul `Execute` est interruptible ; `Undo`, `Redo`, `Load` recalculent d'un bloc.
+
 La règle à ne pas casser : **toute donnée qui entre dans le calcul d'une
 formule entre dans son empreinte**. Un calcul qui lirait une donnée de plus
 sans l'y ajouter afficherait une valeur fausse sans erreur. Les tests à
@@ -181,4 +202,4 @@ entre feuilles #186, analyses recalculées #184) :
   (`Recalculator::forget`), comme `Load` et `NewProject`.
 
 **À lire** : `stokesforge-session/src/lib.rs` (tête, et sa table), `src/actor.rs`,
-`src/recalc.rs`, `src/snapshot.rs`.
+`src/recalc.rs`, `src/gauge.rs`, `src/snapshot.rs`.

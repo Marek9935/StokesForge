@@ -120,7 +120,7 @@ Gardes **en place** du clavier et de la souris (#231) :
 neuf se déclare dans `shortcuts.rs` **et** dans `HELP` (le test
 `chaque_raccourci_consomme_figure_dans_l_aide` en liste les constantes).
 
-Briques **en place** (#232) : `busy.rs` et `empty_state.rs`, testées dans leur module ; le Stop de l'import dans `tests/shell.rs`. Aucune garde ne les verrouille encore.
+Briques **en place** (#232) : `busy.rs` et `empty_state.rs`, testées dans leur module ; le Stop de l'import et celui du recalcul (#239) dans `tests/shell.rs`. Aucune garde ne les verrouille encore.
 
 Gardes **à venir** du standard d'interface (#217) : aucune connue. Elles
 **n'existent pas encore** : ne pas les citer comme vertes. Le commit qui en

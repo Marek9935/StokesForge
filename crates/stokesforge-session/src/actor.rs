@@ -10,6 +10,7 @@ use stokesforge_commands::{Command, CommandError, CommandResult, History, MacroK
 use stokesforge_core::{NodeId, Project};
 
 use crate::error::{SessionError, SessionResult};
+use crate::gauge::{RecalcEnd, RecalcGauge};
 use crate::recalc::{FormulaRecalc, Recalculator};
 use crate::snapshot::{HistoryState, Revision, Snapshot};
 use crate::{ClientId, WindowGeometry};
@@ -34,6 +35,11 @@ pub(crate) enum Request {
         client: ClientId,
         /// Réponse : nouvelle révision, ou erreur.
         reply: Sender<CommandResult<Revision>>,
+        /// Vrai (#239) : répondre dès la commande appliquée, puis recalculer
+        /// les formules en pouvant être arrêté par la [`RecalcGauge`]. La
+        /// révision rendue est alors celle d'avant recalcul ; une révision
+        /// de plus la suit quand il est fini.
+        interruptible: bool,
     },
     /// Annule l'entrée du sommet. `Ok(None)` si la pile est vide.
     Undo {
@@ -143,6 +149,7 @@ pub(crate) fn run(
     mut project: Project,
     history_limit: Option<usize>,
     recalc: FormulaRecalc,
+    gauge: Arc<RecalcGauge>,
     rx: Receiver<Request>,
 ) -> Project {
     let mut history = match history_limit {
@@ -183,22 +190,53 @@ pub(crate) fn run(
                 command,
                 client,
                 reply,
+                interruptible,
             } => {
                 // A4 — une macro ouverte par un autre émetteur n'absorbe plus
                 // silencieusement le travail de celui-ci : c'était le bug.
-                let outcome = if history.in_macro() && macro_owner != Some(client) {
-                    Err(CommandError::ForeignMacro("execute"))
-                } else {
-                    history.execute(&mut project, command).map(|()| {
-                        revision += 1;
-                        formulas.run(&mut project);
-                        if purge_orphaned_geometries(&project, &mut geometries) {
-                            geometry_revision += 1;
+                if history.in_macro() && macro_owner != Some(client) {
+                    let _ = reply.send(Err(CommandError::ForeignMacro("execute")));
+                    continue;
+                }
+                if let Err(err) = history.execute(&mut project, command) {
+                    let _ = reply.send(Err(err));
+                    continue;
+                }
+                revision += 1;
+                if interruptible {
+                    // #239 — la commande est appliquée : on répond sans
+                    // attendre le recalcul, que Stop peut interrompre.
+                    let id = gauge.begin();
+                    let _ = reply.send(Ok(revision));
+                    let stop_gauge = Arc::clone(&gauge);
+                    let completed = formulas
+                        .run_interruptible(&mut project, move || stop_gauge.stop_requested(id));
+                    let mut end = RecalcEnd::Done;
+                    if !completed {
+                        // Stop : annuler la commande comme Ctrl+Z, puis
+                        // recalculer ce qui a changé (la passe interrompue a
+                        // pu réécrire des colonnes). Dans une macro l'annulation
+                        // est refusée : la commande reste, le recalcul s'achève.
+                        if matches!(history.undo(&mut project), Ok(true)) {
+                            end = RecalcEnd::Stopped;
                         }
-                        revision
-                    })
-                };
-                let _ = reply.send(outcome);
+                        formulas.run(&mut project);
+                    }
+                    if purge_orphaned_geometries(&project, &mut geometries) {
+                        geometry_revision += 1;
+                    }
+                    // Les formules ont changé sous la même révision : un
+                    // client qui compare des révisions (cache de rendu) doit
+                    // voir qu'il y a du neuf.
+                    revision += 1;
+                    gauge.finish(id, end);
+                } else {
+                    formulas.run(&mut project);
+                    if purge_orphaned_geometries(&project, &mut geometries) {
+                        geometry_revision += 1;
+                    }
+                    let _ = reply.send(Ok(revision));
+                }
             }
             Request::Undo { reply } => {
                 let outcome = history.undo(&mut project).map(|reverted| {

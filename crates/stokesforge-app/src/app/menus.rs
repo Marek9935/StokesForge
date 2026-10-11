@@ -712,6 +712,17 @@ impl StokesForgeApp {
                     // sous 0,5 s la brique ne peint rien et le message
                     // « Importing… » reste la ligne d'état.
                     let line = ui.scope(|ui| {
+                        if let Some(elapsed) = self.state.recalc_work() {
+                            let work = Work {
+                                label: tr!("status-recalculating"),
+                                elapsed,
+                                progress: None,
+                                stop: Some(Action::StopRecalc),
+                            };
+                            if work_in_progress(ui, &work, actions) {
+                                return;
+                            }
+                        }
                         if let Some((elapsed, done, total)) = self.state.import_work() {
                             let work = Work {
                                 label: tr!("status-import-progress", done = done, total = total),

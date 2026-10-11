@@ -35,7 +35,7 @@ use stokesforge_app::state::{
     UnsavedChoice, UnsavedGesture, INFO_LIFETIME, STATUS_HISTORY_LEN,
 };
 use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind};
-use stokesforge_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
+use stokesforge_core::{Cell, Column, ColumnMeta, ColumnRole, ColumnType, NodeId, Project, Tree};
 use stokesforge_import::{
     DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator,
 };
@@ -7277,6 +7277,93 @@ fn cancelling_plot_settings_does_not_undo_a_detached_entry() {
     });
     main.refresh();
     assert_eq!(cell_f64(&main, column, 0), 99.0);
+}
+
+// -- Recalcul lourd : indicateur et Stop (issue #239) --
+
+/// Un projet dont le premier recalcul complet dure assez pour dépasser
+/// l'attente de la commande : une grosse colonne source et beaucoup de
+/// colonnes-formule qui la lisent.
+fn heavy_formula_project() -> Project {
+    let mut project = Project::new("Lourd").expect("projet");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("classeur");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("lecture")
+        .expect("Sheet1");
+    let values: Vec<f64> = (0..200_000).map(f64::from).collect();
+    project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&values))
+        .expect("A");
+    for index in 0..150 {
+        let column = project
+            .add_column(
+                sheet,
+                None,
+                Some(&format!("F{index}")),
+                Column::new(ColumnType::Numeric),
+            )
+            .expect("colonne");
+        project
+            .set_column_meta(
+                column,
+                ColumnMeta {
+                    formula: Some("A*2+A*3".into()),
+                    ..Default::default()
+                },
+            )
+            .expect("formule");
+    }
+    project
+}
+
+/// Une commande qui lance un recalcul long rend la main : l'indicateur se lit,
+/// et Stop défait la commande comme Ctrl+Z (rétablissable), avec son message.
+/// Sans Stop (témoin), la même commande reste appliquée.
+#[test]
+fn stop_during_a_heavy_recalculation_undoes_the_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(heavy_formula_project(), &dir.path().join("lourd.stf"));
+    let folders = state.tree().len();
+    state.dispatch(Action::AddGraph);
+    let elapsed = state
+        .recalc_work()
+        .expect("le recalcul complet dépasse l'attente de la commande");
+    assert!(elapsed >= std::time::Duration::from_millis(200));
+    assert_eq!(state.tree().len(), folders, "instantané non rafraîchi");
+
+    state.dispatch(Action::StopRecalc);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while state.recalc_work().is_some() {
+        assert!(std::time::Instant::now() < deadline, "recalcul trop long");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    state.poll_recalc();
+    assert_eq!(state.tree().len(), folders, "le graphique a disparu");
+    assert!(state.snapshot().history.can_redo, "comme après Ctrl+Z");
+    assert!(!state.snapshot().history.can_undo);
+    let status = state.status().expect("message");
+    assert!(!status.is_error());
+    assert_eq!(status.text, stokesforge_app::tr!("status-recalc-stopped"));
+}
+
+#[test]
+fn without_stop_the_heavy_recalculation_keeps_the_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(heavy_formula_project(), &dir.path().join("lourd.stf"));
+    let folders = state.tree().len();
+    state.dispatch(Action::AddGraph);
+    assert!(state.recalc_work().is_some());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while state.recalc_work().is_some() {
+        assert!(std::time::Instant::now() < deadline, "recalcul trop long");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    state.poll_recalc();
+    assert_eq!(state.tree().len(), folders + 1, "le graphique reste");
+    assert!(state.snapshot().history.can_undo);
 }
 
 // -- Import en fond, reprise du dernier import, fichiers récents (issue #6) --

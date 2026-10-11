@@ -65,7 +65,7 @@ use stokesforge_plot::{
 use stokesforge_python::interpreter::EmbeddedPython;
 #[cfg(feature = "python")]
 use stokesforge_script::{ScriptEngine, ScriptError, ScriptOutcome};
-use stokesforge_session::{SessionHandle, SessionResult, Snapshot};
+use stokesforge_session::{RecalcEnd, SessionHandle, SessionResult, Snapshot};
 
 use crate::errors;
 use crate::history_text::history_text;
@@ -76,6 +76,11 @@ use crate::user_colors::UserColors;
 
 mod analysis;
 pub use analysis::{CalculationDelete, StaleExport};
+
+/// Durée pendant laquelle une commande attend la fin du recalcul de formules
+/// qu'elle a lancé avant de rendre la main à l'interface (#239) : un recalcul
+/// plus court que ça reste invisible et synchrone.
+const RECALC_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// Ce que l'utilisateur peut demander. La couche fenêtre ne fait que produire
 /// ces valeurs ; elle ne touche jamais l'acteur directement.
@@ -474,6 +479,9 @@ pub enum Action {
     /// Arrête l'import en fond après le fichier en cours (#232, P2) : rien
     /// n'est créé.
     StopImport,
+    /// Arrête le recalcul de formules en cours (#239, P2) : la commande qui
+    /// l'a déclenché est annulée, comme par Ctrl+Z.
+    StopRecalc,
     /// Ouvre Help › Keyboard Shortcuts (#231, K5).
     OpenKeyboardShortcuts,
     /// Ferme la fenêtre des raccourcis clavier.
@@ -2634,6 +2642,11 @@ pub struct AppState {
     pending_stale_export: Option<Action>,
     /// Import en cours sur un fil de fond.
     import_job: Option<ImportJob>,
+    /// Début du recalcul de formules que l'interface n'a pas attendu (#239) ;
+    /// `None` quand aucun ne court. Tant qu'il est posé, l'instantané n'est
+    /// pas rafraîchi (l'acteur ne répondrait qu'à la fin) et la barre d'état
+    /// montre l'indicateur et Stop.
+    recalc_since: Option<std::time::Instant>,
     /// Dernier import réussi, pour le reprendre dans l'assistant.
     last_import: Option<LastImport>,
     /// Fichiers importés avec succès, à inscrire aux fichiers récents par la
@@ -2750,6 +2763,7 @@ impl AppState {
             pending_calculation_delete: None,
             pending_stale_export: None,
             import_job: None,
+            recalc_since: None,
             last_import: None,
             recent_to_record: Vec::new(),
             script_source: String::new(),
@@ -4566,6 +4580,7 @@ impl AppState {
             Action::OpenStatusHistory => self.status_history_open = true,
             Action::CloseStatusHistory => self.status_history_open = false,
             Action::StopImport => self.stop_import(),
+            Action::StopRecalc => self.stop_recalc(),
             Action::OpenKeyboardShortcuts => self.keyboard_shortcuts_open = true,
             Action::CloseKeyboardShortcuts => self.keyboard_shortcuts_open = false,
             Action::OpenAnalysis {
@@ -4987,6 +5002,12 @@ impl AppState {
     /// l'acteur). Un échec de rafraîchissement écrase le message courant —
     /// l'acteur injoignable est plus grave que ce qu'on allait dire.
     pub fn refresh(&mut self) {
+        // Un recalcul qui court (#239) : l'acteur ne répondrait qu'à sa fin et
+        // l'interface resterait figée. L'ancien instantané reste peint ;
+        // `poll_recalc` rafraîchit dès que c'est fini.
+        if self.recalc_since.is_some() && self.handle.recalc_running().is_some() {
+            return;
+        }
         match self.handle.snapshot() {
             Ok(snapshot) => {
                 if self.snapshot.epoch != snapshot.epoch {
@@ -6167,12 +6188,62 @@ impl AppState {
         // Le libellé se calcule sur l'arbre d'**avant** : après coup, une
         // colonne supprimée n'a plus de nom.
         let label = command.label(&self.snapshot.tree);
-        match self.handle.execute(command) {
+        // Interruptible (#239) : la commande est appliquée sans attendre le
+        // recalcul des formules, que Stop peut arrêter.
+        match self.handle.execute_interruptible(command) {
             Ok(_) => {
                 self.notice(history_text(&label));
-                self.refresh();
+                self.settle_recalc();
             }
             Err(err) => self.fail(errors::session::error_message(&err)),
+        }
+    }
+
+    /// Attend [`RECALC_WAIT`] la fin du recalcul que la commande vient de
+    /// lancer : un recalcul bref reste invisible et l'instantané est frais au
+    /// retour, comme avant #239. Au-delà, on rend la main (l'interface se
+    /// repeint avec son indicateur) et [`AppState::poll_recalc`] reprendra.
+    fn settle_recalc(&mut self) {
+        if self.handle.wait_recalc(RECALC_WAIT) {
+            self.finish_recalc();
+        } else {
+            self.recalc_since = Some(std::time::Instant::now() - RECALC_WAIT);
+        }
+    }
+
+    /// Le recalcul est fini : relève comment, rafraîchit, et dit si Stop a
+    /// défait la commande.
+    fn finish_recalc(&mut self) {
+        self.recalc_since = None;
+        let end = self.handle.take_recalc_end();
+        self.refresh();
+        if end == Some(RecalcEnd::Stopped) {
+            self.notice(tr!("status-recalc-stopped"));
+        }
+    }
+
+    /// À appeler à chaque image : reprend la main quand un recalcul que
+    /// l'interface n'a pas attendu vient de finir. Ne bloque jamais.
+    pub fn poll_recalc(&mut self) {
+        if self.recalc_since.is_some() && self.handle.recalc_running().is_none() {
+            self.finish_recalc();
+        }
+    }
+
+    /// Le recalcul en cours vu comme un travail à montrer (#239) : depuis
+    /// combien de temps il dure.
+    pub fn recalc_work(&self) -> Option<std::time::Duration> {
+        let since = self.recalc_since?;
+        self.handle.recalc_running()?;
+        Some(since.elapsed())
+    }
+
+    /// Stop du recalcul (#239, P2) : il s'arrête entre deux colonnes, la
+    /// commande qui l'a déclenché est annulée, ce qui avait changé est
+    /// recalculé. Le message vient à la fin ([`AppState::finish_recalc`]).
+    pub fn stop_recalc(&mut self) {
+        if let Some(id) = self.handle.recalc_running() {
+            self.handle.stop_recalc(id);
         }
     }
 

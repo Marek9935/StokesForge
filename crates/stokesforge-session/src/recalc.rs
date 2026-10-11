@@ -126,6 +126,11 @@ pub(crate) struct Recalculator {
     /// Pendant du mémo pour les calculs d'analyse (#181) : voir la section
     /// « Calculs d'analyse » de la doc de tête.
     calc_memo: HashMap<NodeId, CalcMemo>,
+    /// Arrêt demandé de l'extérieur (#239), lu entre deux colonnes pendant
+    /// [`Recalculator::run_interruptible`] ; `None` le reste du temps.
+    stop: Option<Box<dyn Fn() -> bool + Send>>,
+    /// Vrai dès que `stop` a répondu oui pendant la passe en cours.
+    interrupted: bool,
 }
 
 /// Nombre maximal de tours « formules → calculs » d'une passe : une chaîne
@@ -141,7 +146,35 @@ impl Recalculator {
             mode,
             memo: HashMap::new(),
             calc_memo: HashMap::new(),
+            stop: None,
+            interrupted: false,
         }
+    }
+
+    /// Comme [`Recalculator::run`], mais s'arrête entre deux colonnes (ou deux
+    /// calculs) dès que `stop` répond oui (#239). Rend `true` si la passe est
+    /// allée à son terme. Une passe interrompue laisse un état cohérent : chaque
+    /// colonne est écrite d'un bloc et notée dans le mémo après coup, celles
+    /// qui n'ont pas été atteintes sont simplement vues périmées par la
+    /// passe suivante.
+    pub(crate) fn run_interruptible(
+        &mut self,
+        project: &mut Project,
+        stop: impl Fn() -> bool + Send + 'static,
+    ) -> bool {
+        self.stop = Some(Box::new(stop));
+        self.interrupted = false;
+        self.run(project);
+        self.stop = None;
+        !std::mem::take(&mut self.interrupted)
+    }
+
+    /// Point d'arrêt : vrai si la passe doit s'interrompre (sticky).
+    fn should_stop(&mut self) -> bool {
+        if !self.interrupted {
+            self.interrupted = self.stop.as_ref().is_some_and(|stop| stop());
+        }
+        self.interrupted
     }
 
     /// Oublie tout : le prochain [`Recalculator::run`] recalcule chaque
@@ -214,6 +247,10 @@ impl Recalculator {
             .collect();
         let mut seen = HashSet::new();
         for sheet in sheets {
+            if self.should_stop() {
+                // Passe interrompue : `seen` est incomplet, ne pas élaguer.
+                return;
+            }
             self.recalc_sheet(project, sheet, &mut seen);
         }
         // Une colonne supprimée, ou qui a perdu sa formule, sort du mémo :
@@ -391,6 +428,9 @@ impl Recalculator {
             }
         }
         for id in order {
+            if self.should_stop() {
+                return;
+            }
             let Some((source, formula)) = parsed.get(&id) else {
                 continue;
             };
@@ -753,6 +793,9 @@ impl Recalculator {
         }
         let mut forced = forced;
         for _ in 0..MAX_ROUNDS {
+            if self.should_stop() {
+                return;
+            }
             let changed = self.run_calculations(project, forced.take().as_ref());
             if !changed {
                 break;
@@ -794,6 +837,9 @@ impl Recalculator {
         for id in order {
             if blocked.contains(&id) {
                 continue;
+            }
+            if self.should_stop() {
+                return changed;
             }
             changed |=
                 self.update_calculation(project, id, forced.is_some_and(|f| f.contains(&id)));
@@ -990,4 +1036,116 @@ fn calculations_in_a_cycle(project: &Project) -> HashSet<NodeId> {
         })
         .map(|(id, _)| *id)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use stokesforge_core::{Column, ColumnMeta, ColumnType, ColumnValues};
+
+    use super::*;
+
+    /// Cellules numériques d'une colonne ; `None` pour ce qui ne l'est pas
+    /// (le « --- » d'une colonne-formule pas encore calculée).
+    fn nombres(project: &Project, column: NodeId) -> Vec<Option<f64>> {
+        let column = project
+            .tree()
+            .node(column)
+            .and_then(|n| n.as_column())
+            .expect("colonne");
+        match column.values() {
+            ColumnValues::Float(values) => values.iter().map(|v| Some(*v)).collect(),
+            ColumnValues::Mixed(cells) => cells
+                .iter()
+                .map(|cell| match cell {
+                    stokesforge_core::MixedCell::Number(v) => Some(*v),
+                    _ => None,
+                })
+                .collect(),
+        }
+    }
+
+    fn valeurs(expected: &[f64]) -> Vec<Option<f64>> {
+        expected.iter().map(|v| Some(*v)).collect()
+    }
+
+    /// `A [1,2,3]` puis `B = A*2`, `C = B+1`, `D = C+1` (une chaîne : chaque
+    /// colonne attend la précédente ; les lettres sont positionnelles).
+    fn chaine() -> (Project, [NodeId; 3]) {
+        let mut project = Project::new("Demo").expect("projet");
+        let root = project.root();
+        project.add_workbook(root, Some("Book1")).expect("classeur");
+        let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+        project
+            .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .expect("A");
+        let mut formulas = Vec::new();
+        for (name, text) in [("B", "A*2"), ("C", "B+1"), ("D", "C+1")] {
+            let column = project
+                .add_column(sheet, None, Some(name), Column::new(ColumnType::Numeric))
+                .expect("colonne");
+            project
+                .set_column_meta(
+                    column,
+                    ColumnMeta {
+                        formula: Some(text.into()),
+                        ..Default::default()
+                    },
+                )
+                .expect("formule");
+            formulas.push(column);
+        }
+        (project, [formulas[0], formulas[1], formulas[2]])
+    }
+
+    fn version(project: &Project, column: NodeId) -> u64 {
+        column_version(project, column).expect("version")
+    }
+
+    /// #239 : l'arrêt tombe entre deux colonnes. Ce qui était écrit le reste,
+    /// le reste attend ; la passe suivante achève sans réécrire ce qui l'est
+    /// déjà (le mémo est resté juste) et retombe sur le résultat complet.
+    #[test]
+    fn un_arret_entre_deux_colonnes_laisse_un_etat_que_la_passe_suivante_acheve() {
+        let (mut project, [c, d, e]) = chaine();
+        let polls = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&polls);
+        let mut recalc = Recalculator::new(FormulaRecalc::Targeted);
+        // 1er contrôle : avant la feuille ; 2e : avant C ; 3e : avant D.
+        let completed = recalc.run_interruptible(&mut project, move || {
+            counter.fetch_add(1, Ordering::SeqCst) + 1 >= 3
+        });
+        assert!(!completed, "la passe aurait dû être interrompue");
+        assert_eq!(
+            nombres(&project, c),
+            valeurs(&[2.0, 4.0, 6.0]),
+            "C est écrite"
+        );
+        assert!(
+            nombres(&project, d).iter().all(Option::is_none)
+                && nombres(&project, e).iter().all(Option::is_none),
+            "D et E n'ont pas été atteintes"
+        );
+        let c_version = version(&project, c);
+
+        recalc.run(&mut project);
+        assert_eq!(nombres(&project, d), valeurs(&[3.0, 5.0, 7.0]));
+        assert_eq!(nombres(&project, e), valeurs(&[4.0, 6.0, 8.0]));
+        assert_eq!(
+            version(&project, c),
+            c_version,
+            "C, déjà à jour, n'est pas réécrite"
+        );
+    }
+
+    /// Témoin : sans demande d'arrêt, la passe interruptible va au bout.
+    #[test]
+    fn sans_arret_la_passe_interruptible_va_au_bout() {
+        let (mut project, [_, _, e]) = chaine();
+        let mut recalc = Recalculator::new(FormulaRecalc::Targeted);
+        assert!(recalc.run_interruptible(&mut project, || false));
+        assert_eq!(nombres(&project, e), valeurs(&[4.0, 6.0, 8.0]));
+    }
 }

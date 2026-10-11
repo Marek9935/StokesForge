@@ -143,20 +143,24 @@
 
 mod actor;
 mod error;
+mod gauge;
 mod recalc;
 mod snapshot;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{NodeId, Project};
 
 use actor::Request;
+use gauge::RecalcGauge;
 
 pub use error::{SessionError, SessionResult};
+pub use gauge::RecalcEnd;
 pub use recalc::FormulaRecalc;
 pub use snapshot::{HistoryState, Revision, Snapshot};
 
@@ -204,6 +208,8 @@ pub struct SessionHandle {
     /// cette poignée, distincte de celle de toute poignée issue d'un autre
     /// appel à [`Session::handle`].
     client: ClientId,
+    /// Jauge du recalcul interruptible (#239), commune à toutes les poignées.
+    gauge: Arc<RecalcGauge>,
 }
 
 impl SessionHandle {
@@ -218,6 +224,7 @@ impl SessionHandle {
         SessionHandle {
             tx: self.tx.clone(),
             client: ClientId::fresh(),
+            gauge: Arc::clone(&self.gauge),
         }
     }
 
@@ -242,8 +249,51 @@ impl SessionHandle {
             command,
             client,
             reply,
+            interruptible: false,
         })?
         .map_err(SessionError::from)
+    }
+
+    /// Comme [`SessionHandle::execute`], mais rend la main dès la commande
+    /// appliquée (#239) : le recalcul des formules continue dans l'acteur et
+    /// peut être arrêté par [`SessionHandle::stop_recalc`]. Les requêtes
+    /// suivantes attendent, comme toujours, la fin du recalcul ; pour ne pas
+    /// bloquer, voir [`SessionHandle::recalc_running`]. La révision rendue
+    /// est celle d'avant recalcul ; la fin du recalcul en ajoute une.
+    pub fn execute_interruptible(&self, command: Command) -> SessionResult<Revision> {
+        let client = self.client;
+        self.request(|reply| Request::Execute {
+            command,
+            client,
+            reply,
+            interruptible: true,
+        })?
+        .map_err(SessionError::from)
+    }
+
+    /// Numéro du recalcul interruptible en cours, s'il y en a un. Ne passe
+    /// pas par l'acteur : ne bloque jamais.
+    pub fn recalc_running(&self) -> Option<u64> {
+        self.gauge.running()
+    }
+
+    /// Attend au plus `timeout` la fin du recalcul en cours ; vrai s'il n'y
+    /// en a (plus) aucun.
+    pub fn wait_recalc(&self, timeout: std::time::Duration) -> bool {
+        self.gauge.wait_idle(timeout)
+    }
+
+    /// Demande l'arrêt du recalcul `id` (#239) : il s'interrompt entre deux
+    /// colonnes, la commande qui l'avait déclenché est annulée comme par
+    /// Ctrl+Z, puis ce qui avait changé est recalculé. Faux si ce recalcul
+    /// est déjà fini. Ne bloque jamais.
+    pub fn stop_recalc(&self, id: u64) -> bool {
+        self.gauge.request_stop(id)
+    }
+
+    /// Relève la fin du dernier recalcul interruptible, une seule fois.
+    pub fn take_recalc_end(&self) -> Option<RecalcEnd> {
+        self.gauge.take_finished()
     }
 
     /// Annule l'entrée du sommet. `Ok(None)` si la pile est vide.
@@ -388,13 +438,16 @@ impl Session {
         recalc: FormulaRecalc,
     ) -> std::io::Result<Self> {
         let (tx, rx) = mpsc::channel();
+        let gauge = Arc::new(RecalcGauge::default());
+        let actor_gauge = Arc::clone(&gauge);
         let thread = thread::Builder::new()
             .name("stokesforge-session".to_string())
-            .spawn(move || actor::run(project, history_limit, recalc, rx))?;
+            .spawn(move || actor::run(project, history_limit, recalc, actor_gauge, rx))?;
         Ok(Self {
             handle: SessionHandle {
                 tx,
                 client: ClientId::fresh(),
+                gauge,
             },
             thread,
         })
@@ -408,6 +461,7 @@ impl Session {
         SessionHandle {
             tx: self.handle.tx.clone(),
             client: ClientId::fresh(),
+            gauge: Arc::clone(&self.handle.gauge),
         }
     }
 
@@ -441,5 +495,109 @@ mod tests {
         assert_send::<SessionHandle>();
         assert_send::<Snapshot>();
         assert_send::<Command>();
+    }
+
+    /// `A [1,2,3]` et une colonne `C` vide, pour y poser une formule.
+    fn feuille() -> (Session, NodeId, NodeId) {
+        let mut project = Project::new("Demo").expect("projet");
+        let root = project.root();
+        project.add_workbook(root, Some("Book1")).expect("classeur");
+        let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+        project
+            .add_column(
+                sheet,
+                None,
+                Some("A"),
+                stokesforge_core::Column::from_f64(&[1.0, 2.0, 3.0]),
+            )
+            .expect("A");
+        let c = project
+            .add_column(
+                sheet,
+                None,
+                Some("C"),
+                stokesforge_core::Column::new(stokesforge_core::ColumnType::Numeric),
+            )
+            .expect("C");
+        (Session::spawn(project, None).expect("acteur"), sheet, c)
+    }
+
+    fn formule_c(c: NodeId) -> Command {
+        Command::SetColumnMeta {
+            column: c,
+            meta: stokesforge_core::ColumnMeta {
+                formula: Some("A*2".into()),
+                ..Default::default()
+            },
+        }
+    }
+
+    /// #239 : sans Stop, la commande est appliquée, le recalcul s'achève et la
+    /// fin est relevée une fois ; chaque étape ajoute une révision.
+    #[test]
+    fn un_recalcul_interruptible_non_arrete_s_acheve_normalement() {
+        let (session, _, c) = feuille();
+        let handle = session.handle();
+        let before = handle.snapshot().expect("instantané").revision;
+        handle
+            .execute_interruptible(formule_c(c))
+            .expect("commande");
+        assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
+        assert_eq!(handle.take_recalc_end(), Some(RecalcEnd::Done));
+        assert_eq!(handle.take_recalc_end(), None, "relevée une seule fois");
+        let snapshot = handle.snapshot().expect("instantané");
+        assert_eq!(
+            snapshot.revision,
+            before + 2,
+            "commande, puis fin de recalcul"
+        );
+        assert!(snapshot.history.can_undo);
+        let column = snapshot.tree.node(c).and_then(|n| n.as_column()).unwrap();
+        assert!(column.meta().formula.is_some());
+    }
+
+    /// #239 : Stop annule la commande comme Ctrl+Z (historique intact : rien
+    /// à rétablir de plus que ce qu'un Undo aurait laissé), et la fin est
+    /// `Stopped`. L'arrêt est posé d'avance sur le prochain recalcul, ce qui
+    /// le rend déterministe : le premier point d'arrêt le voit.
+    #[test]
+    fn stop_annule_la_commande_qui_a_declenche_le_recalcul() {
+        let (session, _, c) = feuille();
+        let handle = session.handle();
+        let first = handle.snapshot().expect("instantané");
+        handle.gauge.stop_next_for_test();
+        handle
+            .execute_interruptible(formule_c(c))
+            .expect("commande");
+        assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
+        assert_eq!(handle.take_recalc_end(), Some(RecalcEnd::Stopped));
+        let snapshot = handle.snapshot().expect("instantané");
+        let column = snapshot.tree.node(c).and_then(|n| n.as_column()).unwrap();
+        assert!(column.meta().formula.is_none(), "la formule est défaite");
+        assert!(!snapshot.history.can_undo, "la commande a quitté la pile");
+        assert!(snapshot.history.can_redo, "comme après un Ctrl+Z");
+        assert!(snapshot.revision > first.revision);
+    }
+
+    /// Un Stop tardif (le recalcul visé est fini) ne fait rien — et surtout
+    /// n'arrête pas le suivant.
+    #[test]
+    fn un_stop_tardif_n_arrete_pas_le_recalcul_suivant() {
+        let (session, _, c) = feuille();
+        let handle = session.handle();
+        handle
+            .execute_interruptible(formule_c(c))
+            .expect("commande");
+        assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
+        let finished = 1; // numéro du premier recalcul
+        assert!(!handle.stop_recalc(finished), "déjà fini");
+        handle
+            .execute_interruptible(Command::AddFolder {
+                parent: handle.snapshot().expect("instantané").tree.root(),
+                name: "Dossier".into(),
+            })
+            .expect("commande");
+        assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
+        assert_eq!(handle.take_recalc_end(), Some(RecalcEnd::Done));
     }
 }

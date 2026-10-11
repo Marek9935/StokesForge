@@ -442,7 +442,7 @@ Comment c'est tenu :
   redimensionnement sur une poignée, doigt sur un élément cliquable qui n'est
   pas un bouton.
 
-## Travaux longs et états vides — en place (#232), reste le recalcul (#239)
+## Travaux longs et états vides — en place (#232, #239)
 
 - Au-delà d'≈ 0,5 s : indicateur tournant + mot (« Importing… ») à l'endroit
   du résultat ; barre de progression si le nombre d'étapes est connu (P1).
@@ -455,8 +455,13 @@ Comment c'est tenu :
 - Seuils : l'indicateur après 0,5 s (`busy::SHOW_AFTER`), Stop après 3 s
   (`busy::STOP_AFTER`). **Stop de l'import** : le fil s'arrête après le fichier
   en cours, rien n'est créé (`AppState::stop_import`). **Stop du script** : la
-  console garde le sien (#215). **Recalcul** : pas de Stop tant que l'interface
-  appelle la session de façon bloquante (#239).
+  console garde le sien (#215). **Recalcul de formules** (#239) : une commande attend 0,2 s
+  (`RECALC_WAIT`) la fin du recalcul qu'elle lance — un recalcul bref reste
+  synchrone et invisible — puis rend la main ; la barre d'état montre
+  « Recalculating… » et Stop (`Action::StopRecalc`). Stop interrompt entre
+  deux colonnes puis **annule la commande** comme Ctrl+Z (rétablissable) et
+  recalcule ce qui a changé. Tout autre geste attend la fin du recalcul
+  (`docs/session.md`).
 
 ## Hors de cette page
 

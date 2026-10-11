@@ -503,7 +503,7 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   enregistré par `modal_save_changes` (Entrée = Save), un échec grave hors
   fenêtre par `modal_alert` (M8 : Close + action) — peints depuis
   `app/confirmations.rs`, ou dans le contenu du dialogue qu'ils recouvrent ;
-- un **travail qui dure** passe par `app/busy.rs` (`work_in_progress` : indicateur et mot après 0,5 s, barre si le total est connu, Stop après 3 s si le travail s'interrompt ; #232), jamais un `ui.spinner()` seul ; un **panneau vide** par `app/empty_state.rs` (`empty_state` : phrase grisée centrée qui dit ce qui manque et le geste pour le créer), jamais un `ui.weak(…)` nu ;
+- un **travail qui dure** passe par `app/busy.rs` (`work_in_progress` : indicateur et mot après 0,5 s, barre si le total est connu, Stop après 3 s si le travail s'interrompt ; #232), jamais un `ui.spinner()` seul ; un travail qui passe par la session s'écrit `execute_interruptible` (recalcul de formules, #239 : Stop = annuler la commande), jamais un second chemin ; un **panneau vide** par `app/empty_state.rs` (`empty_state` : phrase grisée centrée qui dit ce qui manque et le geste pour le créer), jamais un `ui.weak(…)` nu ;
 - aucun slider, unité dans le libellé, pas de bulle nue sur un champ (icône
   « ? » de `hover_help`) ;
 - un **formulaire** se pose par `app/form.rs` (grille à deux colonnes, choix

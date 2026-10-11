@@ -1594,3 +1594,5 @@ help-open-list = Ouvrir la liste des valeurs
 busy-stop = Arrêter
     .hint = Arrête le travail en cours
 status-import-stopped = Import arrêté. Rien n'a été importé
+status-recalculating = Recalcul en cours…
+status-recalc-stopped = Recalcul arrêté. La modification a été annulée
