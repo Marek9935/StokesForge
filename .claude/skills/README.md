@@ -25,6 +25,7 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
 | [`stokesforge-import`](stokesforge-import/SKILL.md) | recettes d'appareil, prévisualisation façon Origin, fichiers mal découpés | CSV/TXT/ASC, nouvel instrument, aperçu faux |
 | [`stokesforge-python`](stokesforge-python/SKILL.md) | pont PyO3, surface `pyst`, console de script ; le seul domaine que `cargo test --workspace` ne compile pas (travail CI `test-python` dédié) | script, GIL, numpy, `PYO3_CONFIG_FILE` |
 | [`stokesforge-verification`](stokesforge-verification/SKILL.md) | écrire un test au bon endroit, puis vérifier et committer | « teste », « vérifie », « c'est bon ? », « commit » |
+| [`run-stokesforge`](run-stokesforge/SKILL.md) | lancer, piloter (clics, clavier) et capturer l'application réelle sous Linux | « lance l'app », « screenshot », « vérifie dans l'app » |
 | [`stokesforge-architecture`](stokesforge-architecture/SKILL.md) | répondre sur l'architecture — **pour un chimiste**, par analogies Python | « comment ça marche », « pourquoi ce découpage », « où vit X » |
 | [`stokesforge-fonctionnalites`](stokesforge-fonctionnalites/SKILL.md) | répondre sur ce que le logiciel sait faire — **pour un chimiste** venu d'Origin | « est-ce que je peux… », « comment je fais pour… » |
 | [`stokesforge-textes-interface`](stokesforge-textes-interface/SKILL.md) | écrire un texte visible : glossaire anglais ↔ français, majuscules, ton, messages | tout libellé, infobulle, message ou titre ajouté ou modifié |
