@@ -1512,6 +1512,7 @@ field-refused-integer = Enter a whole number
 field-refused-use-auto = Use Auto range
 field-refused-name-empty = The name cannot be empty
 field-refused-name-taken = This name is already used
+field-refused-range-order = The start of the range must not exceed its end
 
 # Champ numérique : bulle du ▼ (#220).
 number-presets = Common values

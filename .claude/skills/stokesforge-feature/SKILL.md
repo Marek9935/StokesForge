@@ -486,6 +486,11 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   molette (#233, #235) : seulement sur un champ à liste, au survol, un cran =
   valeur proposée voisine ; aspect (#234) : `list_frame`, flèche pleine dans le
   cadre, fond blanc si éditable, gris si liste seule (fonds du thème) ;
+- **deux champs liés** (« de » ≤ « à », #240, N11) : la paire inversée est
+  refusée (ancienne valeur rendue, `field_state::flag` sur le **second** champ),
+  jamais permutée ni ramenée ; **pas pour Min/Max d'un axe**, qui peut être
+  inversé. Un texte Typst fautif est signalé par `formula_field`
+  (`formula::diagnose`, champ quitté) : tout champ de texte riche passe par lui ;
 - le **rappel d'un champ** (case, radio, texte, nombre) est l'icône « ? » :
   `app/hover_help.rs` (`help_beside` autour du champ, `help_text` après) ; jamais
   `on_hover_text` sur un champ (`aucune_bulle_nue_sur_un_champ_de_formulaire`,

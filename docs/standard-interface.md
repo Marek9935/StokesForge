@@ -52,15 +52,15 @@ Déjà en place et réutilisées par ce standard : `modal_dialog_with`
 (`app/dialogs.rs`), `hover_help` (`app/hover_help.rs`), `theme::section_title`,
 `MenuSections::section`, `color_field`.
 
-## Champs numériques — en place (#220, Auto #221, #233–#235), reste N11 (#240)
+## Champs numériques — en place (#220, Auto #221, #233–#235, N9 et N11 #240)
 
 Brique : `stokesforge_app::number_field::number_field(ui, sel, &mut valeur,
 &quantities::GRANDEUR)` (`src/number_field.rs`), table : `src/quantities.rs`
 (`Quantity` : bornes, pas, grand pas, décimales, entier ou non, valeurs
 proposées). Une grandeur neuve s'ajoute à la table, jamais à l'appel ; les 28
 `DragValue` et le `Slider` d'opacité sont migrés, la barre de format des objets
-(épaisseur) aussi (N9). Reste à migrer : le corps de texte de la barre de format
-(il a une entrée « Auto », #221) — #240.
+(épaisseur) et le corps de texte (`quantities::TEXT_FORMAT_SIZE`, entrée
+« Auto ») aussi (N9).
 
 - **Une brique « nombre » unique** (N1 → R1, R12). Aspect : champ texte, avec
   `▼` **seulement** si la table des grandeurs propose des valeurs (épaisseur,
@@ -83,8 +83,8 @@ proposées). Une grandeur neuve s'ajoute à la table, jamais à l'appel ; les 28
   flèche pleine à l'intérieur à droite, comme la liste déroulante ; **fond
   blanc** si le champ est éditable au clavier, **fond gris** si seule la liste
   choisit. Fonds tirés du thème (`list_frame::editable_fill` / `list_only_fill`).
-  Le champ nombre l'applique ; la liste éditable de la barre de format (corps
-  de texte, encore une `ComboBox`) le suivra avec sa migration.
+  Le champ nombre l'applique, y compris la liste éditable du corps de texte de
+  la barre de format.
 - **Application** (N3) : à Entrée ou en quittant le champ ; Échap rend
   l'ancienne valeur ; une entrée d'historique par validation.
 - **Une grandeur, une définition** (N8) : une table unique donne bornes, pas,
@@ -96,8 +96,10 @@ proposées). Une grandeur neuve s'ajoute à la table, jamais à l'appel ; les 28
 - **Unité** (N10) : dans le libellé (« Line width (pt) »), jamais en suffixe,
   y compris % et ° du sélecteur de couleur.
 - **Aucun slider** (N12 → R16) : l'opacité est un champ, comme R, G et B.
-- **Champs couplés** (N11, *à venir*, #240) : min < max, « de » ≤ « à »,
-  erreur sur le **second** champ. Une contrainte entre deux champs est refusée ; seule une
+- **Champs couplés** (N11, en place, #240) : « de » ≤ « à » (plages de
+  l'analyse, `analysis_forms::flag_pair_refusal`), erreur sur le **second** champ.
+  **Exception : Min/Max d'un axe** — un axe peut être inversé (cm⁻¹), aucune
+  contrainte, aucune erreur. Une contrainte entre deux champs est refusée ; seule une
   borne fixe est ramenée.
 
 ### Auto (C4, R10, G4) — en place (#221)
@@ -106,8 +108,8 @@ Mécanique : `quantities::AutoKind` (`None`, `Field`, `Group`) sur la grandeur,
 `number_field::auto_number_field` (valeur `Option`, texte grisé « Auto (…) »)
 pour un `Field`, `NumberResponse::auto` pour un `Group` (`AXIS_BOUND`). Les
 bornes calculées viennent de `DrawnPanel` (`stokesforge-render`), publiées par
-`graph_window::publish_axis_bounds`. Reste à migrer : le corps de texte de la
-barre de format (liste « Auto », C4) — #240.
+`graph_window::publish_axis_bounds`. Le corps de texte de la barre de format
+a son entrée « Auto » (liste éditable, C4).
 
 
 - Choix dans une liste : entrée « Auto » en tête.
@@ -140,8 +142,8 @@ comme `color_picker`), trois étages que les briques « nombre » (#220) et
 Un champ de formulaire neuf qui lit une saisie passe par `edit_text` ; une erreur
 déjà connue passe par `show_issue`. Les teintes sont `theme::field_refused_color`
 et `theme::field_clamped_color`. Branchés : la brique « nombre » (#220) et les
-renommages (#224, `app/inplace_edit.rs`). Reste à brancher (#240) : la
-contrainte entre champs (N11) et l'erreur Typst du titre (T3).
+renommages (#224, `app/inplace_edit.rs`). Branchés aussi (#240) : la
+contrainte entre champs (N11) et l'erreur Typst des textes riches (T3).
 
 - **Illisible** (`abc`, `1..2`) : cadre **rouge**, bulle qui dit la règle,
   l'ancienne valeur revient à la sortie du champ (N6, N7 → R2, R8). Le rouge
@@ -153,8 +155,13 @@ contrainte entre champs (N11) et l'erreur Typst du titre (T3).
   est réservé à « refusé ».
 - **Texte refusé** (T2) : même règle, texte gardé ; un renommage refusé laisse
   le champ ouvert.
-- **Erreur Typst d'un titre** (T3, *à venir*, #240) : aussi sur le champ des
-  propriétés, cadre rouge et message Typst en bulle.
+- **Erreur Typst d'un texte riche** (T3, en place, #240) : titre, titres d'axe,
+  légende — tout champ posé par `plot_settings::formula_field` — peint, **champ
+  quitté** (pas pendant la frappe), le cadre rouge et le message Typst en bulle
+  (`stokesforge_render::formula::diagnose`, mémorisé par texte). Le texte est
+  appliqué tel quel : le graphe retombe sur le texte brut, **dans un cadre rouge à
+  l'écran** (`EguiBackend::draw_text`) ; jamais dans un export ni une copie
+  (backend SVG).
 - Jamais d'effacement ni de correction muette.
 
 ## Virgule décimale — en place (#223)

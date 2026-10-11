@@ -468,3 +468,44 @@ fn un_nom_de_colonne_saffiche_tel_quel_un_nom_saisi_est_compose() {
     );
     assert!(!textes.iter().any(|texte| texte.starts_with("#\"")));
 }
+
+/// Les cadres rouges (tracés fermés) peints pour la figure de `label` (titre de
+/// l'axe gauche) avec le chemin Typst actif.
+fn cadres_rouges(label: &str) -> usize {
+    let ctx = egui::Context::default();
+    ctx.set_fonts(stokesforge_render::font_definitions());
+    let measurer = TextMeasurer::default();
+    let choice = FontChoice::default();
+    let cache: FormulaCache<_> = FormulaCache::new();
+    let project = Project::new("Typst").expect("projet");
+    let spec = spec_with_label(label);
+    let plot = resolve_spec(project.tree(), &spec);
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(400.0, 300.0));
+    let mut shapes = Vec::new();
+    let mut sortie = ctx.run_ui(egui::RawInput::default(), |_ui| {
+        let text = ScreenText::new(&ctx, &measurer);
+        let typst = TypstScreen::new(&ctx, &cache, &choice).expect("polices");
+        collect_shapes_with_typst(&mut shapes, rect, &text, typst, &plot).expect("tracé");
+    });
+    sortie.textures_delta.clear();
+    shapes
+        .iter()
+        .filter(|shape| match shape {
+            Shape::Path(path) => {
+                path.closed
+                    && matches!(&path.stroke.color,
+                        egui::epaint::ColorMode::Solid(c) if c.r() > 200 && c.g() < 80)
+            }
+            _ => false,
+        })
+        .count()
+}
+
+/// T3 (#240) : un titre que Typst refuse est dessiné en brut **dans un cadre
+/// rouge** à l'écran ; un titre valide n'en a pas. (Les exports passent par le
+/// backend SVG, qui ne dessine aucun cadre.)
+#[test]
+fn un_texte_que_typst_refuse_est_encadre_en_rouge_a_l_ecran() {
+    assert_eq!(cadres_rouges("$x, x_, *gras"), 1);
+    assert_eq!(cadres_rouges("$lambda$ (nm)"), 0);
+}

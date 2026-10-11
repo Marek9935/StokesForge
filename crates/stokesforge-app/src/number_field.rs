@@ -681,6 +681,7 @@ mod tests {
             quantities::SHAPE_LINE_WIDTH,
             quantities::SYMBOL_SIZE,
             quantities::TEXT_SIZE,
+            quantities::TEXT_FORMAT_SIZE,
             quantities::ROTATION,
             quantities::COLOR_CHANNEL,
             quantities::OPACITY_PERCENT,

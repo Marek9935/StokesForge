@@ -182,6 +182,9 @@ fn rotate(offset: Vec2, transform: &FontTransform) -> Vec2 {
     }
 }
 
+/// Couleur du cadre d'un texte riche que Typst refuse (#240, T3).
+const COMPILE_ERROR_FRAME: Color32 = Color32::from_rgb(214, 48, 49);
+
 impl DrawingBackend for EguiBackend<'_> {
     type ErrorType = EguiBackendError;
 
@@ -377,6 +380,9 @@ impl DrawingBackend for EguiBackend<'_> {
         // Dégrade silencieusement vers le chemin ordinaire s'il ne compile
         // pas ou que Typst n'est pas activé sur ce backend (`typst_screen`,
         // tête de module) — jamais d'erreur remontée pour un label malformé.
+        // Un texte riche que Typst refuse est dessiné en brut **dans un cadre
+        // rouge** (#240, T3) : repère d'écran, absent des exports (backend SVG).
+        let mut compile_failed = false;
         if let Some(typst) = &self.typst {
             if stokesforge_render::formula::is_rich(style) {
                 let size_pt = stokesforge_render::text::font_size(style.size());
@@ -394,6 +400,7 @@ impl DrawingBackend for EguiBackend<'_> {
                     self.shapes.push(shape);
                     return Ok(());
                 }
+                compile_failed = !text.trim().is_empty();
             }
         }
 
@@ -414,6 +421,21 @@ impl DrawingBackend for EguiBackend<'_> {
         );
         let transform = style.transform();
         let origin = self.at(pos) + rotate(offset, &transform);
+        if compile_failed {
+            // Le cadre suit la rotation du texte (titre de l'axe vertical).
+            let pad = 2.0;
+            let corners = [
+                (-pad, -pad),
+                (size.x + pad, -pad),
+                (size.x + pad, size.y + pad),
+                (-pad, size.y + pad),
+            ]
+            .map(|(x, y)| origin + rotate(Vec2::new(x, y), &transform));
+            self.shapes.push(Shape::closed_line(
+                corners.to_vec(),
+                Stroke::new(1.5, COMPILE_ERROR_FRAME),
+            ));
+        }
         self.shapes.push(Shape::Text(
             TextShape::new(origin, galley, color(fill)).with_angle(angle_of(&transform)),
         ));

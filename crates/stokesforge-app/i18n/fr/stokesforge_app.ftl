@@ -1504,6 +1504,7 @@ field-refused-integer = Saisissez un nombre entier
 field-refused-use-auto = Utilisez Plage auto
 field-refused-name-empty = Le nom ne peut pas être vide
 field-refused-name-taken = Ce nom est déjà utilisé
+field-refused-range-order = Le début de la plage ne doit pas dépasser sa fin
 
 # Champ numérique : bulle du ▼ (#220).
 number-presets = Valeurs courantes

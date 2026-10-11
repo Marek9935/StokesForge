@@ -124,6 +124,14 @@ pub const TEXT_SIZE: Quantity = Quantity::real(0.5, 2.0, 1)
     .between(4.0, 200.0)
     .with_presets(&[8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 24.0, 36.0]);
 
+/// Corps proposé par la barre de format du texte : mêmes bornes que
+/// [`TEXT_SIZE`], liste plus longue et entrée « Auto » (C4, N9).
+pub const TEXT_FORMAT_SIZE: Quantity = TEXT_SIZE
+    .with_presets(&[
+        6.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0,
+    ])
+    .with_auto(AutoKind::Field);
+
 /// Rotation d'un texte, en degrés.
 pub const ROTATION: Quantity = Quantity::real(1.0, 15.0, 1).between(-180.0, 180.0);
 

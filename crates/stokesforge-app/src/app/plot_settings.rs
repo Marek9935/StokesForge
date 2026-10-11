@@ -16,6 +16,7 @@ use stokesforge_plot::{
 };
 
 use crate::color_picker::{ColorUsage, PickerEnv, SavedColorEdit};
+use crate::field_state::{self, FieldIssue};
 use crate::icons::ICON_SIZE;
 use crate::number_field::number_field;
 use crate::quantities;
@@ -569,11 +570,17 @@ fn formula_memo_rows() -> [(&'static str, String); 7] {
 fn formula_field(form: &mut Form<'_>, label: &str, hint: &str, value: &mut String) -> bool {
     form.row(label, |ui| {
         let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
-        let lost = ui
-            .add(egui::TextEdit::singleline(value).desired_width(width))
-            .lost_focus();
+        let response = ui.add(egui::TextEdit::singleline(value).desired_width(width));
+        // T3 : une fois le texte validé (champ quitté), l'erreur Typst se peint
+        // sur le champ ; le graphe, lui, retombe sur le texte brut. Pas de rouge
+        // pendant la frappe, où le markup est forcément inachevé.
+        if !response.has_focus() {
+            if let Some(error) = stokesforge_render_egui::formula::diagnose(value) {
+                field_state::show_issue(ui, &response, &FieldIssue::refused(error));
+            }
+        }
         formula_help(ui, hint);
-        lost
+        response.lost_focus()
     })
 }
 
@@ -1738,6 +1745,66 @@ mod tests {
             rendus.push(rendu);
         }
         (rendus, peints)
+    }
+
+    /// Nombre de cadres rouges (« refusé ») peints dans `shapes`.
+    fn cadres_rouges(shapes: &[egui::epaint::ClippedShape]) -> usize {
+        let rouge = crate::theme::field_refused_color();
+        shapes
+            .iter()
+            .filter(|peint| match &peint.shape {
+                egui::Shape::Rect(rect) => rect.stroke.color == rouge,
+                _ => false,
+            })
+            .count()
+    }
+
+    /// T3 : un texte Typst qui ne compile pas, une fois le champ quitté, est
+    /// signalé par le cadre rouge d'un refus ; un texte valide ne l'est pas.
+    #[test]
+    fn une_erreur_typst_peint_le_cadre_rouge_du_champ() {
+        let context = contexte();
+        let peindre = |valeur: &mut String| {
+            image(&context, vec![], |ui| {
+                form(ui, "essai", |form| {
+                    formula_field(form, "Grandeur", "Aide", valeur)
+                });
+            })
+        };
+        let mut valide = String::from("$lambda$ (nm)");
+        let mut fautif = String::from("$ (unclosed");
+        // Deux images : la grille du formulaire se mesure à la première.
+        peindre(&mut valide);
+        peindre(&mut fautif);
+        assert_eq!(cadres_rouges(&peindre(&mut valide)), 0);
+        assert_eq!(cadres_rouges(&peindre(&mut fautif)), 1);
+    }
+
+    /// T3 en situation : on tape un markup fautif, Entrée quitte le champ, le
+    /// cadre rouge apparaît.
+    #[test]
+    fn une_erreur_typst_tapee_puis_validee_devient_rouge() {
+        let context = contexte();
+        let mut valeur = String::from("abc");
+        let peindre = |valeur: &mut String, events: Vec<egui::Event>| {
+            image(&context, events, |ui| {
+                form(ui, "essai", |form| {
+                    formula_field(form, "Grandeur", "Aide", valeur)
+                });
+            })
+        };
+        peindre(&mut valeur, vec![]);
+        let formes = peindre(&mut valeur, vec![]);
+        let dedans = texte_exact(&textes(&formes), "abc").centre;
+        peindre(&mut valeur, vec![egui::Event::PointerMoved(dedans)]);
+        peindre(&mut valeur, vec![clic(dedans, true)]);
+        peindre(&mut valeur, vec![clic(dedans, false)]);
+        peindre(&mut valeur, vec![egui::Event::Text("$x".into())]);
+        assert!(valeur.contains("$x"), "{valeur:?}");
+        assert_eq!(cadres_rouges(&peindre(&mut valeur, vec![])), 0, "en frappe");
+        peindre(&mut valeur, vec![touche(egui::Key::Enter)]);
+        peindre(&mut valeur, vec![]);
+        assert_eq!(cadres_rouges(&peindre(&mut valeur, vec![])), 1);
     }
 
     /// [`formula_field`] ne valide qu'à la perte de focus — Entrée ou clic

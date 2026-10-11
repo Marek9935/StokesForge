@@ -40,7 +40,7 @@ use stokesforge_plot::PlotType;
 use stokesforge_render_egui::GraphTool;
 
 use crate::color_picker::{ColorUsage, PickerEnv};
-use crate::number_field::number_field;
+use crate::number_field::{auto_number_field, number_field};
 use crate::object_format::ObjectFormat;
 use crate::quantities;
 use crate::text_format::TextFormat;
@@ -828,11 +828,6 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
     });
 }
 
-/// Corps proposés par la barre de format, en points.
-const FORMAT_SIZES: [f64; 14] = [
-    6.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0,
-];
-
 /// Où la barre de format s'est peinte à l'image précédente : un clic dessus ne
 /// ferme pas l'éditeur sur place, sinon le bouton n'agirait jamais.
 fn format_bar_id() -> egui::Id {
@@ -923,43 +918,35 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             requests.push(ToolbarRequest::FormatText(TextFormat::Font(name)));
         }
 
-        // Corps.
-        let chosen = egui::ComboBox::from_id_salt("stokesforge_format_size")
-            .selected_text(
-                env.text_style
-                    .size
-                    .map_or_else(|| tr!("format-size"), |size| format!("{size}")),
-            )
-            .width(54.0)
-            .show_ui(ui, |ui| {
-                let mut chosen = None;
-                if ui
-                    .selectable_label(env.text_style.auto_size, tr!("common-auto"))
-                    .clicked()
-                {
-                    chosen = Some(TextFormat::AutoSize);
-                }
-                ui.separator();
-                for size in FORMAT_SIZES {
-                    if ui
-                        .selectable_label(
-                            !env.text_style.auto_size && env.text_style.size == Some(size),
-                            format!("{size}"),
-                        )
-                        .clicked()
-                    {
-                        chosen = Some(TextFormat::Size(size));
-                    }
-                }
-                chosen
-            });
+        // Corps : liste éditable avec « Auto » (choisir 12 ou taper 15, N9 ; vider
+        // le champ ou taper `auto` rend le corps automatique, C4).
+        let mut size = if env.text_style.auto_size {
+            None
+        } else {
+            env.text_style.size
+        };
+        let hint = if env.text_style.auto_size {
+            tr!("common-auto")
+        } else {
+            tr!("format-size")
+        };
+        let field = auto_number_field(
+            ui,
+            "stokesforge_format_size",
+            &mut size,
+            &quantities::TEXT_SIZE,
+            &hint,
+        );
         on_hover(
-            chosen.response.clone(),
+            field.response.clone(),
             tr!("format-size"),
             Some(tr!("format-size", "hint")),
         );
-        if let Some(format) = chosen.inner.flatten() {
-            requests.push(ToolbarRequest::FormatText(format));
+        if field.changed {
+            requests.push(ToolbarRequest::FormatText(match size {
+                Some(size) => TextFormat::Size(size),
+                None => TextFormat::AutoSize,
+            }));
         }
 
         // #99 : la couleur vient de la zone sélectionnée. Seul un champ en

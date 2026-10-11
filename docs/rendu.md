@@ -109,6 +109,10 @@ voyagent. Le gras vient de l'axe `wght` de Noto Sans ; l'italique de la face
 italique de Noto Sans embarquée avec lui (Typst ne fabrique pas d'italique) ;
 Fira et Libertinus n'ont que le régulier.
 
+`formula::diagnose(texte)` rend le message d'erreur Typst d'un texte riche (ou
+`None`), mémorisé par texte : le rendu retombe seul sur le texte brut, l'interface
+(`plot_settings::formula_field`, #240) s'en sert pour peindre le champ en rouge.
+
 Une formule Typst suit la même couleur (issue #30) : les backends passent
 `style.color()` à la compilation (`formula::ink`), qui pose
 `#set text(fill: rgb(…))`. La couleur est donc **dans l'image rastérisée** ou

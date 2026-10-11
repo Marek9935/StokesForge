@@ -595,6 +595,39 @@ pub fn compile(
     compile_markup(markup, sans, math, extras)
 }
 
+/// Le message d'erreur Typst de `text`, ou `None` s'il compile (#240, T3).
+///
+/// Sert à l'interface : le rendu, lui, retombe déjà sur le texte brut quand une
+/// formule ne compile pas, sans rien dire. Les polices et la taille ne changent
+/// pas la validité d'un markup : la vérification se fait avec les polices
+/// embarquées par défaut, à 12 pt. Le résultat est mémorisé par texte (un champ
+/// de propriétés le demande à chaque image) ; la mémoire est bornée.
+pub fn diagnose(text: &str) -> Option<String> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+
+    const MAX_ENTRIES: usize = 256;
+    static MEMO: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
+    if text.trim().is_empty() {
+        return None;
+    }
+    let memo = MEMO.get_or_init(Default::default);
+    if let Some(known) = memo.lock().unwrap_or_else(|err| err.into_inner()).get(text) {
+        return known.clone();
+    }
+    let verdict = match resolve_fonts(&FontChoice::default()) {
+        Ok((sans, math)) => compile(text, 12.0, [0, 0, 0, 255], sans, math).err(),
+        // Polices introuvables : rien à reprocher au texte.
+        Err(_) => None,
+    };
+    let mut memo = memo.lock().unwrap_or_else(|err| err.into_inner());
+    if memo.len() >= MAX_ENTRIES {
+        memo.clear();
+    }
+    memo.insert(text.to_owned(), verdict.clone());
+    verdict
+}
+
 /// Compile un document Typst complet, réglages de page compris.
 fn compile_markup(
     markup: String,
@@ -1383,6 +1416,16 @@ mod tests {
         let (sans, math) = noto();
         let result = compile("$ (unclosed", 12.0, NOIR, sans, math);
         assert!(result.is_err());
+    }
+
+    /// T3 : l'interface lit l'erreur Typst d'un texte sans le rendre.
+    #[test]
+    fn diagnose_dit_l_erreur_d_un_texte_qui_ne_compile_pas() {
+        assert!(diagnose("$ (unclosed").is_some());
+        assert_eq!(diagnose("$lambda$ (nm)"), None);
+        assert_eq!(diagnose(""), None);
+        // Deuxième demande : même verdict, depuis la mémoire.
+        assert_eq!(diagnose("$ (unclosed"), diagnose("$ (unclosed"));
     }
 
     /// Deux tailles différentes de la même formule donnent des tailles de

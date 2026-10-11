@@ -23,8 +23,9 @@ use crate::analysis::{
     aux_candidates, aux_for, kind_title, series_label, with_unit, AnalysisForm, BaselineShape,
     DirectAlgorithm, Preset,
 };
+use crate::field_state::{self, FieldIssue};
 use crate::icons::{icon_button, Icon, IconRole};
-use crate::number_field::number_field;
+use crate::number_field::{number_field, NumberResponse};
 use crate::quantities;
 use crate::theme::FieldWidth;
 use crate::{theme, tr};
@@ -34,9 +35,14 @@ use crate::{theme, tr};
 /// perdre le calcul au rechargement). Son identifiant est celui de sa place
 /// dans la rangée.
 fn number(ui: &mut egui::Ui, value: &mut f64) -> bool {
+    number_response(ui, value).changed
+}
+
+/// [`number`], avec la réponse du champ (pour y peindre un refus, N11).
+fn number_response(ui: &mut egui::Ui, value: &mut f64) -> NumberResponse {
     let salt = ui.next_auto_id();
     ui.skip_ahead_auto_ids(1);
-    number_field(ui, salt, value, &quantities::FREE).changed
+    number_field(ui, salt, value, &quantities::FREE)
 }
 
 /// Un entier borné par sa grandeur ; même identifiant que [`number`].
@@ -53,6 +59,15 @@ fn whole<T: crate::number_field::Number>(
 /// Un nombre facultatif : un champ texte vide vaut « automatique ». Le texte en
 /// cours de frappe est gardé hors du modèle tant qu'il n'est pas un nombre.
 fn optional_number(ui: &mut egui::Ui, id: egui::Id, value: &mut Option<f64>) -> bool {
+    optional_number_response(ui, id, value).0
+}
+
+/// [`optional_number`], avec la réponse du champ (pour y peindre un refus, N11).
+fn optional_number_response(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    value: &mut Option<f64>,
+) -> (bool, egui::Response) {
     let mut text = ui
         .data_mut(|d| d.get_temp::<(Option<f64>, String)>(id))
         .filter(|(shown, _)| shown == value)
@@ -76,7 +91,33 @@ fn optional_number(ui: &mut egui::Ui, id: egui::Id, value: &mut Option<f64>) -> 
         }
     }
     ui.data_mut(|d| d.insert_temp(id, (*value, text)));
-    changed
+    (changed, response)
+}
+
+/// Mémorise le refus d'une paire « de ≤ à » mise à l'envers sur le **second**
+/// champ (N11), quand `violated` dit que la saisie qui vient d'être validée l'a
+/// inversée (l'appelant a rendu l'ancienne valeur). Un champ de la brique
+/// « nombre » peint ensuite lui-même ce refus.
+fn flag_pair_refusal(ui: &egui::Ui, second: &egui::Response, violated: bool) {
+    if violated {
+        let now = ui.input(|input| input.time);
+        field_state::flag(
+            ui.ctx(),
+            second.id,
+            FieldIssue::refused(tr!("field-refused-range-order")),
+            now,
+        );
+    }
+}
+
+/// [`flag_pair_refusal`], puis peint le refus : pour un champ qui n'est pas
+/// de la brique « nombre » et ne le peint donc pas seul.
+fn paired_issue(ui: &egui::Ui, second: &egui::Response, violated: bool) {
+    flag_pair_refusal(ui, second, violated);
+    let now = ui.input(|input| input.time);
+    if let Some(issue) = field_state::active(ui.ctx(), second.id, now) {
+        field_state::show_issue(ui, second, &issue);
+    }
 }
 
 /// La liste des plages `(de, à)`, une rangée par plage.
@@ -84,9 +125,20 @@ fn range_rows(ui: &mut egui::Ui, id: egui::Id, ranges: &mut Vec<(f64, f64)>) {
     let mut remove = None;
     for (i, (a, b)) in ranges.iter_mut().enumerate() {
         ui.horizontal(|ui| {
+            // « de » ≤ « à » : une paire inversée est refusée, jamais ramenée ni
+            // permutée (N11) ; l'ancienne valeur revient et le second champ est
+            // peint en rouge.
+            let (old_a, old_b) = (*a, *b);
             number(ui, a);
             ui.label(tr!("analysis-field-to"));
-            number(ui, b);
+            let second = number_response(ui, b);
+            let violated = second.changed || *a != old_a;
+            let violated = violated && *a > *b;
+            if violated {
+                *a = old_a;
+                *b = old_b;
+            }
+            flag_pair_refusal(ui, &second.response, violated);
             if icon_button(
                 ui,
                 Icon::Delete,
@@ -143,15 +195,23 @@ fn point_rows(ui: &mut egui::Ui, points: &mut Vec<(f64, f64)>) {
 fn optional_range(ui: &mut egui::Ui, id: egui::Id, range: &mut Option<(f64, f64)>) {
     ui.horizontal(|ui| {
         let (mut a, mut b) = (range.map(|r| r.0), range.map(|r| r.1));
+        let (old_a, old_b) = (a, b);
         let changed_a = optional_number(ui, id.with("a"), &mut a);
         ui.label(tr!("analysis-field-to"));
-        let changed_b = optional_number(ui, id.with("b"), &mut b);
-        if changed_a || changed_b {
+        let (changed_b, second) = optional_number_response(ui, id.with("b"), &mut b);
+        // N11 : « de » ≤ « à », paire inversée refusée (ancienne valeur rendue).
+        let violated = matches!((a, b), (Some(a), Some(b)) if a > b);
+        if violated {
+            a = old_a;
+            b = old_b;
+        }
+        if (changed_a || changed_b) && !violated {
             *range = match (a, b) {
-                (Some(a), Some(b)) => Some((a.min(b), a.max(b))),
+                (Some(a), Some(b)) => Some((a, b)),
                 _ => None,
             };
         }
+        paired_issue(ui, &second, violated);
         if range.is_some()
             && icon_button(
                 ui,
@@ -817,4 +877,57 @@ pub(super) fn value_row(
             error,
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui;
+
+    use super::super::test_support::{cliquer, contexte, image, texte_exact, textes, touche};
+    use super::range_rows;
+
+    fn cadres_rouges(shapes: &[egui::epaint::ClippedShape]) -> usize {
+        let rouge = crate::theme::field_refused_color();
+        shapes
+            .iter()
+            .filter(|peint| {
+                matches!(&peint.shape, egui::Shape::Rect(rect) if rect.stroke.color == rouge)
+            })
+            .count()
+    }
+
+    /// Tape `saisie` dans le champ « à » de la plage `(1, 5)`, valide par Entrée,
+    /// et rend la plage et les cadres rouges de l'image suivante.
+    fn saisir_dans_a(saisie: &str) -> ((f64, f64), usize) {
+        let context = contexte();
+        let mut plages = vec![(1.0, 5.0)];
+        let id = egui::Id::new("essai");
+        let peindre = |plages: &mut Vec<(f64, f64)>, events: Vec<egui::Event>| {
+            image(&context, events, |ui| {
+                range_rows(ui, id, plages);
+            })
+        };
+        peindre(&mut plages, vec![]);
+        let formes = peindre(&mut plages, vec![]);
+        let champ = texte_exact(&textes(&formes), "5").centre;
+        cliquer(&context, champ, egui::PointerButton::Primary, |ui| {
+            range_rows(ui, id, &mut plages);
+        });
+        peindre(&mut plages, vec![egui::Event::Text(saisie.into())]);
+        peindre(&mut plages, vec![touche(egui::Key::Enter)]);
+        let formes = peindre(&mut plages, vec![]);
+        (plages[0], cadres_rouges(&formes))
+    }
+
+    /// N11 : « de » ≤ « à ». Une paire mise à l'envers est refusée (ancienne
+    /// valeur rendue, cadre rouge sur le second champ), jamais permutée.
+    #[test]
+    fn une_plage_inversee_est_refusee_sur_le_second_champ() {
+        assert_eq!(saisir_dans_a("0"), ((1.0, 5.0), 1));
+    }
+
+    #[test]
+    fn une_plage_ordonnee_est_appliquee() {
+        assert_eq!(saisir_dans_a("9"), ((1.0, 9.0), 0));
+    }
 }
