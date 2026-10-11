@@ -1894,16 +1894,20 @@ fn extent_of(
 ///
 /// Le cadrage explicite du spec prime s'il est complet **et** représentable
 /// sur l'échelle choisie ; sinon l'étendue des données ; sinon `0..1`.
+/// Un cadrage « de 800 à 400 » (`range_min > range_max`) trace l'axe à
+/// l'envers, comme [`AxisSpec::inverted`] : les deux ne s'additionnent pas.
 fn axis_range(
     spec: &AxisSpec,
     scale: AxisScale,
     data: Option<(f64, f64)>,
     with_baseline: bool,
 ) -> (f64, f64) {
+    let mut reversed = false;
     let explicit = spec
         .has_explicit_range()
         .then(|| match (spec.range_min, spec.range_max) {
             (Some(min), Some(max)) if min.is_finite() && max.is_finite() && min != max => {
+                reversed = min > max;
                 let (low, high) = (min.min(max), min.max(max));
                 match (scale::forward(scale, low), scale::forward(scale, high)) {
                     (Some(low), Some(high)) if low != high => Some((low, high)),
@@ -1918,7 +1922,7 @@ fn axis_range(
         Some(range) => range,
         None => padded(scale, data, with_baseline),
     };
-    if spec.inverted {
+    if spec.inverted || reversed {
         (max, min)
     } else {
         (min, max)
@@ -2061,6 +2065,39 @@ mod tests {
 
     fn spec_with(panels: Vec<PanelSpec>) -> PlotSpec {
         PlotSpec::empty("Grille").with_panels(Panels::new(panels))
+    }
+
+    /// « De 800 à 400 » trace l'axe à l'envers ; « de 400 à 800 » à l'endroit ;
+    /// la case « Reverse axis » en plus ne s'additionne pas.
+    #[test]
+    fn un_cadrage_de_800_a_400_trace_l_axe_a_l_envers() {
+        let mut axis = AxisSpec {
+            auto_range: false,
+            range_min: Some(800.0),
+            range_max: Some(400.0),
+            ..AxisSpec::default()
+        };
+        assert_eq!(
+            axis_range(&axis, AxisScale::Linear, None, false),
+            (800.0, 400.0)
+        );
+        axis.range_min = Some(400.0);
+        axis.range_max = Some(800.0);
+        assert_eq!(
+            axis_range(&axis, AxisScale::Linear, None, false),
+            (400.0, 800.0)
+        );
+        axis.inverted = true;
+        assert_eq!(
+            axis_range(&axis, AxisScale::Linear, None, false),
+            (800.0, 400.0)
+        );
+        axis.range_min = Some(800.0);
+        axis.range_max = Some(400.0);
+        assert_eq!(
+            axis_range(&axis, AxisScale::Linear, None, false),
+            (800.0, 400.0)
+        );
     }
 
     #[test]

@@ -651,8 +651,7 @@ plot-axes-auto-range =
     Plage auto
     .hint = Calculée d'après les données
     .disabled = Décochez Plage auto pour fixer les bornes
-plot-axes-min = Min
-plot-axes-max = Max
+plot-axes-from = De
 plot-axes-display-section = Affichage
 plot-axes-decimal-comma = Virgule décimale sur les graduations
     .hint = Écrit 1,5 au lieu de 1.5 sur tous les axes de ce graphe, à l'écran et dans les exports

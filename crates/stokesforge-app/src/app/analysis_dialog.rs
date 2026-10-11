@@ -16,6 +16,7 @@ use stokesforge_core::number_format::{format_exact, format_with_uncertainty};
 use super::analysis_forms::{form_body, value_row};
 use super::analysis_preview::{preview, reset_view, PreviewOutcome};
 use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
+use super::form::{choice, ChoiceOption};
 use crate::analysis::{issue_message, kind_title, value_label, value_unit, PreviewTool};
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState, CalculationDelete};
@@ -204,38 +205,46 @@ pub(super) fn analysis_window(
                     egui::vec2((full.x - FORM_WIDTH - 24.0).max(200.0), full.y),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        ui.horizontal(|ui| {
-                            ui.radio_value(
-                                &mut form.tool,
-                                PreviewTool::Points,
-                                tr!("analysis-tool-points"),
-                            );
-                            ui.radio_value(
-                                &mut form.tool,
-                                PreviewTool::Zone,
-                                tr!("analysis-tool-zone"),
-                            );
-                            ui.radio_value(
-                                &mut form.tool,
-                                PreviewTool::Zoom,
-                                tr!("analysis-tool-zoom"),
-                            );
-                            if icon_button(
-                                ui,
-                                Icon::ResetZoom,
-                                IconRole::Neutral,
-                                tr!("analysis-tool-reset"),
-                            )
-                            .clicked()
-                            {
-                                reset_view(ui, id);
-                            }
-                        });
-                        // Le geste de l'outil actif, en clair sous la rangée (M1).
-                        ui.weak(match form.tool {
-                            PreviewTool::Points => tr!("analysis-tool-points", "hint"),
-                            PreviewTool::Zone => tr!("analysis-tool-zone", "hint"),
-                            PreviewTool::Zoom => tr!("analysis-tool-zoom", "hint"),
+                        // Les outils de l'aperçu : un choix exclusif de la brique
+                        // « formulaire » (C1, C2), le geste de l'outil actif en note.
+                        super::form::form(ui, id.with("tools"), |rows| {
+                            rows.field(|ui| {
+                                choice(
+                                    ui,
+                                    id.with("tool"),
+                                    &mut form.tool,
+                                    &[
+                                        ChoiceOption::new(
+                                            PreviewTool::Points,
+                                            tr!("analysis-tool-points"),
+                                        ),
+                                        ChoiceOption::new(
+                                            PreviewTool::Zone,
+                                            tr!("analysis-tool-zone"),
+                                        ),
+                                        ChoiceOption::new(
+                                            PreviewTool::Zoom,
+                                            tr!("analysis-tool-zoom"),
+                                        ),
+                                    ],
+                                );
+                                if icon_button(
+                                    ui,
+                                    Icon::ResetZoom,
+                                    IconRole::Neutral,
+                                    tr!("analysis-tool-reset"),
+                                )
+                                .clicked()
+                                {
+                                    reset_view(ui, id);
+                                }
+                            });
+                            // Le geste de l'outil actif, en clair sous la rangée (M1).
+                            rows.note(match form.tool {
+                                PreviewTool::Points => tr!("analysis-tool-points", "hint"),
+                                PreviewTool::Zone => tr!("analysis-tool-zone", "hint"),
+                                PreviewTool::Zoom => tr!("analysis-tool-zoom", "hint"),
+                            });
                         });
                         let plot_height = (ui.available_height() - VALUES_HEIGHT - 8.0).max(160.0);
                         let result = ui

@@ -659,8 +659,7 @@ plot-axes-auto-range =
     Auto range
     .hint = Computed from the data
     .disabled = Uncheck Auto range to set the bounds
-plot-axes-min = Min
-plot-axes-max = Max
+plot-axes-from = From
 plot-axes-display-section = Display
 plot-axes-decimal-comma = Decimal comma on tick labels
     .hint = Writes 1,5 instead of 1.5 on every axis of this graph, on screen and in exports

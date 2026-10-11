@@ -174,9 +174,9 @@ impl PanelTransform {
     }
 
     /// Le cadrage délimité par deux coins en pixel — le rectangle de zoom
-    /// élastique de la tâche 7.4. L'ordre des coins n'importe pas : un
-    /// cadrage dont les bornes sont inversées se corrige déjà à la
-    /// résolution (`pipeline::axis_range` trie `range_min`/`range_max`).
+    /// élastique de la tâche 7.4. L'ordre des coins n'importe pas : chaque
+    /// paire est remise dans le sens de l'axe affiché, car un cadrage
+    /// « de 800 à 400 » trace l'axe à l'envers (`pipeline::axis_range`).
     pub fn range_between(
         &self,
         corner_a: (f64, f64),
@@ -184,7 +184,17 @@ impl PanelTransform {
     ) -> Option<((f64, f64), (f64, f64))> {
         let (ax, ay) = self.pixel_to_data(corner_a.0, corner_a.1)?;
         let (bx, by) = self.pixel_to_data(corner_b.0, corner_b.1)?;
-        Some(((ax, bx), (ay, by)))
+        let oriented = |(a, b): (f64, f64), shown: (f64, f64)| {
+            if (a < b) == (shown.0 < shown.1) {
+                (a, b)
+            } else {
+                (b, a)
+            }
+        };
+        Some((
+            oriented((ax, bx), self.x_range),
+            oriented((ay, by), self.y_range),
+        ))
     }
 }
 
@@ -361,9 +371,12 @@ mod tests {
         let t = carre();
         let (x_range, y_range) = t.range_between((10.0, 10.0), (60.0, 40.0)).unwrap();
         assert_eq!(x_range, (10.0, 60.0));
-        // Y est inversé : le coin haut (pixel 10) est la donnée la plus
-        // grande, le coin bas (pixel 40) la plus petite.
-        assert_eq!(y_range, (90.0, 60.0));
+        // Y croît vers le haut : le coin haut (pixel 10) est la donnée la plus
+        // grande, mais la paire reste dans le sens de l'axe affiché (bas → haut).
+        assert_eq!(y_range, (60.0, 90.0));
+        // Les coins pris dans l'autre ordre donnent le même cadrage.
+        let swapped = t.range_between((60.0, 40.0), (10.0, 10.0)).unwrap();
+        assert_eq!(swapped, (x_range, y_range));
     }
 
     #[test]

@@ -322,8 +322,8 @@ fn un_cadrage_explicite_incoherent_retombe_sur_les_donnees() {
         );
     }
 
-    // Bornes à l'envers : acceptées, remises à l'endroit — c'est un cadrage
-    // complet et cohérent une fois trié, pas une donnée fautive.
+    // Bornes à l'envers : acceptées, et l'axe est tracé à l'envers (« de 9 à
+    // -9 ») — un cadrage complet et cohérent, pas une donnée fautive.
     let drawn = geometrie(&[("Y", vec![0.0, 10.0])], |ids| {
         un_panneau(SeriesSpec::new(ids[0]), |panel| {
             panel.left = AxisSpec {
@@ -334,7 +334,7 @@ fn un_cadrage_explicite_incoherent_retombe_sur_les_donnees() {
             };
         })
     });
-    assert_eq!(drawn.y_range(), (-9.0, 9.0));
+    assert_eq!(drawn.y_range(), (9.0, -9.0));
 }
 
 #[test]

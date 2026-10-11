@@ -14,6 +14,7 @@ use stokesforge_core::NodeId;
 use super::analysis_dialog::{exact_result_label, format_value};
 use super::analysis_handles::select_calculation;
 use super::empty_state::empty_state;
+use super::form::{choice, ChoiceOption};
 use super::list_row::list_row;
 use crate::analysis::{kind_title, series_label, value_label, value_unit, with_unit};
 use crate::icons::{icon_button, Icon, IconRole};
@@ -85,8 +86,15 @@ pub(super) fn results_pane(
             count = i64::try_from(total).unwrap_or(i64::MAX)
         )));
         if pane.open {
-            ui.radio_value(&mut pane.whole_book, false, tr!("results-scope-sheet"));
-            ui.radio_value(&mut pane.whole_book, true, tr!("results-scope-book"));
+            choice(
+                ui,
+                id.with("scope"),
+                &mut pane.whole_book,
+                &[
+                    ChoiceOption::new(false, tr!("results-scope-sheet")),
+                    ChoiceOption::new(true, tr!("results-scope-book")),
+                ],
+            );
         }
     });
     if pane.open {
@@ -330,6 +338,35 @@ mod tests {
             actions.contains(&Action::EditCalculation(calc)),
             "{actions:?}"
         );
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn la_portee_se_choisit_par_deux_radios_cote_a_cote() {
+        let ctx = contexte();
+        let (session, state, book, sheet) = banc();
+        let mut actions = Vec::new();
+        ctx.data_mut(|d| {
+            d.insert_temp(
+                pane_id(book),
+                PaneState {
+                    open: true,
+                    ..PaneState::default()
+                },
+            )
+        });
+        frame(&ctx, &state, book, sheet, &mut actions);
+        let output = frame(&ctx, &state, book, sheet, &mut actions);
+        let sheet_label = texte_exact(&textes(&output.shapes), &tr!("results-scope-sheet")).centre;
+        let book_label = texte_exact(&textes(&output.shapes), &tr!("results-scope-book")).centre;
+        assert!((sheet_label.y - book_label.y).abs() < 1.0, "côte à côte");
+        cliquer(&ctx, book_label, egui::PointerButton::Primary, |ui| {
+            results_pane(ui, &state, &mut actions, book, sheet)
+        });
+        let pane = ctx
+            .data(|d| d.get_temp::<PaneState>(pane_id(book)))
+            .unwrap();
+        assert!(pane.whole_book);
         session.shutdown().unwrap();
     }
 }

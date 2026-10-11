@@ -427,9 +427,10 @@ Comment c'est tenu :
   avec la fenêtre des séries), formulaire d'analyse, assistant d'import
   (fichiers, format, en-tête, métadonnées, destination ; les traits entre
   blocs sont devenus des titres). La fenêtre des séries (groupe, portée,
-  nuancier — `curve_settings.rs`) est migrée. Reste à migrer : les outils de
-  l'aperçu d'analyse et le volet Results (#241), et les préférences futures
-  (#148).
+  nuancier — `curve_settings.rs`) est migrée, ainsi que les outils de
+  l'aperçu d'analyse (`choice` + note) et la portée du volet Results (#241 ;
+  son tableau série × valeur et les listes « de / à » restent des
+  tableaux/listes de données). Reste à migrer : les préférences futures (#148).
 
 ## Clavier et souris — en place (#231)
 

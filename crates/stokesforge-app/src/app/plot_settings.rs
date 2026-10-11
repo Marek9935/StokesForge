@@ -666,7 +666,7 @@ fn axis_editor(
             axis.range_max = Some(high);
         }
     }
-    // Min et Max restent visibles : grisés sous « Auto range », avec les
+    // De et à restent visibles : grisés sous « Auto range », avec les
     // bornes calculées (#221, #170 §1).
     let auto = axis.auto_range;
     let (mut min, mut max) = if auto {
@@ -679,16 +679,16 @@ fn axis_editor(
     let mut changed = false;
     let mut auto_asked = false;
     form.enabled(!auto, |form| {
-        for (label, salt, value) in [
-            (tr!("plot-axes-min"), "axis_min", &mut min),
-            (tr!("plot-axes-max"), "axis_max", &mut max),
-        ] {
-            let response = form.row(label, |ui| {
-                number_field(ui, salt, value, &quantities::AXIS_BOUND)
-            });
-            changed |= response.changed;
-            auto_asked |= response.auto;
-        }
+        // « De … à … » sur une seule rangée ; l'ordre est libre (un axe peut
+        // être inversé), contrairement aux plages d'analyse (N11).
+        let (first, second) = form.row(tr!("plot-axes-from"), |ui| {
+            let first = number_field(ui, "axis_min", &mut min, &quantities::AXIS_BOUND);
+            ui.label(tr!("analysis-field-to"));
+            let second = number_field(ui, "axis_max", &mut max, &quantities::AXIS_BOUND);
+            (first, second)
+        });
+        changed |= first.changed || second.changed;
+        auto_asked |= first.auto || second.auto;
     })
     .response
     .on_disabled_hover_text(tr!("plot-axes-auto-range", "disabled"));
@@ -2037,7 +2037,7 @@ mod tests {
         (commit, peints)
     }
 
-    /// #221 : sous « Auto range », Min et Max restent visibles (grisés) et
+    /// #221 : sous « Auto range », De et à restent visibles (grisés) et
     /// montrent les bornes calculées, sans les écrire dans le spec. Témoin :
     /// hors Auto, ils montrent les bornes saisies et non les calculées.
     #[test]
@@ -2047,7 +2047,7 @@ mod tests {
         assert!(axe.auto_range);
         let (commit, peints) = peindre_axe(&context, &mut axe, Some((0.0, 4000.0)));
         assert!(!commit, "peindre ne valide rien");
-        assert!(est_peint(&peints, &tr!("plot-axes-min")));
+        assert!(est_peint(&peints, &tr!("plot-axes-from")));
         assert!(est_peint(&peints, "4000"), "{peints:?}");
         assert_eq!((axe.range_min, axe.range_max), (None, None));
 
