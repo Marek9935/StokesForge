@@ -503,7 +503,8 @@ fn grid_clipboard_section(
     });
 }
 
-/// Effacer et supprimer : Clear · Delete (Shift Up).
+/// Effacer et supprimer : Remove Formula, Keep Data (si une formule est
+/// sélectionnée, #236) · Clear · Delete (Shift Up).
 fn grid_erase_section(
     ui: &mut egui::Ui,
     sections: &mut MenuSections,
@@ -513,6 +514,16 @@ fn grid_erase_section(
     menu: &GridMenu,
 ) {
     sections.section(ui, true, |ui| {
+        if menu.offers_keep_formula_data
+            && ui
+                .add(egui::Button::new(tr!("action-remove-formula-keep-data")))
+                .on_hover_text(tr!("action-remove-formula-keep-data", "hint"))
+                .clicked()
+        {
+            state.forget_delete_repeat(sheet);
+            actions.push(Action::RemoveFormulaKeepData { sheet });
+            ui.close();
+        }
         if ui
             .add(egui::Button::new(tr!("action-clear")).shortcut_text(shortcut_text_backspace()))
             .on_hover_text(tr!("action-clear", "hint"))

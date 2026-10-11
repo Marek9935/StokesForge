@@ -259,3 +259,13 @@ d'opération est une donnée, `OperationKind`).
   même le résultat marque le calcul `Failed(OutputUnwritable)`.
 - Le recalcul automatique (`Project::refresh_calculation`, côté session) ne passe pas
   par l'historique : c'est une mise à jour dérivée, comme le recalcul des formules.
+
+## Retirer une formule (#236)
+
+Vider le champ Formule d'une colonne **supprime aussi ses valeurs** : une
+macro `MacroKind::RemoveFormula` (`SetColumnMeta` + `DeleteCells` de toute la
+colonne), une seule entrée d'historique, que Ctrl+Z rend d'un coup. Toutes les
+voies (saisie vidée, Retour arrière, coller, plusieurs colonnes) passent par
+`AppState::set_meta_dropping_formula_data`. Le clic droit offre « Remove
+Formula, Keep Data » (`Action::RemoveFormulaKeepData`), même macro sans
+suppression des valeurs.

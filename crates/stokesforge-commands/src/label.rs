@@ -82,11 +82,13 @@ pub enum MacroKind {
     SetColumnsRole,
     /// Un calcul d'analyse et le tracé de ses colonnes sur un graphe (#200).
     AnalysisToGraph,
+    /// Retirer la formule d'une colonne, avec ou sans ses valeurs (#236).
+    RemoveFormula,
 }
 
 impl MacroKind {
     /// Toutes les natures de groupe, pour les tests exhaustifs.
-    pub const ALL: [MacroKind; 16] = [
+    pub const ALL: [MacroKind; 17] = [
         MacroKind::PasteCells,
         MacroKind::PasteObjects,
         MacroKind::DuplicateObjects,
@@ -103,6 +105,7 @@ impl MacroKind {
         MacroKind::SetColumnsType,
         MacroKind::SetColumnsRole,
         MacroKind::AnalysisToGraph,
+        MacroKind::RemoveFormula,
     ];
 }
 
@@ -303,6 +306,7 @@ impl fmt::Display for MacroKind {
             MacroKind::SetColumnsType => "Change Column Types",
             MacroKind::SetColumnsRole => "Change Column Roles",
             MacroKind::AnalysisToGraph => "Analyze and Plot",
+            MacroKind::RemoveFormula => "Remove Formula",
         })
     }
 }

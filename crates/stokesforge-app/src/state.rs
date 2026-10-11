@@ -305,6 +305,13 @@ pub enum Action {
         /// Feuille visée.
         sheet: NodeId,
     },
+    /// Retire la formule des colonnes dont le champ Formule est sélectionné
+    /// dans `sheet` **en gardant** leurs valeurs (clic droit, #236). Le retrait
+    /// ordinaire (champ vidé) supprime aussi les valeurs.
+    RemoveFormulaKeepData {
+        /// Feuille visée.
+        sheet: NodeId,
+    },
     /// Vide le contenu des cellules actuellement sélectionnées dans `sheet`
     /// **et** fait remonter les cellules suivantes de chaque colonne
     /// touchée, indépendamment — touche Suppr.
@@ -1688,6 +1695,9 @@ pub struct GridMenu {
     /// blocs de cellules qui ne partagent ni leurs lignes ni leurs colonnes.
     /// Copy et Cut sont alors grisés.
     pub copy_enabled: bool,
+    /// Vrai si le champ Formule d'au moins une colonne sélectionnée porte une
+    /// formule : « Remove Formula, Keep Data » (#236) a alors un sens.
+    pub offers_keep_formula_data: bool,
 }
 
 impl GridMenu {
@@ -3701,6 +3711,7 @@ impl AppState {
                 || selection.copy_layout(&self.snapshot.tree, sheet).is_some(),
             paste_absolute_enabled: self.grid_clipboard.is_some(),
             paste_enabled: selection.is_contiguous(&self.snapshot.tree, sheet),
+            offers_keep_formula_data: !self.formula_columns_selected(sheet).is_empty(),
         })
     }
 
@@ -4473,6 +4484,7 @@ impl AppState {
             Action::SetColumnFormula { column, formula } => {
                 self.set_column_meta_field(column, |meta| meta.formula = formula);
             }
+            Action::RemoveFormulaKeepData { sheet } => self.remove_formulas_keep_data(sheet),
             Action::ImportFiles {
                 destination,
                 recipe,
@@ -7477,7 +7489,7 @@ impl AppState {
             self.fail(crate::tr!("status-x-prime-invalid"));
             return;
         }
-        self.execute(Command::SetColumnMeta { column, meta });
+        self.set_meta_dropping_formula_data(column, meta, false);
     }
 
     /// [`Action::SetColumnXPrime`].
@@ -7497,7 +7509,78 @@ impl AppState {
             return;
         };
         update(&mut meta);
+        self.set_meta_dropping_formula_data(column, meta, false);
+    }
+
+    /// Colonnes dont le champ Formule est sélectionné et porte une formule.
+    fn formula_columns_selected(&self, sheet: NodeId) -> Vec<NodeId> {
+        let Some(selection) = self.selection.get(&sheet) else {
+            return Vec::new();
+        };
+        let tree = &self.snapshot.tree;
+        selection
+            .cleared_header_fields(tree, sheet)
+            .into_iter()
+            .filter(|&(column, field)| {
+                field == HeaderField::Formula && self.column_meta(column).formula.is_some()
+            })
+            .map(|(column, _)| column)
+            .collect()
+    }
+
+    /// [`Action::RemoveFormulaKeepData`].
+    fn remove_formulas_keep_data(&mut self, sheet: NodeId) {
+        for column in self.formula_columns_selected(sheet) {
+            let mut meta = self.column_meta(column);
+            meta.formula = None;
+            self.set_meta_dropping_formula_data(column, meta, true);
+        }
+    }
+
+    /// **Le** chemin d'écriture des métadonnées d'une colonne (#236) : quand
+    /// elles retirent une formule, les valeurs calculées partent avec elle
+    /// (`DeleteCells` de toute la colonne) sauf `keep_data`, le tout en une
+    /// seule entrée d'historique (`MacroKind::RemoveFormula`) pour que Ctrl+Z
+    /// rende formule et données ensemble. Toute voie d'effacement de la
+    /// formule (en-tête, Suppr, coller, vider le champ, plusieurs colonnes)
+    /// passe ici.
+    fn set_meta_dropping_formula_data(
+        &mut self,
+        column: NodeId,
+        meta: ColumnMeta,
+        keep_data: bool,
+    ) {
+        let removes_formula = meta.formula.is_none() && self.column_meta(column).formula.is_some();
+        let len = self
+            .snapshot
+            .tree
+            .node(column)
+            .and_then(Node::as_column)
+            .map_or(0, Column::len);
+        if !removes_formula || keep_data || len == 0 {
+            if removes_formula && keep_data {
+                // Une seule commande, mais l'entrée porte tout de même le
+                // libellé « Remove Formula ».
+                if self.handle.begin_macro(MacroKind::RemoveFormula).is_ok() {
+                    self.execute(Command::SetColumnMeta { column, meta });
+                    self.end_grouped_macro();
+                    return;
+                }
+            }
+            self.execute(Command::SetColumnMeta { column, meta });
+            return;
+        }
+        if self.handle.begin_macro(MacroKind::RemoveFormula).is_err() {
+            self.fail(tr!("error-clear-group"));
+            return;
+        }
         self.execute(Command::SetColumnMeta { column, meta });
+        self.execute(Command::DeleteCells {
+            columns: vec![column],
+            at: 0,
+            count: len,
+        });
+        self.end_grouped_macro();
     }
 
     fn add_column(&mut self, sheet: NodeId) {

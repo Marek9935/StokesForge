@@ -1752,6 +1752,101 @@ fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fie
     assert_eq!(meta.formula, Some("c".to_string()));
 }
 
+// -- Retirer une formule (#236) --
+
+fn column_len(state: &AppState, column: NodeId) -> usize {
+    state
+        .tree()
+        .node(column)
+        .and_then(|node| node.as_column())
+        .map_or(0, |c| c.len())
+}
+
+/// Vider la case Formule supprime aussi les valeurs de la colonne, et
+/// Ctrl+Z rend formule et données d'un seul coup (#236).
+#[test]
+fn removing_a_formula_deletes_the_values_and_one_undo_restores_both() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let len = column_len(&state, signal);
+    assert!(len > 0);
+
+    set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
+    let with_formula = column_len(&state, signal);
+    let value = cell(&state, signal, 0);
+
+    set_header_field(&mut state, signal, HeaderField::Formula, "");
+    assert_eq!(state.column_meta(signal).formula, None);
+    assert_eq!(
+        column_len(&state, signal),
+        0,
+        "les valeurs partent avec la formule"
+    );
+    assert!(column_len(&state, temps) > 0, "les autres colonnes restent");
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.column_meta(signal).formula, Some("A*2".to_string()));
+    assert_eq!(column_len(&state, signal), with_formula);
+    assert_eq!(cell(&state, signal, 0), value);
+}
+
+/// Vider le champ au clavier (Retour arrière) suit le même chemin.
+#[test]
+fn clearing_the_formula_field_with_backspace_also_deletes_the_values() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
+
+    state.select_header_field(sheet1, signal, HeaderField::Formula);
+    state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
+
+    assert_eq!(state.column_meta(signal).formula, None);
+    assert_eq!(column_len(&state, signal), 0);
+}
+
+/// « Remove Formula, Keep Data » garde les valeurs ; une seule annulation.
+#[test]
+fn remove_formula_keep_data_keeps_the_values_in_one_undo_step() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
+    let len = column_len(&state, signal);
+    let value = cell(&state, signal, 0);
+
+    state.select_header_field(sheet1, signal, HeaderField::Formula);
+    assert!(state.grid_menu(sheet1).unwrap().offers_keep_formula_data);
+    state.dispatch(Action::RemoveFormulaKeepData { sheet: sheet1 });
+
+    assert_eq!(state.column_meta(signal).formula, None);
+    assert_eq!(column_len(&state, signal), len);
+    assert_eq!(cell(&state, signal, 0), value);
+    assert!(!state.grid_menu(sheet1).unwrap().offers_keep_formula_data);
+
+    state.dispatch(Action::Undo);
+    assert_eq!(state.column_meta(signal).formula, Some("A*2".to_string()));
+}
+
+/// L'entrée n'est offerte que sur une formule existante.
+#[test]
+fn keep_formula_data_is_only_offered_on_a_formula_field() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_header_field(sheet1, signal, HeaderField::Formula);
+    assert!(!state.grid_menu(sheet1).unwrap().offers_keep_formula_data);
+    state.select_header_field(sheet1, signal, HeaderField::Unit);
+    assert!(!state.grid_menu(sheet1).unwrap().offers_keep_formula_data);
+}
+
 // -- Matrice de comportement copier/coller (§3, voir la doc de tête de
 // `stokesforge_app::state`) --
 //

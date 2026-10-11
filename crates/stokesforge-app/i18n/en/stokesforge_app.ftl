@@ -183,6 +183,8 @@ action-paste-in-place = Paste in Place
     .disabled = Copy from the grid first. Text from elsewhere has no original position
 action-clear = Clear
     .hint = Empties the selected cells
+action-remove-formula-keep-data = Remove Formula, Keep Data
+    .hint = Removes the formula and keeps the calculated values as ordinary data
 action-delete-shift-up = Delete and Shift Up
     .hint = Deletes now and shifts cells up. The Del key first clears, then deletes
 
@@ -469,6 +471,7 @@ history-macro-script = Run Script
 history-macro-set-columns-type = Change Column Types
 history-macro-set-columns-role = Change Column Roles
 history-macro-analysis-to-graph = Analyze and Plot
+history-macro-remove-formula = Remove Formula
 
 ## Undo and Redo
 
