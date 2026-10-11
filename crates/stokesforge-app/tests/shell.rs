@@ -1833,6 +1833,28 @@ fn remove_formula_keep_data_keeps_the_values_in_one_undo_step() {
     assert_eq!(state.column_meta(signal).formula, Some("A*2".to_string()));
 }
 
+/// Workbook › Columns : la même entrée, sur des colonnes entières.
+#[test]
+fn remove_columns_formula_keep_data_works_from_the_columns_menu() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
+    let len = column_len(&state, signal);
+
+    assert!(!state.any_formula(&[temps]));
+    assert!(state.any_formula(&[temps, signal]));
+    state.dispatch(Action::RemoveColumnsFormulaKeepData {
+        columns: vec![temps, signal],
+    });
+    assert_eq!(state.column_meta(signal).formula, None);
+    assert_eq!(column_len(&state, signal), len);
+    state.dispatch(Action::Undo);
+    assert_eq!(state.column_meta(signal).formula, Some("A*2".to_string()));
+}
+
 /// L'entrée n'est offerte que sur une formule existante.
 #[test]
 fn keep_formula_data_is_only_offered_on_a_formula_field() {

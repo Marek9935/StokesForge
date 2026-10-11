@@ -180,6 +180,7 @@ action-clear = Effacer
     .hint = Vide les cellules sélectionnées
 action-remove-formula-keep-data = Retirer la formule, garder les données
     .hint = Retire la formule et garde les valeurs calculées comme données ordinaires
+    .disabled = Sélectionnez une colonne qui a une formule
 action-delete-shift-up = Supprimer et remonter
     .hint = Supprime tout de suite et remonte les cellules. La touche Suppr efface d'abord, puis supprime
 

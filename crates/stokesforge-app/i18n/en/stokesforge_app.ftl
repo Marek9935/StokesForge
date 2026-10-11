@@ -185,6 +185,7 @@ action-clear = Clear
     .hint = Empties the selected cells
 action-remove-formula-keep-data = Remove Formula, Keep Data
     .hint = Removes the formula and keeps the calculated values as ordinary data
+    .disabled = Select a column that has a formula
 action-delete-shift-up = Delete and Shift Up
     .hint = Deletes now and shifts cells up. The Del key first clears, then deletes
 

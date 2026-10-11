@@ -312,6 +312,12 @@ pub enum Action {
         /// Feuille visée.
         sheet: NodeId,
     },
+    /// Même retrait, pour des colonnes entières (menu Workbook › Columns,
+    /// #236) : les colonnes sans formule sont ignorées.
+    RemoveColumnsFormulaKeepData {
+        /// Colonnes visées.
+        columns: Vec<NodeId>,
+    },
     /// Vide le contenu des cellules actuellement sélectionnées dans `sheet`
     /// **et** fait remonter les cellules suivantes de chaque colonne
     /// touchée, indépendamment — touche Suppr.
@@ -4484,7 +4490,13 @@ impl AppState {
             Action::SetColumnFormula { column, formula } => {
                 self.set_column_meta_field(column, |meta| meta.formula = formula);
             }
-            Action::RemoveFormulaKeepData { sheet } => self.remove_formulas_keep_data(sheet),
+            Action::RemoveFormulaKeepData { sheet } => {
+                let columns = self.formula_columns_selected(sheet);
+                self.remove_formulas_keep_data(&columns);
+            }
+            Action::RemoveColumnsFormulaKeepData { columns } => {
+                self.remove_formulas_keep_data(&columns);
+            }
             Action::ImportFiles {
                 destination,
                 recipe,
@@ -7512,6 +7524,13 @@ impl AppState {
         self.set_meta_dropping_formula_data(column, meta, false);
     }
 
+    /// Au moins une des `columns` porte une formule.
+    pub fn any_formula(&self, columns: &[NodeId]) -> bool {
+        columns
+            .iter()
+            .any(|&column| self.column_meta(column).formula.is_some())
+    }
+
     /// Colonnes dont le champ Formule est sélectionné et porte une formule.
     fn formula_columns_selected(&self, sheet: NodeId) -> Vec<NodeId> {
         let Some(selection) = self.selection.get(&sheet) else {
@@ -7529,11 +7548,26 @@ impl AppState {
     }
 
     /// [`Action::RemoveFormulaKeepData`].
-    fn remove_formulas_keep_data(&mut self, sheet: NodeId) {
-        for column in self.formula_columns_selected(sheet) {
+    fn remove_formulas_keep_data(&mut self, columns: &[NodeId]) {
+        let grouped = columns
+            .iter()
+            .filter(|&&column| self.column_meta(column).formula.is_some())
+            .count()
+            > 1;
+        if grouped && self.handle.begin_macro(MacroKind::RemoveFormula).is_err() {
+            self.fail(tr!("error-columns-group"));
+            return;
+        }
+        for &column in columns {
+            if self.column_meta(column).formula.is_none() {
+                continue;
+            }
             let mut meta = self.column_meta(column);
             meta.formula = None;
             self.set_meta_dropping_formula_data(column, meta, true);
+        }
+        if grouped {
+            self.end_grouped_macro();
         }
     }
 

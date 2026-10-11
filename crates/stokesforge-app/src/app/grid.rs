@@ -991,6 +991,22 @@ pub(super) fn columns_menu_contents(
     sections.section(ui, true, |ui| {
         column_type_role_menus(ui, state, actions, target_columns);
     });
+    sections.section(ui, true, |ui| {
+        if ui
+            .add_enabled(
+                state.any_formula(target_columns),
+                egui::Button::new(tr!("action-remove-formula-keep-data")),
+            )
+            .on_hover_text(tr!("action-remove-formula-keep-data", "hint"))
+            .on_disabled_hover_text(tr!("action-remove-formula-keep-data", "disabled"))
+            .clicked()
+        {
+            actions.push(Action::RemoveColumnsFormulaKeepData {
+                columns: target_columns.to_vec(),
+            });
+            ui.close();
+        }
+    });
 }
 
 /// Case « Métadonnées » de l'en-tête : le résumé des métadonnées du fichier
