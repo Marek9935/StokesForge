@@ -52,7 +52,7 @@ Déjà en place et réutilisées par ce standard : `modal_dialog_with`
 (`app/dialogs.rs`), `hover_help` (`app/hover_help.rs`), `theme::section_title`,
 `MenuSections::section`, `color_field`.
 
-## Champs numériques — en place (#220, Auto #221, #233–#235), reste N11
+## Champs numériques — en place (#220, Auto #221, #233–#235), reste N11 (#240)
 
 Brique : `stokesforge_app::number_field::number_field(ui, sel, &mut valeur,
 &quantities::GRANDEUR)` (`src/number_field.rs`), table : `src/quantities.rs`
@@ -60,7 +60,7 @@ Brique : `stokesforge_app::number_field::number_field(ui, sel, &mut valeur,
 proposées). Une grandeur neuve s'ajoute à la table, jamais à l'appel ; les 28
 `DragValue` et le `Slider` d'opacité sont migrés, la barre de format des objets
 (épaisseur) aussi (N9). Reste à migrer : le corps de texte de la barre de format
-(il a une entrée « Auto », #221).
+(il a une entrée « Auto », #221) — #240.
 
 - **Une brique « nombre » unique** (N1 → R1, R12). Aspect : champ texte, avec
   `▼` **seulement** si la table des grandeurs propose des valeurs (épaisseur,
@@ -96,8 +96,8 @@ proposées). Une grandeur neuve s'ajoute à la table, jamais à l'appel ; les 28
 - **Unité** (N10) : dans le libellé (« Line width (pt) »), jamais en suffixe,
   y compris % et ° du sélecteur de couleur.
 - **Aucun slider** (N12 → R16) : l'opacité est un champ, comme R, G et B.
-- **Champs couplés** (N11) : min < max, « de » ≤ « à », erreur sur le
-  **second** champ. Une contrainte entre deux champs est refusée ; seule une
+- **Champs couplés** (N11, *à venir*, #240) : min < max, « de » ≤ « à »,
+  erreur sur le **second** champ. Une contrainte entre deux champs est refusée ; seule une
   borne fixe est ramenée.
 
 ### Auto (C4, R10, G4) — en place (#221)
@@ -107,7 +107,7 @@ Mécanique : `quantities::AutoKind` (`None`, `Field`, `Group`) sur la grandeur,
 pour un `Field`, `NumberResponse::auto` pour un `Group` (`AXIS_BOUND`). Les
 bornes calculées viennent de `DrawnPanel` (`stokesforge-render`), publiées par
 `graph_window::publish_axis_bounds`. Reste à migrer : le corps de texte de la
-barre de format (liste « Auto », C4).
+barre de format (liste « Auto », C4) — #240.
 
 
 - Choix dans une liste : entrée « Auto » en tête.
@@ -139,9 +139,9 @@ comme `color_picker`), trois étages que les briques « nombre » (#220) et
 
 Un champ de formulaire neuf qui lit une saisie passe par `edit_text` ; une erreur
 déjà connue passe par `show_issue`. Les teintes sont `theme::field_refused_color`
-et `theme::field_clamped_color`. Reste à brancher (briques à venir) : les
-champs numériques existants (`DragValue`, #220), la contrainte entre champs
-(N11, #221), les renommages (#224), l'erreur Typst du titre (T3).
+et `theme::field_clamped_color`. Branchés : la brique « nombre » (#220) et les
+renommages (#224, `app/inplace_edit.rs`). Reste à brancher (#240) : la
+contrainte entre champs (N11) et l'erreur Typst du titre (T3).
 
 - **Illisible** (`abc`, `1..2`) : cadre **rouge**, bulle qui dit la règle,
   l'ancienne valeur revient à la sortie du champ (N6, N7 → R2, R8). Le rouge
@@ -153,8 +153,8 @@ champs numériques existants (`DragValue`, #220), la contrainte entre champs
   est réservé à « refusé ».
 - **Texte refusé** (T2) : même règle, texte gardé ; un renommage refusé laisse
   le champ ouvert.
-- **Erreur Typst d'un titre** (T3) : aussi sur le champ des propriétés, cadre
-  rouge et message Typst en bulle.
+- **Erreur Typst d'un titre** (T3, *à venir*, #240) : aussi sur le champ des
+  propriétés, cadre rouge et message Typst en bulle.
 - Jamais d'effacement ni de correction muette.
 
 ## Virgule décimale — en place (#223)
@@ -421,7 +421,8 @@ Comment c'est tenu :
   (fichiers, format, en-tête, métadonnées, destination ; les traits entre
   blocs sont devenus des titres). La fenêtre des séries (groupe, portée,
   nuancier — `curve_settings.rs`) est migrée. Reste à migrer : les outils de
-  l'aperçu d'analyse, le volet Results, et les préférences futures (#148).
+  l'aperçu d'analyse et le volet Results (#241), et les préférences futures
+  (#148).
 
 ## Clavier et souris — en place (#231)
 
@@ -441,7 +442,7 @@ Comment c'est tenu :
   redimensionnement sur une poignée, doigt sur un élément cliquable qui n'est
   pas un bouton.
 
-## Travaux longs et états vides — en place (#232), reste le recalcul
+## Travaux longs et états vides — en place (#232), reste le recalcul (#239)
 
 - Au-delà d'≈ 0,5 s : indicateur tournant + mot (« Importing… ») à l'endroit
   du résultat ; barre de progression si le nombre d'étapes est connu (P1).
@@ -455,7 +456,7 @@ Comment c'est tenu :
   (`busy::STOP_AFTER`). **Stop de l'import** : le fil s'arrête après le fichier
   en cours, rien n'est créé (`AppState::stop_import`). **Stop du script** : la
   console garde le sien (#215). **Recalcul** : pas de Stop tant que l'interface
-  appelle la session de façon bloquante (suivi dans une issue dédiée).
+  appelle la session de façon bloquante (#239).
 
 ## Hors de cette page
 
