@@ -79,7 +79,7 @@ fn un_graphe_python_sans_option_title_reste_sans_titre() {
 fn spec_exact_export_stable_et_temoin_de_style() {
     let b = banc();
     let before = b.session.snapshot().unwrap();
-    run(&b, &format!("{HANDLES}g = pyst.plot(y, x, name='Graph1', plot_type='line_scatter', color='#12345680', line_style='dash', line_width=2.5, symbol='square', symbol_size=9., title='$alpha$', x_title='Temps (s)', y_title='$I$', x_scale='log', x_range=(1., 10.), label='Signal')"));
+    run(&b, &format!("{HANDLES}g = pyst.plot(y, x, name='Graph1', plot_type='line_scatter', color='#12345680', line_style='dash', line_width=2.5, symbol='square', symbol_size=9., title='$alpha$', x_title='Temps (s)', y_title='$I$', x_scale='log', x_from=1., x_to=10., label='Signal')"));
     let mut expected = PlotSpec {
         title: "$alpha$".into(),
         ..Default::default()
@@ -150,8 +150,19 @@ fn ajoute_sans_ecraser_les_series_panneaux_et_reglages() {
             spec: first.clone(),
         })
         .unwrap();
-    run(&b, "pyst.plot(y, graph=g, plot_type='scatter', axis='right', y_title='Second', y_scale='log', y_range=(1., 20.))");
+    run(&b, "pyst.plot(y, graph=g, plot_type='scatter', axis='right', y_title='Second', y_scale='log', y_from=1., y_to=20.)");
     let second = graph_spec(&b);
+    // `y_from=1., y_to=20.` : bornes dans l'ordre donné, axe à l'endroit.
+    assert_eq!(
+        second
+            .panels
+            .first()
+            .unwrap()
+            .right
+            .range_min
+            .zip(second.panels.first().unwrap().right.range_max),
+        Some((1.0, 20.0))
+    );
     assert_eq!(second.panels.get(1), first.panels.get(1));
     let panel = second.panels.first().unwrap();
     assert_eq!(panel.series[0], first.panels.first().unwrap().series[0]);
@@ -262,7 +273,7 @@ fn refus_ne_modifient_ni_graphe_ni_historique() {
     run(
         &b,
         r#"
-for opts in ({'plot_type':'inconnu'}, {'color':'red'}, {'symbol':'o'}, {'line_style':'--'}, {'line_width':float('nan')}, {'symbol_size':0}, {'histogram_bins':0}, {'histogram_bins':65537}, {'x_scale':'symlog'}, {'x_range':(2.,1.)}, {'y_scale':'log','y_range':(0.,2.)}, {'y_error':pyst.root()}, {'unknown':1}, {'parent':pyst.root()}, {'name':'Autre'}):
+for opts in ({'plot_type':'inconnu'}, {'color':'red'}, {'symbol':'o'}, {'line_style':'--'}, {'line_width':float('nan')}, {'symbol_size':0}, {'histogram_bins':0}, {'histogram_bins':65537}, {'x_scale':'symlog'}, {'x_from':1.}, {'x_from':2.,'x_to':2.}, {'y_scale':'log','y_from':2.,'y_to':0.}, {'y_error':pyst.root()}, {'unknown':1}, {'parent':pyst.root()}, {'name':'Autre'}):
     try: pyst.plot(y, graph=g, **opts)
     except pyst.InvalidValueError: pass
     else: raise AssertionError('option invalide acceptée')

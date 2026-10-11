@@ -202,10 +202,10 @@ fn action_undo_reverts_what_a_script_wrote() {
     );
 }
 
-// --- 7. Une erreur de script n'est pas une erreur d'application -------------
+// --- 7. Une exception de script est signalée, sa trace reste dans la console --
 
 #[test]
-fn a_script_exception_is_not_an_application_error() {
+fn a_script_exception_is_a_short_error_with_its_trace_in_the_console() {
     let (_session, mut state, sheet) = start();
     let before = state.snapshot().revision;
 
@@ -229,12 +229,14 @@ fn a_script_exception_is_not_an_application_error() {
         output.error
     );
 
-    // Le message de statut reste neutre : une exception de script n'est pas
-    // une erreur d'application.
+    // M10 (#230) : l'exception est signalée dans la barre d'état, la trace
+    // restant dans la console — un seul message court, jamais la trace.
     let status = state.status();
     assert!(
-        status.is_some_and(|status| !status.is_error()),
-        "une exception de script ne doit pas devenir une erreur d'application : {status:?}"
+        status.is_some_and(
+            |status| status.is_error() && status.text == "Script failed. See the console"
+        ),
+        "une exception de script doit être signalée en erreur courte : {status:?}"
     );
     // Rien n'a été écrit dans le modèle : la révision n'a pas bougé.
     assert_eq!(state.snapshot().revision, before);

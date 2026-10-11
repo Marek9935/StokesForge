@@ -279,7 +279,7 @@ sert à identifier sa fenêtre, pas à titrer la figure (#103).
 | `symbol`, `symbol_size` | `none`, `circle`, `square`, `triangle`, `diamond`, `plus`, `cross` ; taille finie positive |
 | `label`, `title`, `x_title`, `y_title` | chaînes avec markup Typst explicite |
 | `x_scale`, `y_scale` | `linear` ou `log` |
-| `x_range`, `y_range` | couple `(min, max)` fini croissant, positif sur un axe log ; plage automatique sinon sur un graphe neuf |
+| `x_from`/`x_to`, `y_from`/`y_to` | les deux bornes ensemble, finies et différentes, positives sur un axe log ; `from > to` trace l'axe à l'envers ; plage automatique sinon sur un graphe neuf |
 | `axis` | `left` ou `right` pour la série et ses options Y ; rend l'axe droit visible |
 | `x_error`, `y_error` | poignées des colonnes d'erreurs |
 | `histogram_bins` | entier de 1 à 65 536 |

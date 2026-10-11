@@ -8707,15 +8707,14 @@ impl AppState {
     }
 
     /// Applique le résultat d'un script terminé : mémorise sa sortie, pose un
-    /// message de statut **neutre** — une exception de script n'est pas une
-    /// erreur d'application, sa trace se lit dans la sortie, pas en rouge
-    /// dans la barre d'état — puis rafraîchit l'instantané (c'est le piège de
+    /// message de statut — court, en erreur pour une exception (M10, #230) ;
+    /// sa trace se lit dans la sortie, jamais dans la barre d'état — puis rafraîchit l'instantané (c'est le piège de
     /// cette tâche : sans ce geste, la grille resterait figée alors que le
     /// modèle a changé).
     ///
     /// Le message est posé **avant** `refresh`, comme dans [`AppState::
     /// execute`] : si le rafraîchissement échoue (acteur injoignable), il
-    /// écrase ce message neutre par l'erreur — plus grave, elle doit
+    /// écrase ce message par l'erreur — plus grave, elle doit
     /// l'emporter, pas l'inverse.
     #[cfg(feature = "python")]
     fn finish_script_run(&mut self, outcome: ScriptOutcome) {

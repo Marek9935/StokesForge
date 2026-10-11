@@ -42,8 +42,8 @@ struct Request {
     y_title: Option<String>,
     x_scale: Option<AxisScale>,
     y_scale: Option<AxisScale>,
-    x_range: Option<(f64, f64)>,
-    y_range: Option<(f64, f64)>,
+    x_bounds: (Option<f64>, Option<f64>),
+    y_bounds: (Option<f64>, Option<f64>),
 }
 
 /// Les colonnes d'une série du lot ; `label` vide = nom automatique.
@@ -66,8 +66,8 @@ pub(crate) fn invalid(message: impl Into<String>) -> PyErr {
 /// (line, scatter, line_scatter, bar, histogram, error_bar), color (#RRGGBB ou
 /// #RRGGBBAA), line_style (none, solid, dash, dot, dash_dot), line_width,
 /// symbol (none, circle, square, triangle, diamond, plus, cross), symbol_size,
-/// label, title, x_title, y_title, x_scale/y_scale (linear, log), x_range/y_range
-/// (min, max), axis (left, right), x_error/y_error (poignées), histogram_bins.
+/// label, title, x_title, y_title, x_scale/y_scale (linear, log), x_from/x_to et
+/// y_from/y_to (les deux ensemble ; from > to trace l'axe à l'envers), axis (left, right), x_error/y_error (poignées), histogram_bins.
 /// Titres et label explicites : markup Typst. Label absent : nom automatique
 /// de la colonne, affiché littéralement. Une exécution = un groupe annulable.
 #[pyfunction]
@@ -124,8 +124,8 @@ pub(crate) fn plot(
         y_title: None,
         x_scale: None,
         y_scale: None,
-        x_range: None,
-        y_range: None,
+        x_bounds: (None, None),
+        y_bounds: (None, None),
     };
     if let Some(options) = options {
         for (key, value) in options.iter() {
@@ -175,10 +175,10 @@ pub(crate) fn plot(
                     };
                     if key == "x_scale" { request.x_scale = Some(scale); } else { request.y_scale = Some(scale); }
                 }
-                "x_range" | "y_range" => {
-                    let (min, max) = value.extract::<(f64, f64)>().map_err(|_| invalid(format!("{key} must be a (min, max) pair")))?;
-                    if !min.is_finite() || !max.is_finite() || min >= max { return Err(invalid(format!("{key} must contain finite increasing bounds"))); }
-                    if key == "x_range" { request.x_range = Some((min, max)); } else { request.y_range = Some((min, max)); }
+                "x_from" | "x_to" | "y_from" | "y_to" => {
+                    let bound = value.extract::<f64>().ok().filter(|v| v.is_finite()).ok_or_else(|| invalid(format!("{key} must be a finite number")))?;
+                    let bounds = if key.starts_with('x') { &mut request.x_bounds } else { &mut request.y_bounds };
+                    if key.ends_with("from") { bounds.0 = Some(bound); } else { bounds.1 = Some(bound); }
                 }
                 "axis" => request.series.axis = match string()?.as_str() {
                     "left" => SeriesAxis::Left, "right" => SeriesAxis::Right,
@@ -265,6 +265,24 @@ fn column_handles(value: &Bound<'_, PyAny>, what: &str) -> PyResult<Vec<Target>>
     Ok(list.iter().map(|h| (h.id, h.epoch)).collect())
 }
 
+/// Les bornes `de … à …` d'un axe : les deux ou aucune, différentes ; `from >
+/// to` est permis et trace l'axe à l'envers.
+fn axis_range(
+    axis: &str,
+    (from, to): (Option<f64>, Option<f64>),
+) -> Result<Option<(f64, f64)>, HostError> {
+    match (from, to) {
+        (None, None) => Ok(None),
+        (Some(from), Some(to)) if from != to => Ok(Some((from, to))),
+        (Some(_), Some(_)) => Err(HostError::InvalidValue(format!(
+            "{axis}_from and {axis}_to must differ"
+        ))),
+        _ => Err(HostError::InvalidValue(format!(
+            "{axis}_from and {axis}_to must be given together"
+        ))),
+    }
+}
+
 fn update_axis(
     axis: &mut AxisSpec,
     title: &Option<String>,
@@ -284,7 +302,10 @@ fn update_axis(
     }
     if axis.scale == AxisScale::Log
         && axis.has_explicit_range()
-        && axis.range_min.is_some_and(|min| min <= 0.0)
+        && axis
+            .range_min
+            .zip(axis.range_max)
+            .is_some_and(|(a, b)| a.min(b) <= 0.0)
     {
         return Err(HostError::InvalidValue(
             "logarithmic axis bounds must be positive".into(),
@@ -354,11 +375,16 @@ fn build_spec(
         &mut panel.bottom,
         &request.x_title,
         request.x_scale,
-        request.x_range,
+        axis_range("x", request.x_bounds)?,
     )?;
     let axis = request.series.axis;
     let y_axis = panel.axis_mut(axis.side());
-    update_axis(y_axis, &request.y_title, request.y_scale, request.y_range)?;
+    update_axis(
+        y_axis,
+        &request.y_title,
+        request.y_scale,
+        axis_range("y", request.y_bounds)?,
+    )?;
     if axis == SeriesAxis::Right {
         y_axis.visible = true;
     }
