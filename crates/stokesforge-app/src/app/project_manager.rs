@@ -40,8 +40,7 @@ pub(super) struct PmInteraction<'a> {
     /// Onglet ouvert ou focalisé par un simple clic — voir
     /// [`StokesForgeApp::open_tab`].
     pub(super) open_requests: &'a mut Vec<Tab>,
-    /// Onglet fermé par un double-clic sur une entrée déjà au premier plan,
-    /// ou par « Masquer » sur une entrée maximisée (garde de cohérence, même
+    /// Onglet fermé par « Masquer » sur une entrée maximisée (garde de cohérence, même
     /// esprit que celle de `detach_tab`).
     pub(super) close_requests: &'a mut Vec<Tab>,
     /// L'onglet actuellement au premier plan — voir la doc de tête du
@@ -231,7 +230,7 @@ pub(super) fn object_menu(
 }
 
 /// Délai d'un clic lent (K4) : plus long que l'intervalle d'un double-clic
-/// d'egui, pour qu'un double-clic (ouvrir, fermer) n'ouvre jamais le champ.
+/// d'egui, pour qu'un double-clic (ouvrir) n'ouvre jamais le champ.
 const SLOW_CLICK_SECONDS: f64 = 0.5;
 
 fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
@@ -611,8 +610,10 @@ fn project_tree_node_ui(
                         .slow_click = None;
                 });
             }
-            if response.double_clicked() && interaction.active_tab == Some(tab) {
-                interaction.close_requests.push(tab);
+            // K3 : un double-clic active ou restaure la fenêtre, il ne la
+            // ferme jamais (fermer se fait par Masquer ou l'en-tête).
+            if response.double_clicked() && ui.input(|input| input.modifiers.is_none()) {
+                interaction.open_requests.push(tab);
             }
             response.rect.center().y
         }
@@ -1277,7 +1278,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn le_double_clic_ferme_lentree_deja_au_premier_plan_mais_pas_une_autre() {
+    fn le_double_clic_active_lentree_et_ne_ferme_jamais() {
         let (_session, book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
         let banc = Banc::new(Some(graph_tab), HashSet::new());
@@ -1288,14 +1289,15 @@ pub(super) mod tests {
         let book_pos = find_text_center(&first.shapes, "Book");
 
         // Double-clic sur l'entrée déjà au premier plan (`active_tab` =
-        // `graph_tab`) : doit fermer, pas seulement (re)focaliser.
+        // `graph_tab`) : la (re)focalise, ne la ferme jamais (K3).
         click_at(&context, graph_pos, egui::Modifiers::NONE, paint);
         click_at(&context, graph_pos, egui::Modifiers::NONE, paint);
         assert!(
-            banc.close_requests.borrow().contains(&graph_tab),
-            "le double-clic sur l'onglet déjà au premier plan doit le fermer, close_requests={:?}",
+            banc.close_requests.borrow().is_empty(),
+            "un double-clic ne ferme jamais, close_requests={:?}",
             banc.close_requests.borrow()
         );
+        assert!(banc.open_requests.borrow().contains(&graph_tab));
 
         // Double-clic sur une entrée qui n'est *pas* au premier plan
         // (`active_tab` reste `graph_tab`) : ouvre/focalise, ne ferme rien.
@@ -1322,10 +1324,10 @@ pub(super) mod tests {
             open.contains(&book_tab),
             "le double-clic doit tout de même ouvrir/focaliser l'entrée, open_requests={open:?}"
         );
-        // Témoin : le même geste, l'entrée étant au premier plan, la ferme —
-        // c'est donc bien un double-clic qui a été envoyé.
-        let (_, close) = double_click_on_book(book_tab);
-        assert!(close.contains(&book_tab), "close_requests={close:?}");
+        // Témoin : au premier plan, le même geste ne ferme toujours rien.
+        let (open, close) = double_click_on_book(book_tab);
+        assert!(close.is_empty(), "close_requests={close:?}");
+        assert!(open.contains(&book_tab));
     }
 
     /// Ctrl/Cmd-clic bascule l'appartenance à la sélection : il ajoute, puis

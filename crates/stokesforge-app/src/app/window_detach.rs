@@ -213,8 +213,7 @@ pub(super) struct ProjectManagerViewModel {
     pub(super) selected: HashSet<Tab>,
     /// Copie de [`StokesForgeApp::hidden_tabs`], même resynchronisation.
     pub(super) hidden: HashSet<Tab>,
-    /// Copie de l'onglet au premier plan, même resynchronisation — pour le
-    /// double-clic « fermer si déjà au premier plan » (§4).
+    /// Copie de l'onglet au premier plan, même resynchronisation.
     pub(super) active_tab: Option<Tab>,
 }
 
@@ -233,7 +232,7 @@ pub(super) struct DetachedProjectManagerRequests {
     /// vidange ; [`StokesForgeApp::ui`](eframe::App::ui) les transfère dans son propre
     /// `open_requests` puis les vide.
     pub(super) open: Vec<Tab>,
-    /// Onglets fermés par un double-clic depuis la dernière vidange (§4) —
+    /// Onglets fermés (« Masquer » d'une entrée maximisée) depuis la dernière vidange (§4) —
     /// même schéma que `open`.
     pub(super) close: Vec<Tab>,
     /// Vrai si le bouton « Réattacher » ou la fermeture de la fenêtre OS a
