@@ -1095,8 +1095,9 @@ portail système présent : le portail (`xdg-desktop-portal`, D-Bus) n'est
 qu'une dépendance d'exécution. Vérifié par une compilation `cargo build` et
 `cargo build --release` réussies dans un bac à sable sans session graphique
 garantie. L'ouverture réelle du sélecteur sur un vrai bureau Wayland reste à
-valider interactivement — ce qu'aucun outil non interactif de ce dépôt ne
-peut faire à la place d'un humain devant un écran.
+valider interactivement — ce qu'aucun outil de ce dépôt ne peut faire à la
+place d'un humain devant un écran : `run-stokesforge` pilote l'application en
+X11 (Xwayland), pas en Wayland natif, et n'ouvre pas le sélecteur `rfd`.
 
 ### Deux modules, une ligne de partage
 
@@ -2026,7 +2027,8 @@ Limite : le filtre ne s'applique qu'à l'image qui suit la prise de focus
 (`set_focus_lock_filter` exige `had_focus_last_frame`) — une touche tombant
 dans l'image même du clic n'est pas une frappe réaliste. Verrouillé par
 les tests de `app/grid.rs` (`app::grid::tests`). Le focus d'egui ne se voit pas dans une capture
-(`STOKESFORGE_APP_SCREENSHOT`) : à confirmer sur une vraie fenêtre.
+(`STOKESFORGE_APP_SCREENSHOT`) : à confirmer sur une vraie fenêtre
+(`run-stokesforge` en X11 aide, sans valoir Wayland natif).
 
 ### Alignement du corps : nombres à droite, texte à gauche
 
@@ -2157,7 +2159,8 @@ Le titre reste saisissable dans **Graph › Properties › Graph Properties… �
 présent reste éditable au double-clic sur la figure.
 
 Deux variables d'environnement servent aux tests et aux captures :
-`STOKESFORGE_APP_AUTOQUIT_MS` et `STOKESFORGE_APP_SCREENSHOT`.
+`STOKESFORGE_APP_AUTOQUIT_MS` et `STOKESFORGE_APP_SCREENSHOT`. Pour une
+interaction (clics, clavier), voir le skill `run-stokesforge`.
 
 ### Tests
 

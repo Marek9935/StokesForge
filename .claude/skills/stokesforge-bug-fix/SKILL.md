@@ -156,8 +156,9 @@ et la page `docs/` du domaine.
 
 Rendre compte honnêtement : ce qui a changé, **les contrôles réellement
 exécutés**, et les limites de validation. Un bug dont la vérification exige une
-vraie fenêtre (Wayland, sélecteur de fichiers natif, multi-écran) n'est pas
-validé par un test vert : le dire.
+vraie fenêtre (Wayland natif, sélecteur de fichiers natif, multi-écran, glisser)
+n'est pas validé par un test vert : le dire. `run-stokesforge` couvre le reste
+de l'interface (menus, dialogues, saisie, annulation) sous X11.
 
 ## Checklist
 

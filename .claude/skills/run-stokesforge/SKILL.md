@@ -75,9 +75,12 @@ Suite complète : voir `CLAUDE.md` (Commandes) et `stokesforge-verification`.
 - **Les fenêtres s'ouvrent vraiment sur le bureau de l'utilisateur** : Xwayland
   est lancé sans `-rootless`, et l'app ordinaire (chemin rapide) aussi. Les
   garder brèves, toujours finir par `stop`/`kill`.
-- **L'app ne se ferme jamais seule au repos.** `STOKESFORGE_APP_AUTOQUIT_MS`
-  n'est évalué qu'à l'image peinte, et egui ne repeint pas sans événement :
-  `kill` explicite obligatoire (par pid : `kill $P`, jamais `pgrep -x`, qui tuerait aussi une instance de l'utilisateur). **N'utilise pas `pkill -f stokesforge-app`** : le
+- **`STOKESFORGE_APP_AUTOQUIT_MS` n'est évalué qu'à l'image peinte** (`autoquit`
+  dans `app.rs`, qui demande son propre réveil par `request_repaint_after`).
+  Vérifié le 2026-10-12 : l'app se ferme seule après 2-3 s en Wayland natif, avec
+  `STOKESFORGE_X11=1` et sous `driver.py start`. Si la fenêtre ne peint jamais
+  (masquée, pas d'affichage), rien ne la ferme : borner par `timeout` et
+  terminer par un `kill` explicite (par pid : `kill $P`, jamais `pgrep -x`, qui tuerait aussi une instance de l'utilisateur). **N'utilise pas `pkill -f stokesforge-app`** : le
   motif attrape le shell de la commande et le tue (exit 144) ; `pkill -x`/`kill $(pgrep -x …)`.
 - **La capture X retarde d'une action sous Xwayland.** `ss` fait donc quatre
   micro-mouvements de pointeur (egui ne repeint que sur événement), capture

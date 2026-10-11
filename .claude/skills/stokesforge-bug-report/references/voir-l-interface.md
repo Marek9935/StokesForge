@@ -49,8 +49,8 @@ La doc de tête de `StokesForgeApp::screenshot` dit pourquoi ce mécanisme exist
 c'est la phrase à retenir : « les tests couvrent la géométrie
 (`stokesforge-render-egui`), pas l'apparence ». Un `cargo test --workspace` vert ne
 dit **rien** sur ce à quoi la fenêtre ressemble. C'est aussi le seul moyen
-d'accéder à une fenêtre sous Wayland, où aucun outil externe ne peut
-photographier une fenêtre donnée.
+de photographier la fenêtre en Wayland natif, où aucun outil externe ne peut
+photographier une fenêtre donnée (sous X11/Xwayland, `run-stokesforge` le fait).
 
 ## En pseudo-langue, pour les textes
 

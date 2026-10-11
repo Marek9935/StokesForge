@@ -140,9 +140,14 @@ La flèche de `stokesforge-bug-report` vers une correction ou une
 implémentation exige une demande explicite de passer au code ; elle ne suit
 pas automatiquement la création ou la validation d'une issue.
 
+`run-stokesforge` se branche à côté de `stokesforge-verification`, pour tout
+changement d'interface qu'il faut voir ou manipuler dans l'application réelle
+(menu, dialogue, saisie, annulation) ; ni Wayland natif, ni `rfd`, ni glisser.
+
 `stokesforge-verification` est le passage obligé avant tout commit : c'est lui qui
 porte ce qu'un `cargo test --workspace` vert **ne prouve pas** (ni `python`, ni
-rien qui exige une vraie fenêtre).
+rien qui exige une vraie fenêtre Wayland, le sélecteur natif ou un glisser ; le
+reste de l'interface se pilote avec `run-stokesforge`).
 
 ## Les invoquer à la main
 
