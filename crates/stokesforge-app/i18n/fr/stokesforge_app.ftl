@@ -1477,3 +1477,35 @@ field-refused-name-taken = Ce nom est déjà utilisé
 
 # Champ numérique : bulle du ▼ (#220).
 number-presets = Valeurs courantes
+
+## Raisons de grisage (#226) : un élément grisé dit pourquoi et quoi faire
+
+disabled-object-gone = Cet élément n'existe plus
+disabled-move-first = Déjà en premier
+disabled-move-last = Déjà en dernier
+disabled-visibility-empty = Rien à afficher ou masquer
+disabled-axis-blocked = Un calque au-dessus dessine déjà cet axe
+disabled-axis-on-overlay = Indisponible sur un calque superposé
+disabled-text-not-moved = Ce texte n'a pas été déplacé
+disabled-no-graph-data = Ce graphique n'a aucune donnée à montrer
+disabled-nothing-to-undo = Rien à annuler
+disabled-nothing-to-redo = Rien à rétablir
+disabled-new-project-busy = Terminez ou annulez d'abord le script, l'import ou la modification en cours
+disabled-no-source-file = Aucune colonne de cette feuille ne vient d'un fichier
+disabled-no-last-import = Aucun import terminé à rouvrir
+disabled-needs-sheet = Mettez d'abord une feuille de classeur au premier plan
+disabled-no-window = Aucune fenêtre à agrandir
+disabled-import-not-data-line = Seule une ligne de données ou de pied de page peut terminer les données
+disabled-import-auto-end-off = La fin automatique des données est déjà désactivée
+disabled-import-builtin-template = Seul un modèle que vous avez enregistré peut être supprimé
+disabled-add-file-first = Ajoutez d'abord un fichier
+disabled-import-no-active-book = Mettez d'abord un classeur au premier plan
+disabled-import-last-step = C'est la dernière étape
+disabled-import-first-step = C'est la première étape
+disabled-script-running = Attendez la fin du script
+disabled-script-unavailable = Python n'est pas disponible dans cette version
+disabled-script-not-running = Aucun script en cours
+disabled-color-invalid = Saisissez d'abord une couleur valide
+disabled-gradient-min-colors = Un dégradé a besoin d'au moins deux couleurs
+disabled-mirror-off = Activez d'abord l'axe miroir
+disabled-analysis-issues = Corrigez d'abord le problème signalé dans le formulaire

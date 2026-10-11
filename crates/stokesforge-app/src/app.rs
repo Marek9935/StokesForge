@@ -1146,6 +1146,7 @@ impl StokesForgeApp {
             actions.clear();
             let label = tr!("new-project-discard");
             let hint = tr!("new-project-discard", "hint");
+            let new_project_busy = tr!("disabled-new-project-busy");
             match modal_dialog_with(
                 ctx,
                 egui::Id::new("stokesforge_new_project"),
@@ -1155,6 +1156,7 @@ impl StokesForgeApp {
                     accept_label: &label,
                     accept_hint: &hint,
                     accept_enabled: self.state.can_new_project(),
+                    accept_disabled: Some(&new_project_busy),
                 },
                 |_| {},
                 |ui| {
@@ -1187,6 +1189,7 @@ impl StokesForgeApp {
                     accept_label: &label,
                     accept_hint: &hint,
                     accept_enabled: true,
+                    accept_disabled: None,
                 },
                 |_| {},
                 |ui| {
@@ -1218,6 +1221,7 @@ impl StokesForgeApp {
                     accept_label: &label,
                     accept_hint: &hint,
                     accept_enabled: true,
+                    accept_disabled: None,
                 },
                 |ui| {
                     if ui
@@ -1258,6 +1262,7 @@ impl StokesForgeApp {
                     accept_label: &label,
                     accept_hint: &hint,
                     accept_enabled: true,
+                    accept_disabled: None,
                 },
                 |_| {},
                 |ui| {

@@ -203,7 +203,15 @@ fn series_list(
             (tr!("action-move-series-down"), false),
         ] {
             let movable = panel.can_move_series(*selected, up);
-            if ui.add_enabled(movable, egui::Button::new(label)).clicked() {
+            if ui
+                .add_enabled(movable, egui::Button::new(label))
+                .on_disabled_hover_text(if up {
+                    tr!("disabled-move-first")
+                } else {
+                    tr!("disabled-move-last")
+                })
+                .clicked()
+            {
                 if let Some(index) = panel.move_series(*selected, up) {
                     *selected = index;
                     commit = true;
@@ -376,6 +384,11 @@ fn group_editor(
             if ui
                 .add_enabled(panel.can_move_group(group, up), egui::Button::new(label))
                 .on_hover_text(hint)
+                .on_disabled_hover_text(if up {
+                    tr!("disabled-move-first")
+                } else {
+                    tr!("disabled-move-last")
+                })
                 .clicked()
             {
                 let place = panel
@@ -573,6 +586,7 @@ fn gradient_editor(
                         custom.len() > 2,
                         egui::Button::new(tr!("curve-gradient-remove-stop")),
                     )
+                    .on_disabled_hover_text(tr!("disabled-gradient-min-colors"))
                     .clicked()
                 {
                     remove = Some(custom.len() - 1);
@@ -621,6 +635,7 @@ fn gradient_editor(
                 egui::Button::new(tr!("curve-gradient-apply")),
             )
             .on_hover_text(tr!("curve-gradient-apply", "hint"))
+            .on_disabled_hover_text(tr!("curve-group-leave", "disabled"))
             .clicked()
         {
             if let Some(group) = group {

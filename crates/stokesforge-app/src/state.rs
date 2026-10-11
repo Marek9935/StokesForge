@@ -957,9 +957,9 @@ fn value_block_from_tsv_column(
                 .iter()
                 .map(|row| row.get(col_index).map(String::as_str).unwrap_or("").trim())
                 .collect();
-            let promoting = texts.iter().any(|text| {
-                !text.is_empty() && parse_numeric_cell(kind, text).is_none()
-            });
+            let promoting = texts
+                .iter()
+                .any(|text| !text.is_empty() && parse_numeric_cell(kind, text).is_none());
             if promoting {
                 let cells = texts
                     .iter()

@@ -203,11 +203,30 @@ mod tests {
     fn iso_display_and_round_trip() {
         use super::format_datetime;
         assert_eq!(format_datetime(0.0).as_deref(), Some("1970-01-01 00:00"));
-        assert_eq!(format_datetime(946_684_800.0).as_deref(), Some("2000-01-01 00:00"));
-        assert_eq!(format_datetime(1_732_547_842.0).as_deref(), Some("2024-11-25 15:17:22"));
-        assert_eq!(format_datetime(-86_400.0).as_deref(), Some("1969-12-31 00:00"));
-        assert_eq!(format_datetime(946_684_801.5).as_deref(), Some("2000-01-01 00:00:01.5"));
-        for value in [0.0, -1.0, 951_913_815.0, 1_790_000_000.0, 946_684_801.25, -2_000_000_000.0] {
+        assert_eq!(
+            format_datetime(946_684_800.0).as_deref(),
+            Some("2000-01-01 00:00")
+        );
+        assert_eq!(
+            format_datetime(1_732_547_842.0).as_deref(),
+            Some("2024-11-25 15:17:22")
+        );
+        assert_eq!(
+            format_datetime(-86_400.0).as_deref(),
+            Some("1969-12-31 00:00")
+        );
+        assert_eq!(
+            format_datetime(946_684_801.5).as_deref(),
+            Some("2000-01-01 00:00:01.5")
+        );
+        for value in [
+            0.0,
+            -1.0,
+            951_913_815.0,
+            1_790_000_000.0,
+            946_684_801.25,
+            -2_000_000_000.0,
+        ] {
             let text = format_datetime(value).unwrap();
             assert_eq!(parse_datetime(&text), Some(value), "{text}");
         }

@@ -713,6 +713,7 @@ fn background_menu(
             ] {
                 if ui
                     .add_enabled(hit.point.is_some(), egui::Button::new(label))
+                    .on_disabled_hover_text(tr!("action-add-text", "disabled"))
                     .clicked()
                 {
                     *insert = hit.pos.map(|pos| (pos, kind));

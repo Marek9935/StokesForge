@@ -464,7 +464,7 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   copier, `format_with_uncertainty`, `format_tick`) — jamais un `format!`
   local (#222) ; la grille peint `AppState::cell_display`, édite et copie
   `cell_text` ;
-- tout élément grisé dit pourquoi et quoi faire (`.disabled`) ;
+- tout élément grisé dit pourquoi et quoi faire : `.on_disabled_hover_text(tr!(…))` sur l'élément lui-même (clé `disabled-*` ou `.disabled` de l'action), jamais sur un groupe ; garde `aucun_element_grise_sans_sa_raison` (#226) ;
 - une erreur dans un dialogue va dans son pied, jamais dans la barre d'état ;
 - une suppression annulable ne demande pas de confirmation ;
 - aucun slider, unité dans le libellé, pas de bulle nue sur un champ (icône

@@ -577,6 +577,7 @@ fn mirror_axis_editor(ui: &mut egui::Ui, axis: &mut AxisSpec) -> bool {
             axis.mirror,
             egui::Checkbox::new(&mut axis.tick_labels, tr!("plot-axes-show-tick-labels")),
         )
+        .on_disabled_hover_text(tr!("disabled-mirror-off"))
         .changed();
     ui.weak(tr!("plot-axes-mirror-note"));
     commit

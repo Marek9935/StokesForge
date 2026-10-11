@@ -116,6 +116,7 @@ impl StokesForgeApp {
                                 .shortcut_text(ctx.format_shortcut(&SHORTCUT_NEW_PROJECT)),
                         )
                         .on_hover_text(tr!("action-new-project", "hint"))
+                        .on_disabled_hover_text(tr!("disabled-new-project-busy"))
                         .clicked()
                     {
                         actions.push(Action::NewProject {
@@ -162,6 +163,7 @@ impl StokesForgeApp {
                             egui::Button::new(tr!("action-refresh-from-source")),
                         )
                         .on_hover_text(tr!("action-refresh-from-source", "hint"))
+                        .on_disabled_hover_text(tr!("disabled-no-source-file"))
                         .clicked()
                     {
                         if let Some(sheet) = active_sheet {
@@ -175,6 +177,7 @@ impl StokesForgeApp {
                             egui::Button::new(tr!("action-reopen-last-import")),
                         )
                         .on_hover_text(tr!("action-reopen-last-import", "hint"))
+                        .on_disabled_hover_text(tr!("disabled-no-last-import"))
                         .clicked()
                     {
                         actions.push(Action::ReopenLastImport);
@@ -253,6 +256,7 @@ impl StokesForgeApp {
                         self.state.can_undo(),
                         egui::Button::new(undo).shortcut_text(ctx.format_shortcut(&SHORTCUT_UNDO)),
                     )
+                    .on_disabled_hover_text(tr!("disabled-nothing-to-undo"))
                     .clicked()
                 {
                     actions.push(Action::Undo);
@@ -268,6 +272,7 @@ impl StokesForgeApp {
                         egui::Button::new(redo)
                             .shortcut_text(ctx.format_shortcut(&SHORTCUT_REDO_Y)),
                     )
+                    .on_disabled_hover_text(tr!("disabled-nothing-to-redo"))
                     .clicked()
                 {
                     actions.push(Action::Redo);
@@ -285,6 +290,7 @@ impl StokesForgeApp {
                             .shortcut_text(ctx.format_shortcut(&SHORTCUT_SELECT_ALL)),
                     )
                     .on_hover_text(tr!("action-select-all", "hint"))
+                    .on_disabled_hover_text(tr!("disabled-needs-sheet"))
                     .clicked()
                 {
                     if let Some(sheet) = active_sheet {
@@ -373,6 +379,7 @@ impl StokesForgeApp {
             sections.section(ui, true, |ui| {
                 if ui
                     .add_enabled(has_data, egui::Button::new(tr!("action-show-graph-data")))
+                    .on_disabled_hover_text(tr!("disabled-no-graph-data"))
                     .clicked()
                 {
                     actions.push(Action::ShowGraphData { graph });
@@ -490,6 +497,11 @@ impl StokesForgeApp {
                             egui::Checkbox::new(&mut checked, label),
                         )
                         .on_hover_text(hint)
+                        .on_disabled_hover_text(if ordinary {
+                            tr!("disabled-axis-blocked")
+                        } else {
+                            tr!("disabled-axis-on-overlay")
+                        })
                         .changed()
                     {
                         actions.push(Action::SetPlotVisibility {
@@ -649,6 +661,7 @@ impl StokesForgeApp {
                             egui::Button::new(tr!("action-maximize-window")),
                         )
                         .on_hover_text(tr!("action-maximize-window", "hint"))
+                        .on_disabled_hover_text(tr!("disabled-no-window"))
                         .clicked()
                     {
                         self.maximized_tab = active;

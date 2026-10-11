@@ -174,6 +174,7 @@ pub(super) fn object_node_menu(
                 && ui
                     .add_enabled(exists, egui::Button::new(tr!("action-select-group-series")))
                     .on_hover_text(tr!("action-select-group-series", "hint"))
+                    .on_disabled_hover_text(tr!("disabled-object-gone"))
                     .clicked()
             {
                 requests.push(ObjectManagerRequest::Select(target));
@@ -182,6 +183,7 @@ pub(super) fn object_node_menu(
             if let T::Series(series) = target {
                 if ui
                     .add_enabled(exists, egui::Button::new(tr!("action-show-graph-data")))
+                    .on_disabled_hover_text(tr!("disabled-object-gone"))
                     .clicked()
                 {
                     actions.push(Action::ShowSeriesData { graph, series });
@@ -191,6 +193,7 @@ pub(super) fn object_node_menu(
             if editable_text == Some(true)
                 && ui
                     .add_enabled(exists, egui::Button::new(tr!("action-edit-text")))
+                    .on_disabled_hover_text(tr!("disabled-object-gone"))
                     .clicked()
             {
                 match target {
@@ -206,6 +209,7 @@ pub(super) fn object_node_menu(
                 if ui
                     .add_enabled(moved, egui::Button::new(tr!("action-reset-text-position")))
                     .on_hover_text(tr!("action-reset-text-position", "hint"))
+                    .on_disabled_hover_text(tr!("disabled-text-not-moved"))
                     .clicked()
                 {
                     actions.push(Action::SetTextAnchor {
@@ -229,6 +233,7 @@ pub(super) fn object_node_menu(
                         egui::Button::new(tr!("action-rename-series"))
                             .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_RENAME_OBJECT)),
                     )
+                    .on_disabled_hover_text(tr!("disabled-object-gone"))
                     .clicked()
                 {
                     requests.push(ObjectManagerRequest::Rename(series));
@@ -251,6 +256,7 @@ pub(super) fn object_node_menu(
                             egui::Button::new(label)
                                 .shortcut_text(ui.ctx().format_shortcut(&shortcut)),
                         )
+                        .on_disabled_hover_text(move_reason(up))
                         .clicked()
                     {
                         actions.push(Action::MoveSeries { graph, series, up });
@@ -265,6 +271,7 @@ pub(super) fn object_node_menu(
                         egui::Button::new(tr!("action-rename-group"))
                             .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_RENAME_OBJECT)),
                     )
+                    .on_disabled_hover_text(tr!("disabled-object-gone"))
                     .clicked()
                 {
                     requests.push(ObjectManagerRequest::RenameGroup(group));
@@ -287,6 +294,7 @@ pub(super) fn object_node_menu(
                             egui::Button::new(label)
                                 .shortcut_text(ui.ctx().format_shortcut(&shortcut)),
                         )
+                        .on_disabled_hover_text(move_reason(up))
                         .clicked()
                     {
                         actions.push(Action::MoveSeriesGroup { graph, group, up });
@@ -296,6 +304,7 @@ pub(super) fn object_node_menu(
                 if ui
                     .add_enabled(exists, egui::Button::new(tr!("action-ungroup-series")))
                     .on_hover_text(tr!("action-ungroup-series", "hint"))
+                    .on_disabled_hover_text(tr!("disabled-object-gone"))
                     .clicked()
                 {
                     actions.push(Action::UngroupSeries { graph, group });
@@ -326,6 +335,7 @@ pub(super) fn object_node_menu(
                     if ui
                         .add_enabled(exists, egui::Button::new(label))
                         .on_hover_text(hint)
+                        .on_disabled_hover_text(tr!("disabled-object-gone"))
                         .clicked()
                     {
                         actions.push(Action::ReorderShape {
@@ -351,6 +361,7 @@ pub(super) fn object_node_menu(
                             tr!("action-show-content")
                         }),
                     )
+                    .on_disabled_hover_text(visibility_reason(target, spec))
                     .clicked()
             {
                 actions.push(Action::SetPlotVisibility {
@@ -378,12 +389,35 @@ pub(super) fn object_node_menu(
         if ui
             .add_enabled(exists, egui::Button::new(tr!("action-properties")))
             .on_hover_text(tr!("action-properties", "hint"))
+            .on_disabled_hover_text(tr!("disabled-object-gone"))
             .clicked()
         {
             requests.push(ObjectManagerRequest::Properties(target));
             ui.close();
         }
     });
+}
+
+/// Pourquoi une série ou un groupe ne monte ou ne descend plus (#226).
+fn move_reason(up: bool) -> String {
+    if up {
+        tr!("disabled-move-first")
+    } else {
+        tr!("disabled-move-last")
+    }
+}
+
+/// Pourquoi la case ou l'entrée Show/Hide d'un objet est grisée (#226) : un
+/// axe miroir déjà dessiné par un calque du dessus, sinon rien à basculer.
+fn visibility_reason(
+    target: crate::object_manager::VisibilityTarget,
+    spec: &stokesforge_plot::PlotSpec,
+) -> String {
+    if target.is_blocked_mirror(spec) {
+        tr!("disabled-axis-blocked")
+    } else {
+        tr!("disabled-visibility-empty")
+    }
 }
 
 fn object_visibility(
@@ -402,6 +436,7 @@ fn object_visibility(
             egui::Checkbox::new(&mut checked, "").indeterminate(state.mixed),
         )
         .on_hover_text(tr!("object-manager-visibility"))
+        .on_disabled_hover_text(visibility_reason(target, spec))
         .changed()
     {
         actions.push(Action::SetPlotVisibility {

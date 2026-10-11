@@ -36,7 +36,7 @@ les règles R1–R16 de `textes-interface.md`.
 | brique d'édition sur place (`app/inplace_edit.rs`) | un seul contrat T4 ; aperçus à pause de 0,3 s | **en place** (#224) |
 | icône « ? » (`app/hover_help.rs` : `hover_help`, `help_text`, `help_beside`) | rappel d'un champ, posé à droite (M1, T6) | **en place** (#225) |
 | garde : aucune bulle nue sur un champ de formulaire (`aucune_bulle_nue_sur_un_champ_de_formulaire`) | case, radio, champ texte/nombre, libellé de champ ; menus et `…_contents` exemptés | **en place** (#225) |
-| garde : aucun `add_enabled` sans raison | | à venir (#226) |
+| garde : aucun `add_enabled` sans raison (`aucun_element_grise_sans_sa_raison`) | chaîne de l'appel lue jusqu'à `.on_disabled_hover_text` ; `add_enabled_ui` (groupe) exempté | **en place** (#226) |
 | brique « formulaire » (grille à deux colonnes), largeurs et espacements de `theme.rs` | | à venir (#227) |
 | garde : aucun `add_space` littéral hors de `theme.rs` | | à venir (#227) |
 | zone de message du pied de `modal_dialog_with`, focus initial, taille mémorisée | | à venir (#228) |
@@ -289,12 +289,13 @@ Comment c'est tenu :
   au focus clavier. Exception écrite : dans « Discard Changes · Cancel ·
   Save », **Entrée = Save**, Échap = Cancel.
 
-## Grisé — à venir (#226)
+## Grisé — en place (#226)
 
 - **Tout élément grisé porte sa raison**, qui dit quoi faire (« Select a
   series first ») (G1).
 - **Forme** (G2) : bulle `.disabled` de l'élément lui-même, jamais mêlée à la
   bulle normale, jamais posée sur un groupe.
+- **Mécanique** : les raisons sont les clés `disabled-*` (ou le `.disabled` de l'action quand elle en a un) ; `ToolbarButton` et le bouton principal de `modal_dialog_with` (`DialogFooter::accept_disabled`) posent la leur. Garde : `aucun_element_grise_sans_sa_raison`.
 - **Undo/Redo** (G3) : grisés, « Nothing to undo » ; actifs, « Undo Rename »
   (libellé d'historique).
 - **Champ qui dépend d'une case** (G4) : grisé, valeur visible et conservée ;

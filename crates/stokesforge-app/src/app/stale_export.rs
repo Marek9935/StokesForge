@@ -35,6 +35,7 @@ pub(super) fn stale_export_window(
             accept_label: &accept,
             accept_hint: &accept_hint,
             accept_enabled: true,
+            accept_disabled: None,
         },
         |ui| {
             if ui

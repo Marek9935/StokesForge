@@ -266,6 +266,11 @@ impl VisibilityTarget {
             | Self::Axes(_) => None,
         }
     }
+    /// Vrai pour l'axe miroir qu'un calque du dessus dessine déjà (#176) : la
+    /// raison de sa case grisée (#226).
+    pub fn is_blocked_mirror(self, spec: &PlotSpec) -> bool {
+        matches!(self, Self::Axis(axis) if axis.blocked(spec))
+    }
     pub fn visibility(self, spec: &PlotSpec) -> Visibility {
         self.visibility_shown(spec, Shown::TEXTS)
     }

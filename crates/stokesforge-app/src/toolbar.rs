@@ -202,7 +202,8 @@ impl ToolbarButton {
         let button =
             egui::Button::image(icon_image(self.icon, self.role)).frame_when_inactive(false);
         ui.add_enabled(self.enabled, button)
-            .on_hover_text(tooltip)
+            .on_hover_text(&tooltip)
+            .on_disabled_hover_text(tooltip)
             .clicked()
     }
 }
@@ -483,7 +484,8 @@ fn tool_button(
         .frame_when_inactive(selected)
         .selected(selected);
     ui.add_enabled(enabled, button)
-        .on_hover_text(tooltip)
+        .on_hover_text(&tooltip)
+        .on_disabled_hover_text(tooltip)
         .clicked()
 }
 

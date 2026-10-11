@@ -94,15 +94,16 @@ Ils ne vérifient pas un comportement mais une propriété de frontière. S'ils
 Gardes **en place** du standard d'interface (#217) : `aucun_champ_numerique_hors_de_la_brique`
 (`stokesforge-app/tests/gardes.rs`, #220 : ni `DragValue` ni `Slider`, sans
 dérogation) et `aucune_bulle_nue_sur_un_champ_de_formulaire` (#225 : le rappel
-d'un champ est l'icône « ? », `help_beside`/`help_text`, sans dérogation).
+d'un champ est l'icône « ? », `help_beside`/`help_text`, sans dérogation) et
+`aucun_element_grise_sans_sa_raison` (#226 : tout `add_enabled` porte
+`.on_disabled_hover_text(tr!(…))`, clés `disabled-*`).
 
 Brique **en place** de l'édition sur place (#224) : `app/inplace_edit.rs` (tests de
 `resolve` et du geste dans son module ; chaque surface teste son usage : onglets,
 Project Manager, grille). Aucune garde ne la verrouille encore ; la garde
 `consume_key` hors de `app/shortcuts.rs` (#231) devra l'excepter.
 
-Gardes **à venir** du standard d'interface (#217) : bulle nue sur un champ (#225), `add_enabled` sans
-raison (#226), `add_space` littéral hors de `theme.rs` (#227), `consume_key`
+Gardes **à venir** du standard d'interface (#217) : `add_space` littéral hors de `theme.rs` (#227), `consume_key`
 hors de `app/shortcuts.rs` (#231). Elles **n'existent pas encore** : ne pas
 les citer comme vertes. Le commit qui en écrit une la déplace dans le tableau
 ci-dessus et la passe à *en place* dans

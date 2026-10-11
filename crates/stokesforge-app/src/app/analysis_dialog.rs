@@ -166,6 +166,7 @@ pub(super) fn analysis_window(
         .data(|data| data.get_temp::<bool>(failed_id))
         .unwrap_or(false);
     let accept_enabled = form.issues().is_empty() && !failed;
+    let accept_disabled = tr!("disabled-analysis-issues");
 
     let outcome = modal_dialog_with(
         ctx,
@@ -176,6 +177,7 @@ pub(super) fn analysis_window(
             accept_label: &accept_label,
             accept_hint: &accept_hint,
             accept_enabled,
+            accept_disabled: Some(&accept_disabled),
         },
         |_| {},
         |ui| {
@@ -279,6 +281,7 @@ pub(super) fn calculation_delete_window(
             accept_label: &accept,
             accept_hint: &accept_hint,
             accept_enabled: true,
+            accept_disabled: None,
         },
         |ui| {
             if ui

@@ -277,6 +277,7 @@ fn import_line_preview_widget(
                                     on_data,
                                     egui::Button::new(tr!("import-line-data-end")),
                                 )
+                                .on_disabled_hover_text(tr!("disabled-import-not-data-line"))
                                 .clicked()
                             {
                                 *chosen = Some((ImportLineAction::DataEndsHere, line.number));
@@ -287,6 +288,7 @@ fn import_line_preview_widget(
                                     auto_cut,
                                     egui::Button::new(tr!("import-line-no-auto-end")),
                                 )
+                                .on_disabled_hover_text(tr!("disabled-import-auto-end-off"))
                                 .clicked()
                             {
                                 *chosen = Some((ImportLineAction::NoAutoCut, line.number));
@@ -473,6 +475,7 @@ fn import_template_controls(ui: &mut egui::Ui, state: &mut AppState, actions: &m
         if ui
             .add_enabled(can_delete, egui::Button::new(tr!("import-files-delete")))
             .on_hover_text(tr!("import-files-delete", "hint"))
+            .on_disabled_hover_text(tr!("disabled-import-builtin-template"))
             .clicked()
         {
             state.request_delete_import_recipe(&current_name);
@@ -880,6 +883,7 @@ fn import_step_header(
     if ui
         .add_enabled(has_files, egui::Button::new(tr!("import-header-detect")))
         .on_hover_text(tr!("import-header-detect", "hint"))
+        .on_disabled_hover_text(tr!("disabled-add-file-first"))
         .clicked()
     {
         requests.auto_detect = true;
@@ -1185,7 +1189,8 @@ fn import_step_destination(
         ui.add_enabled(
             false,
             egui::RadioButton::new(false, tr!("import-destination-active-none")),
-        );
+        )
+        .on_disabled_hover_text(tr!("disabled-import-no-active-book"));
     }
     ui.radio_value(
         &mut import.destination,
@@ -1280,6 +1285,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
         tr!("import-button-finish"),
         tr!("import-button-finish", "hint"),
     );
+    let add_file_first = tr!("disabled-add-file-first");
     let outcome = modal_dialog_with(
         ctx,
         egui::Id::new("stokesforge_import_wizard"),
@@ -1289,6 +1295,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             accept_label: &finish_label,
             accept_hint: &finish_hint,
             accept_enabled: has_files,
+            accept_disabled: Some(&add_file_first),
         },
         |footer| {
             // Ajoutés de droite à gauche : « Next » puis « Back ».
@@ -1297,6 +1304,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
                     step != ImportStep::Destination,
                     egui::Button::new(tr!("import-button-next")).min_size(egui::vec2(84.0, 24.0)),
                 )
+                .on_disabled_hover_text(tr!("disabled-import-last-step"))
                 .clicked()
             {
                 requests.borrow_mut().forward = true;
@@ -1306,6 +1314,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
                     step != ImportStep::Files,
                     egui::Button::new(tr!("import-button-back")).min_size(egui::vec2(84.0, 24.0)),
                 )
+                .on_disabled_hover_text(tr!("disabled-import-first-step"))
                 .clicked()
             {
                 requests.borrow_mut().back = true;

@@ -693,6 +693,7 @@ fn picker_contents(
             if ui
                 .add_enabled(current.is_some(), egui::Button::new(tr!("color-save")))
                 .on_hover_text(tr!("color-save", "hint"))
+                .on_disabled_hover_text(tr!("disabled-color-invalid"))
                 .clicked()
             {
                 if let Some(rgba) = current {

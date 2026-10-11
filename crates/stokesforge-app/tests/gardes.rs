@@ -1102,3 +1102,94 @@ fn la_garde_des_bulles_voit_une_bulle_sur_un_champ() {
         );
     }
 }
+
+/// Les appels `.add_enabled(…)` dont la chaîne de méthodes ne porte pas
+/// `.on_disabled_hover_text(…)`, `chemin:ligne` (#226, G1/G2). Un
+/// `add_enabled_ui`, qui grise un groupe, n'est pas lu : la raison se pose sur
+/// l'élément, jamais sur le groupe.
+fn grises_sans_raison(sources: &[Fichier]) -> Vec<String> {
+    let mut trouvees = Vec::new();
+    for fichier in sources {
+        let source = fichier.production();
+        let masque = &source.masque;
+        for i in 1..masque.len() {
+            if masque[i - 1] != '.' || !commence_par(masque, i, "add_enabled(") {
+                continue;
+            }
+            let Some(mut j) = fermante(masque, i + "add_enabled".len()).map(|k| k + 1) else {
+                continue;
+            };
+            let mut raison = false;
+            loop {
+                while masque.get(j).is_some_and(|c| c.is_whitespace()) {
+                    j += 1;
+                }
+                if masque.get(j) != Some(&'.') {
+                    break;
+                }
+                let nom = ident_en(masque, j + 1);
+                j += 1 + nom.chars().count();
+                if nom == "on_disabled_hover_text" {
+                    raison = true;
+                }
+                if masque.get(j) == Some(&'(') {
+                    match fermante(masque, j) {
+                        Some(k) => j = k + 1,
+                        None => break,
+                    }
+                }
+            }
+            if !raison {
+                trouvees.push(format!(
+                    "src/{}:{}",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    trouvees
+}
+
+/// Règle #226 (`docs/standard-interface.md`, § Grisé, G1/G2) : un élément
+/// grisé par `add_enabled` dit pourquoi et quoi faire, dans la bulle
+/// `.on_disabled_hover_text` de l'élément lui-même.
+#[test]
+fn aucun_element_grise_sans_sa_raison() {
+    let fautifs = grises_sans_raison(&sources::sources());
+    assert!(
+        fautifs.is_empty(),
+        "`add_enabled` sans `.on_disabled_hover_text(tr!(…))` : dire pourquoi l'élément est \
+         grisé et quoi faire (clés `disabled-*`) : {fautifs:?}"
+    );
+}
+
+/// Le témoin : un `add_enabled` sans raison, de toute forme, est vu ; avec sa
+/// raison (placée n'importe où dans la chaîne), un `add_enabled_ui`, un
+/// commentaire et le code de test passent.
+#[test]
+fn la_garde_du_grisage_voit_un_add_enabled_sans_raison() {
+    for code in [
+        "fn f(ui: &mut Ui) { ui.add_enabled(ok, Button::new(t)); }",
+        "fn f(ui: &mut Ui) { if ui.add_enabled(ok, Button::new(t)).clicked() {} }",
+        "fn f(ui: &mut Ui) { ui\n.add_enabled(ok, Button::new(t))\n.on_hover_text(h)\n.clicked(); }",
+    ] {
+        assert_eq!(
+            grises_sans_raison(&[fichier("app/g.rs", code)]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    for code in [
+        "fn f(ui: &mut Ui) { ui.add_enabled(ok, Button::new(t)).on_disabled_hover_text(r); }",
+        "fn f(ui: &mut Ui) { if ui.add_enabled(ok, b).on_hover_text(h).on_disabled_hover_text(tr!(\"k\")).clicked() {} }",
+        "fn f(ui: &mut Ui) { ui.add_enabled_ui(ok, |ui| { ui.label(t); }); }",
+        "fn f(ui: &mut Ui) { // ui.add_enabled(ok, b);\n }",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g(ui: &mut Ui) { ui.add_enabled(ok, b); } }",
+    ] {
+        assert!(
+            grises_sans_raison(&[fichier("app/g.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+}

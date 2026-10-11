@@ -76,6 +76,7 @@ pub(super) fn modal_dialog(
             accept_label: &accept_label,
             accept_hint: &accept_hint,
             accept_enabled: true,
+            accept_disabled: None,
         },
         |_| {},
         add_contents,
@@ -89,6 +90,9 @@ pub(super) struct DialogFooter<'a> {
     pub(super) accept_label: &'a str,
     pub(super) accept_hint: &'a str,
     pub(super) accept_enabled: bool,
+    /// Pourquoi le bouton principal est grisé et quoi faire (#226, G1) ;
+    /// `None` quand il ne l'est jamais.
+    pub(super) accept_disabled: Option<&'a str>,
 }
 
 /// [`modal_dialog`] avec un bouton par défaut personnalisé (`footer`) et des
@@ -206,6 +210,11 @@ pub(super) fn modal_dialog_with(
                 if footer
                     .add_enabled(footer_spec.accept_enabled, accept)
                     .on_hover_text(footer_spec.accept_hint)
+                    .on_disabled_hover_text(
+                        footer_spec
+                            .accept_disabled
+                            .unwrap_or(footer_spec.accept_hint),
+                    )
                     .clicked()
                 {
                     button_outcome = DialogOutcome::Accept;
@@ -381,6 +390,7 @@ mod tests {
                             accept_label: "Suivant",
                             accept_hint: "",
                             accept_enabled,
+                            accept_disabled: Some("raison"),
                         },
                         |_| {},
                         |ui| {

@@ -116,6 +116,11 @@ fn script_fields_contents(
         ctx.request_repaint();
     }
 
+    let unavailable_reason = if running {
+        tr!("disabled-script-running")
+    } else {
+        tr!("disabled-script-unavailable")
+    };
     let available = available && !running;
     ui.add_enabled(
         available,
@@ -123,7 +128,8 @@ fn script_fields_contents(
             .code_editor()
             .desired_rows(6)
             .desired_width(f32::INFINITY),
-    );
+    )
+    .on_disabled_hover_text(&unavailable_reason);
 
     ui.horizontal(|ui| {
         if ui
@@ -132,12 +138,14 @@ fn script_fields_contents(
                 egui::Button::new(tr!("script-run"))
                     .shortcut_text(ctx.format_shortcut(&SHORTCUT_RUN_SCRIPT)),
             )
+            .on_disabled_hover_text(&unavailable_reason)
             .clicked()
         {
             actions.push(Action::RunScript);
         }
         if ui
             .add_enabled(running, egui::Button::new(tr!("script-stop")))
+            .on_disabled_hover_text(tr!("disabled-script-not-running"))
             .clicked()
         {
             actions.push(Action::InterruptScript);

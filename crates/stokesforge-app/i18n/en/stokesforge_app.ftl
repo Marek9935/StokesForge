@@ -1485,3 +1485,35 @@ field-refused-name-taken = This name is already used
 
 # Champ numérique : bulle du ▼ (#220).
 number-presets = Common values
+
+## Raisons de grisage (#226) : un élément grisé dit pourquoi et quoi faire
+
+disabled-object-gone = This item no longer exists
+disabled-move-first = Already first
+disabled-move-last = Already last
+disabled-visibility-empty = Nothing to show or hide
+disabled-axis-blocked = A layer above already draws this axis
+disabled-axis-on-overlay = Not available on a layer drawn on top
+disabled-text-not-moved = This text has not been moved
+disabled-no-graph-data = This graph has no data to show
+disabled-nothing-to-undo = Nothing to undo
+disabled-nothing-to-redo = Nothing to redo
+disabled-new-project-busy = Finish or cancel the running script, import or edit first
+disabled-no-source-file = No column of this sheet comes from a file
+disabled-no-last-import = No finished import to reopen
+disabled-needs-sheet = Bring a workbook sheet to the front first
+disabled-no-window = No window to maximize
+disabled-import-not-data-line = Only a data or footer line can end the data
+disabled-import-auto-end-off = Automatic data end is already off
+disabled-import-builtin-template = Only a template you saved can be deleted
+disabled-add-file-first = Add a file first
+disabled-import-no-active-book = Bring a workbook to the front first
+disabled-import-last-step = This is the last step
+disabled-import-first-step = This is the first step
+disabled-script-running = Wait for the script to finish
+disabled-script-unavailable = Python is not available in this build
+disabled-script-not-running = No script is running
+disabled-color-invalid = Enter a valid color first
+disabled-gradient-min-colors = A gradient needs at least two colors
+disabled-mirror-off = Turn on the mirror axis first
+disabled-analysis-issues = Fix the problem shown in the form first
