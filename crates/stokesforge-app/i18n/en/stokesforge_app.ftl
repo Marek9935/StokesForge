@@ -9,7 +9,8 @@
 
 ## Window
 
-window-title = StokesForge
+window-title-project = { $name } — StokesForge
+window-title-project-unsaved = { $name } • — StokesForge
 window-title-project-manager = StokesForge — Project Manager
 window-title-detached = StokesForge — { $name }
 
@@ -206,7 +207,12 @@ window-kind-note = Note
 window-deleted = { $kind } { $id } (deleted)
 
 status-ready = Ready
-status-revision = Revision { $revision }
+status-history = Show the last 50 messages
+status-history-title = Messages
+status-history-empty = No messages yet
+status-history-time = { $time } UTC
+status-level-warning = Warning
+status-level-error = Error
 status-saved = Saved to { $path }
 status-loaded = Loaded from { $path }
 status-nothing-to-undo = Nothing to undo
@@ -1484,7 +1490,7 @@ error-script-no-python = Python was not found. Set STOKESFORGE_PYTHON_HOME or re
 status-script-running = Running script…
 error-script-start = Could not start the script: { $cause }
 status-script-interrupted = Script interrupted
-status-script-exception = Script ended with an exception. See the output
+status-script-exception = Script failed. See the console
 status-script-done = Script finished
 status-script-interrupt-requested = Interrupt requested
 status-script-none-running = No script is running

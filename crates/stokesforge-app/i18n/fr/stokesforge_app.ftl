@@ -9,7 +9,8 @@
 
 ## Fenêtre
 
-window-title = StokesForge
+window-title-project = { $name } — StokesForge
+window-title-project-unsaved = { $name } • — StokesForge
 window-title-project-manager = StokesForge — Gestionnaire de projet
 window-title-detached = StokesForge — { $name }
 
@@ -201,7 +202,12 @@ window-kind-note = Note
 window-deleted = { $kind } { $id } (élément supprimé)
 
 status-ready = Prêt
-status-revision = Révision { $revision }
+status-history = Afficher les 50 derniers messages
+status-history-title = Messages
+status-history-empty = Aucun message pour l'instant
+status-history-time = { $time } UTC
+status-level-warning = Avertissement
+status-level-error = Erreur
 status-saved = Enregistré dans { $path }
 status-loaded = Chargé depuis { $path }
 status-nothing-to-undo = Rien à annuler
@@ -1476,7 +1482,7 @@ error-script-no-python = Python est introuvable. Définir STOKESFORGE_PYTHON_HOM
 status-script-running = Exécution du script…
 error-script-start = Impossible de démarrer le script : { $cause }
 status-script-interrupted = Script interrompu
-status-script-exception = Le script s'est terminé par une exception. Voir la sortie
+status-script-exception = Le script a échoué. Voir la console
 status-script-done = Script terminé
 status-script-interrupt-requested = Interruption demandée
 status-script-none-running = Aucun script en cours

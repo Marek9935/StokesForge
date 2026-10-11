@@ -37,7 +37,8 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | Fichier | Rôle |
 |---|---|
 | `app.rs` | orchestration : `StokesForgeApp` et ses champs, `new` (disposition initiale, restauration de l'état des fenêtres), `ui()` et l'**ordre des panneaux**, `collect_shortcuts` (raccourcis globaux, consommés avant les widgets), application différée des actions et ouvertures après la peinture, confirmations bloquantes (nouveau projet, suppression de feuille), drainage des fenêtres détachées, capture et auto-fermeture de vérification. Aucun module de `src/app/` ne lui emprunte d'aide : ce qu'ils partagent vit dans `tab.rs`, `window_detach.rs` ou `crate::color_picker` (#128) |
-| `app/menus.rs` | barre de menu (`menu_bar` appelle `file_menu`, `edit_menu`, `workbook_menu`, `graph_menu`, `view_menu`, `window_menu`) et barre d'état (`status_bar`) |
+| `app/menus.rs` | barre de menu (`menu_bar` appelle `file_menu`, `edit_menu`, `workbook_menu`, `graph_menu`, `view_menu`, `window_menu`) et barre d'état (`status_bar`, `status_line`) |
+| `app/status_history.rs` | fenêtre en lecture seule des 50 derniers messages de la barre d'état, horodatés en UTC (#230) |
 | `app/analysis_menu.rs` | menu Analysis (#181) : `analysis_menu_contents` (barre de menus), `analysis_entry` (clic droit de colonne : une entrée `Analysis…`, #202), `calculation_section` (Edit / Recalculate / Detach / Delete sur une colonne calculée) |
 | `app/stale_export.rs` | confirmation d'un export ou d'une copie de figure qui montre des séries pas à jour (#198) |
 | `app/analysis_dialog.rs` | fenêtre d'analyse (`modal_dialog_with`, deux colonnes : formulaire + aperçu) et confirmation de suppression d'un calcul (`calculation_delete_window`) |
@@ -351,8 +352,8 @@ seule entrée « Importer » ; un fichier qui ne donne aucune valeur numérique
 ouvre à la place la fenêtre d'import pré-remplie. Décision pure :
 `state::file_drop_plan`. Le dépôt crée toujours de nouvelles feuilles, même
 si la recette du dernier import remplaçait ou fusionnait une feuille. Le lien
-« Reopen Last Import… » dans la barre d'état et File › Import › Reopen Last
-Import… reprennent ses fichiers dans l'assistant.
+File › Import › Reopen Last
+Import… reprend ses fichiers dans l'assistant.
 
 Le même geste est câblé dans les fenêtres détachées : sur un classeur,
 la destination reste ce classeur ; sur un graphe, une note, une matrice ou le
@@ -2294,3 +2295,22 @@ et porte la glu de sélection vers `GraphView` (`select_manager_target`,
 `StokesForgeApp::run_object_manager_request` (même module, #122, qui porte
 aussi le panneau `object_manager_panel`) — le menu « Graph › Selection » passe par le même chemin. Les décisions de mutation restent dans
 `AppState::dispatch`, avec les commandes de la session.
+
+## Barre d'état (#230)
+
+`AppState::notice` (information), `warn` (avertissement) et `fail` (erreur,
+sauf dans un dialogue modal : M7) posent un `StatusMessage` à niveau
+(`StatusLevel`) et l'ajoutent à un historique de `STATUS_HISTORY_LEN` = 50
+messages. Une information s'efface après `INFO_LIFETIME` (8 s) :
+`AppState::expire_status`, appelée à chaque image par
+`sync_window_title_and_status` (`app.rs`), efface l'échue et rend le délai
+restant — seul cet instant programme un redessin, aucun réveil au repos.
+Avertissement et erreur restent jusqu'au message suivant. Un clic sur la
+barre (`Action::OpenStatusHistory`) ouvre `status_history_window`. Une
+exception de script est une erreur (« Script failed. See the console »). La
+barre n'affiche plus « Revision N » ni « Reopen Last Import… ».
+
+Le titre de la fenêtre est `AppState::window_title` (nom du fichier, « • »
+tant qu'il y a du travail non enregistré), renvoyé par
+`ViewportCommand::Title` quand il change. L'historique est horodaté en UTC
+(pas de fuseau local sans dépendance de calendrier).

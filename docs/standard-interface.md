@@ -231,7 +231,7 @@ Comment c'est tenu :
   (`ImportState::debounce_preview`, pause seulement pendant la frappe dans un
   champ texte ; liste, case et bouton sont immédiats).
 
-## Messages et aide — M1–M3, T5–T6 en place (#225) ; barre d'état à venir (#230)
+## Messages et aide — en place (#225, #230)
 
 - **Trois niveaux d'aide** (M1) : en clair (2 lignes au plus) pour un effet de
   bord, une portée, un geste sur un aperçu ; icône « ? » (`hover_help`) pour

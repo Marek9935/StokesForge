@@ -42,7 +42,7 @@
 //! 3. **Une exception de script n'est pas une erreur d'application.** Elle
 //!    atterrit dans la sortie ([`AppState::script_output`]) avec sa trace
 //!    d'appels ; le message de statut posé par `poll_script` reste neutre
-//!    (`is_error: false`), et l'état reste utilisable.
+//!    (niveau `Info`), et l'état reste utilisable.
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -467,6 +467,10 @@ pub enum Action {
     },
     /// Ferme la fenêtre des métadonnées.
     CloseColumnMetadata,
+    /// Ouvre la fenêtre des 50 derniers messages de la barre d'état (M6).
+    OpenStatusHistory,
+    /// Ferme la fenêtre d'historique des messages.
+    CloseStatusHistory,
     /// Ouvre la fenêtre d'analyse (#181) sur les colonnes Y sélectionnées de
     /// `sheet`, chacune avec le X le plus proche à sa gauche. Rien ne s'ouvre
     /// sans colonne Y.
@@ -912,17 +916,47 @@ impl SaveTarget {
     }
 }
 
-/// Un message à afficher à l'utilisateur, avec sa gravité.
+/// Gravité d'un message de la barre d'état (M4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusLevel {
+    /// Information normale : s'efface d'elle-même après [`INFO_LIFETIME`] (M5).
+    Info,
+    /// Avertissement : « impossible pour l'instant » (annuler à vide), pas un
+    /// échec. Reste jusqu'au message suivant.
+    Warning,
+    /// Échec (chemin illisible, script en erreur). Reste jusqu'au message
+    /// suivant.
+    Error,
+}
+
+/// Durée d'affichage d'une information avant qu'elle s'efface (M5).
+pub const INFO_LIFETIME: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// Nombre de messages gardés pour l'historique de la barre d'état (M6).
+pub const STATUS_HISTORY_LEN: usize = 50;
+
+/// Un message à afficher à l'utilisateur, avec sa gravité et son heure.
 ///
-/// `is_error` sépare deux choses que Qt distinguait par le grisage d'une
-/// action : « impossible pour l'instant » (annuler à vide) n'est **pas** une
-/// erreur, alors qu'un chemin illisible en est une.
+/// Le niveau sépare trois choses que Qt distinguait par le grisage d'une
+/// action : « impossible pour l'instant » (annuler à vide) est un
+/// avertissement, **pas** une erreur, alors qu'un chemin illisible en est une.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusMessage {
-    /// Texte affiché, en français.
+    /// Texte affiché.
     pub text: String,
+    /// Gravité.
+    pub level: StatusLevel,
+    /// Instant monotone de l'émission (pour l'effacement).
+    pub at: std::time::Instant,
+    /// Heure murale de l'émission (pour l'historique).
+    pub wall: std::time::SystemTime,
+}
+
+impl StatusMessage {
     /// Vrai si le message signale un échec.
-    pub is_error: bool,
+    pub fn is_error(&self) -> bool {
+        self.level == StatusLevel::Error
+    }
 }
 
 /// Ce qu'une exécution de script a produit, tel que l'état applicatif le
@@ -940,9 +974,8 @@ pub struct ScriptOutput {
     /// Ce que le script a écrit sur la sortie d'erreur.
     pub stderr: String,
     /// Message d'erreur **avec sa trace d'appels Python complète**, si le
-    /// script a levé une exception. Une exception de script n'est pas une
-    /// erreur d'application : ce champ n'influence jamais [`StatusMessage::
-    /// is_error`].
+    /// script a levé une exception. La barre d'état la marque comme erreur
+    /// (M10) et renvoie ici, à la console, pour le détail.
     pub error: Option<String>,
     /// Vrai si l'exécution s'est arrêtée sur une interruption demandée
     /// ([`Action::InterruptScript`]).
@@ -2508,6 +2541,10 @@ pub struct AppState {
     object_manager_preferences: Preferences,
     /// Dernier message destiné à l'utilisateur.
     status: Option<StatusMessage>,
+    /// Les 50 derniers messages de la barre d'état (M6).
+    status_log: std::collections::VecDeque<StatusMessage>,
+    /// La fenêtre d'historique des messages est ouverte.
+    status_history_open: bool,
     /// Erreur survenue pendant qu'un dialogue modal est ouvert (M7, #228) :
     /// elle s'affiche dans le pied du dialogue, jamais dans la barre d'état.
     dialog_error: Option<String>,
@@ -2678,6 +2715,8 @@ impl AppState {
             object_manager_open: preferences.object_manager_open(),
             object_manager_preferences: preferences,
             status: None,
+            status_log: std::collections::VecDeque::new(),
+            status_history_open: false,
             dialog_error: None,
             editing: None,
             note_editing: None,
@@ -4512,6 +4551,8 @@ impl AppState {
             Action::RefreshFromSource { sheet } => self.refresh_from_source(sheet),
             Action::ViewColumnMetadata { column } => self.metadata_view = Some(column),
             Action::CloseColumnMetadata => self.metadata_view = None,
+            Action::OpenStatusHistory => self.status_history_open = true,
+            Action::CloseStatusHistory => self.status_history_open = false,
             Action::OpenAnalysis {
                 preset,
                 sheet,
@@ -5108,7 +5149,11 @@ impl AppState {
         if !items.is_empty() {
             let count = items.len();
             self.apply_import(plan.destination, items);
-            if self.status.as_ref().is_some_and(|status| !status.is_error) {
+            if self
+                .status
+                .as_ref()
+                .is_some_and(|status| !status.is_error())
+            {
                 self.notice(tr!(
                     "status-import-dropped",
                     count = count,
@@ -5987,10 +6032,13 @@ impl AppState {
     /// naît côté plateforme, jamais dans le modèle.
     pub(crate) fn notice(&mut self, text: String) {
         self.dialog_error = None;
-        self.status = Some(StatusMessage {
-            text,
-            is_error: false,
-        });
+        self.record(text, StatusLevel::Info);
+    }
+
+    /// Enregistre un avertissement (M4) : visible jusqu'au message suivant.
+    pub(crate) fn warn(&mut self, text: String) {
+        self.dialog_error = None;
+        self.record(text, StatusLevel::Warning);
     }
 
     /// Enregistre un message d'échec : dans le pied du dialogue modal ouvert
@@ -6000,10 +6048,62 @@ impl AppState {
             self.dialog_error = Some(text);
             return;
         }
-        self.status = Some(StatusMessage {
+        self.record(text, StatusLevel::Error);
+    }
+
+    /// Pose le message courant et l'ajoute à l'historique (M6, 50 derniers).
+    fn record(&mut self, text: String, level: StatusLevel) {
+        let message = StatusMessage {
             text,
-            is_error: true,
-        });
+            level,
+            at: std::time::Instant::now(),
+            wall: std::time::SystemTime::now(),
+        };
+        if self.status_log.len() == STATUS_HISTORY_LEN {
+            self.status_log.pop_front();
+        }
+        self.status_log.push_back(message.clone());
+        self.status = Some(message);
+    }
+
+    /// Efface l'information trop ancienne (M5) et rend le délai restant avant
+    /// la prochaine échéance, pour programmer **ce seul** redessin : aucun
+    /// réveil périodique au repos. Avertissements et erreurs restent.
+    pub fn expire_status(&mut self, now: std::time::Instant) -> Option<std::time::Duration> {
+        let message = self.status.as_ref()?;
+        if message.level != StatusLevel::Info {
+            return None;
+        }
+        let age = now.saturating_duration_since(message.at);
+        if age >= INFO_LIFETIME {
+            self.status = None;
+            None
+        } else {
+            Some(INFO_LIFETIME - age)
+        }
+    }
+
+    /// Les derniers messages, du plus ancien au plus récent (M6).
+    pub fn status_history(&self) -> impl Iterator<Item = &StatusMessage> {
+        self.status_log.iter()
+    }
+
+    /// L'historique des messages est-il ouvert ?
+    pub fn status_history_open(&self) -> bool {
+        self.status_history_open
+    }
+
+    /// Titre de la fenêtre : nom du projet, « • » tant qu'il n'est pas
+    /// enregistré (R15) : « essai.stf • — StokesForge ».
+    pub fn window_title(&self) -> String {
+        let name = std::path::Path::new(&self.path)
+            .file_name()
+            .map_or_else(|| self.path.clone(), |n| n.to_string_lossy().into_owned());
+        if self.has_unsaved_work(false) {
+            tr!("window-title-project-unsaved", name = name)
+        } else {
+            tr!("window-title-project", name = name)
+        }
     }
 
     /// Le dernier geste a-t-il échoué ? Erreur dans le pied du dialogue ou
@@ -6011,7 +6111,7 @@ impl AppState {
     pub(crate) fn last_action_failed(&self) -> bool {
         self.dialog_error.is_some()
             || self.alert.is_some()
-            || self.status.as_ref().is_some_and(|status| status.is_error)
+            || self.status.as_ref().is_some_and(StatusMessage::is_error)
     }
 
     /// Envoie une commande à l'acteur et rend compte du résultat.
@@ -6040,7 +6140,7 @@ impl AppState {
                 });
                 self.refresh();
             }
-            Ok(None) => self.notice(tr!("status-nothing-to-undo")),
+            Ok(None) => self.warn(tr!("status-nothing-to-undo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
@@ -6055,7 +6155,7 @@ impl AppState {
                 });
                 self.refresh();
             }
-            Ok(None) => self.notice(tr!("status-nothing-to-redo")),
+            Ok(None) => self.warn(tr!("status-nothing-to-redo")),
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
     }
@@ -8489,13 +8589,17 @@ impl AppState {
         let interrupted = outcome.interrupted;
         let failed = outcome.error.is_some();
         self.script_output = Some(ScriptOutput::from(outcome));
-        self.notice(if interrupted {
-            tr!("status-script-interrupted")
-        } else if failed {
-            tr!("status-script-exception")
+        if failed && !interrupted {
+            // M10 : une exception de script est une erreur, la trace est dans
+            // la console (seule exception écrite à « un seul canal », R13).
+            self.fail(tr!("status-script-exception"));
         } else {
-            tr!("status-script-done")
-        });
+            self.notice(if interrupted {
+                tr!("status-script-interrupted")
+            } else {
+                tr!("status-script-done")
+            });
+        }
         self.refresh();
     }
 

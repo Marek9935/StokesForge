@@ -135,7 +135,7 @@ fn suppression_sans_confirmation_nomme_les_graphes_et_un_seul_undo_restaure_tout
     assert!(!state.tree().contains(book));
     assert!(state.unsaved_pending().is_none() && !state.blocking_dialog());
     let status = state.status().expect("message");
-    assert!(!status.is_error);
+    assert!(!status.is_error());
     assert!(status.text.contains("Graph1"), "{}", status.text);
     state.dispatch(Action::Undo);
     assert_eq!(state.tree(), &before);

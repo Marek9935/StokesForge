@@ -31,8 +31,8 @@ use stokesforge_app::selection::Selection;
 use stokesforge_app::state::{
     active_graph, drop_payload_action, drop_rows_action, file_drop_plan, Action, ActiveTabKind,
     AlertKind, AppState, ColumnDragPayload, GridZone, HeaderField, ImportDestination,
-    MoveDirection, PlotAxis, PlotEdit, PlotSettingsTab, PlotTarget, RowAxis, UnsavedChoice,
-    UnsavedGesture,
+    MoveDirection, PlotAxis, PlotEdit, PlotSettingsTab, PlotTarget, RowAxis, StatusLevel,
+    UnsavedChoice, UnsavedGesture, INFO_LIFETIME, STATUS_HISTORY_LEN,
 };
 use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind};
 use stokesforge_core::{Cell, Column, ColumnRole, ColumnType, NodeId, Project, Tree};
@@ -686,7 +686,7 @@ fn non_numeric_input_promotes_the_column_to_mixed() {
     });
 
     assert!(
-        state.status().is_none_or(|status| !status.is_error),
+        state.status().is_none_or(|status| !status.is_error()),
         "une saisie non numérique n'est plus une erreur"
     );
     assert_eq!(column_type(&state, temps), ColumnType::Mixed);
@@ -744,7 +744,7 @@ fn blank_text_writes_a_missing_numeric_value() {
     }
     assert_eq!(state.cell_text(temps, 2), "");
     assert!(
-        state.status().is_none_or(|status| !status.is_error),
+        state.status().is_none_or(|status| !status.is_error()),
         "écrire une valeur manquante n'est pas une erreur"
     );
 }
@@ -829,15 +829,16 @@ fn undo_on_an_empty_history_is_a_notice_not_an_error() {
     state.dispatch(Action::Undo);
 
     let status = state.status().expect("un message");
-    assert!(
-        !status.is_error,
-        "« rien à annuler » est le pendant du bouton grisé, pas une erreur"
+    assert_eq!(
+        status.level,
+        StatusLevel::Warning,
+        "« rien à annuler » est le pendant du bouton grisé : un avertissement, pas une erreur"
     );
     assert_eq!(state.snapshot().revision, before);
 
     state.dispatch(Action::Redo);
     let status = state.status().expect("un message");
-    assert!(!status.is_error);
+    assert!(!status.is_error());
     assert_eq!(state.snapshot().revision, before);
 }
 
@@ -859,7 +860,7 @@ fn the_full_loop_returns_the_saved_tree_bit_for_bit() {
 
     state.dispatch(Action::Save);
     assert!(
-        state.status().is_some_and(|status| !status.is_error),
+        state.status().is_some_and(|status| !status.is_error()),
         "sauvegarde réussie : {:?}",
         state.status()
     );
@@ -873,7 +874,7 @@ fn the_full_loop_returns_the_saved_tree_bit_for_bit() {
 
     state.dispatch(Action::Load);
     assert!(
-        state.status().is_some_and(|status| !status.is_error),
+        state.status().is_some_and(|status| !status.is_error()),
         "chargement réussi : {:?}",
         state.status()
     );
@@ -903,7 +904,7 @@ fn loading_a_foreign_file_leaves_no_stale_per_book_selection() {
     {
         let (other_session, mut other_state) = start(single_sheet_project(), &other);
         other_state.dispatch(Action::Save);
-        assert!(other_state.status().is_some_and(|s| !s.is_error));
+        assert!(other_state.status().is_some_and(|s| !s.is_error()));
         other_session.shutdown().expect("arrêt de la session");
     }
 
@@ -1208,11 +1209,11 @@ fn row_actions_on_something_that_is_not_a_sheet_are_refused() {
         at: 0,
         count: 1,
     });
-    assert!(state.status().is_some_and(|status| status.is_error));
+    assert!(state.status().is_some_and(|status| status.is_error()));
     assert_eq!(state.snapshot().revision, revision);
 
     state.dispatch(Action::AddColumn { sheet: graph });
-    assert!(state.status().is_some_and(|status| status.is_error));
+    assert!(state.status().is_some_and(|status| status.is_error()));
     assert_eq!(state.snapshot().revision, revision);
 }
 
@@ -1225,7 +1226,7 @@ fn selecting_something_that_is_not_a_sheet_is_refused() {
     let root = state.tree().root();
 
     state.dispatch(Action::SelectSheet(root));
-    assert!(state.status().is_some_and(|status| status.is_error));
+    assert!(state.status().is_some_and(|status| status.is_error()));
     assert_eq!(
         state.selected_sheet_in(book1),
         selected,
@@ -1233,7 +1234,7 @@ fn selecting_something_that_is_not_a_sheet_is_refused() {
     );
 
     state.dispatch(Action::SelectSheet(NodeId::from_raw(9_999)));
-    assert!(state.status().is_some_and(|status| status.is_error));
+    assert!(state.status().is_some_and(|status| status.is_error()));
     assert_eq!(state.selected_sheet_in(book1), selected);
 }
 
@@ -1975,7 +1976,7 @@ fn x_prime_refuses_text_nan_and_infinity() {
             "{invalide:?} ne remplace pas la valeur"
         );
         let status = state.status().expect("message d'état");
-        assert!(status.is_error, "{invalide:?} signalé comme erreur");
+        assert!(status.is_error(), "{invalide:?} signalé comme erreur");
     }
     // Les refus n'ont rien empilé : un seul Undo retire le « 3 ».
     state.dispatch(Action::Undo);
@@ -2355,7 +2356,7 @@ fn paste_absolute_without_a_prior_copy_is_a_notice_not_an_error() {
 
     let status = state.status().expect("un message");
     assert!(
-        !status.is_error,
+        !status.is_error(),
         "« rien à coller » est un état normal, pas une erreur"
     );
     assert_eq!(state.snapshot().revision, before, "le modèle n'a pas bougé");
@@ -2663,7 +2664,7 @@ fn script_available_is_false_and_run_script_explains_why_without_the_feature() {
 
     let status = state.status().expect("un message explicite");
     assert!(
-        status.is_error,
+        status.is_error(),
         "impossible d'exécuter un script n'est pas un succès silencieux"
     );
     assert_eq!(
@@ -2696,7 +2697,7 @@ fn interrupt_script_is_also_explained_without_the_feature() {
     state.dispatch(Action::InterruptScript);
 
     let status = state.status().expect("un message explicite");
-    assert!(status.is_error);
+    assert!(status.is_error());
     assert_eq!(
         status.text,
         stokesforge_app::tr!("error-script-unavailable")
@@ -2993,7 +2994,7 @@ fn importing_several_files_creates_one_sheet_each_in_a_single_undo_entry() {
 
     let status = state.status().expect("un message de statut");
     assert!(
-        !status.is_error,
+        !status.is_error(),
         "l'import ne doit pas être signalé en échec"
     );
     assert!(
@@ -3148,7 +3149,7 @@ fn new_book_import_creates_nothing_for_an_unreadable_file() {
         state.tree().node(root).unwrap().children().len(),
         before + 1
     );
-    assert!(state.status().unwrap().is_error);
+    assert!(state.status().unwrap().is_error());
 }
 
 #[test]
@@ -3409,7 +3410,7 @@ fn save_import_recipe_persists_to_disk_and_is_visible_after_reopening() {
     state.save_import_recipe();
     let status = state.status().expect("un message de statut");
     assert!(
-        !status.is_error,
+        !status.is_error(),
         "l'enregistrement a réussi : {}",
         status.text
     );
@@ -3448,7 +3449,7 @@ fn delete_import_recipe_removes_it_from_the_store_on_disk() {
     state.delete_import_recipe("Jasco");
     let status = state.status().expect("un message de statut");
     assert!(
-        !status.is_error,
+        !status.is_error(),
         "la suppression a réussi : {}",
         status.text
     );
@@ -3642,7 +3643,7 @@ fn a_parse_failure_amid_a_batch_is_surfaced_as_an_error_not_silently_swallowed()
     );
     let status = state.status().expect("un message de statut");
     assert!(
-        status.is_error,
+        status.is_error(),
         "un fichier en échec doit se voir, pas disparaître derrière un décompte : {}",
         status.text
     );
@@ -3669,7 +3670,10 @@ fn importing_into_a_nonexistent_book_fails_gracefully() {
     });
 
     let status = state.status().expect("un message de statut");
-    assert!(status.is_error, "un classeur inexistant doit être signalé");
+    assert!(
+        status.is_error(),
+        "un classeur inexistant doit être signalé"
+    );
     assert!(!state.can_undo(), "rien n'a été créé, rien à annuler");
 }
 
@@ -5287,7 +5291,7 @@ fn plot_columns_without_any_y_column_is_a_no_op() {
         undo_label_before,
         "aucune commande n'a été envoyée : l'entrée d'historique à annuler ne change pas"
     );
-    assert!(state.status().is_some_and(|status| status.is_error));
+    assert!(state.status().is_some_and(|status| status.is_error()));
 }
 
 /// Annuler après `Action::PlotColumns` restaure l'arbre bit pour bit — le
@@ -5638,7 +5642,7 @@ fn dropping_rows_ignores_missing_rows_and_refuses_a_sheet_without_x_prime() {
         axis: RowAxis::Ask,
     });
     assert_eq!(state.plot_spec(graph).unwrap(), before);
-    assert!(state.status().expect("message").is_error);
+    assert!(state.status().expect("message").is_error());
 }
 
 /// Plot d'une sélection de lignes (#166) : un graphe neuf dont chaque ligne est
@@ -5682,7 +5686,7 @@ fn plot_rows_creates_a_graph_with_one_row_series_per_row() {
         plot_type: PlotType::Line,
     });
     assert_eq!(state.tree().len(), before);
-    assert!(state.status().expect("message").is_error);
+    assert!(state.status().expect("message").is_error());
 }
 
 // -- 23. Glisser une sélection de colonnes vers un graphe --
@@ -6547,7 +6551,7 @@ fn dropping_files_during_plot_settings_is_refused_without_touching_the_macro() {
         target_book: None,
     });
     assert!(
-        !state.status().unwrap().is_error,
+        !state.status().unwrap().is_error(),
         "le dépôt passe après fermeture du dialogue"
     );
     assert!(state.can_reopen_last_import());
@@ -6573,7 +6577,7 @@ fn dropping_files_uses_the_last_recipe_and_always_creates_new_sheets() {
         recipe,
         paths: vec![initial],
     });
-    assert!(!state.status().unwrap().is_error);
+    assert!(!state.status().unwrap().is_error());
     let before = state.snapshot().tree.clone();
     let sheets_before = state.worksheets_of(book).len();
     let files: Vec<_> = ["depot1.csv", "depot2.csv"]
@@ -6674,7 +6678,7 @@ fn dropping_files_on_a_book_imports_them_as_one_undo_entry() {
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 2);
     assert!(state.import_state().is_none(), "aucune fenêtre d'import");
     let status = state.status().expect("message de statut");
-    assert!(!status.is_error);
+    assert!(!status.is_error());
     assert_eq!(
         status.text,
         stokesforge_app::tr!("status-import-dropped", count = 2, models = "Untitled"),
@@ -6904,7 +6908,7 @@ fn enregistrer_un_modele_d_import_actualise_le_temoin_de_modification() {
 
     state.save_import_recipe();
 
-    assert!(!state.status().unwrap().is_error);
+    assert!(!state.status().unwrap().is_error());
     assert!(
         !state.import_recipe_modified(),
         "le modèle vient d'être enregistré"
@@ -6930,7 +6934,7 @@ fn un_echec_d_enregistrement_garde_le_modele_d_import_modifie() {
     state.open_import(None::<NodeId>);
     state.import_state_mut().unwrap().recipe.skip_chars = 2;
     state.save_import_recipe();
-    assert!(!state.status().unwrap().is_error);
+    assert!(!state.status().unwrap().is_error());
     state.import_state_mut().unwrap().recipe.skip_chars = 3;
 
     let config = directories::ProjectDirs::from("", "", "StokesForge").unwrap();
@@ -7258,7 +7262,7 @@ fn cancelling_plot_settings_does_not_undo_a_detached_entry() {
         text: "99".into(),
     });
     assert!(
-        detached.status().is_some_and(|status| status.is_error),
+        detached.status().is_some_and(|status| status.is_error()),
         "la saisie étrangère est refusée pendant le dialogue"
     );
     main.cancel_plot_settings();
@@ -7309,7 +7313,7 @@ fn a_background_import_reports_progress_then_applies_in_one_entry() {
         paths: files.clone(),
     });
     assert!(
-        state.status().is_some_and(|status| status.is_error),
+        state.status().is_some_and(|status| status.is_error()),
         "un second import est refusé"
     );
 
@@ -7775,7 +7779,7 @@ fn refreshing_from_the_source_file_updates_the_columns_in_place() {
     assert_eq!(ids_before, ids_after, "les colonnes gardent leur identité");
     assert_eq!(column_values(&state, sheet, 0), vec![5.0, 6.0, 7.0]);
     assert_eq!(column_values(&state, sheet, 1), vec![50.0, 60.0, 70.0]);
-    assert!(state.status().is_some_and(|s| !s.is_error));
+    assert!(state.status().is_some_and(|s| !s.is_error()));
 
     // Un seul Ctrl+Z revient aux valeurs d'avant l'actualisation.
     state.dispatch(Action::Undo);
@@ -7784,7 +7788,7 @@ fn refreshing_from_the_source_file_updates_the_columns_in_place() {
     // Un fichier disparu est signalé sans rien casser.
     std::fs::remove_file(&file).unwrap();
     state.dispatch(Action::RefreshFromSource { sheet });
-    assert!(state.status().is_some_and(|s| s.is_error));
+    assert!(state.status().is_some_and(|s| s.is_error()));
     assert_eq!(column_values(&state, sheet, 0), vec![1.0, 2.0]);
     // La feuille de démonstration, saisie à la main, n'a rien à actualiser.
     let demo_sheet = state.selected_sheet_in(book).unwrap();
@@ -7904,7 +7908,7 @@ fn exporter_un_graphe_zoome_ne_touche_pas_le_modele() {
             spec: Box::new(spec.clone()),
         });
         let status = state.status().expect("un message");
-        assert!(!status.is_error, "{}", status.text);
+        assert!(!status.is_error(), "{}", status.text);
         std::fs::read(path).expect("fichier exporté")
     };
     let svg_zoome = exporte(&mut state, "zoome.svg", &zoome);
@@ -7974,13 +7978,13 @@ fn le_format_dexport_suit_lextension() {
         state.status().expect("un message").clone()
     };
 
-    assert!(!exporte(&mut state, "figure.pdf").is_error);
+    assert!(!exporte(&mut state, "figure.pdf").is_error());
     let pdf = std::fs::read(dir.path().join("figure.pdf")).expect("PDF");
     assert!(pdf.starts_with(b"%PDF"));
 
     state.dispatch(Action::SetPngExportScale(2.0));
     assert_eq!(state.png_export_scale(), 2.0);
-    assert!(!exporte(&mut state, "figure.png").is_error);
+    assert!(!exporte(&mut state, "figure.png").is_error());
     let png = std::fs::read(dir.path().join("figure.png")).expect("PNG");
     assert_eq!(
         u32::from_be_bytes([png[16], png[17], png[18], png[19]]),
@@ -7990,10 +7994,10 @@ fn le_format_dexport_suit_lextension() {
     state.dispatch(Action::SetPngExportScale(3.0));
     assert_eq!(state.png_export_scale(), 2.0);
 
-    assert!(!exporte(&mut state, "sans_extension").is_error);
+    assert!(!exporte(&mut state, "sans_extension").is_error());
     assert!(dir.path().join("sans_extension.svg").exists());
 
-    assert!(exporte(&mut state, "figure.jpg").is_error);
+    assert!(exporte(&mut state, "figure.jpg").is_error());
     assert!(!dir.path().join("figure.jpg").exists());
 }
 
@@ -8015,7 +8019,7 @@ fn le_mode_du_texte_svg_suit_la_preference_et_ne_touche_ni_modele_ni_historique(
             spec: spec.clone(),
         });
         let status = state.status().expect("un message");
-        assert!(!status.is_error, "{}", status.text);
+        assert!(!status.is_error(), "{}", status.text);
         std::fs::read_to_string(dir.path().join(nom)).expect("SVG")
     };
 
@@ -8930,7 +8934,7 @@ fn object_manager_reglages_persistants_et_reset_restent_hors_historique() {
     assert_eq!(state.revision(), revision);
     assert!(!state.can_undo() && !state.can_redo());
     assert_eq!(graph_spec(&state, graph), before);
-    assert!(state.status().is_none_or(|status| !status.is_error));
+    assert!(state.status().is_none_or(|status| !status.is_error()));
     session.shutdown().unwrap();
 }
 
@@ -8953,7 +8957,7 @@ fn object_manager_reglage_reste_actif_si_le_stockage_echoue() {
         open: false,
     });
     assert!(!state.object_manager_settings().graph_open);
-    assert!(state.status().is_some_and(|status| status.is_error));
+    assert!(state.status().is_some_and(|status| status.is_error()));
     assert_eq!(state.revision(), revision);
     assert!(!state.can_undo());
     session.shutdown().unwrap();
@@ -9251,7 +9255,7 @@ fn renaming_a_sheet_is_undoable_and_rejects_empty_or_taken_names() {
             name: name.to_string(),
         });
         assert_eq!(state.tree().node(sheet1).unwrap().name(), "Sheet1");
-        assert!(state.status().is_some_and(|status| status.is_error));
+        assert!(state.status().is_some_and(|status| status.is_error()));
         assert_eq!(state.revision(), revision, "aucune entrée d'historique");
     }
 
@@ -9333,7 +9337,7 @@ fn deleting_a_sheet_needs_no_confirmation_and_keeps_the_last_sheet() {
         assert!(!state.can_delete_sheet(sheet1));
         state.dispatch(Action::DeleteSheet(sheet1));
         assert!(state.tree().node(sheet1).is_some());
-        assert!(state.status().is_some_and(|status| status.is_error));
+        assert!(state.status().is_some_and(|status| status.is_error()));
     }
     state.dispatch(Action::AddWorksheet { book });
     let before = std::sync::Arc::clone(state.tree());
@@ -9345,7 +9349,7 @@ fn deleting_a_sheet_needs_no_confirmation_and_keeps_the_last_sheet() {
     assert!(state.tree().node(sheet1).is_none());
     assert!(!state.blocking_dialog());
     let status = state.status().expect("message");
-    assert!(!status.is_error);
+    assert!(!status.is_error());
     assert!(status.text.contains(&users[0]), "{}", status.text);
     state.dispatch(Action::Undo);
     assert_eq!(**state.tree(), *before);
@@ -9369,7 +9373,7 @@ fn copier_la_figure_prepare_svg_png_pdf_sans_toucher_au_modele() {
         spec: Box::new(avant.0.clone()),
     });
     let status = state.status().expect("un message");
-    assert!(!status.is_error, "{}", status.text);
+    assert!(!status.is_error(), "{}", status.text);
     assert_eq!(
         status.text,
         stokesforge_app::tr!("status-graph-copied", formats = "SVG, PNG, PDF")
@@ -9436,12 +9440,12 @@ fn un_refus_du_presse_papiers_est_dit_en_phrase() {
     state.dispatch(Action::CopyGraphFigure {
         spec: Box::new(graph_spec(&state, graph)),
     });
-    assert!(!state.status().expect("message").is_error);
+    assert!(!state.status().expect("message").is_error());
     state.figure_clipboard_failed(&stokesforge_clipboard::ClipboardError::Backend(
         "selection refused".into(),
     ));
     let status = state.status().expect("message");
-    assert!(status.is_error);
+    assert!(status.is_error());
     assert_eq!(
         status.text,
         stokesforge_app::tr!("error-clipboard-backend", detail = "selection refused")
@@ -9878,7 +9882,7 @@ fn une_erreur_va_dans_le_pied_du_dialogue_ouvert_seulement() {
     state.import_state_mut().unwrap().save_as_name = String::new();
     state.save_import_recipe();
     assert!(state.dialog_error().is_some());
-    assert!(!state.status().is_some_and(|status| status.is_error));
+    assert!(!state.status().is_some_and(|status| status.is_error()));
     state.cancel_import();
     assert!(state.dialog_error().is_none(), "l'erreur ne survit pas");
 
@@ -9897,8 +9901,70 @@ fn une_erreur_va_dans_le_pied_du_dialogue_ouvert_seulement() {
     ));
     assert!(state.dialog_error().is_none());
     assert!(
-        state.status().is_some_and(|status| status.is_error),
+        state.status().is_some_and(|status| status.is_error()),
         "hors dialogue, la barre d'état"
     );
     session.shutdown().unwrap();
+}
+
+// -- Barre d'état : durée, historique, titre (#230) --
+
+#[test]
+fn une_information_s_efface_apres_huit_secondes_pas_un_avertissement() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::Save);
+    let at = state.status().expect("enregistré").at;
+    assert_eq!(state.status().unwrap().level, StatusLevel::Info);
+
+    let before = at + INFO_LIFETIME - std::time::Duration::from_secs(3);
+    assert_eq!(
+        state.expire_status(before),
+        Some(std::time::Duration::from_secs(3)),
+        "la prochaine échéance, pour ne programmer que ce redessin"
+    );
+    assert!(state.status().is_some());
+    assert_eq!(state.expire_status(at + INFO_LIFETIME), None);
+    assert!(state.status().is_none(), "l'information s'est effacée");
+
+    // Un avertissement reste, quel que soit l'âge, et ne programme rien.
+    state.dispatch(Action::Undo);
+    state.dispatch(Action::Undo);
+    let at = state.status().expect("avertissement").at;
+    assert_eq!(state.status().unwrap().level, StatusLevel::Warning);
+    assert_eq!(state.expire_status(at + INFO_LIFETIME * 10), None);
+    assert!(state.status().is_some());
+}
+
+#[test]
+fn l_historique_garde_les_cinquante_derniers_messages_dans_l_ordre() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    assert_eq!(state.status_history().count(), 0);
+    for _ in 0..STATUS_HISTORY_LEN + 10 {
+        state.dispatch(Action::Undo);
+    }
+    assert_eq!(state.status_history().count(), STATUS_HISTORY_LEN);
+    let times: Vec<_> = state.status_history().map(|m| m.wall).collect();
+    assert!(times.windows(2).all(|pair| pair[0] <= pair[1]));
+    assert!(!state.status_history_open());
+    state.dispatch(Action::OpenStatusHistory);
+    assert!(state.status_history_open());
+    state.dispatch(Action::CloseStatusHistory);
+    assert!(!state.status_history_open());
+}
+
+#[test]
+fn le_titre_porte_le_nom_du_projet_et_un_point_tant_qu_il_n_est_pas_enregistre() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::Save);
+    let saved = state.window_title();
+    assert!(saved.contains("projet.stokesforge"), "{saved}");
+    assert!(!saved.contains('•'), "{saved}");
+    state.dispatch(Action::AddGraph);
+    let dirty = state.window_title();
+    assert!(dirty.contains("projet.stokesforge •"), "{dirty}");
+    state.dispatch(Action::Save);
+    assert_eq!(state.window_title(), saved);
 }

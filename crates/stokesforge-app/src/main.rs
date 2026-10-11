@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title(stokesforge_app::tr!("window-title"))
+            .with_title(state.window_title())
             .with_inner_size([1100.0, 700.0]),
         event_loop_builder: Some(Box::new(configure_window_backend)),
         // egui-wgpu met par défaut deux images en file d'attente (débit

@@ -112,9 +112,10 @@ phrase par `crates/stokesforge-app/src/errors.rs` :
   (`tr!("error-template-export", cause = …)`). `ErrorKind` est
   `#[non_exhaustive]` : cette famille garde un repli `_` (`error-io-other`),
   seule exception à « sans `_` ».
-- les messages de la barre d'état (`AppState::notice` / `fail`) passent par
-  `tr!` (clés `status-*` pour une information, `error-*` pour un échec) ; la
-  garde `aucun_libelle_en_dur` couvre `notice` et `fail`.
+- les messages de la barre d'état (`AppState::notice` / `warn` / `fail`) passent par
+  `tr!` (clés `status-*` pour une information ou un avertissement, `error-*`
+  pour un échec) ; la garde `aucun_libelle_en_dur` couvre `notice`, `warn` et
+  `fail`. Une exception de script se dit « Script failed. See the console » (M10).
 
 Rédaction : ce qui s'est passé, puis quoi faire seulement si c'est utile ;
 Sentence case, pas de point final sur une ligne unique, ni « please », ni

@@ -440,7 +440,7 @@ impl AppState {
                     _ => Vec::new(),
                 };
                 self.recalculate_calculations(&stale);
-                if self.status.as_ref().is_some_and(|s| s.is_error) {
+                if self.status.as_ref().is_some_and(|s| s.is_error()) {
                     return;
                 }
             }

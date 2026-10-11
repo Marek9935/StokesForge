@@ -115,7 +115,7 @@ fn b15_un_texte_qui_nest_pas_un_nombre_elargit_la_colonne_sans_rien_perdre() {
     state.commit_edit();
 
     assert!(
-        state.status().is_none_or(|s| !s.is_error),
+        state.status().is_none_or(|s| !s.is_error()),
         "ce n'est plus une erreur"
     );
     assert_eq!(

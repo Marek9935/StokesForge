@@ -165,6 +165,7 @@ mod results_pane;
 mod script_console;
 mod shortcuts;
 mod stale_export;
+mod status_history;
 mod tab;
 mod tab_strip;
 #[cfg(test)]
@@ -199,6 +200,7 @@ use shortcuts::{
     SHORTCUT_RUN_SCRIPT, SHORTCUT_SAVE, SHORTCUT_SAVE_AS,
 };
 use stale_export::stale_export_window;
+use status_history::status_history_window;
 use tab::{active_tab_kind, tab_for_window, tab_node, Tab};
 use window_detach::{
     snapshot_stamp, DetachedProjectManagerRequests, DetachedTab, ProjectManagerViewModel,
@@ -241,6 +243,8 @@ pub struct StokesForgeApp {
     state: AppState,
     /// Sélecteur de fichiers natif en cours, sur un fil à part (#192).
     file_picker: FilePicker,
+    /// Dernier titre envoyé à la fenêtre (R15) : `Title` ne repart qu'au changement.
+    window_title: String,
     /// Les barres d'outils : disposition, visibilité et glisser en cours
     /// (issue #60).
     toolbars: ToolbarState,
@@ -458,9 +462,11 @@ impl StokesForgeApp {
         // s'ouvre — ni la console de script ni le Project Manager n'ont leur
         // place ici, ce sont des panneaux fixes.
 
+        let window_title = state.window_title();
         Self {
             state,
             file_picker: FilePicker::default(),
+            window_title,
             toolbars: ToolbarState::default(),
             om_detached: false,
             om_collapsed: false,
@@ -877,6 +883,7 @@ impl eframe::App for StokesForgeApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         // `Context` est un `Arc` : le clone évite l’emprunt de lecture du Ui peint.
         let ctx = ui.ctx().clone();
+        self.sync_window_title_and_status(&ctx);
         let published_stamp = snapshot_stamp(self.state.snapshot());
         let mut actions = Vec::new();
         // Ces files ne s’appliquent qu’après la peinture de la pile flottante.
@@ -1127,6 +1134,20 @@ impl StokesForgeApp {
         }
     }
 
+    /// Titre de la fenêtre à jour (R15) et effacement des informations
+    /// échues (M5) : un seul redessin est programmé, à l'échéance, jamais de
+    /// réveil périodique au repos.
+    fn sync_window_title_and_status(&mut self, ctx: &egui::Context) {
+        let title = self.state.window_title();
+        if title != self.window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.window_title = title;
+        }
+        if let Some(remaining) = self.state.expire_status(std::time::Instant::now()) {
+            ctx.request_repaint_after(remaining);
+        }
+    }
+
     /// Peint les dialogues après le CentralPanel, avant l’application différée.
     fn show_edit_dialogs(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         // Fenêtre d'import (`Action::ImportFiles`, voir la doc de tête de
@@ -1142,6 +1163,7 @@ impl StokesForgeApp {
         // `self.state.plot_settings()` est `Some`.
         plot_settings_window(ctx, &mut self.state);
         column_metadata_window(ctx, &self.state, actions);
+        status_history_window(ctx, &self.state, actions);
         analysis_window(ctx, &mut self.state, actions);
         calculation_delete_window(ctx, &self.state, actions);
         stale_export_window(ctx, &self.state, actions);

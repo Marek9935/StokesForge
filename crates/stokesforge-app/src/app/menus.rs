@@ -694,7 +694,9 @@ impl StokesForgeApp {
         });
     }
 
-    /// Barre d'état : dernier message, révision.
+    /// Barre d'état : le dernier message, à trois niveaux (M4) ; un clic ouvre
+    /// l'historique des 50 derniers (M6). Ni révision ni « Reopen Last
+    /// Import… » (R15 : il reste dans File).
     ///
     /// Les dimensions (lignes × colonnes) qu'elle affichait ont disparu avec
     /// « la » feuille sélectionnée globale : chaque onglet de classeur les
@@ -704,31 +706,49 @@ impl StokesForgeApp {
             .resizable(false)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    match self.state.status() {
-                        Some(status) if status.is_error => {
-                            ui.colored_label(ui.visuals().error_fg_color, &status.text);
-                        }
-                        Some(status) => {
-                            ui.label(&status.text);
-                        }
+                    let line = ui.scope(|ui| match self.state.status() {
+                        Some(status) => status_line(ui, status),
                         None => {
                             ui.weak(tr!("status-ready"));
                         }
-                    }
-                    if self.state.can_reopen_last_import()
-                        && self.state.import_state().is_none()
-                        && ui.link(tr!("action-reopen-last-import")).clicked()
-                    {
-                        actions.push(Action::ReopenLastImport);
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.weak(tr!(
-                            "status-revision",
-                            revision = self.state.snapshot().revision
-                        ));
                     });
+                    // La zone cliquable couvre toute la ligne, par-dessus ses
+                    // éléments (un `Label` ne porte pas le clic).
+                    let response = ui
+                        .interact(
+                            line.response.rect,
+                            egui::Id::new("stokesforge_status_history_click"),
+                            egui::Sense::click(),
+                        )
+                        .on_hover_text(tr!("status-history"));
+                    if response.clicked() {
+                        actions.push(Action::OpenStatusHistory);
+                    }
                 });
             });
+    }
+}
+
+/// Une ligne de message selon son niveau : texte courant, texte en teinte
+/// d'avertissement avec son triangle, ou texte rouge avec sa croix. Partagée
+/// par la barre d'état et la fenêtre d'historique.
+pub(super) fn status_line(ui: &mut egui::Ui, status: &crate::state::StatusMessage) {
+    use crate::icons::{icon_image, Icon, IconRole};
+    use crate::state::StatusLevel;
+    match status.level {
+        StatusLevel::Info => {
+            ui.label(&status.text);
+        }
+        StatusLevel::Warning => {
+            ui.add(icon_image(Icon::Stale, IconRole::Neutral))
+                .on_hover_text(tr!("status-level-warning"));
+            ui.colored_label(ui.visuals().warn_fg_color, &status.text);
+        }
+        StatusLevel::Error => {
+            ui.add(icon_image(Icon::Close, IconRole::Danger))
+                .on_hover_text(tr!("status-level-error"));
+            ui.colored_label(ui.visuals().error_fg_color, &status.text);
+        }
     }
 }
 
@@ -1830,26 +1850,32 @@ mod tests {
             })
     }
 
-    /// « Prêt » sans message, la révision à droite, et une erreur dans la
-    /// couleur d'erreur du thème — un simple avis, non.
+    /// « Prêt » sans message ; trois niveaux (M4) : l'information garde la
+    /// couleur courante, l'avertissement la teinte d'avertissement, l'erreur
+    /// la couleur d'erreur ; ni révision ni lien d'import (R15).
     #[test]
-    fn la_barre_d_etat_dit_pret_la_revision_et_distingue_l_erreur() {
+    fn la_barre_d_etat_distingue_les_trois_niveaux() {
         let (session, mut app, _) = banc();
         let ctx = contexte();
         let output = barre_d_etat(&app, &ctx);
-        let revision = tr!("status-revision", revision = app.state.snapshot().revision);
         assert!(couleur_du_texte(&output, &tr!("status-ready")).is_some());
-        assert!(couleur_du_texte(&output, &revision).is_some());
-        assert!(
-            couleur_du_texte(&output, &tr!("action-reopen-last-import")).is_none(),
-            "rien à rouvrir, pas de lien"
-        );
-        let erreur = ctx.global_style().visuals.error_fg_color;
+        assert!(couleur_du_texte(&output, "Revision").is_none());
+        let visuals = &ctx.global_style().visuals;
+        let (erreur, avertissement) = (visuals.error_fg_color, visuals.warn_fg_color);
 
         app.state.notice("Avis".into());
         let output = barre_d_etat(&app, &ctx);
         assert!(couleur_du_texte(&output, &tr!("status-ready")).is_none());
         assert_ne!(couleur_du_texte(&output, "Avis"), Some(erreur), "témoin");
+        assert_ne!(
+            couleur_du_texte(&output, "Avis"),
+            Some(avertissement),
+            "témoin"
+        );
+
+        app.state.warn("Attention".into());
+        let output = barre_d_etat(&app, &ctx);
+        assert_eq!(couleur_du_texte(&output, "Attention"), Some(avertissement));
 
         // Un geste refusé (la dernière feuille d'un classeur) ; un projet
         // illisible, lui, est un échec grave dit par un dialogue (M8, #229).
@@ -1857,38 +1883,18 @@ mod tests {
         let sheet = app.state.selected_sheet_in(book).unwrap();
         app.state.dispatch(Action::DeleteSheet(sheet));
         let status = app.state.status().expect("un refus se dit");
-        assert!(status.is_error);
+        assert!(status.is_error());
         let text = status.text.clone();
         let output = barre_d_etat(&app, &ctx);
         assert_eq!(couleur_du_texte(&output, &text), Some(erreur));
         session.shutdown().unwrap();
     }
 
-    /// Le lien « rouvrir le dernier import » se retire pendant que
-    /// l'assistant d'import est ouvert.
+    /// Un clic sur la barre d'état demande l'historique des messages (M6).
     #[test]
-    fn le_lien_de_statut_se_retire_pendant_l_import() {
-        let (session, app, _) = banc();
-        let mut state = app.state;
-        let dir = tempfile::tempdir().unwrap();
-        importe(&mut state, &dir);
-        let mut app = StokesForgeApp::new(state);
-        let ctx = contexte();
-        let link = tr!("action-reopen-last-import");
-        assert!(couleur_du_texte(&barre_d_etat(&app, &ctx), &link).is_some());
-        app.state.open_import(None);
-        assert!(couleur_du_texte(&barre_d_etat(&app, &ctx), &link).is_none());
-        session.shutdown().unwrap();
-    }
-
-    /// Le lien de la barre d'état produit exactement l'action du menu Fichier.
-    #[test]
-    fn le_lien_de_statut_reprend_le_dernier_import() {
-        let (session, app, _) = banc();
-        let mut state = app.state;
-        let dir = tempfile::tempdir().unwrap();
-        importe(&mut state, &dir);
-        let app = StokesForgeApp::new(state);
+    fn un_clic_sur_la_barre_d_etat_ouvre_l_historique() {
+        let (session, mut app, _) = banc();
+        app.state.notice("Message".into());
         let context = egui::Context::default();
         crate::theme::install(&context);
         let mut actions = Vec::new();
@@ -1908,7 +1914,7 @@ mod tests {
             output
         };
         let output = paint(Vec::new());
-        let pos = find_text_center(&output.shapes, &tr!("action-reopen-last-import"));
+        let pos = find_text_center(&output.shapes, "Message");
         paint(vec![egui::Event::PointerMoved(pos)]);
         for pressed in [true, false] {
             paint(vec![egui::Event::PointerButton {
@@ -1918,7 +1924,7 @@ mod tests {
                 modifiers: egui::Modifiers::default(),
             }]);
         }
-        assert_eq!(actions, vec![Action::ReopenLastImport]);
+        assert_eq!(actions, vec![Action::OpenStatusHistory]);
         session.shutdown().unwrap();
     }
 }

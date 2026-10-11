@@ -491,7 +491,6 @@ mod tests {
     fn l_anglais_est_la_langue_source() {
         let loader = build_loader(Language::English);
         assert_eq!(loader.get("menu-file"), "File");
-        assert_eq!(loader.get("window-title"), "StokesForge");
         assert_eq!(loader.current_language().to_string(), "en");
     }
 
@@ -500,7 +499,6 @@ mod tests {
         let loader = build_loader(Language::French);
         assert_eq!(loader.current_language().to_string(), "fr");
         assert_eq!(loader.get("menu-file"), "Fichier");
-        assert_eq!(loader.get("window-title"), "StokesForge");
     }
 
     /// Règle CLDR française : le singulier vaut pour 0 **et** 1.

@@ -478,7 +478,7 @@ fn grid_clipboard_section(
             state.forget_delete_repeat(sheet);
             match system_clipboard_text() {
                 Some(text) => actions.push(Action::Paste { sheet, text }),
-                None => state.notice(tr!("status-clipboard-unreadable")),
+                None => state.warn(tr!("status-clipboard-unreadable")),
             }
             ui.close();
         }

@@ -73,6 +73,7 @@ const APPELS: &[&str] = &[
     "colored_label",
     "on_hover_text_at_pointer",
     "notice",
+    "warn",
     "fail",
 ];
 

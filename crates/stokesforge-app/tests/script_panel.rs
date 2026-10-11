@@ -233,7 +233,7 @@ fn a_script_exception_is_not_an_application_error() {
     // une erreur d'application.
     let status = state.status();
     assert!(
-        status.is_some_and(|status| !status.is_error),
+        status.is_some_and(|status| !status.is_error()),
         "une exception de script ne doit pas devenir une erreur d'application : {status:?}"
     );
     // Rien n'a été écrit dans le modèle : la révision n'a pas bougé.
@@ -243,7 +243,7 @@ fn a_script_exception_is_not_an_application_error() {
     // encore après une exception de script.
     let columns_before = state.visible_columns(sheet).len();
     state.dispatch(Action::AddColumn { sheet });
-    assert!(state.status().is_some_and(|status| !status.is_error));
+    assert!(state.status().is_some_and(|status| !status.is_error()));
     assert_eq!(state.visible_columns(sheet).len(), columns_before + 1);
 }
 

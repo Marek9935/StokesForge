@@ -82,7 +82,7 @@ fn opening_without_a_y_column_says_why_and_opens_nothing() {
         columns: vec![s.x],
     });
     assert!(s.state.analysis_form().is_none());
-    assert!(s.state.status().unwrap().is_error);
+    assert!(s.state.status().unwrap().is_error());
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn opening_pairs_each_y_with_its_x_and_validating_is_one_undoable_step() {
     s.state.analysis_form_mut().unwrap().setup.fit.residuals = true;
     s.state.dispatch(Action::ApplyAnalysis);
     assert!(s.state.analysis_form().is_none(), "the window closes");
-    assert!(!s.state.status().unwrap().is_error);
+    assert!(!s.state.status().unwrap().is_error());
     assert_eq!(s.state.tree().calculations().len(), 1);
     // x, y, résidus, ajustement.
     assert_eq!(columns(&s), 4);
@@ -121,7 +121,7 @@ fn a_failing_calculation_keeps_the_window_open() {
     // M7 (#228) : l'erreur va dans le pied de la fenêtre, jamais dans la barre
     // d'état.
     assert!(s.state.dialog_error().is_some());
-    assert!(!s.state.status().is_some_and(|status| status.is_error));
+    assert!(!s.state.status().is_some_and(|status| status.is_error()));
     assert!(s.state.tree().calculations().is_empty());
     s.state.dispatch(Action::CloseAnalysis);
     assert!(s.state.analysis_form().is_none());
@@ -248,7 +248,7 @@ fn dragging_a_handle_is_one_undoable_step_that_changes_the_data() {
         x: 6.0,
         y: 0.0,
     });
-    assert!(!s.state.status().unwrap().is_error);
+    assert!(!s.state.status().unwrap().is_error());
     assert_eq!(range(&s), vec![(2.0, 6.0)]);
 
     // Un seul pas : annuler ramène l'ancienne plage.
@@ -307,7 +307,7 @@ fn add_to_graph_plots_the_new_columns_in_the_same_undo_step() {
     }
     s.state.dispatch(Action::ApplyAnalysis);
     assert!(
-        !s.state.status().unwrap().is_error,
+        !s.state.status().unwrap().is_error(),
         "{:?}",
         s.state.status()
     );
