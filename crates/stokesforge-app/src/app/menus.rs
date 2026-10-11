@@ -231,6 +231,16 @@ impl StokesForgeApp {
                 });
             });
             sections.section(ui, true, |ui| {
+                if ui
+                    .button(tr!("action-preferences"))
+                    .on_hover_text(tr!("action-preferences", "hint"))
+                    .clicked()
+                {
+                    actions.push(Action::OpenPreferences);
+                    ui.close();
+                }
+            });
+            sections.section(ui, true, |ui| {
                 if ui.button(tr!("action-quit")).clicked() {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     ui.close();

@@ -486,6 +486,10 @@ pub enum Action {
     OpenKeyboardShortcuts,
     /// Ferme la fenêtre des raccourcis clavier.
     CloseKeyboardShortcuts,
+    /// Ouvre File › Preferences (#148).
+    OpenPreferences,
+    /// Ferme la fenêtre des préférences.
+    ClosePreferences,
     /// Ouvre la fenêtre d'analyse (#181) sur les colonnes Y sélectionnées de
     /// `sheet`, chacune avec le X le plus proche à sa gauche. Rien ne s'ouvre
     /// sans colonne Y.
@@ -2564,6 +2568,8 @@ pub struct AppState {
     /// La fenêtre d'historique des messages est ouverte.
     status_history_open: bool,
     keyboard_shortcuts_open: bool,
+    /// La fenêtre des préférences est ouverte (#148).
+    preferences_open: bool,
     /// Erreur survenue pendant qu'un dialogue modal est ouvert (M7, #228) :
     /// elle s'affiche dans le pied du dialogue, jamais dans la barre d'état.
     dialog_error: Option<String>,
@@ -2742,6 +2748,7 @@ impl AppState {
             status_log: std::collections::VecDeque::new(),
             status_history_open: false,
             keyboard_shortcuts_open: false,
+            preferences_open: false,
             dialog_error: None,
             editing: None,
             note_editing: None,
@@ -4583,6 +4590,8 @@ impl AppState {
             Action::StopRecalc => self.stop_recalc(),
             Action::OpenKeyboardShortcuts => self.keyboard_shortcuts_open = true,
             Action::CloseKeyboardShortcuts => self.keyboard_shortcuts_open = false,
+            Action::OpenPreferences => self.preferences_open = true,
+            Action::ClosePreferences => self.preferences_open = false,
             Action::OpenAnalysis {
                 preset,
                 sheet,
@@ -6155,6 +6164,11 @@ impl AppState {
     /// L'historique des messages est-il ouvert ?
     pub fn status_history_open(&self) -> bool {
         self.status_history_open
+    }
+
+    /// La fenêtre des préférences est-elle ouverte ?
+    pub fn preferences_open(&self) -> bool {
+        self.preferences_open
     }
 
     /// La fenêtre des raccourcis clavier est-elle ouverte ?

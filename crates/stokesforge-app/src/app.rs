@@ -164,6 +164,7 @@ mod object_manager_ui;
 #[cfg(test)]
 mod panel_tests;
 mod plot_settings;
+mod preferences_window;
 mod project_manager;
 mod results_pane;
 mod script_console;
@@ -199,6 +200,7 @@ use import_wizard::import_window;
 use keyboard_shortcuts_window::keyboard_shortcuts_window;
 use object_manager_ui::{select_manager_target, selected_manager_target};
 use plot_settings::{column_metadata_window, plot_settings_window};
+use preferences_window::preferences_window;
 use shortcuts::{
     collect_undo_redo_shortcuts, SHORTCUT_DUPLICATE_SHEET, SHORTCUT_EXPORT_GRAPH, SHORTCUT_IMPORT,
     SHORTCUT_IMPORT_QWERTY, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT, SHORTCUT_OPEN,
@@ -1171,6 +1173,9 @@ impl StokesForgeApp {
         column_metadata_window(ctx, &self.state, actions);
         status_history_window(ctx, &self.state, actions);
         keyboard_shortcuts_window(ctx, &self.state, actions);
+        if let Some(language) = preferences_window(ctx, &self.state, actions) {
+            self.choose_language(language);
+        }
         analysis_window(ctx, &mut self.state, actions);
         calculation_delete_window(ctx, &self.state, actions);
         stale_export_window(ctx, &self.state, actions);
