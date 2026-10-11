@@ -25,7 +25,10 @@
 //!   par `number_field::number_field` et la table des grandeurs, jamais par
 //!   un `DragValue` ou un `Slider` d'egui, sans dérogation ;
 //! - `aucun_separateur_avant_un_titre_de_section` (#169) : un titre de
-//!   section (`theme::section_title`) sépare seul ses groupes.
+//!   section (`theme::section_title`) sépare seul ses groupes ;
+//! - `aucun_add_space_litteral_hors_du_theme` (#227, L4) : un écart se pose par
+//!   les deux constantes de `theme.rs` (`SPACE_ITEM`, `SPACE_SECTION`), jamais
+//!   par un nombre écrit sur place, sans dérogation.
 //!
 //! Chaque garde a son **témoin** : le motif interdit, posé dans un autre
 //! fichier qu'`app.rs`, est bien refusé — sans lui, une garde qui ne voit rien
@@ -1192,4 +1195,92 @@ fn la_garde_du_grisage_voit_un_add_enabled_sans_raison() {
             "faux positif : {code}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Aucun `add_space` littéral hors de `theme.rs` (#227, L4)
+// ---------------------------------------------------------------------------
+
+/// Les `add_space(<nombre>)` du code de production hors de `theme.rs`,
+/// `chemin:ligne`. Un écart calculé (`add_space(indent)`, une différence de
+/// largeurs) passe : seul un nombre écrit sur place est un espacement
+/// inventé.
+fn add_space_litteraux(sources: &[Fichier]) -> Vec<String> {
+    let mut trouves = Vec::new();
+    for fichier in sources {
+        if fichier.chemin == "theme.rs" {
+            continue;
+        }
+        let source = fichier.production();
+        for i in 0..source.masque.len() {
+            if !commence_par(&source.masque, i, "add_space(") {
+                continue;
+            }
+            let argument: String = source.masque[i + "add_space(".len()..]
+                .iter()
+                .take_while(|c| **c != ')')
+                .filter(|c| !c.is_whitespace())
+                .collect();
+            if argument
+                .trim_start_matches('-')
+                .starts_with(|c: char| c.is_ascii_digit() || c == '.')
+            {
+                trouves.push(format!(
+                    "src/{}:{}",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    trouves
+}
+
+/// Règle #227 (`docs/standard-interface.md`, § Choix, disposition, L4) : deux
+/// constantes d'espacement dans `theme.rs`, aucun `add_space` numérique
+/// ailleurs.
+#[test]
+fn aucun_add_space_litteral_hors_du_theme() {
+    let sources = sources::sources();
+    let fautifs = add_space_litteraux(&sources);
+    assert!(
+        fautifs.is_empty(),
+        "`add_space(<nombre>)` : passer par `theme::SPACE_ITEM` ou `theme::SPACE_SECTION` : \
+         {fautifs:?}"
+    );
+}
+
+/// Le témoin : un nombre, entier ou décimal, est vu ; une constante, un écart
+/// calculé, `theme.rs`, un commentaire et le code de test passent.
+#[test]
+fn la_garde_des_espacements_voit_un_nombre_ecrit_sur_place() {
+    for code in [
+        "fn f(ui: &mut Ui) { ui.add_space(6.0); }",
+        "fn f(ui: &mut Ui) { ui.add_space( 12 ); }",
+        "fn f(ui: &mut Ui) { ui.add_space(.5); }",
+        "fn f(ui: &mut Ui) { ui.add_space(-2.0); }",
+    ] {
+        assert_eq!(
+            add_space_litteraux(&[fichier("app/e.rs", code)]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    for code in [
+        "fn f(ui: &mut Ui) { ui.add_space(theme::SPACE_ITEM); }",
+        "fn f(ui: &mut Ui) { ui.add_space(largeur - texte); }",
+        "fn f(ui: &mut Ui) { ui.add_space(ui.spacing().item_spacing.y); }",
+        "fn f(ui: &mut Ui) {} // ui.add_space(6.0)",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g(ui: &mut Ui) { ui.add_space(80.0); } }",
+    ] {
+        assert!(
+            add_space_litteraux(&[fichier("app/e.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+    assert!(add_space_litteraux(&[fichier(
+        "theme.rs",
+        "fn f(ui: &mut Ui) { ui.add_space(6.0); }"
+    )])
+    .is_empty());
 }

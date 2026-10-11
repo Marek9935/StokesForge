@@ -143,6 +143,7 @@ mod curve_settings;
 mod dialogs;
 mod figure_copy;
 mod file_drop;
+mod form;
 mod format;
 mod graph_targets;
 mod graph_text_edit;
@@ -1268,7 +1269,7 @@ impl StokesForgeApp {
                 |ui| {
                     ui.label(tr!("sheet-delete-confirm", name = name.as_str()));
                     if !users.is_empty() {
-                        ui.add_space(6.0);
+                        ui.add_space(crate::theme::SPACE_ITEM);
                         ui.label(tr!("sheet-delete-used", graphs = users.join(", ")));
                     }
                 },

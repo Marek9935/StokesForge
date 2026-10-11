@@ -251,6 +251,7 @@ import-files-add = Add Files…
     .hint = Picks the files to import
 import-files-add-title = Choose Files to Import
 import-files-drop = or drop files in the window
+import-files-section = Files
 import-files-recent = Recent Files…
 import-files-none = No files chosen
 import-files-row-count =
@@ -337,6 +338,7 @@ import-metadata-keep-header = Keep header
 import-metadata-keep-footer = Keep footer
     .hint = Stores the file footer as metadata
 import-metadata-uncheck = Uncheck a key or section to drop it
+import-metadata-lines-section = File metadata
 import-metadata-none = No metadata with the current settings
 
 # Step 6: destination and template.
@@ -355,6 +357,7 @@ import-layout-per-file = One sheet per file
 import-layout-side-by-side = One sheet, side by side (X Y X Y…)
 import-layout-shared-x = One sheet, X of first file shared
 import-destination-template-name = Template name
+import-destination-template-section = Save as template
 import-destination-save = Save Template
 import-destination-saved-note = Saved templates are offered at the next import
 import-destination-auto = Auto-select
@@ -878,7 +881,7 @@ script-no-output = (no output)
 # Color picker
 color-none = No color (transparent)
 color-none-swatch = No color (transparent, no background in exports)
-color-custom = + Custom
+color-custom = Custom color
     .hint = Picks any color and its opacity, and saves it
 color-shades-dark = Darker shades
 color-shades-light = Lighter shades

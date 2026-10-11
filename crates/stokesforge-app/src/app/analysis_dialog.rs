@@ -294,7 +294,7 @@ pub(super) fn calculation_delete_window(
         },
         |ui| {
             ui.label(tr!("analysis-delete-confirm", name = name.as_str()));
-            ui.add_space(6.0);
+            ui.add_space(crate::theme::SPACE_ITEM);
             ui.label(
                 egui::RichText::new(tr!(
                     "analysis-delete-columns",

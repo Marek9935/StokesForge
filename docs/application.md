@@ -66,7 +66,9 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `field_state.rs` (racine du crate, comme `color_picker.rs`) | brique commune de l'état d'un champ (#219) : `FieldIssue` (refusé rouge / ramené orange), `show_issue`, mémoire de 2 s (`flag`, `active`), cycle d'un champ texte validé (`edit_text`, `decide`, `Verdict`) |
 | `number_field.rs`, `quantities.rs` (racine du crate) | brique « nombre » (#220) : `number_field` (champ texte, flèche pleine dans le cadre si la grandeur a des valeurs, flèches du clavier, molette au survol qui suit la liste, liste dans une `egui::Area`) et la table des grandeurs (`Quantity`) ; construite sur `field_state::edit_text_with_arrow` ; `list_frame.rs` : flèche et fonds partagés avec les listes déroulantes (#234) |
 | `app/dialogs.rs` | brique commune des dialogues modaux : `modal_dialog`, `modal_dialog_with` |
+| `app/form.rs` | brique commune du formulaire (#227) : `form` et `Form` (grille à deux colonnes : `row`, `field`, `checkbox`, `color`, `note`, `section`, `enabled`), choix exclusif fixe `choice` / `choice_by` (radios pour 2–3 options, liste dès 4, `choice_layout`) |
 | `app/tab_strip.rs` | brique commune de la bande d'onglets : `tab_strip`, `tab_strip_with` (`TabOps`, `TabEvent`) |
+| `app/menu_sections.rs` | brique commune des menus : `MenuSections::section` (seul trait de séparation, #155), `menu_choice` (coche seule d'un choix exclusif, C3, #227) |
 | `app/list_row.rs` | brique commune de la ligne de liste sélectionnable (#169) : `list_row`, `ListRowBackground`, `list_row_label`, `list_row_text`, `LIST_ROW_MARK` ; Project Manager, Object Manager, liste des séries des propriétés |
 | `app/shortcuts.rs` | constantes `SHORTCUT_*` et leurs rappels, consommation d'annuler/rétablir dans le viewport actif (`collect_undo_redo_shortcuts`) |
 | `app/window_chrome.rs` | cadre commun des fenêtres et panneaux : `window_header`, `panel_header`, `floating_window_frame`, contour actif, poignées, `show_window_in_layer`, `show_window_contents_bounded` |
@@ -1622,8 +1624,8 @@ texte et les axes en automatique, donc ils suivent le fond.
 fenêtre se choisit par un bouton-échantillon (`color_field`/`color_button`)
 qui ouvre une fenêtre surgissante **repliée** : palette, « Auto »
 quand la couleur peut l'être, couleurs enregistrées et saisie hexadécimale
-(`#RRGGBB`, ou `#RRGGBBAA` avec l'opacité). Le bouton **« + Custom »**
-déplie le reste — Save Color et sa destination, nuancier (carré saturation ×
+(`#RRGGBB`, ou `#RRGGBBAA` avec l'opacité). La case **« Custom color »**
+(une case à cocher depuis C5, #227) déplie le reste — Save Color et sa destination, nuancier (carré saturation ×
 luminosité avec barre de teinte, ou **roue chromatique** avec barre de
 valeur), **opacité**, saisie RGB et HSL. Le sélecteur se rouvre toujours
 replié (`color_picker::custom_id`). Cette fenêtre est une `egui::Area` gérée

@@ -245,6 +245,7 @@ import-files-add = Ajouter des fichiers…
     .hint = Choisit les fichiers à importer
 import-files-add-title = Choisir les fichiers à importer
 import-files-drop = ou déposer des fichiers dans la fenêtre
+import-files-section = Fichiers
 import-files-recent = Fichiers récents…
 import-files-none = Aucun fichier choisi
 import-files-row-count =
@@ -331,6 +332,7 @@ import-metadata-keep-header = Garder l'en-tête
 import-metadata-keep-footer = Garder le pied de page
     .hint = Conserve le pied de page du fichier comme métadonnées
 import-metadata-uncheck = Décocher une clé ou une section pour l'écarter
+import-metadata-lines-section = Métadonnées du fichier
 import-metadata-none = Aucune métadonnée avec les réglages actuels
 
 # Étape 6 : destination et modèle.
@@ -349,6 +351,7 @@ import-layout-per-file = Une feuille par fichier
 import-layout-side-by-side = Une feuille, côte à côte (X Y X Y…)
 import-layout-shared-x = Une feuille, X du premier fichier partagé
 import-destination-template-name = Nom du modèle
+import-destination-template-section = Enregistrer comme modèle
 import-destination-save = Enregistrer le modèle
 import-destination-saved-note = Les modèles enregistrés sont proposés au prochain import
 import-destination-auto = Sélection auto
@@ -870,7 +873,7 @@ script-no-output = (aucune sortie)
 # Sélecteur de couleur
 color-none = Aucune couleur (transparent)
 color-none-swatch = Aucune couleur (transparent, sans fond dans les exports)
-color-custom = + Personnalisée
+color-custom = Couleur personnalisée
     .hint = Choisit n'importe quelle couleur et son opacité, et l'enregistre
 color-shades-dark = Nuances plus foncées
 color-shades-light = Nuances plus claires

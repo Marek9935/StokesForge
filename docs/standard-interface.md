@@ -37,8 +37,9 @@ les règles R1–R16 de `textes-interface.md`.
 | icône « ? » (`app/hover_help.rs` : `hover_help`, `help_text`, `help_beside`) | rappel d'un champ, posé à droite (M1, T6) | **en place** (#225) |
 | garde : aucune bulle nue sur un champ de formulaire (`aucune_bulle_nue_sur_un_champ_de_formulaire`) | case, radio, champ texte/nombre, libellé de champ ; menus et `…_contents` exemptés | **en place** (#225) |
 | garde : aucun `add_enabled` sans raison (`aucun_element_grise_sans_sa_raison`) | chaîne de l'appel lue jusqu'à `.on_disabled_hover_text` ; `add_enabled_ui` (groupe) exempté | **en place** (#226) |
-| brique « formulaire » (grille à deux colonnes), largeurs et espacements de `theme.rs` | | à venir (#227) |
-| garde : aucun `add_space` littéral hors de `theme.rs` | | à venir (#227) |
+| brique « formulaire » (`app/form.rs` : `form`, `Form`, `choice`), largeurs et espacements de `theme.rs` | grille à deux colonnes, choix radio/liste (C1, C2) | **en place** (#227) |
+| choix exclusif dans un menu (`menu_sections::menu_choice`) | coche seule (C3) | **en place** (#227) |
+| garde : aucun `add_space` littéral hors de `theme.rs` (`aucun_add_space_litteral_hors_du_theme`) | | **en place** (#227) |
 | zone de message du pied de `modal_dialog_with`, focus initial, taille mémorisée | | à venir (#228) |
 | variante « confirmation » de `modal_dialog_with` | | à venir (#229) |
 | registre des touches de `app/shortcuts.rs` | | à venir (#231) |
@@ -301,7 +302,7 @@ Comment c'est tenu :
 - **Champ qui dépend d'une case** (G4) : grisé, valeur visible et conservée ;
   masqué seulement si toute la section perd son sens (Min/Max : voir Auto).
 
-## Choix, disposition — à venir (#227)
+## Choix, disposition — en place (#227)
 
 - **Radios** pour 2–3 options, liste déroulante dès 4 (C1) ; horizontaux si
   chaque libellé fait 3 mots au plus, verticaux sinon (C2).
@@ -318,6 +319,38 @@ Comment c'est tenu :
   numérique ailleurs (L4).
 - **Pas de section repliable** dans un formulaire ; trop long → onglets (L5).
 - **Tab suit l'ordre de lecture** (K6) : haut-bas, gauche-droite.
+
+Comment c'est tenu :
+
+- **`app/form.rs`** : `form(ui, sel, |rows| …)` ouvre la grille ; `Form::row`
+  (libellé + champ, l'icône « ? » après le champ), `Form::field` (colonne des
+  champs sans libellé), `Form::checkbox`, `Form::color`, `Form::note` (texte en
+  clair estompé), `Form::section` (titre sur toute la largeur), `Form::enabled`
+  (rangées grisées, G4), `Form::ui` (tableau ou liste sur toute la largeur).
+  La colonne des libellés prend la largeur du plus long, mesurée à l'image
+  précédente ; une image dont elle change est refaite (`request_discard`).
+  Pas d'`egui::Grid` : pas de cellule sur deux colonnes pour un titre, et
+  `add_space` y est interdit. K6 tient par construction (rangées peintes de
+  haut en bas, de gauche à droite).
+- **`choice` / `choice_by`** (`ChoiceOption`, rappel `hint` facultatif) peint
+  un choix exclusif **fixe** selon `choice_layout` (C1, C2, testé pur). Une
+  liste de données (colonnes, graphiques, modèles enregistrés, fichiers
+  récents, calques) reste une liste déroulante quel que soit son nombre. Garde
+  « liste de moins de 4 options » étudiée et non posée : une `ComboBox` de
+  données ne se distingue pas d'un choix fixe à la lecture du code.
+- **`menu_sections::menu_choice`** : coche dans la marge devant l'option
+  courante (Type ▸, Role ▸, Language ▸, SVG Text ▸, PNG Resolution ▸).
+- **`theme.rs`** : `SPACE_ITEM`, `SPACE_SECTION`, `FIELD_WIDTH_SHORT`
+  (aussi `number_field::FIELD_WIDTH`), `FIELD_WIDTH_MEDIUM`, `FieldWidth`.
+  Garde `aucun_add_space_litteral_hors_du_theme` (`tests/gardes.rs`), sans
+  dérogation ; un écart calculé passe.
+- Migrés : propriétés du graphe (toutes les pages, éditeur de série partagé
+  avec la fenêtre des séries), formulaire d'analyse, assistant d'import
+  (fichiers, format, en-tête, métadonnées, destination ; les traits entre
+  blocs sont devenus des titres). Reste à migrer : les réglages propres à la
+  fenêtre des séries (groupe, nuancier — dont la liste « Project / User » à
+  2 options, `curve_settings.rs`), les outils de l'aperçu d'analyse, le
+  volet Results, et les préférences futures (#148).
 
 ## Clavier et souris — à venir (#231)
 

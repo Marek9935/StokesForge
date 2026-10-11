@@ -622,10 +622,11 @@ fn picker_contents(
                 }
             }
         });
-        ui.add_space(2.0);
+        ui.add_space(crate::theme::SPACE_ITEM);
     }
-    // Le nuancier, l'opacité, RVB/TSL et l'enregistrement sont cachés : le
-    // « + » en fin de palette les déplie (#10, comme dans Office).
+    // Le nuancier, l'opacité, RVB/TSL et l'enregistrement sont cachés : la
+    // case « Custom color » en fin de palette les déplie (#10 ; une case
+    // à cocher depuis C5, #227).
     let mut custom = ui
         .ctx()
         .data(|data| data.get_temp::<bool>(custom_id(popup_id)))
@@ -641,8 +642,10 @@ fn picker_contents(
                 close = true;
             }
         }
-        ui.toggle_value(&mut custom, tr!("color-custom"))
-            .on_hover_text(tr!("color-custom", "hint"));
+        // Une bascule est une case à cocher, libellé à droite (C5, #227).
+        crate::app::hover_help::help_beside(ui, tr!("color-custom", "hint"), |ui| {
+            ui.checkbox(&mut custom, tr!("color-custom"))
+        });
     });
     ui.ctx()
         .data_mut(|data| data.insert_temp(custom_id(popup_id), custom));
@@ -771,7 +774,7 @@ fn picker_contents(
         }
 
         // -- RVB ---------------------------------------------------------------
-        ui.add_space(4.0);
+        ui.add_space(crate::theme::SPACE_ITEM);
         let shown = new_rgb.unwrap_or(rgb);
         let mut channels = shown.map(i32::from);
         let mut rgb_changed = false;
@@ -1286,7 +1289,7 @@ mod tests {
         for _ in 0..2 {
             output = run(vec![]);
         }
-        let plus = find_text(&output, &tr!("color-custom")).expect("« + » peint");
+        let plus = find_text(&output, &tr!("color-custom")).expect("case « Custom color » peinte");
         run(vec![egui::Event::PointerMoved(plus)]);
         run(vec![click(plus, true)]);
         run(vec![click(plus, false)]);
@@ -1319,7 +1322,7 @@ mod tests {
     }
 
     /// #10 : le sélecteur s'ouvre replié sur la palette (avec l'hexadécimal) ;
-    /// le dépli « + Personnalisée… » montre nuancier, opacité, RVB/TSL et
+    /// le dépli « Custom color » montre nuancier, opacité, RVB/TSL et
     /// enregistrement ; refermé, il se rouvre replié.
     #[test]
     fn le_selecteur_est_replie_par_defaut_et_se_deplie_a_la_demande() {
