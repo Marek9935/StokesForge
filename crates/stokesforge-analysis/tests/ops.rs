@@ -391,3 +391,47 @@ fn familles_et_recalcul_automatique_par_defaut() {
     );
     assert_eq!(lin.kind(), OperationKind::Fit);
 }
+
+#[test]
+fn constante_et_moyenne_de_zone_corrigent_sans_pente_et_gardent_les_lignes() {
+    let input = SeriesInput {
+        x: vec![0.0, 1.0, 2.0, 3.0, f64::NAN],
+        y: vec![9.0, 2.0, f64::NAN, 6.0, 99.0],
+        sigma: None,
+    };
+    for method in [
+        BaselineMethod::Constant { point: (-5.0, 4.0) },
+        BaselineMethod::ConstantZone { zone: (1.0, 3.0) },
+    ] {
+        let op = Operation::Baseline {
+            method,
+            op: BaselineOp::Subtract,
+            keep_baseline: true,
+        };
+        let out = run(&op, std::slice::from_ref(&input), None).unwrap();
+        let o = &out[0];
+        assert_eq!(o.skipped, 2);
+        let result = &col(o, "corrected").data;
+        assert_eq!(result.len(), 5);
+        assert_eq!(&result[..2], &[5.0, -2.0]);
+        assert!(result[2].is_nan() && result[4].is_nan());
+        assert_eq!(result[3], 2.0);
+        assert_eq!(val(o, "baseline.slope").value, 0.0);
+        assert_eq!(val(o, "baseline.intercept").value, 4.0);
+    }
+    for value in [2.0, 0.0] {
+        let op = Operation::Baseline {
+            method: BaselineMethod::Constant {
+                point: (0.0, value),
+            },
+            op: BaselineOp::Divide,
+            keep_baseline: false,
+        };
+        let out = run(&op, std::slice::from_ref(&input), None).unwrap();
+        if value == 0.0 {
+            assert!(col(&out[0], "corrected").data.iter().all(|v| v.is_nan()));
+        } else {
+            assert_eq!(col(&out[0], "corrected").data[0], 4.5);
+        }
+    }
+}

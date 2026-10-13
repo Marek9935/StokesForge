@@ -190,6 +190,14 @@ anglais aussi. **Limites** : une série par appel (ni lot, ni ajustement global)
 Contrat : `stokesforge-script/tests/analysis.rs`. La dépendance de `script` à
 `stokesforge-analysis` est déclarée dans sa liste blanche (`no_ui_dependency.rs`).
 
+La ligne de base constante (#211) s’appelle avec
+`pyst.analysis.baseline(y, x, method="constant", points=[(x0, y0)])`, ou avec
+`zones=[(x_min, x_max)]` pour la moyenne des Y finis de cette zone inclusive.
+Un seul point **ou** une seule zone est requis, sans les combiner. Comme les
+autres lignes de base, `op="subtract"` soustrait le fond et `op="divide"`
+normalise par ce fond ; diviser par zéro produit des valeurs manquantes.
+Les deux méthodes sont enregistrées avec leurs réglages dans le `.stf`.
+
 ### Écritures et annulation d'un script (#67)
 
 Les écritures passent par les commandes déjà utilisées par l'application.
@@ -503,3 +511,25 @@ hors script continue d'aller sur la sortie du processus.
 
 **À lire** : `stokesforge-script/src/lib.rs`, `src/engine.rs`, `src/surface.rs`,
 `src/bridge.rs`, `stokesforge-python/src/interpreter.rs`, `src/array.rs` (têtes).
+
+### Remplacer une correction dans sa source (#212)
+
+`pyst.analysis.baseline(..., replace_original=True)` et
+`pyst.analysis.correct(..., replace_original=True)` écrivent dans les Y sources
+au lieu d'ajouter des colonnes. `columns['corrected']` désigne alors la source
+originale. Exemple :
+
+```python
+r = pyst.analysis.baseline(y, x, method="constant", points=[(0., 1.)],
+                           replace_original=True)
+```
+
+La correction n'est plus rééditable ni recalculée ; sa trace et ses réglages
+sont conservés dans Résultats et le `.stf`, même si `keep_results=False`.
+`auto_recalc` et les colonnes complémentaires ne s'appliquent pas au
+remplacement. Les colonnes à formule ou calculées sont refusées. Un lot qui
+produit des corrections contradictoires sur un même Y est refusé avant toute
+écriture. Les versions des sources sont revalidées dans la réservation du
+script. Le remplacement rejoint sa macro Script : Annuler défait toutes les
+corrections du script en une fois. Le script demande explicitement le
+remplacement ; la confirmation des sources partagées appartient à l'interface.

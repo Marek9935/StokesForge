@@ -269,3 +269,20 @@ voies (saisie vidée, Retour arrière, coller, plusieurs colonnes) passent par
 `AppState::set_meta_dropping_formula_data`. Le clic droit offre « Remove
 Formula, Keep Data » (`Action::RemoveFormulaKeepData`), même macro sans
 suppression des valeurs.
+
+## Remplacement d'une correction (#212)
+
+`ReplaceAnalysisData { draft, expected_versions }` remplace en place les Y
+d'une ligne de base ou d'une correction par référence, et ajoute une trace
+immuable `CorrectionRecord`. Un instantané structurel garde valeurs et trace
+ensemble : un seul Annuler retire le geste, Rétablir le restaure. Aucun lien de
+calcul n'est conservé ; les colonnes restent éditables et leurs graphiques
+suivent leurs nouvelles valeurs. Les versions de toutes les entrées lues
+sont exigées avant écriture. Une colonne à formule ou calculée est refusée.
+
+La longueur de Y reste identique. Les lignes dont X ou Y est non fini gardent
+leur cellule originale ; un NaN produit sur une ligne valide (division par zéro,
+référence hors plage) reste visible. Plusieurs séries partageant Y doivent
+produire des valeurs identiques : sinon rien n'est écrit. Chaque remplacement
+garde sa propre trace, y compris après une saisie ordinaire. Supprimer toutes
+ses sources retire la trace ; annuler leur suppression la restaure.

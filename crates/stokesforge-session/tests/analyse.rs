@@ -491,3 +491,76 @@ fn une_sortie_qui_refuse_le_resultat_marque_le_calcul_en_echec() {
         );
     }
 }
+
+#[test]
+fn remplacer_actualise_les_dependants_et_annuler_retrouve_leurs_valeurs() {
+    use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
+    let (session, handle, m) = demarrer(FormulaRecalc::Targeted);
+    let calc = ajouter(&handle, &m, true);
+    let before = handle.snapshot().unwrap();
+    let initial = colonne_fit(&before, calc);
+    let series = vec![SeriesRef {
+        x: Some(m.x),
+        y: m.y,
+        sigma: None,
+    }];
+    let operation = Operation::Baseline {
+        method: BaselineMethod::Line {
+            p1: (0., 1.),
+            p2: (100., 1.),
+        },
+        op: BaselineOp::Subtract,
+        keep_baseline: false,
+    };
+    let computed = compute(&before.tree, &operation, &series, None).unwrap();
+    let outputs = computed
+        .columns
+        .into_iter()
+        .map(|c| OutputDraft {
+            series: c.series,
+            key: c.key,
+            index: c.index,
+            meta: ColumnMeta::default(),
+            data: c.data,
+        })
+        .collect();
+    let expected_versions = [m.x, m.y]
+        .map(|id| {
+            (
+                id,
+                before.tree.get(id).unwrap().as_column().unwrap().version(),
+            )
+        })
+        .to_vec();
+    handle
+        .execute(Command::ReplaceAnalysisData {
+            draft: CalculationDraft {
+                operation,
+                series,
+                aux: None,
+                outputs,
+                results: computed.results,
+                keep_results: true,
+                auto_recalc: false,
+            },
+            expected_versions,
+        })
+        .unwrap();
+    let after = handle.snapshot().unwrap();
+    let corrected = colonne_fit(&after, calc);
+    assert_ne!(initial, corrected);
+    for (a, b) in initial.iter().zip(corrected) {
+        assert!((a - b - 1.).abs() < 1e-8);
+    }
+    assert_ne!(
+        before.tree.get(m.y).unwrap().as_column().unwrap().version(),
+        after.tree.get(m.y).unwrap().as_column().unwrap().version()
+    );
+    handle.undo().unwrap();
+    let undone = handle.snapshot().unwrap();
+    assert_eq!(undone.tree.correction_traces().len(), 0);
+    for (a, b) in initial.iter().zip(colonne_fit(&undone, calc)) {
+        assert!((a - b).abs() < 1e-8);
+    }
+    session.shutdown().unwrap();
+}

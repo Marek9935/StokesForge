@@ -80,10 +80,11 @@ fn rank(command: &Command) -> usize {
         Command::AddCalculation { .. } => 26,
         Command::UpdateCalculation { .. } => 27,
         Command::RemoveCalculation { .. } => 28,
+        Command::ReplaceAnalysisData { .. } => 29,
     }
 }
 
-const VARIANTS: usize = 29;
+const VARIANTS: usize = 30;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -93,6 +94,13 @@ fn named(name: &str) -> Option<String> {
 fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
     let root = w.project.root();
     vec![
+        (
+            Command::ReplaceAnalysisData {
+                draft: calc_draft(w),
+                expected_versions: Vec::new(),
+            },
+            HistoryLabel::ReplaceAnalysisData(OperationKind::Correct),
+        ),
         (
             Command::InsertCopy {
                 parent: root,

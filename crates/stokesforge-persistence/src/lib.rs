@@ -278,6 +278,7 @@ pub fn save_with_geometries(
         save_counter,
         saved_colors: convert::saved_colors_to_record(tree.saved_colors()),
         calculations: calculations::calculations_to_records(tree),
+        correction_traces: calculations::corrections_to_records(tree),
         window_geometries,
     };
 
@@ -456,6 +457,10 @@ fn build_project(body: FileBody, path: &Path) -> PersistenceResult<Project> {
             source,
         })?
         .with_saved_colors(convert::record_to_saved_colors(body.saved_colors))
+        .with_correction_traces(calculations::records_to_corrections(
+            body.correction_traces,
+            MAX_NODE_ID,
+        ))
         .with_calculations(calculations::records_to_calculations(
             body.calculations,
             MAX_NODE_ID,
@@ -726,6 +731,7 @@ mod tests {
             save_counter: 0,
             saved_colors: Default::default(),
             calculations: Default::default(),
+            correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let project = build_project(body, Path::new("test.plyx")).expect("modèle valide");
@@ -751,6 +757,7 @@ mod tests {
             save_counter: 0,
             saved_colors: Default::default(),
             calculations: Default::default(),
+            correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
@@ -769,6 +776,7 @@ mod tests {
             save_counter: 0,
             saved_colors: Default::default(),
             calculations: Default::default(),
+            correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
@@ -796,6 +804,7 @@ mod tests {
             save_counter: 0,
             saved_colors: Default::default(),
             calculations: Default::default(),
+            correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
@@ -841,6 +850,7 @@ mod tests {
             save_counter: 0,
             saved_colors: Default::default(),
             calculations: Default::default(),
+            correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
@@ -909,6 +919,7 @@ mod tests {
             save_counter: 0,
             saved_colors: Default::default(),
             calculations: Default::default(),
+            correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
         };
         let project = build_project(body, Path::new("legacy.plyx")).expect("modèle valide");

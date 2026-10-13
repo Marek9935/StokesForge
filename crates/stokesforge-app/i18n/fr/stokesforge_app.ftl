@@ -1617,3 +1617,27 @@ busy-stop = Arrêter
 status-import-stopped = Import arrêté. Rien n'a été importé
 status-recalculating = Recalcul en cours…
 status-recalc-stopped = Recalcul arrêté. La modification a été annulée
+
+analysis-baseline-constant = Constante…
+    .hint = Retirer un fond plat à partir d’un point ou de la moyenne d’une zone
+analysis-baseline-shape-constant = Constante (point)
+analysis-baseline-shape-constant-zone = Constante (moyenne de zone)
+analysis-baseline-hint-constant = Cliquez un point. Maj l’aimante sur la courbe avec la moyenne locale. Modifiez X et Y ci-dessous.
+analysis-baseline-hint-constant-zone = Glissez une plage de X. Sa moyenne Y définit un fond plat ; une nouvelle plage remplace la précédente.
+
+history-replace-analysis-data = Remplacer les données originales ({ $kind })
+
+analysis-output-new-column = Nouvelle colonne
+analysis-output-replace-original = Remplacer les données originales
+analysis-output-replace-hint = La correction remplace les valeurs sources. Ses réglages restent dans Résultats. Annuler restaure les données originales.
+disabled-analysis-replace-operation = Seule une nouvelle correction de ligne de base ou par référence peut remplacer les données originales.
+disabled-analysis-replace-readonly = Les colonnes calculées et les colonnes à formule ne peuvent pas être remplacées.
+analysis-replace-title = Remplacer les données originales
+analysis-replace-confirm = Plusieurs courbes utilisent ces données. Elles afficheront toutes les valeurs corrigées.
+analysis-replace-accept = Remplacer
+analysis-correction-trace = Données modifiées : { $kind }
+
+# Repère discret des corrections définitives (#212).
+grid-column-modified = Données originales remplacées par une correction. Voir Résultats pour les réglages de la correction
+
+analysis-needs-column-curve = L’analyse demande une courbe tracée depuis une colonne

@@ -396,6 +396,14 @@ impl Operation {
         };
         match self {
             Operation::Baseline {
+                method: BaselineMethod::Constant { point },
+                ..
+            } if !point.0.is_finite() || !point.1.is_finite() => bad("point"),
+            Operation::Baseline {
+                method: BaselineMethod::ConstantZone { zone },
+                ..
+            } if !zone.0.is_finite() || !zone.1.is_finite() => bad("zone"),
+            Operation::Baseline {
                 method: BaselineMethod::Zones { degree, .. },
                 ..
             } if !(1..=MAX_DEGREE).contains(degree) => bad("degree"),

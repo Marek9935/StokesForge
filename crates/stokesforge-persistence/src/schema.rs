@@ -62,6 +62,8 @@ pub(crate) struct FileBody {
     /// raison que `saved_colors`.
     #[serde(default)]
     pub(crate) calculations: Vec<crate::calculations::CalculationRecord>,
+    #[serde(default)]
+    pub(crate) correction_traces: Vec<crate::calculations::CalculationRecord>,
     /// Géométrie des fenêtres (position/taille), par identifiant de nœud —
     /// bloc **séparé de l'arbre annulable** (voir la doc de tête de
     /// `stokesforge-session` : la géométrie ne vit pas dans `Project`, ne passe

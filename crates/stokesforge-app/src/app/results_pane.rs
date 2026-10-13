@@ -41,7 +41,9 @@ fn pane_id(book: NodeId) -> egui::Id {
 
 /// La hauteur que le volet prend dans le classeur : rien sans résultat gardé.
 pub(super) fn pane_height(ui: &egui::Ui, state: &AppState, book: NodeId) -> f32 {
-    if state.kept_calculations(book, None).is_empty() {
+    if state.kept_calculations(book, None).is_empty()
+        && state.correction_traces(book, None).is_empty()
+    {
         return 0.0;
     }
     let open = ui
@@ -65,7 +67,8 @@ pub(super) fn results_pane(
 ) {
     let id = pane_id(book);
     let mut pane = ui.data(|d| d.get_temp::<PaneState>(id)).unwrap_or_default();
-    let total = state.kept_calculations(book, None).len();
+    let total =
+        state.kept_calculations(book, None).len() + state.correction_traces(book, None).len();
     let rect = ui.max_rect();
     ui.painter().hline(
         rect.x_range(),
@@ -99,7 +102,8 @@ pub(super) fn results_pane(
     });
     if pane.open {
         let scope = (!pane.whole_book).then_some(sheet);
-        let calculations = state.kept_calculations(book, scope);
+        let mut calculations = state.kept_calculations(book, scope);
+        calculations.extend(state.correction_traces(book, scope));
         if !calculations.contains(&pane.selected.unwrap_or(NodeId::from_raw(0))) {
             pane.selected = calculations.first().copied();
         }
@@ -116,7 +120,13 @@ pub(super) fn results_pane(
                                 empty_state(ui, tr!("results-empty"));
                             }
                             for calc in &calculations {
-                                let mut title = state.calculation_title(*calc);
+                                let mut title = match state.tree().correction_traces().get(calc) {
+                                    Some(trace) => tr!(
+                                        "analysis-correction-trace",
+                                        kind = kind_title(trace.operation.kind())
+                                    ),
+                                    None => state.calculation_title(*calc),
+                                };
                                 if state
                                     .tree()
                                     .calculation(*calc)
@@ -156,6 +166,33 @@ fn detail(
     id: egui::Id,
     calc_id: NodeId,
 ) {
+    if let Some(trace) = state.tree().correction_traces().get(&calc_id) {
+        ui.label(theme::bold(tr!(
+            "analysis-correction-trace",
+            kind = kind_title(trace.operation.kind())
+        )));
+        ui.label(tr!("analysis-output-replace-hint"));
+        egui::ScrollArea::vertical()
+            .id_salt(id.with(("trace", calc_id.raw())))
+            .show(ui, |ui| {
+                for series in &trace.series {
+                    ui.label(series_label(state.tree(), series));
+                }
+                if let Some(aux) = &trace.aux {
+                    ui.label(tr!("analysis-field-reference"));
+                    ui.label(series_label(
+                        state.tree(),
+                        &stokesforge_core::SeriesRef {
+                            x: aux.x,
+                            y: aux.y,
+                            sigma: None,
+                        },
+                    ));
+                }
+                correction_settings(ui, &trace.operation);
+            });
+        return;
+    }
     let Some(calc) = state.tree().calculation(calc_id) else {
         return;
     };
@@ -241,6 +278,66 @@ fn detail(
                     }
                 });
         });
+}
+
+/// Les réglages gardés sont affichés comme des valeurs, sans édition possible.
+fn correction_settings(ui: &mut egui::Ui, operation: &stokesforge_analysis::ops::Operation) {
+    use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp, Interpolation};
+    use stokesforge_analysis::correct::CorrectOp;
+    use stokesforge_analysis::ops::Operation;
+    let pair = |a: f64, b: f64| format!("({}, {})", format_value(a, None), format_value(b, None));
+    match operation {
+        Operation::Baseline { method, op, .. } => {
+            ui.label(match op {
+                BaselineOp::Subtract => tr!("analysis-baseline-subtract"),
+                BaselineOp::Divide => tr!("analysis-baseline-divide"),
+            });
+            match method {
+                BaselineMethod::Constant { point } => {
+                    ui.label(tr!("analysis-baseline-constant"));
+                    ui.label(pair(point.0, point.1));
+                }
+                BaselineMethod::ConstantZone { zone } => {
+                    ui.label(tr!("analysis-baseline-shape-constant-zone"));
+                    ui.label(pair(zone.0, zone.1));
+                }
+                BaselineMethod::Line { p1, p2 } => {
+                    ui.label(tr!("analysis-baseline-shape-line"));
+                    ui.label(pair(p1.0, p1.1));
+                    ui.label(pair(p2.0, p2.1));
+                }
+                BaselineMethod::Zones { zones, degree } => {
+                    ui.label(tr!("analysis-baseline-shape-zones"));
+                    ui.label(tr!("analysis-baseline-degree"));
+                    ui.label(degree.to_string());
+                    for p in zones {
+                        ui.label(pair(p.0, p.1));
+                    }
+                }
+                BaselineMethod::Anchors {
+                    points,
+                    interpolation,
+                } => {
+                    ui.label(tr!("analysis-baseline-anchors"));
+                    ui.label(match interpolation {
+                        Interpolation::Segments => tr!("analysis-baseline-segments"),
+                        Interpolation::Spline => tr!("analysis-baseline-spline"),
+                    });
+                    for p in points {
+                        ui.label(pair(p.0, p.1));
+                    }
+                }
+            }
+        }
+        Operation::Correct { op } => {
+            ui.label(match op {
+                CorrectOp::Subtract => tr!("analysis-correct-subtract"),
+                CorrectOp::Divide => tr!("analysis-correct-divide"),
+                CorrectOp::Multiply => tr!("analysis-correct-multiply"),
+            });
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]

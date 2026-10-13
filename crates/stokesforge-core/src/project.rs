@@ -146,6 +146,7 @@ impl Project {
             .iter()
             .map(|(id, _)| id.raw())
             .chain(tree.calculations().keys().map(|id| id.raw()))
+            .chain(tree.correction_traces().keys().map(|id| id.raw()))
             .max()
             .unwrap_or(0);
         // A7 — le compteur de version de colonne n'est pas encore persisté
@@ -590,12 +591,22 @@ impl Project {
             .filter(|(_, c)| c.series.iter().all(|s| self.tree.node(s.y).is_none()))
             .map(|(id, _)| *id)
             .collect();
-        if orphans.is_empty() {
+        let traces: Vec<NodeId> = self
+            .tree
+            .correction_traces()
+            .iter()
+            .filter(|(_, c)| c.series.iter().all(|s| self.tree.node(s.y).is_none()))
+            .map(|(id, _)| *id)
+            .collect();
+        if orphans.is_empty() && traces.is_empty() {
             return;
         }
-        let map = Arc::make_mut(&mut self.tree).calculations_mut();
+        let tree = Arc::make_mut(&mut self.tree);
         for id in orphans {
-            map.remove(&id);
+            tree.calculations_mut().remove(&id);
+        }
+        for id in traces {
+            tree.correction_traces_mut().remove(&id);
         }
     }
 

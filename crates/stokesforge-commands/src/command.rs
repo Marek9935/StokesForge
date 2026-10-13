@@ -316,6 +316,11 @@ pub enum Command {
     /// enregistrement d'un coup. Le calcul des valeurs est fait *avant*,
     /// par `stokesforge-analysis`, et porté par `draft` — la commande n'appelle
     /// aucun calcul, elle reste une valeur.
+    /// Remplace les sources par la correction et enregistre sa trace immuable.
+    ReplaceAnalysisData {
+        draft: CalculationDraft,
+        expected_versions: Vec<(NodeId, u64)>,
+    },
     AddCalculation {
         /// L'opération, ses entrées et les colonnes à écrire.
         draft: CalculationDraft,
@@ -400,6 +405,9 @@ impl Command {
             Command::EditPlotSpec { kind, .. } => HistoryLabel::EditPlotSpec(*kind),
             Command::SetPlotSpec { graph, .. } => HistoryLabel::SetPlotSpec { name: name(*graph) },
             Command::SetSavedColors { .. } => HistoryLabel::SetSavedColors,
+            Command::ReplaceAnalysisData { draft, .. } => {
+                HistoryLabel::ReplaceAnalysisData(draft.operation.kind())
+            }
             Command::AddCalculation { draft } => {
                 HistoryLabel::AddCalculation(draft.operation.kind())
             }
@@ -456,6 +464,7 @@ impl Command {
                 | Command::AddMatrix { .. }
                 | Command::AddNote { .. }
                 | Command::RemoveNode { .. }
+                | Command::ReplaceAnalysisData { .. }
                 | Command::AddCalculation { .. }
                 | Command::UpdateCalculation { .. }
                 | Command::RemoveCalculation { .. }

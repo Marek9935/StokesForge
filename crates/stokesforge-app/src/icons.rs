@@ -94,6 +94,8 @@ pub enum Icon {
     /// Un calcul d'analyse pas à jour (#200) : triangle d'avertissement, en tête
     /// de la colonne produite et sur la série qui la trace.
     Stale,
+    /// Une colonne corrigée en place (#212), distincte d’un calcul périmé.
+    ModifiedData,
     /// Barre Edit (#238).
     Undo,
     Redo,
@@ -319,6 +321,11 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
     (Icon::Axis, IconRole::Neutral, svg!("ruler.neutral.svg")),
     (Icon::Help, IconRole::Neutral, svg!("question.neutral.svg")),
     (Icon::Stale, IconRole::Neutral, svg!("warning.neutral.svg")),
+    (
+        Icon::ModifiedData,
+        IconRole::Neutral,
+        svg!("pencil-simple.neutral.svg"),
+    ),
     (
         Icon::Undo,
         IconRole::Neutral,

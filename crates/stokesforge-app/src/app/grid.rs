@@ -687,6 +687,28 @@ fn column_letter_widget(
             egui::Label::new(egui::RichText::new(letter_text).color(letter_color))
                 .selectable(false),
         );
+        let corrected = state
+            .tree()
+            .correction_traces()
+            .values()
+            .any(|trace| trace.series.iter().any(|source| source.y == column));
+        // Un seul repère dans la marge : l’avertissement de calcul périmé
+        // garde la priorité, la trace des corrections reste dans la bulle.
+        if corrected {
+            if stale_text.is_none() && rect.width() >= 3.0 * crate::icons::ICON_SIZE {
+                let size = egui::Vec2::splat(crate::icons::ICON_SIZE);
+                let at = egui::Rect::from_min_size(
+                    egui::pos2(rect.left() + 2.0, rect.center().y - size.y / 2.0),
+                    size,
+                );
+                crate::icons::icon_image(
+                    crate::icons::Icon::ModifiedData,
+                    crate::icons::IconRole::Neutral,
+                )
+                .paint_at(ui, at);
+            }
+            response.clone().on_hover_text(tr!("grid-column-modified"));
+        }
         if let Some(text) = stale_text {
             // L'icône d'avertissement à gauche de la lettre (#200), si la colonne
             // est assez large pour ne pas la mordre.
@@ -771,7 +793,7 @@ fn column_properties_menu(
             ui,
             state,
             actions,
-            super::analysis_menu::AnalysisTarget {
+            super::analysis_menu::AnalysisTarget::Columns {
                 sheet,
                 columns: target_columns,
             },

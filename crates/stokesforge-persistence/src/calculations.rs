@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use stokesforge_analysis::ops::{Operation, Warning};
 use stokesforge_analysis::tree::Tree;
 use stokesforge_core::{
-    AuxRef, Calculation, NodeId, OutputRef, ResultValue, SeriesRef, SeriesResult, Staleness,
-    Tree as ModelTree,
+    AuxRef, Calculation, CorrectionRecord, NodeId, OutputRef, ResultValue, SeriesRef, SeriesResult,
+    Staleness, Tree as ModelTree,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -167,7 +167,11 @@ fn record_to_warning(r: &WarningRecord) -> Option<Warning> {
 }
 
 pub(crate) fn calculations_to_records(tree: &ModelTree) -> Vec<CalculationRecord> {
-    tree.calculations()
+    map_to_records(tree.calculations())
+}
+
+fn map_to_records(calculations: &BTreeMap<NodeId, Arc<Calculation>>) -> Vec<CalculationRecord> {
+    calculations
         .iter()
         .map(|(id, calc)| CalculationRecord {
             id: id.raw(),
@@ -222,6 +226,57 @@ pub(crate) fn calculations_to_records(tree: &ModelTree) -> Vec<CalculationRecord
                 }
                 .to_string()
             }),
+        })
+        .collect()
+}
+
+/// Même transport d'opération/résultats, avec un champ de fichier distinct :
+/// une trace ne devient jamais un calcul actif à la lecture.
+pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CalculationRecord> {
+    let traces = tree
+        .correction_traces()
+        .iter()
+        .map(|(id, trace)| {
+            (
+                *id,
+                Arc::new(Calculation {
+                    operation: trace.operation.clone(),
+                    series: trace.series.clone(),
+                    aux: trace.aux.clone(),
+                    outputs: Vec::new(),
+                    results: trace.results.clone(),
+                    keep_results: true,
+                    auto_recalc: false,
+                    stale: None,
+                }),
+            )
+        })
+        .collect();
+    map_to_records(&traces)
+}
+
+pub(crate) fn records_to_corrections(
+    records: Vec<CalculationRecord>,
+    max_id: u64,
+) -> BTreeMap<NodeId, Arc<CorrectionRecord>> {
+    records_to_calculations(records, max_id)
+        .into_iter()
+        .filter(|(_, c)| {
+            matches!(
+                c.operation,
+                Operation::Baseline { .. } | Operation::Correct { .. }
+            )
+        })
+        .map(|(id, calc)| {
+            (
+                id,
+                Arc::new(CorrectionRecord {
+                    operation: calc.operation.clone(),
+                    series: calc.series.clone(),
+                    aux: calc.aux.clone(),
+                    results: calc.results.clone(),
+                }),
+            )
         })
         .collect()
 }

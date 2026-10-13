@@ -3,8 +3,8 @@
 //! (grammaire de `docs/menus.md`) ; le menu du haut l'enveloppe. Le clic droit
 //! d'une colonne n'a qu'une entrée `Analysis…` qui ouvre la fenêtre (#202).
 //!
-//! Chaque entrée pousse [`Action::OpenAnalysis`] avec la famille et la méthode
-//! préchoisies ; la fenêtre (`analysis_dialog.rs`) fait le reste. Tant qu'aucune
+//! Chaque entrée pousse [`Action::OpenAnalysis`] ou
+//! [`Action::OpenGraphAnalysis`] avec la famille et la méthode préchoisies ; la fenêtre (`analysis_dialog.rs`) fait le reste. Tant qu'aucune
 //! colonne Y n'est visée, les entrées sont **grisées** avec leur info-bulle
 //! `.disabled`, jamais absentes : la cible est pertinente, le geste
 //! momentanément impossible. « Recalculate Out of Date » se grise de même quand
@@ -22,11 +22,28 @@ use crate::analysis::Preset;
 use crate::state::{Action, AppState};
 use crate::tr;
 
-/// La cible du menu : la feuille et les colonnes sélectionnées.
+/// La cible du menu : colonnes du classeur, ou séries exactes du graphe
+/// sélectionné et description cadrée par sa vue (#210).
 #[derive(Clone, Copy)]
-pub(super) struct AnalysisTarget<'a> {
-    pub(super) sheet: NodeId,
-    pub(super) columns: &'a [NodeId],
+pub(super) enum AnalysisTarget<'a> {
+    Columns {
+        sheet: NodeId,
+        columns: &'a [NodeId],
+    },
+    Graph {
+        graph: NodeId,
+        series: &'a [stokesforge_plot::SeriesRef],
+        spec: &'a stokesforge_plot::PlotSpec,
+    },
+}
+
+impl AnalysisTarget<'_> {
+    fn enabled(self, state: &AppState) -> bool {
+        match self {
+            Self::Columns { columns, .. } => has_y(state, columns),
+            Self::Graph { series, .. } => !series.is_empty(),
+        }
+    }
 }
 
 /// Au moins une colonne Y parmi `columns`.
@@ -52,10 +69,22 @@ fn open_entry(
         .on_disabled_hover_text(tr!("analysis-needs-y"));
     if response.clicked() {
         if let Some(target) = target {
-            actions.push(Action::OpenAnalysis {
-                preset,
-                sheet: target.sheet,
-                columns: target.columns.to_vec(),
+            actions.push(match target {
+                AnalysisTarget::Columns { sheet, columns } => Action::OpenAnalysis {
+                    preset,
+                    sheet,
+                    columns: columns.to_vec(),
+                },
+                AnalysisTarget::Graph {
+                    graph,
+                    series,
+                    spec,
+                } => Action::OpenGraphAnalysis {
+                    preset,
+                    graph,
+                    series: series.to_vec(),
+                    spec: Box::new(spec.clone()),
+                },
             });
         }
         ui.close();
@@ -113,13 +142,18 @@ pub(super) fn analysis_menu_contents(
     actions: &mut Vec<Action>,
     target: Option<AnalysisTarget>,
 ) {
-    let enabled = target.is_some_and(|t| has_y(state, t.columns));
+    let enabled = target.is_some_and(|t| t.enabled(state));
     let stale = state.stale_calculations();
     let mut sections = MenuSections::new();
     sections.section(ui, true, |ui| {
         ui.add_enabled_ui(enabled, |ui| {
             ui.menu_button(tr!("analysis-menu-baseline"), |ui| {
                 for (label, hint, preset) in [
+                    (
+                        tr!("analysis-baseline-constant"),
+                        tr!("analysis-baseline-constant", "hint"),
+                        Preset::BaselineConstant,
+                    ),
                     (
                         tr!("analysis-baseline-linear"),
                         tr!("analysis-baseline-linear", "hint"),
@@ -234,7 +268,7 @@ pub(super) fn analysis_entry(
         ui,
         actions,
         Some(target),
-        has_y(state, target.columns),
+        target.enabled(state),
         tr!("action-analysis-open"),
         tr!("action-analysis-open", "hint"),
         Preset::BaselineLine,

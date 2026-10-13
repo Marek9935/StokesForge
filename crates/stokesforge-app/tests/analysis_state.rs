@@ -369,3 +369,157 @@ fn the_output_choice_is_remembered_across_sessions() {
     open(&mut s, Preset::Fit(Model::Linear));
     assert!(s.state.analysis_form().unwrap().keep_results);
 }
+
+#[test]
+fn analyse_depuis_graphe_garde_x_sigma_styles_calque_groupe_et_annulation() {
+    use stokesforge_plot::{LineStyle, PanelSpec, PlotSpec, SeriesSpec};
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    // Le X de la série est volontairement différent du X apparié de B.
+    s.state.dispatch(Action::AddColumn { sheet: s.sheet });
+    let explicit_x = *s.state.tree().children(s.sheet).unwrap().last().unwrap();
+    // Une abscisse implicite aurait aussi le mauvais résultat : les valeurs
+    // choisies exercent réellement la lecture de cette autre colonne.
+    s._session
+        .handle()
+        .execute(stokesforge_commands::Command::SetCells {
+            column: explicit_x,
+            start: 0,
+            expected_version: None,
+            values: stokesforge_core::ValueBlock::Float(
+                (0..11).map(|v| 10.0 + f64::from(v)).collect(),
+            ),
+        })
+        .unwrap();
+    s.state.refresh();
+    let mut curve = SeriesSpec::new_xy(explicit_x, s.y);
+    curve.y_error = Some(s.x);
+    curve.group = Some(42);
+    curve.line.style = LineStyle::Dash;
+    curve.line.width = 3.0;
+    let mut panel = PanelSpec::default();
+    panel.series.push(curve.clone());
+    panel.bottom.auto_range = false;
+    panel.bottom.range_min = Some(12.0);
+    panel.bottom.range_max = Some(18.0);
+    let mut spec = PlotSpec::default().with_panels(vec![PanelSpec::default(), panel]);
+    // Le graphe d'essai se crée par la commande habituelle.
+    s._session
+        .handle()
+        .execute(stokesforge_commands::Command::AddGraph {
+            parent: s.state.tree().root(),
+            name: None,
+            spec: spec.clone(),
+        })
+        .unwrap();
+    s.state.refresh();
+    let graph = s.state.graphs()[0].0;
+    s.state.dispatch(Action::OpenGraphAnalysis {
+        preset: Preset::BaselineLine,
+        graph,
+        series: vec![stokesforge_plot::SeriesRef::new(1, 0)],
+        spec: Box::new(spec.clone()),
+    });
+    let form = s.state.analysis_form().unwrap();
+    assert_eq!(
+        form.series[0],
+        stokesforge_core::SeriesRef {
+            x: Some(explicit_x),
+            y: s.y,
+            sigma: Some(s.x)
+        }
+    );
+    assert!(form.add_to_graph);
+    assert_eq!(form.graph, Some(graph));
+    assert_eq!(form.graph_source.as_ref().unwrap().0, spec);
+    assert_eq!(
+        stokesforge_app::analysis::series_points(s.state.tree(), &form.series[0]).0[0],
+        10.0
+    );
+    let form = s.state.analysis_form_mut().unwrap();
+    form.setup.baseline.points = vec![(10.0, 1.0), (20.0, 21.0)];
+    s.state.dispatch(Action::ApplyAnalysis);
+    assert!(
+        !s.state.status().unwrap().is_error(),
+        "{:?}",
+        s.state.status()
+    );
+    spec = match s.state.tree().node(graph).unwrap().kind() {
+        stokesforge_core::NodeKind::Graph { spec, .. } => spec.clone(),
+        _ => unreachable!(),
+    };
+    assert!(spec.panels[0].series.is_empty());
+    assert!(spec.panels[1].series.len() > 1);
+    for result in &spec.panels[1].series[1..] {
+        assert_eq!(result.x, Some(explicit_x));
+        assert_eq!(result.group, Some(42));
+        assert_eq!(result.line, curve.line);
+    }
+    s.state.dispatch(Action::Undo);
+    assert!(s.state.tree().calculations().is_empty());
+    assert_eq!(plotted_columns(&s), vec![s.y]);
+}
+
+#[test]
+fn remplacement_conserve_la_colonne_et_les_traces_successives() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    let before = s.state.tree().clone();
+    for constant in [1., 2.] {
+        open(&mut s, Preset::BaselineLine);
+        let form = s.state.analysis_form_mut().unwrap();
+        form.setup.baseline.points = vec![(0., constant), (10., constant)];
+        form.replace_original = true;
+        s.state.dispatch(Action::ApplyAnalysis);
+        assert!(s.state.analysis_form().is_none());
+        assert_eq!(columns(&s), 2);
+    }
+    assert!(s.state.tree().calculations().is_empty());
+    assert_eq!(s.state.tree().correction_traces().len(), 2);
+    let values = s
+        .state
+        .tree()
+        .get(s.y)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .numeric_view()
+        .unwrap();
+    assert_eq!(values[0], -2.);
+    s.state.dispatch(Action::Undo);
+    assert_eq!(s.state.tree().correction_traces().len(), 1);
+    s.state.dispatch(Action::Undo);
+    assert_eq!(s.state.tree(), &before);
+    s.state.dispatch(Action::Redo);
+    assert_eq!(s.state.tree().correction_traces().len(), 1);
+}
+
+#[test]
+fn remplacement_partage_attend_confirmation_et_annuler_garde_le_formulaire() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    for _ in 0..2 {
+        s.state.dispatch(Action::PlotColumns {
+            sheet: s.sheet,
+            columns: vec![s.x, s.y],
+            plot_type: stokesforge_plot::PlotType::Line,
+        });
+    }
+    open(&mut s, Preset::BaselineLine);
+    let form = s.state.analysis_form_mut().unwrap();
+    form.setup.baseline.points = vec![(0., 1.), (10., 1.)];
+    form.replace_original = true;
+    let before = s.state.tree().clone();
+    s.state.dispatch(Action::ApplyAnalysis);
+    assert!(s.state.pending_analysis_replacement());
+    assert_eq!(s.state.tree(), &before);
+    s.state.dispatch(Action::ConfirmAnalysisReplacement(false));
+    assert!(!s.state.pending_analysis_replacement());
+    assert!(s.state.analysis_form().is_some());
+    assert_eq!(s.state.tree(), &before);
+    s.state.dispatch(Action::ApplyAnalysis);
+    s.state.dispatch(Action::ConfirmAnalysisReplacement(true));
+    assert!(s.state.analysis_form().is_none());
+    assert_eq!(s.state.tree().correction_traces().len(), 1);
+    assert_eq!(columns(&s), 2);
+}

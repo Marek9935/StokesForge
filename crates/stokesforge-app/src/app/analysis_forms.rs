@@ -243,7 +243,7 @@ pub(super) fn form_body(
         input_block(rows, id, form, tree);
         family_chooser(rows, id, form);
         family_block(rows, id, form, tree);
-        output_block(rows, id, form, graphs);
+        output_block(rows, id, form, graphs, tree);
     });
 }
 
@@ -361,6 +361,14 @@ fn family_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree
 fn baseline_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
     let shapes = [
         ChoiceOption::new(
+            BaselineShape::Constant,
+            tr!("analysis-baseline-shape-constant"),
+        ),
+        ChoiceOption::new(
+            BaselineShape::ConstantZone,
+            tr!("analysis-baseline-shape-constant-zone"),
+        ),
+        ChoiceOption::new(
             BaselineShape::TwoPoints,
             tr!("analysis-baseline-shape-line"),
         ),
@@ -382,6 +390,20 @@ fn baseline_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
     }
     let b = &mut form.setup.baseline;
     match b.shape {
+        BaselineShape::Constant => {
+            rows.note(tr!("analysis-baseline-hint-constant"));
+            let mut points = b.constant_point.into_iter().collect();
+            field_list(rows, |ui| point_rows(ui, &mut points));
+            b.constant_point = points.first().copied();
+        }
+        BaselineShape::ConstantZone => {
+            rows.note(tr!("analysis-baseline-hint-constant-zone"));
+            let mut zones = b.constant_zone.into_iter().collect();
+            field_list(rows, |ui| {
+                range_rows(ui, id.with("constant-zone"), &mut zones)
+            });
+            b.constant_zone = zones.last().copied();
+        }
         BaselineShape::TwoPoints => {
             rows.note(tr!("analysis-baseline-hint-line"));
             field_list(rows, |ui| point_rows(ui, &mut b.points));
@@ -768,8 +790,35 @@ fn output_block(
     id: egui::Id,
     form: &mut AnalysisForm,
     graphs: &[(NodeId, String)],
+    tree: &Tree,
 ) {
     rows.section(tr!("analysis-block-output"));
+    if matches!(form.kind, OperationKind::Baseline | OperationKind::Correct)
+        && form.editing.is_none()
+    {
+        let disabled = form.replacement_disabled(tree);
+        if disabled.is_some() {
+            form.replace_original = false;
+        }
+        rows.field(|ui| {
+            choice(
+                ui,
+                id.with("original-data"),
+                &mut form.replace_original,
+                &[
+                    ChoiceOption::new(false, tr!("analysis-output-new-column")),
+                    ChoiceOption::new(true, tr!("analysis-output-replace-original"))
+                        .disabled(disabled),
+                ],
+            )
+        });
+    } else {
+        form.replace_original = false;
+    }
+    if form.replace_original {
+        rows.note(tr!("analysis-output-replace-hint"));
+        return;
+    }
     // Les colonnes que cette famille peut écrire en plus de la principale.
     match form.kind {
         OperationKind::Baseline => {
@@ -929,5 +978,35 @@ mod tests {
     #[test]
     fn une_plage_ordonnee_est_appliquee() {
         assert_eq!(saisir_dans_a("9"), ((1.0, 9.0), 0));
+    }
+
+    #[test]
+    fn peindre_une_constante_ne_detruit_pas_les_reglages_des_autres_formes() {
+        use crate::analysis::{AnalysisForm, BaselineShape, Preset};
+        let context = contexte();
+        let mut form = AnalysisForm::new(&Preset::BaselineAnchors, vec![], false);
+        let points = vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)];
+        let zones = vec![(1.0, 2.0), (3.0, 4.0)];
+        form.setup.baseline.points = points.clone();
+        form.setup.baseline.zones = zones.clone();
+        form.setup.baseline.constant_point = Some((7.0, 8.0));
+        form.setup.baseline.constant_zone = Some((7.0, 9.0));
+        for shape in [
+            BaselineShape::Constant,
+            BaselineShape::ConstantZone,
+            BaselineShape::Anchors,
+            BaselineShape::Zones,
+        ] {
+            form.setup.baseline.shape = shape;
+            image(&context, vec![], |ui| {
+                super::super::form::form(ui, "constante", |rows| {
+                    super::baseline_form(rows, egui::Id::new("constante"), &mut form);
+                });
+            });
+            assert_eq!(form.setup.baseline.points, points);
+            assert_eq!(form.setup.baseline.zones, zones);
+            assert_eq!(form.setup.baseline.constant_point, Some((7.0, 8.0)));
+            assert_eq!(form.setup.baseline.constant_zone, Some((7.0, 9.0)));
+        }
     }
 }

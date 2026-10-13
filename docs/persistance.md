@@ -335,3 +335,15 @@ textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
   leurs valeurs, aucun recalcul n'est nécessaire à l'ouverture pour un calcul manuel.
 - Une copie d'objets (#105) n'emporte pas les calculs : les colonnes copiées
   deviennent ordinaires.
+
+## Corrections définitives des données (#212)
+
+`FileBody::correction_traces` (`#[serde(default)]`) transporte séparément les
+`CorrectionRecord` de l'arbre : opération, séries sources, référence éventuelle
+et résultats. Le transport réutilise l'encodage des opérations/résultats des
+calculs, mais ne recrée aucun calcul actif ni colonne en lecture seule.
+Un ancien fichier se lit sans trace ; une opération inconnue ou un identifiant
+hors borne fait écarter uniquement sa trace. Les valeurs corrigées restent
+dans les colonnes ordinaires. Le compteur reprend au-delà des identifiants des
+traces, même si `next_id_hint` est trop bas. Les copies de colonnes ne transportent
+pas ces traces, comme elles ne transportent pas les calculs.

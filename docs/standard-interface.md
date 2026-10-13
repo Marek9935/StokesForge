@@ -485,3 +485,11 @@ Un comportement qui ne suit pas cette page se signale contre elle
 (`stokesforge-bug-report`). Une règle qui ne convient pas se rediscute avec
 l'utilisateur, elle ne se contourne pas : la changer, c'est changer cette
 page, l'issue concernée et les skills dans le même commit.
+
+### Options indisponibles d'un choix exclusif (#212)
+
+`ChoiceOption::disabled(Some(reason))` grise une option du formulaire et
+affiche sa raison au survol. Le même refus vaut pour les radios et les
+listes déroulantes : une option grisée ne change pas la valeur sélectionnée.
+Le choix reste peint par la brique `choice` ; ne pas reconstruire des radios
+ad hoc pour une indisponibilité.

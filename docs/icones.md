@@ -134,3 +134,8 @@ couleur transparente garde le damier. Dans une barre d'outils, le carré est
 précédé d'une icône qui dit *quelle* couleur (`color_icon_button` : `LineColor`
 pour le trait, `FillColor` pour le remplissage, `TextColor` pour le texte) ;
 dans un formulaire, d'un libellé (`color_field`). Jamais un échantillon seul.
+
+Les colonnes corrigées en place (#212) portent un petit crayon neutre
+(`pencil-simple`, `Icon::ModifiedData`) dans la marge de l’en-tête, distinct du
+triangle d’un calcul périmé. La bulle renvoie aux réglages conservés dans
+Résultats ; aucune couleur d’état ni badge supplémentaire.

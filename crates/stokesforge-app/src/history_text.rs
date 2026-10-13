@@ -129,6 +129,10 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             PlotEditKind::ReorderGroup => tr!("history-plot-reorder-group"),
         },
         HistoryLabel::SetSavedColors => tr!("history-set-saved-colors"),
+        HistoryLabel::ReplaceAnalysisData(kind) => tr!(
+            "history-replace-analysis-data",
+            kind = kind_title(loader, *kind)
+        ),
         HistoryLabel::AddCalculation(kind) => {
             tr!("history-add-calculation", kind = kind_title(loader, *kind))
         }

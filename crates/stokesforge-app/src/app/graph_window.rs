@@ -1847,6 +1847,7 @@ pub(super) mod tests {
             if on_curve {
                 assert_eq!(view.borrow().selected_series(), Some(series));
                 for present in [
+                    tr!("action-analysis-open"),
                     tr!("action-show-graph-data"),
                     tr!("action-rename-series"),
                     tr!("action-move-series-up"),

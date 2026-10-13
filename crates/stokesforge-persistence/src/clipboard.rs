@@ -177,6 +177,7 @@ fn decode_copy(mut nodes: Vec<NodeRecord>) -> PersistenceResult<NodeCopy> {
             nodes,
             saved_colors: Default::default(),
             calculations: Default::default(),
+            correction_traces: Default::default(),
             window_geometries: Default::default(),
             save_counter: 0,
         },

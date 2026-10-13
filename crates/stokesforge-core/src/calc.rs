@@ -43,7 +43,7 @@ use std::sync::Arc;
 use stokesforge_analysis::ops::{self, AuxInput, Operation, SeriesInput, Value, Warning};
 use stokesforge_analysis::AnalysisError;
 
-use crate::column::{Column, ColumnMeta, ValueBlock};
+use crate::column::{Column, ColumnMeta, ColumnType, MixedCell, ValueBlock};
 use crate::error::{CoreError, CoreResult};
 use crate::id::NodeId;
 use crate::project::Project;
@@ -206,6 +206,16 @@ pub struct CalculationDraft {
     pub auto_recalc: bool,
 }
 
+/// Trace immuable d'une correction qui a remplacé ses données sources (#212).
+/// Elle ne crée aucun lien de calcul : les colonnes restent ordinaires.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CorrectionRecord {
+    pub operation: Operation,
+    pub series: Vec<SeriesRef>,
+    pub aux: Option<AuxRef>,
+    pub results: Vec<SeriesResult>,
+}
+
 /// Plafond de séries d'un même calcul (un lot de spectres).
 pub const MAX_CALCULATION_SERIES: usize = 10_000;
 
@@ -232,6 +242,153 @@ impl CalculationDraft {
 }
 
 impl Project {
+    /// Remplace les Y par leur correction et garde la trace du geste, atomiquement.
+    /// Le client fournit les versions de toutes les entrées lues : un résultat
+    /// préparé sur un instantané dépassé ne doit jamais écraser des données neuves.
+    pub fn replace_analysis_data(
+        &mut self,
+        draft: CalculationDraft,
+        expected_versions: &[(NodeId, u64)],
+    ) -> CoreResult<NodeId> {
+        draft.validate()?;
+        draft
+            .operation
+            .validate()
+            .map_err(|e| CoreError::Structure(e.to_string()))?;
+        let mut inputs: Vec<NodeId> = draft
+            .series
+            .iter()
+            .flat_map(|s| [Some(s.y), s.x, s.sigma].into_iter().flatten())
+            .collect();
+        if let Some(aux) = &draft.aux {
+            inputs.push(aux.y);
+            inputs.extend(aux.x);
+        }
+        if inputs
+            .iter()
+            .any(|id| !expected_versions.iter().any(|(read, _)| read == id))
+        {
+            return Err(CoreError::Structure(
+                "a correction needs the version of every input".into(),
+            ));
+        }
+        if !matches!(
+            draft.operation,
+            Operation::Baseline { .. } | Operation::Correct { .. }
+        ) {
+            return Err(CoreError::Structure(
+                "only a curve correction can replace original data".into(),
+            ));
+        }
+        for &(id, expected) in expected_versions {
+            let column = self.tree().get(id)?.as_column().ok_or_else(|| {
+                CoreError::Structure("a correction input must be a column".into())
+            })?;
+            if column.version() != expected {
+                return Err(CoreError::ConcurrentModification {
+                    column: id,
+                    expected,
+                    found: column.version(),
+                });
+            }
+        }
+        let mut writes: std::collections::BTreeMap<NodeId, ValueBlock> =
+            std::collections::BTreeMap::new();
+        for (rank, source) in draft.series.iter().enumerate() {
+            let column = self.tree().get(source.y)?.as_column().ok_or_else(|| {
+                CoreError::Structure("a correction source must be a column".into())
+            })?;
+            if column.meta().formula.is_some() {
+                return Err(CoreError::FormulaColumnReadOnly { column: source.y });
+            }
+            if let Some((calculation, _)) = self.tree().calculation_of_column(source.y) {
+                return Err(CoreError::CalculatedColumnReadOnly {
+                    column: source.y,
+                    calculation,
+                });
+            }
+            let output = draft
+                .outputs
+                .iter()
+                .find(|o| o.series == rank && o.key == "corrected")
+                .ok_or_else(|| {
+                    CoreError::Structure("a correction needs its corrected output".into())
+                })?;
+            if output.data.len() < column.len() {
+                return Err(CoreError::Structure(
+                    "a correction must preserve the source length".into(),
+                ));
+            }
+            // Les lignes non exploitables gardent leur cellule originale. Un
+            // résultat NaN sur une ligne valide (division par zéro, référence
+            // hors plage) reste NaN : ce n'est pas une valeur manquante d'entrée.
+            let cells: Vec<MixedCell> = (0..column.len())
+                .map(|row| {
+                    let x_ok = source.x.is_none_or(|x| {
+                        self.tree()
+                            .node(x)
+                            .and_then(|n| n.as_column())
+                            .is_some_and(|c| c.values().number_at(row).is_finite())
+                    });
+                    if !column.values().number_at(row).is_finite() || !x_ok {
+                        column.cell(row)
+                    } else {
+                        MixedCell::Number(output.data[row])
+                    }
+                })
+                .collect();
+            let values = if column.column_type() == ColumnType::Mixed {
+                ValueBlock::Mixed(cells)
+            } else {
+                ValueBlock::Float(
+                    cells
+                        .iter()
+                        .enumerate()
+                        .map(|(row, cell)| {
+                            if !column.values().number_at(row).is_finite() {
+                                column.values().number_at(row)
+                            } else {
+                                cell.as_number()
+                            }
+                        })
+                        .collect(),
+                )
+            };
+            if let Some(previous) = writes.get(&source.y) {
+                if previous != &values {
+                    return Err(CoreError::Structure(
+                        "one source has conflicting corrections".into(),
+                    ));
+                }
+            } else {
+                writes.insert(source.y, values);
+            }
+        }
+        let before = self.tree().clone();
+        let result = (|| {
+            for (id, values) in writes {
+                self.set_values(id, 0, values)?;
+            }
+            let id = self.allocate_id()?;
+            Arc::make_mut(self.tree_arc_mut())
+                .correction_traces_mut()
+                .insert(
+                    id,
+                    Arc::new(CorrectionRecord {
+                        operation: draft.operation,
+                        series: draft.series,
+                        aux: draft.aux,
+                        results: draft.results,
+                    }),
+                );
+            Ok(id)
+        })();
+        if result.is_err() {
+            self.replace_tree(before);
+        }
+        result
+    }
+
     /// Enregistre un calcul : crée ses colonnes de sortie **juste après la
     /// colonne Y de chaque série** (dans l'ordre des sorties), puis
     /// l'enregistrement. Atomique : un échec rend l'arbre intact.
