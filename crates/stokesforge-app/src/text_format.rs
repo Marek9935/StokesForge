@@ -33,6 +33,9 @@ pub enum TextFormat {
     AutoSize,
     /// Nom de famille d'une police, embarquée ou du système.
     Font(String),
+    /// Alignement du texte dans sa boîte (#244) : un champ de la zone, jamais
+    /// une balise.
+    Align(stokesforge_plot::TextAlign),
 }
 
 /// Le texte après mise en forme, et la sélection à rendre au champ.
@@ -59,7 +62,10 @@ impl TextFormat {
             TextFormat::Size(size) if size.is_finite() && *size > 0.0 => {
                 call(format!("text(size: {size}pt)"))
             }
-            TextFormat::Color(_) | TextFormat::Size(_) | TextFormat::AutoSize => None,
+            TextFormat::Color(_)
+            | TextFormat::Size(_)
+            | TextFormat::AutoSize
+            | TextFormat::Align(_) => None,
             TextFormat::Font(name) => {
                 let name = name.trim();
                 if name.is_empty() {

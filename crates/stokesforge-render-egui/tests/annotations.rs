@@ -177,3 +177,35 @@ fn une_largeur_fixee_fait_passer_le_texte_a_la_ligne() {
     let plafonnee = trace(&project, panel).panels[0].annotations[0];
     assert!(plafonnee.size.0 <= 482, "{plafonnee:?}");
 }
+
+/// Largeur d'une zone de titre (#244) : fixée, elle fait passer un long titre
+/// d'axe à la ligne — texte tracé plus étroit et plus haut.
+#[test]
+fn la_largeur_d_un_titre_d_axe_le_fait_passer_a_la_ligne() {
+    use stokesforge_plot::{AxisSide, TextFont, TextTarget};
+    let (project, mut panel) = projet();
+    panel.bottom.label =
+        "Un titre d'axe vraiment beaucoup trop long pour une seule ligne".to_owned();
+    let cible = TextTarget::AxisTitle {
+        panel: 0,
+        side: AxisSide::Bottom,
+    };
+    let taille = |panel: PanelSpec| {
+        trace(&project, panel).panels[0]
+            .texts
+            .iter()
+            .find(|t| t.target == cible)
+            .expect("titre tracé")
+            .size
+    };
+    let libre = taille(panel.clone());
+    panel.bottom.title_font = TextFont {
+        width: Some(0.2),
+        ..TextFont::default()
+    };
+    let boite = taille(panel);
+    assert!(
+        boite.0 < libre.0 && boite.1 > libre.1,
+        "{boite:?} / {libre:?}"
+    );
+}

@@ -575,6 +575,7 @@ fn le_corps_d_une_zone_de_texte_change_sa_taille() {
                     let font = TextFont {
                         family: String::new(),
                         size: Some(32.0),
+                        ..TextFont::default()
                     };
                     panel.bottom.title_font = font.clone();
                     panel.legend.font = font;

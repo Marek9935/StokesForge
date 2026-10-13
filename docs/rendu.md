@@ -79,7 +79,7 @@ fond sombre fait donc passer d'un coup en blanc tout ce qui est en couleur
 automatique — à l'écran comme à l'export, puisque le pipeline est commun
 (`stokesforge-render-svg/tests/couleurs.rs`).
 
-Largeur d'un texte libre (#244) : `AnnotationSpec::width` est une fraction de la
+Largeur d'un texte libre, d'un titre ou d'un titre d'axe (#244) : `AnnotationSpec::width` / `TextFont::width` est une fraction de la
 figure (bornée à `[MIN_WIDTH, 1]`, `effective_width`), `align` un `TextAlign`. Le
 pipeline en tire une largeur en pixels de backend (arrondie : le nom de famille
 est retenu pour toujours) qui voyage dans la **famille du style**, après la
@@ -87,7 +87,7 @@ police (`formula::family_with_layout`, séparateur `\u{1f}`) ; `formula::source`
 enveloppe alors le texte dans `#box(width: …pt)[#align(…)[…]]` (dans la rotation
 le cas échéant). La boîte entière est la page : la taille rendue à la sélection
 est celle de la boîte, l'ancrage reste son centre. Les deux backends passent
-par `source`. Tests : `une_largeur_fixee_fait_passer_le_texte_a_la_ligne`
+par `source`. Pour une zone, `pipeline::font_style` prend la largeur de la figure (aussi pour un titre vertical) ; la légende ne s'en sert pas. Tests : `la_largeur_d_un_titre_d_axe_le_fait_passer_a_la_ligne`, `une_largeur_fixee_fait_passer_le_texte_a_la_ligne`
 (`render-egui/tests/annotations.rs`), `tirer_la_poignee_fixe_la_largeur`
 (`cache_session.rs`).
 

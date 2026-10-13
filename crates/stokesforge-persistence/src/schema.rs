@@ -694,6 +694,11 @@ pub(crate) struct TextFontRecord {
     pub(crate) family: String,
     #[serde(default)]
     pub(crate) size: Option<f64>,
+    /// Largeur et alignement de la boîte (#244) ; absents d'un fichier plus ancien.
+    #[serde(default)]
+    pub(crate) width: Option<f64>,
+    #[serde(default)]
+    pub(crate) align: TextAlignRecord,
 }
 
 /// [`stokesforge_plot::TextAnchor`], à plat.

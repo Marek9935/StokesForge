@@ -804,7 +804,9 @@ plot-formula-footer = Le texte entre $ … $ est une formule, le reste est du te
 
 plot-text-size = Taille de police (pt)
 plot-text-rotation = Rotation (°)
-plot-text-align = Alignement
+plot-text-align =
+    Alignement
+    .hint = Aligne le texte dans sa boîte (fixez la largeur avec les poignées)
 plot-text-align-left = Gauche
 plot-text-align-center = Centré
 plot-text-align-right = Droite

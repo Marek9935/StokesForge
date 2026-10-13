@@ -927,8 +927,12 @@ est ignoré à la lecture. Le `//!` du module dit pourquoi le panneau est un
   Largeur d'un texte libre (#244) : sans largeur, le texte tient sur une ligne ;
   les deux poignées du texte sélectionné (milieux des bords gauche et droit,
   `GraphView::width_handles`) fixent `AnnotationSpec::width`, en fraction de la
-  figure, et l'éditeur règle l'alignement (`TextAlign`). Titres, axes et
-  légende n'ont pas encore de largeur.
+  figure, et l'éditeur règle l'alignement (`TextAlign`). Un titre, titre de
+  calque ou titre d'axe sélectionné a les mêmes poignées (`TextFont::width`,
+  `GraphEvent::TextResized` → `Action::SetTextFont`) ; la légende n'en a pas. Les
+  trois boutons d'alignement de la barre de format (`TextFormat::Align`, un champ de la boîte
+  ou de la zone, jamais une balise) agissent sur le texte libre (brouillon en
+  édition, sinon `SetAnnotation`) et sur la zone d'un titre.
   Les listes affichent la police et le corps de la zone sélectionnée (#97),
   ou ceux du brouillon pendant l'édition, y compris en fenêtre détachée.
   Un corps hérité affiche sa taille effective issue du pipeline partagé ;

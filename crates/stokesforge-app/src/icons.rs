@@ -78,6 +78,9 @@ pub enum Icon {
     Subscript,
     Superscript,
     Formula,
+    AlignLeft,
+    AlignCenter,
+    AlignRight,
     ShapeRectangle,
     ShapeEllipse,
     ShapeLine,
@@ -261,6 +264,21 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         Icon::PlotBar,
         IconRole::Neutral,
         svg!("chart-bar.neutral.svg"),
+    ),
+    (
+        Icon::AlignLeft,
+        IconRole::Neutral,
+        svg!("text-align-left.neutral.svg"),
+    ),
+    (
+        Icon::AlignCenter,
+        IconRole::Neutral,
+        svg!("text-align-center.neutral.svg"),
+    ),
+    (
+        Icon::AlignRight,
+        IconRole::Neutral,
+        svg!("text-align-right.neutral.svg"),
     ),
     (Icon::Bold, IconRole::Neutral, svg!("text-b.neutral.svg")),
     (

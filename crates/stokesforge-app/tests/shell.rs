@@ -8345,6 +8345,7 @@ fn la_police_d_une_zone_de_texte_se_pose_en_un_pas_annulable() {
     let voulue = TextFont {
         family: "Fira Sans".to_string(),
         size: Some(20.0),
+        ..Default::default()
     };
     for cible in cibles {
         assert_eq!(police(&state, cible), Some(TextFont::default()));

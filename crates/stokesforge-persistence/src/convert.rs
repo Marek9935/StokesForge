@@ -362,6 +362,8 @@ fn font_to_record(font: &stokesforge_plot::TextFont) -> TextFontRecord {
     TextFontRecord {
         family: font.family.clone(),
         size: font.size,
+        width: font.width,
+        align: font.align.into(),
     }
 }
 
@@ -369,6 +371,8 @@ fn record_to_font(record: TextFontRecord) -> stokesforge_plot::TextFont {
     stokesforge_plot::TextFont {
         family: record.family,
         size: record.size,
+        width: record.width,
+        align: record.align.into(),
     }
 }
 

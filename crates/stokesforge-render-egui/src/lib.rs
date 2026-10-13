@@ -205,6 +205,15 @@ pub enum GraphEvent {
         /// Sa nouvelle ancre.
         anchor: TextAnchor,
     },
+    /// Une poignée de largeur d'un titre ou d'un titre d'axe a été tirée puis
+    /// relâchée (#244) : sa nouvelle largeur, en fraction de la largeur de la
+    /// figure, à valider en **une** modification du modèle.
+    TextResized {
+        /// Le texte redimensionné.
+        target: TextTarget,
+        /// Sa largeur, bornée à `[MIN_WIDTH, 1]`.
+        width: f64,
+    },
 }
 
 /// L'outil actif d'un graphe (issue #62), façon Origin. Un réglage de **vue**,
@@ -253,6 +262,8 @@ struct TextDrag {
     start_center: Pos2,
     /// Point d'appui du geste, en repère de la figure.
     press: Pos2,
+    /// Le geste tire une poignée de largeur (#244) au lieu de déplacer.
+    resize: bool,
 }
 
 /// Un glisser de texte libre en cours.
@@ -266,6 +277,20 @@ struct AnnotationDrag {
     press: Pos2,
     /// Le geste tire une poignée de largeur (#244) au lieu de déplacer.
     resize: bool,
+}
+
+/// Peint les deux poignées de largeur d'un texte sélectionné (#244).
+fn paint_width_handles(painter: &Painter, handles: [Pos2; 2]) {
+    for handle in handles {
+        let square = Rect::from_center_size(handle, egui::vec2(7.0, 7.0));
+        painter.rect_filled(square, 1.0, Color32::WHITE);
+        painter.rect_stroke(
+            square,
+            1.0,
+            Stroke::new(1.0, Color32::from_rgb(90, 150, 255)),
+            StrokeKind::Inside,
+        );
+    }
 }
 
 /// Distance maximale, en points egui, à laquelle une poignée de largeur est
@@ -479,6 +504,8 @@ pub struct GraphView {
     /// Aperçu d'un titre ou d'une légende en cours de glisser (issue #53),
     /// sur le même principe que `annotation_preview`.
     text_preview: Option<(TextTarget, TextAnchor)>,
+    /// Aperçu de la largeur d'un titre en cours de redimensionnement (#244).
+    text_width_preview: Option<(TextTarget, f64)>,
     text_drag: Option<TextDrag>,
     /// Texte libre sélectionné (clic), cible de Suppr.
     selected_annotation: Option<AnnotationRef>,
@@ -586,6 +613,7 @@ impl GraphView {
             preview_until: None,
             annotation_drag: None,
             text_preview: None,
+            text_width_preview: None,
             text_drag: None,
             selected_annotation: None,
             selected_text: None,
@@ -894,6 +922,7 @@ impl GraphView {
     fn clear_previews(&mut self) {
         self.set_annotation_preview(None);
         self.set_text_preview(None);
+        self.set_text_width_preview(None);
         self.set_shape_preview(None);
     }
 
@@ -908,6 +937,15 @@ impl GraphView {
         self.preview_until = None;
         if self.text_preview != preview {
             self.text_preview = preview;
+            self.preview_generation += 1;
+        }
+    }
+
+    /// Pose (ou retire) l'aperçu de largeur d'un titre (#244).
+    fn set_text_width_preview(&mut self, preview: Option<(TextTarget, f64)>) {
+        self.preview_until = None;
+        if self.text_width_preview != preview {
+            self.text_width_preview = preview;
             self.preview_generation += 1;
         }
     }
@@ -1095,6 +1133,27 @@ impl GraphView {
         Some([center - axis * half, center + axis * half])
     }
 
+    /// Les poignées de largeur d'un titre ou titre d'axe sélectionné ; pas de
+    /// largeur pour la légende (#244).
+    fn text_width_handles(&self, target: TextTarget) -> Option<[Pos2; 2]> {
+        if matches!(target, TextTarget::Legend { .. }) {
+            return None;
+        }
+        let (center, size, rotation) = self.text_screen_box(target)?;
+        let (sin, cos) = rotation.to_radians().sin_cos();
+        let half = size.x / 2.0 + 3.0;
+        let axis = egui::vec2(cos, -sin);
+        Some([center - axis * half, center + axis * half])
+    }
+
+    fn text_width_handle_at(&self, target: TextTarget, pos: Pos2) -> bool {
+        self.text_width_handles(target).is_some_and(|handles| {
+            handles
+                .iter()
+                .any(|handle| handle.distance(pos) <= WIDTH_HANDLE_RADIUS)
+        })
+    }
+
     /// Vrai si `pos` (points egui) tombe sur une poignée de largeur.
     fn width_handle_at(&self, target: AnnotationRef, pos: Pos2) -> bool {
         self.width_handles(target).is_some_and(|handles| {
@@ -1261,6 +1320,7 @@ impl GraphView {
         let view = &self.view;
         let preview = &self.annotation_preview;
         let text_preview = &self.text_preview;
+        let width_preview = self.text_width_preview;
         let shape_preview = &self.shape_preview;
         let formulas = &self.formulas;
         let font_choice = &self.font_choice;
@@ -1278,6 +1338,12 @@ impl GraphView {
             }
             if let Some((target, anchor)) = text_preview {
                 target.set_anchor(&mut framed, Some(*anchor));
+            }
+            if let Some((target, width)) = width_preview {
+                if let Some(mut font) = target.font(&framed) {
+                    font.width = Some(width);
+                    target.set_font(&mut framed, font);
+                }
             }
             let plot = resolve_spec(&tree, &framed);
             let text = ScreenText::new(&context, measurer);
@@ -1820,6 +1886,16 @@ impl GraphView {
     fn handle_text_drag(&mut self, response: &Response, spec: &PlotSpec) -> bool {
         if response.drag_stopped_by(PointerButton::Primary) {
             if let Some(drag) = self.text_drag.take() {
+                if drag.resize {
+                    match self.text_width_preview {
+                        Some((target, width)) => {
+                            self.events.push(GraphEvent::TextResized { target, width });
+                            self.hold_preview();
+                        }
+                        None => self.set_text_width_preview(None),
+                    }
+                    return true;
+                }
                 match self.text_preview {
                     Some((target, anchor)) if drag.original != Some(anchor) => {
                         self.events.push(GraphEvent::TextMoved { target, anchor });
@@ -1839,7 +1915,10 @@ impl GraphView {
         };
         if self.text_drag.is_none() {
             let origin = pos - response.drag_delta();
-            let Some(target) = self.text_target_at(origin) else {
+            let handle = self
+                .selected_text
+                .filter(|target| self.text_width_handle_at(*target, origin));
+            let Some(target) = handle.or_else(|| self.text_target_at(origin)) else {
                 return false;
             };
             self.selected_series = None;
@@ -1857,6 +1936,7 @@ impl GraphView {
                 original: target.anchor(spec),
                 start_center: Pos2::new(drawn.center.0 as f32, drawn.center.1 as f32),
                 press,
+                resize: handle.is_some(),
             });
         }
         let Some(drag) = self.text_drag.clone() else {
@@ -1865,6 +1945,20 @@ impl GraphView {
         let Some(current) = self.figure_position(pos) else {
             return true;
         };
+        if drag.resize {
+            let (Some(figure), Some(drawn)) = (
+                self.cache.key().map(|key| key.rect.width()),
+                self.drawn_text(drag.target).copied(),
+            ) else {
+                return true;
+            };
+            let (sin, cos) = drawn.rotation.to_radians().sin_cos();
+            let along = (current - drag.start_center).dot(egui::vec2(cos as f32, -sin as f32));
+            let fraction =
+                f64::from(2.0 * along.abs() / figure).clamp(AnnotationSpec::MIN_WIDTH, 1.0);
+            self.set_text_width_preview(Some((drag.target, fraction)));
+            return true;
+        }
         let center = drag.start_center + (current - drag.press);
         // Le repère de l'ancre : le panneau du texte, ou le premier panneau
         // tracé pour le titre du graphe ; l'ordonnée de droite si l'ancre
@@ -1933,21 +2027,18 @@ impl GraphView {
             ));
             // Les poignées de largeur (#244), aux milieux des bords gauche
             // et droit.
-            for handle in self
+            if let Some(handles) = self
                 .selected_annotation
                 .and_then(|target| self.width_handles(target))
-                .into_iter()
-                .flatten()
             {
-                let square = Rect::from_center_size(handle, egui::vec2(7.0, 7.0));
-                painter.rect_filled(square, 1.0, Color32::WHITE);
-                painter.rect_stroke(
-                    square,
-                    1.0,
-                    Stroke::new(1.0, Color32::from_rgb(90, 150, 255)),
-                    StrokeKind::Inside,
-                );
+                paint_width_handles(painter, handles);
             }
+        }
+        if let Some(handles) = self
+            .selected_text
+            .and_then(|target| self.text_width_handles(target))
+        {
+            paint_width_handles(painter, handles);
         }
 
         if let Some((center, size, rotation)) = self

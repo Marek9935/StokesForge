@@ -36,7 +36,7 @@ use crate::icons::{icon_image, Icon, IconRole};
 use crate::state::Action;
 use crate::tr;
 use stokesforge_core::NodeId;
-use stokesforge_plot::PlotType;
+use stokesforge_plot::{PlotType, TextAlign};
 use stokesforge_render_egui::GraphTool;
 
 use crate::color_picker::{ColorUsage, PickerEnv};
@@ -1008,6 +1008,34 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             requests.push(ToolbarRequest::FormatText(TextFormat::Color(color)));
         }
 
+        ui.separator();
+        for (icon, align, label) in [
+            (
+                Icon::AlignLeft,
+                TextAlign::Left,
+                tr!("plot-text-align-left"),
+            ),
+            (
+                Icon::AlignCenter,
+                TextAlign::Center,
+                tr!("plot-text-align-center"),
+            ),
+            (
+                Icon::AlignRight,
+                TextAlign::Right,
+                tr!("plot-text-align-right"),
+            ),
+        ] {
+            let hint = tr!("plot-text-align", "hint");
+            let hint = if enabled {
+                hint
+            } else {
+                format!("{hint}\n{}", text_disabled_hint(env))
+            };
+            if tool_button(ui, icon, label, Some(hint), enabled, false) {
+                requests.push(ToolbarRequest::FormatText(TextFormat::Align(align)));
+            }
+        }
         ui.separator();
         for (icon, format, label, hint) in [
             (

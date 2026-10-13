@@ -30,6 +30,9 @@ columns-plus-right	neutral
 rows-plus-bottom	neutral
 chart-scatter	neutral
 chart-bar	neutral
+text-align-center	neutral
+text-align-left	neutral
+text-align-right	neutral
 text-b	neutral
 text-italic	neutral
 text-subscript	neutral

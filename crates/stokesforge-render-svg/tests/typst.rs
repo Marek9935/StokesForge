@@ -210,6 +210,7 @@ fn la_police_d_une_zone_de_texte_change_l_export() {
     let font = stokesforge_plot::TextFont {
         family: "Fira Sans".to_owned(),
         size: Some(28.0),
+        ..Default::default()
     };
     spec.title_font = font.clone();
     spec.title = "Titre".to_owned();

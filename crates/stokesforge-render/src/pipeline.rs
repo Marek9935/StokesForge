@@ -77,7 +77,7 @@ use stokesforge_plot::{
 use crate::clip::{self, PixelBounds};
 use crate::color::{auto_ink, over_white, parse_hex, rgba_or};
 use crate::decimate;
-use crate::formula::{literal_style_font, rich_style_font};
+use crate::formula::literal_style_font;
 use crate::legend;
 use crate::paint::{self, opaque, rgba, PAPER};
 use crate::scale;
@@ -403,7 +403,12 @@ pub fn draw_on<DB: DrawingBackend>(
     // sauterait. Il est tracé sur son ancre une fois les panneaux faits,
     // par-dessus.
     let title_color = rgba_or(&spec.title_color, opaque(ink));
-    let title_style = font_style(&spec.title_font, TITLE_SIZE, title_color);
+    let title_style = font_style(
+        &spec.title_font,
+        TITLE_SIZE,
+        title_color,
+        root.dim_in_pixel().0,
+    );
     let title_anchor =
         usable_anchor(spec.title_anchor).filter(|_| spec.title_visible && !spec.title.is_empty());
     let area = if !spec.title_visible || spec.title.is_empty() {
@@ -807,6 +812,7 @@ fn draw_panel<DB: DrawingBackend>(
     decimal_comma: bool,
 ) -> Result<(DrawnPanel, Projection, BaseFrame<DB>), DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = panel.spec;
+    let figure_width = canvas.dim_in_pixel().0;
     // Un calque superposé sans calque à recouvrir se trace comme un calque
     // ordinaire.
     let overlay = spec.overlay.filter(|_| base.is_some());
@@ -913,6 +919,7 @@ fn draw_panel<DB: DrawingBackend>(
         &spec.title_font,
         PANEL_TITLE_SIZE,
         rgba_or(&spec.title_color, opaque(ink)),
+        canvas.dim_in_pixel().0,
     );
     let area = if let Some(base) = base {
         // Dimension liée : la zone de tracé du calque recouvert, titre
@@ -1046,7 +1053,7 @@ fn draw_panel<DB: DrawingBackend>(
     // s'affichent en haut et à droite, par les axes secondaires de Plotters
     // (même repère que le calque lui-même, voir plus bas).
     if overlay.is_none() {
-        let colors = AxisColors::of(&spec.bottom, ink);
+        let colors = AxisColors::of(&spec.bottom, ink, figure_width);
         let mut mesh = chart.configure_mesh();
         colors.apply(&mut mesh);
         mesh.x_desc(plotters_desc(&spec.bottom, bottom_anchor))
@@ -1063,7 +1070,7 @@ fn draw_panel<DB: DrawingBackend>(
         mesh.draw()?;
     }
     if overlay.is_none() {
-        let colors = AxisColors::of(&spec.left, ink);
+        let colors = AxisColors::of(&spec.left, ink, figure_width);
         let mut mesh = chart.configure_mesh();
         colors.apply(&mut mesh);
         mesh.y_desc(plotters_desc(&spec.left, left_anchor))
@@ -1089,7 +1096,7 @@ fn draw_panel<DB: DrawingBackend>(
                 String::new()
             }
         };
-        let colors = AxisColors::of(&spec.right, ink);
+        let colors = AxisColors::of(&spec.right, ink, figure_width);
         let mut mesh = chart.configure_secondary_axes();
         mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
             .axis_desc_style(colors.title_style.clone())
@@ -1108,7 +1115,7 @@ fn draw_panel<DB: DrawingBackend>(
     // bas et la gauche, sans titre. Un axe de droite à données est déjà tracé
     // plus haut ; seul le miroir du haut s'ajoute alors.
     if (mirror_top || mirror_right) && y2_range.is_none() {
-        let colors = AxisColors::of(&spec.bottom, ink);
+        let colors = AxisColors::of(&spec.bottom, ink, figure_width);
         let mut mesh = chart.configure_secondary_axes();
         mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
             .axis_style(rgba(colors.ticks));
@@ -1136,7 +1143,11 @@ fn draw_panel<DB: DrawingBackend>(
         // Un seul style de ligne et de libellés pour les deux axes
         // secondaires : celui de l'axe affiché, de l'axe X si les deux le
         // sont.
-        let colors = AxisColors::of(if show_x { &spec.bottom } else { &spec.left }, ink);
+        let colors = AxisColors::of(
+            if show_x { &spec.bottom } else { &spec.left },
+            ink,
+            figure_width,
+        );
         let mut mesh = chart.configure_secondary_axes();
         mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
             .axis_desc_style(colors.title_style.clone())
@@ -1181,7 +1192,7 @@ fn draw_panel<DB: DrawingBackend>(
     if overlay.is_none() {
         let (left, right) = (origin.0 - 1, origin.0 + size.0 as i32);
         let (top, bottom) = (origin.1 - 1, origin.1 + size.1 as i32);
-        let ink = rgba(AxisColors::of(&spec.bottom, ink).ticks);
+        let ink = rgba(AxisColors::of(&spec.bottom, ink, figure_width).ticks);
         for (vertical, horizontal, x, y) in [
             (plan.left, plan.bottom, left, bottom),
             (plan.right, plan.bottom, right, bottom),
@@ -1329,7 +1340,7 @@ fn draw_panel<DB: DrawingBackend>(
         if !axis.title_visible || label.is_empty() || anchor.is_some() || area_size == 0 {
             continue;
         }
-        let colors = AxisColors::of(axis, ink);
+        let colors = AxisColors::of(axis, ink, figure_width);
         let text_size = area.estimate_text_size(&label, &colors.title_style)?;
         let half = text_size.1 as f64 / 2.0;
         let area_size = area_size as f64;
@@ -1451,7 +1462,12 @@ fn draw_panel<DB: DrawingBackend>(
         &spec.legend,
         &entries,
         &legend::LegendText {
-            typed: font_style(&spec.legend.font, LABEL_SIZE, legend_ink),
+            typed: font_style(
+                &spec.legend.font,
+                LABEL_SIZE,
+                legend_ink,
+                canvas.dim_in_pixel().0,
+            ),
             literal: literal_style_font(
                 spec.legend.font.effective_size(LABEL_SIZE),
                 legend_ink,
@@ -1511,7 +1527,7 @@ fn draw_panel<DB: DrawingBackend>(
     ] {
         let Some(anchor) = anchor else { continue };
         let pixel = centered(anchor);
-        let colors = AxisColors::of(axis, ink);
+        let colors = AxisColors::of(axis, ink, figure_width);
         let measured = draw_centered_text(
             canvas,
             &axis.display_label(),
@@ -2022,12 +2038,29 @@ fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'static> {
 /// Le style d'un texte riche saisi (titre, titre d'axe, légende) : la couleur
 /// donnée, le corps et la police de sa zone (issues #77, #78), `default_size`
 /// et la police du graphe quand ils ne sont pas réglés.
+///
+/// `figure_width` est la largeur de la figure en pixels de backend : une
+/// largeur de zone (#244) est une fraction de celle-ci, arrondie au pixel
+/// (le nom de famille du style est retenu pour toujours), et vaut aussi pour
+/// un titre vertical.
 fn font_style(
     font: &stokesforge_plot::TextFont,
     default_size: f64,
     color: (u8, u8, u8, u8),
+    figure_width: u32,
 ) -> TextStyle<'static> {
-    rich_style_font(font.effective_size(default_size), color, font.family())
+    let layout = font.effective_width().map(|fraction| {
+        (
+            (fraction * f64::from(figure_width)).round().max(1.0),
+            font.align,
+        )
+    });
+    crate::formula::rich_style_layout(
+        font.effective_size(default_size),
+        color,
+        font.family(),
+        layout,
+    )
 }
 
 /// Opacité des lignes principales de la grille, dans la couleur de
@@ -2045,11 +2078,11 @@ struct AxisColors {
 }
 
 impl AxisColors {
-    fn of(axis: &AxisSpec, ink: (u8, u8, u8)) -> Self {
+    fn of(axis: &AxisSpec, ink: (u8, u8, u8), figure_width: u32) -> Self {
         let title = rgba_or(&axis.title_color, opaque(ink));
         Self {
             ticks: rgba_or(&axis.tick_color, opaque(ink)),
-            title_style: font_style(&axis.title_font, AXIS_DESC_SIZE, title),
+            title_style: font_style(&axis.title_font, AXIS_DESC_SIZE, title, figure_width),
         }
     }
 

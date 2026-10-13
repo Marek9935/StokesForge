@@ -879,6 +879,18 @@ fn annotation_interactions(
                     open_shape_properties(ui.ctx(), view, &spec, shape);
                 }
             }
+            stokesforge_render_egui::GraphEvent::TextResized { target, width } => {
+                if let Some(mut font) =
+                    crate::state::current_plot_spec(tree, graph).and_then(|spec| target.font(&spec))
+                {
+                    font.width = Some(width);
+                    actions.push(Action::SetTextFont {
+                        graph,
+                        target,
+                        font,
+                    });
+                }
+            }
             stokesforge_render_egui::GraphEvent::TextMoved { target, anchor } => {
                 actions.push(Action::SetTextAnchor {
                     graph,

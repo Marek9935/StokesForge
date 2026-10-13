@@ -618,6 +618,74 @@ fn double_cliquer_un_texte_demande_a_lediter() {
 
 // -- Issue #53 : glisser et double-cliquer un titre, une légende --
 
+/// Tirer la poignée d'un titre sélectionné (#244) en fixe la largeur, en
+/// fraction de la figure ; un seul signal, au relâchement.
+#[test]
+fn tirer_la_poignee_d_un_titre_fixe_sa_largeur() {
+    use stokesforge_render_egui::{GraphEvent, TextTarget};
+    let banc = Banc::with_title("Titre");
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+    let (centre, taille, _) = view
+        .text_screen_box(TextTarget::Title)
+        .expect("titre tracé");
+    image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![egui::Event::PointerMoved(centre), bouton(centre, true)],
+        0.1,
+    );
+    image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![bouton(centre, false)],
+        0.2,
+    );
+    assert_eq!(view.selected_text(), Some(TextTarget::Title));
+
+    let poignee = centre + egui::vec2(taille.x / 2.0 + 3.0, 0.0);
+    let cible = centre + egui::vec2(150.0, 0.0);
+    let mut signaux = image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![egui::Event::PointerMoved(poignee), bouton(poignee, true)],
+        0.3,
+    );
+    for pas in 1..=5 {
+        let pos = poignee + (cible - poignee) * (pas as f32 / 5.0);
+        signaux.extend(image_avec(
+            &context,
+            &mut view,
+            &banc,
+            rect,
+            vec![egui::Event::PointerMoved(pos)],
+            0.3 + 0.05 * pas as f64,
+        ));
+    }
+    assert!(signaux.is_empty(), "un signal avant le relâchement");
+    signaux.extend(image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![bouton(cible, false)],
+        1.0,
+    ));
+    let [GraphEvent::TextResized { target, width }] = &signaux[..] else {
+        panic!("un seul signal attendu : {signaux:?}")
+    };
+    assert_eq!(*target, TextTarget::Title);
+    assert!((width - 0.5).abs() < 0.03, "largeur {width}");
+}
+
 /// Glisser le titre du graphe : l'aperçu suit le pointeur sans toucher au
 /// modèle, **un seul** signal sort au relâchement, et la vue ne défile pas.
 #[test]

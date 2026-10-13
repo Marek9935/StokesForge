@@ -782,6 +782,8 @@ fn non_trivial_spec(
             title_font: stokesforge_plot::TextFont {
                 family: "Fira Sans".to_string(),
                 size: Some(18.0),
+                width: Some(0.4),
+                align: stokesforge_plot::TextAlign::Right,
             },
             tick_color: "#fefefe".to_string(),
             // #176 : axe miroir, sans étiquettes de graduation.
@@ -800,6 +802,7 @@ fn non_trivial_spec(
             font: stokesforge_plot::TextFont {
                 family: "Libertinus Sans".to_string(),
                 size: Some(11.0),
+                ..Default::default()
             },
             color: "#118899".to_string(),
         },
@@ -869,6 +872,7 @@ fn non_trivial_spec(
         title_font: stokesforge_plot::TextFont {
             family: "Noto Sans".to_string(),
             size: None,
+            ..Default::default()
         },
         title_color: "#8833aa".to_string(),
         ..PanelSpec::at(1, 0)
@@ -882,6 +886,7 @@ fn non_trivial_spec(
         title_font: stokesforge_plot::TextFont {
             family: "Libertinus Sans".to_string(),
             size: Some(30.0),
+            ..Default::default()
         },
         ..PlotSpec::empty("Mesure du 11/09").with_panels(vec![panel_a, panel_b])
     }

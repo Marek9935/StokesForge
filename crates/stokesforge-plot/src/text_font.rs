@@ -15,6 +15,11 @@ pub struct TextFont {
     /// Corps au sens de Plotters (16 = titre d'axe). `None` = le corps par
     /// défaut de ce texte.
     pub size: Option<f64>,
+    /// Largeur de la boîte, en fraction de la largeur de la figure (#244) ;
+    /// `None` = une ligne. Voir [`crate::AnnotationSpec::width`].
+    pub width: Option<f64>,
+    /// Alignement dans la boîte ; sans effet sans largeur.
+    pub align: crate::TextAlign,
 }
 
 impl TextFont {
@@ -24,7 +29,10 @@ impl TextFont {
 
     /// Vrai si rien n'est réglé.
     pub fn is_default(&self) -> bool {
-        self.family.trim().is_empty() && self.size.is_none()
+        self.family.trim().is_empty()
+            && self.size.is_none()
+            && self.width.is_none()
+            && self.align == crate::TextAlign::Center
     }
 
     /// Le corps tracé : celui du réglage borné dans [`Self::SIZE_RANGE`],
@@ -34,6 +42,14 @@ impl TextFont {
             Some(size) if size.is_finite() => size.clamp(Self::SIZE_RANGE.0, Self::SIZE_RANGE.1),
             _ => default,
         }
+    }
+
+    /// La largeur tracée : [`Self::width`] bornée comme celle d'un texte libre
+    /// ([`crate::AnnotationSpec::effective_width`]).
+    pub fn effective_width(&self) -> Option<f64> {
+        self.width
+            .filter(|width| width.is_finite())
+            .map(|width| width.clamp(crate::AnnotationSpec::MIN_WIDTH, 1.0))
     }
 
     /// La famille demandée, `None` si elle est vide.

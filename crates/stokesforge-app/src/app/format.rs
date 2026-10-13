@@ -339,6 +339,42 @@ impl StokesForgeApp {
                 return self.set_zone_font(graph, target, actions, |font| font.size = None);
             }
         }
+        // L'alignement (#244) est un champ de la boîte : le brouillon d'un
+        // texte libre en édition, sinon la zone d'un titre (édité ou
+        // sélectionné), sinon le texte libre sélectionné.
+        if let TextFormat::Align(align) = *format {
+            if annotation_editing {
+                self.read_graph_view(graph, |view| {
+                    let id = annotation_editor_id(view);
+                    ctx.data_mut(|data| {
+                        if let Some(mut editor) = data.get_temp::<AnnotationEditor>(id) {
+                            editor.draft.align = align;
+                            data.insert_temp(id, editor);
+                        }
+                    });
+                });
+                return true;
+            }
+            if let Some(target) = zone {
+                return self.set_zone_font(graph, target, actions, |font| font.align = align);
+            }
+            if let Some(target) = selected_annotation {
+                let Some(mut annotation) =
+                    crate::state::current_plot_spec(self.state.tree(), graph)
+                        .and_then(|spec| target.get(&spec).cloned())
+                else {
+                    return true;
+                };
+                annotation.align = align;
+                actions.push(Action::SetAnnotation {
+                    graph,
+                    target,
+                    annotation: Box::new(annotation),
+                });
+                return true;
+            }
+            return false;
+        }
         if let TextFormat::Font(name) = format {
             let name = name.trim().to_owned();
             if annotation_editing {
@@ -626,6 +662,7 @@ mod tests {
             font: stokesforge_plot::TextFont {
                 family: "Fira Sans".into(),
                 size: Some(28.0),
+                ..Default::default()
             },
         });
         let mut app = StokesForgeApp::new(state);
@@ -811,6 +848,7 @@ mod tests {
                     font: TextFont {
                         family: "Fira Sans".into(),
                         size: Some(28.0),
+                        ..Default::default()
                     },
                 });
                 let explicit = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
@@ -894,6 +932,32 @@ mod tests {
             app.text_format_state(&ctx, Some(Tab::Graph(graph)))
                 .auto_family
         );
+        session.shutdown().unwrap();
+    }
+
+    /// Les boutons d'alignement de la barre (#244) posent `align` : sur le
+    /// texte libre sélectionné (champ de la boîte), sur un titre sélectionné
+    /// (champ de sa zone), chacun en une seule action.
+    #[test]
+    fn l_alignement_se_pose_sur_la_boite_ou_la_zone() {
+        use stokesforge_plot::TextAlign;
+        let (session, mut app, graph, ctx) = setup();
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.with_graph_view(graph, |view| view.select_annotation(Some(TEXTE), &spec));
+        match formate(&mut app, &ctx, graph, TextFormat::Align(TextAlign::Right)).as_slice() {
+            [Action::SetAnnotation { annotation, .. }] => {
+                assert_eq!(annotation.align, TextAlign::Right);
+                assert_eq!(annotation.text, "Texte", "aucune balise");
+            }
+            other => panic!("une SetAnnotation attendue, pas {other:?}"),
+        }
+        app.with_graph_view(graph, |view| {
+            view.select_text(Some(TextTarget::Title), &spec)
+        });
+        match formate(&mut app, &ctx, graph, TextFormat::Align(TextAlign::Left)).as_slice() {
+            [Action::SetTextFont { font, .. }] => assert_eq!(font.align, TextAlign::Left),
+            other => panic!("une SetTextFont attendue, pas {other:?}"),
+        }
         session.shutdown().unwrap();
     }
 
