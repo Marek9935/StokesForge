@@ -65,6 +65,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
+use stokesforge_plot::TextAlign;
 
 use plotters_backend::{
     text_anchor::{HPos, VPos},
@@ -189,6 +190,9 @@ pub fn literal_style_font(
 /// Sépare la police du reste d'un nom de famille de style
 /// (`stokesforge-typst|Fira Sans` → `("stokesforge-typst", Some("Fira Sans"))`).
 fn split_font(name: &str) -> (&str, Option<&str>) {
+    let name = name
+        .split_once(LAYOUT_SEPARATOR)
+        .map_or(name, |(head, _)| head);
     match name.split_once(FONT_SEPARATOR) {
         Some((base, font)) if !font.is_empty() => (base, Some(font)),
         Some((base, _)) => (base, None),
@@ -202,6 +206,64 @@ pub fn family_with_font(base: &str, font: Option<&str>) -> String {
         Some(font) => format!("{base}{FONT_SEPARATOR}{font}"),
         None => base.to_owned(),
     }
+}
+
+/// La police portée par un nom de famille de style (voir [`split_font`]).
+pub fn font_of_family(name: &str) -> Option<&str> {
+    split_font(name).1
+}
+
+/// Le séparateur de la mise en page (largeur, alignement) en fin de nom de
+/// famille de style, après la police : `…\u{1f}<largeur>\u{1f}<l|c|r>`. Un
+/// caractère de contrôle, qu'aucun nom de police ne contient (#244).
+const LAYOUT_SEPARATOR: char = '\u{1f}';
+
+/// Ajoute à la famille de style `family` une boîte de `width` points
+/// alignée par `align`. `None` : la famille est rendue telle quelle.
+pub fn family_with_layout(family: String, layout: Option<(f64, TextAlign)>) -> String {
+    match layout.filter(|(width, _)| width.is_finite() && *width > 0.0) {
+        Some((width, align)) => {
+            let letter = match align {
+                TextAlign::Left => 'l',
+                TextAlign::Center => 'c',
+                TextAlign::Right => 'r',
+            };
+            format!("{family}{LAYOUT_SEPARATOR}{width}{LAYOUT_SEPARATOR}{letter}")
+        }
+        None => family,
+    }
+}
+
+/// La boîte (largeur en points, alignement) portée par `style`, s'il en a une.
+pub fn layout_of<S: plotters_backend::BackendTextStyle>(style: &S) -> Option<(f64, TextAlign)> {
+    let plotters_backend::FontFamily::Name(name) = style.family() else {
+        return None;
+    };
+    let mut parts = name.split(LAYOUT_SEPARATOR).skip(1);
+    let width: f64 = parts.next()?.parse().ok()?;
+    let align = match parts.next()? {
+        "l" => TextAlign::Left,
+        "r" => TextAlign::Right,
+        _ => TextAlign::Center,
+    };
+    (width.is_finite() && width > 0.0).then_some((width, align))
+}
+
+/// [`rich_style_font`] dans une boîte de largeur fixée (#244).
+pub fn rich_style_layout(
+    size: f64,
+    color: (u8, u8, u8, u8),
+    font: Option<&str>,
+    layout: Option<(f64, TextAlign)>,
+) -> plotters::style::TextStyle<'static> {
+    family_style(
+        interned(family_with_layout(
+            family_with_font(RICH_FAMILY, font),
+            layout,
+        )),
+        size,
+        color,
+    )
 }
 
 /// Le séparateur entre la famille de rôle et la police dans un nom de
@@ -326,6 +388,7 @@ pub fn source<'a, S: plotters_backend::BackendTextStyle>(
     style: &S,
 ) -> std::borrow::Cow<'a, str> {
     let angle = rotation_of(style);
+    let layout = layout_of(style);
     let (literal, font) = match style.family() {
         plotters_backend::FontFamily::Name(name) => {
             let (base, font) = split_font(name);
@@ -344,6 +407,19 @@ pub fn source<'a, S: plotters_backend::BackendTextStyle>(
             quoted(math_family_for(font)),
         )
     });
+    // Une boîte de largeur fixée : le texte y passe à la ligne et s'y aligne
+    // (#244). La boîte entière est la page, donc l'ancrage reste son centre.
+    let boxed = |body: String| match layout {
+        Some((width, align)) => {
+            let side = match align {
+                TextAlign::Left => "left",
+                TextAlign::Center => "center",
+                TextAlign::Right => "right",
+            };
+            format!("#box(width: {width}pt)[#set par(justify: false)\n#align({side})[{body}]]")
+        }
+        None => body,
+    };
     if angle != 0.0 {
         // Typst tourne dans le sens horaire (repère écran) : l'angle
         // antihoraire du modèle change de signe.
@@ -352,7 +428,16 @@ pub fn source<'a, S: plotters_backend::BackendTextStyle>(
         } else {
             text.to_owned()
         };
+        let body = boxed(body);
         return format!("{ROTATE_CALL}{}deg)[{preamble}{body}]", -angle).into();
+    }
+    if layout.is_some() {
+        let body = if literal {
+            escape(text)
+        } else {
+            text.to_owned()
+        };
+        return format!("{preamble}{}", boxed(body)).into();
     }
     match (literal, preamble.is_empty()) {
         (true, true) => escape(text).into(),

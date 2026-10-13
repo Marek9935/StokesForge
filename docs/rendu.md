@@ -79,6 +79,18 @@ fond sombre fait donc passer d'un coup en blanc tout ce qui est en couleur
 automatique — à l'écran comme à l'export, puisque le pipeline est commun
 (`stokesforge-render-svg/tests/couleurs.rs`).
 
+Largeur d'un texte libre (#244) : `AnnotationSpec::width` est une fraction de la
+figure (bornée à `[MIN_WIDTH, 1]`, `effective_width`), `align` un `TextAlign`. Le
+pipeline en tire une largeur en pixels de backend (arrondie : le nom de famille
+est retenu pour toujours) qui voyage dans la **famille du style**, après la
+police (`formula::family_with_layout`, séparateur `\u{1f}`) ; `formula::source`
+enveloppe alors le texte dans `#box(width: …pt)[#align(…)[…]]` (dans la rotation
+le cas échéant). La boîte entière est la page : la taille rendue à la sélection
+est celle de la boîte, l'ancrage reste son centre. Les deux backends passent
+par `source`. Tests : `une_largeur_fixee_fait_passer_le_texte_a_la_ligne`
+(`render-egui/tests/annotations.rs`), `tirer_la_poignee_fixe_la_largeur`
+(`cache_session.rs`).
+
 Police d'une zone de texte (issues #77, #78) : la police et le corps d'un
 titre, d'un titre d'axe, de la légende et d'un texte libre sont des champs de la
 zone (`stokesforge_plot::TextFont`), pas du contenu. Le pipeline en tire le style

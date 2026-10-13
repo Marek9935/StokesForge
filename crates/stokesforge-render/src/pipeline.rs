@@ -619,10 +619,13 @@ fn draw_centered_text<DB: DrawingBackend>(
     // Le style d'un texte riche saisi porte la police de sa zone dans sa
     // famille (`formula::rich_style_font`) : le style tourné la reprend.
     let font = match style.font.get_family() {
-        FontFamily::Name(name) => name.split_once('|').map(|(_, font)| font),
+        FontFamily::Name(name) => crate::formula::font_of_family(name),
         _ => None,
     };
-    let family = crate::formula::rotated_family_font(rotation, font);
+    let family = crate::formula::family_with_layout(
+        crate::formula::rotated_family_font(rotation, font),
+        crate::formula::layout_of(style),
+    );
     let turned = TextStyle {
         font: (family.as_str(), style.font.get_size()).into_font(),
         color: style.color,
@@ -1637,10 +1640,22 @@ fn draw_annotation<DB: DrawingBackend>(
     let color = rgba_or(&annotation.color, opaque(ink));
     let size = annotation.effective_size();
     let rotation = annotation.effective_rotation();
+    // Une largeur fixée (fraction de la figure, plafonnée à elle) fait passer
+    // le texte à la ligne dans une boîte de cette largeur (#244).
+    let layout = annotation.effective_width().map(|fraction| {
+        (
+            // Arrondie au pixel : le nom de famille du style est retenu pour
+            // toujours (`formula::interned`), une largeur par valeur.
+            (fraction * f64::from(screen.dim_in_pixel().0))
+                .round()
+                .max(1.0),
+            annotation.align,
+        )
+    });
     let (width, height) = draw_centered_text(
         screen,
         &annotation.text,
-        &rich_style_font(size, color, Some(annotation.font.as_str())),
+        &crate::formula::rich_style_layout(size, color, Some(annotation.font.as_str()), layout),
         rotation,
         pixel,
     )?;

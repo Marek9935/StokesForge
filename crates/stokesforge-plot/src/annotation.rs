@@ -33,6 +33,25 @@ pub struct AnnotationSpec {
     pub rotation: f64,
     /// Nom de famille de la police (issue #78) ; vide = la police du graphe.
     pub font: String,
+    /// Largeur de la boîte, en **fraction de la figure** (#244) ; `None` =
+    /// pas de largeur : le texte reste sur une ligne, comme avant. Fixée, elle
+    /// fait passer le texte à la ligne ; voir [`Self::effective_width`].
+    pub width: Option<f64>,
+    /// Alignement du texte dans la boîte ; sans effet tant que
+    /// [`Self::width`] est `None`.
+    pub align: TextAlign,
+}
+
+/// L'alignement d'un texte dans sa boîte (#244).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TextAlign {
+    /// Au bord gauche.
+    Left,
+    /// Centré.
+    #[default]
+    Center,
+    /// Au bord droit.
+    Right,
 }
 
 impl AnnotationSpec {
@@ -55,7 +74,20 @@ impl AnnotationSpec {
             size: Self::DEFAULT_SIZE,
             rotation: 0.0,
             font: String::new(),
+            width: None,
+            align: TextAlign::Center,
         }
+    }
+
+    /// Plus petite largeur de boîte, en fraction de la figure.
+    pub const MIN_WIDTH: f64 = 0.02;
+
+    /// La largeur tracée : [`Self::width`] bornée à `[MIN_WIDTH, 1]` (le
+    /// plafond est la figure), `None` pour une valeur absente ou non finie.
+    pub fn effective_width(&self) -> Option<f64> {
+        self.width
+            .filter(|width| width.is_finite())
+            .map(|width| width.clamp(Self::MIN_WIDTH, 1.0))
     }
 
     /// Le corps effectivement tracé : [`Self::size`] ramené dans

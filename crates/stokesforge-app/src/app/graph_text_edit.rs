@@ -23,6 +23,9 @@ use crate::quantities;
 use crate::state::{series_list_label, Action};
 use crate::tr;
 
+use stokesforge_plot::TextAlign;
+
+use super::form::ChoiceOption;
 use super::inplace_edit;
 use crate::color_picker::{saved_colors_id, SavedColorRequest};
 
@@ -489,6 +492,19 @@ pub(super) fn annotation_editor_ui(
                         ("annotation_rotation", id),
                         &mut editor.draft.rotation,
                         &quantities::ROTATION,
+                    );
+                    // L'alignement ne se voit que dans une boîte de largeur
+                    // fixée (poignées du texte sélectionné, #244).
+                    ui.label(tr!("plot-text-align"));
+                    super::form::choice(
+                        ui,
+                        ("annotation_align", id),
+                        &mut editor.draft.align,
+                        &[
+                            ChoiceOption::new(TextAlign::Left, tr!("plot-text-align-left")),
+                            ChoiceOption::new(TextAlign::Center, tr!("plot-text-align-center")),
+                            ChoiceOption::new(TextAlign::Right, tr!("plot-text-align-right")),
+                        ],
                     );
                     if ui
                         .button(tr!("plot-text-ok"))

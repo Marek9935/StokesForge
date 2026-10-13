@@ -812,6 +812,10 @@ plot-formula-footer = Text between $ … $ is a formula, the rest is plain text.
 
 plot-text-size = Font size (pt)
 plot-text-rotation = Rotation (°)
+plot-text-align = Alignment
+plot-text-align-left = Left
+plot-text-align-center = Center
+plot-text-align-right = Right
 plot-text-ok =
     OK
     .hint = Applies the text (Enter)

@@ -512,6 +512,77 @@ fn glisser_un_texte_ne_signale_quau_relachement() {
     );
 }
 
+/// Tirer la poignée droite d'un texte sélectionné (#244) fixe sa largeur, en
+/// fraction de la figure, symétriquement autour du centre ; un seul signal, au
+/// relâchement, et le texte ne bouge pas.
+#[test]
+fn tirer_la_poignee_fixe_la_largeur() {
+    let banc = banc_avec_texte();
+    let context = contexte();
+    let mut view = GraphView::new();
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    let target = stokesforge_plot::AnnotationRef { panel: 0, index: 0 };
+
+    image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+    let (centre, taille, _) = view.annotation_screen_box(target).expect("texte tracé");
+    // Un clic sélectionne le texte.
+    image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![egui::Event::PointerMoved(centre), bouton(centre, true)],
+        0.1,
+    );
+    image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![bouton(centre, false)],
+        0.2,
+    );
+    assert_eq!(view.selected_annotation(), Some(target));
+
+    let poignee = centre + egui::vec2(taille.x / 2.0 + 3.0, 0.0);
+    let cible = centre + egui::vec2(150.0, 0.0);
+    let mut signaux = image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![egui::Event::PointerMoved(poignee), bouton(poignee, true)],
+        0.3,
+    );
+    for pas in 1..=5 {
+        let pos = poignee + (cible - poignee) * (pas as f32 / 5.0);
+        signaux.extend(image_avec(
+            &context,
+            &mut view,
+            &banc,
+            rect,
+            vec![egui::Event::PointerMoved(pos)],
+            0.3 + 0.05 * pas as f64,
+        ));
+    }
+    assert!(signaux.is_empty(), "un signal avant le relâchement");
+    signaux.extend(image_avec(
+        &context,
+        &mut view,
+        &banc,
+        rect,
+        vec![bouton(cible, false)],
+        1.0,
+    ));
+    let [stokesforge_render_egui::GraphEvent::AnnotationMoved { annotation, .. }] = &signaux[..]
+    else {
+        panic!("un seul signal attendu : {signaux:?}")
+    };
+    let largeur = annotation.width.expect("largeur fixée");
+    assert!((largeur - 0.5).abs() < 0.03, "largeur {largeur}");
+    assert_eq!((annotation.x, annotation.y), (16.0, 24.0));
+}
+
 /// Un double-clic sur un texte demande à l'éditer et ne réinitialise pas le
 /// zoom ; ailleurs, il garde son rôle (réinitialiser).
 #[test]

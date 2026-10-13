@@ -154,3 +154,26 @@ fn un_texte_dans_les_marges_est_dessine_la_ou_il_est_designe() {
         );
     }
 }
+
+/// Largeur fixée (#244) : la boîte tracée fait la fraction demandée de la
+/// figure (480 px ici), le texte long passe à la ligne (boîte plus haute),
+/// et sans largeur le texte reste sur une ligne.
+#[test]
+fn une_largeur_fixee_fait_passer_le_texte_a_la_ligne() {
+    let (project, mut panel) = projet();
+    let long = "Un texte bien trop long pour tenir sur une seule ligne dans la boîte";
+    panel.annotations[0].text = long.to_owned();
+    let libre = trace(&project, panel.clone()).panels[0].annotations[0];
+    panel.annotations[0].width = Some(0.25);
+    let boite = trace(&project, panel.clone()).panels[0].annotations[0];
+    assert!(
+        (i64::from(boite.size.0) - 120).abs() <= 2,
+        "largeur {:?}",
+        boite.size
+    );
+    assert!(boite.size.1 > libre.size.1, "{boite:?} contre {libre:?}");
+    // Le plafond est la figure.
+    panel.annotations[0].width = Some(7.0);
+    let plafonnee = trace(&project, panel).panels[0].annotations[0];
+    assert!(plafonnee.size.0 <= 482, "{plafonnee:?}");
+}

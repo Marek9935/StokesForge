@@ -818,6 +818,21 @@ pub(crate) struct AnnotationSpecRecord {
     /// Police du texte (issue #78) ; absente d'un fichier plus ancien.
     #[serde(default)]
     pub(crate) font: String,
+    /// Largeur en fraction de la figure (#244) ; absente = une ligne.
+    #[serde(default)]
+    pub(crate) width: Option<f64>,
+    /// Alignement dans la boîte (#244) ; absent = centré.
+    #[serde(default)]
+    pub(crate) align: TextAlignRecord,
+}
+
+/// [`stokesforge_plot::TextAlign`], à plat.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum TextAlignRecord {
+    Left,
+    #[default]
+    Center,
+    Right,
 }
 
 impl Default for PanelSpecRecord {

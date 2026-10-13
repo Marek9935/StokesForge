@@ -18,8 +18,8 @@ use crate::schema::{
     LegendPositionRecord, LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord,
     OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RoleRecord,
     SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord,
-    ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord, TextAnchorRecord, TextFontRecord,
-    TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord, TextAlignRecord, TextAnchorRecord,
+    TextFontRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -200,6 +200,26 @@ impl From<PlotTypeRecord> for PlotType {
             PlotTypeRecord::Histogram => PlotType::Histogram,
             PlotTypeRecord::ErrorBar => PlotType::ErrorBar,
             PlotTypeRecord::Unknown(raw) => PlotType::Unknown(raw),
+        }
+    }
+}
+
+impl From<stokesforge_plot::TextAlign> for TextAlignRecord {
+    fn from(value: stokesforge_plot::TextAlign) -> Self {
+        match value {
+            stokesforge_plot::TextAlign::Left => Self::Left,
+            stokesforge_plot::TextAlign::Center => Self::Center,
+            stokesforge_plot::TextAlign::Right => Self::Right,
+        }
+    }
+}
+
+impl From<TextAlignRecord> for stokesforge_plot::TextAlign {
+    fn from(value: TextAlignRecord) -> Self {
+        match value {
+            TextAlignRecord::Left => Self::Left,
+            TextAlignRecord::Center => Self::Center,
+            TextAlignRecord::Right => Self::Right,
         }
     }
 }
@@ -534,6 +554,8 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
                 size: annotation.size,
                 rotation: annotation.rotation,
                 font: annotation.font.clone(),
+                width: annotation.width,
+                align: annotation.align.into(),
             })
             .collect(),
         shapes: panel.shapes.iter().map(shape_to_record).collect(),
@@ -636,6 +658,8 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
                 size: annotation.size,
                 rotation: annotation.rotation,
                 font: annotation.font,
+                width: annotation.width,
+                align: annotation.align.into(),
             })
             .collect(),
         shapes: record.shapes.into_iter().map(record_to_shape).collect(),

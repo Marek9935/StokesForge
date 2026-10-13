@@ -264,7 +264,13 @@ struct AnnotationDrag {
     start_center: Pos2,
     /// Point d'appui du geste, en repère de la figure.
     press: Pos2,
+    /// Le geste tire une poignée de largeur (#244) au lieu de déplacer.
+    resize: bool,
 }
+
+/// Distance maximale, en points egui, à laquelle une poignée de largeur est
+/// saisie.
+const WIDTH_HANDLE_RADIUS: f32 = 7.0;
 
 /// Distance maximale, en pixels, à laquelle un point est encore « désigné »
 /// par le curseur (tâche R7.2). Au-delà, personne n'est sous la souris.
@@ -1079,6 +1085,25 @@ impl GraphView {
         Some((center, size, drawn.rotation as f32))
     }
 
+    /// Les deux poignées de largeur du texte libre `target`, au milieu de
+    /// ses bords gauche et droit (repère tourné), en points egui (#244).
+    fn width_handles(&self, target: AnnotationRef) -> Option<[Pos2; 2]> {
+        let (center, size, rotation) = self.annotation_screen_box(target)?;
+        let (sin, cos) = rotation.to_radians().sin_cos();
+        let half = size.x / 2.0 + 3.0;
+        let axis = egui::vec2(cos, -sin);
+        Some([center - axis * half, center + axis * half])
+    }
+
+    /// Vrai si `pos` (points egui) tombe sur une poignée de largeur.
+    fn width_handle_at(&self, target: AnnotationRef, pos: Pos2) -> bool {
+        self.width_handles(target).is_some_and(|handles| {
+            handles
+                .iter()
+                .any(|handle| handle.distance(pos) <= WIDTH_HANDLE_RADIUS)
+        })
+    }
+
     fn drawn_annotation(&self, target: AnnotationRef) -> Option<&DrawnAnnotation> {
         self.last
             .as_ref()?
@@ -1712,7 +1737,10 @@ impl GraphView {
         if self.annotation_drag.is_none() {
             // Le point de départ réel, comme pour le rectangle élastique.
             let origin = pos - response.drag_delta();
-            let Some(target) = self.annotation_at(origin) else {
+            let handle = self
+                .selected_annotation
+                .filter(|target| self.width_handle_at(*target, origin));
+            let Some(target) = handle.or_else(|| self.annotation_at(origin)) else {
                 return false;
             };
             let (Some(original), Some(drawn), Some(press)) = (
@@ -1731,6 +1759,7 @@ impl GraphView {
                 original,
                 start_center: Pos2::new(drawn.center.0 as f32, drawn.center.1 as f32),
                 press,
+                resize: handle.is_some(),
             });
         }
         let Some(drag) = self.annotation_drag.clone() else {
@@ -1739,6 +1768,25 @@ impl GraphView {
         let Some(current) = self.figure_position(pos) else {
             return true;
         };
+        if drag.resize {
+            // La poignée tirée fixe la demi-largeur : sa distance au centre,
+            // mesurée le long du texte (tourné), en fraction de la figure.
+            let Some(figure) = self.cache.key().map(|key| key.rect.width()) else {
+                return true;
+            };
+            let (sin, cos) = drag.original.effective_rotation().to_radians().sin_cos();
+            let along = (current - drag.start_center).dot(egui::vec2(cos as f32, -sin as f32));
+            let fraction =
+                f64::from(2.0 * along.abs() / figure).clamp(AnnotationSpec::MIN_WIDTH, 1.0);
+            self.set_annotation_preview(Some((
+                drag.target,
+                AnnotationSpec {
+                    width: Some(fraction),
+                    ..drag.original
+                },
+            )));
+            return true;
+        }
         let center = drag.start_center + (current - drag.press);
         let right = drag.original.axis == SeriesAxis::Right;
         let moved = self
@@ -1883,6 +1931,23 @@ impl GraphView {
                 corners.to_vec(),
                 Stroke::new(1.0, Color32::from_rgb(90, 150, 255)),
             ));
+            // Les poignées de largeur (#244), aux milieux des bords gauche
+            // et droit.
+            for handle in self
+                .selected_annotation
+                .and_then(|target| self.width_handles(target))
+                .into_iter()
+                .flatten()
+            {
+                let square = Rect::from_center_size(handle, egui::vec2(7.0, 7.0));
+                painter.rect_filled(square, 1.0, Color32::WHITE);
+                painter.rect_stroke(
+                    square,
+                    1.0,
+                    Stroke::new(1.0, Color32::from_rgb(90, 150, 255)),
+                    StrokeKind::Inside,
+                );
+            }
         }
 
         if let Some((center, size, rotation)) = self

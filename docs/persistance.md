@@ -176,6 +176,10 @@ panneau (issue #35) : `PanelSpecRecord::annotations`, un champ
 plus ancien ignore le champ (il le perd à la ré-écriture). Aller-retour tenu
 par `a_non_trivial_plot_spec_round_trips_intact`.
 
+Largeur et alignement d'un texte libre (#244) : `AnnotationSpecRecord::width`
+(`Option<f64>`) et `align` (`TextAlignRecord`), `#[serde(default)]` — un fichier plus
+ancien se relit sans largeur, centré. Même aller-retour.
+
 Idem pour les **objets graphiques** (issue #76) : `PanelSpecRecord::shapes`
 (`ShapeSpecRecord`, `ShapeKindRecord`), `#[serde(default)]` ; même aller-retour
 tenu par `a_non_trivial_plot_spec_round_trips_intact`.

@@ -814,6 +814,8 @@ fn non_trivial_spec(
                 rotation: -30.0,
                 font: "Fira Sans".to_string(),
                 visible: false,
+                width: Some(0.3),
+                align: stokesforge_plot::TextAlign::Right,
                 ..stokesforge_plot::AnnotationSpec::new("*seuil*", -0.25, 1e-3)
             },
         ],

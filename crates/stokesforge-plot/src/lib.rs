@@ -99,7 +99,7 @@ pub mod text_anchor;
 pub mod text_font;
 pub mod theme;
 
-pub use annotation::{AnnotationRef, AnnotationSpec};
+pub use annotation::{AnnotationRef, AnnotationSpec, TextAlign};
 pub use axis::{AxisScale, AxisSide, AxisSpec};
 pub use gradient::{gradient_colors, GradientPreset, GRADIENT_PRESETS};
 pub use legend::{LegendPosition, LegendSpec};

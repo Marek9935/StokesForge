@@ -191,6 +191,7 @@ l'interface, mais son mot est déjà fixé.
 | Auto | Auto | Valeur choisie par StokesForge d'après le contexte | Automatique, Défaut | G (Q9) |
 | Text | Texte | Texte libre ancré aux données, posé sur le graphique | Annotation, Texte libre | O (Q21) |
 | Font size (pt) / Rotation (°) | Taille (pt) / Rotation (°) | Réglages d'un texte | Angle | G |
+| Alignment (Left / Center / Right) | Alignement (Gauche / Centré / Droite) | Place du texte dans une boîte de largeur fixée (#244) | Justification | G |
 | Object | Objet | Rectangle, ellipse, ligne ou flèche posé sur le graphique, ancré aux données (« forme » est réservé au symbole) | Forme, Dessin, Shape | O (#76) |
 | Bring to Front / Send to Back | Amener devant / Envoyer derrière | Ordre d'empilement des objets | Premier plan, Arrière-plan (réservé au fond) | O (#76) |
 | Formula | Formule | Texte composé par Typst, entre `$…$` | Équation, LaTeX | — |
