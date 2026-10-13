@@ -32,14 +32,14 @@ use super::analysis_handles::calculation_handles;
 use super::dialogs::{modal_dialog, DialogOutcome};
 use super::graph_text_edit::{
     add_annotation_at, annotation_editor_id, annotation_editor_ui, open_annotation_editor,
-    open_legend_entry_editor, open_series_name_editor, open_text_editor, text_editor_id,
-    text_editor_ui, AnnotationEditor, ContextText, TextEditor,
+    open_group_name_editor_in_graph, open_legend_entry_editor, open_series_name_editor,
+    open_text_editor, text_editor_id, text_editor_ui, AnnotationEditor, ContextText, TextEditor,
 };
 use super::grid::keyboard_focus_outside_grid;
 use super::menu_sections::MenuSections;
 use super::object_manager_ui::{
-    apply_object_request, group_shortcuts, object_node_menu, open_group_name_editor,
-    select_manager_target, series_shortcuts, ObjectManagerRequest,
+    apply_object_request, group_shortcuts, object_node_menu, select_manager_target,
+    series_shortcuts, ObjectManagerRequest,
 };
 use super::shortcuts::SHORTCUT_EXPORT_GRAPH;
 use crate::color_picker::{saved_colors_id, SavedColorRequest};
@@ -345,12 +345,13 @@ pub(super) fn graph_view_contents(
                     if let Some(group) = view.selected_group() {
                         // Un groupe sélectionné (#197) : mêmes gestes qu'au
                         // clavier de l'Object Manager ; le renommage se fait
-                        // dans son arbre.
+                        // sur place dans le graphe (#206), l'arbre pouvant
+                        // être masqué ou replié.
                         let mut requests = Vec::new();
                         group_shortcuts(ui.ctx(), graph_id, group, &spec, actions, &mut requests);
                         for request in requests {
                             if let ObjectManagerRequest::RenameGroup(group) = request {
-                                open_group_name_editor(ui.ctx(), &spec, graph_id, group);
+                                open_group_name_editor_in_graph(ui.ctx(), view, &spec, group);
                             }
                         }
                         if ui.input_mut(|i| i.consume_shortcut(&super::shortcuts::KEY_DELETE)) {
@@ -2231,18 +2232,32 @@ pub(super) mod tests {
             "le groupe est déjà en bas"
         );
 
+        let mut f2_view = group_view();
         let (actions, context) = run(
-            &mut group_view(),
+            &mut f2_view,
             key(egui::Key::F2, egui::Modifiers::NONE),
             false,
         );
         assert!(actions.is_empty(), "F2 n'agit pas sur le modèle");
-        assert!(group_rename_pending(&context, graph, group));
+        // #206 : l'éditeur s'ouvre dans le graphe, pas dans l'arbre.
+        assert!(!group_rename_pending(&context, graph, group));
+        let editor: super::super::graph_text_edit::TextEditor = context
+            .data(|data| data.get_temp(text_editor_id(&f2_view)))
+            .expect("F2 ouvre l'éditeur de nom dans le graphe");
+        assert_eq!(
+            editor.target,
+            super::super::graph_text_edit::TextEditTarget::GroupName(group)
+        );
         // Témoin : F2 sur une série seule ne renomme pas son groupe.
         let mut view = GraphView::new();
         view.select_series(Some(SeriesRef::new(0, 1)), &spec);
         let (_, context) = run(&mut view, key(egui::Key::F2, egui::Modifiers::NONE), false);
         assert!(!group_rename_pending(&context, graph, group));
+        assert!(context
+            .data(|data| data
+                .get_temp::<super::super::graph_text_edit::TextEditor>(text_editor_id(&view)))
+            .is_some_and(|editor| editor.target
+                != super::super::graph_text_edit::TextEditTarget::GroupName(group)));
         session.shutdown().unwrap();
     }
 }

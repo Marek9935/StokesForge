@@ -2279,6 +2279,7 @@ le focus clavier au panneau : F2, Ctrl+flèches et Suppr agissent dès ce clic,
 sans glisser préalable (#126). Le trait coloré et le nom de la série offrent
 les mêmes gestes (sélection, clic droit, double-clic et glisser, #151).
 Supprimer une série ne supprime aucune colonne de données ni les autres
+F2 sur un groupe sélectionné dans la figure ouvre l'éditeur de son nom dans la figure (sur la légende), arbre masqué ou replié compris (#206).
 courbes ; Annuler/Rétablir restaure sa place et ses réglages. Un clic ailleurs
 rend ce focus.
 

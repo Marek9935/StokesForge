@@ -145,12 +145,14 @@ impl StokesForgeApp {
                 let target = editor
                     .as_ref()
                     .map(|editor| match editor.target {
-                        TextEditTarget::Title(target) => target,
-                        TextEditTarget::LegendEntry(address) => TextTarget::Legend {
+                        TextEditTarget::Title(target) => Some(target),
+                        TextEditTarget::LegendEntry(address) => Some(TextTarget::Legend {
                             panel: address.panel,
-                        },
+                        }),
+                        // Un nom de groupe n'a pas de police propre.
+                        TextEditTarget::GroupName(_) => None,
                     })
-                    .or_else(|| view.selected_text())?;
+                    .unwrap_or_else(|| view.selected_text())?;
                 let font = target.font(&spec)?;
                 let default_size = match target {
                     TextTarget::Title => stokesforge_render_egui::TITLE_SIZE,
@@ -315,6 +317,7 @@ impl StokesForgeApp {
                         panel: address.panel,
                     }
                 }
+                TextEditTarget::GroupName(_) => return false,
             }),
             (None, selected) if !annotation_editing => selected,
             _ => None,

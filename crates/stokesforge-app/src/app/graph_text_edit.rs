@@ -56,6 +56,8 @@ pub(super) enum TextEditTarget {
     Title(TextTarget),
     /// Le nom, en légende, d'une série.
     LegendEntry(stokesforge_plot::SeriesRef),
+    /// Le nom d'un groupe de séries (#206).
+    GroupName(stokesforge_plot::SeriesGroupRef),
 }
 
 /// L'éditeur sur place d'un titre ou d'un nom de légende (issue #53) : un
@@ -213,6 +215,37 @@ pub(super) fn open_series_name_editor(
     );
 }
 
+/// Ouvre l'éditeur sur le nom d'un groupe, posé sur l'entrée de légende de
+/// son premier membre (#206) : F2 sur un groupe sélectionné dans le graphe
+/// marche même quand l'Object Manager est masqué ou replié.
+pub(super) fn open_group_name_editor_in_graph(
+    ctx: &egui::Context,
+    view: &GraphView,
+    spec: &stokesforge_plot::PlotSpec,
+    graph_group: stokesforge_plot::SeriesGroupRef,
+) {
+    let Some(panel) = spec.panels.get(graph_group.panel) else {
+        return;
+    };
+    let Some(first) = panel.group_members(graph_group.group).first().copied() else {
+        return;
+    };
+    let anchor = view
+        .legend_entry_screen_box(graph_group.panel, first)
+        .unwrap_or((
+            view.display_rect()
+                .map_or(ctx.content_rect().center(), |r| r.center()),
+            egui::vec2(180.0, 24.0),
+        ));
+    start_text_editor(
+        ctx,
+        view,
+        TextEditTarget::GroupName(graph_group),
+        crate::object_manager::group_title(panel, graph_group.group),
+        anchor,
+    );
+}
+
 fn start_text_editor(
     ctx: &egui::Context,
     view: &GraphView,
@@ -311,6 +344,11 @@ pub(super) fn text_editor_ui(
                 TextEditTarget::LegendEntry(series) => Action::SetLegendEntryName {
                     graph,
                     series,
+                    name: editor.buffer.clone(),
+                },
+                TextEditTarget::GroupName(group) => Action::RenameSeriesGroup {
+                    graph,
+                    group,
                     name: editor.buffer.clone(),
                 },
             });
