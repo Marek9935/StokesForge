@@ -843,6 +843,43 @@ pub fn over_format_bar(ctx: &egui::Context, pos: Pos2) -> bool {
         .is_some_and(|rect| rect.contains(pos))
 }
 
+/// Les trois boutons d'alignement du texte (#244), partagés avec la barre de
+/// l'éditeur sur place (#246). `current` allume celui de la boîte visée.
+pub(crate) fn align_buttons(
+    ui: &mut egui::Ui,
+    current: Option<TextAlign>,
+    disabled_hint: Option<String>,
+    requests: &mut Vec<ToolbarRequest>,
+) {
+    let enabled = disabled_hint.is_none();
+    for (icon, align, label) in [
+        (
+            Icon::AlignLeft,
+            TextAlign::Left,
+            tr!("plot-text-align-left"),
+        ),
+        (
+            Icon::AlignCenter,
+            TextAlign::Center,
+            tr!("plot-text-align-center"),
+        ),
+        (
+            Icon::AlignRight,
+            TextAlign::Right,
+            tr!("plot-text-align-right"),
+        ),
+    ] {
+        let hint = tr!("plot-text-align", "hint");
+        let hint = match &disabled_hint {
+            None => hint,
+            Some(why) => format!("{hint}\n{why}"),
+        };
+        if tool_button(ui, icon, label, Some(hint), enabled, current == Some(align)) {
+            requests.push(ToolbarRequest::FormatText(TextFormat::Align(align)));
+        }
+    }
+}
+
 /// Pourquoi les boutons de la barre de format sont grisés : sans graphe au
 /// premier plan, le même conseil que la barre « Outils » (#108) ; avec un
 /// graphe, ce qu'il faut sélectionner.
@@ -1023,34 +1060,8 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
         }
 
         ui.separator();
-        for (icon, align, label) in [
-            (
-                Icon::AlignLeft,
-                TextAlign::Left,
-                tr!("plot-text-align-left"),
-            ),
-            (
-                Icon::AlignCenter,
-                TextAlign::Center,
-                tr!("plot-text-align-center"),
-            ),
-            (
-                Icon::AlignRight,
-                TextAlign::Right,
-                tr!("plot-text-align-right"),
-            ),
-        ] {
-            let hint = tr!("plot-text-align", "hint");
-            let hint = if enabled {
-                hint
-            } else {
-                format!("{hint}\n{}", text_disabled_hint(env))
-            };
-            let current = env.text_style.align == Some(align);
-            if tool_button(ui, icon, label, Some(hint), enabled, current) {
-                requests.push(ToolbarRequest::FormatText(TextFormat::Align(align)));
-            }
-        }
+        let why = (!enabled).then(|| text_disabled_hint(env));
+        align_buttons(ui, env.text_style.align, why, requests);
         ui.separator();
         for (icon, format, label, hint) in [
             (
