@@ -116,10 +116,16 @@ fn apply_pending_format(ctx: &egui::Context, field: egui::Id, buffer: &mut Strin
     };
     let mut state = egui::TextEdit::load_state(ctx, field).unwrap_or_default();
     let length = buffer.chars().count();
-    let selection = state.cursor.char_range().map_or(length..length, |range| {
-        let [start, end] = range.sorted_cursors();
-        start.index.0..end.index.0
+    // egui réduit la sélection d'un champ peint sans le focus (#242) : on
+    // prend celle que le champ avait tant qu'il l'avait.
+    let kept = ctx.data(|data| data.get_temp::<SelectionKept>(field.with("selection_kept")));
+    let selection = kept.map(|SelectionKept(range)| range).unwrap_or_else(|| {
+        state.cursor.char_range().map_or(length..length, |range| {
+            let [start, end] = range.sorted_cursors();
+            start.index.0..end.index.0
+        })
     });
+    let selection = selection.start.min(length)..selection.end.min(length);
     let done = crate::text_format::apply(buffer, selection, &format);
     *buffer = done.text;
     state.cursor.set_char_range(Some(CCursorRange::two(
@@ -127,7 +133,37 @@ fn apply_pending_format(ctx: &egui::Context, field: egui::Id, buffer: &mut Strin
         CCursor::new(done.selection.end),
     )));
     state.store(ctx, field);
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            field.with("selection_kept"),
+            SelectionKept(done.selection.clone()),
+        )
+    });
     ctx.memory_mut(|memory| memory.request_focus(field));
+}
+
+/// La dernière sélection du champ quand il avait le focus, en caractères.
+#[derive(Clone)]
+struct SelectionKept(std::ops::Range<usize>);
+
+/// Retient la sélection du champ `field` s'il a le focus cette image, pour
+/// que le clic suivant sur la barre de format la retrouve (voir
+/// [`apply_pending_format`]).
+fn keep_selection(ctx: &egui::Context, field: egui::Id) {
+    if !ctx.memory(|memory| memory.has_focus(field)) {
+        return;
+    }
+    let Some(range) = egui::TextEdit::load_state(ctx, field).and_then(|s| s.cursor.char_range())
+    else {
+        return;
+    };
+    let [start, end] = range.sorted_cursors();
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            field.with("selection_kept"),
+            SelectionKept(start.index.0..end.index.0),
+        )
+    });
 }
 
 pub(super) fn text_editor_id(view: &GraphView) -> egui::Id {
@@ -305,6 +341,7 @@ pub(super) fn text_editor_ui(
                     inplace_edit::FocusLoss::Ignored,
                     None,
                 );
+                keep_selection(ui.ctx(), field_id);
                 editor.focus = false;
                 match shown.end {
                     Some(
@@ -559,6 +596,7 @@ pub(super) fn annotation_editor_ui(
                     .hint_text(tr!("plot-text-placeholder")),
             );
             inplace_edit::measured(ui.ctx(), field_id, &editor.draft.text);
+            keep_selection(ui.ctx(), field_id);
             // Le contrat commun, sauf le clic ailleurs : l'éditeur porte des
             // réglages (taille, rotation, couleur) qui prennent le focus sans
             // finir la saisie, `outside` décide (plus bas).
@@ -1001,5 +1039,49 @@ mod tests {
             }]
         );
         assert!(!open_now(&ctx, &view));
+    }
+}
+
+#[cfg(test)]
+mod selection_entre_deux_formats {
+    use super::*;
+    use crate::text_format::TextFormat;
+
+    fn image(ctx: &egui::Context, field: egui::Id, buffer: &mut String, blur: bool) {
+        let _ = crate::app::test_support::image(ctx, vec![], |ui| {
+            if blur {
+                ui.ctx().memory_mut(|m| m.surrender_focus(field));
+            }
+            apply_pending_format(ui.ctx(), field, buffer);
+            let _ = inplace_edit::show(
+                ui,
+                field,
+                egui::TextEdit::singleline(buffer),
+                inplace_edit::Opening::SelectAll,
+                inplace_edit::FocusLoss::Ignored,
+                None,
+            );
+            keep_selection(ui.ctx(), field);
+        });
+    }
+
+    /// #242 : B puis I sur la même sélection — egui réduit la sélection d'un champ
+    /// peint sans focus, le champ la retient donc lui-même.
+    #[test]
+    fn la_selection_survit_a_deux_formats() {
+        let ctx = crate::app::test_support::contexte();
+        let field = egui::Id::new("champ");
+        let mut buffer = "λ (nm)".to_owned();
+        for _ in 0..3 {
+            image(&ctx, field, &mut buffer, false);
+        }
+        for format in [TextFormat::Bold, TextFormat::Italic] {
+            // Le clic sur la barre : le champ perd le focus, la demande est posée.
+            image(&ctx, field, &mut buffer, true);
+            ctx.data_mut(|d| d.insert_temp(pending_format_id(), Some(format)));
+            image(&ctx, field, &mut buffer, false);
+            image(&ctx, field, &mut buffer, false);
+        }
+        assert_eq!(buffer, "#strong[#emph[λ (nm)]]");
     }
 }
