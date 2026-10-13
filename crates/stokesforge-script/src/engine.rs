@@ -81,6 +81,10 @@ struct Shared {
     running: AtomicBool,
     /// Vrai quand une interruption a été demandée pour l'exécution en cours.
     interrupt_requested: AtomicBool,
+    /// Numéro de l'exécution en cours (ou de la dernière) ; incrémenté au
+    /// début de chaque script. Un message d'interruption porte le numéro
+    /// qu'il visait et ne frappe aucun autre script.
+    generation: AtomicU64,
     /// Identifiant Python (`threading.get_ident()`) du fil de script, `0` tant
     /// que l'interpréteur n'a pas démarré.
     py_thread_ident: AtomicU64,
@@ -191,8 +195,9 @@ enum Message {
 
 /// Message envoyé au fil d'interruption.
 enum InterruptMessage {
-    /// Lever une exception asynchrone dans le fil de script.
-    Now,
+    /// Lever une exception asynchrone dans le fil de script, si c'est encore
+    /// l'exécution portant ce numéro.
+    Now(u64),
     /// Arrêter le fil d'interruption.
     Stop,
 }
@@ -335,7 +340,8 @@ impl ScriptEngine {
         self.shared
             .interrupt_requested
             .store(true, Ordering::Release);
-        let _ = self.interrupts.send(InterruptMessage::Now);
+        let generation = self.shared.generation.load(Ordering::Acquire);
+        let _ = self.interrupts.send(InterruptMessage::Now(generation));
     }
 
     /// Vrai pendant qu'un script s'exécute.
@@ -479,6 +485,7 @@ fn execute(source: &str, globals: &Py<PyDict>, shared: &Shared) -> ScriptOutcome
     // demandée alors que `is_running()` est déjà vrai ne peut plus être
     // effacée par cette ligne.
     shared.interrupt_requested.store(false, Ordering::Release);
+    shared.generation.fetch_add(1, Ordering::AcqRel);
 
     Python::attach(|py| {
         clear_pending_async_exception(py, shared);
@@ -573,7 +580,7 @@ fn interrupt_main(messages: &mpsc::Receiver<InterruptMessage>, shared: &Arc<Shar
     while let Ok(message) = messages.recv() {
         match message {
             InterruptMessage::Stop => break,
-            InterruptMessage::Now => {
+            InterruptMessage::Now(target) => {
                 let ident = shared.py_thread_ident.load(Ordering::Acquire);
                 if ident == 0 {
                     continue;
@@ -587,7 +594,12 @@ fn interrupt_main(messages: &mpsc::Receiver<InterruptMessage>, shared: &Arc<Shar
                     // laisserait passer une interruption qui exploserait dans
                     // le script suivant, ou pire, au milieu d'un `import` de
                     // l'hôte.
-                    if !shared.running.load(Ordering::Acquire) {
+                    // Le numéro écarte aussi le script **suivant** : un `Now`
+                    // resté en file après une interruption déjà servie par
+                    // `check_interrupt` ne vise plus l'exécution courante.
+                    if !shared.running.load(Ordering::Acquire)
+                        || shared.generation.load(Ordering::Acquire) != target
+                    {
                         return;
                     }
                     let exception = py.get_type::<PyKeyboardInterrupt>();
