@@ -617,3 +617,46 @@ fn interrupt_main(messages: &mpsc::Receiver<InterruptMessage>, shared: &Arc<Shar
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use stokesforge_core::Project;
+    use stokesforge_python::interpreter::{self, EmbeddedPython};
+    use stokesforge_session::Session;
+
+    /// #215 : un `Now` resté en file après un script fini ne frappe pas le
+    /// script suivant. On le poste à la main, une fois le suivant démarré.
+    #[test]
+    fn interruption_perimee_ne_frappe_pas_le_script_suivant() {
+        let actor = Session::spawn(Project::new("Course").unwrap(), None).unwrap();
+        let prefix = std::env::var_os(interpreter::HOME_ENV)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../vendor/python/extracted/python")
+            });
+        let engine = Arc::new(
+            ScriptEngine::spawn(actor.handle(), EmbeddedPython::with_home(prefix)).unwrap(),
+        );
+        assert!(engine.run("x = 1").unwrap().error.is_none());
+        let stale = engine.shared.generation.load(Ordering::Acquire);
+
+        let poster = {
+            let engine = Arc::clone(&engine);
+            thread::spawn(move || {
+                while !engine.is_running() {
+                    thread::yield_now();
+                }
+                let _ = engine.interrupts.send(InterruptMessage::Now(stale));
+            })
+        };
+        let outcome = engine
+            .run("import time\nfor _ in range(30):\n    time.sleep(0.01)")
+            .unwrap();
+        poster.join().unwrap();
+        assert!(outcome.error.is_none(), "{:?}", outcome.error);
+        assert!(!outcome.interrupted);
+    }
+}
