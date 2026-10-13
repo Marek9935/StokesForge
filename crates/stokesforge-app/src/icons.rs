@@ -94,6 +94,8 @@ pub enum Icon {
     /// Barre Edit (#238).
     Undo,
     Redo,
+    /// La poignée d'une ligne que l'on réordonne au glisser.
+    Grip,
 }
 
 macro_rules! svg {
@@ -308,6 +310,11 @@ const VARIANTS: &[(Icon, IconRole, Svg)] = &[
         Icon::Redo,
         IconRole::Neutral,
         svg!("arrow-clockwise.neutral.svg"),
+    ),
+    (
+        Icon::Grip,
+        IconRole::Neutral,
+        svg!("dots-six-vertical.neutral.svg"),
     ),
 ];
 

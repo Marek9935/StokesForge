@@ -89,6 +89,54 @@ impl ObjectManagerSettings {
     }
 }
 
+/// Un format offert au presse-papiers par Copy Graph (#149).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CopyFormat {
+    Svg,
+    Png,
+    Pdf,
+}
+
+impl CopyFormat {
+    pub const ALL: [Self; 3] = [Self::Svg, Self::Png, Self::Pdf];
+}
+
+/// Une ligne de la liste des formats de copie : le format, offert ou non.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CopyFormatEntry {
+    pub format: CopyFormat,
+    pub on: bool,
+}
+
+/// L'ordre et l'état par défaut : les trois formats, offerts.
+pub fn default_copy_formats() -> Vec<CopyFormatEntry> {
+    CopyFormat::ALL
+        .map(|format| CopyFormatEntry { format, on: true })
+        .to_vec()
+}
+
+/// Remet une liste lue (ou saisie) en état : un format répété ne compte que la
+/// première fois, un format absent est ajouté en fin, offert, et au moins un
+/// format reste offert (copier sans rien offrir n'aurait pas de sens).
+pub fn normalize_copy_formats(entries: &[CopyFormatEntry]) -> Vec<CopyFormatEntry> {
+    let mut list: Vec<CopyFormatEntry> = Vec::new();
+    for entry in entries {
+        if list.iter().all(|kept| kept.format != entry.format) {
+            list.push(*entry);
+        }
+    }
+    for format in CopyFormat::ALL {
+        if list.iter().all(|kept| kept.format != format) {
+            list.push(CopyFormatEntry { format, on: true });
+        }
+    }
+    if list.iter().all(|entry| !entry.on) {
+        list[0].on = true;
+    }
+    list
+}
+
 /// Taille et position d'un dialogue modal (F8, #228), en points : coin haut
 /// gauche et taille. Mémorisée à sa fermeture, reprise à sa prochaine
 /// ouverture (ramenée dans l'écran par le dialogue).
@@ -146,6 +194,10 @@ struct PreferencesFile {
     /// Gardée brute : une entrée illisible n'efface pas les autres.
     #[serde(default)]
     dialogs: Option<serde_json::Value>,
+    /// Les formats de Copy Graph, dans l'ordre offert (#148, #149). Gardée
+    /// brute : une liste illisible retombe sur le défaut.
+    #[serde(default)]
+    copy_formats: Option<serde_json::Value>,
 }
 
 /// Les préférences de l'utilisateur, et le fichier d'où elles viennent.
@@ -158,6 +210,7 @@ pub struct Preferences {
     toolbars: Option<serde_json::Value>,
     analysis_keep_results: bool,
     dialogs: BTreeMap<String, DialogGeometry>,
+    copy_formats: Vec<CopyFormatEntry>,
     path: Option<PathBuf>,
 }
 
@@ -201,6 +254,10 @@ impl Preferences {
             toolbars: file.toolbars,
             analysis_keep_results: file.analysis_keep_results.unwrap_or(false),
             dialogs: read_dialogs(file.dialogs),
+            copy_formats: file
+                .copy_formats
+                .and_then(|value| serde_json::from_value::<Vec<CopyFormatEntry>>(value).ok())
+                .map_or_else(default_copy_formats, |list| normalize_copy_formats(&list)),
             path,
         }
     }
@@ -297,6 +354,19 @@ impl Preferences {
     pub fn save_analysis_keep_results(&mut self, keep: bool) -> std::io::Result<()> {
         self.analysis_keep_results = keep;
         self.save_field("analysis_keep_results", keep.into())
+    }
+
+    /// Les formats de Copy Graph, dans l'ordre où ils sont offerts.
+    pub fn copy_formats(&self) -> &[CopyFormatEntry] {
+        &self.copy_formats
+    }
+
+    /// Mémorise l'ordre et l'état des formats de copie (remis en état par
+    /// [`normalize_copy_formats`]) sans remplacer les autres préférences.
+    pub fn save_copy_formats(&mut self, entries: &[CopyFormatEntry]) -> std::io::Result<()> {
+        self.copy_formats = normalize_copy_formats(entries);
+        let value = serde_json::to_value(&self.copy_formats).map_err(std::io::Error::other)?;
+        self.save_field("copy_formats", value)
     }
 
     /// La taille et la position mémorisées de chaque sorte de dialogue (F8),
@@ -720,6 +790,55 @@ mod object_manager_tests {
         assert_eq!(
             Preferences::load_from(Some(path)).svg_text_mode(),
             SvgTextMode::Text
+        );
+    }
+
+    #[test]
+    fn les_formats_de_copie_se_relisent_dans_leur_ordre() {
+        let dossier = tempfile::tempdir().unwrap();
+        let path = dossier.path().join("preferences.json");
+        let mut prefs = Preferences::load_from(Some(path.clone()));
+        assert_eq!(prefs.copy_formats(), default_copy_formats());
+        let choisis = [
+            CopyFormatEntry {
+                format: CopyFormat::Pdf,
+                on: true,
+            },
+            CopyFormatEntry {
+                format: CopyFormat::Svg,
+                on: false,
+            },
+            CopyFormatEntry {
+                format: CopyFormat::Png,
+                on: true,
+            },
+        ];
+        prefs.save_copy_formats(&choisis).unwrap();
+        assert_eq!(
+            Preferences::load_from(Some(path)).copy_formats(),
+            choisis.as_slice()
+        );
+    }
+
+    #[test]
+    fn une_liste_de_formats_abimee_est_remise_en_etat() {
+        let png_seul = [CopyFormatEntry {
+            format: CopyFormat::Png,
+            on: false,
+        }];
+        let remise = normalize_copy_formats(&png_seul);
+        assert_eq!(remise.len(), 3, "les formats absents reviennent");
+        assert_eq!(remise[0].format, CopyFormat::Png);
+        assert!(remise.iter().any(|e| e.on), "au moins un format offert");
+        let doublon = [png_seul[0], png_seul[0]];
+        assert_eq!(normalize_copy_formats(&doublon).len(), 3);
+
+        let dossier = tempfile::tempdir().unwrap();
+        let path = dossier.path().join("preferences.json");
+        std::fs::write(&path, r#"{"copy_formats":"n'importe quoi"}"#).unwrap();
+        assert_eq!(
+            Preferences::load_from(Some(path)).copy_formats(),
+            default_copy_formats()
         );
     }
 }

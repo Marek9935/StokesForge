@@ -9541,6 +9541,45 @@ fn copier_la_figure_prepare_svg_png_pdf_sans_toucher_au_modele() {
     assert!(!state.can_undo(), "aucune entrée d'historique");
 }
 
+/// Preferences › Export règle la copie : l'ordre des représentations est celui
+/// de la liste, un format décoché n'est pas offert, et le message ne nomme que
+/// ceux qui le sont.
+#[test]
+fn copier_la_figure_suit_l_ordre_et_le_choix_des_preferences() {
+    use stokesforge_app::preferences::{CopyFormat, CopyFormatEntry};
+    use stokesforge_clipboard::mime;
+    let dir = tempfile::tempdir().expect("dossier temporaire");
+    let (_session, mut state, graph) = demo_with_graph(dir.path());
+    state.dispatch(Action::SetCopyFormats(vec![
+        CopyFormatEntry {
+            format: CopyFormat::Pdf,
+            on: true,
+        },
+        CopyFormatEntry {
+            format: CopyFormat::Svg,
+            on: false,
+        },
+        CopyFormatEntry {
+            format: CopyFormat::Png,
+            on: true,
+        },
+    ]));
+    state.dispatch(Action::CopyGraphFigure {
+        spec: Box::new(graph_spec(&state, graph)),
+    });
+    let status = state.status().expect("un message");
+    assert!(!status.is_error(), "{}", status.text);
+    assert_eq!(
+        status.text,
+        stokesforge_app::tr!("status-graph-copied", formats = "PDF, PNG")
+    );
+    let reps = state.take_figure_clipboard().expect("la figure est prête");
+    assert_eq!(
+        reps.iter().map(|r| r.mime).collect::<Vec<_>>(),
+        [mime::PDF, mime::PNG]
+    );
+}
+
 /// La figure copiée est celle du spec cadré qu'on donne : un zoom change les
 /// octets (même témoin que l'export vers un fichier).
 #[test]
