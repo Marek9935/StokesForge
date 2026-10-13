@@ -58,6 +58,7 @@ use std::path::PathBuf;
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
 use stokesforge_analysis::correct::CorrectOp;
 use stokesforge_analysis::fit::FitSpec;
 use stokesforge_analysis::model::Model;
@@ -81,6 +82,11 @@ const FORMULES: [&str; 13] = [
 
 #[derive(Debug, Clone)]
 enum Pas {
+    /// Correction définitive d’une colonne ordinaire (#212).
+    RemplacerCorrection {
+        feuille: usize,
+        colonne: usize,
+    },
     Saisir {
         feuille: usize,
         colonne: usize,
@@ -290,6 +296,7 @@ fn pas() -> impl Strategy<Value = Pas> {
         1 => f.clone().prop_map(|feuille| Pas::CollerFeuille { feuille }),
         1 => f.clone().prop_map(|feuille| Pas::CollerClasseur { feuille }),
         1 => f.clone().prop_map(|feuille| Pas::SupprimerFeuille { feuille }),
+        3 => (f.clone(), 0usize..8).prop_map(|(feuille, colonne)| Pas::RemplacerCorrection { feuille, colonne }),
         4 => (f, 0usize..8, 0usize..8, any::<bool>(), any::<bool>()).prop_map(
             |(feuille, x, y, correction, automatique)| Pas::AjouterCalcul {
                 feuille,
@@ -316,6 +323,7 @@ fn pas() -> impl Strategy<Value = Pas> {
 
 /// Toutes les natures de pas, pour le contrôle de couverture.
 const NOMS_DE_PAS: &[&str] = &[
+    "RemplacerCorrection",
     "Saisir",
     "SaisirTexte",
     "PoserFormule",
@@ -349,6 +357,7 @@ const NOMS_DE_PAS: &[&str] = &[
 /// Nom de la nature d'un pas (une entrée de [`NOMS_DE_PAS`]).
 fn nom(pas: &Pas) -> &'static str {
     match pas {
+        Pas::RemplacerCorrection { .. } => "RemplacerCorrection",
         Pas::Saisir { .. } => "Saisir",
         Pas::SaisirTexte { .. } => "SaisirTexte",
         Pas::PoserFormule { .. } => "PoserFormule",
@@ -476,6 +485,57 @@ fn colonnes(tree: &Tree, feuille: Option<NodeId>) -> Vec<NodeId> {
         .unwrap_or_default()
 }
 
+/// Choix dans l’ordre de la feuille, sans dépendre de la table de hachage.
+/// Le calcul et la commande restent les mêmes que dans les clients réels.
+fn commande_correction(tree: &Tree, colonnes: &[NodeId], rang: usize) -> Option<Command> {
+    let candidates: Vec<_> = colonnes
+        .iter()
+        .copied()
+        .filter(|id| {
+            tree.node(*id).and_then(|n| n.as_column()).is_some_and(|c| {
+                c.column_type() == ColumnType::Numeric
+                    && c.meta().formula.is_none()
+                    && tree.calculation_of_column(*id).is_none()
+            })
+        })
+        .collect();
+    let y = *candidates.get(rang % candidates.len().max(1))?;
+    let version = tree.node(y)?.as_column()?.version();
+    let operation = Operation::Baseline {
+        method: BaselineMethod::Constant { point: (0.0, 1.5) },
+        op: BaselineOp::Subtract,
+        keep_baseline: false,
+    };
+    let series = vec![SeriesRef {
+        x: None,
+        y,
+        sigma: None,
+    }];
+    let result = compute(tree, &operation, &series, None).ok()?;
+    Some(Command::ReplaceAnalysisData {
+        draft: CalculationDraft {
+            operation,
+            series,
+            aux: None,
+            outputs: result
+                .columns
+                .into_iter()
+                .map(|c| OutputDraft {
+                    series: c.series,
+                    key: c.key,
+                    index: c.index,
+                    meta: ColumnMeta::default(),
+                    data: c.data,
+                })
+                .collect(),
+            results: result.results,
+            keep_results: true,
+            auto_recalc: false,
+        },
+        expected_versions: vec![(y, version)],
+    })
+}
+
 /// Les versions de toutes les colonnes de l'arbre.
 fn versions(tree: &Tree) -> HashMap<NodeId, u64> {
     tree.iter()
@@ -490,6 +550,10 @@ fn commande(pas: &Pas, tree: &Tree, rang: usize) -> Option<Command> {
     let feuille = |i: usize| choisir(&sheets, i);
     let colonne = |f: usize, c: usize| choisir(&colonnes(tree, feuille(f)), c);
     match *pas {
+        Pas::RemplacerCorrection {
+            feuille: f,
+            colonne: c,
+        } => commande_correction(tree, &colonnes(tree, feuille(f)), c),
         Pas::Saisir {
             feuille: f,
             colonne: c,
@@ -769,6 +833,35 @@ fn jouer(
     nom: &str,
 ) -> Reponse {
     match pas {
+        Pas::RemplacerCorrection { .. } => {
+            let Some(Command::ReplaceAnalysisData {
+                draft,
+                expected_versions,
+            }) = commande
+            else {
+                return Reponse::Refuse;
+            };
+            let Ok(snapshot) = handle.snapshot() else {
+                return Reponse::Refuse;
+            };
+            // Les deux compteurs divergent lorsque le mode complet réécrit
+            // des formules inchangées. Le résultat commun ne change pas ;
+            // seule sa garde de concurrence prend les versions de sa jumelle.
+            let expected_versions: Option<Vec<_>> = expected_versions
+                .iter()
+                .map(|(id, _)| Some((*id, snapshot.tree.node(*id)?.as_column()?.version())))
+                .collect();
+            let Some(expected_versions) = expected_versions else {
+                return Reponse::Refuse;
+            };
+            Reponse::de(
+                handle.execute(Command::ReplaceAnalysisData {
+                    draft: draft.clone(),
+                    expected_versions,
+                }),
+                |_| true,
+            )
+        }
         Pas::RecalculerPerimes => Reponse::de(handle.recalculate(&[]), |_| true),
         Pas::Annuler => Reponse::de(handle.undo(), Option::is_some),
         Pas::Retablir => Reponse::de(handle.redo(), Option::is_some),

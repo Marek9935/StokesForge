@@ -120,7 +120,7 @@ Selection ▸ ne subsiste que dans Edit.
 | Grille vide, zone blanche | Add Column |
 | Onglet de feuille, bande vide | Add Worksheet ─ Rename · Duplicate ─ Delete |
 
-### Colonne : Analysis (#181)
+### Colonnes et courbes : Analysis (#181, #210)
 
 Le clic droit d'un en-tête de colonne a **une seule entrée** `Analysis…` dans
 la section « créer » (après `Plot ▸` et Add Column) : elle ouvre la fenêtre
@@ -132,6 +132,16 @@ d'analyse, dont la liste « Analysis type » choisit la famille (#202, décision
 Correct… · Integrate… · Fit ▸ · Peaks and Deconvolution ▸ ─ Recalculate Out of
 Date. Les entrées sont **grisées** (info-bulle `.disabled`) tant qu'aucune
 colonne Y n'est visée, jamais absentes.
+
+Le clic droit d'une courbe ou d'un groupe, dans le graphique comme dans
+l'Object Manager, propose aussi `Analysis…`, parmi ses actions principales.
+Le menu Analysis du haut prend la courbe ou le groupe sélectionné quand un
+graphique est actif. Un groupe analyse tous ses membres, dans l'ordre du
+tracé ; les séries construites depuis une ligne de feuille sont grisées.
+Les X/Y sont ceux du tracé, y compris dans un classeur caché : l'appariement
+des colonnes de la feuille n'intervient pas. L'aperçu reprend le cadrage et
+les styles de la source ; Add to graph est coché et les résultats rejoignent
+son calque et son groupe.
 
 ### Barre de menus
 

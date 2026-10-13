@@ -170,6 +170,36 @@ L'interface du traitement mathématique est répartie ainsi :
   (`preferences.json`, `analysis_keep_results`) ; l'en-tête d'une colonne pas à
   jour porte l'icône `Icon::Stale` (Phosphor `warning`, rôle neutre) à gauche de
   sa lettre teintée.
+- Analyse depuis une courbe (#210) : le clic droit de la figure et de
+  l’Object Manager partagent l’entrée « Analysis… ». Le menu Analysis du haut
+  utilise aussi la courbe ou le groupe sélectionné quand le graphique est actif.
+  Le formulaire conserve les références X/Y de chaque série, son style et son
+  cadrage ; il n’apparie pas de nouveau les colonnes selon leur position dans la
+  feuille. Un groupe ouvre un lot, les données d’un classeur caché restent
+  analysables. « Add to graph » est coché au départ et les colonnes produites
+  rejoignent le calque et le groupe de leur courbe source.
+  L’aperçu conserve aussi l’échelle logarithmique et l’inversion des axes,
+  avec les gestes en coordonnées des données. Pour des barres ou un
+  histogramme, il relie les Y bruts à analyser avec le style de la source ;
+  il ne calcule pas d’histogramme des résultats.
+- Ligne de base constante (#211) : « Constant… » est la première méthode du
+  menu Baseline. Le fond plat se fixe par un point unique (libre, ou aimanté avec
+  Maj et moyenne locale) éditable en X/Y, ou par la moyenne d’une zone inclusive
+  de X. Une nouvelle zone remplace la précédente ; seuls les couples X/Y finis
+  entrent dans sa moyenne. Subtract et Divide réutilisent les mêmes opérations
+  que les autres lignes de base.
+- Remplacement des données originales (#212) : la sortie d’une ligne de base
+  ou d’une correction par référence peut écraser ses colonnes Y ordinaires.
+  La colonne conserve sa longueur et ses cellules non exploitables ; les
+  courbes qui la tracent suivent les nouvelles valeurs. Les colonnes à formule
+  ou calculées restent protégées. Plusieurs courbes qui partagent une source
+  déclenchent une confirmation. La commande `ReplaceAnalysisData` écrit les
+  données et une trace immuable `CorrectionRecord` dans une même entrée
+  annulable, sans lien de calcul ni colonne produite ; les réglages ne se
+  rouvrent pas. Résultats conserve les corrections successives, y compris
+  après une saisie manuelle, et le fichier `.stf` les enregistre. Le petit
+  crayon neutre dans l’en-tête renvoie à ces réglages par son info-bulle ;
+  Annuler retire les valeurs corrigées et la trace du geste ensemble.
 - Le choix du type d'analyse se fait dans la fenêtre (liste « Analysis type »,
   `family_chooser`) tant qu'elle crée un calcul ; un calcul rouvert garde sa
   famille (#202).

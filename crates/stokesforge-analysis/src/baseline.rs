@@ -1,4 +1,5 @@
-//! Lignes de base (#185) : droite par deux points, polynôme ajusté sur des
+//! Lignes de base (#185, #211) : constante par un point ou une zone, droite
+//! par deux points, polynôme ajusté sur des
 //! zones de fond, ou courbe par points d'ancrage (segments ou spline).
 //!
 //! Ce module ne fabrique que la **fonction** ligne de base ; soustraire ou
@@ -19,6 +20,10 @@ pub enum Interpolation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BaselineMethod {
+    /// Fond plat fixé par un point libre ou aimanté.
+    Constant { point: (f64, f64) },
+    /// Fond plat : moyenne des Y dans une seule plage inclusive de X.
+    ConstantZone { zone: (f64, f64) },
     /// Droite passant par deux points.
     Line { p1: (f64, f64), p2: (f64, f64) },
     /// Polynôme de degré `degree` ajusté par moindres carrés sur les points de
@@ -161,6 +166,63 @@ fn eval_spline(pts: &[(f64, f64)], second: &[f64], x: f64) -> f64 {
 /// zones (les points de fond).
 pub fn build(method: &BaselineMethod, series: &Series) -> Result<Baseline, AnalysisError> {
     match method {
+        BaselineMethod::Constant { point } if !point.0.is_finite() || !point.1.is_finite() => {
+            Err(AnalysisError::InvalidParameter {
+                name: "point".into(),
+            })
+        }
+        BaselineMethod::Constant { point } => Ok(Baseline {
+            shape: Shape::Poly {
+                coeffs: vec![point.1],
+                center: 0.0,
+                scale: 1.0,
+            },
+            points_used: 1,
+        }),
+        BaselineMethod::ConstantZone { zone } if !zone.0.is_finite() || !zone.1.is_finite() => {
+            Err(AnalysisError::InvalidParameter {
+                name: "zone".into(),
+            })
+        }
+        BaselineMethod::ConstantZone { zone } => {
+            let values: Vec<f64> = series
+                .x
+                .iter()
+                .zip(&series.y)
+                .filter(|(x, y)| {
+                    x.is_finite()
+                        && y.is_finite()
+                        && **x >= zone.0.min(zone.1)
+                        && **x <= zone.0.max(zone.1)
+                })
+                .map(|(_, y)| *y)
+                .collect();
+            if values.is_empty() {
+                return Err(AnalysisError::ZonesTooSmall {
+                    found: 0,
+                    needed: 1,
+                    degree: 0,
+                });
+            }
+            // Moyenne en ligne : évite la somme intermédiaire qui déborde.
+            let mean = values.iter().enumerate().fold(0.0_f64, |mean, (i, y)| {
+                let n = (i + 1) as f64;
+                if mean.signum() == y.signum() {
+                    mean + (y - mean) / n
+                } else {
+                    // La différence entre deux signes opposés peut déborder.
+                    mean * (i as f64 / n) + y / n
+                }
+            });
+            Ok(Baseline {
+                shape: Shape::Poly {
+                    coeffs: vec![mean],
+                    center: 0.0,
+                    scale: 1.0,
+                },
+                points_used: values.len(),
+            })
+        }
         BaselineMethod::Line { p1, p2 } => {
             if p1.0 == p2.0 {
                 return Err(AnalysisError::DuplicateAnchor);
@@ -278,6 +340,46 @@ mod tests {
             .map(|&v| 2.0 + 0.05 * v + 10.0 * (-(v - 50.0).powi(2) / 20.0).exp())
             .collect();
         Series::new(x, y)
+    }
+
+    #[test]
+    fn la_constante_n_a_aucune_pente_et_la_zone_prend_la_moyenne() {
+        let s = Series::new(
+            vec![0.0, 1.0, 2.0, 3.0, 4.0],
+            vec![100.0, 2.0, f64::NAN, 6.0, 100.0],
+        );
+        let point = build(&BaselineMethod::Constant { point: (2.0, 7.0) }, &s).unwrap();
+        assert_eq!(point.as_line(), Some((0.0, 7.0)));
+        for x in [-100.0, 0.0, 200.0] {
+            assert_eq!(point.eval(x), 7.0);
+        }
+        let zone = build(&BaselineMethod::ConstantZone { zone: (3.0, 1.0) }, &s).unwrap();
+        assert_eq!(zone.as_line(), Some((0.0, 4.0)));
+        assert_eq!(zone.points_used, 2);
+        assert_ne!(point.eval(2.0), zone.eval(2.0));
+        assert!(build(&BaselineMethod::ConstantZone { zone: (10.0, 11.0) }, &s).is_err());
+        assert!(build(
+            &BaselineMethod::Constant {
+                point: (0.0, f64::NAN)
+            },
+            &s
+        )
+        .is_err());
+        assert!(build(
+            &BaselineMethod::ConstantZone {
+                zone: (0.0, f64::INFINITY)
+            },
+            &s
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn moyenne_de_zone_ne_deborde_pas_pour_un_fond_fini_tres_grand() {
+        let s = Series::new(vec![0.0, 1.0, 2.0], vec![f64::MAX; 3]);
+        let b = build(&BaselineMethod::ConstantZone { zone: (0.0, 2.0) }, &s).unwrap();
+        assert!(b.eval(1.0).is_finite());
+        assert!((b.eval(1.0) / f64::MAX - 1.0).abs() < 1e-15);
     }
 
     #[test]

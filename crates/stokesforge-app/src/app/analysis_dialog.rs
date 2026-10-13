@@ -15,7 +15,9 @@ use stokesforge_core::number_format::{format_exact, format_with_uncertainty};
 
 use super::analysis_forms::{form_body, value_row};
 use super::analysis_preview::{preview, reset_view, PreviewOutcome};
-use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
+use super::dialogs::{
+    modal_confirm, modal_dialog_with, ConfirmOutcome, DialogFooter, DialogOutcome,
+};
 use super::form::{choice, ChoiceOption};
 use crate::analysis::{issue_message, kind_title, value_label, value_unit, PreviewTool};
 use crate::icons::{icon_button, Icon, IconRole};
@@ -335,6 +337,33 @@ pub(super) fn calculation_delete_window(
             actions.push(Action::ConfirmDeleteCalculation(CalculationDelete::Cancel));
         }
         DialogOutcome::Open => {}
+    }
+}
+
+/// Une source partagée modifie toutes ses courbes : Cancel garde le formulaire.
+pub(super) fn analysis_replace_window(
+    ctx: &egui::Context,
+    state: &AppState,
+    actions: &mut Vec<Action>,
+) {
+    if !state.pending_analysis_replacement() {
+        return;
+    }
+    let outcome = modal_confirm(
+        ctx,
+        egui::Id::new("stokesforge_replace_analysis"),
+        &tr!("analysis-replace-title"),
+        egui::vec2(520.0, 170.0),
+        &tr!("analysis-replace-accept"),
+        &tr!("analysis-output-replace-hint"),
+        |ui| {
+            ui.label(tr!("analysis-replace-confirm"));
+        },
+    );
+    match outcome {
+        ConfirmOutcome::Confirm => actions.push(Action::ConfirmAnalysisReplacement(true)),
+        ConfirmOutcome::Cancel => actions.push(Action::ConfirmAnalysisReplacement(false)),
+        ConfirmOutcome::Open => {}
     }
 }
 

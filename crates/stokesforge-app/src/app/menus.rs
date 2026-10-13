@@ -91,7 +91,7 @@ impl StokesForgeApp {
                     if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
                         self.graph_menu(ui, ctx, graph, actions, &mut object_requests);
                     }
-                    self.analysis_menu(ui, actions);
+                    self.analysis_menu(ui, actions, active_graph(active_tab_kind(active_tab)));
                     self.view_menu(ui, actions);
                     self.window_menu(ui);
                     help_menu(ui, actions);
@@ -347,9 +347,14 @@ impl StokesForgeApp {
         }
     }
 
-    /// Menu Analysis (#181) : toujours présent ; ses entrées se grisent tant
-    /// qu'aucune colonne Y n'est sélectionnée dans le classeur actif.
-    fn analysis_menu(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+    /// Menu Analysis (#181, #210) : la sélection du graphe actif prend
+    /// priorité ; sinon les colonnes Y du classeur. Sans cible : grisé.
+    fn analysis_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        actions: &mut Vec<Action>,
+        graph: Option<NodeId>,
+    ) {
         let book = self.active_book();
         let sheet = book.and_then(|book| self.state.selected_sheet_in(book));
         let columns = sheet
@@ -359,11 +364,28 @@ impl StokesForgeApp {
                     .map(|selection| selection.columns(self.state.tree(), sheet))
             })
             .unwrap_or_default();
+        let graph_target = graph.and_then(|graph| {
+            let spec = crate::state::current_plot_spec(self.state.tree(), graph)?;
+            self.read_graph_view(graph, |view| {
+                let sources = selected_manager_target(view)
+                    .map(|target| super::object_manager_ui::analysis_sources(&spec, target))
+                    .unwrap_or_default();
+                (graph, sources, view.framed_spec(&spec))
+            })
+        });
         ui.menu_button(tr!("menu-analysis"), |ui| {
-            let target = sheet.map(|sheet| super::analysis_menu::AnalysisTarget {
-                sheet,
-                columns: &columns,
-            });
+            let target = match graph_target.as_ref() {
+                Some((graph, series, spec)) => Some(super::analysis_menu::AnalysisTarget::Graph {
+                    graph: *graph,
+                    series,
+                    spec,
+                }),
+                None if graph.is_some() => None,
+                None => sheet.map(|sheet| super::analysis_menu::AnalysisTarget::Columns {
+                    sheet,
+                    columns: &columns,
+                }),
+            };
             super::analysis_menu::analysis_menu_contents(ui, &self.state, actions, target);
         });
     }
@@ -1214,6 +1236,28 @@ mod tests {
     /// Menu Analysis (#181) : grisé tant qu'aucune colonne Y n'est visée, puis
     /// chaque entrée ouvre la fenêtre sur sa famille et sa méthode ;
     /// « Recalculate Out of Date » reste grisé quand tout est à jour.
+    #[test]
+    fn le_menu_analyse_ouvre_la_serie_du_graphe_actif() {
+        let (_session, mut app, graph) = banc();
+        let tab = Some(Tab::Graph(graph));
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.with_graph_view(graph, |view| {
+            view.select_series(Some(stokesforge_plot::SeriesRef::new(0, 0)), &spec)
+        });
+        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
+        let entry = active(&menu, &tr!("action-analysis-integrate"));
+        assert!(entry.enabled);
+        assert_eq!(
+            clique(&mut app, &ctx, tab, entry.center),
+            vec![Action::OpenGraphAnalysis {
+                preset: crate::analysis::Preset::Integrate,
+                graph,
+                series: vec![stokesforge_plot::SeriesRef::new(0, 0)],
+                spec: Box::new(spec),
+            }]
+        );
+    }
+
     #[test]
     fn le_menu_analyse_se_grise_sans_colonne_y_et_ouvre_la_fenetre() {
         use crate::analysis::Preset;

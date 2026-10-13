@@ -501,6 +501,13 @@ pub enum Action {
         /// Colonnes sélectionnées au moment du geste.
         columns: Vec<NodeId>,
     },
+    /// Ouvre l'analyse sur les couples exacts du graphe et son cadrage de vue.
+    OpenGraphAnalysis {
+        preset: crate::analysis::Preset,
+        graph: NodeId,
+        series: Vec<stokesforge_plot::SeriesRef>,
+        spec: Box<PlotSpec>,
+    },
     /// Rouvre un calcul existant dans la fenêtre d'analyse.
     EditCalculation(NodeId),
     /// Fin d'un glisser de poignée sur le graphe (#199) : le calcul reçoit la
@@ -516,6 +523,8 @@ pub enum Action {
     /// Valide la fenêtre d'analyse : un calcul neuf ou modifié, une seule
     /// entrée d'historique.
     ApplyAnalysis,
+    /// Réponse au remplacement d'une source tracée par plusieurs courbes.
+    ConfirmAnalysisReplacement(bool),
     /// Recalcule des calculs, hors historique ; liste vide : tous les calculs
     /// périmés.
     RecalculateCalculations(Vec<NodeId>),
@@ -2647,6 +2656,7 @@ pub struct AppState {
     analysis_keep_results: bool,
     /// Calcul dont la suppression attend confirmation (M8).
     pending_calculation_delete: Option<NodeId>,
+    pending_analysis_replacement: bool,
     /// L'export (ou la copie) d'un graphe qui montre des séries pas à jour, en
     /// attente de la réponse de l'utilisateur (#198).
     pending_stale_export: Option<Action>,
@@ -2772,6 +2782,7 @@ impl AppState {
             analysis: None,
             analysis_keep_results: keep_results_default,
             pending_calculation_delete: None,
+            pending_analysis_replacement: false,
             pending_stale_export: None,
             import_job: None,
             recalc_since: None,
@@ -4601,6 +4612,12 @@ impl AppState {
                 sheet,
                 columns,
             } => self.open_analysis(&preset, sheet, &columns),
+            Action::OpenGraphAnalysis {
+                preset,
+                graph,
+                series,
+                spec,
+            } => self.open_graph_analysis(&preset, graph, &series, *spec),
             Action::EditCalculation(id) => self.edit_calculation(id),
             Action::MoveCalculationHandle {
                 calculation,
@@ -4608,8 +4625,12 @@ impl AppState {
                 x,
                 y,
             } => self.move_calculation_handle(calculation, slot, x, y),
-            Action::CloseAnalysis => self.analysis = None,
+            Action::CloseAnalysis => {
+                self.analysis = None;
+                self.pending_analysis_replacement = false;
+            }
             Action::ApplyAnalysis => self.apply_analysis(),
+            Action::ConfirmAnalysisReplacement(accept) => self.confirm_analysis_replacement(accept),
             Action::RecalculateCalculations(ids) => self.recalculate_calculations(&ids),
             Action::DetachCalculation(id) => self.detach_calculation(id),
             Action::RequestDeleteCalculation(id) => self.request_delete_calculation(id),
@@ -5035,6 +5056,7 @@ impl AppState {
                     self.renaming_sheet = None;
                     self.pending_row_drop = None;
                     self.pending_calculation_delete = None;
+                    self.pending_analysis_replacement = false;
                     self.pending_stale_export = None;
                     self.pending_overwrite = None;
                     self.object_clipboard_output = None;

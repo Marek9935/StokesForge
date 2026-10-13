@@ -102,6 +102,41 @@ impl AppState {
         ));
     }
 
+    /// Le graphe désigne ses propres X/Y : aucun appariement de feuille ici.
+    pub(super) fn open_graph_analysis(
+        &mut self,
+        preset: &Preset,
+        graph: NodeId,
+        sources: &[stokesforge_plot::SeriesRef],
+        spec: stokesforge_plot::PlotSpec,
+    ) {
+        let series: Option<Vec<SeriesRef>> = sources
+            .iter()
+            .map(|source| {
+                let curve = spec.panels.get(source.panel)?.series.get(source.index)?;
+                // Une série de ligne a une autre sémantique que les colonnes ;
+                // elle ne doit jamais analyser silencieusement toute sa colonne.
+                if curve.row.is_some() || self.snapshot.tree.node(curve.y).is_none() {
+                    return None;
+                }
+                Some(SeriesRef {
+                    x: curve.x,
+                    y: curve.y,
+                    sigma: curve.y_error,
+                })
+            })
+            .collect();
+        let Some(series) = series.filter(|s| !s.is_empty()) else {
+            self.fail(tr!("status-analysis-no-series"));
+            return;
+        };
+        let mut form = AnalysisForm::new(preset, series, self.analysis_keep_results);
+        form.graph = Some(graph);
+        form.add_to_graph = true;
+        form.graph_source = Some((spec, sources.to_vec()));
+        self.analysis = Some(form);
+    }
+
     /// Rouvre un calcul existant (« Edit Calculation… »).
     pub(super) fn edit_calculation(&mut self, id: NodeId) {
         match self.snapshot.tree.calculation(id) {
@@ -138,10 +173,57 @@ impl AppState {
     /// Valide la fenêtre : un calcul neuf ou la modification de l'existant,
     /// en une entrée d'historique. La fenêtre reste ouverte si le calcul
     /// échoue.
+    pub fn pending_analysis_replacement(&self) -> bool {
+        self.pending_analysis_replacement
+    }
+
+    pub(super) fn confirm_analysis_replacement(&mut self, accept: bool) {
+        if !self.pending_analysis_replacement {
+            return;
+        }
+        self.pending_analysis_replacement = false;
+        if accept {
+            self.apply_analysis_confirmed(true);
+        }
+    }
+
     pub(super) fn apply_analysis(&mut self) {
+        self.apply_analysis_confirmed(false);
+    }
+
+    fn apply_analysis_confirmed(&mut self, confirmed: bool) {
         let Some(form) = self.analysis.clone() else {
             return;
         };
+        if form.replace_original {
+            if let Some(reason) = form.replacement_disabled(&self.snapshot.tree) {
+                self.fail(reason);
+                return;
+            }
+            let ys: Vec<NodeId> = form.series.iter().map(|s| s.y).collect();
+            let graphs: Vec<_> = self
+                .graphs()
+                .iter()
+                .filter_map(|(id, _)| current_plot_spec(&self.snapshot.tree, *id))
+                .collect();
+            let shared = ys.iter().any(|y| {
+                graphs
+                    .iter()
+                    .map(|s| {
+                        s.panels
+                            .iter()
+                            .flat_map(|p| p.series.iter())
+                            .filter(|s| s.y == *y)
+                            .count()
+                    })
+                    .sum::<usize>()
+                    > 1
+            });
+            if shared && !confirmed {
+                self.pending_analysis_replacement = true;
+                return;
+            }
+        }
         let draft = match form.draft(&self.snapshot.tree) {
             Ok(draft) => draft,
             Err(issue) => {
@@ -149,11 +231,43 @@ impl AppState {
                 return;
             }
         };
-        let command = match form.editing {
-            Some(id) => Command::UpdateCalculation { id, draft },
-            None => Command::AddCalculation { draft },
+        let command = if form.replace_original {
+            let mut inputs: Vec<NodeId> = draft
+                .series
+                .iter()
+                .flat_map(|s| [Some(s.y), s.x, s.sigma].into_iter().flatten())
+                .collect();
+            if let Some(aux) = &draft.aux {
+                inputs.push(aux.y);
+                inputs.extend(aux.x);
+            }
+            inputs.sort();
+            inputs.dedup();
+            let expected_versions = inputs
+                .into_iter()
+                .filter_map(|id| {
+                    self.snapshot
+                        .tree
+                        .node(id)
+                        .and_then(|n| n.as_column())
+                        .map(|c| (id, c.version()))
+                })
+                .collect();
+            Command::ReplaceAnalysisData {
+                draft,
+                expected_versions,
+            }
+        } else {
+            match form.editing {
+                Some(id) => Command::UpdateCalculation { id, draft },
+                None => Command::AddCalculation { draft },
+            }
         };
-        let target = match (form.editing, form.add_to_graph, form.graph) {
+        let target = match (
+            form.editing,
+            form.add_to_graph && !form.replace_original,
+            form.graph,
+        ) {
             (None, true, Some(graph)) => Some(graph),
             _ => None,
         };
@@ -225,7 +339,11 @@ impl AppState {
                     .position(|p| p.series.iter().any(|s| ys.contains(&s.y)))
             })
             .unwrap_or(0);
-        self.add_series_to_graph(graph, panel, columns, None);
+        if form.graph == Some(graph) && form.graph_source.is_some() {
+            self.add_graph_analysis_outputs(graph, form, &before);
+        } else {
+            self.add_series_to_graph(graph, panel, columns, None);
+        }
         if self.last_action_failed() {
             let _ = self.handle.abort_macro();
             self.refresh();
@@ -238,6 +356,58 @@ impl AppState {
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
         self.refresh();
+    }
+
+    /// Le résultat rejoint exactement le calque et le groupe de sa source,
+    /// avec son X explicite (l'ordre de la feuille ne sert pas d'appariement).
+    fn add_graph_analysis_outputs(
+        &mut self,
+        graph: NodeId,
+        form: &AnalysisForm,
+        before: &[NodeId],
+    ) {
+        let Some((source_spec, sources)) = &form.graph_source else {
+            return;
+        };
+        let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
+            self.fail(tr!("error-graph-gone"));
+            return;
+        };
+        let Some((_, calc)) = self
+            .snapshot
+            .tree
+            .calculations()
+            .iter()
+            .find(|(id, _)| !before.contains(id))
+        else {
+            return;
+        };
+        for output in calc
+            .live_outputs(&self.snapshot.tree)
+            .filter(|o| o.key != "residuals")
+        {
+            let (Some(column), Some(source)) = (output.column, sources.get(output.series)) else {
+                continue;
+            };
+            let Some(curve) = source_spec
+                .panels
+                .get(source.panel)
+                .and_then(|p| p.series.get(source.index))
+            else {
+                continue;
+            };
+            let Some(panel) = spec.panels.get_mut(source.panel) else {
+                continue;
+            };
+            let mut result = curve.clone();
+            result.y = column;
+            result.y_error = None;
+            result.name.clear();
+            result.visible = true;
+            // Aucun nouveau groupe : le numéro appartient au calque source.
+            panel.series.push(result);
+        }
+        self.execute(Command::SetPlotSpec { graph, spec });
     }
 
     /// Recalcule `ids` ; vide : tous les calculs périmés.
@@ -303,6 +473,24 @@ impl AppState {
 }
 
 impl AppState {
+    /// Les traces de correction du classeur, dans leur ordre de création.
+    pub fn correction_traces(&self, book: NodeId, sheet: Option<NodeId>) -> Vec<NodeId> {
+        let tree = &self.snapshot.tree;
+        tree.correction_traces()
+            .iter()
+            .filter(|(_, trace)| {
+                trace.series.iter().any(|s| {
+                    let parent = tree.node(s.y).and_then(Node::parent);
+                    parent.is_some_and(|p| {
+                        tree.node(p).and_then(Node::parent) == Some(book)
+                            && sheet.is_none_or(|wanted| wanted == p)
+                    })
+                })
+            })
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
     /// Les calculs qui gardent leurs résultats (« Keep in Results ») pour le
     /// classeur `book` — ceux dont la première série vit dans une de ses
     /// feuilles —, restreints à `sheet` quand elle est donnée (volet Results,

@@ -24,7 +24,10 @@ use std::collections::HashMap;
 
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngAlgorithm, TestRng, TestRunner};
+use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
+use stokesforge_analysis::ops::Operation;
 use stokesforge_commands::{Command, History};
+use stokesforge_core::{compute, CalculationDraft, OutputDraft, SeriesRef, Tree};
 use stokesforge_core::{Column, ColumnMeta, ColumnType, ColumnValues, NodeId, Project, ValueBlock};
 use tempfile::TempDir;
 
@@ -36,6 +39,10 @@ const NOMS: [&str; 4] = ["P", "Q", "R", "S"];
 
 #[derive(Debug, Clone)]
 enum Pas {
+    /// Correction définitive d’une colonne ordinaire (#212).
+    RemplacerCorrection {
+        colonne: usize,
+    },
     Cellules {
         colonne: usize,
         debut: usize,
@@ -84,6 +91,7 @@ enum Pas {
 
 fn pas() -> impl Strategy<Value = Pas> {
     prop_oneof![
+        (0usize..6).prop_map(|colonne| Pas::RemplacerCorrection { colonne }),
         (0usize..6, 0usize..6, 0usize..4).prop_map(|(colonne, debut, combien)| Pas::Cellules {
             colonne,
             debut,
@@ -102,6 +110,57 @@ fn pas() -> impl Strategy<Value = Pas> {
         Just(Pas::Annuler),
         Just(Pas::Retablir),
     ]
+}
+
+/// Choix dans l’ordre de la feuille, sans dépendre de la table de hachage.
+/// Le calcul et la commande restent les mêmes que dans les clients réels.
+fn commande_correction(tree: &Tree, colonnes: &[NodeId], rang: usize) -> Option<Command> {
+    let candidates: Vec<_> = colonnes
+        .iter()
+        .copied()
+        .filter(|id| {
+            tree.node(*id).and_then(|n| n.as_column()).is_some_and(|c| {
+                c.column_type() == ColumnType::Numeric
+                    && c.meta().formula.is_none()
+                    && tree.calculation_of_column(*id).is_none()
+            })
+        })
+        .collect();
+    let y = *candidates.get(rang % candidates.len().max(1))?;
+    let version = tree.node(y)?.as_column()?.version();
+    let operation = Operation::Baseline {
+        method: BaselineMethod::Constant { point: (0.0, 1.5) },
+        op: BaselineOp::Subtract,
+        keep_baseline: false,
+    };
+    let series = vec![SeriesRef {
+        x: None,
+        y,
+        sigma: None,
+    }];
+    let result = compute(tree, &operation, &series, None).ok()?;
+    Some(Command::ReplaceAnalysisData {
+        draft: CalculationDraft {
+            operation,
+            series,
+            aux: None,
+            outputs: result
+                .columns
+                .into_iter()
+                .map(|c| OutputDraft {
+                    series: c.series,
+                    key: c.key,
+                    index: c.index,
+                    meta: ColumnMeta::default(),
+                    data: c.data,
+                })
+                .collect(),
+            results: result.results,
+            keep_results: true,
+            auto_recalc: false,
+        },
+        expected_versions: vec![(y, version)],
+    })
 }
 
 /// Runner à graine fixe, sans fichier de régression sur le disque du dépôt.
@@ -157,6 +216,9 @@ impl Monde {
         let colonnes = self.colonnes();
         let choisir = |i: usize| colonnes.get(i % colonnes.len().max(1)).copied();
         let commande = match pas {
+            Pas::RemplacerCorrection { colonne } => {
+                commande_correction(self.project.tree(), &colonnes, *colonne)
+            }
             Pas::Cellules {
                 colonne,
                 debut,

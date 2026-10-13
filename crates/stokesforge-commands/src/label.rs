@@ -211,6 +211,8 @@ pub enum HistoryLabel {
     SetSavedColors,
     /// Enregistrement d'un calcul d'analyse (#181).
     AddCalculation(OperationKind),
+    /// Correction définitive des valeurs originales.
+    ReplaceAnalysisData(OperationKind),
     /// Modification des paramètres d'un calcul d'analyse.
     UpdateCalculation(OperationKind),
     /// Retrait d'un calcul d'analyse.
@@ -368,6 +370,9 @@ impl fmt::Display for HistoryLabel {
             HistoryLabel::SetPlotSpec { name: None } => f.write_str("Edit Graph"),
             HistoryLabel::EditPlotSpec(kind) => kind.fmt(f),
             HistoryLabel::SetSavedColors => f.write_str("Edit Saved Colors"),
+            HistoryLabel::ReplaceAnalysisData(kind) => {
+                write!(f, "Replace Original Data ({})", kind_title(*kind))
+            }
             HistoryLabel::AddCalculation(kind) => {
                 write!(f, "Add {} Calculation", kind_title(*kind))
             }

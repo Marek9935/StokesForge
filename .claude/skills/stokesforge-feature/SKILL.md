@@ -745,3 +745,13 @@ contextuel et Graph › Selection partagent `object_node_menu`
 série reste dans son groupe ; le rang final est décidé par `series_drop`,
 puis une seule `Action::ReorderSeries` part au relâchement. Les propriétés
 conservent le calque exact dans `PlotEdit::selected_panel`.
+
+## Correction définitive d'une analyse (#212)
+
+Réutiliser `ReplaceAnalysisData` pour remplacer la source Y d'une ligne de base
+ou d'une correction par référence. La trace immuable est un `CorrectionRecord`
+à part des calculs ; valeurs et trace sont annulées ensemble. Exiger les
+versions de toutes les entrées lues, préserver longueur/lignes manquantes,
+refuser les corrections contradictoires d'un même Y. Dans un formulaire,
+griser le choix avec `ChoiceOption::disabled` et sa raison ; la confirmation
+des sources partagées réutilise `modal_confirm`.

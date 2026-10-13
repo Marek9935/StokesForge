@@ -214,6 +214,18 @@ réglage, fichier ancien = actif) ; `stokesforge-app/src/app/stale_export.rs`
 (les quatre réponses de la confirmation, SVG grisé `#9a9a9a` ou non, graphe sans
 avertissement exporté sans demander, ligne de l'Object Manager marquée).
 
+### Ligne de base constante (#211)
+
+`stokesforge-analysis/src/baseline.rs` et `tests/ops.rs` comparent le point
+libre à la moyenne d’une zone, gardent une pente exactement nulle, vérifient
+les bornes inclusives, les lignes écartées et la division par zéro. Les
+réglages non finis et la zone sans donnée sont refusés.
+`stokesforge-app/tests/analysis.rs` vérifie le point et la zone uniques,
+leurs poignées et la réouverture du calcul ;
+`stokesforge-persistence/tests/calculations.rs` traverse le `.stf` avec les
+deux variantes. `stokesforge-script/tests/analysis.rs` exerce les mêmes
+méthodes via `pyst`, leurs refus et l’annulation du script (feature `python`).
+
 ### Mutants éprouvés (#181, calculs d'analyse)
 
 Même mécanisme, autre mémo (`CalcFingerprint`, `CalcMemo`). `b22` joue les pas
@@ -261,6 +273,15 @@ nomme les comportements.
 3. Si elle peut viser une colonne-formule (comme `DeleteCells` et
    `SetColumnType` aujourd'hui), un cas nommé : la colonne est réécrite par sa
    formule.
+
+Le remplacement par une correction (#212) est exercé par le pas
+`RemplacerCorrection` dans `b14` et `b22` : colonne numérique ordinaire,
+constante soustraite par `compute`, commande `ReplaceAnalysisData` avec les
+versions de ses entrées. `b14` vérifie aussi la trace dans l’aller-retour `.stf` ;
+`b22` exige au moins vingt passes pour ce geste, en conservant son oracle
+ciblé/complet et son témoin « sans rapport ». Les gardes de concurrence
+prennent les versions propres à chaque jumelle, dont les compteurs peuvent
+diverger ; le résultat calculé soumis aux deux reste identique.
 
 **C. Un nouveau calcul dérivé réutilise le mécanisme** (analyses #184).
 
@@ -426,3 +447,15 @@ méthode de `PanelSpec` qu'ils déclenchent : un test qui appelle
 | F2 n'ouvre plus le renommage du groupe | idem |
 | `.stf` : noms de groupe vides gardés au chargement | `un_nom_de_groupe_vide_est_ecarte_au_chargement` (`stokesforge-persistence/src/convert.rs`) |
 | `.stf` : `#[serde(default)]` retiré de `group_names` (ancien fichier illisible) | `un_calque_sans_noms_de_groupe_se_relit_avec_ses_groupes` |
+
+### Remplacement définitif d'une correction (#212)
+
+`commands/tests/calculations.rs` tient l'atomicité données/trace, undo/redo,
+longueur et positions, conflit de versions, refus des colonnes en lecture seule
+et corrections contradictoires sur un Y partagé. `persistence/tests/calculations.rs`
+garde les traces successives et l'allocateur après rechargement.
+`session/tests/analyse.rs` vérifie que les calculs dépendants suivent le
+remplacement et son annulation. `app/tests/analysis_state.rs` exerce la
+confirmation des sources partagées ; `app::form::tests` refuse les options
+grisées dans les radios et les listes. `script/tests/analysis.rs` vérifie le
+retour de la poignée originale et la macro Script avec `replace_original=True`.

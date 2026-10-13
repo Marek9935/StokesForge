@@ -189,7 +189,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::file_picker::{FilePicker, PickRequest};
-use analysis_dialog::{analysis_window, calculation_delete_window};
+use analysis_dialog::{analysis_replace_window, analysis_window, calculation_delete_window};
 use file_drop::{
     begin_file_drop, finish_file_drop, open_project_in_new_window, remember_recent_imports,
 };
@@ -1181,6 +1181,7 @@ impl StokesForgeApp {
         }
         analysis_window(ctx, &mut self.state, actions);
         calculation_delete_window(ctx, &self.state, actions);
+        analysis_replace_window(ctx, &self.state, actions);
         stale_export_window(ctx, &self.state, actions);
         dialogs::sync_dialogs(ctx, &self.state, actions);
     }

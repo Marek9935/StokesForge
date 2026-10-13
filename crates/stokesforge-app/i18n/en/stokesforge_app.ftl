@@ -1625,3 +1625,27 @@ busy-stop = Stop
 status-import-stopped = Import stopped. Nothing was imported
 status-recalculating = Recalculating…
 status-recalc-stopped = Recalculation stopped. The change was undone
+
+analysis-baseline-constant = Constant…
+    .hint = Remove a flat background from one point or the mean of a zone
+analysis-baseline-shape-constant = Constant (point)
+analysis-baseline-shape-constant-zone = Constant (zone mean)
+analysis-baseline-hint-constant = Click one point. Shift snaps to the curve using the local mean. Edit X and Y below.
+analysis-baseline-hint-constant-zone = Drag one X range. Its mean Y defines a flat background; a new range replaces the previous one.
+
+history-replace-analysis-data = Replace Original Data ({ $kind })
+
+analysis-output-new-column = New column
+analysis-output-replace-original = Replace original data
+analysis-output-replace-hint = The correction replaces the source values. Its settings remain in Results. Undo restores the original data.
+disabled-analysis-replace-operation = Only a new baseline or reference correction can replace original data.
+disabled-analysis-replace-readonly = Calculated columns and columns with a formula cannot be replaced.
+analysis-replace-title = Replace original data
+analysis-replace-confirm = Several curves use these data. They will all show the corrected values.
+analysis-replace-accept = Replace
+analysis-correction-trace = Modified data: { $kind }
+
+# Repère discret des corrections définitives (#212).
+grid-column-modified = Original data replaced by a correction. See Results for the correction settings
+
+analysis-needs-column-curve = Analysis requires a curve drawn from a column

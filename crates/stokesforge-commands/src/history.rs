@@ -1071,6 +1071,13 @@ impl History {
                 project.remove(id)?;
                 Ok(structural(before, project, label))
             }
+            Command::ReplaceAnalysisData {
+                draft,
+                expected_versions,
+            } => {
+                project.replace_analysis_data(draft, &expected_versions)?;
+                Ok(structural(before, project, label))
+            }
             Command::AddCalculation { draft } => {
                 project.add_calculation(draft)?;
                 Ok(structural(before, project, label))
@@ -1357,6 +1364,7 @@ impl History {
             | Command::AddMatrix { .. }
             | Command::AddNote { .. }
             | Command::RemoveNode { .. }
+            | Command::ReplaceAnalysisData { .. }
             | Command::AddCalculation { .. }
             | Command::UpdateCalculation { .. }
             | Command::RemoveCalculation { .. } => {
@@ -1995,6 +2003,7 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::AddMatrix { .. }
         | Command::AddNote { .. }
         | Command::RemoveNode { .. }
+        | Command::ReplaceAnalysisData { .. }
         | Command::AddCalculation { .. }
         | Command::UpdateCalculation { .. }
         | Command::RemoveCalculation { .. }

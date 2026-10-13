@@ -67,7 +67,7 @@ pub mod tree;
 
 pub use calc::{
     compute, AuxRef, Calculation, CalculationDraft, ComputeError, Computed, ComputedColumn,
-    OutputDraft, OutputRef, ResultValue, SeriesRef, SeriesResult, Staleness,
+    CorrectionRecord, OutputDraft, OutputRef, ResultValue, SeriesRef, SeriesResult, Staleness,
     MAX_CALCULATION_SERIES,
 };
 pub use column::{

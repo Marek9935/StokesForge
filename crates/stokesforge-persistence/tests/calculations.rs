@@ -156,3 +156,117 @@ fn le_separateur_decimal_d_un_graphe_survit_a_un_aller_retour_et_vaut_point_par_
     }
     assert!(!stokesforge_plot::PlotSpec::default().decimal_comma);
 }
+
+#[test]
+fn les_deux_lignes_de_base_constantes_traversent_le_fichier_stf() {
+    use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
+    for method in [
+        BaselineMethod::Constant { point: (2.5, 7.0) },
+        BaselineMethod::ConstantZone { zone: (1.0, 3.0) },
+    ] {
+        let mut project = project_with_calculation();
+        let old = project
+            .tree()
+            .calculations()
+            .values()
+            .next()
+            .unwrap()
+            .clone();
+        let operation = Operation::Baseline {
+            method,
+            op: BaselineOp::Subtract,
+            keep_baseline: false,
+        };
+        project
+            .add_calculation(CalculationDraft {
+                operation: operation.clone(),
+                series: old.series.clone(),
+                aux: None,
+                outputs: Vec::new(),
+                results: Vec::new(),
+                keep_results: false,
+                auto_recalc: true,
+            })
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("constant.stf");
+        save(&project, &path).unwrap();
+        let back = load(&path).unwrap();
+        assert!(back
+            .tree()
+            .calculations()
+            .values()
+            .any(|c| c.operation == operation));
+        assert_eq!(back.tree(), project.tree());
+    }
+}
+
+#[test]
+fn les_corrections_definitives_survivent_au_fichier_sans_lien_de_calcul() {
+    let mut project = project_with_calculation();
+    let (id, calc) = project
+        .tree()
+        .calculations()
+        .iter()
+        .next()
+        .map(|(id, c)| (*id, c.clone()))
+        .unwrap();
+    let output = calc.outputs[0].column.unwrap();
+    project.remove_calculation(id, true).unwrap();
+    let y = calc.series[0].y;
+    for correction in [1., 2.] {
+        let versions = calc
+            .series
+            .iter()
+            .flat_map(|s| [Some(s.y), s.x].into_iter().flatten())
+            .map(|id| {
+                (
+                    id,
+                    project
+                        .tree()
+                        .get(id)
+                        .unwrap()
+                        .as_column()
+                        .unwrap()
+                        .version(),
+                )
+            })
+            .collect::<Vec<_>>();
+        project
+            .replace_analysis_data(
+                CalculationDraft {
+                    operation: calc.operation.clone(),
+                    series: calc.series.clone(),
+                    aux: None,
+                    outputs: vec![OutputDraft {
+                        series: 0,
+                        key: "corrected".into(),
+                        index: None,
+                        meta: ColumnMeta::default(),
+                        data: vec![correction; 3],
+                    }],
+                    results: calc.results.clone(),
+                    keep_results: false,
+                    auto_recalc: false,
+                },
+                &versions,
+            )
+            .unwrap();
+    }
+    assert!(project.tree().node(output).is_none());
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("corrections.stf");
+    save(&project, &path).unwrap();
+    let back = load(&path).unwrap();
+    assert_eq!(back.tree(), project.tree());
+    assert_eq!(back.tree().correction_traces().len(), 2);
+    assert!(back.tree().calculations().is_empty());
+    assert!(back.tree().calculation_of_column(y).is_none());
+    let mut back = back;
+    let next = back.add_note(back.root(), None, "suivant").unwrap();
+    assert!(back
+        .tree()
+        .correction_traces()
+        .keys()
+        .all(|id| id.raw() < next.raw()));
+}

@@ -232,6 +232,7 @@ pub(super) struct ChoiceOption<T> {
     pub(super) value: T,
     pub(super) label: String,
     pub(super) hint: Option<String>,
+    pub(super) disabled: Option<String>,
 }
 
 impl<T> ChoiceOption<T> {
@@ -241,7 +242,14 @@ impl<T> ChoiceOption<T> {
             value,
             label: label.into(),
             hint: None,
+            disabled: None,
         }
+    }
+
+    /// Grise une option avec la raison du refus affichée au survol.
+    pub(super) fn disabled(mut self, reason: Option<String>) -> Self {
+        self.disabled = reason;
+        self
     }
 
     /// La même option, avec son rappel.
@@ -273,8 +281,15 @@ pub(super) fn choice_by<T: Clone>(
                 .selected_text(shown)
                 .show_ui(ui, |ui| {
                     for (index, option) in options.iter().enumerate() {
-                        let mut entry =
-                            ui.selectable_label(current == Some(index), option.label.as_str());
+                        let mut entry = ui
+                            .add_enabled(
+                                option.disabled.is_none(),
+                                egui::Button::selectable(
+                                    current == Some(index),
+                                    option.label.as_str(),
+                                ),
+                            )
+                            .on_disabled_hover_text(option.disabled.as_deref().unwrap_or_default());
                         if let Some(hint) = &option.hint {
                             entry = entry.on_hover_text(hint);
                         }
@@ -289,7 +304,14 @@ pub(super) fn choice_by<T: Clone>(
                 ui.push_id(id_salt, |ui| {
                     for (index, option) in options.iter().enumerate() {
                         let radio = |ui: &mut egui::Ui| {
-                            ui.radio(current == Some(index), option.label.as_str())
+                            ui.add_enabled(
+                                option.disabled.is_none(),
+                                egui::RadioButton::new(
+                                    current == Some(index),
+                                    option.label.as_str(),
+                                ),
+                            )
+                            .on_disabled_hover_text(option.disabled.as_deref().unwrap_or_default())
                         };
                         let clicked = match &option.hint {
                             Some(hint) => help_beside(ui, hint.clone(), radio).clicked(),
@@ -435,5 +457,49 @@ mod tests {
         peindre(vec![clic(true)], &mut valeur);
         peindre(vec![clic(false)], &mut valeur);
         assert!(!change.get(), "l'option déjà choisie ne change rien");
+    }
+    /// Le même refus doit tenir dans les radios et dans une liste déroulante.
+    #[test]
+    fn une_option_grisee_ne_se_choisit_ni_en_radio_ni_en_liste() {
+        use super::super::test_support::cliquer;
+        for count in [2, 4] {
+            let context = contexte();
+            let mut value = 1;
+            let options: Vec<_> = (1..=count)
+                .map(|n| {
+                    ChoiceOption::new(n, n.to_string()).disabled((n == 2).then(|| "refus".into()))
+                })
+                .collect();
+            let mut peindre = |ui: &mut egui::Ui| {
+                choice(ui, "refus", &mut value, &options);
+            };
+            let mut painted = image(&context, vec![], &mut peindre);
+            if count == 4 {
+                let position = textes(&painted)
+                    .iter()
+                    .find(|t| t.texte == "1")
+                    .unwrap()
+                    .centre;
+                cliquer(
+                    &context,
+                    position,
+                    egui::PointerButton::Primary,
+                    &mut peindre,
+                );
+                painted = image(&context, vec![], &mut peindre);
+            }
+            let position = textes(&painted)
+                .iter()
+                .find(|t| t.texte == "2")
+                .unwrap()
+                .centre;
+            cliquer(
+                &context,
+                position,
+                egui::PointerButton::Primary,
+                &mut peindre,
+            );
+            assert_eq!(value, 1);
+        }
     }
 }

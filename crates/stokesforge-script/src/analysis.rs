@@ -298,6 +298,7 @@ fn run(
     inputs: Inputs,
     keep_results: bool,
     auto_recalc: bool,
+    replace_original: bool,
 ) -> PyResult<Py<PyDict>> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
@@ -345,9 +346,59 @@ fn run(
                 op.clone(),
                 aux,
                 computed,
-                keep_results,
+                keep_results || replace_original,
                 auto_recalc,
             );
+            if replace_original {
+                let mut ids: Vec<NodeId> = series
+                    .iter()
+                    .flat_map(|s| [Some(s.y), s.x, s.sigma].into_iter().flatten())
+                    .collect();
+                if let Some(aux) = &draft.aux {
+                    ids.push(aux.y);
+                    ids.extend(aux.x);
+                }
+                ids.sort();
+                ids.dedup();
+                let expected_versions = ids
+                    .iter()
+                    .filter_map(|id| {
+                        tree.node(*id)
+                            .and_then(|n| n.as_column())
+                            .map(|c| (*id, c.version()))
+                    })
+                    .collect();
+                session
+                    .execute(Command::ReplaceAnalysisData {
+                        draft,
+                        expected_versions,
+                    })
+                    .map_err(HostError::from_session)?;
+                let after = session.snapshot().map_err(HostError::from_session)?;
+                let calc = stokesforge_core::Calculation {
+                    operation: op.clone(),
+                    series: series.clone(),
+                    aux: inputs.aux.map(|(y, x)| AuxRef {
+                        y: y.0,
+                        x: x.map(|h| h.0),
+                    }),
+                    outputs: series
+                        .iter()
+                        .enumerate()
+                        .map(|(rank, s)| stokesforge_core::OutputRef {
+                            series: rank,
+                            key: "corrected".into(),
+                            index: None,
+                            column: Some(s.y),
+                        })
+                        .collect(),
+                    results: values.clone(),
+                    keep_results: true,
+                    auto_recalc: false,
+                    stale: None,
+                };
+                return Ok((std::sync::Arc::new(calc), values, after.epoch));
+            }
             session
                 .execute(Command::AddCalculation { draft })
                 .map_err(HostError::from_session)?;
@@ -379,10 +430,11 @@ fn run(
 }
 
 /// Ligne de base : `method` = `"anchors"` (avec `points=[(x, y), …]`),
-/// `"line"` (deux `points`) ou `"zones"` (avec `zones=[(de, à), …]` et
+/// `"constant"` (un point ou une zone), `"line"` (deux `points`) ou
+/// `"zones"` (avec `zones=[(de, à), …]` et
 /// `degree`). `op` : `"subtract"` ou `"divide"`.
 #[pyfunction]
-#[pyo3(signature = (y, x=None, *, method="anchors", points=None, zones=None, degree=1, interpolation="segments", op="subtract", keep_baseline=false, keep_results=false, auto_recalc=true))]
+#[pyo3(signature = (y, x=None, *, method="anchors", points=None, zones=None, degree=1, interpolation="segments", op="subtract", keep_baseline=false, keep_results=false, auto_recalc=true, replace_original=false))]
 #[allow(clippy::too_many_arguments)]
 fn baseline(
     py: Python<'_>,
@@ -397,9 +449,22 @@ fn baseline(
     keep_baseline: bool,
     keep_results: bool,
     auto_recalc: bool,
+    replace_original: bool,
 ) -> PyResult<Py<PyDict>> {
     let points = points.unwrap_or_default();
     let method = match method {
+        "constant" => {
+            let zones = zones.unwrap_or_default();
+            match (points.as_slice(), zones.as_slice()) {
+                ([point], []) => BaselineMethod::Constant { point: *point },
+                ([], [zone]) => BaselineMethod::ConstantZone { zone: *zone },
+                _ => {
+                    return Err(invalid(
+                        "method \"constant\" needs exactly one point or one zone",
+                    ))
+                }
+            }
+        }
         "line" => {
             let [p1, p2] = points[..] else {
                 return Err(invalid("method \"line\" needs exactly two points"));
@@ -423,7 +488,7 @@ fn baseline(
         },
         other => {
             return Err(invalid(format!(
-                "unknown method \"{other}\": use \"anchors\", \"line\" or \"zones\""
+                "unknown method \"{other}\": use \"constant\", \"anchors\", \"line\" or \"zones\""
             )))
         }
     };
@@ -446,6 +511,7 @@ fn baseline(
         Inputs::new(y, x, None, None)?,
         keep_results,
         auto_recalc,
+        replace_original,
     )
 }
 
@@ -453,7 +519,7 @@ fn baseline(
 /// ou `"subtract"`. La référence est interpolée sur les X de la série ; hors
 /// d'elle, les cellules restent vides.
 #[pyfunction]
-#[pyo3(signature = (y, reference, x=None, reference_x=None, *, op="divide", keep_results=false, auto_recalc=true))]
+#[pyo3(signature = (y, reference, x=None, reference_x=None, *, op="divide", keep_results=false, auto_recalc=true, replace_original=false))]
 #[allow(clippy::too_many_arguments)]
 fn correct(
     py: Python<'_>,
@@ -464,6 +530,7 @@ fn correct(
     op: &str,
     keep_results: bool,
     auto_recalc: bool,
+    replace_original: bool,
 ) -> PyResult<Py<PyDict>> {
     let op = choice(
         "op",
@@ -480,6 +547,7 @@ fn correct(
         Inputs::new(y, x, None, Some((reference, reference_x)))?,
         keep_results,
         auto_recalc,
+        replace_original,
     )
 }
 
@@ -516,6 +584,7 @@ fn integrate(
         Inputs::new(y, x, None, None)?,
         keep_results,
         auto_recalc,
+        false,
     )
 }
 
@@ -599,6 +668,7 @@ fn fit(
         Inputs::new(y, x, sigma, None)?,
         keep_results,
         auto_recalc,
+        false,
     )
 }
 
@@ -676,6 +746,7 @@ fn peaks(
         Inputs::new(y, x, None, None)?,
         keep_results,
         auto_recalc,
+        false,
     )
 }
 
@@ -714,6 +785,7 @@ fn reconvolve(
         Inputs::new(y, x, None, Some((response, response_x)))?,
         keep_results,
         auto_recalc,
+        false,
     )
 }
 
@@ -750,6 +822,7 @@ fn deconvolve(
         Inputs::new(y, x, None, Some((response, response_x)))?,
         keep_results,
         auto_recalc,
+        false,
     )
 }
 

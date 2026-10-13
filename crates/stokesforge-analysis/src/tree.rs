@@ -122,6 +122,12 @@ impl Operation {
                 keep_baseline,
             } => {
                 let m = match method {
+                    BaselineMethod::Constant { point } => W::kind("constant")
+                        .put("point", pair(point.0, point.1))
+                        .done(),
+                    BaselineMethod::ConstantZone { zone } => W::kind("constant-zone")
+                        .put("zone", pair(zone.0, zone.1))
+                        .done(),
                     BaselineMethod::Line { p1, p2 } => W::kind("line")
                         .put("p1", pair(p1.0, p1.1))
                         .put("p2", pair(p2.0, p2.1))
@@ -410,6 +416,12 @@ impl Operation {
             "baseline" => {
                 let m = R::of(r.req("method")?, "method")?;
                 let method = match m.kind()? {
+                    "constant" => BaselineMethod::Constant {
+                        point: m.pair("point")?,
+                    },
+                    "constant-zone" => BaselineMethod::ConstantZone {
+                        zone: m.pair("zone")?,
+                    },
                     "line" => BaselineMethod::Line {
                         p1: m.pair("p1")?,
                         p2: m.pair("p2")?,
@@ -561,6 +573,16 @@ mod tests {
             },
         ];
         let mut v = vec![
+            Operation::Baseline {
+                method: BaselineMethod::Constant { point: (5.0, 2.5) },
+                op: BaselineOp::Subtract,
+                keep_baseline: true,
+            },
+            Operation::Baseline {
+                method: BaselineMethod::ConstantZone { zone: (3.0, 7.0) },
+                op: BaselineOp::Divide,
+                keep_baseline: false,
+            },
             Operation::Baseline {
                 method: BaselineMethod::Line {
                     p1: (1.0, 2.0),

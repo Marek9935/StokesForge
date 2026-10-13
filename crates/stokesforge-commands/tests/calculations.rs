@@ -320,3 +320,324 @@ fn le_type_et_la_suppression_de_cellules_d_une_sortie_sont_refuses() {
         assert_eq!(w.project.tree(), &before, "aucun état partiel");
     }
 }
+
+/// #212 : les valeurs changent dans la même colonne, sans calcul vivant.
+#[test]
+fn remplacer_garde_une_trace_et_se_defait_en_un_seul_pas() {
+    let mut w = world();
+    let before = w.project.tree().clone();
+    let d = draft(&w, vec![1., 2., 3.]);
+    let versions = [w.x, w.y]
+        .map(|id| {
+            (
+                id,
+                w.project
+                    .tree()
+                    .get(id)
+                    .unwrap()
+                    .as_column()
+                    .unwrap()
+                    .version(),
+            )
+        })
+        .to_vec();
+    w.history
+        .execute(
+            &mut w.project,
+            Command::ReplaceAnalysisData {
+                draft: d,
+                expected_versions: versions,
+            },
+        )
+        .unwrap();
+    assert_eq!(w.project.tree().children(w.sheet).unwrap().len(), 2);
+    assert!(w.project.tree().calculation_of_column(w.y).is_none());
+    assert_eq!(w.project.tree().correction_traces().len(), 1);
+    let after = w.project.tree().clone();
+    assert_ne!(
+        before.get(w.y).unwrap().as_column().unwrap().version(),
+        after.get(w.y).unwrap().as_column().unwrap().version()
+    );
+    w.history.undo(&mut w.project).unwrap();
+    assert_eq!(w.project.tree(), &before);
+    w.history.redo(&mut w.project).unwrap();
+    assert_eq!(w.project.tree(), &after);
+    w.history
+        .execute(
+            &mut w.project,
+            Command::SetCells {
+                column: w.y,
+                start: 0,
+                values: ValueBlock::Float(vec![99.]),
+                expected_version: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        w.project.tree().correction_traces().len(),
+        1,
+        "la saisie garde la trace"
+    );
+}
+
+#[test]
+fn remplacement_refuse_longueur_et_versions_sans_ecriture_partielle() {
+    let mut w = world();
+    let before = w.project.tree().clone();
+    let versions = [w.x, w.y]
+        .map(|id| {
+            (
+                id,
+                w.project
+                    .tree()
+                    .get(id)
+                    .unwrap()
+                    .as_column()
+                    .unwrap()
+                    .version(),
+            )
+        })
+        .to_vec();
+    let d = draft(&w, vec![1.]);
+    assert!(w
+        .history
+        .execute(
+            &mut w.project,
+            Command::ReplaceAnalysisData {
+                draft: d,
+                expected_versions: versions.clone()
+            }
+        )
+        .is_err());
+    assert_eq!(w.project.tree(), &before);
+    assert_eq!(w.history.len(), 0);
+    let d = draft(&w, vec![1., 2., 3.]);
+    let mut bad = versions;
+    bad[0].1 += 1;
+    assert!(w
+        .history
+        .execute(
+            &mut w.project,
+            Command::ReplaceAnalysisData {
+                draft: d,
+                expected_versions: bad
+            }
+        )
+        .is_err());
+    assert_eq!(w.project.tree(), &before);
+    assert_eq!(w.history.len(), 0);
+}
+
+#[test]
+fn remplacement_preserve_lignes_non_exploitables_et_nan_de_resultat() {
+    let mut w = world();
+    w.project
+        .set_values(w.x, 1, ValueBlock::Float(vec![f64::NAN]))
+        .unwrap();
+    let d = draft(&w, vec![1., f64::NAN, f64::NAN, 777.]);
+    let versions = [w.x, w.y]
+        .map(|id| {
+            (
+                id,
+                w.project
+                    .tree()
+                    .get(id)
+                    .unwrap()
+                    .as_column()
+                    .unwrap()
+                    .version(),
+            )
+        })
+        .to_vec();
+    w.history
+        .execute(
+            &mut w.project,
+            Command::ReplaceAnalysisData {
+                draft: d,
+                expected_versions: versions,
+            },
+        )
+        .unwrap();
+    let values = w
+        .project
+        .tree()
+        .get(w.y)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .numeric_view()
+        .unwrap();
+    assert_eq!(values.len(), 3);
+    assert_eq!(values[0], 1.);
+    assert_eq!(values[1], 20.);
+    assert!(values[2].is_nan());
+}
+
+#[test]
+fn remplacement_dedoublonne_sources_et_refuse_corrections_contradictoires() {
+    let mut w = world();
+    let before = w.project.tree().clone();
+    let mut d = draft(&w, vec![1., 2., 3.]);
+    d.series.push(d.series[0].clone());
+    d.results.push(SeriesResult::default());
+    let mut output = d.outputs[0].clone();
+    output.series = 1;
+    output.data[0] = 4.;
+    d.outputs.push(output);
+    let versions = [w.x, w.y]
+        .map(|id| {
+            (
+                id,
+                w.project
+                    .tree()
+                    .get(id)
+                    .unwrap()
+                    .as_column()
+                    .unwrap()
+                    .version(),
+            )
+        })
+        .to_vec();
+    assert!(w
+        .history
+        .execute(
+            &mut w.project,
+            Command::ReplaceAnalysisData {
+                draft: d,
+                expected_versions: versions
+            }
+        )
+        .is_err());
+    assert_eq!(w.project.tree(), &before);
+    assert_eq!(w.history.len(), 0);
+}
+
+#[test]
+fn remplacement_refuse_formule_et_sortie_calculee_puis_supprime_trace_orpheline() {
+    let mut w = world();
+    let d = draft(&w, vec![1., 2., 3.]);
+    let mut versions = [w.x, w.y]
+        .map(|id| {
+            (
+                id,
+                w.project
+                    .tree()
+                    .get(id)
+                    .unwrap()
+                    .as_column()
+                    .unwrap()
+                    .version(),
+            )
+        })
+        .to_vec();
+    let mut meta = w
+        .project
+        .tree()
+        .get(w.y)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .meta()
+        .clone();
+    meta.formula = Some("A*2".into());
+    w.project.set_column_meta(w.y, meta).unwrap();
+    versions.iter_mut().for_each(|(id, version)| {
+        *version = w
+            .project
+            .tree()
+            .get(*id)
+            .unwrap()
+            .as_column()
+            .unwrap()
+            .version()
+    });
+    let before = w.project.tree().clone();
+    let error = w
+        .history
+        .execute(
+            &mut w.project,
+            Command::ReplaceAnalysisData {
+                draft: d,
+                expected_versions: versions,
+            },
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        stokesforge_commands::CommandError::Core(CoreError::FormulaColumnReadOnly { .. })
+    ));
+    assert_eq!(w.project.tree(), &before);
+    let mut meta = w
+        .project
+        .tree()
+        .get(w.y)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .meta()
+        .clone();
+    meta.formula = None;
+    w.project.set_column_meta(w.y, meta).unwrap();
+    let d = draft(&w, vec![1., 2., 3.]);
+    let versions = [w.x, w.y]
+        .map(|id| {
+            (
+                id,
+                w.project
+                    .tree()
+                    .get(id)
+                    .unwrap()
+                    .as_column()
+                    .unwrap()
+                    .version(),
+            )
+        })
+        .to_vec();
+    w.history
+        .execute(
+            &mut w.project,
+            Command::ReplaceAnalysisData {
+                draft: d,
+                expected_versions: versions,
+            },
+        )
+        .unwrap();
+    w.history
+        .execute(&mut w.project, Command::RemoveNode { id: w.y })
+        .unwrap();
+    assert!(w.project.tree().correction_traces().is_empty());
+    w.history.undo(&mut w.project).unwrap();
+    assert_eq!(w.project.tree().correction_traces().len(), 1);
+    add(&mut w, vec![1., 2., 3.]);
+    let out = w.project.tree().calculation(calc_id(&w)).unwrap().outputs[0]
+        .column
+        .unwrap();
+    let mut d = draft(&w, vec![4., 5., 6.]);
+    d.series[0].y = out;
+    let versions = [w.x, out]
+        .map(|id| {
+            (
+                id,
+                w.project
+                    .tree()
+                    .get(id)
+                    .unwrap()
+                    .as_column()
+                    .unwrap()
+                    .version(),
+            )
+        })
+        .to_vec();
+    let before = w.project.tree().clone();
+    assert!(w
+        .history
+        .execute(
+            &mut w.project,
+            Command::ReplaceAnalysisData {
+                draft: d,
+                expected_versions: versions
+            }
+        )
+        .is_err());
+    assert_eq!(w.project.tree(), &before);
+}

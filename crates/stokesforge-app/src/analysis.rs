@@ -53,6 +53,8 @@ pub const AVERAGE_RANGE: std::ops::RangeInclusive<usize> = 1..=101;
 /// (M1 B). La fenêtre sait changer de méthode, pour « Edit Calculation… ».
 #[derive(Debug, Clone, PartialEq)]
 pub enum Preset {
+    /// Ligne de base constante par un point ou la moyenne d’une zone.
+    BaselineConstant,
     /// Ligne de base par deux points.
     BaselineLine,
     /// Ligne de base polynomiale sur des zones.
@@ -77,9 +79,10 @@ impl Preset {
     /// La famille d'opération que ce choix lance.
     pub fn kind(&self) -> OperationKind {
         match self {
-            Preset::BaselineLine | Preset::BaselinePolynomial | Preset::BaselineAnchors => {
-                OperationKind::Baseline
-            }
+            Preset::BaselineConstant
+            | Preset::BaselineLine
+            | Preset::BaselinePolynomial
+            | Preset::BaselineAnchors => OperationKind::Baseline,
             Preset::Correct => OperationKind::Correct,
             Preset::Integrate => OperationKind::Integrate,
             Preset::Fit(_) => OperationKind::Fit,
@@ -112,6 +115,10 @@ impl Preset {
 /// La forme d'une ligne de base (M10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaselineShape {
+    /// Fond plat par un point.
+    Constant,
+    /// Fond plat par la moyenne d’une zone.
+    ConstantZone,
     /// Une droite par deux points posés.
     TwoPoints,
     /// Un polynôme ajusté sur des zones de fond.
@@ -124,6 +131,10 @@ pub enum BaselineShape {
 #[derive(Debug, Clone, PartialEq)]
 pub struct BaselineSetup {
     pub shape: BaselineShape,
+    /// Réglages propres aux constantes : changer de forme conserve ceux des
+    /// ancrages et du polynôme, même après un nouveau geste sur l’aperçu.
+    pub constant_point: Option<(f64, f64)>,
+    pub constant_zone: Option<(f64, f64)>,
     /// Les deux points de la droite, ou les points d'ancrage.
     pub points: Vec<(f64, f64)>,
     /// Les zones de fond.
@@ -140,6 +151,8 @@ impl Default for BaselineSetup {
     fn default() -> Self {
         Self {
             shape: BaselineShape::Anchors,
+            constant_point: None,
+            constant_zone: None,
             points: Vec::new(),
             zones: Vec::new(),
             degree: 1,
@@ -450,6 +463,11 @@ pub struct AnalysisForm {
     /// Le graphe d'où l'on vient : « Add to graph » y range les colonnes.
     pub graph: Option<NodeId>,
     pub add_to_graph: bool,
+    /// Remplace définitivement les Y ; seul Annuler revient aux valeurs brutes.
+    pub replace_original: bool,
+    /// Cadrage et styles figés au geste depuis un graphe (#210), avec les
+    /// adresses des sources dans ce spec ; jamais persistés comme calcul.
+    pub graph_source: Option<(stokesforge_plot::PlotSpec, Vec<stokesforge_plot::SeriesRef>)>,
     /// La série montrée dans l'aperçu.
     pub current: usize,
     pub tool: PreviewTool,
@@ -462,6 +480,7 @@ impl AnalysisForm {
     pub fn new(preset: &Preset, series: Vec<SeriesRef>, keep_results: bool) -> Self {
         let mut setup = Setup::default();
         match preset {
+            Preset::BaselineConstant => setup.baseline.shape = BaselineShape::Constant,
             Preset::BaselineLine => setup.baseline.shape = BaselineShape::TwoPoints,
             Preset::BaselinePolynomial => {
                 setup.baseline.shape = BaselineShape::Zones;
@@ -483,6 +502,8 @@ impl AnalysisForm {
             editing: None,
             graph: None,
             add_to_graph: false,
+            replace_original: false,
+            graph_source: None,
             current: 0,
             tool: PreviewTool::default(),
             average: DEFAULT_AVERAGE,
@@ -599,6 +620,12 @@ impl AnalysisForm {
                             have: b.points.len(),
                         })
                     }
+                    BaselineShape::Constant if b.constant_point.is_none() => {
+                        Some(Issue::NeedsPoints { needed: 1, have: 0 })
+                    }
+                    BaselineShape::ConstantZone if b.constant_zone.is_none() => {
+                        Some(Issue::NeedsZone)
+                    }
                     BaselineShape::Zones if b.zones.is_empty() => Some(Issue::NeedsZone),
                     _ => None,
                 }
@@ -625,6 +652,12 @@ impl AnalysisForm {
             OperationKind::Baseline => {
                 let b = &s.baseline;
                 let method = match b.shape {
+                    BaselineShape::Constant => BaselineMethod::Constant {
+                        point: b.constant_point?,
+                    },
+                    BaselineShape::ConstantZone => BaselineMethod::ConstantZone {
+                        zone: b.constant_zone?,
+                    },
                     BaselineShape::TwoPoints => BaselineMethod::Line {
                         p1: b.points[0],
                         p2: b.points[1],
@@ -747,6 +780,25 @@ impl AnalysisForm {
         }
     }
 
+    /// Une correction peut remplacer uniquement des colonnes ordinaires.
+    pub fn replacement_disabled(&self, tree: &Tree) -> Option<String> {
+        if self.editing.is_some()
+            || !matches!(self.kind, OperationKind::Baseline | OperationKind::Correct)
+        {
+            return Some(tr!("disabled-analysis-replace-operation"));
+        }
+        if self.series.iter().any(|s| {
+            tree.calculation_of_column(s.y).is_some()
+                || tree
+                    .node(s.y)
+                    .and_then(|n| n.as_column())
+                    .is_none_or(|c| c.meta().formula.is_some())
+        }) {
+            return Some(tr!("disabled-analysis-replace-readonly"));
+        }
+        None
+    }
+
     /// Ce qui s'écrit : la sortie `key` est-elle demandée ?
     pub fn wants_output(&self, key: &str) -> bool {
         match (self.kind, key) {
@@ -808,7 +860,7 @@ impl AnalysisForm {
             series,
             aux: self.aux.clone(),
             outputs,
-            results: if self.keep_results {
+            results: if self.keep_results || self.replace_original {
                 computed.results
             } else {
                 Vec::new()
@@ -921,6 +973,9 @@ pub fn kind_title(kind: OperationKind) -> String {
 pub fn preset_of(op: &Operation) -> Preset {
     match op {
         Operation::Baseline { method, .. } => match method {
+            BaselineMethod::Constant { .. } | BaselineMethod::ConstantZone { .. } => {
+                Preset::BaselineConstant
+            }
             BaselineMethod::Line { .. } => Preset::BaselineLine,
             BaselineMethod::Zones { .. } => Preset::BaselinePolynomial,
             BaselineMethod::Anchors { .. } => Preset::BaselineAnchors,
@@ -947,6 +1002,14 @@ impl Setup {
                 b.op = *op;
                 b.baseline_column = *keep_baseline;
                 match method {
+                    BaselineMethod::Constant { point } => {
+                        b.shape = BaselineShape::Constant;
+                        b.constant_point = Some(*point);
+                    }
+                    BaselineMethod::ConstantZone { zone } => {
+                        b.shape = BaselineShape::ConstantZone;
+                        b.constant_zone = Some(*zone);
+                    }
                     BaselineMethod::Line { p1, p2 } => {
                         b.shape = BaselineShape::TwoPoints;
                         b.points = vec![*p1, *p2];
@@ -1066,7 +1129,12 @@ impl AnalysisForm {
     /// des zones pour les plages et le fond, des points sinon.
     pub fn natural_tool(&self) -> PreviewTool {
         match self.kind {
-            OperationKind::Baseline if self.setup.baseline.shape == BaselineShape::Zones => {
+            OperationKind::Baseline
+                if matches!(
+                    self.setup.baseline.shape,
+                    BaselineShape::Zones | BaselineShape::ConstantZone
+                ) =>
+            {
                 PreviewTool::Zone
             }
             OperationKind::Integrate | OperationKind::Fit | OperationKind::Reconvolution => {
@@ -1083,6 +1151,8 @@ impl AnalysisForm {
             OperationKind::Baseline => {
                 let b = &mut self.setup.baseline;
                 match b.shape {
+                    BaselineShape::Constant => b.constant_point = Some((x, y)),
+                    BaselineShape::ConstantZone => {}
                     BaselineShape::TwoPoints => {
                         b.points.push((x, y));
                         if b.points.len() > 2 {
@@ -1119,8 +1189,17 @@ impl AnalysisForm {
             return;
         }
         match self.kind {
-            OperationKind::Baseline if self.setup.baseline.shape == BaselineShape::Zones => {
-                self.setup.baseline.zones.push(range);
+            OperationKind::Baseline
+                if matches!(
+                    self.setup.baseline.shape,
+                    BaselineShape::Zones | BaselineShape::ConstantZone
+                ) =>
+            {
+                if self.setup.baseline.shape == BaselineShape::ConstantZone {
+                    self.setup.baseline.constant_zone = Some(range);
+                } else {
+                    self.setup.baseline.zones.push(range);
+                }
             }
             OperationKind::Integrate => self.setup.integrate.ranges.push(range),
             OperationKind::Fit => self.setup.fit.range = Some(range),
@@ -1148,7 +1227,23 @@ impl AnalysisForm {
         match self.kind {
             OperationKind::Baseline => {
                 let b = &mut self.setup.baseline;
-                if b.shape == BaselineShape::Zones {
+                if b.shape == BaselineShape::Constant {
+                    if b.constant_point
+                        .is_some_and(|(px, _)| (px - x).abs() <= tolerance)
+                    {
+                        b.constant_point = None;
+                        true
+                    } else {
+                        false
+                    }
+                } else if b.shape == BaselineShape::ConstantZone {
+                    if b.constant_zone.is_some_and(|(a, z)| a <= x && x <= z) {
+                        b.constant_zone = None;
+                        true
+                    } else {
+                        false
+                    }
+                } else if b.shape == BaselineShape::Zones {
                     containing(&b.zones, x).map(|i| b.zones.remove(i)).is_some()
                 } else {
                     nearest(b.points.iter().map(|p| p.0), x, tolerance)
@@ -1260,10 +1355,19 @@ impl AnalysisForm {
         let s = &self.setup;
         match self.kind {
             OperationKind::Baseline => {
-                if s.baseline.shape == BaselineShape::Zones {
+                if s.baseline.shape == BaselineShape::ConstantZone {
+                    edges(
+                        RangeSet::BaselineZones,
+                        &s.baseline.constant_zone.into_iter().collect::<Vec<_>>(),
+                    );
+                } else if s.baseline.shape == BaselineShape::Zones {
                     edges(RangeSet::BaselineZones, &s.baseline.zones);
                 } else {
-                    let points = s.baseline.points.clone();
+                    let points = if s.baseline.shape == BaselineShape::Constant {
+                        s.baseline.constant_point.into_iter().collect()
+                    } else {
+                        s.baseline.points.clone()
+                    };
                     for (i, (x, y)) in points.into_iter().enumerate() {
                         out.push(Handle {
                             slot: HandleSlot::Point(i),
@@ -1323,7 +1427,16 @@ impl AnalysisForm {
         let s = &mut self.setup;
         match slot {
             HandleSlot::Point(i) => {
-                let Some(point) = s.baseline.points.get_mut(i) else {
+                let point = if s.baseline.shape == BaselineShape::Constant {
+                    if i == 0 {
+                        s.baseline.constant_point.as_mut()
+                    } else {
+                        None
+                    }
+                } else {
+                    s.baseline.points.get_mut(i)
+                };
+                let Some(point) = point else {
                     return false;
                 };
                 let changed = *point != (x, y);
@@ -1343,11 +1456,20 @@ impl AnalysisForm {
                 changed
             }
             HandleSlot::Edge(set, i, which) => match set {
-                RangeSet::BaselineZones => s
-                    .baseline
-                    .zones
-                    .get_mut(i)
-                    .is_some_and(|r| edge(r, which, x)),
+                RangeSet::BaselineZones => {
+                    if s.baseline.shape == BaselineShape::ConstantZone {
+                        i == 0
+                            && s.baseline
+                                .constant_zone
+                                .as_mut()
+                                .is_some_and(|r| edge(r, which, x))
+                    } else {
+                        s.baseline
+                            .zones
+                            .get_mut(i)
+                            .is_some_and(|r| edge(r, which, x))
+                    }
+                }
                 RangeSet::Integrate => s
                     .integrate
                     .ranges

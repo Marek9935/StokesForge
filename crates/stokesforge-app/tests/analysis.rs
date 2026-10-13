@@ -579,3 +579,95 @@ fn handles_expose_points_edges_and_seeds_and_move_them() {
     let centers: Vec<f64> = form.setup.peaks.seeds.iter().map(|s| s.center).collect();
     assert_eq!(centers, vec![7.0, 9.0]);
 }
+
+#[test]
+fn constante_un_seul_point_ou_une_zone_et_reouverture_exacte() {
+    let f = fixture();
+    let mut form = AnalysisForm::new(&Preset::BaselineConstant, series(&f), false);
+    assert!(form.operation_for(false).is_none());
+    form.add_point(3.0, 7.0);
+    form.add_point(8.0, 17.0);
+    assert_eq!(form.setup.baseline.constant_point, Some((8.0, 17.0)));
+    assert_eq!(form.handles().len(), 1);
+    assert!(form.move_handle(HandleSlot::Point(0), 10.0, 3.0));
+    let operation = form.operation_for(false).unwrap();
+    assert!(matches!(
+        operation,
+        Operation::Baseline {
+            method: BaselineMethod::Constant { point: (10.0, 3.0) },
+            ..
+        }
+    ));
+    let mut restored = AnalysisForm::new(&preset_of(&operation), series(&f), false);
+    restored.setup.load(&operation);
+    assert_eq!(restored.operation_for(false), Some(operation));
+    form.setup.baseline.shape = BaselineShape::ConstantZone;
+    assert!(form.operation_for(false).is_none());
+    form.add_zone(1.0, 5.0);
+    form.add_zone(9.0, 3.0);
+    assert_eq!(form.setup.baseline.constant_zone, Some((3.0, 9.0)));
+    assert_eq!(form.handles().len(), 2);
+    let operation = form.operation_for(false).unwrap();
+    restored.setup.load(&operation);
+    assert_eq!(restored.operation_for(false), Some(operation));
+    assert!(form.remove_near(4.0, 0.1));
+    assert!(form.operation_for(false).is_none());
+}
+
+#[test]
+fn changer_de_forme_constante_conserve_les_ancrages_et_les_zones() {
+    let f = fixture();
+    let mut form = AnalysisForm::new(&Preset::BaselineAnchors, series(&f), false);
+    for (x, y) in [(1.0, 3.0), (2.0, 5.0), (3.0, 7.0)] {
+        form.add_point(x, y);
+    }
+    let anchors = form.operation_for(false).unwrap();
+    form.setup.baseline.shape = BaselineShape::Constant;
+    assert!(
+        form.operation_for(false).is_none(),
+        "la constante a son propre point"
+    );
+    form.add_point(4.0, 9.0);
+    assert!(form.move_handle(HandleSlot::Point(0), 5.0, 11.0));
+    let constant = form.operation_for(false).unwrap();
+    form.setup.baseline.shape = BaselineShape::Anchors;
+    assert_eq!(form.operation_for(false), Some(anchors));
+    form.setup.baseline.shape = BaselineShape::Zones;
+    form.add_zone(1.0, 3.0);
+    form.add_zone(7.0, 9.0);
+    let zones = form.operation_for(false).unwrap();
+    form.setup.baseline.shape = BaselineShape::ConstantZone;
+    assert!(
+        form.operation_for(false).is_none(),
+        "la constante a sa propre zone"
+    );
+    form.add_zone(4.0, 6.0);
+    assert!(form.move_handle(
+        HandleSlot::Edge(RangeSet::BaselineZones, 0, Edge::Hi),
+        8.0,
+        0.0
+    ));
+    let constant_zone = form.operation_for(false).unwrap();
+    form.setup.baseline.shape = BaselineShape::Zones;
+    assert_eq!(form.operation_for(false), Some(zones.clone()));
+    form.setup.baseline.shape = BaselineShape::Constant;
+    assert_eq!(form.operation_for(false), Some(constant));
+    assert!(form.remove_near(5.0, 0.01));
+    form.setup.baseline.shape = BaselineShape::ConstantZone;
+    assert_eq!(form.operation_for(false), Some(constant_zone));
+    assert!(form.remove_near(5.0, 0.01));
+    form.setup.baseline.shape = BaselineShape::Zones;
+    assert_eq!(form.operation_for(false), Some(zones));
+    // La droite utilise toujours les deux premiers ancrages conservés.
+    form.setup.baseline.shape = BaselineShape::TwoPoints;
+    assert!(matches!(
+        form.operation_for(false),
+        Some(Operation::Baseline {
+            method: BaselineMethod::Line {
+                p1: (1.0, 3.0),
+                p2: (2.0, 5.0)
+            },
+            ..
+        })
+    ));
+}

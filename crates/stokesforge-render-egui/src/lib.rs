@@ -408,6 +408,45 @@ pub fn series_swatch(tree: &Tree, spec: &stokesforge_plot::SeriesSpec, rect: Rec
     shapes
 }
 
+/// Courbe de l'aperçu d'analyse, déjà projetée en pixels locaux. Ce pont
+/// n'interprète aucun style : traits, tirets et symboles sont ceux du rendu
+/// partagé, comme dans le graphe et ses exports (#210).
+pub fn analysis_curve(
+    spec: &stokesforge_plot::SeriesSpec,
+    rect: Rect,
+    points: &[(f64, f64)],
+) -> Vec<Shape> {
+    use plotters::drawing::IntoDrawingArea;
+    let mut shapes = Vec::new();
+    static TEXT: std::sync::OnceLock<TextMeasurer> = std::sync::OnceLock::new();
+    let text = TEXT.get_or_init(TextMeasurer::default);
+    let area = EguiBackend::in_rect(&mut shapes, rect, text).into_drawing_area();
+    let mut line = spec.line.clone();
+    if matches!(
+        spec.plot_type,
+        stokesforge_plot::PlotType::Bar | stokesforge_plot::PlotType::Histogram
+    ) && line.style == stokesforge_plot::LineStyle::None
+    {
+        line.style = stokesforge_plot::LineStyle::Solid;
+    }
+    for run in points.split(|(x, y)| !x.is_finite() || !y.is_finite()) {
+        // Barres et histogrammes : l'analyse travaille sur les mesures Y
+        // brutes, l'aperçu les relie en conservant le style du trait source.
+        if spec.plot_type.draws_line() || !spec.plot_type.draws_symbols() {
+            let _ = stokesforge_render::paint::polyline_f64(&area, run, &line, false);
+        }
+        if spec.plot_type.draws_symbols() {
+            let pixels: Vec<_> = run
+                .iter()
+                .map(|(x, y)| (x.round() as i32, y.round() as i32))
+                .collect();
+            let _ = stokesforge_render::paint::symbols(&area, &pixels, &spec.symbol, false);
+        }
+    }
+    drop(area);
+    shapes
+}
+
 /// Comme [`collect_shapes`], avec le chemin Typst de la tâche R8.3 activé.
 ///
 /// Point d'entrée bas niveau équivalent, pour tester le chemin écran de

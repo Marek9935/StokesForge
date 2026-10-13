@@ -98,6 +98,14 @@ de `window_detach.rs` ; le moteur Python reste dans l’AppState principal.
 
 - Analyse (#181) : un calcul (`Tree::calculations`, lien opération → séries → colonnes de sortie) n'est pas un nœud ; sa création, sa modification et sa suppression sont des commandes annulables (`AddCalculation`/`UpdateCalculation`/`RemoveCalculation`), le recalcul est dérivé (hors historique, comme les formules) et sa trace vit dans `outputs`, jamais sur la colonne. Une colonne calculée est en lecture seule (cellules, type, suppression de cellules ; ses métadonnées hors formule restent libres). Les plafonds des réglages (degré, itérations, bruit) sont vérifiés par `Operation::validate` dans `ops::run`, pour l’interface, `pyst` et le fichier. Le formulaire est `stokesforge-app/src/analysis.rs` (sans egui), la fenêtre et le volet Results dans `src/app/analysis_*.rs`/`results_pane.rs`, `pyst.analysis` dans `stokesforge-script/src/analysis.rs`. Ajouter une opération : crate d'analyse → `compute` → formulaire → clés `analysis-*` en/fr → `pyst.analysis` → `docs/tests.md`.
 
+
+- Corrections définitives (#212) : `ReplaceAnalysisData` écrit les Y et leur
+  `CorrectionRecord` dans le même pas d'historique. La trace est séparée des
+  calculs, persistée dans `correction_traces`, immuable et conservée après
+  saisie ; ne jamais créer un calcul dont la sortie est sa propre source.
+  Le choix de destination utilise `ChoiceOption::disabled` pour les sources
+  en lecture seule ; les sources tracées plusieurs fois exigent `modal_confirm`.
+
 ## Script `pyst`
 
 - `pyst` : les écritures de #67 réutilisent les commandes, dans une macro `Script` ouverte à la première mutation et avortée sur erreur non rattrapée/interruption. Le moteur possède sa propre identité de client ; les poignées sont revalidées après réservation. `set_values` remplace longueur et cellules sans changer le type ni la provenance ; `set_column` reste strict. `undo()` annule le groupe courant et fait un point de validation. Les objets graphiques (`add_shape`, `remove_shape`, #76) rejoignent également ce groupe, avec relecture du spec sous réservation. Contrat : `stokesforge-script/tests/mutations.rs`, `tests/graphs.rs`, `docs/python-et-script.md`.

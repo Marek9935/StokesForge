@@ -387,3 +387,55 @@ print('scipy', scipy.__version__)
     banc.session.undo().unwrap();
     assert_eq!(columns(&banc), before);
 }
+
+#[test]
+fn ligne_de_base_constante_par_point_ou_moyenne_de_zone() {
+    let banc = banc();
+    let before = columns(&banc);
+    run(
+        &banc,
+        r#"
+p = pyst.analysis.baseline(y, x, method='constant', points=[(5., 4.)], keep_baseline=True)
+z = pyst.analysis.baseline(y, x, method='constant', zones=[(1., 3.)])
+assert p['values']['baseline.slope'] == 0.
+assert p['values']['baseline.intercept'] == 4.
+assert z['values']['baseline.intercept'] == 5.
+assert pyst.column(p['columns']['corrected'])[0] == -3.
+assert pyst.column(z['columns']['corrected'])[0] == -4.
+for kwargs in [dict(points=[]), dict(points=[(0., 1.), (1., 2.)]), dict(points=[(0., 1.)], zones=[(1., 2.)]), dict(zones=[(1., 2.), (3., 4.)]), dict(points=[(0., float('nan'))])]:
+    try:
+        pyst.analysis.baseline(y, x, method='constant', **kwargs)
+        assert False, kwargs
+    except pyst.InvalidValueError:
+        pass
+"#,
+    );
+    assert_eq!(columns(&banc), before + 3);
+    banc.session.undo().unwrap();
+    assert_eq!(columns(&banc), before);
+}
+
+#[test]
+fn remplacement_python_utilise_la_colonne_source_et_le_groupe_annulable() {
+    let b = banc();
+    let before = b.session.snapshot().unwrap();
+    run(
+        &b,
+        r#"
+r = pyst.analysis.baseline(y, x, method='constant', points=[(0.0, 1.0)], replace_original=True)
+assert repr(r['columns']['corrected']) == repr(y)
+assert abs(pyst.column(y)[3] - 6.0) < 1e-10
+r = pyst.analysis.correct(y, ref, x, op='divide', replace_original=True)
+assert repr(r['columns']['corrected']) == repr(y)
+assert abs(pyst.column(y)[3] - 3.0) < 1e-10
+"#,
+    );
+    let after = b.session.snapshot().unwrap();
+    assert_eq!(columns(&b), 3);
+    assert!(after.tree.calculations().is_empty());
+    assert_eq!(after.tree.correction_traces().len(), 2);
+    b.session.undo().unwrap();
+    assert_eq!(b.session.snapshot().unwrap().tree, before.tree);
+    b.session.redo().unwrap();
+    assert_eq!(b.session.snapshot().unwrap().tree, after.tree);
+}

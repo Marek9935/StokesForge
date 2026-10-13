@@ -53,6 +53,7 @@ use super::StokesForgeApp;
 #[derive(Clone, Copy)]
 pub(super) enum ObjectManagerRequest {
     Select(crate::object_manager::VisibilityTarget),
+    Analysis(crate::object_manager::VisibilityTarget),
     Properties(crate::object_manager::VisibilityTarget),
     Rename(stokesforge_plot::SeriesRef),
     /// Édite sur place le nom d'un groupe de séries (#197).
@@ -128,13 +129,51 @@ pub(super) fn select_manager_target(
     }
 }
 
+/// Séries analysables de la cible, dans leur ordre de tracé. Une série
+/// construite depuis une ligne de feuille ne désigne pas une colonne Y.
+pub(super) fn analysis_sources(
+    spec: &stokesforge_plot::PlotSpec,
+    target: T,
+) -> Vec<stokesforge_plot::SeriesRef> {
+    match target {
+        T::Series(source) => spec
+            .panels
+            .get(source.panel)
+            .and_then(|p| p.series.get(source.index))
+            .filter(|s| s.row.is_none())
+            .map(|_| vec![source])
+            .unwrap_or_default(),
+        T::SeriesGroup(group) => spec
+            .panels
+            .get(group.panel)
+            .map(|panel| {
+                let members: Vec<_> = panel
+                    .series
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| s.group == Some(group.group))
+                    .collect();
+                if members.iter().any(|(_, s)| s.row.is_some()) {
+                    return Vec::new();
+                }
+                members
+                    .into_iter()
+                    .map(|(index, _)| stokesforge_plot::SeriesRef::new(group.panel, index))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
 /// **Le** menu d'un objet du graphe (#152) : le même au clic droit dans la
 /// figure, sur son nœud de l'Object Manager et sous Graph › Selection (qui
 /// l'enveloppe dans son sous-menu, le clic droit l'affiche à plat). Sections
 /// de la grammaire de `docs/menus.md`, une section sans objet pour la cible
 /// étant **absente** :
 ///
-/// 1. principale — Show Data (courbe), Edit Text / Reset Position (textes),
+/// 1. principale — Show Data / Analysis (courbe), Analysis (groupe),
+///    Edit Text / Reset Position (textes),
 ///    Select Members (groupe) ;
 /// 2. organiser — Rename (courbe, groupe), Move Up/Down (courbe, groupe),
 ///    Ungroup (groupe), Hide (courbe), Bring to Front / Send to Back (objet),
@@ -190,6 +229,19 @@ pub(super) fn object_node_menu(
                     actions.push(Action::ShowSeriesData { graph, series });
                     ui.close();
                 }
+            }
+            if matches!(target, T::Series(_) | T::SeriesGroup(_))
+                && ui
+                    .add_enabled(
+                        !analysis_sources(spec, target).is_empty(),
+                        egui::Button::new(tr!("action-analysis-open")),
+                    )
+                    .on_hover_text(tr!("action-analysis-open", "hint"))
+                    .on_disabled_hover_text(tr!("analysis-needs-column-curve"))
+                    .clicked()
+            {
+                requests.push(ObjectManagerRequest::Analysis(target));
+                ui.close();
             }
             if editable_text == Some(true)
                 && ui
@@ -1389,6 +1441,14 @@ pub(super) fn apply_object_request(
     };
     match request {
         ObjectManagerRequest::Select(target) => select_manager_target(view, Some(target), &spec),
+        ObjectManagerRequest::Analysis(target) => {
+            actions.push(Action::OpenGraphAnalysis {
+                preset: crate::analysis::Preset::BaselineLine,
+                graph,
+                series: analysis_sources(&spec, target),
+                spec: Box::new(view.framed_spec(&spec)),
+            });
+        }
         ObjectManagerRequest::Rename(series) => {
             open_series_name_editor(ctx, view, tree, graph, series)
         }
@@ -1423,6 +1483,36 @@ mod tests {
     };
 
     use crate::object_manager::VisibilityTarget as T;
+
+    #[test]
+    fn analyse_du_groupe_garde_ses_membres_et_le_spec_de_la_vue() {
+        let (project, graph, mut spec, _) = trois_series();
+        spec.panels.get_mut(0).unwrap().series[0].group = Some(7);
+        spec.panels.get_mut(0).unwrap().series[2].group = Some(7);
+        let target = T::SeriesGroup(stokesforge_plot::SeriesGroupRef::new(0, 7));
+        let sources = analysis_sources(&spec, target);
+        assert_eq!(sources, vec![SeriesRef::new(0, 0), SeriesRef::new(0, 2)]);
+        let ctx = egui::Context::default();
+        let mut view = GraphView::default();
+        let mut actions = Vec::new();
+        apply_object_request(
+            &ctx,
+            &mut view,
+            project.tree(),
+            graph,
+            ObjectManagerRequest::Analysis(T::Series(SeriesRef::new(0, 0))),
+            &mut actions,
+        );
+        assert!(
+            matches!(actions.as_slice(), [Action::OpenGraphAnalysis { graph: g, series, spec: s, .. }]
+            if *g == graph && series == &[SeriesRef::new(0, 0)] && **s == view.framed_spec(&crate::state::current_plot_spec(project.tree(), graph).unwrap()))
+        );
+        spec.panels.get_mut(0).unwrap().series[2].row = Some(0);
+        assert!(
+            analysis_sources(&spec, target).is_empty(),
+            "un lot de lignes n'analyse pas ses colonnes silencieusement"
+        );
+    }
 
     /// Un graphe de trois séries (« Premier », « Deuxième », « Dernier »), la
     /// première sélectionnée, et son arbre d'Object Manager.
@@ -2065,6 +2155,24 @@ mod tests {
             assert!(actions.is_empty());
             assert!(!painted(&output, &tr!("action-delete-content")));
         }
+    }
+
+    #[test]
+    fn clic_droit_analyse_la_courbe_visee_dans_object_manager() {
+        let (project, _, spec, model) = trois_series();
+        let ctx = super::super::test_support::contexte();
+        let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+        paint(Vec::new());
+        let (output, _, _) = paint(Vec::new());
+        let row = text_center(&output, "Deuxième");
+        clic_menu(&paint, row, egui::PointerButton::Secondary);
+        let (output, _, _) = paint(Vec::new());
+        let entry = text_center(&output, &tr!("action-analysis-open"));
+        let (_, actions, requests) = clic_menu(&paint, entry, egui::PointerButton::Primary);
+        assert!(actions.is_empty(), "la vue doit encore fournir le cadrage");
+        assert!(requests.iter().any(|request| matches!(request,
+            ObjectManagerRequest::Analysis(T::Series(series)) if *series == SeriesRef::new(0, 1)
+        )));
     }
 
     /// #169 : la série sélectionnée est une ligne de liste — fond pâle

@@ -228,6 +228,9 @@ grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
 | Counts | Coups | Nombre de détections | Comptes | D (Q18) |
 | Molar absorption coefficient† | Coefficient d'absorption molaire | Absorbance ramenée à 1 mol L⁻¹ et 1 cm · *ε / (L mol⁻¹ cm⁻¹)* | Coefficient d'extinction | I |
 | Sample / Blank / Reference | Échantillon / Blanc / Référence | Mesure étudiée / sans analyte / de comparaison | Témoin | D |
+| New column | Nouvelle colonne | Sortie d’analyse distincte de la source | Colonne calculée (pour le choix de destination) | D (#212) |
+| Replace original data | Remplacer les données originales | Correction définitive de la colonne source | Écraser | D (#212) |
+| Modified data | Données modifiées | Trace d’une correction définitive | Périmé | D (#212) |
 | Baseline† | Ligne de base | Signal de fond sous les pics | Fond continu | I |
 | Peak† | Pic | Maximum local du signal | Bande (sauf IR/Raman : *band*) | I |
 | Peak position† | Position du pic | Abscisse du maximum | Centre | D |
@@ -250,6 +253,7 @@ grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
 | Calculation | Calcul | Un traitement enregistré, avec ses colonnes de sortie | Opération | D |
 | Out of date | Pas à jour | Calcul dont une entrée a changé ou disparu | Périmé, Obsolète | D |
 | Recalculate | Recalculer | Refaire un calcul sur les données actuelles | Rafraîchir | D |
+| Constant (baseline) | Constante (ligne de base) | Fond plat par un point ou la moyenne d’une zone | Décalage | D (#211) |
 | Anchor point | Point d'ancrage | Point posé sur l'aperçu pour tracer une ligne de base | Ancre | D |
 | Zone | Zone | Intervalle d'abscisses choisi sur l'aperçu | Région, Plage | D |
 | Reference | Référence | Colonne par laquelle on corrige une série | Témoin | D |

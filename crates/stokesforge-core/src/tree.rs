@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use stokesforge_plot::SavedColors;
 
-use crate::calc::Calculation;
+use crate::calc::{Calculation, CorrectionRecord};
 use crate::column::Column;
 use crate::error::{CoreError, CoreResult};
 use crate::id::NodeId;
@@ -49,6 +49,7 @@ pub struct Tree {
     /// Calculs d'analyse (#181) — voir [`crate::calc`]. Portés par l'arbre pour
     /// voyager avec lui, comme les couleurs enregistrées.
     calculations: BTreeMap<NodeId, Arc<Calculation>>,
+    correction_traces: BTreeMap<NodeId, Arc<CorrectionRecord>>,
 }
 
 impl Tree {
@@ -80,7 +81,26 @@ impl Tree {
             root: id,
             saved_colors: SavedColors::default(),
             calculations: BTreeMap::new(),
+            correction_traces: BTreeMap::new(),
         }
+    }
+
+    /// Les corrections définitives des données sources, sans lien de calcul.
+    pub fn correction_traces(&self) -> &BTreeMap<NodeId, Arc<CorrectionRecord>> {
+        &self.correction_traces
+    }
+
+    /// Reconstruit les traces lues du fichier, sans réactiver un calcul.
+    pub fn with_correction_traces(
+        mut self,
+        traces: BTreeMap<NodeId, Arc<CorrectionRecord>>,
+    ) -> Self {
+        self.correction_traces = traces;
+        self
+    }
+
+    pub(crate) fn correction_traces_mut(&mut self) -> &mut BTreeMap<NodeId, Arc<CorrectionRecord>> {
+        &mut self.correction_traces
     }
 
     /// Les couleurs enregistrées dans le projet.
@@ -152,6 +172,7 @@ impl Tree {
             root,
             saved_colors: SavedColors::default(),
             calculations: BTreeMap::new(),
+            correction_traces: BTreeMap::new(),
         };
         tree.validate_loaded()?;
         Ok(tree)

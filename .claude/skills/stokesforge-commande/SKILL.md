@@ -175,3 +175,13 @@ au collage et restaure l'arbre en cas d'échec ; `DuplicateWorksheet` l'utilise
 leurs références dans le même projet ; entre projets, `NodeCopy::into_external`
 active les données embarquées et le remplacement de toutes les références (#107). Le
 classeur caché est persisté et révélé par `SetWindowMeta`.
+
+## Correction définitive d'une analyse (#212)
+
+Réutiliser `ReplaceAnalysisData` pour remplacer la source Y d'une ligne de base
+ou d'une correction par référence. La trace immuable est un `CorrectionRecord`
+à part des calculs ; valeurs et trace sont annulées ensemble. Exiger les
+versions de toutes les entrées lues, préserver longueur/lignes manquantes,
+refuser les corrections contradictoires d'un même Y. Dans un formulaire,
+griser le choix avec `ChoiceOption::disabled` et sa raison ; la confirmation
+des sources partagées réutilise `modal_confirm`.

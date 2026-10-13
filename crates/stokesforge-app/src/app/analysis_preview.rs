@@ -51,6 +51,10 @@ pub(super) struct View {
     pub x1: f64,
     pub y0: f64,
     pub y1: f64,
+    x_log: bool,
+    y_log: bool,
+    x_inverted: bool,
+    y_inverted: bool,
 }
 
 impl View {
@@ -75,15 +79,43 @@ impl View {
         }
         let (x0, x1) = bounds(xs);
         let (y0, y1) = bounds(ys);
-        View { x0, x1, y0, y1 }
+        View {
+            x0,
+            x1,
+            y0,
+            y1,
+            x_log: false,
+            y_log: false,
+            x_inverted: false,
+            y_inverted: false,
+        }
+    }
+
+    fn fraction(lo: f64, hi: f64, value: f64, log: bool, inverted: bool) -> f64 {
+        let transform = |v: f64| if log { v.log10() } else { v };
+        let fraction = (transform(value) - transform(lo)) / (transform(hi) - transform(lo));
+        if inverted {
+            1.0 - fraction
+        } else {
+            fraction
+        }
+    }
+
+    fn value(lo: f64, hi: f64, fraction: f64, log: bool, inverted: bool) -> f64 {
+        let fraction = if inverted { 1.0 - fraction } else { fraction };
+        if log {
+            10.0_f64.powf(lo.log10() + fraction * (hi.log10() - lo.log10()))
+        } else {
+            lo + fraction * (hi - lo)
+        }
     }
 
     pub(super) fn to_screen(self, rect: egui::Rect, x: f64, y: f64) -> egui::Pos2 {
-        let u = (x - self.x0) / (self.x1 - self.x0);
-        let v = (y - self.y0) / (self.y1 - self.y0);
+        let u = Self::fraction(self.x0, self.x1, x, self.x_log, self.x_inverted);
+        let v = Self::fraction(self.y0, self.y1, y, self.y_log, self.y_inverted);
         egui::pos2(
-            rect.left() + (u as f32) * rect.width(),
-            rect.bottom() - (v as f32) * rect.height(),
+            rect.left() + u as f32 * rect.width(),
+            rect.bottom() - v as f32 * rect.height(),
         )
     }
 
@@ -91,27 +123,44 @@ impl View {
         let u = f64::from((p.x - rect.left()) / rect.width());
         let v = f64::from((rect.bottom() - p.y) / rect.height());
         (
-            self.x0 + u * (self.x1 - self.x0),
-            self.y0 + v * (self.y1 - self.y0),
+            Self::value(self.x0, self.x1, u, self.x_log, self.x_inverted),
+            Self::value(self.y0, self.y1, v, self.y_log, self.y_inverted),
         )
     }
 
     /// Le cadre agrandi (`factor` > 1) ou rétréci autour de `anchor`, qui
     /// reste au même endroit de l'écran.
     pub(super) fn zoomed(self, anchor: (f64, f64), factor: f64) -> View {
-        let scale = |lo: f64, hi: f64, at: f64| (at + (lo - at) * factor, at + (hi - at) * factor);
-        let (x0, x1) = scale(self.x0, self.x1, anchor.0);
-        let (y0, y1) = scale(self.y0, self.y1, anchor.1);
-        View { x0, x1, y0, y1 }
+        let scale = |lo: f64, hi: f64, at: f64, log: bool| {
+            if log {
+                let (lo, hi, at) = (lo.log10(), hi.log10(), at.log10());
+                (
+                    10.0_f64.powf(at + (lo - at) * factor),
+                    10.0_f64.powf(at + (hi - at) * factor),
+                )
+            } else {
+                (at + (lo - at) * factor, at + (hi - at) * factor)
+            }
+        };
+        let (x0, x1) = scale(self.x0, self.x1, anchor.0, self.x_log);
+        let (y0, y1) = scale(self.y0, self.y1, anchor.1, self.y_log);
+        View {
+            x0,
+            x1,
+            y0,
+            y1,
+            ..self
+        }
     }
 
     /// Le cadre dont deux coins sont `a` et `b` (coordonnées de données).
-    pub(super) fn between(a: (f64, f64), b: (f64, f64)) -> View {
+    pub(super) fn between(self, a: (f64, f64), b: (f64, f64)) -> View {
         View {
             x0: a.0.min(b.0),
             x1: a.0.max(b.0),
             y0: a.1.min(b.1),
             y1: a.1.max(b.1),
+            ..self
         }
     }
 }
@@ -344,9 +393,10 @@ impl PreviewJobs {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct StoredView {
     key: (usize, u64),
+    source: Option<(stokesforge_plot::PlotSpec, Vec<stokesforge_plot::SeriesRef>)>,
     view: View,
 }
 
@@ -482,7 +532,7 @@ pub(super) fn preview(
     let key = (form.current, series.y.raw());
     let mut view = ui
         .data_mut(|d| d.get_temp::<StoredView>(view_id))
-        .filter(|s| s.key == key)
+        .filter(|s| s.key == key && s.source == form.graph_source)
         .map(|s| s.view)
         .unwrap_or_else(|| {
             let mut all_y = ys.clone();
@@ -491,7 +541,52 @@ pub(super) fn preview(
                     all_y.extend(c.iter().copied());
                 }
             }
-            View::around(&xs, &all_y)
+            let mut frame = View::around(&xs, &all_y);
+            if let Some((spec, sources)) = &form.graph_source {
+                if let Some(source) = sources.get(form.current) {
+                    if let Some(panel) = spec.panels.get(source.panel) {
+                        let Some(curve) = panel.series.get(source.index) else {
+                            return frame;
+                        };
+                        let y = panel.axis(curve.axis.side());
+                        frame.x_log = panel.bottom.scale == stokesforge_plot::AxisScale::Log;
+                        frame.y_log = y.scale == stokesforge_plot::AxisScale::Log;
+                        frame.x_inverted = panel.bottom.inverted;
+                        frame.y_inverted = y.inverted;
+                        let positive_bounds = |values: &[f64]| {
+                            let values: Vec<_> = values
+                                .iter()
+                                .copied()
+                                .filter(|v| v.is_finite() && *v > 0.0)
+                                .map(f64::log10)
+                                .collect();
+                            let bounds = View::around(&values, &values);
+                            (10.0_f64.powf(bounds.x0), 10.0_f64.powf(bounds.x1))
+                        };
+                        if frame.x_log {
+                            (frame.x0, frame.x1) = positive_bounds(&xs);
+                        }
+                        if frame.y_log {
+                            (frame.y0, frame.y1) = positive_bounds(&all_y);
+                        }
+                        if let (Some(lo), Some(hi)) =
+                            (panel.bottom.range_min, panel.bottom.range_max)
+                        {
+                            if !panel.bottom.auto_range {
+                                frame.x0 = lo;
+                                frame.x1 = hi;
+                            }
+                        }
+                        if let (Some(lo), Some(hi)) = (y.range_min, y.range_max) {
+                            if !y.auto_range {
+                                frame.y0 = lo;
+                                frame.y1 = hi;
+                            }
+                        }
+                    }
+                }
+            }
+            frame
         });
 
     let dark = ui.visuals().dark_mode;
@@ -558,7 +653,12 @@ pub(super) fn preview(
         };
         for (x, y) in rows_x.iter().zip(ys) {
             if x.is_finite() && y.is_finite() {
-                run.push(view.to_screen(plot_rect, *x, *y));
+                let point = view.to_screen(plot_rect, *x, *y);
+                if point.x.is_finite() && point.y.is_finite() {
+                    run.push(point);
+                } else {
+                    flush(&mut run);
+                }
             } else {
                 flush(&mut run);
             }
@@ -585,7 +685,28 @@ pub(super) fn preview(
     let data_stroke = egui::Stroke::new(1.2, text_color);
     {
         let (_, all_y) = series_rows(tree, &series);
-        curve(&plot, &all_y, data_stroke);
+        let source = form.graph_source.as_ref().and_then(|(spec, sources)| {
+            let source = sources.get(form.current)?;
+            spec.panels.get(source.panel)?.series.get(source.index)
+        });
+        if let Some(source) = source {
+            let pixels: Vec<_> = rows_x
+                .iter()
+                .zip(&all_y)
+                .map(|(x, y)| {
+                    if !x.is_finite() || !y.is_finite() {
+                        return (f64::NAN, f64::NAN);
+                    }
+                    let p = view.to_screen(plot_rect, *x, *y) - plot_rect.min;
+                    (f64::from(p.x), f64::from(p.y))
+                })
+                .collect();
+            plot.extend(stokesforge_render_egui::analysis_curve(
+                source, plot_rect, &pixels,
+            ));
+        } else {
+            curve(&plot, &all_y, data_stroke);
+        }
     }
     let helper = egui::Stroke::new(1.5, theme::preview_helper_color(dark));
     let result = egui::Stroke::new(1.8, theme::preview_result_color(dark));
@@ -643,6 +764,9 @@ pub(super) fn preview(
             x1: view.x1,
             y0: -bound * 1.1,
             y1: bound * 1.1,
+            y_log: false,
+            y_inverted: false,
+            ..view
         };
         painter.rect_stroke(
             strip,
@@ -756,7 +880,7 @@ pub(super) fn preview(
             match form.tool {
                 PreviewTool::Zone => form.add_zone(a.0, b.0),
                 PreviewTool::Zoom if (from - to).abs().max_elem() > 4.0 => {
-                    view = View::between(a, b);
+                    view = view.between(a, b);
                 }
                 _ => {}
             }
@@ -783,7 +907,16 @@ pub(super) fn preview(
     if response.double_clicked() {
         ui.data_mut(|d| d.remove::<StoredView>(view_id));
     } else {
-        ui.data_mut(|d| d.insert_temp(view_id, StoredView { key, view }));
+        ui.data_mut(|d| {
+            d.insert_temp(
+                view_id,
+                StoredView {
+                    key,
+                    source: form.graph_source.clone(),
+                    view,
+                },
+            )
+        });
     }
     outcome
 }
@@ -793,7 +926,12 @@ fn zones_of(form: &AnalysisForm) -> Vec<(f64, f64)> {
     use stokesforge_analysis::ops::OperationKind as K;
     let s = &form.setup;
     match form.kind {
-        K::Baseline => s.baseline.zones.clone(),
+        K::Baseline if s.baseline.shape == crate::analysis::BaselineShape::ConstantZone => {
+            s.baseline.constant_zone.into_iter().collect()
+        }
+        K::Baseline if s.baseline.shape == crate::analysis::BaselineShape::Zones => {
+            s.baseline.zones.clone()
+        }
         K::Integrate => s.integrate.ranges.clone(),
         K::Fit => s.fit.range.into_iter().collect(),
         K::Peaks => s.peaks.range.into_iter().collect(),
@@ -807,7 +945,15 @@ fn marks_of(form: &AnalysisForm) -> Vec<(f64, f64)> {
     use crate::analysis::BaselineShape;
     use stokesforge_analysis::ops::OperationKind as K;
     match form.kind {
-        K::Baseline if form.setup.baseline.shape != BaselineShape::Zones => {
+        K::Baseline if form.setup.baseline.shape == BaselineShape::Constant => {
+            form.setup.baseline.constant_point.into_iter().collect()
+        }
+        K::Baseline
+            if !matches!(
+                form.setup.baseline.shape,
+                BaselineShape::Zones | BaselineShape::ConstantZone
+            ) =>
+        {
             form.setup.baseline.points.clone()
         }
         _ => Vec::new(),
@@ -938,12 +1084,38 @@ mod tests {
     }
 
     #[test]
+    fn echelle_log_inversee_et_zoom_gardent_la_correspondance_des_gestes() {
+        let view = View {
+            x0: 1.0,
+            x1: 100.0,
+            y0: 10.0,
+            y1: 1000.0,
+            x_log: true,
+            y_log: true,
+            x_inverted: true,
+            y_inverted: false,
+        };
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 100.0));
+        let center = view.to_screen(rect, 10.0, 100.0);
+        assert_eq!(center, rect.center());
+        let point = view.to_data(rect, center);
+        assert!((point.0 - 10.0).abs() < 1e-6);
+        assert!((point.1 - 100.0).abs() < 1e-6);
+        assert_eq!(view.to_screen(rect, 100.0, 10.0), rect.left_bottom());
+        assert_eq!(view.to_screen(rect, 1.0, 1000.0), rect.right_top());
+        let zoom = view.zoomed((10.0, 100.0), 0.5);
+        assert_eq!(zoom.to_screen(rect, 10.0, 100.0), center);
+        assert!(zoom.x_log && zoom.y_log && zoom.x_inverted);
+    }
+
+    #[test]
     fn ecran_et_donnees_sont_des_fonctions_inverses() {
         let view = View {
             x0: 0.0,
             x1: 10.0,
             y0: -1.0,
             y1: 1.0,
+            ..View::around(&[], &[])
         };
         let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 100.0));
         let p = view.to_screen(rect, 2.5, 0.5);
@@ -960,6 +1132,7 @@ mod tests {
             x1: 10.0,
             y0: 0.0,
             y1: 10.0,
+            ..View::around(&[], &[])
         };
         let zoomed = view.zoomed((2.0, 4.0), 0.5);
         assert_eq!((zoomed.x0, zoomed.x1), (1.0, 6.0));
