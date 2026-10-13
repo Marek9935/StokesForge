@@ -170,6 +170,10 @@ fn number_field_core<T: Number>(
     let has_presets = !quantity.presets.is_empty();
     let mut current = value.to_f64();
     let mut changed = false;
+    let mut auto = false;
+    // Un Auto de la valeur elle-même (`AutoKind::Field`) ouvre la liste par une
+    // entrée « Auto » ; les valeurs proposées sont alors décalées d'un cran.
+    let offset = usize::from(quantity.auto == AutoKind::Field);
     let focused = ctx.memory(|memory| memory.has_focus(id));
 
     // — Clavier, avant le champ : le `TextEdit` prendrait ↑/↓ et Entrée. —
@@ -186,18 +190,23 @@ fn number_field_core<T: Number>(
         let alt_down = key(ui, &shortcuts::KEY_ALT_ARROW_DOWN);
         if alt_down && has_presets && !presets.open {
             presets.open = true;
-            presets.highlighted = nearest_preset(quantity, current);
+            presets.highlighted = nearest_preset(quantity, current) + offset;
         } else if presets.open {
             if key(ui, &shortcuts::KEY_ARROW_DOWN) {
-                presets.highlighted = (presets.highlighted + 1).min(quantity.presets.len() - 1);
+                presets.highlighted =
+                    (presets.highlighted + 1).min(quantity.presets.len() - 1 + offset);
             }
             if key(ui, &shortcuts::KEY_ARROW_UP) {
                 presets.highlighted = presets.highlighted.saturating_sub(1);
             }
             if key(ui, &shortcuts::KEY_ENTER) {
-                current = quantity.presets[presets.highlighted];
+                if presets.highlighted < offset {
+                    auto = true;
+                } else {
+                    current = quantity.presets[presets.highlighted - offset];
+                    changed = true;
+                }
                 presets.open = false;
-                changed = true;
             }
         } else {
             let steps = i32::from(key(ui, &shortcuts::KEY_SHIFT_ARROW_UP)) * 10
@@ -242,7 +251,6 @@ fn number_field_core<T: Number>(
         response.request_focus();
     }
     let typed = edited.value.is_some();
-    let mut auto = false;
     match edited.value {
         Some(Entry::Value(value)) => {
             current = value;
@@ -279,7 +287,11 @@ fn number_field_core<T: Number>(
         list_frame::paint_arrow(ui, arrow, &button);
         if button.clicked() {
             presets.open = !presets.open;
-            presets.highlighted = nearest_preset(quantity, current);
+            presets.highlighted = if auto_hint.is_some() {
+                0
+            } else {
+                nearest_preset(quantity, current) + offset
+            };
         }
         if presets.open {
             let anchor = response.rect.left_bottom() + egui::vec2(0.0, 2.0);
@@ -305,9 +317,14 @@ fn number_field_core<T: Number>(
                     && !button.rect.contains(pos)
                     && !area.response.rect.contains(pos)
             });
-            if let Some(preset) = picked {
-                current = preset;
-                changed = true;
+            if let Some(choice) = picked {
+                match choice {
+                    Some(preset) => {
+                        current = preset;
+                        changed = true;
+                    }
+                    None => auto = true,
+                }
                 presets.open = false;
                 response.request_focus();
             } else if outside {
@@ -441,19 +458,28 @@ fn preset_popup_contents(
     ui: &mut egui::Ui,
     quantity: &Quantity,
     highlighted: usize,
-) -> Option<f64> {
+) -> Option<Option<f64>> {
+    let offset = usize::from(quantity.auto == AutoKind::Field);
     let mut picked = None;
     egui::ScrollArea::vertical()
         .max_height(180.0)
         .show(ui, |ui| {
             ui.set_min_width(FIELD_WIDTH);
+            if offset == 1
+                && ui
+                    .selectable_label(highlighted == 0, tr!("common-auto"))
+                    .clicked()
+            {
+                picked = Some(None);
+            }
             for (index, preset) in quantity.presets.iter().enumerate() {
+                let index = index + offset;
                 let entry = ui.selectable_label(
                     index == highlighted,
                     format_value(*preset, quantity.decimals),
                 );
                 if entry.clicked() {
-                    picked = Some(*preset);
+                    picked = Some(Some(*preset));
                 }
                 if index == highlighted
                     && ui.input(|input| {
@@ -583,6 +609,19 @@ mod tests {
                 "{texte:?}"
             );
         }
+    }
+
+    #[test]
+    fn le_corps_de_la_barre_de_format_accepte_auto() {
+        // #245 : la barre de format doit pouvoir remettre le corps en Auto,
+        // par le mot, par le champ vidé ou par l'entrée de la liste.
+        let corps = quantities::TEXT_FORMAT_SIZE;
+        assert_eq!(corps.auto, AutoKind::Field);
+        for texte in ["auto", ""] {
+            assert_eq!(read(&corps, texte), Verdict::Valid(Entry::Auto));
+        }
+        // Le corps de l'éditeur sur place n'a pas d'Auto : ce n'est pas lui.
+        assert_eq!(quantities::TEXT_SIZE.auto, AutoKind::None);
     }
 
     #[test]

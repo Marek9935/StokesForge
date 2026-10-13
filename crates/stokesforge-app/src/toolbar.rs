@@ -929,7 +929,18 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             env.text_style.size
         };
         let hint = if env.text_style.auto_size {
-            tr!("common-auto")
+            // Le corps réellement appliqué reste lisible : « Auto (12) ».
+            match env.text_style.size {
+                Some(effective) => format!(
+                    "{} ({})",
+                    tr!("common-auto"),
+                    crate::number_field::format_value(
+                        effective,
+                        quantities::TEXT_FORMAT_SIZE.decimals
+                    )
+                ),
+                None => tr!("common-auto"),
+            }
         } else {
             tr!("format-size")
         };
@@ -937,7 +948,7 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             ui,
             "stokesforge_format_size",
             &mut size,
-            &quantities::TEXT_SIZE,
+            &quantities::TEXT_FORMAT_SIZE,
             &hint,
         );
         on_hover(
