@@ -365,6 +365,25 @@ impl StokesForgeApp {
             }
             return false;
         }
+        // Gras et italique d'un titre sélectionné hors édition (#243) : les
+        // balises enveloppent tout le texte, comme pour un texte libre ; un
+        // texte déjà entièrement enveloppé se déballe. La légende n'a pas de
+        // texte propre (`TextTarget::text` rend `None`) : rien à envelopper.
+        if let (TextFormat::Bold | TextFormat::Italic, Some(target), None, false) =
+            (format, zone, &title_editing, annotation_editing)
+        {
+            if let Some(text) = crate::state::current_plot_spec(self.state.tree(), graph)
+                .and_then(|spec| target.text(&spec))
+            {
+                let length = text.chars().count();
+                actions.push(Action::SetTextContent {
+                    graph,
+                    target,
+                    text: crate::text_format::apply(&text, 0..length, format).text,
+                });
+            }
+            return true;
+        }
         // La couleur : celle de la zone d'un titre sélectionné ; dans un champ
         // en édition elle reste une balise sur le passage surligné (#90).
         if let (TextFormat::Color(color), Some(target), None, false) =
@@ -875,6 +894,41 @@ mod tests {
             app.text_format_state(&ctx, Some(Tab::Graph(graph)))
                 .auto_family
         );
+        session.shutdown().unwrap();
+    }
+
+    /// Un titre sélectionné hors édition (#243) : B / I enveloppent tout son
+    /// texte en une seule action ; une boîte à moitié enveloppée est
+    /// enveloppée en entier, une boîte entièrement enveloppée se déballe.
+    #[test]
+    fn gras_et_italique_enveloppent_tout_un_titre_selectionne() {
+        let (session, mut app, graph, ctx) = setup();
+        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        app.with_graph_view(graph, |view| {
+            view.select_text(Some(TextTarget::Title), &spec)
+        });
+        let texte = |actions: Vec<Action>| match actions.as_slice() {
+            [Action::SetTextContent { text, .. }] => text.clone(),
+            other => panic!("une seule SetTextContent attendue, pas {other:?}"),
+        };
+        assert_eq!(
+            texte(formate(&mut app, &ctx, graph, TextFormat::Bold)),
+            "#strong[Titre]"
+        );
+        assert_eq!(
+            texte(formate(&mut app, &ctx, graph, TextFormat::Italic)),
+            "#emph[Titre]"
+        );
+        let mut poser = |text: &str| {
+            app.state.dispatch(Action::SetTextContent {
+                graph,
+                target: TextTarget::Title,
+                text: text.into(),
+            });
+            texte(formate(&mut app, &ctx, graph, TextFormat::Bold))
+        };
+        assert_eq!(poser("#strong[a] b"), "#strong[#strong[a] b]");
+        assert_eq!(poser("#strong[Titre]"), "Titre");
         session.shutdown().unwrap();
     }
 

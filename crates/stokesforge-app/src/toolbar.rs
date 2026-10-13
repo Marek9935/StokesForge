@@ -1041,12 +1041,16 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
                 tr!("format-formula", "hint"),
             ),
         ] {
-            let hint = if rich {
+            // Gras et italique agissent aussi sur tout un titre sélectionné (#243).
+            let usable = rich
+                || (env.text_format == FormatTarget::Zone
+                    && matches!(format, TextFormat::Bold | TextFormat::Italic));
+            let hint = if usable {
                 hint
             } else {
                 format!("{hint}\n{}", text_disabled_hint(env))
             };
-            if tool_button(ui, icon, label, Some(hint), rich, false) {
+            if tool_button(ui, icon, label, Some(hint), usable, false) {
                 requests.push(ToolbarRequest::FormatText(format));
             }
         }
