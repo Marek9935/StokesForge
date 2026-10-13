@@ -16,6 +16,18 @@ cargo test -p stokesforge-robustesse -- --ignored  # reproductions et bancs coû
 scripts/python-test.sh                        # pont, scripts, robustesse, application et CLI
 ```
 
+**Lire la sortie sans la verser dans le contexte.** Un `cargo test --workspace`
+produit des milliers de lignes. Garder le journal complet dans un fichier et
+n'afficher que le résumé ; relire le fichier au besoin plutôt que relancer
+(une relance coûte des minutes de compilation) :
+
+```sh
+cargo test --workspace > "$tmp/test.log" 2>&1; echo "code $?"
+rg -n 'FAILED|panicked|^error|^warning|test result' "$tmp/test.log" | head -40
+```
+
+Un `| tail` ou un `| head` direct, sans fichier, perd le détail d'un échec.
+
 **Les travaux `fmt`, `clippy` et `test` n'activent pas `python`.** Le travail
 `test-python` est automatique et bloquant ; il teste les cinq crates du chemin
 Python. Clippy Python exige encore l'environnement embarqué explicitement.
@@ -147,7 +159,7 @@ n'importe quelle machine. Suivre ce principe pour tout nouveau test de coût.
   module (le *pourquoi* : ce qui a été essayé, écarté, imposé par une
   contrainte) et la page `docs/` du domaine (le *quoi*, qui oriente).
   Si des chemins, scripts ou frontières ont bougé : `.claude/rules.md`,
-  `.codex/README.md`, `CLAUDE.md`, `AGENTS.md`.
+  `.codex/README.md`, `CLAUDE.md`, `.claude/conventions.md`, `AGENTS.md`.
 - Code, commentaires, tests, doc et commits en **français**.
 
 ## Committer

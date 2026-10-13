@@ -50,6 +50,9 @@ déclenche pas. Les deux diagnostics envoient à des endroits opposés du fichie
 
 ## 2. Corriger à la bonne couche
 
+Avant de toucher au code : la section du domaine dans `.claude/conventions.md`
+(table dans `CLAUDE.md`) — une règle de brique ou de garde s'y trouve.
+
 Le réflexe coûteux est de réparer là où le symptôme se voit. Table de renvoi :
 
 | Symptôme | Où la cause vit le plus souvent |

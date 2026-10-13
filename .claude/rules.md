@@ -82,3 +82,11 @@ jamais comme description de l'état actuel. Deux valent le détour avant d'agir 
 Les phases citées un peu partout (0-5 pour le socle, R0-R8 pour le rendu) sont
 **toutes closes** : un `R6`/`R7`/`R8` dans un commentaire désigne du travail
 fait, pas du travail à venir.
+
+## Conventions par domaine
+
+Les règles détaillées par domaine (briques de `stokesforge-app`, menus,
+séries, copie, analyse, `pyst`, pièges du rendu) sont dans
+[`conventions.md`](conventions.md) ; la table de `CLAUDE.md` dit quelle section
+lire. Une grande recherche (beaucoup de lecture) part à l'agent `recherche`
+(`agents/recherche.md`, Haiku) : voir `CLAUDE.md`, « Délégation ».

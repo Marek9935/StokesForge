@@ -25,7 +25,8 @@ Dans cet ordre, sans sauter d'étape :
    a souvent du travail en cours qu'il ne faut ni écraser ni committer.
 2. Ouvrir la page `docs/` du domaine, **pas** le workspace entier.
    `.claude/rules.md` dit exactement quoi charger et quoi ne pas ouvrir.
-   `docs/invariants.md` vaut pour tous les domaines.
+   `docs/invariants.md` vaut pour tous les domaines. Lire aussi la section
+   du domaine dans `.claude/conventions.md` (table dans `CLAUDE.md`).
 3. Chercher l'existant (`rg`) : une fonctionnalité voisine, un helper, un
    `Action`, une `Command` qui fait déjà 80 % du travail. Réutiliser bat
    écrire, et le dépôt a déjà payé pour ses abstractions.

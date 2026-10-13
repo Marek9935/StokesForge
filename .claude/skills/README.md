@@ -10,7 +10,8 @@ Codex charge les mêmes dossiers via les liens de `.agents/skills/` ;
 
 Elles ne remplacent pas la documentation — elles l'**utilisent**.
 `docs/README.md` route par domaine, `docs/invariants.md` dit ce qu'on ne casse
-pas, `.claude/rules.md` dit quoi charger et quoi ne pas ouvrir. Les skills
+pas, `.claude/rules.md` dit quoi charger et quoi ne pas ouvrir, `.claude/conventions.md`
+porte les règles détaillées par domaine (table de lecture dans `CLAUDE.md`). Les skills
 disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
 
 ## Les skills
@@ -118,7 +119,7 @@ correctif ou un chantier qui installe une règle nouvelle — un standard
 d'interface (barres de défilement, sélecteur de couleur), un motif à suivre
 (une fenêtre, une commande), une frontière — met à jour **au besoin** le ou
 les skills concernés (`stokesforge-feature`, `stokesforge-bug-fix`, etc.), ainsi que
-`CLAUDE.md`, dans le même commit que le code. Sans cela, le prochain
+`CLAUDE.md` ou `.claude/conventions.md`, dans le même commit que le code. Sans cela, le prochain
 développement repart de l'ancienne règle et réintroduit l'incohérence. Les
 issues GitLab le rappellent dans une ligne « **Cohérence** ».
 
@@ -148,6 +149,14 @@ changement d'interface qu'il faut voir ou manipuler dans l'application réelle
 porte ce qu'un `cargo test --workspace` vert **ne prouve pas** (ni `python`, ni
 rien qui exige une vraie fenêtre Wayland, le sélecteur natif ou un glisser ; le
 reste de l'interface se pilote avec `run-stokesforge`).
+
+## Agent de recherche
+
+`.claude/agents/recherche.md` n'est pas un skill : c'est un sous-agent Haiku,
+en lecture seule, pour les recherches qui demandent de lire beaucoup de
+fichiers. Il rend une synthèse avec `fichier:ligne` et garde ainsi le contexte
+de la session principale petit. Quand l'utiliser et quand non : `CLAUDE.md`,
+« Délégation ».
 
 ## Les invoquer à la main
 
