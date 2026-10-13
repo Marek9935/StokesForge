@@ -290,6 +290,9 @@ pub struct TextFormatState {
     pub color: Option<String>,
     pub auto_family: bool,
     pub auto_size: bool,
+    /// Alignement de la boîte visée (#244) ; `None` sans cible. Allume le
+    /// bouton correspondant.
+    pub align: Option<TextAlign>,
 }
 
 impl TextFormatState {
@@ -1032,7 +1035,8 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             } else {
                 format!("{hint}\n{}", text_disabled_hint(env))
             };
-            if tool_button(ui, icon, label, Some(hint), enabled, false) {
+            let current = env.text_style.align == Some(align);
+            if tool_button(ui, icon, label, Some(hint), enabled, current) {
                 requests.push(ToolbarRequest::FormatText(TextFormat::Align(align)));
             }
         }

@@ -137,6 +137,7 @@ impl StokesForgeApp {
                             auto_family: annotation.font.trim().is_empty(),
                             auto_size: annotation.size
                                 == stokesforge_plot::AnnotationSpec::DEFAULT_SIZE,
+                            align: Some(annotation.align),
                         }
                         .with_markup(&annotation.text),
                     );
@@ -183,6 +184,7 @@ impl StokesForgeApp {
                         color: target.color(&spec),
                         auto_family: font.family().is_none(),
                         auto_size: font.size.is_none(),
+                        align: Some(font.align),
                     }
                     .with_markup(&text),
                 )
@@ -958,6 +960,16 @@ mod tests {
             [Action::SetTextFont { font, .. }] => assert_eq!(font.align, TextAlign::Left),
             other => panic!("une SetTextFont attendue, pas {other:?}"),
         }
+        // Le bouton de l'alignement courant reste enfoncé : l'état le lit.
+        assert_eq!(
+            app.text_format_state(&ctx, Some(Tab::Graph(graph))).align,
+            Some(TextAlign::Center)
+        );
+        app.with_graph_view(graph, |view| view.select_annotation(Some(TEXTE), &spec));
+        assert_eq!(
+            app.text_format_state(&ctx, Some(Tab::Graph(graph))).align,
+            Some(TextAlign::Center)
+        );
         session.shutdown().unwrap();
     }
 
