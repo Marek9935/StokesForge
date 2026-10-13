@@ -81,6 +81,17 @@ impl Quantity {
         self.integer && self.min >= 0.0 && self.max < 1000.0 && self.presets.is_empty()
     }
 
+    /// Le nombre est un réel signé borné à trois chiffres, sans liste de
+    /// valeurs (rotation en degrés) : « -180.5 » tient dans un champ un peu
+    /// plus large que [`Self::is_compact`] (#246).
+    pub fn is_compact_signed(&self) -> bool {
+        !self.integer
+            && self.min > -1000.0
+            && self.max < 1000.0
+            && self.presets.is_empty()
+            && self.auto == AutoKind::None
+    }
+
     /// La même grandeur bornée à `min..=max`.
     pub const fn between(self, min: f64, max: f64) -> Self {
         Self { min, max, ..self }

@@ -229,6 +229,8 @@ fn number_field_core<T: Number>(
         id_salt,
         if quantity.is_compact() {
             crate::theme::FIELD_WIDTH_DIGITS
+        } else if quantity.is_compact_signed() {
+            crate::theme::FIELD_WIDTH_SIGNED_DIGITS
         } else {
             FIELD_WIDTH
         },
@@ -547,6 +549,10 @@ mod tests {
             assert!(compact.is_compact());
         }
         // Plus de trois chiffres, réel ou signé : largeur courte.
+        assert!(quantities::ROTATION.is_compact_signed());
+        assert!(!quantities::ROTATION.is_compact());
+        assert!(!quantities::FREE.is_compact_signed());
+        assert!(!quantities::TEXT_FORMAT_SIZE.is_compact_signed());
         assert!(!quantities::ITERATIONS.is_compact());
         assert!(!quantities::FREE.is_compact());
         assert!(!quantities::COUNT.is_compact());

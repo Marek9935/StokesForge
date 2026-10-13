@@ -23,9 +23,6 @@ use crate::quantities;
 use crate::state::{series_list_label, Action};
 use crate::tr;
 
-use stokesforge_plot::TextAlign;
-
-use super::form::ChoiceOption;
 use super::inplace_edit;
 use crate::color_picker::{saved_colors_id, SavedColorRequest};
 
@@ -531,18 +528,23 @@ pub(super) fn annotation_editor_ui(
                         &quantities::ROTATION,
                     );
                     // L'alignement ne se voit que dans une boîte de largeur
-                    // fixée (poignées du texte sélectionné, #244).
-                    ui.label(tr!("plot-text-align"));
-                    super::form::choice(
+                    // fixée (poignées du texte sélectionné, #244) ; mêmes
+                    // boutons que la barre de format (#246).
+                    let mut requests = Vec::new();
+                    crate::toolbar::align_buttons(
                         ui,
-                        ("annotation_align", id),
-                        &mut editor.draft.align,
-                        &[
-                            ChoiceOption::new(TextAlign::Left, tr!("plot-text-align-left")),
-                            ChoiceOption::new(TextAlign::Center, tr!("plot-text-align-center")),
-                            ChoiceOption::new(TextAlign::Right, tr!("plot-text-align-right")),
-                        ],
+                        Some(editor.draft.align),
+                        None,
+                        &mut requests,
                     );
+                    for request in requests {
+                        if let crate::toolbar::ToolbarRequest::FormatText(
+                            crate::text_format::TextFormat::Align(align),
+                        ) = request
+                        {
+                            editor.draft.align = align;
+                        }
+                    }
                     if ui
                         .button(tr!("plot-text-ok"))
                         .on_hover_text(tr!("plot-text-ok", "hint"))

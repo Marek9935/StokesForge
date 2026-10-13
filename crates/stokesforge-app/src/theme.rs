@@ -90,6 +90,10 @@ pub const SPACE_SECTION: f32 = 6.0;
 /// pour cent, degré…), sans liste de valeurs (~38 px).
 pub const FIELD_WIDTH_DIGITS: f32 = 38.0;
 
+/// Largeur d'un champ réel signé à trois chiffres et une décimale, sans liste
+/// (rotation, « -180.5 », #246).
+pub const FIELD_WIDTH_SIGNED_DIGITS: f32 = 54.0;
+
 /// Largeur d'un champ **court** (L2, #227) : un nombre, une borne, un
 /// caractère (~80 px). C'est la largeur de la brique « nombre ».
 pub const FIELD_WIDTH_SHORT: f32 = 80.0;
