@@ -73,7 +73,8 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/menu_sections.rs` | brique commune des menus : `MenuSections::section` (seul trait de séparation, #155), `menu_choice` (coche seule d'un choix exclusif, C3, #227) |
 | `app/list_row.rs` | brique commune de la ligne de liste sélectionnable (#169) : `list_row`, `ListRowBackground`, `list_row_label`, `list_row_text`, `LIST_ROW_MARK` ; Project Manager, Object Manager, liste des séries des propriétés |
 | `app/shortcuts.rs` | **registre unique des touches** (#231) : constantes `SHORTCUT_*` et `KEY_*`, leurs rappels, tableau `HELP` qui engendre Help › Keyboard Shortcuts, consommation d'annuler/rétablir dans le viewport actif (`collect_undo_redo_shortcuts`) |
-| `app/preferences_window.rs` | File › Preferences (#148) : fenêtre minimale, rubrique General (langue), appliquée tout de suite, `modal_read_only` |
+| `app/preferences_window.rs` | File › Preferences (#148) : rubriques General (langue) et Export (formats de Copy Graph : ordre au glisser, cases, `Action::SetCopyFormats`, préférence `copy_formats`), appliquées tout de suite, `modal_read_only` |
+| `app/reorder_list.rs` | brique commune d'une liste réordonnée au glisser : poignée `Grip`, ligne qui suit le pointeur, lignes qui s'écartent en direct (`reorder_row`, `reorder_move`, `move_before`) ; seule la poignée se saisit, pour ne pas voler le clic des cases |
 | `app/keyboard_shortcuts_window.rs` | Help › Keyboard Shortcuts (#231, K5) : fenêtre en lecture seule, engendrée de `HELP` |
 | `app/busy.rs`, `app/empty_state.rs` | briques « travail en cours » (indicateur après 0,5 s, progression, Stop après 3 s ; #232 ; import en fond et recalcul de formules #239) et « état vide » (phrase grisée centrée qui dit le geste) |
 | `app/cursors.rs` | seul module qui nomme un `CursorIcon` (#231, X2) : main ouverte/fermée, flèches de redimensionnement, doigt des éléments cliquables qui ne sont pas des boutons |

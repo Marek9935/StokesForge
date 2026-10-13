@@ -164,8 +164,11 @@ mod object_manager_ui;
 #[cfg(test)]
 mod panel_tests;
 mod plot_settings;
+#[cfg(test)]
+mod preferences_proto;
 mod preferences_window;
 mod project_manager;
+mod reorder_list;
 mod results_pane;
 mod script_console;
 pub(crate) mod shortcuts;

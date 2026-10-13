@@ -775,6 +775,10 @@ pub enum Action {
     /// Règle l'écriture du texte des exports SVG, texte ou contours (#162).
     /// Préférence de l'application : ni commande, ni historique, ni `.stf`.
     SetSvgTextMode(stokesforge_render_svg::SvgTextMode),
+    /// Règle l'ordre et l'état des formats offerts par Copy Graph (#148,
+    /// #149). Préférence de l'application : ni commande, ni historique, ni
+    /// `.stf`.
+    SetCopyFormats(Vec<crate::preferences::CopyFormatEntry>),
     /// Pose un texte libre (issue #35) : remplace celui de `target`, ou
     /// l'ajoute si `target` est le rang qui suit le dernier
     /// ([`AnnotationRef::set`]). **Une** modification du modèle, donc une
@@ -4923,6 +4927,14 @@ impl AppState {
                     ));
                 }
             }
+            Action::SetCopyFormats(entries) => {
+                if let Err(error) = self.object_manager_preferences.save_copy_formats(&entries) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::SetPngExportScale(scale) => {
                 if PNG_EXPORT_SCALES.contains(&scale) {
                     self.png_export_scale = scale;
@@ -6348,6 +6360,10 @@ impl AppState {
     }
 
     /// L'écriture du texte des exports SVG (#162).
+    pub fn copy_formats(&self) -> &[crate::preferences::CopyFormatEntry] {
+        self.object_manager_preferences.copy_formats()
+    }
+
     pub fn svg_text_mode(&self) -> stokesforge_render_svg::SvgTextMode {
         self.object_manager_preferences.svg_text_mode()
     }
@@ -6411,29 +6427,37 @@ impl AppState {
     /// les trois formats. Un format qui échoue seul est omis et nommé dans le
     /// message ; si aucun n'est prêt, rien n'est offert.
     fn copy_graph_figure(&mut self, spec: &PlotSpec) {
+        use crate::preferences::CopyFormat;
         use stokesforge_clipboard::{mime, Representation};
         use stokesforge_render_svg::ExportFormat;
 
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
-        let wanted = [
-            // Le presse-papiers prend toujours le défaut, texte SVG (#162).
-            (
-                "SVG",
-                mime::SVG,
-                ExportFormat::Svg {
-                    text: stokesforge_render_svg::SvgTextMode::Text,
-                },
-            ),
-            (
-                "PNG",
-                mime::PNG,
-                ExportFormat::Png {
-                    scale: self.png_export_scale,
-                },
-            ),
-            ("PDF", mime::PDF, ExportFormat::Pdf),
-        ];
+        // L'ordre et le choix sont ceux de Preferences › Export : l'ordre des
+        // représentations est celui où les applications les voient.
+        let wanted: Vec<(&str, &str, ExportFormat)> = self
+            .copy_formats()
+            .iter()
+            .filter(|entry| entry.on)
+            .map(|entry| match entry.format {
+                // Le presse-papiers prend toujours le défaut, texte SVG (#162).
+                CopyFormat::Svg => (
+                    "SVG",
+                    mime::SVG,
+                    ExportFormat::Svg {
+                        text: stokesforge_render_svg::SvgTextMode::Text,
+                    },
+                ),
+                CopyFormat::Png => (
+                    "PNG",
+                    mime::PNG,
+                    ExportFormat::Png {
+                        scale: self.png_export_scale,
+                    },
+                ),
+                CopyFormat::Pdf => ("PDF", mime::PDF, ExportFormat::Pdf),
+            })
+            .collect();
         let formats: Vec<ExportFormat> = wanted.iter().map(|(_, _, format)| *format).collect();
         let results = match stokesforge_render_svg::export_bytes_many(
             &plot,
