@@ -850,7 +850,16 @@ pub(super) fn preview(
         }
     }
 
-    let origin = ui.input(|i| i.pointer.press_origin());
+    // L'origine du glisser est gardée en mémoire (#251) : egui efface
+    // `press_origin` à l'image du relâchement, celle où la zone se pose.
+    let origin_id = id.with("drag_origin");
+    let origin = match ui.input(|i| i.pointer.press_origin()) {
+        Some(pos) => {
+            ui.data_mut(|d| d.insert_temp(origin_id, pos));
+            Some(pos)
+        }
+        None => ui.data_mut(|d| d.remove_temp::<egui::Pos2>(origin_id)),
+    };
     if response.dragged_by(egui::PointerButton::Primary) {
         if let (Some(from), Some(to)) = (origin, response.interact_pointer_pos()) {
             match form.tool {
@@ -1169,5 +1178,78 @@ mod tests {
         assert_eq!(tick_step(0.0), 1.0);
         assert_eq!(format_tick(0.4, 0.2), "0.4");
         assert_eq!(format_tick(6.0, 2.0), "6");
+    }
+}
+
+/// #251 : un glisser de l'outil Zone pose la zone au relâchement, alors
+/// qu'egui a déjà effacé `press_origin` à cette image.
+#[cfg(test)]
+mod zone_tests {
+    use super::super::test_support::{colonnes_xy, contexte, image};
+    use super::*;
+    use crate::analysis::{BaselineShape, Preset};
+    use stokesforge_core::SeriesRef;
+
+    /// Glisse sur l'aperçu de gauche à droite, au milieu de la hauteur.
+    fn glisser(shape: Option<BaselineShape>, preset: Preset) -> AnalysisForm {
+        let mut project = stokesforge_core::Project::new("Zone").unwrap();
+        let (x, y) = colonnes_xy(&mut project);
+        let tree = project.tree().clone();
+        let series = vec![SeriesRef {
+            x: Some(x),
+            y,
+            sigma: None,
+        }];
+        let mut form = AnalysisForm::new(&preset, series, false);
+        if let Some(shape) = shape {
+            form.setup.baseline.shape = shape;
+            form.tool = form.natural_tool();
+        }
+        let context = contexte();
+        let id = egui::Id::new("zone");
+        let ev = |pos: egui::Pos2, pressed: Option<bool>| {
+            let mut v = vec![egui::Event::PointerMoved(pos)];
+            if let Some(pressed) = pressed {
+                v.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            v
+        };
+        let (a, b) = (egui::pos2(500.0, 400.0), egui::pos2(900.0, 400.0));
+        for events in [
+            vec![],
+            ev(a, None),
+            ev(a, Some(true)),
+            ev(egui::pos2(700.0, 400.0), None),
+            ev(b, None),
+            ev(b, Some(false)),
+            vec![],
+        ] {
+            image(&context, events, |ui| {
+                preview(ui, id, &mut form, &tree, 0);
+            });
+        }
+        form
+    }
+
+    #[test]
+    fn glisser_trace_la_zone_de_la_constante_par_moyenne() {
+        let form = glisser(Some(BaselineShape::ConstantZone), Preset::BaselineConstant);
+        assert_eq!(form.tool, PreviewTool::Zone);
+        assert!(
+            form.setup.baseline.constant_zone.is_some(),
+            "{:?}",
+            form.setup.baseline
+        );
+    }
+
+    #[test]
+    fn glisser_trace_une_zone_du_polynome() {
+        let form = glisser(None, Preset::BaselinePolynomial);
+        assert_eq!(form.setup.baseline.zones.len(), 1);
     }
 }
