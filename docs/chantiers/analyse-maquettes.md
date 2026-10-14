@@ -603,6 +603,10 @@ Alternative : poignées pour la ligne de base seulement, le reste par
 │ Output  …                             │                                  │
 ```
 
+Ordre retenu dans l'application (#252) : Input, Analysis type, puis la
+colonne Reference en tête du bloc de la famille (Response pour la
+déconvolution), puis l'opération et Output — comme pour la Baseline.
+
 La référence est ramenée sur la grille X des données par interpolation
 linéaire (décidé). Points hors du domaine de la référence :
 

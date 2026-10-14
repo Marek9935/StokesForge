@@ -249,7 +249,7 @@ pub(super) fn form_body(
     graphs: &[(NodeId, String)],
 ) {
     super::form::form(ui, id.with("rows"), |rows| {
-        input_block(rows, id, form, tree);
+        input_block(rows, form, tree);
         family_chooser(rows, id, form);
         family_block(rows, id, form, tree);
         output_block(rows, id, form, graphs, tree);
@@ -263,7 +263,7 @@ fn field_list(rows: &mut Form<'_>, add: impl FnOnce(&mut egui::Ui)) {
     });
 }
 
-fn input_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
+fn input_block(rows: &mut Form<'_>, form: &mut AnalysisForm, tree: &Tree) {
     rows.section(tr!("analysis-block-input"));
     let count = form.series.len();
     rows.ui().horizontal(|ui| {
@@ -305,6 +305,11 @@ fn input_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree:
             ),
         );
     }
+}
+
+/// Le sélecteur de la colonne auxiliaire (Reference / Response), en tête du
+/// bloc de la famille, sous « Analysis type » (#252).
+fn aux_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     if form.needs_aux() {
         let candidates = aux_candidates(tree, &form.series);
         let selected = form
@@ -371,6 +376,7 @@ fn family_chooser(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
 }
 
 fn family_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
+    aux_block(rows, id, form, tree);
     match form.kind {
         OperationKind::Baseline => baseline_form(rows, id, form),
         OperationKind::Correct => correct_form(rows, id, form),
@@ -1042,5 +1048,28 @@ mod tests {
             assert_eq!(form.setup.baseline.constant_point, Some((7.0, 8.0)));
             assert_eq!(form.setup.baseline.constant_zone, Some((7.0, 9.0)));
         }
+    }
+
+    /// #252 : la colonne de référence se choisit sous « Analysis type », dans
+    /// le bloc de la famille, comme les réglages de la Baseline — pas sous
+    /// l'entrée.
+    #[test]
+    fn la_reference_vient_sous_le_type_d_analyse() {
+        use crate::analysis::{AnalysisForm, Preset};
+        use stokesforge_core::Project;
+        let context = contexte();
+        let project = Project::new("essai").unwrap();
+        let tree = project.tree().clone();
+        let mut form = AnalysisForm::new(&Preset::Correct, vec![], false);
+        let formes = image(&context, vec![], |ui| {
+            super::form_body(ui, egui::Id::new("essai"), &mut form, &tree, &[]);
+        });
+        let peints = textes(&formes);
+        let y = |libelle: String| texte_exact(&peints, &libelle).centre.y;
+        let entree = y(crate::tr!("analysis-block-input"));
+        let type_ = y(crate::tr!("analysis-block-type"));
+        let reference = y(crate::tr!("analysis-field-reference"));
+        assert!(entree < type_, "Input au-dessus d'Analysis type");
+        assert!(type_ < reference, "Reference sous Analysis type");
     }
 }
