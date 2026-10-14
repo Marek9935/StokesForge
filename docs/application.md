@@ -1829,8 +1829,9 @@ réellement dans `stokesforge-plot` (lu avant d'écrire, comme demandé) :
   (« mettez la série dans un groupe »). Nuanciers : fournis
   (`GRADIENT_PRESETS`), enregistrés (projet ou utilisateur, suffixe « (Project) »
   / « (User) », bouton Delete grisé hors nuancier enregistré) ou personnalisé à
-  N couleurs (nom + cible + Save), aperçu, « Apply to Group » qui répartit les
-  couleurs dans l'ordre de la liste. Le choix en cours est un état de fenêtre ;
+  N couleurs (nom + cible + Save), aperçu, appliqué **dès qu'on le choisit** (ou qu'on change
+  un arrêt), sans bouton : il répartit les couleurs dans l'ordre de la liste
+  du brouillon, que OK valide et Cancel défait (#213). Le choix en cours est un état de fenêtre ;
   seules les couleurs appliquées et les nuanciers enregistrés entrent dans le
   modèle. Dans l'Object Manager, le nœud sous le calque s'appelle « Series » ; un
   groupe y est un **nœud parent comme les autres** (#197) : triangle de repli
@@ -1841,7 +1842,9 @@ réellement dans `stokesforge-plot` (lu avant d'écrire, comme demandé) :
   sélectionnée ; les poignées de toutes ses courbes sont peintes), double-clic
   = fenêtre des séries ouverte sur sa première série, clic droit
   (`object_node_menu` : Select Members, Rename, Move Up / Down, Ungroup, Hide,
-  Delete, Properties…). Suppr supprime le groupe **et ses séries** (le geste
+  Delete, Properties…). Dans la fenêtre des séries, l'en-tête du groupe suit la
+  même règle (#208) : surligné quand le groupe est réglé (portée « tout le
+  groupe »), un clic le choisit (première série, portée groupe). Suppr supprime le groupe **et ses séries** (le geste
   distinct de la dissolution) ; Ctrl+↑/↓ le déplace en bloc. Actions :
   `RenameSeriesGroup`, `UngroupSeries`, `MoveSeriesGroup`, `MoveSeries`,
   `RemovePlotObject`.
@@ -2326,7 +2329,8 @@ seule action. La sélection suit le contenu déplacé, y compris après
 Annuler/Rétablir, et une suppression décale les adresses des voisins sélectionnés.
 
 Les propriétés choisissent la série et le calque exacts, même masqués ; le
-sélecteur de calque est commun aux pages de la fenêtre. Un texte libre
+sélecteur de calque est commun aux pages de la fenêtre ; il est grisé, avec
+une info-bulle, sur « Graph » et « Theme » qui valent pour tout le graphique (#180). Un texte libre
 réutilise son éditeur sur place. Un objet graphique ouvre un brouillon de
 propriétés (coordonnées, trait, remplissage) : Valider envoie une action,
 Annuler ne change rien. Les parents ont leurs propriétés et leur visibilité ;

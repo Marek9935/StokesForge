@@ -85,8 +85,8 @@ une commande : l'interface passe par `EditPlotSpec` (motifs `RenameGroup`,
 **Nuanciers (#178).** `stokesforge_plot::gradient` : `GRADIENT_PRESETS` (bleu →
 rouge, noir → rouge…) et `gradient_colors(arrêts, n)`, couleurs `#RRGGBB`
 régulièrement espacées entre le premier et le dernier arrêt, quel que soit `n`.
-Rien n'est stocké au moment d'appliquer : « Appliquer au groupe » écrit les
-couleurs dans les séries. Un nuancier **personnalisé** s'enregistre sous un nom :
+Rien n'est stocké au moment d'appliquer : choisir un nuancier (ou changer un arrêt) écrit
+aussitôt les couleurs dans les séries du brouillon (#213). Un nuancier **personnalisé** s'enregistre sous un nom :
 `SavedColors::gradients` (`SavedGradient { name, stops }`, bornés comme les
 couleurs, `with_gradient_added` remplace par le nom, `with_gradient_removed`),
 donc dans le projet (`SetSavedColors`, annulable, `.stf`) ou pour l'utilisateur
