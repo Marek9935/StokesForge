@@ -13,6 +13,10 @@ automatiquement chargée : voir la
 2. Lire `docs/README.md`, puis la page du domaine ci-dessous. Consulter
    `docs/invariants.md` avant de changer les contrats du modèle, l'historique,
    la session, le rendu ou le pont Python.
+   Lire aussi la section utile de [`.claude/conventions.md`](../.claude/conventions.md)
+   avant d'écrire dans le domaine ; la table « Conventions par domaine » de
+   [`CLAUDE.md`](../CLAUDE.md) oriente. [`.claude/rules.md`](../.claude/rules.md)
+   précise le périmètre de lecture par tâche.
 3. Rechercher avec `rg` et `rg --files` les symboles, usages, composants
    analogues et tests existants. Lire les commentaires `//!` des modules
    concernés et suivre le chemin depuis l'appelant jusqu'à l'implémentation.
@@ -32,12 +36,12 @@ en refonte générale.
 
 ### Skills de projet repris de Claude
 
-Les onze skills maintenus dans [`.claude/skills/`](../.claude/skills/README.md)
+Les douze skills maintenus dans [`.claude/skills/`](../.claude/skills/README.md)
 sont également disponibles pour Codex via les liens de `.agents/skills/`.
 Ce sont les mêmes fichiers : modifier le skill source dans `.claude/skills/`
 met à jour les deux assistants. Pour une tâche donnée, lire le `SKILL.md`
 concerné et ses seules références utiles, après le parcours de lecture
-ci-dessus ; ne pas charger les onze systématiquement.
+ci-dessus ; ne pas charger les douze systématiquement.
 
 | Besoin | Skill à consulter |
 |---|---|
@@ -49,6 +53,7 @@ ci-dessus ; ne pas charger les onze systématiquement.
 | Import CSV/TXT/ASC et prévisualisation | [`stokesforge-import`](../.agents/skills/stokesforge-import/SKILL.md) |
 | Pont PyO3, scripts et console Python | [`stokesforge-python`](../.agents/skills/stokesforge-python/SKILL.md) |
 | Tests, vérification finale et commit | [`stokesforge-verification`](../.agents/skills/stokesforge-verification/SKILL.md) |
+| Lancer, piloter et capturer l'application réelle sous Linux | [`run-stokesforge`](../.agents/skills/run-stokesforge/SKILL.md) |
 | Expliquer le découpage du logiciel | [`stokesforge-architecture`](../.agents/skills/stokesforge-architecture/SKILL.md) |
 | Expliquer ce que le logiciel sait faire | [`stokesforge-fonctionnalites`](../.agents/skills/stokesforge-fonctionnalites/SKILL.md) |
 | Écrire ou modifier un texte visible | [`stokesforge-textes-interface`](../.agents/skills/stokesforge-textes-interface/SKILL.md) |
@@ -63,6 +68,13 @@ Les mentions d'outils propres à Claude, comme `AskUserQuestion`, désignent
 l'intention du workflow : utiliser l'outil de question disponible dans Codex
 si un arbitrage utilisateur est réellement nécessaire. En cas de divergence,
 suivre la demande de l'utilisateur, `AGENTS.md`, ce guide et le code actuel.
+
+`run-stokesforge` complète la vérification pour les scénarios interactifs
+(menus, dialogues, saisie, annulation). Son pilote partagé est
+`.claude/skills/run-stokesforge/driver.py` ; lire les captures avec l'outil
+d'image disponible dans Codex. Il tourne en X11 sous Xwayland et ne valide
+ni Wayland natif, ni le sélecteur `rfd`, ni le glisser. Les fenêtres ouvertes
+pour la vérification sont fermées à la fin du scénario selon le skill.
 
 Pendant la création ou l'enrichissement d'issues, conserver le contexte de
 signalement entre les messages : « ajoute », « enlève » ou « supprime »
@@ -100,8 +112,8 @@ Les documents de `docs/archive/` expliquent les arbitrages historiques.
 Les références anciennes à `architecture-choisie.md`, `format-fichier-plx.md`
 ou `questions-ouvertes.md` s'y résolvent. Les notes `docs/chantier-*.md` et
 `docs/chantiers/` demandent une confrontation au code avant de reprendre un
-« reste à faire ». La présence éventuelle de `legacy-python/` ne change pas
-la cible active Rust.
+« reste à faire ». `legacy-python/` a été supprimé de cette branche ;
+l'ancienne implémentation reste accessible sous le tag `legacy-python`.
 
 ## 3. Réutiliser les frontières existantes
 
@@ -209,8 +221,10 @@ dans une copie distincte du runtime ; voir `docs/python-matplotlib-spike.md`.
   `stokesforge-render-egui/tests/mesure_courbes.rs`, se lance en `--release`
   avec `--ignored` ; protocole, commande et mesures dans `docs/rendu.md`.
 - UI : tester la logique via `AppState` ; pour le clavier, le focus ou la
-  présentation, compléter par une vérification visuelle si un affichage est
-  disponible. Sinon préciser ce qui reste non vérifié.
+  présentation, compléter par une vérification dans l'application réelle
+  avec `run-stokesforge` si un affichage est disponible. Pour les textes,
+  capturer aussi en `STOKESFORGE_LANG=en-XA` (catalogue et troncature).
+  Préciser les limites X11 du pilote et ce qui reste non vérifié.
 - Wayland (#72) : les patches `vendor/winit` et `vendor/smithay-clipboard`
   partagent le récepteur de dépôt et de presse-papiers entre les viewports.
   Les deux copies sont hors workspace. Le parseur et le canal exacts sont

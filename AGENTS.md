@@ -40,10 +40,17 @@ confirmation pour les choix courants couverts par la demande.
   `docs/archive/` ne prouve pas qu'une fonctionnalité existe ou reste à faire.
 - Quand un travail installe une règle nouvelle (standard d'interface, motif à
   suivre, frontière), mettre à jour au besoin les skills concernés
-  (`.claude/skills/`) et `CLAUDE.md` dans le même commit que le code.
+  (`.claude/skills/`) et `CLAUDE.md` ou `.claude/conventions.md` dans le même
+  commit que le code.
 - Les skills de projet dans `.agents/skills/` renvoient aux sources maintenues
   dans `.claude/skills/`. Consulter le skill pertinent selon la table de
   `.codex/README.md` et ses références utiles, sans charger toute la collection.
+- Les conventions détaillées sont partagées dans `.claude/conventions.md` :
+  lire la section du domaine avant d'écrire du code (table dans `CLAUDE.md`).
+  `.claude/rules.md` précise le périmètre de lecture. Le skill `run-stokesforge`
+  pilote et capture l'application réelle sous Linux pour les vérifications
+  interactives ; son chemin X11 sous Xwayland ne valide ni Wayland natif,
+  ni `rfd`, ni le glisser.
 - Standard de comportement (#217) : champs, messages, dialogues, confirmations,
   grisage, clavier et souris suivent `docs/standard-interface.md`, source
   unique. Section *à venir* (#219–#232) : la règle vaut déjà pour tout code
