@@ -58,6 +58,20 @@ qu'ils apparaissent à l'écran.
 - Un nouveau lot de décisions = un **nouvel** artifact (nouveau fichier),
   pas une republication du précédent : ses réponses sont la trace du lot.
 
+## Défendre une option sur le fond (règle demandée le 2026-10-14)
+
+- « Fidèle à ce que tu as choisi », « cohérent avec ta réponse précédente »
+  **n'est pas un argument** pour une option. Il ne vaut que si une **règle
+  générale d'interface** (`docs/standard-interface.md`, `docs/menus.md`) impose
+  la cohérence ; une décision de produit prise en cherchant une solution n'en
+  est pas une.
+- Remettre en question les points déjà abordés : si une réponse antérieure
+  mène à un résultat discutable (menu à une entrée, module d'une fonction),
+  le dire dans la question et chiffrer l'inconvénient plutôt que le recopier.
+- Avant de proposer un classement de menus, relire la règle des sous-menus
+  (`docs/menus.md` : 3 entrées au moins, profondeur 2) : une maquette qui la
+  viole est une erreur de la question, pas un choix de l'utilisateur.
+
 ## Après les réponses
 
 1. Relire la collection avec `ArtifactData` (`action: list`,
