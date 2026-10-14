@@ -20,8 +20,8 @@ use super::analysis_dialog::{exact_result_label, format_value};
 use super::form::{choice, choice_by, ChoiceOption, Form};
 use super::hover_help::{help_beside, help_text};
 use crate::analysis::{
-    aux_candidates, aux_for, kind_title, series_label, with_unit, AnalysisForm, BaselineShape,
-    DirectAlgorithm, Preset,
+    aux_candidates, aux_for, kind_title, reference_label, series_label, with_unit, AnalysisForm,
+    BaselineShape, Category, DirectAlgorithm, Preset,
 };
 use crate::field_state::{self, FieldIssue};
 use crate::icons::{icon_button, Icon, IconRole};
@@ -310,8 +310,18 @@ fn input_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree:
         let selected = form
             .aux
             .as_ref()
-            .and_then(|a| candidates.iter().find(|(y, _)| *y == a.y))
-            .map(|(_, label)| label.clone())
+            .and_then(|a| {
+                // Une référence figée (#248) n'est pas une colonne à choisir :
+                // elle se lit « copy of … ».
+                if tree.is_analysis_copy(a.y) {
+                    Some(reference_label(tree, a))
+                } else {
+                    candidates
+                        .iter()
+                        .find(|(y, _)| *y == a.y)
+                        .map(|(_, label)| label.clone())
+                }
+            })
             .unwrap_or_else(|| tr!("analysis-field-choose-column"));
         let heading = if form.kind == OperationKind::Correct {
             tr!("analysis-field-reference")
@@ -338,17 +348,22 @@ fn input_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree:
     }
 }
 
-/// Le titre de la famille ; à la création, une liste déroulante qui en change à
-/// chaud (#202 : le clic droit ouvre la fenêtre sans famille choisie). Un
-/// calcul rouvert garde sa famille : seule sa méthode se change.
+/// Le titre de la famille ; à la création, le choix « Analysis type » parmi les
+/// seules familles de la catégorie de la fenêtre (#248), qui en change à chaud.
+/// Une catégorie à une seule famille (Fitting, Integrate) n'a rien à choisir.
+/// Un calcul rouvert garde sa famille : seule sa méthode se change.
 fn family_chooser(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
-    if form.editing.is_some() {
+    let kinds = Category::of(form.kind).kinds();
+    if form.editing.is_some() || kinds.len() < 2 {
         rows.section(kind_title(form.kind));
         return;
     }
     rows.section(tr!("analysis-block-type"));
     let mut kind = form.kind;
-    let options = OperationKind::ALL.map(|kind| ChoiceOption::new(kind, kind_title(kind)));
+    let options: Vec<_> = kinds
+        .iter()
+        .map(|kind| ChoiceOption::new(*kind, kind_title(*kind)))
+        .collect();
     if choice(rows.ui(), id.with("family"), &mut kind, &options) {
         form.set_kind(kind);
         form.tool = form.natural_tool();

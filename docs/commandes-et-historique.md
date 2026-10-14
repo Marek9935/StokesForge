@@ -280,6 +280,14 @@ calcul n'est conservé ; les colonnes restent éditables et leurs graphiques
 suivent leurs nouvelles valeurs. Les versions de toutes les entrées lues
 sont exigées avant écriture. Une colonne à formule ou calculée est refusée.
 
+`RestoreOriginalData { trace }` (#248, structurelle) rend aux colonnes
+remplacées leur original, gardé dans le classeur caché des copies : il écrase
+les saisies faites depuis, et un Annuler le défait. Les copies (référence
+figée d'une correction, originaux) vivent dans **un seul classeur caché par
+projet** (`stokesforge-core/src/analysis_store.rs`) ; une copie est retirée avec
+la dernière analyse ou trace qui la cite. Toutes ces écritures sont dans la
+commande qui les provoque : annuler ramène l'arbre, copies comprises.
+
 La longueur de Y reste identique. Les lignes dont X ou Y est non fini gardent
 leur cellule originale ; un NaN produit sur une ligne valide (division par zéro,
 référence hors plage) reste visible. Plusieurs séries partageant Y doivent

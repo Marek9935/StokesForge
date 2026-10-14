@@ -947,6 +947,17 @@ mod tests {
         tab: Option<Tab>,
         events: Vec<egui::Event>,
     ) -> (egui::FullOutput, Vec<Action>) {
+        peint_avec(app, ctx, tab, events, egui::Modifiers::NONE)
+    }
+
+    /// Comme [`peint`], touches de modification tenues (Ctrl+clic).
+    fn peint_avec(
+        app: &mut StokesForgeApp,
+        ctx: &egui::Context,
+        tab: Option<Tab>,
+        events: Vec<egui::Event>,
+        modifiers: egui::Modifiers,
+    ) -> (egui::FullOutput, Vec<Action>) {
         let mut actions = Vec::new();
         let mut output = ctx.run_ui(
             egui::RawInput {
@@ -954,7 +965,10 @@ mod tests {
                     egui::Pos2::ZERO,
                     egui::vec2(1200.0, 900.0),
                 )),
-                events,
+                // egui 0.36 : les touches tenues passent par un événement.
+                events: std::iter::once(egui::Event::ModifiersChanged(modifiers))
+                    .chain(events)
+                    .collect(),
                 ..Default::default()
             },
             |ui| {
@@ -991,6 +1005,17 @@ mod tests {
         tab: Option<Tab>,
         pos: egui::Pos2,
     ) -> Vec<Action> {
+        clique_avec(app, ctx, tab, pos, egui::Modifiers::NONE)
+    }
+
+    /// Un clic gauche, `modifiers` tenues pendant tout le geste.
+    fn clique_avec(
+        app: &mut StokesForgeApp,
+        ctx: &egui::Context,
+        tab: Option<Tab>,
+        pos: egui::Pos2,
+        modifiers: egui::Modifiers,
+    ) -> Vec<Action> {
         let mut actions = Vec::new();
         for events in [
             vec![egui::Event::PointerMoved(pos)],
@@ -998,16 +1023,16 @@ mod tests {
                 pos,
                 button: egui::PointerButton::Primary,
                 pressed: true,
-                modifiers: egui::Modifiers::NONE,
+                modifiers,
             }],
             vec![egui::Event::PointerButton {
                 pos,
                 button: egui::PointerButton::Primary,
                 pressed: false,
-                modifiers: egui::Modifiers::NONE,
+                modifiers,
             }],
         ] {
-            actions.extend(peint(app, ctx, tab, events).1);
+            actions.extend(peint_avec(app, ctx, tab, events, modifiers).1);
         }
         actions
     }
@@ -1247,11 +1272,10 @@ mod tests {
 
         let (_, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
         for label in [
-            tr!("analysis-menu-baseline"),
-            tr!("action-analysis-correct"),
+            tr!("analysis-category-data-manipulation"),
+            tr!("analysis-category-fitting"),
+            tr!("analysis-category-peaks"),
             tr!("action-analysis-integrate"),
-            tr!("analysis-menu-fit"),
-            tr!("analysis-menu-peaks"),
         ] {
             assert!(!active(&menu, &label).enabled, "sans colonne : {label}");
         }
@@ -1289,7 +1313,10 @@ mod tests {
         let (ctx, menu) = ouvre_chemin(
             &mut app,
             tab,
-            &[tr!("menu-analysis"), tr!("analysis-menu-baseline")],
+            &[
+                tr!("menu-analysis"),
+                tr!("analysis-category-data-manipulation"),
+            ],
         );
         let anchors = active(&menu, &tr!("analysis-baseline-anchors"));
         assert_eq!(
@@ -1301,6 +1328,140 @@ mod tests {
             }]
         );
         assert_ferme(&mut app, &ctx, tab);
+        session.shutdown().unwrap();
+    }
+
+    /// #248 : le menu Analysis a une entrée par catégorie, et les méthodes de
+    /// chaque catégorie sont dans son sous-menu — « Correct by Reference » est
+    /// du ressort de Data Manipulation, pas de Fitting.
+    #[test]
+    fn le_menu_analyse_range_les_methodes_par_categorie() {
+        let (session, mut app, _) = banc();
+        let book = app.state.books()[0].0;
+        app.open_tab(Tab::Book(book));
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let tab = Some(Tab::Book(book));
+        let columns: Vec<_> = app
+            .state
+            .visible_columns(sheet)
+            .iter()
+            .map(|c| c.0)
+            .collect();
+        app.state.select_column(sheet, columns[0]);
+        app.state.extend_column_selection(sheet, columns[1]);
+
+        let chemin = |app: &mut StokesForgeApp, categorie: &str| {
+            let (_, menu) = ouvre_chemin(app, tab, &[tr!("menu-analysis"), categorie.to_string()]);
+            menu.into_iter()
+                .map(|entree| entree.label)
+                .collect::<Vec<_>>()
+        };
+        let data = chemin(&mut app, &tr!("analysis-category-data-manipulation"));
+        for attendu in [
+            tr!("analysis-baseline-constant"),
+            tr!("analysis-baseline-linear"),
+            tr!("analysis-baseline-polynomial"),
+            tr!("analysis-baseline-anchors"),
+            tr!("action-analysis-correct"),
+        ] {
+            assert!(
+                data.contains(&attendu),
+                "Data Manipulation : {attendu} dans {data:?}"
+            );
+        }
+        let fitting = chemin(&mut app, &tr!("analysis-category-fitting"));
+        assert!(
+            fitting.contains(&tr!("analysis-fit-gaussian")),
+            "{fitting:?}"
+        );
+        assert!(fitting.contains(&tr!("analysis-fit-custom")), "{fitting:?}");
+        assert!(
+            !fitting.contains(&tr!("action-analysis-correct")),
+            "témoin : la correction n'est pas un ajustement"
+        );
+        let peaks = chemin(&mut app, &tr!("analysis-category-peaks"));
+        for attendu in [
+            tr!("action-analysis-peaks"),
+            tr!("action-analysis-reconvolution"),
+            tr!("action-analysis-direct"),
+        ] {
+            assert!(peaks.contains(&attendu), "{attendu} dans {peaks:?}");
+        }
+        session.shutdown().unwrap();
+    }
+
+    /// #249 : les dernières analyses lancées sont listées en bas du menu ; un
+    /// clic ouvre la fenêtre, Ctrl+clic lance (même geste, `run` en plus).
+    #[test]
+    fn le_menu_analyse_liste_les_dernieres_analyses_et_ctrl_clic_les_lance() {
+        use crate::analysis::{Preset, RecentTarget};
+        let (session, mut app, _) = banc();
+        let book = app.state.books()[0].0;
+        app.open_tab(Tab::Book(book));
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let tab = Some(Tab::Book(book));
+        let columns: Vec<_> = app
+            .state
+            .visible_columns(sheet)
+            .iter()
+            .map(|c| c.0)
+            .collect();
+        app.state.select_column(sheet, columns[0]);
+        app.state.extend_column_selection(sheet, columns[1]);
+        let selected = app
+            .state
+            .selection(sheet)
+            .map(|selection| selection.columns(app.state.tree(), sheet))
+            .unwrap();
+
+        // Témoin : rien n'a été lancé, rien n'est listé.
+        let (_, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
+        let numerote = |label: &str| label.starts_with("1 ");
+        assert!(
+            menu.iter().all(|entree| !numerote(&entree.label)),
+            "{menu:?}"
+        );
+
+        app.state.dispatch(Action::OpenAnalysis {
+            preset: Preset::Integrate,
+            sheet,
+            columns: selected.clone(),
+        });
+        app.state.dispatch(Action::ApplyAnalysis);
+        assert_eq!(app.state.analysis_recent().len(), 1);
+
+        let label = tr!(
+            "analysis-recent-entry",
+            rank = 1_i64,
+            label = app.state.analysis_recent()[0].label()
+        );
+        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
+        let entry = active(&menu, &label);
+        assert!(entry.enabled);
+        let target = RecentTarget::Columns {
+            sheet,
+            columns: selected,
+        };
+        assert_eq!(
+            clique(&mut app, &ctx, tab, entry.center),
+            vec![Action::OpenRecentAnalysis {
+                index: 0,
+                run: false,
+                target: target.clone(),
+            }]
+        );
+        assert_ferme(&mut app, &ctx, tab);
+
+        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-analysis"));
+        let entry = active(&menu, &label);
+        assert_eq!(
+            clique_avec(&mut app, &ctx, tab, entry.center, egui::Modifiers::COMMAND),
+            vec![Action::OpenRecentAnalysis {
+                index: 0,
+                run: true,
+                target,
+            }]
+        );
         session.shutdown().unwrap();
     }
 

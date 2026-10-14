@@ -52,10 +52,11 @@ fn rank(label: &HistoryLabel) -> usize {
         HistoryLabel::UpdateCalculation(_) => 26,
         HistoryLabel::RemoveCalculation { .. } => 27,
         HistoryLabel::ReplaceAnalysisData(_) => 28,
+        HistoryLabel::RestoreOriginalData(_) => 29,
     }
 }
 
-const VARIANTS: usize = 29;
+const VARIANTS: usize = 30;
 
 /// Chaque variante, sous **chacune** de ses formes (cible connue ou non, 0, 1 et
 /// plusieurs lignes, chaque nature de groupe).
@@ -132,6 +133,7 @@ fn all_labels() -> Vec<HistoryLabel> {
     for kind in OperationKind::ALL {
         labels.push(HistoryLabel::AddCalculation(kind));
         labels.push(HistoryLabel::ReplaceAnalysisData(kind));
+        labels.push(HistoryLabel::RestoreOriginalData(Some(kind)));
         labels.push(HistoryLabel::UpdateCalculation(kind));
         for with_columns in [false, true] {
             labels.push(HistoryLabel::RemoveCalculation {
@@ -146,6 +148,7 @@ fn all_labels() -> Vec<HistoryLabel> {
             with_columns,
         });
     }
+    labels.push(HistoryLabel::RestoreOriginalData(None));
     labels
 }
 

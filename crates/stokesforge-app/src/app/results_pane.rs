@@ -16,7 +16,9 @@ use super::analysis_handles::select_calculation;
 use super::empty_state::empty_state;
 use super::form::{choice, ChoiceOption};
 use super::list_row::list_row;
-use crate::analysis::{kind_title, series_label, value_label, value_unit, with_unit};
+use crate::analysis::{
+    kind_title, reference_label, series_label, value_label, value_unit, with_unit, Category,
+};
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState};
 use crate::{theme, tr};
@@ -120,13 +122,25 @@ pub(super) fn results_pane(
                                 empty_state(ui, tr!("results-empty"));
                             }
                             for calc in &calculations {
-                                let mut title = match state.tree().correction_traces().get(calc) {
-                                    Some(trace) => tr!(
-                                        "analysis-correction-trace",
-                                        kind = kind_title(trace.operation.kind())
-                                    ),
-                                    None => state.calculation_title(*calc),
-                                };
+                                let (category, mut title) =
+                                    match state.tree().correction_traces().get(calc) {
+                                        Some(trace) => (
+                                            Category::of(trace.operation.kind()),
+                                            tr!(
+                                                "analysis-correction-trace",
+                                                kind = kind_title(trace.operation.kind())
+                                            ),
+                                        ),
+                                        None => (
+                                            state
+                                                .tree()
+                                                .calculation(*calc)
+                                                .map_or(Category::DataManipulation, |c| {
+                                                    Category::of(c.operation.kind())
+                                                }),
+                                            state.calculation_title(*calc),
+                                        ),
+                                    };
                                 if state
                                     .tree()
                                     .calculation(*calc)
@@ -134,6 +148,13 @@ pub(super) fn results_pane(
                                 {
                                     title = tr!("results-stale-suffix", title = title.as_str());
                                 }
+                                // La catégorie en tête de ligne (#248) : la liste est
+                                // unique, tous les types y sont mêlés.
+                                let title = tr!(
+                                    "results-row",
+                                    category = category.title(),
+                                    title = title.as_str()
+                                );
                                 if list_row(ui, None, &title, pane.selected == Some(*calc), false)
                                     .clicked()
                                 {
@@ -167,10 +188,23 @@ fn detail(
     calc_id: NodeId,
 ) {
     if let Some(trace) = state.tree().correction_traces().get(&calc_id) {
-        ui.label(theme::bold(tr!(
-            "analysis-correction-trace",
-            kind = kind_title(trace.operation.kind())
-        )));
+        ui.horizontal(|ui| {
+            ui.label(theme::bold(tr!(
+                "analysis-correction-trace",
+                kind = kind_title(trace.operation.kind())
+            )));
+            if ui
+                .add_enabled(
+                    !trace.originals.is_empty(),
+                    egui::Button::new(tr!("action-restore-original-data")),
+                )
+                .on_hover_text(tr!("action-restore-original-data", "hint"))
+                .on_disabled_hover_text(tr!("action-restore-original-data", "disabled"))
+                .clicked()
+            {
+                actions.push(Action::RestoreOriginalData(calc_id));
+            }
+        });
         ui.label(tr!("analysis-output-replace-hint"));
         egui::ScrollArea::vertical()
             .id_salt(id.with(("trace", calc_id.raw())))
@@ -180,14 +214,7 @@ fn detail(
                 }
                 if let Some(aux) = &trace.aux {
                     ui.label(tr!("analysis-field-reference"));
-                    ui.label(series_label(
-                        state.tree(),
-                        &stokesforge_core::SeriesRef {
-                            x: aux.x,
-                            y: aux.y,
-                            sigma: None,
-                        },
-                    ));
+                    ui.label(reference_label(state.tree(), aux));
                 }
                 correction_settings(ui, &trace.operation);
             });
@@ -196,6 +223,12 @@ fn detail(
     let Some(calc) = state.tree().calculation(calc_id) else {
         return;
     };
+    // La référence figée d'une correction n'apparaît que par cette ligne (#248).
+    let reference = calc
+        .aux
+        .as_ref()
+        .filter(|_| calc.operation.kind() == stokesforge_analysis::ops::OperationKind::Correct)
+        .map(|aux| reference_label(state.tree(), aux));
     ui.horizontal(|ui| {
         ui.label(theme::bold(kind_title(calc.operation.kind())));
         if ui
@@ -224,6 +257,12 @@ fn detail(
             actions.push(Action::RequestDeleteCalculation(calc_id));
         }
     });
+    if let Some(reference) = reference {
+        ui.label(tr!(
+            "analysis-reference-line",
+            reference = reference.as_str()
+        ));
+    }
     // Les colonnes du tableau : chaque (clé, rang) vu, dans l'ordre d'apparition.
     let mut columns: Vec<(String, Option<usize>)> = Vec::new();
     for result in &calc.results {
@@ -435,6 +474,34 @@ mod tests {
             actions.contains(&Action::EditCalculation(calc)),
             "{actions:?}"
         );
+        session.shutdown().unwrap();
+    }
+
+    /// #248 : la liste est unique ; chaque ligne porte sa catégorie en tête.
+    #[test]
+    fn chaque_ligne_porte_sa_categorie_en_tete() {
+        let ctx = contexte();
+        let (session, state, book, sheet) = banc();
+        let mut actions = Vec::new();
+        ctx.data_mut(|d| {
+            d.insert_temp(
+                pane_id(book),
+                PaneState {
+                    open: true,
+                    ..PaneState::default()
+                },
+            )
+        });
+        frame(&ctx, &state, book, sheet, &mut actions);
+        let output = frame(&ctx, &state, book, sheet, &mut actions);
+        let calc = *state.tree().calculations().keys().next().unwrap();
+        let titre = state.calculation_title(calc);
+        let attendu = tr!(
+            "results-row",
+            category = Category::Integrate.title(),
+            title = titre.as_str()
+        );
+        assert!(painted(&output, &attendu), "{attendu}");
         session.shutdown().unwrap();
     }
 

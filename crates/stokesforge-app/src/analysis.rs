@@ -92,7 +92,12 @@ impl Preset {
         }
     }
 
-    /// Les modèles proposés par `Fit ▸` (le modèle libre se saisit dans la
+    /// La catégorie (donc la fenêtre) de ce choix.
+    pub fn category(&self) -> Category {
+        Category::of(self.kind())
+    }
+
+    /// Les modèles proposés par `Fitting ▸` (le modèle libre se saisit dans la
     /// fenêtre, il n'a pas d'entrée de menu qui le préremplisse).
     pub fn fit_models() -> [Model; 10] {
         [
@@ -110,6 +115,93 @@ impl Preset {
             },
         ]
     }
+}
+
+/// La catégorie d'une analyse (#248), comme dans OriginLab : une entrée du
+/// menu Analysis, une fenêtre. Seule `DataManipulation` transforme la courbe et
+/// peut **remplacer** les données ; les autres écrivent de nouvelles colonnes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Category {
+    /// Lignes de base et correction par une référence.
+    DataManipulation,
+    /// Ajustement par un modèle.
+    Fitting,
+    /// Décomposition en pics, reconvolution, déconvolution directe.
+    PeaksAndDeconvolution,
+    /// Intégrale.
+    Integrate,
+}
+
+impl Category {
+    /// Les catégories, dans l'ordre du menu.
+    pub const ALL: [Category; 4] = [
+        Category::DataManipulation,
+        Category::Fitting,
+        Category::PeaksAndDeconvolution,
+        Category::Integrate,
+    ];
+
+    /// La catégorie d'une famille d'opération.
+    pub fn of(kind: OperationKind) -> Self {
+        match kind {
+            OperationKind::Baseline | OperationKind::Correct => Category::DataManipulation,
+            OperationKind::Fit => Category::Fitting,
+            OperationKind::Peaks
+            | OperationKind::Reconvolution
+            | OperationKind::DirectDeconvolution => Category::PeaksAndDeconvolution,
+            OperationKind::Integrate => Category::Integrate,
+        }
+    }
+
+    /// Les familles que la fenêtre de la catégorie propose (« Analysis type »).
+    pub fn kinds(self) -> &'static [OperationKind] {
+        match self {
+            Category::DataManipulation => &[OperationKind::Baseline, OperationKind::Correct],
+            Category::Fitting => &[OperationKind::Fit],
+            Category::PeaksAndDeconvolution => &[
+                OperationKind::Peaks,
+                OperationKind::Reconvolution,
+                OperationKind::DirectDeconvolution,
+            ],
+            Category::Integrate => &[OperationKind::Integrate],
+        }
+    }
+
+    /// La méthode préchoisie quand on ouvre la fenêtre de la catégorie sans
+    /// méthode (clic droit).
+    pub fn default_preset(self) -> Preset {
+        match self {
+            Category::DataManipulation => Preset::BaselineLine,
+            Category::Fitting => Preset::Fit(Model::Linear),
+            Category::PeaksAndDeconvolution => Preset::Peaks,
+            Category::Integrate => Preset::Integrate,
+        }
+    }
+
+    /// Le nom de la catégorie, dans la langue courante.
+    pub fn title(self) -> String {
+        match self {
+            Category::DataManipulation => tr!("analysis-category-data-manipulation"),
+            Category::Fitting => tr!("analysis-category-fitting"),
+            Category::PeaksAndDeconvolution => tr!("analysis-category-peaks"),
+            Category::Integrate => tr!("analysis-category-integrate"),
+        }
+    }
+}
+
+/// Là où une analyse récente se relance (#249) : la sélection courante, des
+/// colonnes d'une feuille ou des courbes d'un graphe.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecentTarget {
+    Columns {
+        sheet: NodeId,
+        columns: Vec<NodeId>,
+    },
+    Graph {
+        graph: NodeId,
+        series: Vec<stokesforge_plot::SeriesRef>,
+        spec: Box<stokesforge_plot::PlotSpec>,
+    },
 }
 
 /// La forme d'une ligne de base (M10).
@@ -969,6 +1061,28 @@ pub fn kind_title(kind: OperationKind) -> String {
     }
 }
 
+/// La colonne de référence d'une correction, telle que l'utilisateur la lit :
+/// « copy of /[Book1]Sheet1!B » quand le calcul lit sa copie figée (#248), sinon
+/// le nom de la colonne.
+pub fn reference_label(tree: &Tree, aux: &AuxRef) -> String {
+    if tree.is_analysis_copy(aux.y) {
+        let source = tree
+            .node(aux.y)
+            .and_then(|n| n.as_column())
+            .map(|c| c.meta().long_name.clone())
+            .unwrap_or_default();
+        return tr!("analysis-reference-copy", name = source.as_str());
+    }
+    series_label(
+        tree,
+        &SeriesRef {
+            x: aux.x,
+            y: aux.y,
+            sigma: None,
+        },
+    )
+}
+
 /// Le préréglage qui rouvre une opération existante.
 pub fn preset_of(op: &Operation) -> Preset {
     match op {
@@ -990,6 +1104,23 @@ pub fn preset_of(op: &Operation) -> Preset {
 }
 
 impl Setup {
+    /// Oublie les **plages** et les valeurs de départ — plages d'intégration,
+    /// d'ajustement et de pics, positions de départ des pics, valeurs initiales
+    /// et bornes des paramètres, fenêtre de reconvolution — pour ne garder que
+    /// les réglages de méthode (#249). La définition d'une ligne de base (ses
+    /// points, ses zones) reste : c'est elle qu'on relance sur le spectre
+    /// suivant.
+    pub fn forget_positions(&mut self) {
+        self.integrate.ranges.clear();
+        self.fit.range = None;
+        self.fit.reset_params();
+        self.peaks.seeds.clear();
+        self.peaks.range = None;
+        self.reconv.spec.window = None;
+        let count = self.reconv.param_count();
+        self.reconv.spec.params = vec![ParamSetting::default(); count];
+    }
+
     /// Reprend les réglages d'une opération existante (modification).
     pub fn load(&mut self, op: &Operation) {
         match op {

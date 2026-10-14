@@ -5,8 +5,8 @@ use stokesforge_analysis::correct::CorrectOp;
 use stokesforge_analysis::ops::Operation;
 use stokesforge_commands::{Command, History};
 use stokesforge_core::{
-    CalculationDraft, Column, ColumnMeta, CoreError, NodeId, OutputDraft, Project, SeriesRef,
-    SeriesResult, ValueBlock,
+    AuxRef, CalculationDraft, Column, ColumnMeta, CoreError, NodeId, OutputDraft, Project,
+    SeriesRef, SeriesResult, ValueBlock,
 };
 
 struct World {
@@ -640,4 +640,361 @@ fn remplacement_refuse_formule_et_sortie_calculee_puis_supprime_trace_orpheline(
         )
         .is_err());
     assert_eq!(w.project.tree(), &before);
+}
+
+// ── Référence figée et originaux gardés (#248) ──────────────────────────
+
+/// Un monde avec une colonne de référence (RX, RY) en plus de la série (X, Y).
+fn reference_world() -> (World, NodeId, NodeId) {
+    let mut w = world();
+    let rx = w
+        .project
+        .add_column(
+            w.sheet,
+            None,
+            Some("RX"),
+            Column::from_f64(&[1.0, 2.0, 3.0]),
+        )
+        .unwrap();
+    let ry = w
+        .project
+        .add_column(
+            w.sheet,
+            None,
+            Some("RY"),
+            Column::from_f64(&[2.0, 2.0, 2.0]),
+        )
+        .unwrap();
+    (w, rx, ry)
+}
+
+fn corrected_by(w: &World, rx: NodeId, ry: NodeId) -> CalculationDraft {
+    CalculationDraft {
+        aux: Some(AuxRef { x: Some(rx), y: ry }),
+        ..draft(w, vec![5.0, 10.0, 15.0])
+    }
+}
+
+fn add_corrected(w: &mut World, rx: NodeId, ry: NodeId) {
+    let d = corrected_by(w, rx, ry);
+    w.history
+        .execute(&mut w.project, Command::AddCalculation { draft: d })
+        .unwrap();
+}
+
+fn values_of(project: &Project, column: NodeId) -> Vec<f64> {
+    project
+        .tree()
+        .get(column)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .numeric_view()
+        .unwrap()
+        .to_vec()
+}
+
+fn store_columns(project: &Project) -> Vec<NodeId> {
+    project
+        .analysis_store_sheet()
+        .map(|sheet| project.tree().children(sheet).unwrap().to_vec())
+        .unwrap_or_default()
+}
+
+#[test]
+fn la_reference_d_une_correction_est_figee_dans_un_classeur_cache() {
+    let (mut w, rx, ry) = reference_world();
+    add_corrected(&mut w, rx, ry);
+    let aux = w
+        .project
+        .tree()
+        .calculation(calc_id(&w))
+        .unwrap()
+        .aux
+        .clone()
+        .unwrap();
+    assert_ne!(
+        aux.y, ry,
+        "le calcul lit une copie, pas la colonne d'origine"
+    );
+    assert!(w.project.is_analysis_copy(aux.y));
+    assert!(w.project.is_analysis_copy(aux.x.unwrap()));
+    assert_eq!(values_of(&w.project, aux.y), vec![2.0, 2.0, 2.0]);
+    assert_eq!(
+        store_columns(&w.project).len(),
+        2,
+        "le Y et son X, rien d'autre"
+    );
+    // Le classeur est caché et marqué : books() et le Project Manager le taisent.
+    let sheet = w.project.analysis_store_sheet().unwrap();
+    let book = w.project.tree().parent(sheet).unwrap().unwrap();
+    assert!(matches!(
+        w.project.tree().get(book).unwrap().kind(),
+        stokesforge_core::NodeKind::Workbook { meta, .. } if meta.hidden
+    ));
+    // La feuille de l'utilisateur n'a gagné que la colonne produite.
+    assert_eq!(w.project.tree().children(w.sheet).unwrap().len(), 5);
+}
+
+#[test]
+fn supprimer_ou_modifier_la_reference_d_origine_ne_casse_rien() {
+    let (mut w, rx, ry) = reference_world();
+    add_corrected(&mut w, rx, ry);
+    let id = calc_id(&w);
+    let aux = w
+        .project
+        .tree()
+        .calculation(id)
+        .unwrap()
+        .aux
+        .clone()
+        .unwrap();
+    w.history
+        .execute(
+            &mut w.project,
+            Command::SetCells {
+                column: ry,
+                start: 0,
+                values: ValueBlock::Float(vec![99.0]),
+                expected_version: None,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        values_of(&w.project, aux.y),
+        vec![2.0, 2.0, 2.0],
+        "témoin : copie intacte"
+    );
+    w.history
+        .execute(&mut w.project, Command::RemoveNode { id: ry })
+        .unwrap();
+    w.history
+        .execute(&mut w.project, Command::RemoveNode { id: rx })
+        .unwrap();
+    let calc = w.project.tree().calculation(id).expect("le calcul reste");
+    assert_eq!(calc.aux.as_ref(), Some(&aux));
+    assert_eq!(values_of(&w.project, aux.y), vec![2.0, 2.0, 2.0]);
+}
+
+#[test]
+fn deux_calculs_partagent_la_copie_jusqu_au_dernier() {
+    let (mut w, rx, ry) = reference_world();
+    add_corrected(&mut w, rx, ry);
+    add_corrected(&mut w, rx, ry);
+    assert_eq!(
+        store_columns(&w.project).len(),
+        2,
+        "une copie pour les deux"
+    );
+    let ids: Vec<NodeId> = w.project.tree().calculations().keys().copied().collect();
+    let before = w.project.tree().clone();
+    w.history
+        .execute(
+            &mut w.project,
+            Command::RemoveCalculation {
+                id: ids[0],
+                with_columns: false,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        store_columns(&w.project).len(),
+        2,
+        "le second la lit encore"
+    );
+    w.history
+        .execute(
+            &mut w.project,
+            Command::RemoveCalculation {
+                id: ids[1],
+                with_columns: true,
+            },
+        )
+        .unwrap();
+    assert!(
+        w.project.analysis_store_sheet().is_none(),
+        "la dernière analyse emporte les copies et leur classeur"
+    );
+    assert!(w.project.tree().windows().iter().all(|id| {
+        !matches!(
+            w.project.tree().get(*id).unwrap().kind(),
+            stokesforge_core::NodeKind::Workbook { meta, .. } if meta.hidden
+        )
+    }));
+    // Annuler ramène tout, copies comprises.
+    w.history.undo(&mut w.project).unwrap();
+    w.history.undo(&mut w.project).unwrap();
+    assert_eq!(w.project.tree(), &before);
+}
+
+#[test]
+fn modifier_la_reference_d_un_calcul_fige_la_nouvelle_et_libere_l_ancienne() {
+    let (mut w, rx, ry) = reference_world();
+    add_corrected(&mut w, rx, ry);
+    let id = calc_id(&w);
+    let first = w
+        .project
+        .tree()
+        .calculation(id)
+        .unwrap()
+        .aux
+        .clone()
+        .unwrap();
+    // Un autre état de la référence : une copie neuve.
+    w.history
+        .execute(
+            &mut w.project,
+            Command::SetCells {
+                column: ry,
+                start: 0,
+                values: ValueBlock::Float(vec![4.0, 4.0, 4.0]),
+                expected_version: None,
+            },
+        )
+        .unwrap();
+    let update = corrected_by(&w, rx, ry);
+    w.history
+        .execute(
+            &mut w.project,
+            Command::UpdateCalculation { id, draft: update },
+        )
+        .unwrap();
+    let second = w
+        .project
+        .tree()
+        .calculation(id)
+        .unwrap()
+        .aux
+        .clone()
+        .unwrap();
+    assert_ne!(first.y, second.y);
+    assert_eq!(values_of(&w.project, second.y), vec![4.0, 4.0, 4.0]);
+    assert!(
+        w.project.tree().node(first.y).is_none(),
+        "l'ancienne copie ne sert plus"
+    );
+    assert_eq!(store_columns(&w.project).len(), 2);
+    // Rouvrir le calcul sans toucher à la référence garde la copie : le
+    // formulaire repasse l'AuxRef du calcul, déjà une copie.
+    let reopen = CalculationDraft {
+        aux: Some(second.clone()),
+        ..draft(&w, vec![5.0, 10.0, 15.0])
+    };
+    w.history
+        .execute(
+            &mut w.project,
+            Command::UpdateCalculation { id, draft: reopen },
+        )
+        .unwrap();
+    assert_eq!(w.project.tree().calculation(id).unwrap().aux, Some(second));
+    assert_eq!(store_columns(&w.project).len(), 2);
+}
+
+fn replace_with_reference(w: &mut World, rx: NodeId, ry: NodeId) {
+    let d = corrected_by(w, rx, ry);
+    let versions = [w.x, w.y, rx, ry]
+        .map(|id| {
+            let version = w
+                .project
+                .tree()
+                .get(id)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .version();
+            (id, version)
+        })
+        .to_vec();
+    w.history
+        .execute(
+            &mut w.project,
+            Command::ReplaceAnalysisData {
+                draft: d,
+                expected_versions: versions,
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn restaurer_rend_les_originaux_ecrase_les_saisies_et_s_annule() {
+    let (mut w, rx, ry) = reference_world();
+    replace_with_reference(&mut w, rx, ry);
+    assert_eq!(
+        values_of(&w.project, w.y),
+        vec![5.0, 10.0, 15.0],
+        "remplacé"
+    );
+    let trace = *w.project.tree().correction_traces().keys().next().unwrap();
+    // Un original (Y) et la référence figée (Y, X) vivent dans le classeur caché.
+    assert_eq!(store_columns(&w.project).len(), 3);
+    let record = w.project.tree().correction_traces()[&trace].clone();
+    assert_eq!(record.originals.len(), 1);
+    assert_eq!(
+        values_of(&w.project, record.originals[0].1),
+        vec![10.0, 20.0, 30.0]
+    );
+
+    // Une saisie faite depuis, et une ligne ajoutée : « il restaure tout ».
+    w.history
+        .execute(
+            &mut w.project,
+            Command::SetCells {
+                column: w.y,
+                start: 0,
+                values: ValueBlock::Float(vec![99.0, 98.0, 97.0, 96.0]),
+                expected_version: None,
+            },
+        )
+        .unwrap();
+    let typed = w.project.tree().clone();
+    w.history
+        .execute(&mut w.project, Command::RestoreOriginalData { trace })
+        .unwrap();
+    assert_eq!(values_of(&w.project, w.y), vec![10.0, 20.0, 30.0]);
+    assert!(w.project.tree().correction_traces().is_empty());
+    assert!(
+        w.project.analysis_store_sheet().is_none(),
+        "plus de trace : plus de copie"
+    );
+    let restored = w.project.tree().clone();
+
+    w.history.undo(&mut w.project).unwrap();
+    assert_eq!(
+        w.project.tree(),
+        &typed,
+        "Ctrl+Z rend la correction et ses copies"
+    );
+    assert_eq!(w.project.tree().correction_traces().len(), 1);
+    w.history.redo(&mut w.project).unwrap();
+    assert_eq!(w.project.tree(), &restored);
+}
+
+#[test]
+fn supprimer_la_colonne_remplacee_emporte_la_trace_et_les_copies() {
+    let (mut w, rx, ry) = reference_world();
+    replace_with_reference(&mut w, rx, ry);
+    let trace = *w.project.tree().correction_traces().keys().next().unwrap();
+    let with_trace = w.project.tree().clone();
+    w.history
+        .execute(&mut w.project, Command::RemoveNode { id: w.y })
+        .unwrap();
+    // Plus de ligne de Results, donc plus de bouton : rien à restaurer.
+    assert!(w.project.tree().correction_traces().is_empty());
+    assert!(w.project.analysis_store_sheet().is_none());
+    let error = w
+        .history
+        .execute(&mut w.project, Command::RestoreOriginalData { trace })
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        stokesforge_commands::CommandError::Core(CoreError::UnknownNode(_))
+    ));
+    // Annuler la suppression ramène la trace, les copies et la restauration.
+    w.history.undo(&mut w.project).unwrap();
+    assert_eq!(w.project.tree(), &with_trace);
+    w.history
+        .execute(&mut w.project, Command::RestoreOriginalData { trace })
+        .unwrap();
+    assert_eq!(values_of(&w.project, w.y), vec![10.0, 20.0, 30.0]);
 }

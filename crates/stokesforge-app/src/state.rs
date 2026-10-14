@@ -508,6 +508,19 @@ pub enum Action {
         series: Vec<stokesforge_plot::SeriesRef>,
         spec: Box<PlotSpec>,
     },
+    /// Rouvre une des dernières analyses lancées (#249) sur la sélection
+    /// courante : la fenêtre s'ouvre avec ses réglages ; avec `run` (Ctrl+clic)
+    /// elle est lancée tout de suite si rien ne manque.
+    OpenRecentAnalysis {
+        /// Rang dans [`AppState::analysis_recent`], 0 pour la plus récente.
+        index: usize,
+        run: bool,
+        target: crate::analysis::RecentTarget,
+    },
+    /// « Restore Original Data » (#248) : rend aux colonnes qu'une correction a
+    /// remplacées leurs valeurs d'avant, écrase les saisies faites depuis ;
+    /// `Ctrl+Z` annule. Porte la trace de la correction (ligne de Results).
+    RestoreOriginalData(NodeId),
     /// Rouvre un calcul existant dans la fenêtre d'analyse.
     EditCalculation(NodeId),
     /// Fin d'un glisser de poignée sur le graphe (#199) : le calcul reçoit la
@@ -2654,6 +2667,8 @@ pub struct AppState {
     /// « Keep in Results » : le dernier choix de la session (M5), repris à
     /// l'ouverture suivante.
     analysis_keep_results: bool,
+    /// Les dernières analyses lancées, la plus récente en tête (#249).
+    analysis_recent: Vec<crate::analysis_recent::RecentAnalysis>,
     /// Calcul dont la suppression attend confirmation (M8).
     pending_calculation_delete: Option<NodeId>,
     pending_analysis_replacement: bool,
@@ -2728,6 +2743,7 @@ impl AppState {
     ) -> SessionResult<Self> {
         let snapshot = handle.snapshot()?;
         let keep_results_default = preferences.analysis_keep_results();
+        let analysis_recent = preferences.analysis_recent().to_vec();
         let saved_revision = std::path::Path::new(&path)
             .is_file()
             .then_some((snapshot.revision, snapshot.geometry_revision));
@@ -2781,6 +2797,7 @@ impl AppState {
             metadata_view: None,
             analysis: None,
             analysis_keep_results: keep_results_default,
+            analysis_recent,
             pending_calculation_delete: None,
             pending_analysis_replacement: false,
             pending_stale_export: None,
@@ -4613,6 +4630,12 @@ impl AppState {
                 series,
                 spec,
             } => self.open_graph_analysis(&preset, graph, &series, *spec),
+            Action::OpenRecentAnalysis { index, run, target } => {
+                self.open_recent_analysis(index, run, target)
+            }
+            Action::RestoreOriginalData(trace) => {
+                self.execute(Command::RestoreOriginalData { trace })
+            }
             Action::EditCalculation(id) => self.edit_calculation(id),
             Action::MoveCalculationHandle {
                 calculation,

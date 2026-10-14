@@ -213,6 +213,9 @@ pub enum HistoryLabel {
     AddCalculation(OperationKind),
     /// Correction définitive des valeurs originales.
     ReplaceAnalysisData(OperationKind),
+    /// Restauration des valeurs originales qu'une correction avait remplacées
+    /// (#248), avec la famille de la correction si on la connaît encore.
+    RestoreOriginalData(Option<OperationKind>),
     /// Modification des paramètres d'un calcul d'analyse.
     UpdateCalculation(OperationKind),
     /// Retrait d'un calcul d'analyse.
@@ -373,6 +376,10 @@ impl fmt::Display for HistoryLabel {
             HistoryLabel::ReplaceAnalysisData(kind) => {
                 write!(f, "Replace Original Data ({})", kind_title(*kind))
             }
+            HistoryLabel::RestoreOriginalData(Some(kind)) => {
+                write!(f, "Restore Original Data ({})", kind_title(*kind))
+            }
+            HistoryLabel::RestoreOriginalData(None) => f.write_str("Restore Original Data"),
             HistoryLabel::AddCalculation(kind) => {
                 write!(f, "Add {} Calculation", kind_title(*kind))
             }

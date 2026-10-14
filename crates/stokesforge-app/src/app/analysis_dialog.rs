@@ -19,7 +19,7 @@ use super::dialogs::{
     modal_confirm, modal_dialog_with, ConfirmOutcome, DialogFooter, DialogOutcome,
 };
 use super::form::{choice, ChoiceOption};
-use crate::analysis::{issue_message, kind_title, value_label, value_unit, PreviewTool};
+use crate::analysis::{issue_message, kind_title, value_label, value_unit, Category, PreviewTool};
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState, CalculationDelete};
 use crate::{theme, tr};
@@ -148,11 +148,14 @@ pub(super) fn analysis_window(
     };
     let id = egui::Id::new("stokesforge_analysis");
     let series_shown = form.series.get(form.current).cloned();
-    let kind = kind_title(form.kind);
     let title = if form.editing.is_some() {
+        let kind = kind_title(form.kind);
         tr!("analysis-window-edit", kind = kind.as_str())
     } else {
-        tr!("analysis-window-new", kind = kind.as_str())
+        // La fenêtre est celle d'une catégorie (#248) : son titre ne change pas
+        // quand on passe d'une méthode à l'autre.
+        let category = Category::of(form.kind).title();
+        tr!("analysis-window-new", kind = category.as_str())
     };
     let accept_label = if form.editing.is_some() {
         tr!("analysis-apply-update")
@@ -453,16 +456,21 @@ mod tests {
             // la troisième éprouve le calcul mémorisé de l'aperçu.
             frame(&ctx, &mut state);
             let (output, _) = frame(&ctx, &mut state);
-            let title = tr!("analysis-window-new", kind = kind_title(preset.kind()));
+            let title = tr!(
+                "analysis-window-new",
+                kind = Category::of(preset.kind()).title()
+            );
             assert!(painted(&output, &title), "{preset:?} : titre {title:?}");
             frame(&ctx, &mut state);
             session.shutdown().unwrap();
         }
     }
 
-    /// La fenêtre ouverte depuis le clic droit (#202) change de famille à chaud.
+    /// « Analysis type » ne liste que les familles de la catégorie de la
+    /// fenêtre (#248) et en change à chaud ; une catégorie à une seule famille
+    /// n'a pas de choix.
     #[test]
-    fn la_liste_operation_change_de_famille_a_chaud() {
+    fn analysis_type_ne_liste_que_les_familles_de_la_categorie() {
         use stokesforge_analysis::ops::OperationKind;
         let ctx = contexte();
         let (session, mut state, sheet, ids) = banc();
@@ -474,19 +482,37 @@ mod tests {
         frame(&ctx, &mut state);
         let (output, _) = frame(&ctx, &mut state);
         let all = textes(&output.shapes);
-        let combo = texte_exact(&all, &kind_title(OperationKind::Baseline));
+        assert!(painted(&output, &tr!("analysis-block-type")));
+        for autre in [
+            OperationKind::Fit,
+            OperationKind::Integrate,
+            OperationKind::Peaks,
+        ] {
+            assert!(
+                !all.iter().any(|t| t.texte == kind_title(autre)),
+                "{autre:?} n'est pas une méthode de Data Manipulation"
+            );
+        }
+        let correct = texte_exact(&all, &kind_title(OperationKind::Correct));
         let mut actions = Vec::new();
-        cliquer(&ctx, combo.centre, egui::PointerButton::Primary, |ui| {
-            analysis_window(ui.ctx(), &mut state, &mut actions);
-        });
-        let (output, _) = frame(&ctx, &mut state);
-        let all = textes(&output.shapes);
-        let fit = texte_exact(&all, &kind_title(OperationKind::Fit));
-        cliquer(&ctx, fit.centre, egui::PointerButton::Primary, |ui| {
+        cliquer(&ctx, correct.centre, egui::PointerButton::Primary, |ui| {
             analysis_window(ui.ctx(), &mut state, &mut actions);
         });
         frame(&ctx, &mut state);
-        assert_eq!(state.analysis_form().unwrap().kind, OperationKind::Fit);
+        assert_eq!(state.analysis_form().unwrap().kind, OperationKind::Correct);
+        session.shutdown().unwrap();
+
+        // Témoin : Fitting n'a qu'une famille, donc pas de choix.
+        let ctx = contexte();
+        let (session, mut state, sheet, ids) = banc();
+        state.dispatch(Action::OpenAnalysis {
+            preset: Preset::Fit(Model::Linear),
+            sheet,
+            columns: vec![ids[0], ids[1]],
+        });
+        frame(&ctx, &mut state);
+        let (output, _) = frame(&ctx, &mut state);
+        assert!(!painted(&output, &tr!("analysis-block-type")));
         session.shutdown().unwrap();
     }
 

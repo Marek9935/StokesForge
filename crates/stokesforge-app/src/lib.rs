@@ -41,6 +41,7 @@
 )]
 
 pub mod analysis;
+pub mod analysis_recent;
 pub mod app;
 pub mod color_picker;
 pub mod errors;

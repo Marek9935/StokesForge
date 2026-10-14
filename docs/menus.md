@@ -122,19 +122,24 @@ Selection ▸ ne subsiste que dans Edit.
 
 ### Colonnes et courbes : Analysis (#181, #210)
 
-Le clic droit d'un en-tête de colonne a **une seule entrée** `Analysis…` dans
-la section « créer » (après `Plot ▸` et Add Column) : elle ouvre la fenêtre
-d'analyse, dont la liste « Analysis type » choisit la famille (#202, décision du
-2026-10-09 ; un sous-menu aurait fait trois niveaux, au-delà de la profondeur
-2). Sur une colonne que produit un calcul, une section de gestes du calcul
-(Edit · Recalculate · Detach · Delete) suit Type/Role. Le menu du haut
-(`analysis_menu_contents`) garde une entrée par méthode : Baseline ▸ ·
-Correct… · Integrate… · Fit ▸ · Peaks and Deconvolution ▸ ─ Recalculate Out of
-Date. Les entrées sont **grisées** (info-bulle `.disabled`) tant qu'aucune
-colonne Y n'est visée, jamais absentes.
+Le menu du haut (`analysis_menu_contents`) range les méthodes en
+**catégories** (#248), une fenêtre par catégorie : Data Manipulation ▸
+(Constant… · Linear… · Polynomial… · Anchor Points… · Correct by Reference…,
+à plat) · Fitting ▸ (modèles, Custom Model…) · Peaks and Deconvolution ▸
+(Decompose Peaks… · Reconvolution… · Direct Deconvolution…) · Integrate… ─
+Recalculate Out of Date ─ les **trois dernières analyses lancées** (#249),
+numérotées, sous un filet. Un clic sur une dernière analyse ouvre la fenêtre
+pré-remplie ; Ctrl+clic la relance sur la sélection courante (la fenêtre
+s'ouvre si un réglage manque). Le clic droit d'un en-tête de colonne a un
+sous-menu `Analysis ▸` à quatre entrées, une par catégorie, dans la section
+« créer » (après `Plot ▸` et Add Column) — une entrée par méthode aurait dépassé
+la profondeur 2. Sur une colonne que produit un calcul, une section de gestes
+du calcul (Edit · Recalculate · Detach · Delete) suit Type/Role. Les entrées
+sont **grisées** (info-bulle `.disabled`) tant qu'aucune colonne Y n'est
+visée, jamais absentes.
 
 Le clic droit d'une courbe ou d'un groupe, dans le graphique comme dans
-l'Object Manager, propose aussi `Analysis…`, parmi ses actions principales.
+l'Object Manager, propose le même sous-menu `Analysis ▸`, parmi ses actions principales.
 Le menu Analysis du haut prend la courbe ou le groupe sélectionné quand un
 graphique est actif. Un groupe analyse tous ses membres, dans l'ordre du
 tracé ; les séries construites depuis une ligne de feuille sont grisées.

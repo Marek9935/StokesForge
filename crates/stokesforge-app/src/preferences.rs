@@ -189,6 +189,10 @@ struct PreferencesFile {
     /// « Show » (#200, maquette M5).
     #[serde(default)]
     analysis_keep_results: Option<bool>,
+    /// Les dernières analyses lancées (#249). Gardée brute : une entrée
+    /// illisible est ignorée sans effacer les autres.
+    #[serde(default)]
+    analysis_recent: Option<serde_json::Value>,
     /// Gardée brute : une entrée illisible n'efface pas les autres.
     #[serde(default)]
     dialogs: Option<serde_json::Value>,
@@ -207,6 +211,7 @@ pub struct Preferences {
     svg_text: SvgTextMode,
     toolbars: Option<serde_json::Value>,
     analysis_keep_results: bool,
+    analysis_recent: Vec<crate::analysis_recent::RecentAnalysis>,
     dialogs: BTreeMap<String, DialogGeometry>,
     copy_formats: Vec<CopyFormatEntry>,
     path: Option<PathBuf>,
@@ -248,6 +253,7 @@ impl Preferences {
             },
             toolbars: file.toolbars,
             analysis_keep_results: file.analysis_keep_results.unwrap_or(false),
+            analysis_recent: read_recent_analyses(file.analysis_recent),
             dialogs: read_dialogs(file.dialogs),
             copy_formats: file
                 .copy_formats
@@ -337,6 +343,21 @@ impl Preferences {
     pub fn save_analysis_keep_results(&mut self, keep: bool) -> std::io::Result<()> {
         self.analysis_keep_results = keep;
         self.save_field("analysis_keep_results", keep.into())
+    }
+
+    /// Les dernières analyses lancées, la plus récente en tête (#249).
+    pub fn analysis_recent(&self) -> &[crate::analysis_recent::RecentAnalysis] {
+        &self.analysis_recent
+    }
+
+    /// Mémorise la liste sans remplacer les autres préférences.
+    pub fn save_analysis_recent(
+        &mut self,
+        list: &[crate::analysis_recent::RecentAnalysis],
+    ) -> std::io::Result<()> {
+        self.analysis_recent = list.to_vec();
+        let value = serde_json::Value::Array(list.iter().map(|entry| entry.to_json()).collect());
+        self.save_field("analysis_recent", value)
     }
 
     /// Les formats de Copy Graph, dans l'ordre où ils sont offerts.
@@ -448,6 +469,21 @@ fn read_dialogs(value: Option<serde_json::Value>) -> BTreeMap<String, DialogGeom
                 .map(|geometry| (kind, geometry))
         })
         .take(MAX_DIALOG_GEOMETRIES)
+        .collect()
+}
+
+/// Les analyses récentes lues dans le fichier : une entrée illisible est
+/// écartée, la liste est plafonnée (#249).
+fn read_recent_analyses(
+    value: Option<serde_json::Value>,
+) -> Vec<crate::analysis_recent::RecentAnalysis> {
+    let Some(serde_json::Value::Array(items)) = value else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(crate::analysis_recent::RecentAnalysis::from_json)
+        .take(crate::analysis_recent::MAX_RECENT)
         .collect()
 }
 

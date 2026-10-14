@@ -3559,7 +3559,7 @@ mod tests {
         for entree in propres_aux_lettres.iter().chain([
             &tr!("action-copy"),
             &tr!("action-clear"),
-            &tr!("action-analysis-open"),
+            &tr!("menu-analysis"),
         ]) {
             assert!(
                 textes.contains(entree),

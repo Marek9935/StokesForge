@@ -1,7 +1,9 @@
 //! Le menu Analysis (#181, maquettes M1 et M2) : la barre de menus et le clic
 //! droit d'une colonne partagent **un seul contenu**, `analysis_menu_contents`
-//! (grammaire de `docs/menus.md`) ; le menu du haut l'enveloppe. Le clic droit
-//! d'une colonne n'a qu'une entrée `Analysis…` qui ouvre la fenêtre (#202).
+//! (grammaire de `docs/menus.md`) ; le menu du haut l'enveloppe. Le menu range
+//! les méthodes en **catégories** (#248), une fenêtre par catégorie, puis liste
+//! les trois dernières analyses lancées (#249). Le clic droit d'une colonne a
+//! un sous-menu `Analysis ▸` à une entrée par catégorie.
 //!
 //! Chaque entrée pousse [`Action::OpenAnalysis`] ou
 //! [`Action::OpenGraphAnalysis`] avec la famille et la méthode préchoisies ; la fenêtre (`analysis_dialog.rs`) fait le reste. Tant qu'aucune
@@ -18,7 +20,7 @@ use stokesforge_analysis::model::Model;
 use stokesforge_core::{ColumnRole, NodeId};
 
 use super::menu_sections::MenuSections;
-use crate::analysis::Preset;
+use crate::analysis::{Category, Preset, RecentTarget};
 use crate::state::{Action, AppState};
 use crate::tr;
 
@@ -134,8 +136,77 @@ fn fit_label(model: &Model) -> (String, String) {
     }
 }
 
-/// Le contenu du menu Analysis : lignes de base, correction, intégrale,
-/// ajustement, pics et déconvolution, puis le recalcul des périmés.
+/// Un sous-menu de catégorie : grisé tant qu'aucune colonne Y n'est visée,
+/// avec la raison en info-bulle.
+fn category_menu(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    category: Category,
+    contents: impl FnOnce(&mut egui::Ui),
+) {
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.menu_button(category.title(), contents)
+            .response
+            .on_disabled_hover_text(tr!("analysis-needs-y"));
+    });
+}
+
+/// Ce que `target` devient quand on relance une analyse récente.
+fn recent_target(target: AnalysisTarget) -> RecentTarget {
+    match target {
+        AnalysisTarget::Columns { sheet, columns } => RecentTarget::Columns {
+            sheet,
+            columns: columns.to_vec(),
+        },
+        AnalysisTarget::Graph {
+            graph,
+            series,
+            spec,
+        } => RecentTarget::Graph {
+            graph,
+            series: series.to_vec(),
+            spec: Box::new(spec.clone()),
+        },
+    }
+}
+
+/// Les dernières analyses lancées (#249), sous le dernier filet du menu : un
+/// clic ouvre la fenêtre avec leurs réglages, Ctrl+clic les lance sur la
+/// sélection courante.
+fn recent_entries(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    actions: &mut Vec<Action>,
+    target: Option<AnalysisTarget>,
+    enabled: bool,
+) {
+    for (index, recent) in state.analysis_recent().iter().enumerate() {
+        let label = tr!(
+            "analysis-recent-entry",
+            rank = i64::try_from(index + 1).unwrap_or(i64::MAX),
+            label = recent.label()
+        );
+        let response = ui
+            .add_enabled(enabled, egui::Button::new(label))
+            .on_hover_text(recent.hint())
+            .on_disabled_hover_text(tr!("analysis-needs-y"));
+        if response.clicked() {
+            if let Some(target) = target {
+                let run = ui.input(|input| input.modifiers.command);
+                actions.push(Action::OpenRecentAnalysis {
+                    index,
+                    run,
+                    target: recent_target(target),
+                });
+            }
+            ui.close();
+        }
+    }
+}
+
+/// Le contenu du menu Analysis (#248) : une entrée par catégorie — Data
+/// Manipulation, Fitting, Peaks and Deconvolution, Integrate —, le recalcul
+/// des périmés, puis les dernières analyses lancées (#249).
 pub(super) fn analysis_menu_contents(
     ui: &mut egui::Ui,
     state: &AppState,
@@ -146,45 +217,72 @@ pub(super) fn analysis_menu_contents(
     let stale = state.stale_calculations();
     let mut sections = MenuSections::new();
     sections.section(ui, true, |ui| {
-        ui.add_enabled_ui(enabled, |ui| {
-            ui.menu_button(tr!("analysis-menu-baseline"), |ui| {
-                for (label, hint, preset) in [
-                    (
-                        tr!("analysis-baseline-constant"),
-                        tr!("analysis-baseline-constant", "hint"),
-                        Preset::BaselineConstant,
-                    ),
-                    (
-                        tr!("analysis-baseline-linear"),
-                        tr!("analysis-baseline-linear", "hint"),
-                        Preset::BaselineLine,
-                    ),
-                    (
-                        tr!("analysis-baseline-polynomial"),
-                        tr!("analysis-baseline-polynomial", "hint"),
-                        Preset::BaselinePolynomial,
-                    ),
-                    (
-                        tr!("analysis-baseline-anchors"),
-                        tr!("analysis-baseline-anchors", "hint"),
-                        Preset::BaselineAnchors,
-                    ),
-                ] {
-                    open_entry(ui, actions, target, enabled, label, hint, preset);
-                }
-            })
-            .response
-            .on_disabled_hover_text(tr!("analysis-needs-y"));
+        category_menu(ui, enabled, Category::DataManipulation, |ui| {
+            for (label, hint, preset) in [
+                (
+                    tr!("analysis-baseline-constant"),
+                    tr!("analysis-baseline-constant", "hint"),
+                    Preset::BaselineConstant,
+                ),
+                (
+                    tr!("analysis-baseline-linear"),
+                    tr!("analysis-baseline-linear", "hint"),
+                    Preset::BaselineLine,
+                ),
+                (
+                    tr!("analysis-baseline-polynomial"),
+                    tr!("analysis-baseline-polynomial", "hint"),
+                    Preset::BaselinePolynomial,
+                ),
+                (
+                    tr!("analysis-baseline-anchors"),
+                    tr!("analysis-baseline-anchors", "hint"),
+                    Preset::BaselineAnchors,
+                ),
+                (
+                    tr!("action-analysis-correct"),
+                    tr!("action-analysis-correct", "hint"),
+                    Preset::Correct,
+                ),
+            ] {
+                open_entry(ui, actions, target, enabled, label, hint, preset);
+            }
         });
-        open_entry(
-            ui,
-            actions,
-            target,
-            enabled,
-            tr!("action-analysis-correct"),
-            tr!("action-analysis-correct", "hint"),
-            Preset::Correct,
-        );
+        category_menu(ui, enabled, Category::Fitting, |ui| {
+            for model in Preset::fit_models() {
+                let (label, hint) = fit_label(&model);
+                open_entry(
+                    ui,
+                    actions,
+                    target,
+                    enabled,
+                    label,
+                    hint,
+                    Preset::Fit(model),
+                );
+            }
+        });
+        category_menu(ui, enabled, Category::PeaksAndDeconvolution, |ui| {
+            for (label, hint, preset) in [
+                (
+                    tr!("action-analysis-peaks"),
+                    tr!("action-analysis-peaks", "hint"),
+                    Preset::Peaks,
+                ),
+                (
+                    tr!("action-analysis-reconvolution"),
+                    tr!("action-analysis-reconvolution", "hint"),
+                    Preset::Reconvolution,
+                ),
+                (
+                    tr!("action-analysis-direct"),
+                    tr!("action-analysis-direct", "hint"),
+                    Preset::DirectDeconvolution,
+                ),
+            ] {
+                open_entry(ui, actions, target, enabled, label, hint, preset);
+            }
+        });
         open_entry(
             ui,
             actions,
@@ -194,49 +292,6 @@ pub(super) fn analysis_menu_contents(
             tr!("action-analysis-integrate", "hint"),
             Preset::Integrate,
         );
-        ui.add_enabled_ui(enabled, |ui| {
-            ui.menu_button(tr!("analysis-menu-fit"), |ui| {
-                for model in Preset::fit_models() {
-                    let (label, hint) = fit_label(&model);
-                    open_entry(
-                        ui,
-                        actions,
-                        target,
-                        enabled,
-                        label,
-                        hint,
-                        Preset::Fit(model),
-                    );
-                }
-            })
-            .response
-            .on_disabled_hover_text(tr!("analysis-needs-y"));
-        });
-        ui.add_enabled_ui(enabled, |ui| {
-            ui.menu_button(tr!("analysis-menu-peaks"), |ui| {
-                for (label, hint, preset) in [
-                    (
-                        tr!("action-analysis-peaks"),
-                        tr!("action-analysis-peaks", "hint"),
-                        Preset::Peaks,
-                    ),
-                    (
-                        tr!("action-analysis-reconvolution"),
-                        tr!("action-analysis-reconvolution", "hint"),
-                        Preset::Reconvolution,
-                    ),
-                    (
-                        tr!("action-analysis-direct"),
-                        tr!("action-analysis-direct", "hint"),
-                        Preset::DirectDeconvolution,
-                    ),
-                ] {
-                    open_entry(ui, actions, target, enabled, label, hint, preset);
-                }
-            })
-            .response
-            .on_disabled_hover_text(tr!("analysis-needs-y"));
-        });
     });
     sections.section(ui, true, |ui| {
         if ui
@@ -252,26 +307,87 @@ pub(super) fn analysis_menu_contents(
             ui.close();
         }
     });
+    sections.section(ui, !state.analysis_recent().is_empty(), |ui| {
+        recent_entries(ui, state, actions, target, enabled);
+    });
 }
 
-/// L'entrée `Analysis…` du clic droit d'une colonne (#202) : ouvre la fenêtre
-/// d'analyse, dont la liste « Analysis type » choisit la famille. Un sous-menu
-/// aurait fait trois niveaux (Analysis ▸ Fit ▸ modèle), au-delà de la
-/// profondeur 2 de la grammaire ; le menu du haut garde les entrées par méthode.
+/// Le sous-menu `Analysis ▸` du clic droit (colonne, courbe) : une entrée par
+/// catégorie, qui ouvre la fenêtre de la catégorie (#248). Les méthodes d'une
+/// catégorie se choisissent dans sa fenêtre : un sous-menu de méthodes aurait
+/// fait trois niveaux, au-delà de la profondeur 2 de la grammaire. Grisé avec
+/// `disabled` en info-bulle quand rien n'est analysable.
+pub(super) fn analysis_open_menu(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    disabled: String,
+    mut open: impl FnMut(Category),
+) {
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.menu_button(tr!("menu-analysis"), |ui| {
+            for (category, label, hint) in [
+                (
+                    Category::DataManipulation,
+                    tr!("action-analysis-open-data-manipulation"),
+                    tr!("action-analysis-open-data-manipulation", "hint"),
+                ),
+                (
+                    Category::Fitting,
+                    tr!("action-analysis-open-fitting"),
+                    tr!("action-analysis-open-fitting", "hint"),
+                ),
+                (
+                    Category::PeaksAndDeconvolution,
+                    tr!("action-analysis-open-peaks"),
+                    tr!("action-analysis-open-peaks", "hint"),
+                ),
+                (
+                    Category::Integrate,
+                    tr!("action-analysis-open-integrate"),
+                    tr!("action-analysis-open-integrate", "hint"),
+                ),
+            ] {
+                if ui.button(label).on_hover_text(hint).clicked() {
+                    open(category);
+                    ui.close();
+                }
+            }
+        })
+        .response
+        .on_disabled_hover_text(disabled);
+    });
+}
+
+/// Le sous-menu `Analysis ▸` du clic droit d'une colonne (#202, #248).
 pub(super) fn analysis_entry(
     ui: &mut egui::Ui,
     state: &AppState,
     actions: &mut Vec<Action>,
     target: AnalysisTarget,
 ) {
-    open_entry(
+    analysis_open_menu(
         ui,
-        actions,
-        Some(target),
         target.enabled(state),
-        tr!("action-analysis-open"),
-        tr!("action-analysis-open", "hint"),
-        Preset::BaselineLine,
+        tr!("analysis-needs-y"),
+        |category| {
+            actions.push(match target {
+                AnalysisTarget::Columns { sheet, columns } => Action::OpenAnalysis {
+                    preset: category.default_preset(),
+                    sheet,
+                    columns: columns.to_vec(),
+                },
+                AnalysisTarget::Graph {
+                    graph,
+                    series,
+                    spec,
+                } => Action::OpenGraphAnalysis {
+                    preset: category.default_preset(),
+                    graph,
+                    series: series.to_vec(),
+                    spec: Box::new(spec.clone()),
+                },
+            })
+        },
     );
 }
 

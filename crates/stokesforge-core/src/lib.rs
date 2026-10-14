@@ -50,6 +50,7 @@
     warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+pub mod analysis_store;
 pub mod calc;
 pub mod column;
 pub mod copy;

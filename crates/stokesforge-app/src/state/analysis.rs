@@ -14,7 +14,8 @@ use stokesforge_core::{Node, NodeId, NodeKind, SeriesRef};
 use stokesforge_plot::PlotType;
 
 use super::{current_plot_spec, history_text, series_from_columns, Action, AppState};
-use crate::analysis::{issue_message, AnalysisForm, Preset};
+use crate::analysis::{issue_message, AnalysisForm, Preset, RecentTarget};
+use crate::analysis_recent::{remember, RecentAnalysis};
 use crate::errors;
 use crate::tr;
 
@@ -135,6 +136,61 @@ impl AppState {
         form.add_to_graph = true;
         form.graph_source = Some((spec, sources.to_vec()));
         self.analysis = Some(form);
+    }
+
+    /// Les dernières analyses lancées, la plus récente en tête (#249).
+    pub fn analysis_recent(&self) -> &[RecentAnalysis] {
+        &self.analysis_recent
+    }
+
+    /// Rouvre une des dernières analyses (#249) sur la sélection `target`,
+    /// avec ses réglages. Avec `run` (Ctrl+clic), la lance tout de suite quand
+    /// rien ne manque — points, zones et colonne de référence ne sont pas
+    /// retenus : alors la fenêtre reste ouverte, réglages en place, pour les
+    /// poser. « Replace original data » n'est repris que si la sélection le
+    /// permet (colonnes ordinaires).
+    pub(super) fn open_recent_analysis(&mut self, index: usize, run: bool, target: RecentTarget) {
+        let Some(recent) = self.analysis_recent.get(index).cloned() else {
+            return;
+        };
+        let preset = recent.preset();
+        match target {
+            RecentTarget::Columns { sheet, columns } => {
+                self.open_analysis(&preset, sheet, &columns)
+            }
+            RecentTarget::Graph {
+                graph,
+                series,
+                spec,
+            } => self.open_graph_analysis(&preset, graph, &series, *spec),
+        }
+        let tree = self.snapshot.tree.clone();
+        let Some(form) = self.analysis.as_mut() else {
+            return;
+        };
+        recent.apply(form);
+        form.replace_original =
+            recent.replace_original && form.replacement_disabled(&tree).is_none();
+        if !run || !form.issues().is_empty() {
+            return;
+        }
+        let replaced = form.replace_original;
+        self.apply_analysis();
+        if replaced && self.analysis.is_none() && !self.pending_analysis_replacement {
+            self.notice(tr!("status-analysis-replaced", label = recent.label()));
+        }
+    }
+
+    /// Retient l'analyse que le formulaire vient de lancer (#249). Un fichier
+    /// de préférences illisible ne doit pas défaire un calcul réussi.
+    fn remember_analysis(&mut self, form: &AnalysisForm) {
+        let Some(recent) = RecentAnalysis::from_form(form) else {
+            return;
+        };
+        remember(&mut self.analysis_recent, recent);
+        let _ = self
+            .object_manager_preferences
+            .save_analysis_recent(&self.analysis_recent);
     }
 
     /// Rouvre un calcul existant (« Edit Calculation… »).
@@ -279,6 +335,7 @@ impl AppState {
         // ouverte.
         if !self.last_action_failed() {
             self.analysis_keep_results = form.keep_results;
+            self.remember_analysis(&form);
             // Le dernier choix devient le défaut des prochaines sessions (#200).
             // Un fichier de préférences illisible ne doit pas défaire un calcul réussi.
             let _ = self

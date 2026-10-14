@@ -230,6 +230,10 @@ fn map_to_records(calculations: &BTreeMap<NodeId, Arc<Calculation>>) -> Vec<Calc
         .collect()
 }
 
+/// Clé de la « sortie » d'une trace de correction qui porte la copie de
+/// l'original d'une colonne remplacée (#248).
+const ORIGINAL_KEY: &str = "original";
+
 /// Même transport d'opération/résultats, avec un champ de fichier distinct :
 /// une trace ne devient jamais un calcul actif à la lecture.
 pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CalculationRecord> {
@@ -243,7 +247,22 @@ pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CalculationRecord>
                     operation: trace.operation.clone(),
                     series: trace.series.clone(),
                     aux: trace.aux.clone(),
-                    outputs: Vec::new(),
+                    // Les copies des originaux (#248) voyagent comme des
+                    // sorties de clé `original` : la série dit quelle colonne
+                    // fut remplacée. Aucun schéma de plus.
+                    outputs: trace
+                        .originals
+                        .iter()
+                        .filter_map(|(column, copy)| {
+                            let series = trace.series.iter().position(|s| s.y == *column)?;
+                            Some(OutputRef {
+                                series,
+                                key: ORIGINAL_KEY.to_string(),
+                                index: None,
+                                column: Some(*copy),
+                            })
+                        })
+                        .collect(),
                     results: trace.results.clone(),
                     keep_results: true,
                     auto_recalc: false,
@@ -275,6 +294,12 @@ pub(crate) fn records_to_corrections(
                     series: calc.series.clone(),
                     aux: calc.aux.clone(),
                     results: calc.results.clone(),
+                    originals: calc
+                        .outputs
+                        .iter()
+                        .filter(|o| o.key == ORIGINAL_KEY)
+                        .filter_map(|o| Some((calc.series.get(o.series)?.y, o.column?)))
+                        .collect(),
                 }),
             )
         })

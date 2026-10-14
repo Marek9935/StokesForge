@@ -53,7 +53,10 @@ use super::StokesForgeApp;
 #[derive(Clone, Copy)]
 pub(super) enum ObjectManagerRequest {
     Select(crate::object_manager::VisibilityTarget),
-    Analysis(crate::object_manager::VisibilityTarget),
+    Analysis(
+        crate::object_manager::VisibilityTarget,
+        crate::analysis::Category,
+    ),
     Properties(crate::object_manager::VisibilityTarget),
     Rename(stokesforge_plot::SeriesRef),
     /// Édite sur place le nom d'un groupe de séries (#197).
@@ -230,18 +233,13 @@ pub(super) fn object_node_menu(
                     ui.close();
                 }
             }
-            if matches!(target, T::Series(_) | T::SeriesGroup(_))
-                && ui
-                    .add_enabled(
-                        !analysis_sources(spec, target).is_empty(),
-                        egui::Button::new(tr!("action-analysis-open")),
-                    )
-                    .on_hover_text(tr!("action-analysis-open", "hint"))
-                    .on_disabled_hover_text(tr!("analysis-needs-column-curve"))
-                    .clicked()
-            {
-                requests.push(ObjectManagerRequest::Analysis(target));
-                ui.close();
+            if matches!(target, T::Series(_) | T::SeriesGroup(_)) {
+                super::analysis_menu::analysis_open_menu(
+                    ui,
+                    !analysis_sources(spec, target).is_empty(),
+                    tr!("analysis-needs-column-curve"),
+                    |category| requests.push(ObjectManagerRequest::Analysis(target, category)),
+                );
             }
             if editable_text == Some(true)
                 && ui
@@ -1429,9 +1427,9 @@ pub(super) fn apply_object_request(
     };
     match request {
         ObjectManagerRequest::Select(target) => select_manager_target(view, Some(target), &spec),
-        ObjectManagerRequest::Analysis(target) => {
+        ObjectManagerRequest::Analysis(target, category) => {
             actions.push(Action::OpenGraphAnalysis {
-                preset: crate::analysis::Preset::BaselineLine,
+                preset: category.default_preset(),
                 graph,
                 series: analysis_sources(&spec, target),
                 spec: Box::new(view.framed_spec(&spec)),
@@ -1488,7 +1486,10 @@ mod tests {
             &mut view,
             project.tree(),
             graph,
-            ObjectManagerRequest::Analysis(T::Series(SeriesRef::new(0, 0))),
+            ObjectManagerRequest::Analysis(
+                T::Series(SeriesRef::new(0, 0)),
+                crate::analysis::Category::DataManipulation,
+            ),
             &mut actions,
         );
         assert!(
@@ -2139,11 +2140,14 @@ mod tests {
         let row = text_center(&output, "Deuxième");
         clic_menu(&paint, row, egui::PointerButton::Secondary);
         let (output, _, _) = paint(Vec::new());
-        let entry = text_center(&output, &tr!("action-analysis-open"));
+        let submenu = text_center(&output, &tr!("menu-analysis"));
+        clic_menu(&paint, submenu, egui::PointerButton::Primary);
+        let (output, _, _) = paint(Vec::new());
+        let entry = text_center(&output, &tr!("action-analysis-open-data-manipulation"));
         let (_, actions, requests) = clic_menu(&paint, entry, egui::PointerButton::Primary);
         assert!(actions.is_empty(), "la vue doit encore fournir le cadrage");
         assert!(requests.iter().any(|request| matches!(request,
-            ObjectManagerRequest::Analysis(T::Series(series)) if *series == SeriesRef::new(0, 1)
+            ObjectManagerRequest::Analysis(T::Series(series), crate::analysis::Category::DataManipulation) if *series == SeriesRef::new(0, 1)
         )));
     }
 

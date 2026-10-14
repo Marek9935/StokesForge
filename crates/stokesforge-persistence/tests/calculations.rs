@@ -270,3 +270,87 @@ fn les_corrections_definitives_survivent_au_fichier_sans_lien_de_calcul() {
         .keys()
         .all(|id| id.raw() < next.raw()));
 }
+
+/// Une correction par une référence figée, remplaçant les données (#248) : le
+/// classeur caché, la copie de l'original et la référence survivent au fichier,
+/// et « Restore original data » marche après rechargement.
+#[test]
+fn les_copies_figees_et_les_originaux_survivent_au_fichier() {
+    use stokesforge_core::AuxRef;
+    let mut project = Project::new("P").unwrap();
+    let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+    let sheet = project.tree().children(book).unwrap()[0];
+    let mut add = |name: &str, values: &[f64]| {
+        project
+            .add_column(sheet, None, Some(name), Column::from_f64(values))
+            .unwrap()
+    };
+    let x = add("X", &[1.0, 2.0, 3.0]);
+    let y = add("Y", &[10.0, 20.0, 30.0]);
+    let rx = add("RX", &[1.0, 2.0, 3.0]);
+    let ry = add("RY", &[2.0, 2.0, 2.0]);
+    let versions: Vec<_> = [x, y, rx, ry]
+        .iter()
+        .map(|id| {
+            let version = project
+                .tree()
+                .get(*id)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .version();
+            (*id, version)
+        })
+        .collect();
+    project
+        .replace_analysis_data(
+            CalculationDraft {
+                operation: Operation::Correct {
+                    op: CorrectOp::Divide,
+                },
+                series: vec![SeriesRef {
+                    x: Some(x),
+                    y,
+                    sigma: None,
+                }],
+                aux: Some(AuxRef { x: Some(rx), y: ry }),
+                outputs: vec![OutputDraft {
+                    series: 0,
+                    key: "corrected".into(),
+                    index: None,
+                    meta: ColumnMeta::default(),
+                    data: vec![5.0, 10.0, 15.0],
+                }],
+                results: vec![SeriesResult::default()],
+                keep_results: false,
+                auto_recalc: false,
+            },
+            &versions,
+        )
+        .unwrap();
+    assert!(project.analysis_store_sheet().is_some());
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("copies.stf");
+    save(&project, &path).unwrap();
+    let mut back = load(&path).unwrap();
+    assert_eq!(back.tree(), project.tree());
+    assert!(
+        back.analysis_store_sheet().is_some(),
+        "le classeur caché revient marqué"
+    );
+    let trace = *back.tree().correction_traces().keys().next().unwrap();
+    assert_eq!(back.tree().correction_traces()[&trace].originals.len(), 1);
+    back.restore_original_data(trace).unwrap();
+    let restored: Vec<f64> = back
+        .tree()
+        .get(y)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .numeric_view()
+        .unwrap()
+        .to_vec();
+    assert_eq!(restored, vec![10.0, 20.0, 30.0]);
+    assert!(back.analysis_store_sheet().is_none());
+}

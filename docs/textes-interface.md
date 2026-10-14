@@ -241,6 +241,9 @@ grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
 | Smooth† | Lisser | Réduire le bruit d'un spectre | Filtrer | D |
 | Derivative† | Dérivée | Pente du spectre, d'ordre 1 ou 2 | Différentielle | D |
 | Integrate† | Intégrer | Calculer l'aire sous la courbe | — | D |
+| Data Manipulation† | Manipulation des données | Catégorie : lignes de base et correction | — | D (#248) |
+| Fitting† | Ajustement | Catégorie : modèles ajustés aux données | — | D (#248) |
+| Restore original data | Restaurer les données originales | Rend les valeurs d'avant un remplacement | Annuler la correction | D (#248) |
 | Fit† | Ajuster | Faire coller un modèle aux données | Fitter, Lisser | D |
 | Offset (stack)† | Décalage (empilement) | Translation verticale entre spectres superposés | Espacement | D |
 

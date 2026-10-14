@@ -241,7 +241,10 @@ Deux conséquences qui traversent les crates :
 - **toute donnée que lit le calcul entre dans l'empreinte**
   (`stokesforge-session/src/recalc.rs`) — une fonction de formule, une
   référence entre feuilles ou une analyse qui lit une donnée nouvelle l'y
-  ajoute ;
+  ajoute. La référence d'une correction est lue sur une **copie figée** du
+  classeur caché des copies (#248), jamais sur la colonne d'origine : la copie
+  est dédoublonnée par **contenu**, jamais par numéro de version, qui dépend de
+  l'historique et fausserait l'oracle `b22` ;
 - **toute écriture de données d'une colonne tire un numéro de version neuf**
   (`Project::next_column_version`, `stokesforge-core`), **et toute insertion
   d'une colonne qui porte déjà un numéro fait passer le compteur au-delà**

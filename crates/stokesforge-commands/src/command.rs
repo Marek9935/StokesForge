@@ -325,6 +325,14 @@ pub enum Command {
         /// L'opération, ses entrées et les colonnes à écrire.
         draft: CalculationDraft,
     },
+    /// « Restore original data » (#248) : rend aux colonnes qu'une correction a
+    /// remplacées leurs valeurs d'avant (gardées dans le classeur caché des
+    /// analyses), écrase ce qui y a été saisi depuis et retire la trace.
+    /// Structurelle : annuler rend la correction et ses copies.
+    RestoreOriginalData {
+        /// La trace de la correction (ligne de Results).
+        trace: NodeId,
+    },
     /// Remplace les paramètres, les colonnes et les résultats d'un calcul
     /// (« Edit Calculation… », glisser une poignée de ligne de base sur le
     /// graphe). Les sorties qui existent déjà sont réécrites en place.
@@ -411,6 +419,11 @@ impl Command {
             Command::AddCalculation { draft } => {
                 HistoryLabel::AddCalculation(draft.operation.kind())
             }
+            Command::RestoreOriginalData { trace } => HistoryLabel::RestoreOriginalData(
+                tree.correction_traces()
+                    .get(trace)
+                    .map(|record| record.operation.kind()),
+            ),
             Command::UpdateCalculation { id, draft } => HistoryLabel::UpdateCalculation(
                 tree.calculation(*id)
                     .map_or_else(|| draft.operation.kind(), |c| c.operation.kind()),
@@ -466,6 +479,7 @@ impl Command {
                 | Command::RemoveNode { .. }
                 | Command::ReplaceAnalysisData { .. }
                 | Command::AddCalculation { .. }
+                | Command::RestoreOriginalData { .. }
                 | Command::UpdateCalculation { .. }
                 | Command::RemoveCalculation { .. }
         )

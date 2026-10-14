@@ -133,6 +133,11 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             "history-replace-analysis-data",
             kind = kind_title(loader, *kind)
         ),
+        HistoryLabel::RestoreOriginalData(Some(kind)) => tr!(
+            "history-restore-original-data",
+            kind = kind_title(loader, *kind)
+        ),
+        HistoryLabel::RestoreOriginalData(None) => tr!("history-restore-original-data-any"),
         HistoryLabel::AddCalculation(kind) => {
             tr!("history-add-calculation", kind = kind_title(loader, *kind))
         }

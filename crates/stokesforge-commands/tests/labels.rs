@@ -81,10 +81,11 @@ fn rank(command: &Command) -> usize {
         Command::UpdateCalculation { .. } => 27,
         Command::RemoveCalculation { .. } => 28,
         Command::ReplaceAnalysisData { .. } => 29,
+        Command::RestoreOriginalData { .. } => 30,
     }
 }
 
-const VARIANTS: usize = 30;
+const VARIANTS: usize = 31;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -316,6 +317,13 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
             HistoryLabel::AddCalculation(OperationKind::Correct),
         ),
         (
+            // Trace inconnue de l'arbre : pas de famille à nommer.
+            Command::RestoreOriginalData {
+                trace: NodeId::from_raw(9_999),
+            },
+            HistoryLabel::RestoreOriginalData(None),
+        ),
+        (
             // Calcul inconnu de l'arbre : la famille se lit dans le brouillon.
             Command::UpdateCalculation {
                 id: NodeId::from_raw(9_999),
@@ -375,6 +383,14 @@ fn calculation_labels_display_in_english() {
         "Detach Fit Calculation"
     );
     assert_eq!(remove(None, false).to_string(), "Detach Calculation");
+    assert_eq!(
+        HistoryLabel::RestoreOriginalData(Some(OperationKind::Baseline)).to_string(),
+        "Restore Original Data (Baseline)"
+    );
+    assert_eq!(
+        HistoryLabel::RestoreOriginalData(None).to_string(),
+        "Restore Original Data"
+    );
     for kind in OperationKind::ALL {
         assert!(!HistoryLabel::AddCalculation(kind).to_string().is_empty());
     }

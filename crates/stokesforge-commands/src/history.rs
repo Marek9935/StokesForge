@@ -1082,6 +1082,10 @@ impl History {
                 project.add_calculation(draft)?;
                 Ok(structural(before, project, label))
             }
+            Command::RestoreOriginalData { trace } => {
+                project.restore_original_data(trace)?;
+                Ok(structural(before, project, label))
+            }
             Command::UpdateCalculation { id, draft } => {
                 project.update_calculation(id, draft)?;
                 Ok(structural(before, project, label))
@@ -1366,6 +1370,7 @@ impl History {
             | Command::RemoveNode { .. }
             | Command::ReplaceAnalysisData { .. }
             | Command::AddCalculation { .. }
+            | Command::RestoreOriginalData { .. }
             | Command::UpdateCalculation { .. }
             | Command::RemoveCalculation { .. } => {
                 unreachable!("apply_data appelée avec une commande structurelle")
@@ -2005,6 +2010,7 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::RemoveNode { .. }
         | Command::ReplaceAnalysisData { .. }
         | Command::AddCalculation { .. }
+        | Command::RestoreOriginalData { .. }
         | Command::UpdateCalculation { .. }
         | Command::RemoveCalculation { .. }
         | Command::SetWindowMeta { .. }

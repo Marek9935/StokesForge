@@ -212,8 +212,14 @@ pub struct CalculationDraft {
 pub struct CorrectionRecord {
     pub operation: Operation,
     pub series: Vec<SeriesRef>,
+    /// La référence figée d'une correction par une colonne (#248) : une copie
+    /// du classeur caché, jamais la colonne d'origine.
     pub aux: Option<AuxRef>,
     pub results: Vec<SeriesResult>,
+    /// `(colonne remplacée, copie de son original)` : de quoi la restaurer
+    /// (« Restore original data », #248). Les copies vivent dans le classeur
+    /// caché des analyses.
+    pub originals: Vec<(NodeId, NodeId)>,
 }
 
 /// Plafond de séries d'un même calcul (un lot de spectres).
@@ -366,6 +372,11 @@ impl Project {
         }
         let before = self.tree().clone();
         let result = (|| {
+            let aux = self.frozen_aux(&draft.operation, draft.aux.as_ref())?;
+            let mut originals = Vec::with_capacity(writes.len());
+            for &id in writes.keys() {
+                originals.push((id, self.keep_original(id)?));
+            }
             for (id, values) in writes {
                 self.set_values(id, 0, values)?;
             }
@@ -377,16 +388,67 @@ impl Project {
                     Arc::new(CorrectionRecord {
                         operation: draft.operation,
                         series: draft.series,
-                        aux: draft.aux,
+                        aux,
                         results: draft.results,
+                        originals,
                     }),
                 );
+            self.gc_analysis_store();
             Ok(id)
         })();
         if result.is_err() {
             self.replace_tree(before);
         }
         result
+    }
+
+    /// « Restore original data » (#248) : rend à chaque colonne remplacée par
+    /// la correction `trace` son type et ses valeurs d'avant, **écrase** ce qui
+    /// y a été saisi depuis, retire la trace et les copies qui ne servent plus.
+    /// Une colonne supprimée depuis est laissée de côté. Atomique.
+    pub fn restore_original_data(&mut self, trace: NodeId) -> CoreResult<()> {
+        let record = self
+            .tree()
+            .correction_traces()
+            .get(&trace)
+            .cloned()
+            .ok_or(CoreError::UnknownNode(trace))?;
+        let before = self.tree().clone();
+        let result = (|| {
+            for (column, copy) in &record.originals {
+                if self
+                    .tree()
+                    .node(*column)
+                    .and_then(|n| n.as_column())
+                    .is_some()
+                {
+                    self.restore_from_copy(*column, *copy)?;
+                }
+            }
+            Arc::make_mut(self.tree_arc_mut())
+                .correction_traces_mut()
+                .remove(&trace);
+            self.gc_analysis_store();
+            Ok(())
+        })();
+        if result.is_err() {
+            self.replace_tree(before);
+        }
+        result
+    }
+
+    /// La référence que le calcul lira : figée dans le classeur caché pour une
+    /// correction par une colonne (#248), telle quelle pour les autres
+    /// opérations.
+    fn frozen_aux(
+        &mut self,
+        operation: &Operation,
+        aux: Option<&AuxRef>,
+    ) -> CoreResult<Option<AuxRef>> {
+        match (operation, aux) {
+            (Operation::Correct { .. }, Some(aux)) => self.freeze_reference(aux).map(Some),
+            (_, aux) => Ok(aux.cloned()),
+        }
     }
 
     /// Enregistre un calcul : crée ses colonnes de sortie **juste après la
@@ -403,6 +465,7 @@ impl Project {
     }
 
     fn add_calculation_inner(&mut self, draft: CalculationDraft) -> CoreResult<NodeId> {
+        let aux = self.frozen_aux(&draft.operation, draft.aux.as_ref())?;
         let mut last_after: Vec<NodeId> = draft.series.iter().map(|s| s.y).collect();
         let mut outputs = Vec::with_capacity(draft.outputs.len());
         for out in &draft.outputs {
@@ -418,7 +481,7 @@ impl Project {
         let calc = Calculation {
             operation: draft.operation,
             series: draft.series,
-            aux: draft.aux,
+            aux,
             outputs,
             results: if draft.keep_results {
                 draft.results
@@ -432,6 +495,7 @@ impl Project {
         Arc::make_mut(self.tree_arc_mut())
             .calculations_mut()
             .insert(id, Arc::new(calc));
+        self.gc_analysis_store();
         Ok(id)
     }
 
@@ -484,6 +548,7 @@ impl Project {
         current: &Calculation,
         draft: CalculationDraft,
     ) -> CoreResult<()> {
+        let aux = self.frozen_aux(&draft.operation, draft.aux.as_ref())?;
         let mut last_after: Vec<NodeId> = draft.series.iter().map(|s| s.y).collect();
         let mut outputs = Vec::with_capacity(draft.outputs.len());
         let mut kept: Vec<NodeId> = Vec::new();
@@ -518,14 +583,14 @@ impl Project {
         for old in &current.outputs {
             if let Some(col) = old.column {
                 if !kept.contains(&col) && self.tree().node(col).is_some() {
-                    self.remove(col)?;
+                    self.remove_without_gc(col)?;
                 }
             }
         }
         let calc = Calculation {
             operation: draft.operation,
             series: draft.series,
-            aux: draft.aux,
+            aux,
             outputs,
             results: if draft.keep_results {
                 draft.results
@@ -539,6 +604,7 @@ impl Project {
         Arc::make_mut(self.tree_arc_mut())
             .calculations_mut()
             .insert(id, Arc::new(calc));
+        self.gc_analysis_store();
         Ok(())
     }
 
@@ -557,7 +623,7 @@ impl Project {
                 for out in &calc.outputs {
                     if let Some(col) = out.column {
                         if self.tree().node(col).is_some() {
-                            self.remove(col)?;
+                            self.remove_without_gc(col)?;
                         }
                     }
                 }
@@ -565,6 +631,7 @@ impl Project {
             Arc::make_mut(self.tree_arc_mut())
                 .calculations_mut()
                 .remove(&id);
+            self.gc_analysis_store();
             Ok(())
         })();
         if result.is_err() {

@@ -570,7 +570,18 @@ impl Project {
     }
 
     /// Retire `id` et toute sa descendance. Rend l'index qu'il occupait.
+    /// Les copies du classeur caché que plus aucune analyse ne cite partent
+    /// avec lui (#248).
     pub fn remove(&mut self, id: NodeId) -> CoreResult<usize> {
+        let index = self.remove_without_gc(id)?;
+        self.gc_analysis_store();
+        Ok(index)
+    }
+
+    /// [`Project::remove`] sans le ménage du classeur caché : pour une
+    /// opération qui vient de créer des copies qu'aucun calcul ne cite encore
+    /// et qui fait le ménage à sa fin.
+    pub(crate) fn remove_without_gc(&mut self, id: NodeId) -> CoreResult<usize> {
         self.tree.validate_remove(id)?;
         let tree = Arc::make_mut(&mut self.tree);
         let index = tree.remove(id)?;

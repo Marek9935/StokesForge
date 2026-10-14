@@ -346,4 +346,8 @@ Un ancien fichier se lit sans trace ; une opération inconnue ou un identifiant
 hors borne fait écarter uniquement sa trace. Les valeurs corrigées restent
 dans les colonnes ordinaires. Le compteur reprend au-delà des identifiants des
 traces, même si `next_id_hint` est trop bas. Les copies de colonnes ne transportent
-pas ces traces, comme elles ne transportent pas les calculs.
+pas ces traces, comme elles ne transportent pas les calculs. Les colonnes
+remplacées (colonne, copie de son original) sont écrites comme sorties de clé
+`"original"` de l'enregistrement, sans changement de schéma ; la copie vit dans
+le classeur caché des copies d'analyse (#248), classeur ordinaire `hidden`
+marqué par son commentaire de fenêtre.
