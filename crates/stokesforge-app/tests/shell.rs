@@ -115,8 +115,12 @@ fn single_sheet_project() -> Project {
 /// que la session (à garder vivante : la lâcher termine l'acteur).
 fn start(project: Project, path: &Path) -> (Session, AppState) {
     let session = Session::spawn(project, None).expect("thread de session");
-    let state = AppState::new(session.handle(), path.display().to_string())
-        .expect("état applicatif initial");
+    let state = AppState::new_with_preferences(
+        session.handle(),
+        path.display().to_string(),
+        stokesforge_app::preferences::Preferences::load_from(None),
+    )
+    .expect("état applicatif initial");
     (session, state)
 }
 

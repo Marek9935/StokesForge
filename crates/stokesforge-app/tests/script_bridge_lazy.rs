@@ -64,8 +64,12 @@ fn the_bridge_starts_only_at_the_first_script() {
         .expect("colonne Temps");
 
     let session = Session::spawn(project, None).expect("thread de session");
-    let mut state = AppState::new(session.handle(), "script-test.stokesforge".to_string())
-        .expect("état applicatif initial");
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        "script-test.stokesforge".to_string(),
+        stokesforge_app::preferences::Preferences::load_from(None),
+    )
+    .expect("état applicatif initial");
 
     // Construire l'état ne doit pas toucher Python : c'est le cœur du
     // critère « fenêtre et feuille s'ouvrent sans interpréteur ».

@@ -27,7 +27,12 @@ fn fixture() -> (Session, AppState, NodeId, NodeId, NodeId) {
         )
         .unwrap();
     let session = Session::spawn(project, None).unwrap();
-    let state = AppState::new(session.handle(), String::new()).unwrap();
+    let state = AppState::new_with_preferences(
+        session.handle(),
+        String::new(),
+        stokesforge_app::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
     (session, state, book, graph, y)
 }
 
@@ -287,7 +292,12 @@ fn collage_dans_un_autre_dossier_et_deplacement_groupes() {
     let book = project.add_workbook(a, Some("Book1")).unwrap();
     let note = project.add_note(a, Some("Note1"), "Notes").unwrap();
     let session = Session::spawn(project, None).unwrap();
-    let mut state = AppState::new(session.handle(), String::new()).unwrap();
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        String::new(),
+        stokesforge_app::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
     state.dispatch(Action::MoveObjects {
         ids: vec![book, note],
         parent: b,

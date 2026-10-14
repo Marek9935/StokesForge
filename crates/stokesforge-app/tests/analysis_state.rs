@@ -42,9 +42,10 @@ fn setup(dir: &std::path::Path) -> Setup {
         )
         .unwrap();
     let session = Session::spawn(project, None).unwrap();
-    let state = AppState::new(
+    let state = AppState::new_with_preferences(
         session.handle(),
         dir.join("p.stokesforge").display().to_string(),
+        stokesforge_app::preferences::Preferences::load_from(None),
     )
     .unwrap();
     Setup {

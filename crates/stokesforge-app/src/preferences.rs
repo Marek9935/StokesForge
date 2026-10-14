@@ -446,7 +446,13 @@ impl Preferences {
         }
         let text = serde_json::to_string_pretty(&serde_json::Value::Object(document))
             .map_err(std::io::Error::other)?;
-        std::fs::write(path, text)
+        // Écriture atomique : un lecteur concurrent ne voit jamais un fichier
+        // tronqué (#250).
+        let temporary = path.with_extension("json.tmp");
+        std::fs::write(&temporary, text)?;
+        std::fs::rename(&temporary, path).inspect_err(|_| {
+            let _ = std::fs::remove_file(&temporary);
+        })
     }
 
     /// Le fichier d'où viennent les préférences, s'il y en a un.
@@ -490,7 +496,14 @@ fn read_recent_analyses(
 /// `directories::ProjectDirs::from("", "", "StokesForge")`, dossier de
 /// configuration, fichier `preferences.json` — le même dossier que
 /// `couleurs.json` et `import_recipes.json`.
+///
+/// Sous `cfg(test)` : `None`. Un test unitaire n'écrit jamais dans les vraies
+/// préférences de la machine (#250) ; les tests d'intégration, eux, passent
+/// par `AppState::new_with_preferences` et un `Preferences::load_from`.
 fn default_path() -> Option<PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
     directories::ProjectDirs::from("", "", "StokesForge")
         .map(|dirs| dirs.config_dir().join("preferences.json"))
 }

@@ -1435,3 +1435,27 @@ fn la_garde_des_espacements_voit_un_nombre_ecrit_sur_place() {
     )])
     .is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// Les tests n'écrivent pas dans les vraies préférences (#250)
+// ---------------------------------------------------------------------------
+
+/// `AppState::new` charge `~/.config/stokesforge/preferences.json` : un test
+/// d'intégration passe par `new_with_preferences`.
+#[test]
+fn aucun_test_d_integration_n_utilise_appstate_new() {
+    let dossier = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut fautifs = Vec::new();
+    for entree in std::fs::read_dir(dossier).expect("dossier tests") {
+        let chemin = entree.expect("entrée").path();
+        if chemin.extension().is_some_and(|e| e == "rs")
+            && chemin.file_name().is_some_and(|n| n != "gardes.rs")
+            && std::fs::read_to_string(&chemin)
+                .expect("lecture")
+                .contains("AppState::new(")
+        {
+            fautifs.push(chemin.display().to_string());
+        }
+    }
+    assert!(fautifs.is_empty(), "AppState::new dans {fautifs:?}");
+}

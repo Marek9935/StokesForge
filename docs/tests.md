@@ -399,6 +399,12 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
   vérifie que l'action poussée. Pour exercer les actions de réglage (#139),
   `AppState::new_with_preferences` injecte un `Preferences::load_from` sur
   un fichier de dossier temporaire, sans modifier l'environnement global.
+- Règle (#250) : un test n'écrit jamais dans les vraies préférences. Les tests
+  unitaires de `stokesforge-app` n'en ont aucune (`default_path` rend `None`
+  sous `cfg(test)`) ; les tests d'intégration (`tests/`) construisent leur
+  état par `AppState::new_with_preferences(…, Preferences::load_from(None))`,
+  jamais `AppState::new` (garde dans `tests/gardes.rs`). L'écriture du fichier
+  est atomique (temporaire + renommage).
 - Un test ne lit pas non plus les modèles d'import ni les fichiers récents de
   la machine (`import_recipes.json`, `import_recent.json`) : un modèle
   enregistré « Jasco » passait devant le modèle intégré et faisait échouer le

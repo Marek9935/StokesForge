@@ -96,8 +96,12 @@ fn start() -> (Session, AppState, NodeId) {
         .resolve("[Book1]Sheet1")
         .expect("feuille de démonstration");
     let session = Session::spawn(project, None).expect("thread de session");
-    let mut state = AppState::new(session.handle(), "script-test.stokesforge".to_string())
-        .expect("état applicatif initial");
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        "script-test.stokesforge".to_string(),
+        stokesforge_app::preferences::Preferences::load_from(None),
+    )
+    .expect("état applicatif initial");
     state.set_python(EmbeddedPython::with_home(home()));
     (session, state, sheet)
 }
