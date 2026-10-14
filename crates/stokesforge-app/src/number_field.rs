@@ -28,6 +28,7 @@
 //! # Auto (#221)
 //!
 //! Une grandeur a un Auto ([`AutoKind`]) : `Field` — champ vidé ou mot `auto`
+//! (casse libre, ou la seule lettre `a`/`A`)
 //! rend la valeur automatique ([`auto_number_field`], texte grisé « Auto (…) ») ;
 //! `Group` — le mot `auto` coche l'Auto du groupe ([`NumberResponse::auto`]),
 //! un champ vidé est refusé. Sans Auto, le mot et le champ vidé sont refusés.
@@ -505,7 +506,9 @@ fn read(quantity: &Quantity, text: &str) -> Verdict<Entry> {
     if quantity.auto == AutoKind::Field && trimmed.is_empty() {
         return Verdict::Valid(Entry::Auto);
     }
-    if quantity.auto != AutoKind::None && trimmed.eq_ignore_ascii_case("auto") {
+    if quantity.auto != AutoKind::None
+        && (trimmed.eq_ignore_ascii_case("auto") || trimmed.eq_ignore_ascii_case("a"))
+    {
         return Verdict::Valid(Entry::Auto);
     }
     if quantity.auto == AutoKind::Group && trimmed.is_empty() {
@@ -633,7 +636,7 @@ mod tests {
     #[test]
     fn auto_est_accepte_selon_la_grandeur() {
         let champ = quantities::FREE.with_auto(AutoKind::Field);
-        for texte in ["", "  ", "auto", "Auto", " AUTO "] {
+        for texte in ["", "  ", "auto", "Auto", " AUTO ", "a", "A"] {
             assert_eq!(
                 read(&champ, texte),
                 Verdict::Valid(Entry::Auto),
@@ -651,7 +654,7 @@ mod tests {
     /// Témoin : une grandeur sans Auto refuse le mot comme le champ vidé.
     #[test]
     fn sans_auto_le_mot_et_le_champ_vide_sont_refuses() {
-        for texte in ["auto", "Auto", ""] {
+        for texte in ["auto", "Auto", "a", "A", ""] {
             assert!(
                 matches!(read(&quantities::LINE_WIDTH, texte), Verdict::Refused(_)),
                 "{texte:?}"
