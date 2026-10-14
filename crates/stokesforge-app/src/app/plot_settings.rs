@@ -232,20 +232,30 @@ fn plot_settings_contents(
         let spec = &mut edit.spec;
         edit.selected_panel = edit.selected_panel.min(spec.panels.len() - 1);
         if spec.panels.len() > 1 {
-            egui::ComboBox::from_id_salt("plot_settings_layer")
-                .selected_text(tr!(
-                    "object-manager-layer",
-                    index = (edit.selected_panel + 1)
-                ))
-                .show_ui(ui, |ui| {
-                    for index in 0..spec.panels.len() {
-                        ui.selectable_value(
-                            &mut edit.selected_panel,
-                            index,
-                            tr!("object-manager-layer", index = (index + 1)),
-                        );
-                    }
-                });
+            // Les pages « Graph » et « Theme » valent pour tout le graphique :
+            // le choix du calque reste affiché mais grisé, avec sa raison (#180).
+            let per_layer = !matches!(chosen_tab, PlotSettingsTab::Graph | PlotSettingsTab::Theme);
+            let layer_choice = ui.add_enabled_ui(per_layer, |ui| {
+                egui::ComboBox::from_id_salt("plot_settings_layer")
+                    .selected_text(tr!(
+                        "object-manager-layer",
+                        index = (edit.selected_panel + 1)
+                    ))
+                    .show_ui(ui, |ui| {
+                        for index in 0..spec.panels.len() {
+                            ui.selectable_value(
+                                &mut edit.selected_panel,
+                                index,
+                                tr!("object-manager-layer", index = (index + 1)),
+                            );
+                        }
+                    });
+            });
+            if !per_layer {
+                layer_choice
+                    .response
+                    .on_hover_text(tr!("plot-layer-choice-disabled"));
+            }
         }
         // La page occupe toute la hauteur de la fenêtre, même quand son
         // contenu est plus court : sans `auto_shrink(false)`, une
@@ -1430,8 +1440,9 @@ mod tests {
     }
 
     /// #177–#179 : les séries ont leur fenêtre — la bande du graphe ne les
-    /// propose plus — qui montre le groupe de la série choisie, et « Appliquer
-    /// au groupe » répartit le nuancier sur ses seules séries, jusqu'au modèle.
+    /// propose plus — qui montre le groupe de la série choisie ; choisir un
+    /// nuancier le répartit aussitôt sur ses seules séries (pas de bouton
+    /// « Appliquer », #213), jusqu'au modèle.
     #[test]
     fn la_fenetre_des_series_regle_un_groupe_et_lui_applique_un_nuancier() {
         let mut banc = banc(|spec| {
@@ -1455,14 +1466,16 @@ mod tests {
         assert!(est_peint(&peints, &tr!("curve-scope-group-note")));
         let original = banc.modele();
 
-        cliquer_libelle(&context, &mut banc.state, &tr!("curve-gradient-apply"));
+        cliquer_libelle(&context, &mut banc.state, &tr!("curve-gradient-blue-red"));
+        assert_eq!(banc.modele(), original, "ouvrir la liste ne colore rien");
+        cliquer_libelle(&context, &mut banc.state, &tr!("curve-gradient-black-red"));
         let apres = banc.modele();
         let couleurs: Vec<&str> = apres.panels[0]
             .series
             .iter()
             .map(|s| s.line.color.as_str())
             .collect();
-        assert_eq!(couleurs[..2], ["#0000ff", "#ff0000"]);
+        assert_eq!(couleurs[..2], ["#000000", "#ff0000"]);
         assert_eq!(
             apres.panels[0].series[2], original.panels[0].series[2],
             "la série d'un autre groupe n'est pas touchée"

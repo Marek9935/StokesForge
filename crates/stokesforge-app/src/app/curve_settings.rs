@@ -180,10 +180,21 @@ fn series_list(
                             true,
                         )
                         .show_header(ui, |ui| {
-                            if list_row(ui, None, &group_title(panel, id), false, false).clicked() {
+                            // Comme dans l'Object Manager (#208) : l'en-tête est
+                            // surligné quand le groupe est ce qu'on règle, et un
+                            // clic choisit le groupe (sa première série, portée
+                            // « tout le groupe »).
+                            let scope_id = egui::Id::new("curve_edit_scope");
+                            let scope = ui
+                                .data(|d| d.get_temp(scope_id))
+                                .unwrap_or(EditScope::Group);
+                            let on_group = scope == EditScope::Group && members.contains(selected);
+                            let title = group_title(panel, id);
+                            if list_row(ui, None, &title, on_group, false).clicked() {
                                 if let Some(first) = members.first() {
                                     *selected = *first;
                                 }
+                                ui.data_mut(|d| d.insert_temp(scope_id, EditScope::Group));
                             }
                         })
                         .body(|ui| {
@@ -479,12 +490,12 @@ fn choice_stops(choice: &GradientChoice, env: &PickerEnv, custom: &[String]) -> 
 }
 
 /// Nuanciers (#178) : choisir (fourni, enregistré, personnalisé), voir l'aperçu,
-/// enregistrer ou supprimer un nuancier enregistré, et « Appliquer au
-/// groupe », qui répartit les couleurs régulièrement sur les séries du groupe
+/// enregistrer ou supprimer un nuancier enregistré ; il répartit les couleurs régulièrement sur les séries du groupe
 /// dans l'ordre de la liste. Grisé tant que la portée n'est pas « tout le
-/// groupe » (`enabled`), avec l'info-bulle qui le dit. Le choix en cours n'est
-/// qu'un état de fenêtre ; seules les couleurs appliquées entrent dans le
-/// graphe.
+/// groupe » (`enabled`), avec l'info-bulle qui le dit. Le nuancier s'applique
+/// dès qu'on le choisit ou qu'on change un arrêt (brouillon, validé par OK).
+/// Le choix en cours n'est qu'un état de fenêtre ; seules les couleurs
+/// appliquées entrent dans le graphe.
 fn gradient_editor(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
@@ -506,6 +517,8 @@ fn gradient_editor(
     let mut name: String = ui.data(|d| d.get_temp(name_id)).unwrap_or_default();
     let mut target: SaveTarget = ui.data(|d| d.get_temp(target_id)).unwrap_or_default();
 
+    let choice_before = choice.clone();
+    let custom_before = custom.clone();
     let mut commit = false;
     let out = ui.add_enabled_ui(enabled, |ui| {
         form(ui, "curve_gradient_form", |f| {
@@ -638,15 +651,10 @@ fn gradient_editor(
             }
             let active = choice_stops(&choice, env, &custom);
             gradient_strip(f.ui(), &gradient_colors(&active, PREVIEW_STEPS));
-            if f.field(|ui| {
-                ui.add_enabled(
-                    group.is_some(),
-                    egui::Button::new(tr!("curve-gradient-apply")),
-                )
-                .on_hover_text(tr!("curve-gradient-apply", "hint"))
-                .on_disabled_hover_text(tr!("curve-group-leave", "disabled"))
-                .clicked()
-            }) {
+            // Pas de bouton « Appliquer » : comme tous les autres réglages,
+            // le nuancier s'écrit dans le brouillon dès qu'on le change
+            // (choix, arrêt de couleur) ; Cancel l'efface, OK le valide (#213).
+            if enabled && (choice != choice_before || custom != custom_before) {
                 if let Some(group) = group {
                     commit |= panel.apply_group_gradient(group, &active);
                 }
