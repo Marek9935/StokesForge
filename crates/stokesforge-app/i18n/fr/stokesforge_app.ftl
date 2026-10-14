@@ -734,9 +734,6 @@ curve-gradient-custom = Personnalisé
 curve-gradient-stop = Couleur { $number }
 curve-gradient-add-stop = Ajouter une couleur
 curve-gradient-remove-stop = Retirer une couleur
-curve-gradient-apply =
-    Appliquer au groupe
-    .hint = Répartit le nuancier régulièrement sur les séries du groupe, dans l'ordre de la liste
 curve-gradient-blue-red = Bleu vers Rouge
 curve-gradient-black-red = Noir vers Rouge
 curve-gradient-black-blue = Noir vers Bleu
@@ -815,6 +812,7 @@ plot-text-placeholder = Texte, $formule$
 plot-view-reset-zoom = Réinitialiser le zoom
 plot-layer-badge = { $n }
     .hint = Fait du calque { $n } la cible des ajouts à ce graphique
+plot-layer-choice-disabled = Cette page vaut pour tout le graphique, pas pour un calque
 
 # Export
 

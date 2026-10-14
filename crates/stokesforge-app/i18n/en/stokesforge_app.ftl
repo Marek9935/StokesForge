@@ -742,9 +742,6 @@ curve-gradient-custom = Custom
 curve-gradient-stop = Color { $number }
 curve-gradient-add-stop = Add Color
 curve-gradient-remove-stop = Remove Color
-curve-gradient-apply =
-    Apply to Group
-    .hint = Spreads the gradient evenly over the series of the group, in list order
 curve-gradient-blue-red = Blue to Red
 curve-gradient-black-red = Black to Red
 curve-gradient-black-blue = Black to Blue
@@ -823,6 +820,7 @@ plot-text-placeholder = Text, $formula$
 plot-view-reset-zoom = Reset Zoom
 plot-layer-badge = { $n }
     .hint = Makes layer { $n } the target of additions to this graph
+plot-layer-choice-disabled = This page applies to the whole graph, not to a layer
 
 # Export
 
