@@ -227,7 +227,7 @@ par `Ui::close`, dont egui propage la demande aux menus parents.
 | Edit | Undo, Redo ; Selection → Copy, Paste, Rename, Duplicate, Delete des objets du Project Manager |
 | Workbook (classeur actif) | Sheet → Add Worksheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row |
 | Graph (graphique actif) | Show Data ; Add Text ; Selection → le menu de l'objet sélectionné (grisé sans sélection) ; Reset Text Positions ; Top / Right Mirror Axis (cases, calque actif ordinaire, #176) ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
-| View | Panels → Project Manager, Script Console ; Object Manager → Show, puis les réglages du fond (Show graph texts, Show Axes, Expand by Default, Reset Settings) ; Toolbars → File, Tools, Text format |
+| View | Panels → Project Manager, Script Console ; Object Manager → Show, puis les réglages du fond (Show Axes, Expand by Default, Reset Settings) ; Toolbars → File, Tools, Text format |
 | Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
 
 La grammaire des sections, des séparateurs et des sous-menus est dans
@@ -2240,14 +2240,11 @@ Affichage › Gestionnaire d'objets › Afficher ouvre l'arbre du
 graphique actif : graphique › calques (`PlotSpec::panels`) › groupe de tracés ›
 séries, ainsi que les objets rares, textes libres et objets graphiques
 (rectangle, ellipse, ligne, flèche), quand il y en a. Les **textes
-automatiques** (titre du graphique et des calques, titres d'axes, légende) sont
-cachés par défaut (#102) : une seule bascule, « Afficher les textes du
-graphique » (Affichage › Gestionnaire d'objets et
-clic droit sur le fond du panneau, même
-`Action::SetObjectManagerShowTexts`), les liste. C'est une préférence
-d'interface (`object_manager_show_texts` dans `preferences.json`, hors `.stf`),
-et le filtre vit dans `object_tree_with_selection`. Un texte caché n'apparaît
-pas même sélectionné dans la figure. Les **axes** (#111, #147) suivent le même
+liés** (titre du graphique et des calques, titres d'axes, légende) n'y sont
+jamais listés (#214) : ils s'éditent par double-clic sur la figure ou dans la
+fenêtre des propriétés, et ne comptent pas dans les cases parentes. Le groupe
+« Objects » ne liste que les objets libres, est replié par défaut et disparaît
+quand il est vide. Les **axes** (#111, #147) suivent le même
 motif avec leur propre bascule, « Afficher les axes »
 (`Action::SetObjectManagerShowScales`, préférence `object_manager_show_scales`,
 même sous-menu Affichage et dans le menu du fond) : non listés par défaut, ils
@@ -2271,8 +2268,7 @@ chacun commandant l'`AxisSpec` `bottom` / `left` qui le porte ; ses lignes
 défaut** (#138) : un clic sur sa flèche déplie les lignes d'axe, sans toucher
 au modèle. Les cases du graphique et du
 calque ne comptent que les **enfants listés** (#173), regroupés dans `Shown` :
-les textes automatiques sans la bascule « Show graph texts », les axes sans
-« Show Axes » ; un enfant non listé garde son état. Axes listés, ils comptent
+les axes sans « Show Axes » ; un enfant non listé garde son état. Axes listés, ils comptent
 (calque et graphique mixtes si un miroir est décoché) ; la case du groupe de
 tracés n'a que ses séries (`VisibilityTarget::contents_shown`,
 `visibility_shown`, `set_shown`). Activer une bascule recalcule les parents. `Action::SetPlotVisibility` lit la bascule dans l'état. Le panneau est redimensionnable à droite ;

@@ -513,14 +513,6 @@ pub(super) fn object_manager_settings_contents(
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
     let mut sections = MenuSections::new();
     sections.section(ui, true, |ui| {
-        let mut show = settings.show_texts;
-        if ui
-            .checkbox(&mut show, tr!("object-manager-show-texts"))
-            .on_hover_text(tr!("object-manager-show-texts", "hint"))
-            .changed()
-        {
-            actions.push(Action::SetObjectManagerShowTexts(show));
-        }
         let mut show = settings.show_scales;
         if ui
             .checkbox(&mut show, tr!("object-manager-show-axes"))
@@ -705,15 +697,6 @@ impl ObjectManagerPaint<'_> {
         })
         .body(|ui| {
             crate::tree_lines::tree_children(ui, |ui, branch| {
-                self.object_group(
-                    ui,
-                    None,
-                    &model.objects,
-                    branch,
-                    actions,
-                    requests,
-                    selected,
-                );
                 for layer in &model.layers {
                     let y = self.layer(ui, layer, actions, requests, selected);
                     branch.mark(y);
@@ -1281,7 +1264,7 @@ fn object_manager_object_row(
         let background = ListRowBackground::reserve(ui);
         let row = ui
             .horizontal(|ui| {
-                object_visibility(ui, graph, object.target, spec, Shown::TEXTS, actions);
+                object_visibility(ui, graph, object.target, spec, Shown::NONE, actions);
                 let icon = match object.kind {
                     crate::object_manager::ObjectKind::Text => Icon::TextTool,
                     crate::object_manager::ObjectKind::Axis => Icon::Axis,
@@ -1310,7 +1293,7 @@ fn object_manager_object_row(
                         graph,
                         object.target,
                         spec,
-                        Shown::TEXTS,
+                        Shown::NONE,
                         actions,
                         requests,
                     )
@@ -1349,7 +1332,6 @@ impl StokesForgeApp {
                 &tree,
                 graph,
                 selection,
-                settings.show_texts,
                 settings.show_scales,
             )
         });
@@ -1617,20 +1599,13 @@ mod tests {
         );
         let output = paint(Vec::new()).0;
         assert!(
-            painted(&output, &tr!("object-manager-show-texts")),
+            painted(&output, &tr!("object-manager-show-axes")),
             "les réglages sont au premier niveau, sans enveloppe"
         );
         assert!(painted(&output, &tr!("object-manager-reset")));
-        for (key, expected) in [
-            (
-                tr!("object-manager-show-texts"),
-                Action::SetObjectManagerShowTexts(true),
-            ),
-            (
-                tr!("object-manager-show-axes"),
-                Action::SetObjectManagerShowScales(true),
-            ),
-        ] {
+        {
+            let key = tr!("object-manager-show-axes");
+            let expected = Action::SetObjectManagerShowScales(true);
             let output = paint(Vec::new()).0;
             let (_, actions, requests) = clic_menu(
                 &paint,
@@ -1645,7 +1620,7 @@ mod tests {
                 painted(&output, &tr!("object-manager-reset")),
                 "le menu racine reste ouvert"
             );
-            assert!(painted(&output, &tr!("object-manager-show-texts")));
+            assert!(painted(&output, &tr!("object-manager-show-axes")));
             assert!(painted(&output, &tr!("object-manager-show-axes")));
         }
     }
@@ -1703,7 +1678,7 @@ mod tests {
             assert!(requests.is_empty());
             let output = paint(Vec::new()).0;
             assert!(egui::Popup::is_any_open(&ctx));
-            assert!(painted(&output, &tr!("object-manager-show-texts")));
+            assert!(painted(&output, &tr!("object-manager-show-axes")));
             assert!(painted(&output, &tr!("object-manager-default-expansion")));
             assert!(painted(&output, &label));
         }
@@ -1834,14 +1809,9 @@ mod tests {
         let graph = project
             .add_graph(project.root(), None, spec.clone())
             .unwrap();
-        let model = crate::object_manager::object_tree_with_selection(
-            project.tree(),
-            graph,
-            None,
-            true,
-            true,
-        )
-        .unwrap();
+        let model =
+            crate::object_manager::object_tree_with_selection(project.tree(), graph, None, true)
+                .unwrap();
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         egui_extras::install_image_loaders(&ctx);
@@ -1878,10 +1848,6 @@ mod tests {
         let (output, actions, requests) = paint(Vec::new());
         assert!(actions.is_empty() && requests.is_empty());
         let mut expected = vec![model.title.clone()];
-        if !model.objects.is_empty() {
-            expected.push(tr!("object-manager-objects"));
-        }
-        expected.extend(model.objects.iter().map(|object| object.label.clone()));
         expected.extend([
             tr!("object-manager-layer", index = 1),
             tr!("object-manager-group"),
@@ -1894,19 +1860,12 @@ mod tests {
                 "les axes sont repliés par défaut"
             );
         }
-        if !model.layers[0].objects.is_empty() {
-            expected.push(tr!("object-manager-objects"));
-        }
-        expected.extend(
-            model.layers[0]
-                .objects
-                .iter()
-                .map(|object| object.label.clone()),
-        );
+        assert!(!model.layers[0].objects.is_empty());
+        expected.push(tr!("object-manager-objects"));
         assert_eq!(
             labels(&output),
             expected,
-            "les sections suivent l'ordre du graphique"
+            "les sections suivent l'ordre du graphique, « Objects » replié par défaut"
         );
 
         let click_toggle = |output: &egui::FullOutput, label: &str| {
@@ -1927,7 +1886,7 @@ mod tests {
         let collapsed = click_toggle(&output, &tr!("object-manager-group"));
         let texts = labels(&collapsed);
         assert!(!texts.iter().any(|text| text == "Courbe"));
-        assert!(texts.iter().any(|text| text == "Note libre"));
+        assert!(texts.contains(&tr!("object-manager-objects")));
         for axis in &model.layers[0].axes {
             assert!(
                 !texts.contains(&axis.label),
@@ -1939,7 +1898,7 @@ mod tests {
         let with_axes = click_toggle(&expanded, &tr!("object-manager-axes"));
         let texts = labels(&with_axes);
         assert!(texts.iter().any(|text| text == "Courbe"));
-        assert!(texts.iter().any(|text| text == "Note libre"));
+        assert!(texts.contains(&tr!("object-manager-objects")));
         for axis in &model.layers[0].axes {
             assert!(
                 texts.contains(&axis.label),
@@ -1977,17 +1936,11 @@ mod tests {
             .unwrap();
         let settings = ObjectManagerSettings {
             show_scales: true,
-            show_texts: true,
             ..Default::default()
         };
-        let model = crate::object_manager::object_tree_with_selection(
-            project.tree(),
-            graph,
-            None,
-            true,
-            true,
-        )
-        .unwrap();
+        let model =
+            crate::object_manager::object_tree_with_selection(project.tree(), graph, None, true)
+                .unwrap();
         let paint = |ctx: &egui::Context, settings| {
             let mut actions = Vec::new();
             let output = image_de(ctx, egui::vec2(800.0, 700.0), Vec::new(), |ui| {
@@ -2022,7 +1975,10 @@ mod tests {
             paint(&ctx, settings);
             let baseline = paint(&ctx, settings);
             if group == ObjectManagerGroup::Objects {
-                assert!(painted(&baseline, "Texte global"));
+                assert!(
+                    !painted(&baseline, "Texte global"),
+                    "le titre du graphique n'est jamais listé"
+                );
             }
             let expected = settings.group_open(group);
             assert_eq!(

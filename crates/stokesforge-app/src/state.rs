@@ -620,8 +620,6 @@ pub enum Action {
     },
     /// Ouvre ou ferme le panneau ; préférence de la personne, hors historique.
     SetObjectManagerOpen(bool),
-    /// Bascule unique « Show graph texts » (menu View et menu contextuel).
-    SetObjectManagerShowTexts(bool),
     /// Liste ou cache les échelles (axes) dans l'Object Manager (#111).
     SetObjectManagerShowScales(bool),
     /// Repli initial d'une famille, hors projet et historique (#139).
@@ -4427,11 +4425,6 @@ impl AppState {
         self.object_manager_open = open;
     }
 
-    /// Textes automatiques listés dans l'Object Manager (#102), hors projet.
-    pub fn object_manager_show_texts(&self) -> bool {
-        self.object_manager_settings().show_texts
-    }
-
     /// Échelles (axes) listées dans l'Object Manager (#111), hors projet.
     pub fn object_manager_show_scales(&self) -> bool {
         self.object_manager_settings().show_scales
@@ -4677,11 +4670,6 @@ impl AppState {
                         cause = errors::io::error_message(&error)
                     ));
                 }
-            }
-            Action::SetObjectManagerShowTexts(show) => {
-                let mut settings = self.object_manager_settings();
-                settings.show_texts = show;
-                self.save_object_manager_settings(settings);
             }
             Action::SetObjectManagerShowScales(show) => {
                 let mut settings = self.object_manager_settings();

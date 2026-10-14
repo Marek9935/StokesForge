@@ -97,7 +97,7 @@ copie la figure que sans sélection, #149).
 | Cible | Menu |
 |---|---|
 | Nœud | le menu de l'objet de la figure (`object_node_menu`) |
-| Fond | Show Graph Texts ☐ · Show Scales ☐ · Expand by Default ▸ (5 cases) ─ Reset Settings |
+| Fond | Show Axes ☐ · Expand by Default ▸ (5 cases) ─ Reset Settings |
 
 View › Object Manager enveloppe le même contenu (`object_manager_settings_contents`).
 Les cases gardent le menu ouvert (#114).

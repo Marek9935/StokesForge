@@ -1650,7 +1650,6 @@ mod tests {
         let tab = Some(Tab::Graph(graph));
         let (_, menu) = ouvre(&mut app, tab, &tr!("menu-view"));
         assert!(active(&menu, &tr!("action-object-manager")).enabled);
-        assert!(entree(&menu, &tr!("object-manager-show-texts")).is_none());
         assert!(entree(&menu, &tr!("object-manager-show-axes")).is_none());
         for open in [false, true] {
             app.state.set_object_manager_open_for_test(open);
@@ -1659,7 +1658,7 @@ mod tests {
                 entree(&panels, &tr!("project-manager-title")).is_some()
                     && entree(&panels, &tr!("script-title")).is_some()
             );
-            assert!(entree(&panels, &tr!("object-manager-show-texts")).is_none());
+            assert!(entree(&panels, &tr!("object-manager-show-axes")).is_none());
             assert_eq!(
                 panels
                     .iter()
@@ -1682,7 +1681,7 @@ mod tests {
             let toujours = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
             assert!(entree(&toujours, &tr!("action-show-content")).is_some());
             assert_eq!(
-                active(&menu, &tr!("object-manager-show-texts")).enabled,
+                active(&menu, &tr!("object-manager-show-axes")).enabled,
                 open,
                 "les réglages suivent l'ouverture du panneau, sans enveloppe"
             );
@@ -1809,18 +1808,10 @@ mod tests {
             }
             ouvre_chemin(app, None, &path)
         };
-        for (label, current, action) in [
-            (
-                tr!("object-manager-show-texts"),
-                app.state.object_manager_show_texts(),
-                Action::SetObjectManagerShowTexts(!app.state.object_manager_show_texts()),
-            ),
-            (
-                tr!("object-manager-show-axes"),
-                app.state.object_manager_show_scales(),
-                Action::SetObjectManagerShowScales(!app.state.object_manager_show_scales()),
-            ),
-        ] {
+        {
+            let label = tr!("object-manager-show-axes");
+            let current = app.state.object_manager_show_scales();
+            let action = Action::SetObjectManagerShowScales(!current);
             let (ctx, menu) = open(&mut app, None);
             let row = active(&menu, &label);
             assert!(row.enabled);

@@ -1007,8 +1007,6 @@ object-manager-visibility = Afficher ou masquer ce contenu. Les séries masquée
 object-manager-layer = Calque { $index }
 object-manager-group = Séries
 object-manager-axes = Axes
-object-manager-show-texts = Afficher les textes du graphique
-    .hint = Liste dans le gestionnaire d’objets le titre du graphique, les titres des calques et des axes et la légende. Ne modifie pas leur visibilité sur le graphique. Non listés par défaut.
 object-manager-show-axes = Afficher les axes
     .hint = Liste les axes de chaque calque dans le gestionnaire d’objets. Ne modifie pas leur visibilité sur le graphique. Non listés par défaut.
 

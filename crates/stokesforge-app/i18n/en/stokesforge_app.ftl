@@ -1015,8 +1015,6 @@ object-manager-visibility = Show or hide this content. Hidden series are exclude
 object-manager-layer = Layer { $index }
 object-manager-group = Series
 object-manager-axes = Axes
-object-manager-show-texts = Show graph texts
-    .hint = Lists the graph title, layer titles, axis titles and legend in the Object Manager. Does not change their visibility on the graph. Not listed by default.
 object-manager-show-axes = Show Axes
     .hint = Lists the axes of each layer in the Object Manager. Does not change their visibility on the graph. Not listed by default.
 

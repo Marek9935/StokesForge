@@ -18,15 +18,12 @@
 //! graphique et du calque ne comptent les axes que **listés** (bascule « Show
 //! Axes », [`Shown::scales`]) ; la case du groupe de tracés n'a que ses séries.
 //!
-//! Vue par défaut (#102) : calques, groupes de tracés et séries, plus les
-//! objets rares (formes, textes libres). Les textes automatiques — titre du
-//! graphique et des calques, titres d'axes, légende — ne sont listés que si la
-//! bascule « Show graph texts » est active (préférence d'interface, hors `.stf`) ;
-//! le filtre vit dans [`object_tree_with_selection`]. Les cases du graphique et
-//! du calque commandent toujours le contenu complet, textes cachés compris
-//! ([`VisibilityTarget::contents`]) ; l'état d'une case parente et son
-//! basculement ne comptent que les enfants **affichés** dans l'arbre (#173,
-//! [`VisibilityTarget::contents_shown`]).
+//! Vue par défaut (#102, #214) : calques, groupes de tracés et séries, plus les
+//! objets libres (formes, textes libres). Les textes liés — titre du graphique
+//! et des calques, titres d'axes, légende — ne sont jamais listés : ils
+//! s'éditent par double-clic ou dans les propriétés. L'état d'une case parente
+//! et son basculement ne comptent que les enfants **affichés** dans l'arbre
+//! (#173, [`VisibilityTarget::contents_shown`]).
 
 use stokesforge_core::{series_label, NodeId, Tree};
 use stokesforge_plot::{
@@ -146,30 +143,20 @@ pub fn axis_sides(panel: &stokesforge_plot::PanelSpec) -> Vec<AxisSide> {
     }
 }
 /// Ce que l'arbre affiche, donc ce que comptent les cases parentes (#173) :
-/// les textes automatiques et le groupe « Axes » sont listés par leurs bascules.
+/// le groupe « Axes » est listé par sa bascule.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Shown {
-    pub texts: bool,
     pub scales: bool,
 }
 
 impl Shown {
-    /// Les textes seuls (feuilles : la valeur n'importe pas).
-    pub const TEXTS: Self = Self {
-        texts: true,
-        scales: false,
-    };
-    /// Ni textes ni axes.
-    pub const NONE: Self = Self {
-        texts: false,
-        scales: false,
-    };
+    /// Ni axes (feuilles : la valeur n'importe pas).
+    pub const NONE: Self = Self { scales: false };
 }
 
 impl From<crate::preferences::ObjectManagerSettings> for Shown {
     fn from(settings: crate::preferences::ObjectManagerSettings) -> Self {
         Self {
-            texts: settings.show_texts,
             scales: settings.show_scales,
         }
     }
@@ -185,11 +172,11 @@ pub struct Visibility {
 impl VisibilityTarget {
     /// Feuilles concernées ; un titre vide ne rend pas un parent indéterminé.
     pub fn contents(self, spec: &PlotSpec) -> Vec<Self> {
-        self.contents_shown(spec, Shown::TEXTS)
+        self.contents_shown(spec, Shown::NONE)
     }
     /// Feuilles que l'arbre **affiche** sous ce parent (#173) : sans les
-    /// textes automatiques tant que `show_texts` est faux, un texte caché
-    /// ne compte ni dans l'état de la case ni dans son basculement.
+    /// textes liés (#214) ni les axes non listés, qui ne comptent ni dans
+    /// l'état de la case ni dans son basculement.
     pub fn contents_shown(self, spec: &PlotSpec, shown: Shown) -> Vec<Self> {
         if let Self::Axes(index) = self {
             let Some(panel) = spec.panels.get(index) else {
@@ -214,9 +201,6 @@ impl VisibilityTarget {
             return vec![self];
         }
         let mut leaves = Vec::new();
-        if self == Self::Graph && shown.texts && !spec.title.is_empty() {
-            leaves.push(Self::Text(TextTarget::Title));
-        }
         for (index, panel) in spec.panels.iter().enumerate() {
             if matches!(self, Self::Panel(i) | Self::Group(i) if i != index) {
                 continue;
@@ -233,9 +217,6 @@ impl VisibilityTarget {
             }
             if shown.scales {
                 leaves.extend(Self::Axes(index).contents_shown(spec, shown));
-            }
-            if shown.texts {
-                leaves.extend(panel_texts(spec, index).into_iter().map(Self::Text));
             }
             leaves.extend(panel.annotations.iter().enumerate().map(|(rank, _)| {
                 Self::Annotation(AnnotationRef {
@@ -272,7 +253,7 @@ impl VisibilityTarget {
         matches!(self, Self::Axis(axis) if axis.blocked(spec))
     }
     pub fn visibility(self, spec: &PlotSpec) -> Visibility {
-        self.visibility_shown(spec, Shown::TEXTS)
+        self.visibility_shown(spec, Shown::NONE)
     }
     /// État de la case, d'après les seuls enfants affichés (#173).
     pub fn visibility_shown(self, spec: &PlotSpec, shown: Shown) -> Visibility {
@@ -290,7 +271,7 @@ impl VisibilityTarget {
     }
     /// Cible périmée ou valeur identique : aucune entrée d'historique.
     pub fn set(self, spec: &mut PlotSpec, visible: bool) -> bool {
-        self.set_shown(spec, visible, Shown::TEXTS)
+        self.set_shown(spec, visible, Shown::NONE)
     }
     /// Comme [`Self::set`], sur les seuls enfants affichés (#173) : un texte
     /// caché garde son état.
@@ -469,27 +450,6 @@ pub fn selection_after_history(
     }
 }
 
-fn panel_texts(spec: &PlotSpec, index: usize) -> Vec<TextTarget> {
-    let Some(panel) = spec.panels.get(index) else {
-        return Vec::new();
-    };
-    let mut texts = Vec::new();
-    if !panel.title.is_empty() {
-        texts.push(TextTarget::PanelTitle { panel: index });
-    }
-    // Le modèle réserve aussi Top ; le pipeline ne trace encore que ces
-    // trois axes. Ne pas proposer un titre sans composant à éditer.
-    for side in [AxisSide::Bottom, AxisSide::Left, AxisSide::Right] {
-        if !panel.axis(side).display_label().is_empty() {
-            texts.push(TextTarget::AxisTitle { panel: index, side });
-        }
-    }
-    if !panel.series.is_empty() {
-        texts.push(TextTarget::Legend { panel: index });
-    }
-    texts
-}
-
 /// Rang final après un déplacement dans le groupe. Les dépôts entre calques
 /// sont refusés : ils changeraient les axes de rattachement des données.
 pub fn series_drop(
@@ -577,7 +537,6 @@ pub struct ObjectTree {
     pub graph: NodeId,
     pub title: String,
     pub layers: Vec<LayerRow>,
-    pub objects: Vec<ObjectRow>,
 }
 
 /// Le nom d'un axe **à l'endroit où il est affiché** : l'axe X d'un calque
@@ -610,18 +569,12 @@ pub fn group_title(panel: &PanelSpec, group: u32) -> String {
 }
 
 pub fn object_tree(tree: &Tree, graph: NodeId, selected: Option<SeriesRef>) -> Option<ObjectTree> {
-    object_tree_with_selection(
-        tree,
-        graph,
-        selected.map(VisibilityTarget::Series),
-        false,
-        false,
-    )
+    object_tree_with_selection(tree, graph, selected.map(VisibilityTarget::Series), false)
 }
-/// `show_texts` : lister les textes automatiques (titre du graphique et des
-/// calques, titres d'axes, légende). Faux par défaut (#102) ; les textes libres
-/// et les formes sont toujours listés. Un texte caché n'apparaît pas même
-/// sélectionné : la sélection ne le révèle pas.
+/// Les textes liés (titre du graphique et des calques, titres d'axes,
+/// légende) ne sont jamais listés (#214) : ils s'éditent par double-clic sur la
+/// figure ou dans la fenêtre des propriétés. Le groupe « Objects » ne reçoit
+/// que les objets libres (textes libres, formes).
 ///
 /// `show_scales` : lister sous chaque calque le groupe « Axes », une ligne par
 /// axe (les quatre, y compris ceux masqués par défaut) (#111). Faux par
@@ -630,46 +583,19 @@ pub fn object_tree_with_selection(
     tree: &Tree,
     graph: NodeId,
     selected: Option<VisibilityTarget>,
-    show_texts: bool,
     show_scales: bool,
 ) -> Option<ObjectTree> {
     let node = tree.node(graph)?;
     let spec = crate::state::current_plot_spec(tree, graph)?;
-    let text_row = |target: TextTarget| {
-        let target = VisibilityTarget::Text(target);
-        ObjectRow {
-            target,
-            label: match target {
-                VisibilityTarget::Text(t) => t
-                    .text(&spec)
-                    .unwrap_or_else(|| crate::tr!("plot-tab-legend")),
-                _ => String::new(),
-            },
-            kind: ObjectKind::Text,
-            selected: selected == Some(target),
-        }
-    };
     Some(ObjectTree {
         graph,
         title: node.name().to_string(),
-        objects: if !show_texts || spec.title.is_empty() {
-            Vec::new()
-        } else {
-            vec![text_row(TextTarget::Title)]
-        },
         layers: spec
             .panels
             .iter()
             .enumerate()
             .map(|(index, panel)| {
-                let mut objects: Vec<ObjectRow> = if show_texts {
-                    panel_texts(&spec, index)
-                        .into_iter()
-                        .map(&text_row)
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                let mut objects: Vec<ObjectRow> = Vec::new();
                 let axes: Vec<ObjectRow> = if !show_scales {
                     Vec::new()
                 } else {
@@ -888,10 +814,7 @@ mod tests {
         let mut base = PanelSpec::at(0, 0);
         base.series.push(SeriesSpec::new(NodeId::from_raw(900)));
         let mut spec = PlotSpec::empty("T").with_panels(Panels::new(vec![base]));
-        let axes = Shown {
-            texts: false,
-            scales: true,
-        };
+        let axes = Shown { scales: true };
         // Série décochée, axes cochés : le calque et le graphique sont mixtes.
         assert!(T::Group(0).set_shown(&mut spec, false, axes));
         assert!(T::Group(0).visibility_shown(&spec, axes).enabled);
@@ -905,8 +828,8 @@ mod tests {
         assert!(!T::Panel(0).visibility_shown(&spec, axes).mixed);
     }
 
-    /// #173 : un texte automatique caché dans l'arbre ne rend pas son parent
-    /// indéterminé et n'est pas basculé par un clic sur ce parent.
+    /// #173, #214 : un texte lié n'est jamais listé ; il ne rend pas son
+    /// parent indéterminé et un clic sur ce parent ne le bascule pas.
     #[test]
     fn un_parent_ne_tient_compte_que_des_enfants_affiches() {
         use crate::object_manager::{Shown, VisibilityTarget as T};
@@ -921,18 +844,14 @@ mod tests {
         let legende = T::Text(TextTarget::Legend { panel: 1 });
         assert_eq!(legende.value(&spec), Some(false));
         for parent in [T::Graph, T::Panel(1)] {
-            let tout = parent.visibility_shown(&spec, Shown::TEXTS);
-            assert!(tout.mixed, "avec les textes, la légende cachée compte");
             let affiche = parent.visibility_shown(&spec, Shown::NONE);
             assert!(affiche.checked && !affiche.mixed, "{parent:?}");
         }
-        // Décocher le parent laisse le texte caché dans son état.
+        // Décocher puis recocher le parent laisse le texte dans son état.
         assert!(T::Panel(1).set_shown(&mut spec, false, Shown::NONE));
         assert_eq!(legende.value(&spec), Some(false));
         assert!(T::Panel(1).set_shown(&mut spec, true, Shown::NONE));
         assert_eq!(legende.value(&spec), Some(false));
-        assert!(T::Panel(1).set_shown(&mut spec, true, Shown::TEXTS));
-        assert_eq!(legende.value(&spec), Some(true));
     }
 
     #[test]

@@ -44,7 +44,6 @@ impl ObjectManagerGroup {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct ObjectManagerSettings {
-    pub show_texts: bool,
     pub show_scales: bool,
     pub graph_open: bool,
     pub layers_open: bool,
@@ -56,13 +55,12 @@ pub struct ObjectManagerSettings {
 impl Default for ObjectManagerSettings {
     fn default() -> Self {
         Self {
-            show_texts: false,
             show_scales: false,
             graph_open: true,
             layers_open: true,
             plots_open: true,
             axes_open: false,
-            objects_open: true,
+            objects_open: false,
         }
     }
 }
@@ -175,8 +173,6 @@ struct PreferencesFile {
     #[serde(default)]
     object_manager_open: Option<bool>,
     #[serde(default)]
-    object_manager_show_texts: Option<bool>,
-    #[serde(default)]
     object_manager_show_scales: Option<bool>,
     #[serde(default)]
     object_manager_settings: Option<ObjectManagerSettings>,
@@ -235,11 +231,8 @@ impl Preferences {
             .and_then(|content| serde_json::from_str::<PreferencesFile>(&content).ok())
             .unwrap_or_default();
         let mut settings = file.object_manager_settings.unwrap_or_default();
-        // Les anciennes versions écrivent encore les deux champs historiques.
+        // Les anciennes versions écrivent encore un champ historique.
         // Ils restent prioritaires et sont tenus à jour lors de chaque écriture.
-        if let Some(show) = file.object_manager_show_texts {
-            settings.show_texts = show;
-        }
         if let Some(show) = file.object_manager_show_scales {
             settings.show_scales = show;
         }
@@ -298,18 +291,6 @@ impl Preferences {
     pub fn save_object_manager_open(&mut self, open: bool) -> std::io::Result<()> {
         self.object_manager_open = open;
         self.save_field("object_manager_open", open.into())
-    }
-
-    /// Textes automatiques (titres, légende) listés dans l'Object Manager ;
-    /// cachés par défaut (#102).
-    pub fn object_manager_show_texts(&self) -> bool {
-        self.object_manager_settings.show_texts
-    }
-
-    /// Mémorise la bascule sans remplacer les autres préférences.
-    pub fn save_object_manager_show_texts(&mut self, show: bool) -> std::io::Result<()> {
-        self.object_manager_settings.show_texts = show;
-        self.save_field("object_manager_show_texts", show.into())
     }
 
     /// Échelles (axes) listées dans l'Object Manager ; cachées par défaut (#111).
@@ -408,7 +389,6 @@ impl Preferences {
                 "object_manager_settings",
                 serde_json::to_value(settings).map_err(std::io::Error::other)?,
             ),
-            ("object_manager_show_texts", settings.show_texts.into()),
             ("object_manager_show_scales", settings.show_scales.into()),
         ])
     }
@@ -667,7 +647,6 @@ mod object_manager_tests {
         assert_eq!(
             settings,
             ObjectManagerSettings {
-                show_texts: true,
                 show_scales: true,
                 axes_open: true,
                 ..defaults
@@ -687,7 +666,6 @@ mod object_manager_tests {
         let mut preferences = Preferences::load_from(Some(path.clone()));
         let defaults = ObjectManagerSettings::default();
         let settings = ObjectManagerSettings {
-            show_texts: true,
             show_scales: true,
             graph_open: false,
             layers_open: false,
@@ -705,7 +683,6 @@ mod object_manager_tests {
             let document: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
             assert_eq!(document["avenir"], 42);
-            assert_eq!(document["object_manager_show_texts"], expected.show_texts);
             assert_eq!(document["object_manager_show_scales"], expected.show_scales);
         }
     }
@@ -736,41 +713,16 @@ mod object_manager_tests {
     }
 
     #[test]
-    fn textes_automatiques_caches_par_defaut_et_bascule_memorisee() {
-        // Absent, corrompu ou sans le champ : cachés.
-        assert!(!Preferences::load_from(None).object_manager_show_texts());
-        for content in ["{ pas du json", r#"{"language":"fr"}"#] {
-            let dir = tempfile::tempdir().unwrap();
-            let path = dir.path().join("preferences.json");
-            std::fs::write(&path, content).unwrap();
-            assert!(!Preferences::load_from(Some(path)).object_manager_show_texts());
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("preferences.json");
-        std::fs::write(&path, r#"{"language":"fr","avenir":42}"#).unwrap();
-        let mut preferences = Preferences::load_from(Some(path.clone()));
-        preferences.save_object_manager_show_texts(true).unwrap();
-        let relues = Preferences::load_from(Some(path.clone()));
-        assert!(relues.object_manager_show_texts());
-        assert_eq!(relues.language(), Some("fr"));
-        assert!(std::fs::read_to_string(&path).unwrap().contains("avenir"));
-        // L'ouverture du panneau reste indépendante.
-        assert!(relues.object_manager_open());
-    }
-
-    #[test]
     fn echelles_cachees_par_defaut_et_bascule_memorisee() {
         assert!(!Preferences::load_from(None).object_manager_show_scales());
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("preferences.json");
-        std::fs::write(&path, r#"{"object_manager_show_texts":true}"#).unwrap();
+        std::fs::write(&path, r#"{"language":"fr"}"#).unwrap();
         let mut preferences = Preferences::load_from(Some(path.clone()));
         assert!(!preferences.object_manager_show_scales());
         preferences.save_object_manager_show_scales(true).unwrap();
         let relues = Preferences::load_from(Some(path));
         assert!(relues.object_manager_show_scales());
-        // Indépendante de la bascule des textes.
-        assert!(relues.object_manager_show_texts());
     }
 
     /// #162 : texte SVG par défaut ; le choix des contours est retenu d'une

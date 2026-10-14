@@ -120,22 +120,6 @@ fn start(project: Project, path: &Path) -> (Session, AppState) {
     (session, state)
 }
 
-/// Comme [`start`], avec les textes automatiques listés dans Object Manager
-/// (#173) ; les préférences vivent dans `dir`, jamais dans la configuration
-/// réelle.
-fn start_showing_texts(project: Project, dir: &Path, file: &str) -> (Session, AppState) {
-    use stokesforge_app::preferences::Preferences;
-    let session = Session::spawn(project, None).expect("thread de session");
-    let mut state = AppState::new_with_preferences(
-        session.handle(),
-        dir.join(file).display().to_string(),
-        Preferences::load_from(Some(dir.join("preferences.json"))),
-    )
-    .expect("état applicatif initial");
-    state.dispatch(Action::SetObjectManagerShowTexts(true));
-    (session, state)
-}
-
 /// Session sur le projet de démonstration, fichier de travail dans `dir`.
 fn start_demo(dir: &Path) -> (Session, AppState) {
     start(demo_project(), &dir.join("projet.stokesforge"))
@@ -9046,7 +9030,6 @@ fn object_manager_reglages_persistants_et_reset_restent_hors_historique() {
             !defaults.group_open(group)
         );
     }
-    state.dispatch(Action::SetObjectManagerShowTexts(true));
     state.dispatch(Action::SetObjectManagerShowScales(true));
     let changed = state.object_manager_settings();
     assert_ne!(
@@ -9057,7 +9040,7 @@ fn object_manager_reglages_persistants_et_reset_restent_hors_historique() {
         Preferences::load_from(Some(path.clone())).object_manager_settings(),
         changed
     );
-    assert!(state.object_manager_show_texts() && state.object_manager_show_scales());
+    assert!(state.object_manager_show_scales());
     state.dispatch(Action::ResetObjectManagerSettings);
     assert_eq!(state.object_manager_settings(), defaults);
     let loaded = Preferences::load_from(Some(path));
@@ -9099,54 +9082,38 @@ fn object_manager_reglage_reste_actif_si_le_stockage_echoue() {
 }
 
 #[test]
-fn object_manager_textes_automatiques_caches_par_defaut_sans_revelation() {
+fn object_manager_textes_lies_jamais_listes_sans_revelation() {
     use stokesforge_app::object_manager::{object_tree_with_selection, VisibilityTarget as T};
     use stokesforge_plot::{AnnotationRef, ShapeRef, TextTarget};
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
-    // Préférences dans le dossier temporaire : la bascule des textes y reste.
-    let (_session, mut state) = start_showing_texts(project, dir.path(), "cache.stf");
-    state.dispatch(Action::SetObjectManagerShowTexts(false));
+    let (_session, mut state) = start(project, &dir.path().join("cache.stf"));
     let text = AnnotationRef { panel: 0, index: 0 };
     let arrow = ShapeRef { panel: 0, index: 3 };
-    // Cachés : ni titre du graphique, ni titre de calque, ni axes, ni légende ;
+    // #214 : ni titre du graphique, ni titre de calque, ni axes, ni légende ;
     // le texte libre et les quatre formes restent.
-    let hidden = object_tree_with_selection(state.tree(), graph, None, false, false).unwrap();
-    assert!(hidden.objects.is_empty());
-    assert_eq!(hidden.layers[0].objects.len(), 5);
-    assert!(hidden.layers[0]
+    let tree = object_tree_with_selection(state.tree(), graph, None, false).unwrap();
+    assert_eq!(tree.layers[0].objects.len(), 5);
+    assert!(tree.layers[0]
         .objects
         .iter()
         .all(|o| matches!(o.target, T::Annotation(_) | T::Shape(_))));
-    assert!(hidden.layers[0]
+    assert!(tree.layers[0]
         .objects
         .iter()
         .any(|o| o.target == T::Annotation(text)));
-    assert!(hidden.layers[0]
+    assert!(tree.layers[0]
         .objects
         .iter()
         .any(|o| o.target == T::Shape(arrow)));
-    assert!(
-        !hidden.layers[0].series.is_empty(),
-        "séries toujours listées"
-    );
-    // Pas de révélation à la sélection : un texte caché sélectionné n'apparaît pas.
-    let selected = object_tree_with_selection(
-        state.tree(),
-        graph,
-        Some(T::Text(TextTarget::Title)),
-        false,
-        false,
-    )
-    .unwrap();
-    assert!(selected.objects.is_empty());
+    assert!(!tree.layers[0].series.is_empty(), "séries toujours listées");
+    // Pas de révélation à la sélection : un texte lié sélectionné n'apparaît pas.
+    let selected =
+        object_tree_with_selection(state.tree(), graph, Some(T::Text(TextTarget::Title)), false)
+            .unwrap();
     assert!(selected.layers[0].objects.iter().all(|o| !o.selected));
-    // Bascule active : les textes reviennent (même total que l'ancienne vue).
-    let shown = object_tree_with_selection(state.tree(), graph, None, true, false).unwrap();
-    assert_eq!(shown.objects.len(), 1);
-    assert_eq!(shown.layers[0].objects.len(), 9);
     // #173 : la case du graphique ne commande que ce que l'arbre affiche ; les
-    // textes cachés gardent leur état, et ne rendent pas la case indéterminée.
+    // textes liés gardent leur état, et ne rendent pas la case indéterminée.
     state.dispatch(Action::SetPlotVisibility {
         graph,
         target: T::Graph,
@@ -9155,30 +9122,9 @@ fn object_manager_textes_automatiques_caches_par_defaut_sans_revelation() {
     let spec = graph_spec(&state, graph);
     assert!(spec.title_visible);
     assert!(spec.panels[0].bottom.title_visible);
-    assert!(
-        !T::Graph
-            .visibility_shown(&spec, stokesforge_app::object_manager::Shown::NONE)
-            .checked
-    );
-    assert!(
-        !T::Graph
-            .visibility_shown(&spec, stokesforge_app::object_manager::Shown::NONE)
-            .mixed
-    );
-    assert!(!spec.panels[0].series[0].visible);
-    state.dispatch(Action::Undo);
-    assert_eq!(graph_spec(&state, graph), before);
-    // Textes listés : la même case les commande aussi.
-    state.dispatch(Action::SetObjectManagerShowTexts(true));
-    state.dispatch(Action::SetPlotVisibility {
-        graph,
-        target: T::Graph,
-        visible: false,
-    });
-    let spec = graph_spec(&state, graph);
-    assert!(!spec.title_visible);
-    assert!(!spec.panels[0].bottom.title_visible);
     assert!(!T::Graph.visibility(&spec).checked);
+    assert!(!T::Graph.visibility(&spec).mixed);
+    assert!(!spec.panels[0].series[0].visible);
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), before);
 }
@@ -9201,12 +9147,12 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
             .collect()
     };
     // Cachées par défaut, même textes affichés.
-    let hidden = object_tree_with_selection(state.tree(), graph, None, true, false).unwrap();
+    let hidden = object_tree_with_selection(state.tree(), graph, None, false).unwrap();
     assert!(axes(&hidden).is_empty());
     // Bascule active : le groupe « Axes » et ses quatre lignes, dont le haut et
     // la droite, axes miroirs (#176) ; les autres objets du calque n'en
     // contiennent aucun.
-    let shown = object_tree_with_selection(state.tree(), graph, None, false, true).unwrap();
+    let shown = object_tree_with_selection(state.tree(), graph, None, true).unwrap();
     let axis = |side| T::Axis(AxisRef { panel: 0, side });
     assert_eq!(
         axes(&shown),
@@ -9264,21 +9210,20 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
 }
 
 #[test]
-fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
+fn object_manager_arbre_objets_libres_visibilite_et_fichier() {
     use stokesforge_app::object_manager::{object_tree_with_selection, VisibilityTarget as T};
     use stokesforge_plot::{AnnotationRef, AxisSide, ShapeRef, TextTarget};
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
-    let (_session, mut state) = start_showing_texts(project, dir.path(), "objets.stf");
+    let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
     let text = AnnotationRef { panel: 0, index: 0 };
     let arrow = ShapeRef { panel: 0, index: 3 };
-    let model = object_tree_with_selection(state.tree(), graph, Some(T::Shape(arrow)), true, false)
-        .unwrap();
-    assert_eq!(model.objects[0].target, T::Text(TextTarget::Title));
+    let model =
+        object_tree_with_selection(state.tree(), graph, Some(T::Shape(arrow)), false).unwrap();
     assert_eq!(
         model.layers[0].objects.len(),
-        9,
-        "titre, deux axes, légende, texte et quatre objets"
+        5,
+        "texte libre et quatre formes, aucun texte lié (#214)"
     );
     assert_eq!(
         model.layers[0]
@@ -9304,7 +9249,10 @@ fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
     let hidden_title = graph_spec(&state, graph);
     assert_eq!(target.text(&hidden_title).as_deref(), Some("Temps (s)"));
     assert_eq!(target.visible(&hidden_title), Some(false));
-    assert!(T::Panel(0).visibility(&hidden_title).mixed);
+    assert!(
+        !T::Panel(0).visibility(&hidden_title).mixed,
+        "un titre lié n'est pas listé : il ne compte pas dans la case du calque"
+    );
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), before);
 
@@ -9314,20 +9262,17 @@ fn object_manager_arbre_textes_objets_visibilite_et_fichier() {
         visible: false,
     });
     let hidden = graph_spec(&state, graph);
-    assert!(!hidden.title_visible);
-    assert!(!hidden.panels[0].title_visible);
-    assert!(!hidden.panels[0].bottom.title_visible);
     assert!(
-        hidden.panels[0].bottom.visible,
-        "masquer un titre ne masque pas l'axe"
+        hidden.title_visible && hidden.panels[0].bottom.title_visible,
+        "les textes liés non listés gardent leur état (#214)"
     );
+    assert!(hidden.panels[0].bottom.visible);
     assert!(!text.get(&hidden).unwrap().visible);
     assert!(!arrow.get(&hidden).unwrap().visible);
     assert!(!T::Graph.visibility(&hidden).checked);
     assert!(!T::Graph.visibility(&hidden).mixed);
     let model =
-        object_tree_with_selection(state.tree(), graph, Some(T::Annotation(text)), true, false)
-            .unwrap();
+        object_tree_with_selection(state.tree(), graph, Some(T::Annotation(text)), false).unwrap();
     assert!(model.layers[0]
         .objects
         .iter()

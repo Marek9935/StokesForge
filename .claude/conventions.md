@@ -34,9 +34,10 @@ Le graphique vide passe par `AddGraph` ; `SessionHandle::new_project`, comme
 
 Object Manager (#81–85) : `object_manager.rs` projette le graphe,
 `app/object_manager_ui.rs` peint l'arbre (#121), la sélection
-reste dans `GraphView` (même vue en fenêtre détachée). Les textes automatiques
-(titres, légende) sont cachés par défaut ; une bascule unique
-(`Action::SetObjectManagerShowTexts`, préférence hors `.stf`, #102) les liste.
+reste dans `GraphView` (même vue en fenêtre détachée). Les textes liés
+(titres, légende) n'y sont **jamais** listés (#214) : ils s'éditent par
+double-clic sur la figure ou dans les propriétés ; « Objects » ne contient que
+les objets libres (texte libre, formes), replié par défaut, absent quand vide.
 Les échelles (groupe « Axes » sous le calque, replié par défaut #138, une ligne par axe, case = `AxisSpec::visible`, #111)
 ont leur propre bascule jumelle (`Action::SetObjectManagerShowScales`) et ne sont
 pas commandées par les cases du graphique/calque. Les filtres vivent dans

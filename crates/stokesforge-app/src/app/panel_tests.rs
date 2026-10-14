@@ -860,7 +860,7 @@ fn les_reglages_reveillent_et_changent_le_panneau_detache_comme_le_panneau_ancre
     };
     child();
     assert!(!painted(&child(), &tr!("object-manager-axes")));
-    assert!(painted(&child(), "Annotation témoin"));
+    assert!(painted(&child(), &tr!("object-manager-objects")));
     for _ in 0..8 {
         publish(&mut app);
         child();
@@ -882,7 +882,6 @@ fn les_reglages_reveillent_et_changent_le_panneau_detache_comme_le_panneau_ancre
         "un réglage de repli seul réveille le panneau, même si les axes sont encore filtrés"
     );
     app.state.dispatch(Action::SetObjectManagerShowScales(true));
-    app.state.dispatch(Action::SetObjectManagerShowTexts(true));
     let output = publish(&mut app);
     assert_eq!(
         output.viewport_output[&id].repaint_delay,
@@ -892,7 +891,7 @@ fn les_reglages_reveillent_et_changent_le_panneau_detache_comme_le_panneau_ancre
     let output = child();
     assert!(painted(&output, &tr!("object-manager-axes")));
     assert!(painted(&output, &tr!("plot-axis-bottom")));
-    assert!(painted(&output, "Titre témoin"));
+    assert!(!painted(&output, "Titre témoin"), "titre lié jamais listé");
     // Le panneau ancré lit les mêmes filtres et replis initiaux.
     app.om_detached = false;
     publish(&mut app);
@@ -903,12 +902,12 @@ fn les_reglages_reveillent_et_changent_le_panneau_detache_comme_le_panneau_ancre
     publish(&mut app);
     let reset = publish(&mut app);
     assert!(!painted(&reset, &tr!("object-manager-axes")));
-    assert!(painted(&reset, "Annotation témoin"));
+    assert!(painted(&reset, &tr!("object-manager-objects")));
     app.om_detached = true;
     publish(&mut app);
     child();
     assert!(!painted(&child(), &tr!("object-manager-axes")));
-    assert!(painted(&child(), "Annotation témoin"));
+    assert!(painted(&child(), &tr!("object-manager-objects")));
     // Le reset n'efface pas les axes déjà dépliés. Le filtre les révèle,
     // malgré le nouveau défaut axes_open=false, dans les deux présentations.
     app.state.dispatch(Action::SetObjectManagerShowScales(true));
