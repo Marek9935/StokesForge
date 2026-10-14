@@ -9092,7 +9092,7 @@ fn object_manager_textes_lies_jamais_listes_sans_revelation() {
     let arrow = ShapeRef { panel: 0, index: 3 };
     // #214 : ni titre du graphique, ni titre de calque, ni axes, ni légende ;
     // le texte libre et les quatre formes restent.
-    let tree = object_tree_with_selection(state.tree(), graph, None, false).unwrap();
+    let tree = object_tree_with_selection(state.tree(), graph, None, false, true).unwrap();
     assert_eq!(tree.layers[0].objects.len(), 5);
     assert!(tree.layers[0]
         .objects
@@ -9108,9 +9108,14 @@ fn object_manager_textes_lies_jamais_listes_sans_revelation() {
         .any(|o| o.target == T::Shape(arrow)));
     assert!(!tree.layers[0].series.is_empty(), "séries toujours listées");
     // Pas de révélation à la sélection : un texte lié sélectionné n'apparaît pas.
-    let selected =
-        object_tree_with_selection(state.tree(), graph, Some(T::Text(TextTarget::Title)), false)
-            .unwrap();
+    let selected = object_tree_with_selection(
+        state.tree(),
+        graph,
+        Some(T::Text(TextTarget::Title)),
+        false,
+        true,
+    )
+    .unwrap();
     assert!(selected.layers[0].objects.iter().all(|o| !o.selected));
     // #173 : la case du graphique ne commande que ce que l'arbre affiche ; les
     // textes liés gardent leur état, et ne rendent pas la case indéterminée.
@@ -9124,6 +9129,31 @@ fn object_manager_textes_lies_jamais_listes_sans_revelation() {
     assert!(spec.panels[0].bottom.title_visible);
     assert!(!T::Graph.visibility(&spec).checked);
     assert!(!T::Graph.visibility(&spec).mixed);
+    assert!(!spec.panels[0].series[0].visible);
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), before);
+}
+
+#[test]
+fn object_manager_show_objects_liste_ou_cache_les_objets_libres() {
+    use stokesforge_app::object_manager::{object_tree_with_selection, VisibilityTarget as T};
+    let dir = tempfile::tempdir().unwrap();
+    let (project, graph, before) = object_manager_project();
+    let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
+    let listed = object_tree_with_selection(state.tree(), graph, None, false, true).unwrap();
+    assert_eq!(listed.layers[0].objects.len(), 5);
+    let hidden = object_tree_with_selection(state.tree(), graph, None, false, false).unwrap();
+    assert!(hidden.layers[0].objects.is_empty());
+    assert!(!hidden.layers[0].series.is_empty());
+    // Les objets non listés ne comptent pas dans la case du graphique (#173).
+    state.dispatch(Action::SetObjectManagerShowObjects(false));
+    state.dispatch(Action::SetPlotVisibility {
+        graph,
+        target: T::Graph,
+        visible: false,
+    });
+    let spec = graph_spec(&state, graph);
+    assert!(spec.panels[0].annotations.iter().all(|a| a.visible));
     assert!(!spec.panels[0].series[0].visible);
     state.dispatch(Action::Undo);
     assert_eq!(graph_spec(&state, graph), before);
@@ -9147,12 +9177,12 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
             .collect()
     };
     // Cachées par défaut, même textes affichés.
-    let hidden = object_tree_with_selection(state.tree(), graph, None, false).unwrap();
+    let hidden = object_tree_with_selection(state.tree(), graph, None, false, true).unwrap();
     assert!(axes(&hidden).is_empty());
     // Bascule active : le groupe « Axes » et ses quatre lignes, dont le haut et
     // la droite, axes miroirs (#176) ; les autres objets du calque n'en
     // contiennent aucun.
-    let shown = object_tree_with_selection(state.tree(), graph, None, true).unwrap();
+    let shown = object_tree_with_selection(state.tree(), graph, None, true, true).unwrap();
     let axis = |side| T::Axis(AxisRef { panel: 0, side });
     assert_eq!(
         axes(&shown),
@@ -9218,8 +9248,8 @@ fn object_manager_arbre_objets_libres_visibilite_et_fichier() {
     let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
     let text = AnnotationRef { panel: 0, index: 0 };
     let arrow = ShapeRef { panel: 0, index: 3 };
-    let model =
-        object_tree_with_selection(state.tree(), graph, Some(T::Shape(arrow)), false).unwrap();
+    let model = object_tree_with_selection(state.tree(), graph, Some(T::Shape(arrow)), false, true)
+        .unwrap();
     assert_eq!(
         model.layers[0].objects.len(),
         5,
@@ -9272,7 +9302,8 @@ fn object_manager_arbre_objets_libres_visibilite_et_fichier() {
     assert!(!T::Graph.visibility(&hidden).checked);
     assert!(!T::Graph.visibility(&hidden).mixed);
     let model =
-        object_tree_with_selection(state.tree(), graph, Some(T::Annotation(text)), false).unwrap();
+        object_tree_with_selection(state.tree(), graph, Some(T::Annotation(text)), false, true)
+            .unwrap();
     assert!(model.layers[0]
         .objects
         .iter()

@@ -227,7 +227,7 @@ par `Ui::close`, dont egui propage la demande aux menus parents.
 | Edit | Undo, Redo ; Selection → Copy, Paste, Rename, Duplicate, Delete des objets du Project Manager |
 | Workbook (classeur actif) | Sheet → Add Worksheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row |
 | Graph (graphique actif) | Show Data ; Add Text ; Selection → le menu de l'objet sélectionné (grisé sans sélection) ; Reset Text Positions ; Top / Right Mirror Axis (cases, calque actif ordinaire, #176) ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
-| View | Panels → Project Manager, Script Console ; Object Manager → Show, puis les réglages du fond (Show Axes, Expand by Default, Reset Settings) ; Toolbars → File, Tools, Text format |
+| View | Object Manager → les réglages du fond (Show Axes, Show Objects, Expand by Default, Reset Settings) ; plus de Panels ni de Toolbars (#214) |
 | Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
 
 La grammaire des sections, des séparateurs et des sous-menus est dans
@@ -979,7 +979,7 @@ est ignoré à la lecture. Le `//!` du module dit pourquoi le panneau est un
   choix fait sur une autre zone. Un passage portant une couleur locale donne
   un échantillon neutre. En édition, le brouillon du sélecteur dure seulement
   jusqu'à la validation du geste, qui pose une seule balise sur le passage.
-- Visibilité : menu **View › Toolbars**, une case par barre. Emplacement et visibilité
+- Visibilité : plus de menu pour masquer une barre (View ne porte que les réglages des panneaux, #214) ; l'état reste dans `preferences.json`. Emplacement et visibilité
   sont dans `preferences.json` (champ `toolbars`), pas dans le `.stf` ; la
   lecture ignore ce qu'elle ne comprend pas. `StokesForgeApp::new` ne lit pas le
   fichier (les tests), `main` appelle `load_toolbar_layout`.
@@ -2244,7 +2244,7 @@ liés** (titre du graphique et des calques, titres d'axes, légende) n'y sont
 jamais listés (#214) : ils s'éditent par double-clic sur la figure ou dans la
 fenêtre des propriétés, et ne comptent pas dans les cases parentes. Le groupe
 « Objects » ne liste que les objets libres, est replié par défaut et disparaît
-quand il est vide. Les **axes** (#111, #147) suivent le même
+quand il est vide. « Objects » a sa bascule « Afficher les objets » (`show_objects`, listé par défaut) ; décoché, ses objets ne comptent pas dans les cases parentes. Les **axes** (#111, #147) suivent le même
 motif avec leur propre bascule, « Afficher les axes »
 (`Action::SetObjectManagerShowScales`, préférence `object_manager_show_scales`,
 même sous-menu Affichage et dans le menu du fond) : non listés par défaut, ils

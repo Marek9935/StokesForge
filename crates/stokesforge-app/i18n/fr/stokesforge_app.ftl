@@ -33,8 +33,6 @@ menu-import = Importer
 menu-properties = Propriétés
 menu-insert-object = Insérer un objet
 menu-export = Exporter
-menu-panels = Panneaux
-menu-toolbars = Barres d’outils
 menu-sheet = Feuille
 menu-columns = Colonnes
 menu-language = Langue
@@ -1009,6 +1007,9 @@ object-manager-group = Séries
 object-manager-axes = Axes
 object-manager-show-axes = Afficher les axes
     .hint = Liste les axes de chaque calque dans le gestionnaire d’objets. Ne modifie pas leur visibilité sur le graphique. Non listés par défaut.
+
+object-manager-show-objects = Afficher les objets
+    .hint = Liste les objets libres de chaque calque (textes libres, formes) dans le gestionnaire d’objets. Ne modifie pas leur visibilité sur le graphique. Listés par défaut.
 
 menu-selected-content = Sélection
     .disabled = Sélectionnez d’abord une courbe, un texte ou un objet

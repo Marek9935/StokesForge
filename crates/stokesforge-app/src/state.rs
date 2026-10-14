@@ -622,6 +622,8 @@ pub enum Action {
     SetObjectManagerOpen(bool),
     /// Liste ou cache les échelles (axes) dans l'Object Manager (#111).
     SetObjectManagerShowScales(bool),
+    /// Liste ou cache le groupe « Objects » (objets libres) dans l'Object Manager.
+    SetObjectManagerShowObjects(bool),
     /// Repli initial d'une famille, hors projet et historique (#139).
     SetObjectManagerGroupOpen {
         group: ObjectManagerGroup,
@@ -4670,6 +4672,11 @@ impl AppState {
                         cause = errors::io::error_message(&error)
                     ));
                 }
+            }
+            Action::SetObjectManagerShowObjects(show) => {
+                let mut settings = self.object_manager_settings();
+                settings.show_objects = show;
+                self.save_object_manager_settings(settings);
             }
             Action::SetObjectManagerShowScales(show) => {
                 let mut settings = self.object_manager_settings();

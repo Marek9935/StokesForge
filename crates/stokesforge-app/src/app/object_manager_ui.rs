@@ -521,6 +521,14 @@ pub(super) fn object_manager_settings_contents(
         {
             actions.push(Action::SetObjectManagerShowScales(show));
         }
+        let mut show = settings.show_objects;
+        if ui
+            .checkbox(&mut show, tr!("object-manager-show-objects"))
+            .on_hover_text(tr!("object-manager-show-objects", "hint"))
+            .changed()
+        {
+            actions.push(Action::SetObjectManagerShowObjects(show));
+        }
         egui::containers::menu::SubMenuButton::new(tr!("object-manager-default-expansion"))
             .config(config.clone())
             .ui(ui, |ui| {
@@ -553,18 +561,15 @@ pub(super) fn object_manager_settings_contents(
     });
 }
 
-/// Les mêmes réglages sous View › Object Manager, grisés quand le panneau
-/// est fermé : l'enveloppe du menu du haut, le contenu étant celui du clic
-/// droit sur le fond. Fonctionne aussi en fenêtre détachée.
+/// Les mêmes réglages sous View › Object Manager : l'enveloppe du menu du
+/// haut, le contenu étant celui du clic droit sur le fond. Fonctionne aussi
+/// en fenêtre détachée.
 pub(super) fn object_manager_settings_menu(
     ui: &mut egui::Ui,
     settings: ObjectManagerSettings,
-    enabled: bool,
     actions: &mut Vec<Action>,
 ) {
-    ui.add_enabled_ui(enabled, |ui| {
-        object_manager_settings_contents(ui, settings, actions);
-    });
+    object_manager_settings_contents(ui, settings, actions);
 }
 
 /// Un seul contenu pour Object Manager, quel que soit son emplacement.
@@ -1264,7 +1269,7 @@ fn object_manager_object_row(
         let background = ListRowBackground::reserve(ui);
         let row = ui
             .horizontal(|ui| {
-                object_visibility(ui, graph, object.target, spec, Shown::NONE, actions);
+                object_visibility(ui, graph, object.target, spec, Shown::BASE, actions);
                 let icon = match object.kind {
                     crate::object_manager::ObjectKind::Text => Icon::TextTool,
                     crate::object_manager::ObjectKind::Axis => Icon::Axis,
@@ -1293,7 +1298,7 @@ fn object_manager_object_row(
                         graph,
                         object.target,
                         spec,
-                        Shown::NONE,
+                        Shown::BASE,
                         actions,
                         requests,
                     )
@@ -1333,6 +1338,7 @@ impl StokesForgeApp {
                 graph,
                 selection,
                 settings.show_scales,
+                settings.show_objects,
             )
         });
         if self.om_detached {
@@ -1809,9 +1815,14 @@ mod tests {
         let graph = project
             .add_graph(project.root(), None, spec.clone())
             .unwrap();
-        let model =
-            crate::object_manager::object_tree_with_selection(project.tree(), graph, None, true)
-                .unwrap();
+        let model = crate::object_manager::object_tree_with_selection(
+            project.tree(),
+            graph,
+            None,
+            true,
+            true,
+        )
+        .unwrap();
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         egui_extras::install_image_loaders(&ctx);
@@ -1938,9 +1949,14 @@ mod tests {
             show_scales: true,
             ..Default::default()
         };
-        let model =
-            crate::object_manager::object_tree_with_selection(project.tree(), graph, None, true)
-                .unwrap();
+        let model = crate::object_manager::object_tree_with_selection(
+            project.tree(),
+            graph,
+            None,
+            true,
+            true,
+        )
+        .unwrap();
         let paint = |ctx: &egui::Context, settings| {
             let mut actions = Vec::new();
             let output = image_de(ctx, egui::vec2(800.0, 700.0), Vec::new(), |ui| {

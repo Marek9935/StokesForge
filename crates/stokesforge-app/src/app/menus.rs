@@ -33,7 +33,6 @@ use stokesforge_render_svg::SvgTextMode;
 
 use crate::i18n;
 use crate::state::{active_graph, Action};
-use crate::toolbar::ToolbarId;
 use crate::tr;
 
 use super::busy::{work_in_progress, Work};
@@ -631,33 +630,11 @@ impl StokesForgeApp {
 
     fn view_menu(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.menu_button(tr!("menu-view"), |ui| {
-            ui.menu_button(tr!("menu-panels"), |ui| {
-                ui.checkbox(&mut self.pm_open, tr!("project-manager-title"));
-                ui.checkbox(&mut self.script_open, tr!("script-title"));
-            });
+            // Ni panneaux ni barres d'outils à masquer : le menu ne porte que
+            // les réglages de chaque panneau (Object Manager, plus tard
+            // Project Manager et console de script).
             ui.menu_button(tr!("action-object-manager"), |ui| {
-                let mut open = self.state.object_manager_open();
-                if ui.checkbox(&mut open, tr!("action-show-content")).changed() {
-                    actions.push(Action::SetObjectManagerOpen(open));
-                }
-                object_manager_settings_menu(
-                    ui,
-                    self.state.object_manager_settings(),
-                    open,
-                    actions,
-                );
-            });
-            ui.menu_button(tr!("menu-toolbars"), |ui| {
-                for id in ToolbarId::ALL {
-                    let mut visible = self.toolbars.layout().is_visible(id);
-                    if ui
-                        .checkbox(&mut visible, id.label())
-                        .on_hover_text(id.hint())
-                        .changed()
-                    {
-                        self.toolbars.set_visible(id, visible);
-                    }
-                }
+                object_manager_settings_menu(ui, self.state.object_manager_settings(), actions);
             });
         });
     }
@@ -1645,62 +1622,34 @@ mod tests {
     }
 
     #[test]
-    fn le_menu_affichage_reflete_et_bascule_panneaux_et_barres() {
+    fn le_menu_affichage_ne_porte_que_les_reglages_des_panneaux() {
         let (session, mut app, graph) = banc();
         let tab = Some(Tab::Graph(graph));
         let (_, menu) = ouvre(&mut app, tab, &tr!("menu-view"));
-        assert!(active(&menu, &tr!("action-object-manager")).enabled);
-        assert!(entree(&menu, &tr!("object-manager-show-axes")).is_none());
+        assert!(entree(&menu, &tr!("project-manager-title")).is_none());
+        assert!(entree(&menu, &tr!("script-title")).is_none());
+        assert!(
+            entree(&menu, &tr!("action-object-manager")).is_some(),
+            "seul l'Object Manager porte des réglages aujourd'hui (#214)"
+        );
         for open in [false, true] {
             app.state.set_object_manager_open_for_test(open);
-            let (_, panels) = ouvre_chemin(&mut app, tab, &[tr!("menu-view"), tr!("menu-panels")]);
-            assert!(
-                entree(&panels, &tr!("project-manager-title")).is_some()
-                    && entree(&panels, &tr!("script-title")).is_some()
-            );
-            assert!(entree(&panels, &tr!("object-manager-show-axes")).is_none());
-            assert_eq!(
-                panels
-                    .iter()
-                    .filter(|entry| entry.label == tr!("action-object-manager"))
-                    .count(),
-                1,
-                "Object Manager reste au premier niveau, sans doublon dans Panels"
-            );
-            let (ctx, menu) = ouvre_chemin(
+            let (_, menu) = ouvre_chemin(
                 &mut app,
                 tab,
                 &[tr!("menu-view"), tr!("action-object-manager")],
             );
-            let case = active(&menu, &tr!("action-show-content"));
-            assert_eq!(case.toggled, Some(open));
-            assert_eq!(
-                clique(&mut app, &ctx, tab, case.center),
-                vec![Action::SetObjectManagerOpen(!open)]
-            );
-            let toujours = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
-            assert!(entree(&toujours, &tr!("action-show-content")).is_some());
-            assert_eq!(
-                active(&menu, &tr!("object-manager-show-axes")).enabled,
-                open,
-                "les réglages suivent l'ouverture du panneau, sans enveloppe"
-            );
+            assert!(entree(&menu, &tr!("action-show-content")).is_none());
+            for label in [
+                tr!("object-manager-show-axes"),
+                tr!("object-manager-show-objects"),
+            ] {
+                assert!(
+                    active(&menu, &label).enabled,
+                    "réglage actif, panneau ouvert ou non"
+                );
+            }
         }
-        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-view"), tr!("menu-toolbars")]);
-        for id in ToolbarId::ALL {
-            assert_eq!(
-                active(&menu, &id.label()).toggled,
-                Some(app.toolbars.layout().is_visible(id)),
-                "{id:?}"
-            );
-        }
-        let id = ToolbarId::ALL[0];
-        let visible = app.toolbars.layout().is_visible(id);
-        let pos = active(&menu, &id.label()).center;
-        assert!(clique(&mut app, &ctx, tab, pos).is_empty());
-        assert_eq!(app.toolbars.layout().is_visible(id), !visible);
-        let toujours = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
-        assert_eq!(active(&toujours, &id.label()).toggled, Some(!visible));
         session.shutdown().unwrap();
     }
 
@@ -1808,10 +1757,20 @@ mod tests {
             }
             ouvre_chemin(app, None, &path)
         };
-        {
-            let label = tr!("object-manager-show-axes");
-            let current = app.state.object_manager_show_scales();
-            let action = Action::SetObjectManagerShowScales(!current);
+        for (label, current, action) in [
+            (
+                tr!("object-manager-show-axes"),
+                app.state.object_manager_show_scales(),
+                Action::SetObjectManagerShowScales(!app.state.object_manager_show_scales()),
+            ),
+            (
+                tr!("object-manager-show-objects"),
+                app.state.object_manager_settings().show_objects,
+                Action::SetObjectManagerShowObjects(
+                    !app.state.object_manager_settings().show_objects,
+                ),
+            ),
+        ] {
             let (ctx, menu) = open(&mut app, None);
             let row = active(&menu, &label);
             assert!(row.enabled);

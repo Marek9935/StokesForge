@@ -97,9 +97,9 @@ copie la figure que sans sélection, #149).
 | Cible | Menu |
 |---|---|
 | Nœud | le menu de l'objet de la figure (`object_node_menu`) |
-| Fond | Show Axes ☐ · Expand by Default ▸ (5 cases) ─ Reset Settings |
+| Fond | Show Axes ☐ · Show Objects ☑ · Expand by Default ▸ (5 cases) ─ Reset Settings |
 
-View › Object Manager enveloppe le même contenu (`object_manager_settings_contents`).
+View ne contient que « Object Manager ▸ » (plus de Panels ni de Toolbars : panneaux et barres ne se masquent pas par menu ; les réglages du Project Manager et de la console viendront s'y ajouter) ; il enveloppe le même contenu (`object_manager_settings_contents`).
 Les cases gardent le menu ouvert (#114).
 
 ### Project Manager

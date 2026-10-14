@@ -643,7 +643,7 @@ fn graph_context_menu(
                 graph_id,
                 object,
                 spec,
-                crate::object_manager::Shown::NONE,
+                crate::object_manager::Shown::BASE,
                 actions,
                 &mut requests,
             ),
@@ -1940,7 +1940,7 @@ pub(super) mod tests {
                     graph,
                     VisibilityTarget::Shape(object),
                     &spec,
-                    crate::object_manager::Shown::NONE,
+                    crate::object_manager::Shown::BASE,
                     &mut actions,
                     &mut requests,
                 );
@@ -2025,7 +2025,7 @@ pub(super) mod tests {
                         graph,
                         VisibilityTarget::Shape(object),
                         &spec,
-                        crate::object_manager::Shown::NONE,
+                        crate::object_manager::Shown::BASE,
                         &mut Vec::new(),
                         &mut requests,
                     );

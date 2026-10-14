@@ -45,6 +45,7 @@ impl ObjectManagerGroup {
 #[serde(default)]
 pub struct ObjectManagerSettings {
     pub show_scales: bool,
+    pub show_objects: bool,
     pub graph_open: bool,
     pub layers_open: bool,
     pub plots_open: bool,
@@ -56,6 +57,7 @@ impl Default for ObjectManagerSettings {
     fn default() -> Self {
         Self {
             show_scales: false,
+            show_objects: true,
             graph_open: true,
             layers_open: true,
             plots_open: true,
@@ -667,6 +669,7 @@ mod object_manager_tests {
         let defaults = ObjectManagerSettings::default();
         let settings = ObjectManagerSettings {
             show_scales: true,
+            show_objects: false,
             graph_open: false,
             layers_open: false,
             plots_open: false,

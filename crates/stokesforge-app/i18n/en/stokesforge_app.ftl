@@ -37,8 +37,6 @@ menu-import = Import
 menu-properties = Properties
 menu-insert-object = Insert Object
 menu-export = Export
-menu-panels = Panels
-menu-toolbars = Toolbars
 menu-sheet = Sheet
 menu-columns = Columns
 menu-language = Language
@@ -1017,6 +1015,9 @@ object-manager-group = Series
 object-manager-axes = Axes
 object-manager-show-axes = Show Axes
     .hint = Lists the axes of each layer in the Object Manager. Does not change their visibility on the graph. Not listed by default.
+
+object-manager-show-objects = Show Objects
+    .hint = Lists the free objects of each layer (free texts, shapes) in the Object Manager. Does not change their visibility on the graph. Listed by default.
 
 menu-selected-content = Selection
     .disabled = Select a curve, a text or an object first
