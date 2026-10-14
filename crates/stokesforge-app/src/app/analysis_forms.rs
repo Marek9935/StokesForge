@@ -56,10 +56,24 @@ fn whole<T: crate::number_field::Number>(
     number_field(ui, salt, value, quantity).changed
 }
 
-/// Un nombre facultatif : un champ texte vide vaut « automatique ». Le texte en
+/// Un nombre facultatif : un champ texte vide, `auto` ou `a` vaut « automatique ». Le texte en
 /// cours de frappe est gardé hors du modèle tant qu'il n'est pas un nombre.
 fn optional_number(ui: &mut egui::Ui, id: egui::Id, value: &mut Option<f64>) -> bool {
     optional_number_response(ui, id, value).0
+}
+
+/// Ce que dit la saisie d'un nombre facultatif : `Some(None)` pour l'Auto
+/// (champ vidé, mot `auto` ou lettre `a`, comme `number_field::read`, #247),
+/// `Some(Some(n))` pour un nombre, `None` pour une saisie illisible.
+fn parse_optional(text: &str) -> Option<Option<f64>> {
+    let trimmed = text.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("auto")
+        || trimmed.eq_ignore_ascii_case("a")
+    {
+        return Some(None);
+    }
+    stokesforge_core::number_format::parse_input(trimmed).map(Some)
 }
 
 /// [`optional_number`], avec la réponse du champ (pour y peindre un refus, N11).
@@ -80,12 +94,7 @@ fn optional_number_response(
     );
     let mut changed = false;
     if response.changed() {
-        let parsed = if text.trim().is_empty() {
-            Some(None)
-        } else {
-            stokesforge_core::number_format::parse_input(&text).map(Some)
-        };
-        if let Some(next) = parsed {
+        if let Some(next) = parse_optional(&text) {
             changed = next != *value;
             *value = next;
         }
@@ -933,7 +942,17 @@ mod tests {
     use eframe::egui;
 
     use super::super::test_support::{cliquer, contexte, image, texte_exact, textes, touche};
-    use super::range_rows;
+    use super::{parse_optional, range_rows};
+
+    #[test]
+    fn un_nombre_facultatif_lit_auto_comme_le_champ_nombre() {
+        // #247 : `auto` et `a` valent un champ vidé.
+        for texte in ["", "  ", "auto", "Auto", " AUTO ", "a", "A"] {
+            assert_eq!(parse_optional(texte), Some(None), "{texte:?}");
+        }
+        assert_eq!(parse_optional("2.5"), Some(Some(2.5)));
+        assert_eq!(parse_optional("abc"), None);
+    }
 
     fn cadres_rouges(shapes: &[egui::epaint::ClippedShape]) -> usize {
         let rouge = crate::theme::field_refused_color();

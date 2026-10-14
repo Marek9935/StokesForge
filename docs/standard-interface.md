@@ -121,7 +121,9 @@ a son entrée « Auto » (liste éditable, C4).
   les reprend comme valeurs.
 - Le mot `auto` tapé au clavier est accepté par un champ dont la grandeur a
   un Auto (Auto du groupe compris), et aucun autre texte ; ailleurs, c'est une
-  saisie illisible.
+  saisie illisible. Les nombres facultatifs de l'analyse (paramètres
+  d'ajustement, `a`/`b`), qui ne passent pas par `number_field`, lisent eux
+  aussi `auto` et `a` comme un champ vidé (`parse_optional`, #247).
 
 ## Saisie refusée ou ramenée — en place (#219)
 
