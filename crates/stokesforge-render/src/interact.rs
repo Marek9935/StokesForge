@@ -33,7 +33,10 @@
 
 use crate::pipeline::DrawnPanel;
 use crate::scale::{forward, inverse};
-use stokesforge_plot::AxisScale;
+use crate::series;
+use stokesforge_core::resolve::resolve_panel;
+use stokesforge_core::Tree;
+use stokesforge_plot::{AxisScale, PlotSpec, SeriesAxis};
 
 /// La correspondance pixel ↔ données d'un panneau déjà tracé.
 ///
@@ -267,9 +270,98 @@ pub fn nearest_on_curve(
         .map(|(index, squared)| (index, squared.sqrt()))
 }
 
+/// Un point désigné sur une courbe : ce que [`nearest_point`] rend, en
+/// `f64` et sans type d'interface (la conversion en pixels egui est celle de
+/// `stokesforge-render-egui`, qui en fait son `PointHit`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NearestPoint {
+    /// Indice de la série dans `PanelSpec::series`, résolu dans le même
+    /// ordre (`ResolvedPanel::series`).
+    pub series: usize,
+    /// Indice du point désigné dans sa série.
+    pub point_index: usize,
+    /// Position du point, dans l'espace de la géométrie préparée
+    /// ([`series::prepare`]).
+    pub data: (f64, f64),
+    /// Position du point, en pixels de la figure.
+    pub pixel: (f64, f64),
+    /// Distance du curseur au point, en pixels.
+    pub distance: f64,
+}
+
+/// Le point désigné du panneau tracé `drawn_panel` sous le curseur `cursor`
+/// (pixels de la figure) — tâche R7.2, l'équivalent local de
+/// `ReverseCoordTranslate` + `min_by_key` d'`architecture-choisie.md` §6
+/// (`min_by_key` vit dans [`nearest_on_curve`], réutilisé série par série).
+/// `None` si aucun point n'est à `radius` pixels ou moins.
+///
+/// **Limité à l'axe principal** (bas, gauche) : une série de l'axe secondaire
+/// vivrait sur un second [`PanelTransform`] (`of_axis`) qu'il faudrait
+/// construire à côté, et rien aujourd'hui n'en a l'usage. Écart assumé, pas
+/// une omission tue. Les séries masquées, brisées ou de type inconnu, et
+/// celles qui ne sont pas une courbe (histogramme, barres), sont ignorées.
+///
+/// Recalcule la géométrie plutôt que de la garder en mémoire : une série
+/// résolue ne porte que des `Arc<Vec<f64>>` clonés par compteur
+/// (`stokesforge-core::resolve`), donc le refaire à chaque survol coûte un
+/// parcours, pas une copie — moins cher que de le garder à jour à travers
+/// chaque zoom.
+pub fn nearest_point(
+    tree: &Tree,
+    spec: &PlotSpec,
+    drawn_panel: &DrawnPanel,
+    transform: &PanelTransform,
+    cursor: (f64, f64),
+    radius: f64,
+) -> Option<NearestPoint> {
+    let spec_panel = spec.panels.get(drawn_panel.index)?;
+    let resolved = resolve_panel(tree, spec_panel);
+
+    let mut best: Option<NearestPoint> = None;
+    for (series_index, resolved_series) in resolved.series.iter().enumerate() {
+        let series_spec = resolved_series.spec;
+        if !series_spec.visible || series_spec.axis == SeriesAxis::Right {
+            continue;
+        }
+        let prepared = series::prepare(
+            resolved_series,
+            spec_panel.bottom.scale,
+            spec_panel.left.scale,
+        );
+        if prepared.broken || prepared.unknown_type {
+            continue;
+        }
+        let series::Geometry::Curve { points, .. } = &prepared.geometry else {
+            continue;
+        };
+        let Some((point_index, distance)) = nearest_on_curve(transform, points, cursor) else {
+            continue;
+        };
+        if best.is_some_and(|hit| hit.distance <= distance) {
+            continue;
+        }
+        let Some(pixel) = transform.data_to_pixel(points[point_index].0, points[point_index].1)
+        else {
+            continue;
+        };
+        best = Some(NearestPoint {
+            series: series_index,
+            point_index,
+            data: points[point_index],
+            pixel,
+            distance,
+        });
+    }
+    best.filter(|hit| hit.distance <= radius)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::panel;
+    use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
+    use stokesforge_core::{NodeId, Project};
+    use stokesforge_plot::{PanelSpec, SeriesSpec};
 
     /// Un panneau de 100×100 px, cadré sur `0..100` des deux côtés, en
     /// linéaire — assez pour vérifier le sens des deux axes sans que
@@ -396,5 +488,158 @@ mod tests {
         let (index, distance) = nearest_on_curve(&t, &points, (52.0, 51.0)).unwrap();
         assert_eq!(index, 1);
         assert!(distance < 3.0, "{distance}");
+    }
+
+    /// Un projet à une feuille dont les colonnes sont `colonnes`, et leurs
+    /// identifiants dans le même ordre.
+    fn projet(colonnes: &[Vec<f64>]) -> (Project, Vec<NodeId>) {
+        let mut project = Project::new("Désignation").expect("projet");
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).expect("classeur");
+        let sheet = project.add_worksheet(book, None).expect("feuille");
+        let ids = colonnes
+            .iter()
+            .map(|valeurs| {
+                let colonne = Column::from_block(
+                    ColumnType::Numeric,
+                    ValueBlock::Float(valeurs.clone()),
+                    ColumnMeta::default(),
+                )
+                .expect("colonne");
+                project
+                    .add_column(sheet, None, None, colonne)
+                    .expect("ajout")
+            })
+            .collect();
+        (project, ids)
+    }
+
+    /// Désigne le point sous `cursor` d'un panneau 100×100 px cadré sur
+    /// `0..100`, dont `series` sont les courbes.
+    fn designer(
+        colonnes: &[Vec<f64>],
+        series: impl Fn(&[NodeId]) -> Vec<SeriesSpec>,
+        cursor: (f64, f64),
+        radius: f64,
+    ) -> Option<NearestPoint> {
+        let (project, ids) = projet(colonnes);
+        let mut spec_panel = PanelSpec::at(0, 0);
+        spec_panel.series.extend(series(&ids));
+        let spec = PlotSpec::empty("Désignation").with_panels(spec_panel);
+        let drawn = panel(0, 0, 0);
+        let transform = PanelTransform::of(&drawn).expect("zone de tracé");
+        nearest_point(project.tree(), &spec, &drawn, &transform, cursor, radius)
+    }
+
+    fn diagonale() -> Vec<Vec<f64>> {
+        vec![vec![0.0, 50.0, 100.0], vec![0.0, 50.0, 100.0]]
+    }
+
+    #[test]
+    fn le_point_designe_est_le_plus_proche_du_curseur() {
+        // Le point (50, 50) est au pixel (50, 50) : l'ordonnée est retournée.
+        let hit = designer(
+            &diagonale(),
+            |ids| vec![SeriesSpec::new_xy(ids[0], ids[1])],
+            (52.0, 51.0),
+            12.0,
+        )
+        .expect("un point à portée");
+        assert_eq!((hit.series, hit.point_index), (0, 1));
+        assert_eq!(hit.data, (50.0, 50.0));
+        assert_eq!(hit.pixel, (50.0, 50.0));
+        assert!((hit.distance - 5f64.sqrt()).abs() < 1e-9, "{hit:?}");
+    }
+
+    #[test]
+    fn hors_de_portee_rien_n_est_designe() {
+        let colonnes = diagonale();
+        let series = |ids: &[NodeId]| vec![SeriesSpec::new_xy(ids[0], ids[1])];
+        // Le coin haut gauche est à plus de 12 px de la diagonale (le point
+        // le plus proche, (0, 0), est au pixel (0, 100)).
+        assert_eq!(designer(&colonnes, series, (10.0, 10.0), 12.0), None);
+        // À 20 px du point (50, 50) : hors d'un rayon de 12, dans un de 25.
+        assert_eq!(designer(&colonnes, series, (70.0, 50.0), 12.0), None);
+        let hit = designer(&colonnes, series, (70.0, 50.0), 25.0).expect("à portée");
+        assert_eq!(hit.point_index, 1);
+    }
+
+    #[test]
+    fn une_serie_masquee_ou_de_droite_n_est_pas_designee() {
+        let colonnes = vec![
+            vec![0.0, 50.0, 100.0],
+            vec![0.0, 50.0, 100.0],
+            // Une seconde courbe, loin de la première (décalée de 10 px).
+            vec![0.0, 40.0, 90.0],
+        ];
+        let curseur = (50.0, 50.0);
+        let deux = |modifier: fn(&mut SeriesSpec)| {
+            move |ids: &[NodeId]| {
+                let mut proche = SeriesSpec::new_xy(ids[0], ids[1]);
+                modifier(&mut proche);
+                vec![proche, SeriesSpec::new_xy(ids[0], ids[2])]
+            }
+        };
+        let libre = designer(&colonnes, deux(|_| {}), curseur, 12.0).expect("à portée");
+        assert_eq!((libre.series, libre.point_index), (0, 1));
+
+        let masquee = designer(&colonnes, deux(|s| s.visible = false), curseur, 12.0)
+            .expect("l'autre courbe est à portée");
+        assert_eq!((masquee.series, masquee.point_index), (1, 1));
+        assert_eq!(masquee.data, (50.0, 40.0));
+
+        let droite = designer(
+            &colonnes,
+            deux(|s| s.axis = stokesforge_plot::SeriesAxis::Right),
+            curseur,
+            12.0,
+        )
+        .expect("l'autre courbe est à portée");
+        assert_eq!(droite.series, 1);
+
+        // Seule, une série masquée ne désigne rien.
+        let seule = |ids: &[NodeId]| {
+            let mut s = SeriesSpec::new_xy(ids[0], ids[1]);
+            s.visible = false;
+            vec![s]
+        };
+        assert_eq!(designer(&colonnes, seule, curseur, 12.0), None);
+    }
+
+    #[test]
+    fn un_panneau_inconnu_du_spec_ne_designe_rien() {
+        let (project, _) = projet(&[]);
+        let spec = PlotSpec::empty("Vide").with_panels(PanelSpec::at(0, 0));
+        let drawn = panel(5, 0, 0);
+        let transform = PanelTransform::of(&drawn).expect("zone de tracé");
+        assert_eq!(
+            nearest_point(project.tree(), &spec, &drawn, &transform, (1.0, 1.0), 12.0),
+            None
+        );
+    }
+
+    #[test]
+    fn le_panneau_designe_est_celui_du_calque_trace() {
+        // Le calque tracé est le second du spec : c'est ses séries qu'on lit,
+        // pas celles du premier.
+        let (project, ids) = projet(&diagonale());
+        let mut second = PanelSpec::at(0, 1);
+        second.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
+        let spec = PlotSpec::empty("Deux").with_panels(stokesforge_plot::Panels::new(vec![
+            PanelSpec::at(0, 0),
+            second,
+        ]));
+        let drawn = panel(1, 0, 1);
+        let transform = PanelTransform::of(&drawn).expect("zone de tracé");
+        let hit = nearest_point(
+            project.tree(),
+            &spec,
+            &drawn,
+            &transform,
+            (50.0, 50.0),
+            12.0,
+        )
+        .expect("un point à portée");
+        assert_eq!(hit.point_index, 1);
     }
 }

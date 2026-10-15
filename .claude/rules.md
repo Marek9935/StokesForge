@@ -47,7 +47,7 @@ façon.
 `stokesforge-render-egui::feathering` (la tessellation n'existe que pour l'écran).
 Et le feathering n'entre **pas** dans la clé de cache.
 
-**Zoom et pan ne sont pas des mutations du modèle.** `ViewState` vit à côté, sur
+**Zoom et pan ne sont pas des mutations du modèle.** `ViewState` (`stokesforge_render::view`, sans egui) vit à côté, sur
 `GraphView`, et ne touche jamais au `PlotSpec` du `Tree` — personne ne veut
 annuler un zoom avec `Ctrl+Z`. La règle « toute mutation passe par une commande »
 ne s'applique donc pas au cadrage de vue.

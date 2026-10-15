@@ -61,7 +61,7 @@ dépendances.
 | `stokesforge-session` | l'acteur, les `Snapshot`, la `revision` | [session](session.md) |
 | `stokesforge-import` | lecture des fichiers d'appareil (CSV/TXT/ASC), recettes, aperçu ; indépendant de core/UI | [application](application.md) |
 | `stokesforge-render` | mesure de texte, pipeline Plotters, **tout le rendu** | [rendu](rendu.md) |
-| `stokesforge-render-egui` | backend écran, cache de formes, zoom/pan, feathering | [rendu](rendu.md) |
+| `stokesforge-render-egui` | backend écran (`DrawingBackend` → `egui::Shape`), cache de formes, lecture des entrées egui (molette, glisser), feathering ; le calcul du zoom/pan et du point le plus proche est dans `stokesforge-render` (#262) | [rendu](rendu.md) |
 | `stokesforge-render-svg` | export SVG, et par-dessus PDF et PNG | [rendu](rendu.md) |
 | `stokesforge-python` | interpréteur CPython embarqué, aller-retour numpy | [python](python-et-script.md) |
 | `stokesforge-script` | le fil de script, la surface `pyst`, l'interruption | [python](python-et-script.md) |

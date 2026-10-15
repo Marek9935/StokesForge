@@ -92,11 +92,17 @@ Corollaire pratique : une traduction de donnée (une cellule mixte qui devient
   (`paint_handles`, générique sur le backend), puis posées par `GraphView`
   **par-dessus** la figure en cache : sélectionner ne reconstruit rien, et
   l'export ne les voit pas. Un futur repère de sélection suit ce motif.
-- **Zoom et pan ne sont pas des mutations du modèle.** `ViewState` vit sur
-  `GraphView`, à côté du `PlotSpec`, et n'y touche jamais : personne ne veut
+- **Zoom et pan ne sont pas des mutations du modèle.** `ViewState`
+  (`stokesforge_render::view`, sans egui, #262) vit sur `GraphView`, à côté du `PlotSpec`, et n'y touche jamais : personne ne veut
   annuler un zoom par Ctrl+Z. La règle « toute mutation passe par une
   commande » ne s'applique pas au cadrage de vue — et le panneau de
   configuration des graphes n'a, et n'aura, aucun champ de navigation.
+
+**Une règle en `f64` ne s'écrit pas dans `stokesforge-render-egui`** (#254,
+#262). Cadrage d'un geste, zoom, pan, point le plus proche du curseur :
+`stokesforge-render` (`view`, `interact`), curseur en `(f64, f64)`. Le crate
+égui n'en garde que l'adaptateur `Pos2` ↔ `(f64, f64)` et la lecture des
+entrées.
 
 ## Ordre de tracé d'un panneau
 
@@ -136,6 +142,7 @@ forcément une sur un axe log.
 | `stokesforge-render-egui/tests/formes.rs` | les conventions d'ancrage propres à chaque backend |
 | `stokesforge-render-egui/tests/feathering.rs` | le feathering hors de la clé de cache |
 | `stokesforge-render-svg/tests/frontiere.rs` | l'export ne voit ni `egui`, ni `eframe`, ni `winit` — donc se teste sans serveur graphique |
+| `stokesforge-render/src/view.rs`, `src/interact.rs` (modules `tests`) | cadrage d'un geste (zoom, pan, échelle log, axe inversé, calques superposés, axe seul) et point le plus proche (#262), sans egui |
 | `stokesforge-render/tests/geometrie.rs`, `stokesforge-render-svg/tests/calques.rs` | placement des calques superposés et de leurs axes en haut / à droite (#167) |
 
 Un test qui compare deux chemins peut passer parce que les deux sont justes —

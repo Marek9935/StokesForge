@@ -81,7 +81,6 @@ pub mod feathering;
 pub mod scaled;
 mod shape_tools;
 pub mod typst_screen;
-mod view;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -90,13 +89,14 @@ use egui::{
     Color32, Galley, Id, Painter, PointerButton, Pos2, Rect, Response, Shape, Stroke, StrokeKind,
 };
 use stokesforge_core::node::NodeKind;
-use stokesforge_core::resolve::{resolve_panel, resolve_spec, ResolvedPlot};
+use stokesforge_core::resolve::{resolve_spec, ResolvedPlot};
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_plot::{PlotSpec, SeriesAxis};
 use stokesforge_render::formula::FormulaCache;
+use stokesforge_render::interact;
 use stokesforge_render::pipeline::{self};
+use stokesforge_render::view::ViewState;
 // Descendue dans `stokesforge-render` (#255) : `errors.rs` de l'app la lit sans egui.
-use stokesforge_render::series;
 pub use stokesforge_render::RenderError;
 use stokesforge_session::Revision;
 use stokesforge_session::Snapshot;
@@ -136,7 +136,6 @@ pub use typst_screen::{formula_label, FormulaTexture, TypstScreen};
 // besoin pour vérifier ce qu'elle propose d'écrire (mémo de syntaxe des
 // propriétés), sans déclarer d'arête vers `stokesforge-render`.
 pub use stokesforge_render::formula;
-pub use view::{Framing, ViewState};
 
 /// Ce que la vue signale à l'application, à traduire en actions — textes
 /// libres (issue #35). Relevé par [`GraphView::take_events`].
@@ -1463,40 +1462,13 @@ impl GraphView {
             .or_else(|| last.panels.iter().enumerate().find_map(hit))
     }
 
-    /// Applique un geste de cadrage (zoom, glisser, rectangle) à **toutes les
-    /// échelles propres de tous les calques de la case** du calque
-    /// `panel_index` (dans [`DrawnPlot::panels`]) (#167). Les calques d'une
-    /// case partagent la même zone de tracé : la même transformation en
-    /// pixels garde donc leurs graduations alignées, y compris celles d'un
-    /// axe secondaire. Une échelle liée à un autre calque n'a pas de cadrage
-    /// à elle et suit celle qu'elle recouvre.
+    /// Applique un geste de cadrage (zoom, glisser, rectangle) à toutes les
+    /// échelles propres de la case du calque `panel_index` (dans
+    /// [`DrawnPlot::panels`]) — le calcul est `ViewState::commit_gesture`
+    /// (`stokesforge-render`, sans egui).
     fn commit_gesture(&mut self, panel_index: usize, gesture: Gesture) {
         let Some(last) = &self.last else { return };
-        let Some(hit) = last.panels.get(panel_index) else {
-            return;
-        };
-        let cell = (hit.row, hit.column);
-        let mut updates = Vec::new();
-        for panel in last.panels.iter().filter(|p| (p.row, p.column) == cell) {
-            let (own_x, own_y) = match panel.overlay {
-                Some(overlay) => (overlay.x_top, overlay.y_right),
-                None => (true, true),
-            };
-            let mut framing = Framing::default();
-            if let Some((x, y)) = PanelTransform::of(panel).and_then(|t| t.apply(&gesture)) {
-                framing.x = own_x.then_some(x);
-                framing.y = own_y.then_some(y);
-            }
-            if panel.overlay.is_none() && panel.y2_range.is_some() {
-                framing.y2 = PanelTransform::of_axis(panel, true)
-                    .and_then(|t| t.apply(&gesture))
-                    .map(|(_, y2)| y2);
-            }
-            updates.push((panel.index, framing));
-        }
-        for (index, framing) in updates {
-            self.view.set_framing(index, framing);
-        }
+        self.view.commit_gesture(&last.panels, panel_index, gesture);
     }
 
     /// L'axe (ligne et graduations) sous le pixel egui `pos`, par l'indice du
@@ -1508,58 +1480,13 @@ impl GraphView {
         }
     }
 
-    /// Applique un geste à **une seule échelle** (#167) : celle de l'axe
-    /// `side` du panneau `panel_index` (dans [`DrawnPlot::panels`]). Les
-    /// autres échelles, liées ou non, ne bougent pas. Le geste n'agit que
-    /// selon l'axe : l'autre composante est neutralisée au centre de la zone
-    /// de tracé.
+    /// Applique un geste à une seule échelle : celle de l'axe `side` du
+    /// panneau `panel_index` (dans [`DrawnPlot::panels`]) — le calcul est
+    /// `ViewState::commit_axis_gesture` (`stokesforge-render`, sans egui).
     fn commit_axis_gesture(&mut self, panel_index: usize, side: AxisSide, gesture: Gesture) {
-        let Some(panel) = self.last.as_ref().and_then(|l| l.panels.get(panel_index)) else {
-            return;
-        };
-        let horizontal = side == AxisSide::Bottom;
-        let center = (
-            panel.pixel_origin.0 as f64 + panel.pixel_size.0 as f64 / 2.0,
-            panel.pixel_origin.1 as f64 + panel.pixel_size.1 as f64 / 2.0,
-        );
-        let gesture = match gesture {
-            Gesture::Zoom { anchor, factor } => Gesture::Zoom {
-                anchor: if horizontal {
-                    (anchor.0, center.1)
-                } else {
-                    (center.0, anchor.1)
-                },
-                factor,
-            },
-            Gesture::Pan { dx, dy } => {
-                if horizontal {
-                    Gesture::Pan { dx, dy: 0.0 }
-                } else {
-                    Gesture::Pan { dx: 0.0, dy }
-                }
-            }
-            other => other,
-        };
-        let mut framing = Framing::default();
-        match side {
-            AxisSide::Bottom => {
-                framing.x = PanelTransform::of(panel)
-                    .and_then(|t| t.apply(&gesture))
-                    .map(|(x, _)| x);
-            }
-            AxisSide::Left => {
-                framing.y = PanelTransform::of(panel)
-                    .and_then(|t| t.apply(&gesture))
-                    .map(|(_, y)| y);
-            }
-            AxisSide::Right => {
-                framing.y2 = PanelTransform::of_axis(panel, true)
-                    .and_then(|t| t.apply(&gesture))
-                    .map(|(_, y2)| y2);
-            }
-        }
-        let index = panel.index;
-        self.view.set_framing(index, framing);
+        let Some(last) = &self.last else { return };
+        self.view
+            .commit_axis_gesture(&last.panels, panel_index, side, gesture);
     }
 
     /// Ctrl+molette (zoom), glissé principal (pan avec l'outil Pointeur,
@@ -2121,16 +2048,10 @@ impl GraphView {
     }
 }
 
-/// Le point désigné du panneau `panel_index` sous le pixel `pos` — tâche
-/// R7.2, l'équivalent local de `ReverseCoordTranslate` + `min_by_key`
-/// d'`architecture-choisie.md` §6 (`min_by_key` vit dans
-/// `stokesforge_render::nearest_on_curve`, réutilisé série par série).
-///
-/// Recalcule la géométrie plutôt que de la garder en mémoire : une série
-/// résolue ne porte que des `Arc<Vec<f64>>` clonés par compteur
-/// (`stokesforge-core::resolve`), donc le refaire à chaque survol coûte un
-/// parcours, pas une copie — moins cher que de le garder à jour à travers
-/// chaque zoom.
+/// Le point désigné du panneau `panel_index` sous le pixel `pos` : l'adaptateur
+/// egui de `stokesforge_render::interact::nearest_point`, qui porte le calcul
+/// en `f64` (#262). Seules les conversions `Pos2` ↔ `(f64, f64)` et le rayon
+/// de désignation ([`HIT_RADIUS`]) restent ici.
 fn nearest_point(
     tree: &Tree,
     spec: &PlotSpec,
@@ -2139,48 +2060,22 @@ fn nearest_point(
     transform: &PanelTransform,
     pos: Pos2,
 ) -> Option<PointHit> {
-    let spec_panel = spec.panels.get(drawn_panel.index)?;
-    let resolved = resolve_panel(tree, spec_panel);
-    let cursor = (pos.x as f64, pos.y as f64);
-
-    let mut best: Option<PointHit> = None;
-    for (series_index, resolved_series) in resolved.series.iter().enumerate() {
-        let series_spec = resolved_series.spec;
-        // Désignation limitée à l'axe principal — voir la doc de `PointHit`.
-        if !series_spec.visible || series_spec.axis == SeriesAxis::Right {
-            continue;
-        }
-        let prepared = series::prepare(
-            resolved_series,
-            spec_panel.bottom.scale,
-            spec_panel.left.scale,
-        );
-        if prepared.broken || prepared.unknown_type {
-            continue;
-        }
-        let series::Geometry::Curve { points, .. } = &prepared.geometry else {
-            continue;
-        };
-        let Some((point_index, distance)) = nearest_on_curve(transform, points, cursor) else {
-            continue;
-        };
-        if best.is_some_and(|hit| hit.distance as f64 <= distance) {
-            continue;
-        }
-        let Some(pixel) = transform.data_to_pixel(points[point_index].0, points[point_index].1)
-        else {
-            continue;
-        };
-        best = Some(PointHit {
-            panel: panel_index,
-            series: series_index,
-            point_index,
-            data: points[point_index],
-            pixel: Pos2::new(pixel.0 as f32, pixel.1 as f32),
-            distance: distance as f32,
-        });
-    }
-    best.filter(|hit| hit.distance <= HIT_RADIUS)
+    let hit = interact::nearest_point(
+        tree,
+        spec,
+        drawn_panel,
+        transform,
+        (pos.x as f64, pos.y as f64),
+        HIT_RADIUS as f64,
+    )?;
+    Some(PointHit {
+        panel: panel_index,
+        series: hit.series,
+        point_index: hit.point_index,
+        data: hit.data,
+        pixel: Pos2::new(hit.pixel.0 as f32, hit.pixel.1 as f32),
+        distance: hit.distance as f32,
+    })
 }
 
 /// Le champ de saisie d'un texte libre en cours d'édition (issue #37) : où
@@ -2253,6 +2148,7 @@ fn graph_spec(tree: &Tree, graph: NodeId) -> Result<PlotSpec, RenderError> {
 mod tests {
     use super::*;
     use stokesforge_plot::{PanelSpec, Panels};
+    use stokesforge_render::view::Framing;
 
     /// Issue #37 : le champ de saisie est centré sur le texte rendu, à son
     /// corps (proportionnel à la taille et à l'échelle d'affichage), et au

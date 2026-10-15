@@ -39,6 +39,7 @@ par inadvertance, et ce sont eux qu'il faut comprendre avant de les modifier.
 | `*/tests/no_ui_dependency.rs` | liste blanche de dépendances : toute addition au `Cargo.toml` doit y être ajoutée explicitement (invariant 2). Lecture commune `stokesforge-arch-guard` : dépendances normales, de build, `target.*` et renommées (`package`) ; `dev-dependencies` exclues ; témoins négatifs dans `stokesforge-arch-guard/src/lib.rs` |
 | `stokesforge-render-svg/tests/frontiere.rs` | l'export ne voit ni `egui`, ni `eframe`, ni `winit` — donc se teste sans serveur graphique |
 | `stokesforge-render/tests/mesure.rs` | la source unique de mesure de texte (invariant 4) |
+| `stokesforge-render/src/{view,interact}.rs` (modules `tests`) | interaction sans egui (#262) : cadrage d'un geste (zoom, pan, échelle log, axe inversé, calques superposés, axe seul, panneau inconnu), réinitialisation, point le plus proche (courbe, hors de portée, série masquée ou de droite, calque du spec) ; mutants éprouvés (signe du pan, filtre de case, calque lié, rayon, série masquée) |
 | `stokesforge-render-egui/tests/accord.rs` | écran et export placent les mêmes primitives aux mêmes pixels |
 | `stokesforge-render-egui/tests/feathering.rs` | le feathering n'entre pas dans la clé de cache (invariant 6) |
 | `stokesforge-app/tests/script_bridge_lazy.rs` | l'interpréteur Python ne démarre pas à l'ouverture de la fenêtre |

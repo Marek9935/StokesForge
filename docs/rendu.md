@@ -14,6 +14,17 @@ Les deux backends ne diffèrent que par **la façon de poser des pixels**. Tout
 le reste — types de série, échelles, primitives, légende, décimation, rognage,
 formules — est dans `stokesforge-render`.
 
+**Qui fait quoi pour l'interaction (#262).** Tout calcul en `f64` — pixel ↔
+données, zoom, pan, rectangle élastique, cadrage d'un geste, point le plus
+proche — vit dans `stokesforge-render` (`interact`, `view`, `hit`,
+`series_selection`) et se teste sans egui. `stokesforge-render-egui` n'en garde
+que ce qui touche egui : lire la molette et le glisser (`handle_navigation`),
+convertir `Pos2` ↔ `(f64, f64)` (`nearest_point` y est un adaptateur qui
+applique `HIT_RADIUS` et rend un `PointHit` en `Pos2`), poser les `Shape`
+(`backend`, `scaled`, `cache`, `shape_tools`, `typst_screen`) et le
+*feathering*. `GraphView` porte un `ViewState` comme champ et appelle
+`ViewState::commit_gesture` avec les panneaux de la dernière figure tracée.
+
 ## `stokesforge-render` — le socle commun
 
 | Module | Ce qu'il porte |
@@ -27,7 +38,8 @@ formules — est dans `stokesforge-render`.
 | `clip` | rognage géométrique d'une polyligne contre le rectangle de tracé |
 | `legend` | la légende, mise en page à la main |
 | `decimate` | LTTB |
-| `interact` | correspondance pixel ↔ données d'un panneau tracé |
+| `interact` | correspondance pixel ↔ données d'un panneau tracé (`PanelTransform`, `Gesture`) et point le plus proche du curseur (`nearest_point`, curseur en `(f64, f64)`, #262) |
+| `view` | l'état de vue — zoom et pan (`ViewState`, `Framing`) — et le cadrage qu'un geste donne (`commit_gesture`, `commit_axis_gesture`), sans egui (#262) |
 | `hit` | composant (titre, zone de tracé, axe, titre d'axe) sous un pixel, sur la géométrie allouée par Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
 | `series_selection` | série sous un pixel, sur ses pixels réellement tracés, et poignées de la série sélectionnée (#98) |
 | `color` | lecture des couleurs `#RRGGBB` du spec (adaptateur de `stokesforge_plot::parse_hex`, **source unique** partagée avec le sélecteur de l'interface), et l'encre automatique contrastée avec le fond (`auto_ink`) |
@@ -416,7 +428,7 @@ Un zoom molette est un **cadrage de vue éphémère**. Le faire passer par une
 commande annulable en ferait une entrée d'historique au même titre qu'un
 renommage — et personne ne veut annuler un zoom avec `Ctrl+Z`.
 
-`ViewState` vit donc à côté du modèle, sur `GraphView`, et ne touche jamais au
+`ViewState` (`stokesforge_render::view`) vit donc à côté du modèle, sur `GraphView`, et ne touche jamais au
 `PlotSpec` stocké dans le `Tree`. Le mécanisme réutilise ce qui existait déjà :
 `AxisSpec::has_explicit_range` fait primer un cadrage explicite sur les données
 calculées ; `ViewState::apply` pose `auto_range = false` et les deux bornes sur

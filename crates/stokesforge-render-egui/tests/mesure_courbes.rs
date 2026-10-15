@@ -18,10 +18,11 @@ use plotters::drawing::IntoDrawingArea;
 use stokesforge_core::resolve::resolve_spec;
 use stokesforge_core::{Column, Project};
 use stokesforge_plot::{LineSpec, PanelSpec, PlotSpec, SeriesSpec};
+use stokesforge_render::view::{Framing, ViewState};
 use stokesforge_render::{decimate, pipeline, series};
 use stokesforge_render_egui::{
-    feathering, font_definitions, CacheKey, EguiBackend, Feathering, Framing, ScreenText,
-    ShapeCache, TextMeasurer, ViewState,
+    feathering, font_definitions, CacheKey, EguiBackend, Feathering, ScreenText, ShapeCache,
+    TextMeasurer,
 };
 
 const RECT: Rect = Rect {

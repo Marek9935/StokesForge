@@ -88,6 +88,10 @@ pub mod series_selection;
 pub mod shapes;
 pub mod subpixel;
 pub mod text;
+pub mod view;
+
+#[cfg(test)]
+mod test_support;
 
 use stokesforge_core::NodeId;
 

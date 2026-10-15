@@ -19,7 +19,7 @@
 //!   one exception: `Shape::Text` depends on the current `pixels_per_point`
 //!   and so must be recreated every time `pixels_per_point` changes »* ;
 //! - **`view_generation`** (tâche R7.1) — le compteur de
-//!   [`crate::view::ViewState`], qui monte à chaque zoom, pan ou rectangle
+//!   `stokesforge_render::view::ViewState`, qui monte à chaque zoom, pan ou rectangle
 //!   de zoom élastique commis. Contrairement au *feathering* (voir plus
 //!   bas), le zoom/pan **change la géométrie tracée** — les bornes d'axe ne
 //!   sont plus celles des données — donc doit entrer dans la clé, sous
@@ -63,7 +63,7 @@ pub struct CacheKey {
     pub rect: Rect,
     /// Échelle d'affichage au moment du calcul.
     pub pixels_per_point: f32,
-    /// Génération de [`crate::view::ViewState`] au moment du calcul — tâche
+    /// Génération de `stokesforge_render::view::ViewState` au moment du calcul — tâche
     /// R7.1. `0` tant qu'aucun zoom ni pan n'a été commis.
     pub view_generation: u64,
 }
