@@ -131,7 +131,8 @@ Recalculate Out of Date ─ les **trois dernières analyses lancées** (#249),
 numérotées, sous un filet. Un clic sur une dernière analyse ouvre la fenêtre
 pré-remplie ; Ctrl+clic la relance sur la sélection courante (la fenêtre
 s'ouvre si un réglage manque). Le clic droit d'un en-tête de colonne a un
-sous-menu `Analysis ▸` à quatre entrées, une par catégorie, dans la section
+sous-menu `Analysis ▸` à quatre entrées, une par catégorie (qui rouvre la
+dernière méthode lancée dans cette catégorie), dans la section
 « créer » (après `Plot ▸` et Add Column) — une entrée par méthode aurait dépassé
 la profondeur 2. Sur une colonne que produit un calcul, une section de gestes
 du calcul (Edit · Recalculate · Detach · Delete) suit Type/Role. Les entrées

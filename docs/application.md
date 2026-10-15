@@ -73,7 +73,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/menu_sections.rs` | brique commune des menus : `MenuSections::section` (seul trait de séparation, #155), `menu_choice` (coche seule d'un choix exclusif, C3, #227) |
 | `app/list_row.rs` | brique commune de la ligne de liste sélectionnable (#169) : `list_row`, `ListRowBackground`, `list_row_label`, `list_row_text`, `LIST_ROW_MARK` ; Project Manager, Object Manager, liste des séries des propriétés |
 | `app/shortcuts.rs` | **registre unique des touches** (#231) : constantes `SHORTCUT_*` et `KEY_*`, leurs rappels, tableau `HELP` qui engendre Help › Keyboard Shortcuts, consommation d'annuler/rétablir dans le viewport actif (`collect_undo_redo_shortcuts`) |
-| `app/preferences_window.rs` | File › Preferences (#148) : rubriques General (langue) et Export (formats de Copy Graph : ordre au glisser, cases, `Action::SetCopyFormats`, préférence `copy_formats`), appliquées tout de suite, `modal_read_only` |
+| `app/preferences_window.rs` | File › Preferences (#148) : rubriques General (langue), Display (rangées Metadata et x' des nouveaux classeurs, `Action::SetWorkbookHeaderDefaults`) et Export (formats de Copy Graph : ordre au glisser, cases, `Action::SetCopyFormats`, préférence `copy_formats`), appliquées tout de suite, `modal_read_only` |
 | `app/reorder_list.rs` | brique commune d'une liste réordonnée au glisser : poignée `Grip`, ligne qui suit le pointeur, lignes qui s'écartent en direct (`reorder_row`, `reorder_move`, `move_before`) ; seule la poignée se saisit, pour ne pas voler le clic des cases |
 | `app/keyboard_shortcuts_window.rs` | Help › Keyboard Shortcuts (#231, K5) : fenêtre en lecture seule, engendrée de `HELP` |
 | `app/busy.rs`, `app/empty_state.rs` | briques « travail en cours » (indicateur après 0,5 s, progression, Stop après 3 s ; #232 ; import en fond et recalcul de formules #239) et « état vide » (phrase grisée centrée qui dit le geste) |
@@ -138,7 +138,17 @@ L'interface du traitement mathématique est répartie ainsi :
   calcul déjà lancé n'est pas interrompu : son résultat périmé est ignoré.
 - Colonnes périmées : grisées dans la grille, lettre teintée (`theme::stale_color`)
   et info-bulle ; le volet Results (replié par défaut) liste les calculs
-  conservés (portée Feuille / Classeur) avec Edit / Recalculate / Delete.
+  conservés (portée Feuille / Classeur) avec Edit / Recalculate / Delete. Bandeau
+  de 22 px centré, fond un cran plus clair (`theme::results_pane_fill`) ; la liste
+  (≤ 45 % de la largeur) et le détail sont deux rectangles bornés, le texte du
+  détail revient à la ligne ; une ligne de liste est « Opération · Feuille/Colonne »
+  (`row_title`), sans catégorie.
+- Une catégorie du sous-menu `Analysis ▸` du clic droit rouvre **la dernière
+  méthode lancée dans cette catégorie** (tirée des analyses récentes, donc des trois
+  dernières seulement), sinon `Category::default_preset`. `publish_last_presets`
+  la publie chaque image dans le `Context`, `category_preset` la lit : les menus
+  du graphe n'ont pas l'état sous la main. Seule la méthode est reprise, pas ses
+  réglages.
 - Séries pas à jour sur le graphe (#198) : le cœur résout le drapeau
   (`ResolvedSeries.stale` : une des colonnes X, Y ou d'erreur sort d'un calcul
   pas à jour) et le rendu l'applique sans rien savoir du modèle — trait grisé
@@ -225,7 +235,7 @@ par `Ui::close`, dont egui propage la demande aux menus parents.
 |---|---|
 | File | New → New Project, Add Workbook, Add Graph ; Import → Import…, Refresh from Source, Reopen Last Import… ; Open…, Save, Save As… ; Language ; Quit |
 | Edit | Undo, Redo ; Selection → Copy, Paste, Rename, Duplicate, Delete des objets du Project Manager |
-| Workbook (classeur actif) | Sheet → Add Worksheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row |
+| Workbook (classeur actif) | Sheet → Add Worksheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row, Show x' Row (ce classeur seul) |
 | Graph (graphique actif) | Show Data ; Add Text ; Selection → le menu de l'objet sélectionné (grisé sans sélection) ; Reset Text Positions ; Top / Right Mirror Axis (cases, calque actif ordinaire, #176) ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
 | View | Object Manager → les réglages du fond (Show Axes, Show Objects, Expand by Default, Reset Settings) ; plus de Panels ni de Toolbars (#214) |
 | Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
@@ -501,11 +511,24 @@ du dépôt en Wayland natif le 2026-10-02.
 les tests automatiques couvrent le parseur, le canal, sa durée de vie et la
 décision d'import, pas le compositeur.
 
-### Ligne « Metadata » de l'en-tête
+### Lignes « Metadata » et x' de l'en-tête
 
-Elle se masque et se réaffiche (Classeur › Afficher la ligne Metadata des
-colonnes, ou clic droit sur son libellé) : réglage de vue gardé dans la mémoire
-d'egui, partagé par les classeurs flottants et détachés, jamais dans le modèle.
+Deux rangées facultatives, **réglées par classeur** : Classeur › Afficher la
+ligne Metadata / Afficher la ligne x', le clic droit de la case « # » (sous la
+section de la sélection), et, pour Metadata, le clic droit de son libellé. Le
+réglage d'un classeur (`grid::HeaderRows`, `header_rows` / `set_header_rows`)
+est gardé dans la mémoire d'egui sous l'identifiant du classeur, partagé par
+ses fenêtres flottante et détachée, jamais dans le modèle ni le `.stf` ; il se
+perd à la fermeture de l'application.
+
+Le réglage des **nouveaux** classeurs est une préférence (Préférences ›
+Display ; `preferences.json`, `workbook_show_metadata` affichée par défaut,
+`workbook_show_x_prime` cachée par défaut ; `Action::SetWorkbookHeaderDefaults`).
+`app.rs` la publie à chaque image dans le `Context`
+(`grid::publish_header_row_defaults`) : un classeur que l'utilisateur n'a pas
+réglé la suit, un classeur réglé la garde. La hauteur de l'en-tête perd une
+sous-ligne par rangée masquée (`stacked_header_height`). Limite connue : la
+navigation clavier peut encore atteindre la rangée x' masquée.
 
 ### Débordement des fenêtres de contenu
 

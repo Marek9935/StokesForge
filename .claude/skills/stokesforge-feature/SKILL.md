@@ -51,6 +51,7 @@ qu'une fonctionnalité existe, ni qu'elle reste à faire. **Le code fait foi.**
 | Ce que fait la fonctionnalité | Où elle vit | Piège |
 |---|---|---|
 | change le **modèle** (colonnes, arbre, `PlotSpec`, texte de note…) | une `Command` de `stokesforge-commands` | jamais une primitive `stokesforge-core` en direct (invariant 1) ; voir le skill **stokesforge-commande** |
+| est un **réglage de vue propre à un document** (rangées d'en-tête d'un classeur) | mémoire d'egui sous l'identifiant du nœud, défaut des nouveaux documents en préférence publiée dans le `Context` (`grid::header_rows`) | jamais un drapeau global : tous les classeurs le suivraient ; rien dans le modèle ni le `.stf` |
 | change le **cadrage de vue** (zoom, pan) | `ViewState` sur `GraphView` | ce n'est **pas** une mutation du modèle : personne ne veut annuler un zoom par Ctrl+Z |
 | est une **décision** d'interface (quoi proposer, quoi griser, comment nommer) | `stokesforge-app/src/state.rs` | doit rester testable sans fenêtre |
 | est du **dessin ou de l'événement** egui | le module de **la surface** dans `stokesforge-app/src/app/` (grille `grid.rs`, classeur `workbook.rs`, graphe `graph_window.rs`, menus `menus.rs`, barres de format `format.rs`, dialogue `plot_settings.rs`…, table complète dans `docs/application.md`, § Découpage du code ; voir § 2 octies) — `app.rs` n'en reçoit que l'appel | rien de ce qu'ils contiennent n'est une décision de produit ; jamais une logique de surface dans `app.rs` |
