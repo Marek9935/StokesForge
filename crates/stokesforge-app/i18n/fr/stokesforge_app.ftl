@@ -1538,7 +1538,6 @@ field-refused-integer = Saisissez un nombre entier
 field-refused-use-auto = Utilisez Plage auto
 field-refused-name-empty = Le nom ne peut pas être vide
 field-refused-name-taken = Ce nom est déjà utilisé
-field-refused-range-order = Le début de la plage ne doit pas dépasser sa fin
 
 # Champ numérique : bulle du ▼ (#220).
 number-presets = Valeurs courantes
@@ -1681,7 +1680,7 @@ analysis-correction-trace = Données modifiées : { $kind }
 # Repère discret des corrections définitives (#212).
 grid-column-modified = Données originales remplacées par une correction. Voir Résultats pour les réglages de la correction
 
+analysis-needs-column-curve = L’analyse demande une courbe tracée depuis une colonne
 
 # Glisser-déposer des séries, des groupes et des objets libres.
 object-drag-end = Fin de la liste
-analysis-needs-column-curve = L’analyse demande une courbe tracée depuis une colonne

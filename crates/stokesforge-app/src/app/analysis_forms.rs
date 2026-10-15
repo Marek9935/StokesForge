@@ -23,7 +23,6 @@ use crate::analysis::{
     aux_candidates, aux_for, kind_title, reference_label, series_label, with_unit, AnalysisForm,
     BaselineShape, Category, DirectAlgorithm, Preset,
 };
-use crate::field_state::{self, FieldIssue};
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::number_field::{number_field, NumberResponse};
 use crate::quantities;
@@ -87,11 +86,23 @@ fn optional_number_response(
         .filter(|(shown, _)| shown == value)
         .map(|(_, text)| text)
         .unwrap_or_else(|| value.map(|v| v.to_string()).unwrap_or_default());
-    let response = ui.add(
-        egui::TextEdit::singleline(&mut text)
-            .desired_width(theme::FIELD_WIDTH_SHORT)
-            .hint_text(tr!("analysis-field-auto")),
-    );
+    let output = egui::TextEdit::singleline(&mut text)
+        .desired_width(theme::FIELD_WIDTH_SHORT)
+        .hint_text(tr!("analysis-field-auto"))
+        .show(ui);
+    let response = output.response.response;
+    // Comme `number_field` : prendre le focus sélectionne tout le texte.
+    if response.gained_focus() {
+        let mut state = output.state;
+        let end = egui::text::CCursor::new(text.chars().count());
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                end,
+            )));
+        state.store(ui.ctx(), response.id);
+    }
     let mut changed = false;
     if response.changed() {
         if let Some(next) = parse_optional(&text) {
@@ -99,55 +110,64 @@ fn optional_number_response(
             *value = next;
         }
     }
+    // Un texte qui n'est pas un nombre, ou qui dit « auto » (`a`, `auto`), est
+    // vidé en quittant le champ : la borne redevient « auto » et le champ montre
+    // son indication. Pendant la frappe on le tolère : « - » ou « 1e »
+    // précèdent un nombre.
+    if response.lost_focus() && !matches!(parse_optional(&text), Some(Some(_))) {
+        text.clear();
+        changed = value.is_some();
+        *value = None;
+    }
     ui.data_mut(|d| d.insert_temp(id, (*value, text)));
     (changed, response)
 }
 
-/// Mémorise le refus d'une paire « de ≤ à » mise à l'envers sur le **second**
-/// champ (N11), quand `violated` dit que la saisie qui vient d'être validée l'a
-/// inversée (l'appelant a rendu l'ancienne valeur). Un champ de la brique
-/// « nombre » peint ensuite lui-même ce refus.
-fn flag_pair_refusal(ui: &egui::Ui, second: &egui::Response, violated: bool) {
-    if violated {
-        let now = ui.input(|input| input.time);
-        field_state::flag(
-            ui.ctx(),
-            second.id,
-            FieldIssue::refused(tr!("field-refused-range-order")),
-            now,
-        );
-    }
-}
-
-/// [`flag_pair_refusal`], puis peint le refus : pour un champ qui n'est pas
-/// de la brique « nombre » et ne le peint donc pas seul.
-fn paired_issue(ui: &egui::Ui, second: &egui::Response, violated: bool) {
-    flag_pair_refusal(ui, second, violated);
-    let now = ui.input(|input| input.time);
-    if let Some(issue) = field_state::active(ui.ctx(), second.id, now) {
-        field_state::show_issue(ui, second, &issue);
-    }
-}
-
 /// La liste des plages `(de, à)`, une rangée par plage.
-fn range_rows(ui: &mut egui::Ui, id: egui::Id, ranges: &mut Vec<(f64, f64)>) {
+///
+/// Comme [`optional_range`], chaque borne vide (« auto ») prend l'étendue des
+/// données `extent`, et un texte illisible est vidé. Les bornes saisies vivent
+/// dans l'état du champ (`pending`), car le modèle ne porte que la plage
+/// résolue. Une paire inversée est échangée sans bruit.
+fn range_rows(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    ranges: &mut Vec<(f64, f64)>,
+    extent: Option<(f64, f64)>,
+) {
+    type Pending = (Option<f64>, Option<f64>, (f64, f64));
     let mut remove = None;
-    for (i, (a, b)) in ranges.iter_mut().enumerate() {
+    for (i, row) in ranges.iter_mut().enumerate() {
         ui.horizontal(|ui| {
-            // « de » ≤ « à » : une paire inversée est refusée, jamais ramenée ni
-            // permutée (N11) ; l'ancienne valeur revient et le second champ est
-            // peint en rouge.
-            let (old_a, old_b) = (*a, *b);
-            number(ui, a);
+            let state_id = id.with(("pending", i));
+            // `committed` : la plage que ce champ a lui-même écrite ; si le
+            // modèle en diffère (tracé à la souris), il fait foi.
+            let (mut a, mut b) = match ui.data(|d| d.get_temp::<Pending>(state_id)) {
+                Some((a, b, committed)) if committed == *row => (a, b),
+                _ => (Some(row.0), Some(row.1)),
+            };
+            let (changed_a, resp_a) = optional_number_response(ui, id.with(("a", i)), &mut a);
             ui.label(tr!("analysis-field-to"));
-            let second = number_response(ui, b);
-            let violated = second.changed || *a != old_a;
-            let violated = violated && *a > *b;
-            if violated {
-                *a = old_a;
-                *b = old_b;
+            let (changed_b, resp_b) = optional_number_response(ui, id.with(("b", i)), &mut b);
+            // Pas d'échange pendant la frappe (il déplacerait le texte sous le
+            // curseur) : le modèle reçoit la paire ordonnée, l'affichage la
+            // suit quand on quitte les deux champs.
+            if (resp_a.lost_focus() || resp_b.lost_focus())
+                && !resp_a.has_focus()
+                && !resp_b.has_focus()
+            {
+                if let (Some(x), Some(y)) = (a, b) {
+                    if x > y {
+                        (a, b) = (Some(y), Some(x));
+                    }
+                }
             }
-            flag_pair_refusal(ui, &second.response, violated);
+            if changed_a || changed_b {
+                let lo = a.or(extent.map(|e| e.0)).unwrap_or(row.0);
+                let hi = b.or(extent.map(|e| e.1)).unwrap_or(row.1);
+                *row = (lo.min(hi), lo.max(hi));
+            }
+            ui.data_mut(|d| d.insert_temp::<Pending>(state_id, (a, b, *row)));
             if icon_button(
                 ui,
                 Icon::Delete,
@@ -168,10 +188,16 @@ fn range_rows(ui: &mut egui::Ui, id: egui::Id, ranges: &mut Vec<(f64, f64)>) {
         .on_hover_text(tr!("analysis-field-add-range", "hint"))
         .clicked()
     {
-        let last = ranges.last().map_or(0.0, |r| r.1);
-        ranges.push((last, last + 1.0));
+        // Une rangée neuve couvre toute la série (bornes « auto »).
+        ranges.push(extent.unwrap_or((0.0, 0.0)));
+        let i = ranges.len() - 1;
+        ui.data_mut(|d| {
+            d.insert_temp::<(Option<f64>, Option<f64>, (f64, f64))>(
+                id.with(("pending", i)),
+                (None, None, ranges[i]),
+            )
+        });
     }
-    let _ = id;
 }
 
 /// La liste des points `(x, y)`, une rangée par point.
@@ -201,26 +227,56 @@ fn point_rows(ui: &mut egui::Ui, points: &mut Vec<(f64, f64)>) {
 }
 
 /// Une plage facultative : deux champs et un bouton pour la retirer.
-fn optional_range(ui: &mut egui::Ui, id: egui::Id, range: &mut Option<(f64, f64)>) {
+///
+/// Chaque borne se saisit seule : une borne vide (« auto ») prend l'étendue des
+/// données `extent` ; sans étendue connue, la plage reste absente tant que les
+/// deux bornes ne sont pas données. Une paire inversée est échangée sans bruit.
+/// Les bornes saisies vivent dans l'état du champ (`pending`), car le modèle
+/// ne porte qu'une plage complète : sans cela, une borne tapée seule serait
+/// effacée au rendu suivant.
+fn optional_range(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    range: &mut Option<(f64, f64)>,
+    extent: Option<(f64, f64)>,
+) {
+    type Pending = (Option<f64>, Option<f64>, Option<(f64, f64)>);
     ui.horizontal(|ui| {
-        let (mut a, mut b) = (range.map(|r| r.0), range.map(|r| r.1));
-        let (old_a, old_b) = (a, b);
-        let changed_a = optional_number(ui, id.with("a"), &mut a);
+        let state_id = id.with("pending");
+        // `committed` : la plage que ce champ a lui-même écrite. Si le modèle
+        // en diffère (tracé à la souris, bouton retirer, autre formulaire), il
+        // fait foi.
+        let (mut a, mut b) = match ui.data(|d| d.get_temp::<Pending>(state_id)) {
+            Some((a, b, committed)) if committed == *range => (a, b),
+            _ => (range.map(|r| r.0), range.map(|r| r.1)),
+        };
+        let (changed_a, resp_a) = optional_number_response(ui, id.with("a"), &mut a);
         ui.label(tr!("analysis-field-to"));
-        let (changed_b, second) = optional_number_response(ui, id.with("b"), &mut b);
-        // N11 : « de » ≤ « à », paire inversée refusée (ancienne valeur rendue).
-        let violated = matches!((a, b), (Some(a), Some(b)) if a > b);
-        if violated {
-            a = old_a;
-            b = old_b;
+        let (changed_b, resp_b) = optional_number_response(ui, id.with("b"), &mut b);
+        // Pas d'échange pendant la frappe (il déplacerait le texte sous le
+        // curseur) : le modèle reçoit la paire ordonnée, l'affichage la suit
+        // quand on quitte les deux champs.
+        if (resp_a.lost_focus() || resp_b.lost_focus())
+            && !resp_a.has_focus()
+            && !resp_b.has_focus()
+        {
+            if let (Some(x), Some(y)) = (a, b) {
+                if x > y {
+                    (a, b) = (Some(y), Some(x));
+                }
+            }
         }
-        if (changed_a || changed_b) && !violated {
-            *range = match (a, b) {
-                (Some(a), Some(b)) => Some((a, b)),
+        if changed_a || changed_b {
+            let lo = a.or(extent.map(|e| e.0));
+            let hi = b.or(extent.map(|e| e.1));
+            *range = match (lo, hi) {
+                (Some(lo), Some(hi)) if a.is_some() || b.is_some() => {
+                    Some((lo.min(hi), lo.max(hi)))
+                }
                 _ => None,
             };
         }
-        paired_issue(ui, &second, violated);
+        ui.data_mut(|d| d.insert_temp::<Pending>(state_id, (a, b, *range)));
         if range.is_some()
             && icon_button(
                 ui,
@@ -377,18 +433,24 @@ fn family_chooser(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
 
 fn family_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     aux_block(rows, id, form, tree);
+    let extent = x_extent(form, tree);
     match form.kind {
-        OperationKind::Baseline => baseline_form(rows, id, form),
+        OperationKind::Baseline => baseline_form(rows, id, form, extent),
         OperationKind::Correct => correct_form(rows, id, form),
-        OperationKind::Integrate => integrate_form(rows, id, form),
+        OperationKind::Integrate => integrate_form(rows, id, form, extent),
         OperationKind::Fit => fit_form(rows, id, form, tree),
-        OperationKind::Peaks => peaks_form(rows, id, form),
-        OperationKind::Reconvolution => reconv_form(rows, id, form),
+        OperationKind::Peaks => peaks_form(rows, id, form, tree),
+        OperationKind::Reconvolution => reconv_form(rows, id, form, tree),
         OperationKind::DirectDeconvolution => direct_form(rows, id, form),
     }
 }
 
-fn baseline_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
+fn baseline_form(
+    rows: &mut Form<'_>,
+    id: egui::Id,
+    form: &mut AnalysisForm,
+    extent: Option<(f64, f64)>,
+) {
     let shapes = [
         ChoiceOption::new(
             BaselineShape::Constant,
@@ -430,7 +492,7 @@ fn baseline_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
             rows.note(tr!("analysis-baseline-hint-constant-zone"));
             let mut zones = b.constant_zone.into_iter().collect();
             field_list(rows, |ui| {
-                range_rows(ui, id.with("constant-zone"), &mut zones)
+                range_rows(ui, id.with("constant-zone"), &mut zones, extent)
             });
             b.constant_zone = zones.last().copied();
         }
@@ -458,7 +520,9 @@ fn baseline_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
         }
         BaselineShape::Zones => {
             rows.note(tr!("analysis-baseline-hint-zones"));
-            field_list(rows, |ui| range_rows(ui, id.with("zones"), &mut b.zones));
+            field_list(rows, |ui| {
+                range_rows(ui, id.with("zones"), &mut b.zones, extent)
+            });
             rows.row(tr!("analysis-baseline-degree"), |ui| {
                 whole(ui, &mut b.degree, &quantities::POLYNOMIAL_DEGREE)
             });
@@ -493,10 +557,17 @@ fn correct_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
     });
 }
 
-fn integrate_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
+fn integrate_form(
+    rows: &mut Form<'_>,
+    id: egui::Id,
+    form: &mut AnalysisForm,
+    extent: Option<(f64, f64)>,
+) {
     let i = &mut form.setup.integrate;
     rows.note(tr!("analysis-integrate-hint"));
-    field_list(rows, |ui| range_rows(ui, id.with("ranges"), &mut i.ranges));
+    field_list(rows, |ui| {
+        range_rows(ui, id.with("ranges"), &mut i.ranges, extent)
+    });
     rows.field(|ui| {
         choice(
             ui,
@@ -532,6 +603,18 @@ fn model_name(model: &Model) -> String {
     }
 }
 
+/// L'étendue en X de l'entrée courante : ce que vaut une borne laissée « auto ».
+fn x_extent_of(xs: &[f64]) -> Option<(f64, f64)> {
+    let lo = xs.iter().copied().fold(f64::INFINITY, f64::min);
+    let hi = xs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    (lo <= hi).then_some((lo, hi))
+}
+
+fn x_extent(form: &AnalysisForm, tree: &Tree) -> Option<(f64, f64)> {
+    let series = form.series.get(form.current)?;
+    x_extent_of(&crate::analysis::series_points(tree, series).0)
+}
+
 fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     let has_sigma = form.series.iter().any(|s| s.sigma.is_some());
     let multi = form.series.len() > 1;
@@ -540,6 +623,7 @@ fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &T
         .get(form.current)
         .map(|s| crate::analysis::series_points(tree, s))
         .unwrap_or_default();
+    let extent = x_extent_of(&shown_x);
     let f = &mut form.setup.fit;
     let models: Vec<ChoiceOption<Model>> = Preset::fit_models()
         .into_iter()
@@ -611,7 +695,7 @@ fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &T
         multi,
     );
     rows.row(tr!("analysis-field-range"), |ui| {
-        optional_range(ui, id.with("fit-range"), &mut f.range);
+        optional_range(ui, id.with("fit-range"), &mut f.range, extent);
     });
     if has_sigma {
         rows.checkbox(
@@ -664,7 +748,8 @@ fn params_table(
         });
 }
 
-fn peaks_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
+fn peaks_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
+    let extent = x_extent(form, tree);
     let p = &mut form.setup.peaks;
     // Trois formes : des radios (C1), plus une liste déroulante.
     rows.row(tr!("analysis-peaks-shape"), |ui| {
@@ -748,12 +833,13 @@ fn peaks_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
         });
     }
     rows.row(tr!("analysis-field-range"), |ui| {
-        optional_range(ui, id.with("peaks-range"), &mut p.range);
+        optional_range(ui, id.with("peaks-range"), &mut p.range, extent);
     });
     rows.checkbox(&mut p.residuals, tr!("analysis-fit-residuals"), None);
 }
 
-fn reconv_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
+fn reconv_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
+    let extent = x_extent(form, tree);
     let r = &mut form.setup.reconv;
     rows.note(tr!("analysis-reconv-hint"));
     let before = r.spec.components;
@@ -777,7 +863,7 @@ fn reconv_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
         false,
     );
     rows.row(tr!("analysis-field-range"), |ui| {
-        optional_range(ui, id.with("reconv-window"), &mut r.spec.window);
+        optional_range(ui, id.with("reconv-window"), &mut r.spec.window, extent);
     });
     rows.checkbox(&mut r.residuals, tr!("analysis-fit-residuals"), None);
 }
@@ -993,14 +1079,14 @@ mod tests {
         let id = egui::Id::new("essai");
         let peindre = |plages: &mut Vec<(f64, f64)>, events: Vec<egui::Event>| {
             image(&context, events, |ui| {
-                range_rows(ui, id, plages);
+                range_rows(ui, id, plages, None);
             })
         };
         peindre(&mut plages, vec![]);
         let formes = peindre(&mut plages, vec![]);
         let champ = texte_exact(&textes(&formes), "5").centre;
         cliquer(&context, champ, egui::PointerButton::Primary, |ui| {
-            range_rows(ui, id, &mut plages);
+            range_rows(ui, id, &mut plages, None);
         });
         peindre(&mut plages, vec![egui::Event::Text(saisie.into())]);
         peindre(&mut plages, vec![touche(egui::Key::Enter)]);
@@ -1008,16 +1094,75 @@ mod tests {
         (plages[0], cadres_rouges(&formes))
     }
 
-    /// N11 : « de » ≤ « à ». Une paire mise à l'envers est refusée (ancienne
-    /// valeur rendue, cadre rouge sur le second champ), jamais permutée.
+    /// « de » ≤ « à » : une paire mise à l'envers est échangée sans bruit,
+    /// sans cadre rouge.
     #[test]
-    fn une_plage_inversee_est_refusee_sur_le_second_champ() {
-        assert_eq!(saisir_dans_a("0"), ((1.0, 5.0), 1));
+    fn une_plage_inversee_est_echangee_sans_bruit() {
+        assert_eq!(saisir_dans_a("0"), ((0.0, 1.0), 0));
+    }
+
+    /// Une plage facultative accepte une borne seule : taper « min » d'abord ne
+    /// l'efface pas, et la borne laissée « auto » prend l'étendue des données.
+    #[test]
+    fn une_borne_tapee_seule_n_est_pas_effacee() {
+        let context = contexte();
+        let mut plage: Option<(f64, f64)> = None;
+        let id = egui::Id::new("facultative");
+        let extent = Some((0.0, 100.0));
+        let peindre = |plage: &mut Option<(f64, f64)>, events: Vec<egui::Event>| {
+            image(&context, events, |ui| {
+                super::optional_range(ui, id, plage, extent);
+            })
+        };
+        peindre(&mut plage, vec![]);
+        let formes = peindre(&mut plage, vec![]);
+        let champ = textes(&formes)
+            .into_iter()
+            .find(|t| t.texte == "auto")
+            .expect("le champ « de » est vide")
+            .centre;
+        cliquer(&context, champ, egui::PointerButton::Primary, |ui| {
+            super::optional_range(ui, id, &mut plage, extent);
+        });
+        peindre(&mut plage, vec![egui::Event::Text("30".into())]);
+        let formes = peindre(&mut plage, vec![]);
+        assert_eq!(plage, Some((30.0, 100.0)));
+        assert!(
+            textes(&formes).iter().any(|t| t.texte == "30"),
+            "la borne tapée reste affichée"
+        );
     }
 
     #[test]
     fn une_plage_ordonnee_est_appliquee() {
         assert_eq!(saisir_dans_a("9"), ((1.0, 9.0), 0));
+    }
+
+    /// Taper deux chiffres dans « à » sous une borne « de » plus grande : le
+    /// texte tapé reste en place pendant la frappe (pas d'échange sous le
+    /// curseur, qui donnait « 6960 »), et le modèle reçoit la paire ordonnée.
+    #[test]
+    fn taper_sous_une_borne_plus_grande_n_echange_pas_pendant_la_frappe() {
+        let context = contexte();
+        let mut plages = vec![(660.0, 700.0)];
+        let id = egui::Id::new("frappe");
+        let peindre = |plages: &mut Vec<(f64, f64)>, events: Vec<egui::Event>| {
+            image(&context, events, |ui| {
+                range_rows(ui, id, plages, None);
+            })
+        };
+        peindre(&mut plages, vec![]);
+        let formes = peindre(&mut plages, vec![]);
+        let champ = texte_exact(&textes(&formes), "700").centre;
+        cliquer(&context, champ, egui::PointerButton::Primary, |ui| {
+            range_rows(ui, id, &mut plages, None);
+        });
+        peindre(&mut plages, vec![egui::Event::Text("9".into())]);
+        let formes = peindre(&mut plages, vec![egui::Event::Text("9".into())]);
+        let affiches: Vec<String> = textes(&formes).into_iter().map(|t| t.texte).collect();
+        assert!(affiches.contains(&"660".to_string()), "{affiches:?}");
+        assert!(affiches.contains(&"99".to_string()), "{affiches:?}");
+        assert_eq!(plages[0], (99.0, 660.0));
     }
 
     #[test]
@@ -1040,7 +1185,7 @@ mod tests {
             form.setup.baseline.shape = shape;
             image(&context, vec![], |ui| {
                 super::super::form::form(ui, "constante", |rows| {
-                    super::baseline_form(rows, egui::Id::new("constante"), &mut form);
+                    super::baseline_form(rows, egui::Id::new("constante"), &mut form, None);
                 });
             });
             assert_eq!(form.setup.baseline.points, points);
