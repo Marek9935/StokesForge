@@ -1721,18 +1721,13 @@ fn series_label_of(tree: &Tree, column: NodeId) -> String {
     )
 }
 
-/// La colonne annexe `y` avec le X le plus proche à sa gauche dans sa feuille.
+/// La colonne annexe `y` avec le X le plus proche à sa gauche dans sa feuille
+/// (la règle d'appariement de `stokesforge_core::compose::x_for`).
 pub fn aux_for(tree: &Tree, y: NodeId) -> AuxRef {
-    let x = tree.node(y).and_then(|n| n.parent()).and_then(|sheet| {
-        let columns = tree.children(sheet).ok()?;
-        let at = columns.iter().position(|c| *c == y)?;
-        columns[..at].iter().rev().copied().find(|c| {
-            tree.node(*c)
-                .and_then(|n| n.as_column())
-                .is_some_and(|col| col.meta().role == stokesforge_core::ColumnRole::X)
-        })
-    });
-    AuxRef { x, y }
+    AuxRef {
+        x: stokesforge_core::compose::x_for(tree, y),
+        y,
+    }
 }
 
 /// La formule d'un modèle, en Typst, pour la fenêtre d'ajustement (#204). Les

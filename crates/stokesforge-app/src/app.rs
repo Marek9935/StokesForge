@@ -1391,7 +1391,8 @@ impl StokesForgeApp {
                     let target = self
                         .read_graph_view(graph, selected_manager_target)
                         .flatten()?;
-                    let previous = crate::state::current_plot_spec(self.state.tree(), graph)?;
+                    let previous =
+                        stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)?;
                     Some((graph, target, previous))
                 })
                 .collect()
@@ -1464,7 +1465,9 @@ impl StokesForgeApp {
         }
         if self.state.revision() != revision_before {
             for (graph, target, previous) in history_selections {
-                if let Some(next) = crate::state::current_plot_spec(self.state.tree(), graph) {
+                if let Some(next) =
+                    stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
+                {
                     let target = crate::object_manager::selection_after_history(
                         &previous,
                         &next,
@@ -1522,7 +1525,7 @@ impl StokesForgeApp {
         graph: NodeId,
         removed: crate::object_manager::VisibilityTarget,
     ) {
-        if let Some(spec) = crate::state::current_plot_spec(self.state.tree(), graph) {
+        if let Some(spec) = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph) {
             self.with_graph_view(graph, |view| {
                 let next = crate::object_manager::selection_after_remove(
                     selected_manager_target(view),
@@ -2115,12 +2118,12 @@ mod tests {
 
     fn nom_selectionne(app: &StokesForgeApp, graph: NodeId) -> Option<String> {
         let rank = app.selected_series(graph)?;
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph)?;
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph)?;
         Some(spec.panels[rank.panel].series[rank.index].name.clone())
     }
 
     fn selectionner(app: &mut StokesForgeApp, graph: NodeId, index: usize) {
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| {
             view.select_series(Some(stokesforge_plot::SeriesRef::new(0, index)), &spec);
         });
@@ -2140,7 +2143,8 @@ mod tests {
             let mut app = StokesForgeApp::new(state);
             selectionner(&mut app, graph, selected);
             app.dispatch_actions(&context, vec![remove(graph)]);
-            let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+            let spec =
+                stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
             assert_eq!(spec.panels[0].series.len(), 2, "groupe et séries supprimés");
             assert_eq!(
                 nom_selectionne(&app, graph).as_deref(),
@@ -2166,7 +2170,7 @@ mod tests {
                 up: false,
             }],
         );
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         let names: Vec<&str> = spec.panels[0]
             .series
             .iter()

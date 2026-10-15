@@ -169,7 +169,7 @@ avec toute session, y compris une session sans interface.
 | `remove(handle)` | supprime le nœud et ses descendants, sauf la racine |
 | `set_values(handle, values)` | remplace les valeurs et la longueur de cette seule colonne |
 | `set_column_meta(handle, **metadata)` | modifie les seuls champs nommés, en préservant la provenance |
-| `plot(y, x=None, *, graph=None, name=None, parent=None, **options)` | crée un graphe natif ou ajoute une série à un graphe ; poignée |
+| `plot(y, x=None, *, graph=None, name=None, parent=None, **options)` | crée un graphe natif ou ajoute une série à un graphe ; poignée ; sans `x`, la colonne X à gauche par rôle, sinon l'indice de ligne |
 | `add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis="left", line_color="", line_width=1.5, fill_color="")` | ajoute un objet graphique en coordonnées de données ; rang dans le panneau |
 | `remove_shape(graph, index, *, panel=(0, 0))` | retire l'objet graphique de ce rang |
 | `undo()` | termine puis annule le groupe courant, ou annule le dernier groupe déjà terminé ; `False` si l'historique est vide |
@@ -279,7 +279,12 @@ cellules exactes, undo/redo, refus, époques, interruption et imports).
 ### Graphes natifs (#68)
 
 `pyst.plot(y, x)` référence les colonnes du modèle et crée un graphe à la
-racine ; sans `x`, l'abscisse est l'indice de ligne. `parent` accepte un
+racine. Sans `x`, chaque `y` prend la colonne de rôle X la plus proche à sa
+gauche dans sa feuille (X2 pour un `y` de rôle Y2), comme la fenêtre
+(`stokesforge_core::compose::x_for`, #257) ; l'abscisse n'est l'indice de ligne
+que si la feuille n'a pas de colonne X à gauche. **Changement de #257** : avant,
+`plot(y)` sans `x=` donnait toujours l'indice de ligne, même quand une colonne
+est de rôle X. Un `x=` explicite garde la main, rôle ou non. `parent` accepte un
 dossier, `name` choisit le nom (automatique `GraphN` sinon). `graph=g` ajoute
 une série au premier panneau d'un graphe existant et conserve ses autres
 panneaux, séries et réglages ; `name` et `parent` sont alors refusés. Un appel
@@ -339,11 +344,12 @@ sont refusés sans mutation. Contrat : `tests/script.rs` et `tests/graphs.rs`.
 
 `pyst.plot([y1, y2, …], x)` crée **un groupe**, comme les séries ajoutées
 ensemble depuis l'interface (`PanelSpec::push_series_batch`) ; une liste d'une
-seule colonne n'en crée pas. `x` est `None` (indice de ligne), une colonne
-partagée ou une liste de même longueur que `y`. `label` est une chaîne pour
+seule colonne n'en crée pas. `x` est `None` (la colonne X à gauche de chaque `y`
+par son rôle, sinon l'indice de ligne), une colonne partagée ou une liste de
+même longueur que `y`. `label` est une chaîne pour
 une série, une liste (un nom par série) pour un lot ; `group_name` nomme le
 groupe (refusé pour une série seule) ; `x_error`/`y_error` ne servent qu'à une
-série seule. Les couleurs automatiques suivent la palette, série après série.
+série seule. Les couleurs automatiques suivent la palette, série après série (`SeriesSpec::from_palette`, au rang de la série dans le panneau).
 
 | Appel | Effet |
 |---|---|

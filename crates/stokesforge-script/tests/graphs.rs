@@ -614,3 +614,53 @@ pyst.apply_gradient(g, gid, 'blue-red')
     assert_eq!(after.revision, before.revision);
     assert_eq!(after.history, before.history);
 }
+
+/// #257 : `plot(y)` sans `x=` cherche la colonne X par rôle (la plus proche à
+/// gauche de y, comme la fenêtre) ; sans colonne X à gauche, l'abscisse reste
+/// le numéro de ligne ; `x=` explicite garde la main.
+#[test]
+fn plot_sans_x_prend_la_colonne_x_a_gauche_par_role() {
+    // Aucune colonne de rôle X : numéro de ligne, comme avant.
+    let b = banc();
+    run(&b, &format!("{HANDLES}g = pyst.plot(y, name='Graph1')"));
+    assert_eq!(graph_spec(&b).panels[0].series[0].x, None);
+
+    // X est de rôle X et à gauche de Y : Y s'y apparie sans que le script le dise.
+    let b = banc();
+    run(
+        &b,
+        &format!("{HANDLES}pyst.set_column_meta(x, role='x')\ng = pyst.plot(y, name='Graph1')"),
+    );
+    let series = &graph_spec(&b).panels[0].series;
+    assert_eq!((series[0].x, series[0].y), (Some(b.x), b.y));
+
+    // Une colonne X située à droite de y ne compte pas : numéro de ligne.
+    let b = banc();
+    run(
+        &b,
+        &format!("{HANDLES}pyst.set_column_meta(y, role='x')\ng = pyst.plot(x, name='Graph1')"),
+    );
+    assert_eq!(graph_spec(&b).panels[0].series[0].x, None);
+
+    // `x=` explicite l'emporte sur le rôle, et la palette suit le rang.
+    let b = banc();
+    run(
+        &b,
+        &format!(
+            "{HANDLES}pyst.set_column_meta(x, role='x')\n\
+             g = pyst.plot(y, y, name='Graph1')\n\
+             pyst.plot(y, graph=g)"
+        ),
+    );
+    let panel = &graph_spec(&b).panels[0];
+    assert_eq!(panel.series[0].x, Some(b.y), "x= explicite");
+    assert_eq!(panel.series[1].x, Some(b.x), "rôle X, y ajouté à un graphe");
+    assert_eq!(
+        panel.series[1].line.color,
+        stokesforge_plot::palette_color(1)
+    );
+    assert_eq!(
+        panel.series[1].symbol.color,
+        stokesforge_plot::palette_color(1)
+    );
+}

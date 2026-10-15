@@ -364,7 +364,7 @@ impl StokesForgeApp {
             })
             .unwrap_or_default();
         let graph_target = graph.and_then(|graph| {
-            let spec = crate::state::current_plot_spec(self.state.tree(), graph)?;
+            let spec = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)?;
             self.read_graph_view(graph, |view| {
                 let sources = selected_manager_target(view)
                     .map(|target| super::object_manager_ui::analysis_sources(&spec, target))
@@ -398,7 +398,7 @@ impl StokesForgeApp {
         object_requests: &mut Vec<ObjectManagerRequest>,
     ) {
         ui.menu_button(tr!("menu-graph"), |ui| {
-            let spec = crate::state::current_plot_spec(self.state.tree(), graph);
+            let spec = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph);
             let shown = crate::object_manager::Shown::from(self.state.object_manager_settings());
             let target = self
                 .read_graph_view(graph, selected_manager_target)
@@ -1242,7 +1242,7 @@ mod tests {
     fn le_menu_analyse_ouvre_la_serie_du_graphe_actif() {
         let (_session, mut app, graph) = banc();
         let tab = Some(Tab::Graph(graph));
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| {
             view.select_series(Some(stokesforge_plot::SeriesRef::new(0, 0)), &spec)
         });
@@ -1678,7 +1678,7 @@ mod tests {
     fn copier_le_graphique_est_dans_le_menu_graphique() {
         let (session, mut app, graph) = banc();
         let tab = Some(Tab::Graph(graph));
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         // Une série sélectionnée ne grise pas l'entrée : Ctrl+C se tait alors,
         // le menu non.
         app.with_graph_view(graph, |view| {
@@ -1725,7 +1725,7 @@ mod tests {
         );
 
         let target = AnnotationRef { panel: 0, index: 0 };
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| view.select_annotation(Some(target), &spec));
         let (ctx, menu) = ouvre_chemin(
             &mut app,
@@ -1766,7 +1766,7 @@ mod tests {
         );
 
         let series = stokesforge_plot::SeriesRef::new(0, 0);
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| view.select_series(Some(series), &spec));
         let (ctx, menu) = ouvre_le_contenu(&mut app);
         let properties = active(&menu, &tr!("action-properties"));

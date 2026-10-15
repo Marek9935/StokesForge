@@ -323,7 +323,7 @@ pub(super) fn graph_view_contents(
     // la figure, jamais dans `stokesforge-render` : l'export SVG/PNG/PDF d'un
     // graphe sans fond reste transparent (invariant 5, lu dans l'autre sens ;
     // test `un_fond_sans_couleur_donne_un_png_transparent`).
-    let background = crate::state::current_plot_spec(&snapshot.tree, graph_id)
+    let background = stokesforge_core::compose::current_plot_spec(&snapshot.tree, graph_id)
         .map(|spec| spec.background)
         .unwrap_or_default();
     if let Some(backdrop) = display_backdrop(&background) {
@@ -332,16 +332,22 @@ pub(super) fn graph_view_contents(
     match view.paint_scaled(&figure_ui, rect, snapshot, graph_id) {
         Ok(_) => {
             publish_axis_bounds(ui.ctx(), view, graph_id);
-            if let Some(spec) = crate::state::current_plot_spec(&snapshot.tree, graph_id) {
+            if let Some(spec) =
+                stokesforge_core::compose::current_plot_spec(&snapshot.tree, graph_id)
+            {
                 layer_badges(&figure_ui, view, &spec, graph_id, outer);
             }
             graph_context_menu(ui, view, &snapshot.tree, graph_id, actions);
             annotation_interactions(ui, view, &snapshot.tree, graph_id, actions);
-            if let Some(spec) = crate::state::current_plot_spec(&snapshot.tree, graph_id) {
+            if let Some(spec) =
+                stokesforge_core::compose::current_plot_spec(&snapshot.tree, graph_id)
+            {
                 calculation_handles(ui, view, &snapshot.tree, graph_id, &spec, actions);
             }
             if !keyboard_focus_outside_grid(ui.ctx()) {
-                if let Some(spec) = crate::state::current_plot_spec(&snapshot.tree, graph_id) {
+                if let Some(spec) =
+                    stokesforge_core::compose::current_plot_spec(&snapshot.tree, graph_id)
+                {
                     if let Some(group) = view.selected_group() {
                         // Un groupe sélectionné (#197) : mêmes gestes qu'au
                         // clavier de l'Object Manager ; le renommage se fait
@@ -570,7 +576,7 @@ fn graph_context_menu(
     };
     let hit_id = response.id.with("context_hit");
     if response.secondary_clicked() {
-        let spec = crate::state::current_plot_spec(tree, graph_id);
+        let spec = stokesforge_core::compose::current_plot_spec(tree, graph_id);
         let pos = response.interact_pointer_pos();
         let component = pos.and_then(|pos| view.component_at(pos));
         let annotation = pos.and_then(|pos| view.annotation_at(pos));
@@ -636,7 +642,7 @@ fn graph_context_menu(
                     point: None,
                 });
         ui.weak(hit.target.label());
-        let spec = crate::state::current_plot_spec(tree, graph_id);
+        let spec = stokesforge_core::compose::current_plot_spec(tree, graph_id);
         match (hit.object, hit.legend_entry, spec.as_ref()) {
             (Some(object), _, Some(spec)) => object_node_menu(
                 ui,
@@ -658,7 +664,7 @@ fn graph_context_menu(
         apply_object_request(&ctx, view, tree, graph_id, request, actions);
     }
     if let Some((pos, kind)) = insert {
-        if let Some(spec) = crate::state::current_plot_spec(tree, graph_id) {
+        if let Some(spec) = stokesforge_core::compose::current_plot_spec(tree, graph_id) {
             view.insert_shape_at(pos, kind, &spec);
         }
     }
@@ -761,7 +767,7 @@ fn background_menu(
                 .on_hover_text(tr!("action-copy-graph", "hint"))
                 .clicked()
             {
-                if let Some(spec) = crate::state::current_plot_spec(tree, graph_id) {
+                if let Some(spec) = stokesforge_core::compose::current_plot_spec(tree, graph_id) {
                     actions.push(Action::CopyGraphFigure {
                         spec: Box::new(view.framed_spec(&spec)),
                     });
@@ -875,13 +881,13 @@ fn annotation_interactions(
                 });
             }
             stokesforge_render_egui::GraphEvent::OpenShapeProperties(shape) => {
-                if let Some(spec) = crate::state::current_plot_spec(tree, graph) {
+                if let Some(spec) = stokesforge_core::compose::current_plot_spec(tree, graph) {
                     open_shape_properties(ui.ctx(), view, &spec, shape);
                 }
             }
             stokesforge_render_egui::GraphEvent::TextResized { target, width } => {
-                if let Some(mut font) =
-                    crate::state::current_plot_spec(tree, graph).and_then(|spec| target.font(&spec))
+                if let Some(mut font) = stokesforge_core::compose::current_plot_spec(tree, graph)
+                    .and_then(|spec| target.font(&spec))
                 {
                     font.width = Some(width);
                     actions.push(Action::SetTextFont {
@@ -949,7 +955,7 @@ pub(super) fn request_graph_export(
     graph: NodeId,
     actions: &mut Vec<Action>,
 ) {
-    let Some(spec) = crate::state::current_plot_spec(tree, graph) else {
+    let Some(spec) = stokesforge_core::compose::current_plot_spec(tree, graph) else {
         return;
     };
     let spec = match view {
@@ -1334,7 +1340,8 @@ pub(super) mod tests {
         for context_menu in [false, true] {
             let (session, graph) = graphe();
             let mut state = AppState::new(session.handle(), "test.stf".into()).unwrap();
-            let mut spec = crate::state::current_plot_spec(state.tree(), graph).unwrap();
+            let mut spec =
+                stokesforge_core::compose::current_plot_spec(state.tree(), graph).unwrap();
             spec.panels.push(PanelSpec::at(0, 1));
             state.dispatch(Action::SetPlotSpec { graph, spec });
             let context = egui::Context::default();
@@ -1483,7 +1490,7 @@ pub(super) mod tests {
     fn le_calque_actif_suit_le_repere_et_cible_le_depot() {
         let (session, graph) = graphe();
         let mut state = AppState::new(session.handle(), "test.stf".into()).unwrap();
-        let mut spec = crate::state::current_plot_spec(state.tree(), graph).unwrap();
+        let mut spec = stokesforge_core::compose::current_plot_spec(state.tree(), graph).unwrap();
         spec.panels.push(PanelSpec::at(0, 1));
         state.dispatch(Action::SetPlotSpec { graph, spec });
         let context = egui::Context::default();
@@ -1505,7 +1512,7 @@ pub(super) mod tests {
             });
             output.textures_delta.clear();
         };
-        let spec = crate::state::current_plot_spec(state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(state.tree(), graph).unwrap();
         paint(&mut view, Vec::new());
         assert_eq!(view.active_panel(&spec), 0, "graphe neuf : le premier");
 
@@ -1771,7 +1778,7 @@ pub(super) mod tests {
         use super::super::test_support::{contexte, image_de};
         let (session, graph) = graphe();
         let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
-        let spec = crate::state::current_plot_spec(state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(state.tree(), graph).unwrap();
         let series = stokesforge_plot::SeriesRef::new(0, 0);
         for on_curve in [true, false] {
             let context = contexte();

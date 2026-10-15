@@ -572,7 +572,7 @@ pub fn object_tree_with_selection(
     show_objects: bool,
 ) -> Option<ObjectTree> {
     let node = tree.node(graph)?;
-    let spec = crate::state::current_plot_spec(tree, graph)?;
+    let spec = stokesforge_core::compose::current_plot_spec(tree, graph)?;
     Some(object_tree_of_spec(
         tree,
         graph,

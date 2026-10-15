@@ -100,7 +100,8 @@ impl StokesForgeApp {
         let Some(graph) = active_graph(active_tab_kind(active_tab)) else {
             return TextFormatState::default();
         };
-        let Some(spec) = crate::state::current_plot_spec(self.state.tree(), graph) else {
+        let Some(spec) = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
+        else {
             return TextFormatState::default();
         };
         let state = self
@@ -207,7 +208,7 @@ impl StokesForgeApp {
         let target = self
             .read_graph_view(graph, GraphView::selected_shape)
             .flatten()?;
-        let shape = crate::state::current_plot_spec(self.state.tree(), graph)
+        let shape = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
             .and_then(|spec| target.get(&spec).cloned())?;
         Some((graph, target, shape))
     }
@@ -219,7 +220,7 @@ impl StokesForgeApp {
     ) -> Option<crate::toolbar::ObjectFormatState> {
         let graph = active_graph(active_tab_kind(active_tab))?;
         if let Some(target) = self.selected_series(graph) {
-            let spec = crate::state::current_plot_spec(self.state.tree(), graph)?;
+            let spec = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)?;
             let series = spec.series_at(target)?;
             return Some(crate::toolbar::ObjectFormatState {
                 closed: false,
@@ -247,7 +248,9 @@ impl StokesForgeApp {
     ) {
         if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
             if let Some(target) = self.selected_series(graph) {
-                if let Some(mut spec) = crate::state::current_plot_spec(self.state.tree(), graph) {
+                if let Some(mut spec) =
+                    stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
+                {
                     if spec
                         .series_at_mut(target)
                         .is_some_and(|series| format.apply_series(series))
@@ -362,7 +365,7 @@ impl StokesForgeApp {
             }
             if let Some(target) = selected_annotation {
                 let Some(mut annotation) =
-                    crate::state::current_plot_spec(self.state.tree(), graph)
+                    stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
                         .and_then(|spec| target.get(&spec).cloned())
                 else {
                     return true;
@@ -388,7 +391,7 @@ impl StokesForgeApp {
             }
             if let Some(target) = selected_annotation {
                 let Some(mut annotation) =
-                    crate::state::current_plot_spec(self.state.tree(), graph)
+                    stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
                         .and_then(|spec| target.get(&spec).cloned())
                 else {
                     return true;
@@ -410,8 +413,9 @@ impl StokesForgeApp {
         if let (TextFormat::Bold | TextFormat::Italic, Some(target), None, false) =
             (format, zone, &title_editing, annotation_editing)
         {
-            if let Some(text) = crate::state::current_plot_spec(self.state.tree(), graph)
-                .and_then(|spec| target.text(&spec))
+            if let Some(text) =
+                stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
+                    .and_then(|spec| target.text(&spec))
             {
                 let length = text.chars().count();
                 actions.push(Action::SetTextContent {
@@ -458,8 +462,9 @@ impl StokesForgeApp {
         actions: &mut Vec<Action>,
         edit: impl FnOnce(&mut stokesforge_plot::TextFont),
     ) -> bool {
-        if let Some(mut font) = crate::state::current_plot_spec(self.state.tree(), graph)
-            .and_then(|spec| target.font(&spec))
+        if let Some(mut font) =
+            stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
+                .and_then(|spec| target.font(&spec))
         {
             edit(&mut font);
             actions.push(Action::SetTextFont {
@@ -503,7 +508,7 @@ impl StokesForgeApp {
                     return;
                 };
                 let Some(mut annotation) =
-                    crate::state::current_plot_spec(self.state.tree(), graph)
+                    stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
                         .and_then(|spec| target.get(&spec).cloned())
                 else {
                     return;
@@ -668,7 +673,7 @@ mod tests {
             },
         });
         let mut app = StokesForgeApp::new(state);
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.open_tab(Tab::Graph(graph));
         app.with_graph_view(graph, |view| {
             view.select_text(Some(TextTarget::Title), &spec)
@@ -766,7 +771,8 @@ mod tests {
                 side: stokesforge_plot::AxisSide::Bottom,
             },
         ] {
-            let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+            let spec =
+                stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
             app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
             paint(&mut app, &ctx, Vec::new());
             paint(&mut app, &ctx, Vec::new());
@@ -781,7 +787,8 @@ mod tests {
             click_at(&ctx, red, egui::Modifiers::NONE, |ctx, events| {
                 paint(&mut app, ctx, events)
             });
-            let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+            let spec =
+                stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
             assert_eq!(
                 target.color(&spec).as_deref(),
                 Some("#8b1a1a"),
@@ -835,7 +842,8 @@ mod tests {
                     stokesforge_render_egui::LABEL_SIZE,
                 ),
             ] {
-                let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+                let spec =
+                    stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
                 app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
                 let inherited = app.text_format_state(&ctx, Some(Tab::Graph(graph)));
                 assert_eq!(inherited.size, Some(size));
@@ -888,7 +896,7 @@ mod tests {
     fn la_barre_lit_le_brouillon_et_auto_retablit_le_corps_du_texte_libre() {
         let (session, mut app, graph, ctx) = setup();
         let target = AnnotationRef { panel: 0, index: 0 };
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         let mut draft = target.get(&spec).unwrap().clone();
         draft.font = "Libertinus Sans".into();
         draft.size = 36.0;
@@ -944,7 +952,7 @@ mod tests {
     fn l_alignement_se_pose_sur_la_boite_ou_la_zone() {
         use stokesforge_plot::TextAlign;
         let (session, mut app, graph, ctx) = setup();
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| view.select_annotation(Some(TEXTE), &spec));
         match formate(&mut app, &ctx, graph, TextFormat::Align(TextAlign::Right)).as_slice() {
             [Action::SetAnnotation { annotation, .. }] => {
@@ -979,7 +987,7 @@ mod tests {
     #[test]
     fn gras_et_italique_enveloppent_tout_un_titre_selectionne() {
         let (session, mut app, graph, ctx) = setup();
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| {
             view.select_text(Some(TextTarget::Title), &spec)
         });
@@ -1016,7 +1024,7 @@ mod tests {
             target: TextTarget::Title,
             text: "Titre #text(size: 28pt, font: \"Fira Sans\", fill: red)[local]".into(),
         });
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| {
             view.select_text(Some(TextTarget::Title), &spec)
         });
@@ -1080,7 +1088,7 @@ mod tests {
         );
         app.state.dispatch(Action::Undo);
         assert_eq!(
-            crate::state::current_plot_spec(app.state.tree(), graph).unwrap(),
+            stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap(),
             spec
         );
         app.reattach_tab(Tab::Graph(graph));
@@ -1185,7 +1193,7 @@ mod tests {
     #[test]
     fn gras_italique_couleur_et_corps_d_un_texte_libre_selectionne() {
         let (session, mut app, graph, ctx) = setup();
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| view.select_annotation(Some(TEXTE), &spec));
         assert_eq!(
             app.format_target(&ctx, Some(Tab::Graph(graph))),
@@ -1252,7 +1260,7 @@ mod tests {
             panel: 0,
             side: AxisSide::Bottom,
         };
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| view.select_text(Some(target), &spec));
         assert_eq!(
             formate(&mut app, &ctx, graph, TextFormat::Color("#8b1a1a".into())),
@@ -1300,7 +1308,7 @@ mod tests {
 
         // Titre sélectionné.
         let (session, mut app, graph, ctx) = setup();
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         app.with_graph_view(graph, |view| {
             view.select_text(Some(TextTarget::Title), &spec)
         });

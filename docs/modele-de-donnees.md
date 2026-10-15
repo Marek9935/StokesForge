@@ -161,7 +161,7 @@ Types : `Numeric`, `DateTime` (timestamp POSIX en secondes, affiché et édité 
 (défaut), `X2`, `Y2`, `Z`, `XError`, `YError`, `Label`, aucun. `X2`/`Y2` (#167)
 alimentent un **second calque superposé** (`PanelSpec::overlay`,
 `OverlaySpec { x_top, y_right }`) : chaque Y2 s'apparie au X2 le plus proche à
-sa gauche, comme Y avec X (`state::series_from_columns`, `PlannedSeries`).
+sa gauche, comme Y avec X (`stokesforge_core::compose::series_from_columns`, `PlannedSeries`).
 Un calque identifie par son **indice** dans `PlotSpec::panels` ; `(row, column)`
 ne sert qu'à la grille, plusieurs calques pouvant partager une case.
 
@@ -312,10 +312,10 @@ renommer ou déplacer une colonne ne casse rien.
 
 ## `resolve` — le seul point de contact
 
-`stokesforge_core::resolve` est le **seul** module du crate à connaître
-`stokesforge-plot`. Il traduit un spec contre l'arbre courant : `NodeId` → colonne
-→ données prêtes à tracer. Tout le reste du crate ignore jusqu'à l'existence
-de `PlotSpec`.
+`stokesforge_core::resolve` traduit un spec contre l'arbre courant : `NodeId` →
+colonne → données prêtes à tracer. Seul avec `compose` (ci-dessous), il connaît
+`stokesforge-plot` ; tout le reste du crate ignore jusqu'à l'existence de
+`PlotSpec`.
 
 Deux propriétés à connaître avant d'y toucher :
 
@@ -332,6 +332,31 @@ Deux propriétés à connaître avant d'y toucher :
   marquée (invariant 10).
 
 **À lire** : `stokesforge-core/src/resolve.rs` (tête).
+
+## `compose` — fabriquer les séries d'un graphe (#257)
+
+`stokesforge_core::compose` est le sens inverse de `resolve` : il lit le `Tree`
+et fabrique des `SeriesSpec`, ou lit un `PlotSpec`. Une seule règle pour
+l'interface (`AppState::plot_columns`, `add_series_to_graph`, `add_rows_to_graph`,
+`plot_rows`, la fenêtre d'analyse), `pyst.plot` et l'annexe d'une analyse :
+
+- **appariement** (`series_from_columns`, `x_for`) : chaque Y est apparié au X
+  le plus proche à sa **gauche** dans la feuille, X non sélectionné compris ; un
+  Y2 prend de même un X2 et va au second calque (`PlannedSeries::secondary`).
+  Sans X à gauche, l'abscisse reste implicite (numéro de ligne) ;
+- **palette** : toute série passe par `SeriesSpec::from_palette(y, rang)` (trait
+  et marqueurs), le rang étant celui de la série dans son calque ; jamais
+  `palette_color` écrit à la main ;
+- **calques** : `overlay_base` (le calque ordinaire que recouvre un calque
+  superposé), `second_layer_of` (le calque X2/Y2, `OverlaySpec::SECOND_AXES`) ;
+  les calques se nomment dans `stokesforge-plot` (`OverlaySpec::SECOND_AXES`,
+  `TOP_X`, `new`) ;
+- **lignes** (`row_series`, `x_prime_columns`, `spec_has_x`) : le nom de la série
+  est un paramètre (une phrase d'interface que ce crate ne sait pas écrire).
+
+Rien n'y mute : l'appelant envoie le résultat par une commande annulable
+(`AddGraph`, `SetPlotSpec`). Retirer une série du panneau passe par
+`PanelSpec::remove_series`, comme `remove_group` pour un groupe.
 
 ## Ce qu'il faut savoir avant de modifier
 

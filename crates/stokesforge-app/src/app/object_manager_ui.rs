@@ -1451,7 +1451,8 @@ impl StokesForgeApp {
             self.read_graph_view(graph, selected_manager_target)
                 .flatten()
         });
-        let spec = graph.and_then(|graph| crate::state::current_plot_spec(&tree, graph));
+        let spec =
+            graph.and_then(|graph| stokesforge_core::compose::current_plot_spec(&tree, graph));
         let model = graph.and_then(|graph| {
             crate::object_manager::object_tree_with_selection(
                 &tree,
@@ -1544,7 +1545,7 @@ pub(super) fn apply_object_request(
     request: ObjectManagerRequest,
     actions: &mut Vec<Action>,
 ) {
-    let Some(spec) = crate::state::current_plot_spec(tree, graph) else {
+    let Some(spec) = stokesforge_core::compose::current_plot_spec(tree, graph) else {
         return;
     };
     match request {
@@ -1617,7 +1618,7 @@ mod tests {
         );
         assert!(
             matches!(actions.as_slice(), [Action::OpenGraphAnalysis { graph: g, series, spec: s, .. }]
-            if *g == graph && series == &[SeriesRef::new(0, 0)] && **s == view.framed_spec(&crate::state::current_plot_spec(project.tree(), graph).unwrap()))
+            if *g == graph && series == &[SeriesRef::new(0, 0)] && **s == view.framed_spec(&stokesforge_core::compose::current_plot_spec(project.tree(), graph).unwrap()))
         );
         spec.panels.get_mut(0).unwrap().series[2].row = Some(0);
         assert!(

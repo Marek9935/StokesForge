@@ -13,7 +13,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use stokesforge_commands::Command;
-use stokesforge_core::{NodeId, NodeKind};
+use stokesforge_core::{compose, NodeId, NodeKind};
 use stokesforge_plot::{
     AxisScale, AxisSpec, BinCount, LineStyle, PlotSpec, PlotType, SeriesAxis, SeriesSpec,
     SymbolShape,
@@ -59,7 +59,9 @@ pub(crate) fn invalid(message: impl Into<String>) -> PyErr {
 
 /// Crée un graphe natif et rend sa poignée ; graph= ajoute au premier panneau.
 /// y est une colonne, ou une liste d'au moins deux colonnes qui forment un
-/// groupe de séries (#196) ; x=None utilise l'indice de ligne, x peut être une
+/// groupe de séries (#196) ; sans x, chaque y prend la colonne de rôle X la plus
+/// proche à sa gauche dans sa feuille (X2 pour un y de rôle Y2), comme la
+/// fenêtre, et l'indice de ligne s'il n'y en a pas (#257) ; x peut être une
 /// colonne partagée ou une liste de même longueur que y. Avec plusieurs
 /// séries, label est une liste (un nom par série) et group_name nomme le
 /// groupe ; x_error/y_error ne servent qu'à une série seule. Options : plot_type
@@ -361,13 +363,26 @@ fn build_spec(
         .map(|(rank, member)| {
             let mut series = request.series.clone();
             series.y = member.y;
-            series.x = member.x;
+            // `x=` explicite garde la main ; sinon la colonne X la plus proche
+            // à gauche par rôle, comme la fenêtre, et le numéro de ligne si la
+            // feuille n'en a pas (`compose::x_for`, #257).
+            series.x = member
+                .x
+                .or_else(|| compose::x_for(&snapshot.tree, member.y));
             series.name.clone_from(&member.label);
-            let color = request.color.clone().unwrap_or_else(|| {
-                stokesforge_plot::palette_color(panel.series.len() + rank).into()
-            });
-            series.line.color.clone_from(&color);
-            series.symbol.color = color;
+            // Sans `color=`, la couleur de palette du rang de la série dans le
+            // panneau (`SeriesSpec::from_palette`, trait et marqueurs).
+            let palette = SeriesSpec::from_palette(member.y, panel.series.len() + rank);
+            match &request.color {
+                Some(color) => {
+                    series.line.color.clone_from(color);
+                    series.symbol.color.clone_from(color);
+                }
+                None => {
+                    series.line.color = palette.line.color;
+                    series.symbol.color = palette.symbol.color;
+                }
+            }
             series
         })
         .collect();

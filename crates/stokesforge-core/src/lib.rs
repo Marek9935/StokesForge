@@ -53,6 +53,7 @@
 pub mod analysis_store;
 pub mod calc;
 pub mod column;
+pub mod compose;
 pub mod copy;
 pub mod datetime;
 pub mod error;
@@ -76,6 +77,7 @@ pub use column::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, ImportSource, MetaLine,
     MixedCell, NumericStatus, ValueBlock, ValuesDelta,
 };
+pub use compose::PlannedSeries;
 pub use copy::NodeCopy;
 pub use error::{CoreError, CoreResult};
 pub use formula::{

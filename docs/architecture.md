@@ -55,7 +55,7 @@ dépendances.
 | `stokesforge-id` | `NodeId`, et rien d'autre | [modèle](modele-de-donnees.md) |
 | `stokesforge-analysis` | traitement mathématique pur (#181) : lignes de base, correction par référence, intégrales, ajustements, pics, déconvolution ; `f64` où `NaN` dit « vide », résultats à clés stables ; ni UI, ni Python, ni autre crate du workspace | [modèle](modele-de-donnees.md) |
 | `stokesforge-plot` | `PlotSpec` : la description d'un graphe, neutre vis-à-vis du renderer | [modèle](modele-de-donnees.md) |
-| `stokesforge-core` | `Project` / `Tree` / `Node` / `Column`, plus `resolve` | [modèle](modele-de-donnees.md) |
+| `stokesforge-core` | `Project` / `Tree` / `Node` / `Column`, plus `resolve` (spec → données) et `compose` (colonnes → séries d'un graphe, #257 : appariement X/Y, palette par rang, calques ; lecture du `PlotSpec` ; aucune phrase, aucune mutation) | [modèle](modele-de-donnees.md) |
 | `stokesforge-commands` | les commandes, la pile d'undo hybride, les macros | [commandes](commandes-et-historique.md) |
 | `stokesforge-persistence` | `save`/`load`, schéma de transport, format `.stf` | [persistance](persistance.md) |
 | `stokesforge-session` | l'acteur, les `Snapshot`, la `revision` | [session](session.md) |

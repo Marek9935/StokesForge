@@ -13,7 +13,9 @@ use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{Node, NodeId, NodeKind, SeriesRef};
 use stokesforge_plot::PlotType;
 
-use super::{current_plot_spec, history_text, series_from_columns, Action, AppState};
+use stokesforge_core::compose::{current_plot_spec, series_from_columns};
+
+use super::{history_text, Action, AppState};
 use crate::analysis::{issue_message, AnalysisForm, Preset, RecentTarget};
 use crate::analysis_recent::{remember, RecentAnalysis};
 use crate::errors;

@@ -179,7 +179,12 @@ un `PlotSpec` par `AddGraph`, ou ajoute une série au premier panneau par
 `SetPlotSpec` — le premier calque, indice 0 de `PlotSpec::panels` (un calque
 s'identifie par son indice, jamais par `(row, column)`, #167). Réutiliser
 `stokesforge-plot` : palette, couleurs, axes et styles ;
-pas de dépendance de production à un moteur de rendu. Valider les poignées
+pas de dépendance de production à un moteur de rendu. Les règles de
+composition sont celles de l'interface, dans `stokesforge_core::compose`
+(#257) : sans `x=`, la colonne X de rôle X la plus proche à gauche de chaque
+`y` (`compose::x_for`), l'indice de ligne seulement sans X à gauche ; la
+couleur automatique est `SeriesSpec::from_palette(y, rang)`, jamais
+`palette_color` écrit à la main. Un `x=` explicite garde la main. Valider les poignées
 sur un seul instantané, puis de nouveau après acquisition de la macro.
 `add_shape` et `remove_shape` (#76) passent eux aussi par le contexte :
 valider le spec avant réservation puis le relire sous macro, même si l'objet

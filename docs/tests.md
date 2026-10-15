@@ -483,6 +483,23 @@ pour éprouver le chemin « texte externe », coller dans une **autre** session.
 `SetCellsPromoting` (stokesforge-commands) est inchangé : seul le bloc qu'on lui
 passe vient désormais de `from_texts`.
 
+## Composition des graphes (#257)
+
+| Mutant (ce qui est cassé) | Vu par |
+|---|---|
+| appariement au X le plus proche à **droite** (ou le premier à gauche) | `chaque_y_prend_le_x_le_plus_proche_a_sa_gauche_meme_non_selectionne`, `un_y2_s_apparie_a_x2_et_va_au_second_calque`, `x_for_suit_la_meme_regle_que_series_from_columns` (`stokesforge-core/src/compose.rs`) |
+| `x_for` ne distingue plus Y2 → X2 | `x_for_suit_la_meme_regle_que_series_from_columns` |
+| palette sans décalage de rang (`start_index`, séries « ligne », rang du panneau dans `pyst`) | `la_palette_suit_le_rang_avec_le_decalage_de_chaque_calque`, `les_series_ligne_prennent_la_palette_du_rang_et_le_nom_donne` ; `plusieurs_colonnes_forment_un_groupe_et_une_seule_non` (`stokesforge-script/tests/graphs.rs`) |
+| second calque confondu avec le calque des lignes, ou calque de base cherché parmi les superposés | `le_second_calque_est_celui_des_deux_axes_pas_celui_des_lignes`, `un_calque_superpose_recouvre_le_dernier_calque_ordinaire_de_sa_case` |
+| `spec_has_x` sans les séries « ligne » ; x' non fini accepté | `le_graphe_a_un_x_par_une_colonne_x_ou_une_serie_ligne`, `les_colonnes_x_prime_sont_celles_dont_la_valeur_est_finie` |
+| constructeur `OverlaySpec::new` inversé, `TOP_X` qui affiche aussi Y | `les_calques_nommes_disent_quels_axes_ils_affichent` (`stokesforge-plot/src/panel.rs`) |
+| `PanelSpec::remove_series` qui ne retire rien ou accepte un rang hors borne | `remove_series_retire_la_serie_designee_et_pas_une_autre` ; `object_manager_supprime_une_courbe_sans_toucher_aux_donnees` (`stokesforge-app/tests/shell.rs`) |
+| `pyst.plot(y)` sans `x=` qui garde l'indice de ligne malgré une colonne X à gauche | `plot_sans_x_prend_la_colonne_x_a_gauche_par_role` (`stokesforge-script/tests/graphs.rs`, feature `python`) |
+| `aux_for` qui perd le X apparié | `reference_candidates_exclude_the_processed_series_and_pair_their_x` (`stokesforge-app/tests/analysis.rs`) |
+
+Les tests de l'app (`plot_columns_*`, `add_layer_*`, `plot_rows_*`) gardent le
+câblage : `compose` rend les séries, l'app les envoie en une commande.
+
 ### Remplacement définitif d'une correction (#212)
 
 `commands/tests/calculations.rs` tient l'atomicité données/trace, undo/redo,

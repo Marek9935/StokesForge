@@ -176,8 +176,8 @@ pub(super) fn open_text_editor(
     graph: NodeId,
     target: TextTarget,
 ) {
-    let Some(original) =
-        crate::state::current_plot_spec(tree, graph).and_then(|spec| target.text(&spec))
+    let Some(original) = stokesforge_core::compose::current_plot_spec(tree, graph)
+        .and_then(|spec| target.text(&spec))
     else {
         return;
     };
@@ -202,7 +202,7 @@ pub(super) fn open_legend_entry_editor(
     panel: usize,
     series: usize,
 ) {
-    let Some(spec) = crate::state::current_plot_spec(tree, graph) else {
+    let Some(spec) = stokesforge_core::compose::current_plot_spec(tree, graph) else {
         return;
     };
     let address = stokesforge_plot::SeriesRef::new(panel, series);
@@ -229,7 +229,7 @@ pub(super) fn open_series_name_editor(
     graph: NodeId,
     series: stokesforge_plot::SeriesRef,
 ) {
-    let Some(spec) = crate::state::current_plot_spec(tree, graph) else {
+    let Some(spec) = stokesforge_core::compose::current_plot_spec(tree, graph) else {
         return;
     };
     let Some(value) = spec.series_at(series) else {
@@ -409,8 +409,8 @@ pub(super) fn open_annotation_editor(
     graph: NodeId,
     target: stokesforge_render_egui::AnnotationRef,
 ) {
-    let Some(original) =
-        crate::state::current_plot_spec(tree, graph).and_then(|spec| target.get(&spec).cloned())
+    let Some(original) = stokesforge_core::compose::current_plot_spec(tree, graph)
+        .and_then(|spec| target.get(&spec).cloned())
     else {
         return;
     };
@@ -426,7 +426,7 @@ pub(super) fn add_annotation_at(
     graph: NodeId,
     (panel, x, y): (usize, f64, f64),
 ) {
-    let Some(target) = crate::state::current_plot_spec(tree, graph)
+    let Some(target) = stokesforge_core::compose::current_plot_spec(tree, graph)
         .and_then(|spec| stokesforge_render_egui::AnnotationRef::next_in(&spec, panel))
     else {
         return;

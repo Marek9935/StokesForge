@@ -26,6 +26,23 @@ pub struct OverlaySpec {
     pub y_right: bool,
 }
 
+impl OverlaySpec {
+    /// Calque superposé dont les deux axes sont affichés, chacun à l'échelle
+    /// propre : le second calque des rôles X2/Y2 (#167).
+    pub const SECOND_AXES: Self = Self::new(true, true);
+
+    /// Calque superposé dont seul l'axe X est affiché, en haut : celui des
+    /// séries « ligne » (#166). Son axe Y suit celui du calque recouvert, donc
+    /// reste à gauche (`y_right: false`), voulu.
+    pub const TOP_X: Self = Self::new(true, false);
+
+    /// Calque superposé affichant (`true`) ou non son axe X en haut et son
+    /// axe Y à droite.
+    pub const fn new(x_top: bool, y_right: bool) -> Self {
+        Self { x_top, y_right }
+    }
+}
+
 /// Un emplacement de la liste des séries d'un panneau (#197), tel que le
 /// projette [`PanelSpec::slots`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -567,6 +584,16 @@ impl PanelSpec {
         changed
     }
 
+    /// Retire la série de rang `index` (#257), sans toucher aux autres ni à
+    /// leurs groupes. Faux, sans rien changer, si le rang n'existe pas.
+    pub fn remove_series(&mut self, index: usize) -> bool {
+        if index >= self.series.len() {
+            return false;
+        }
+        self.series.remove(index);
+        true
+    }
+
     /// Supprime le groupe `group` et ses séries (#197). Faux s'il n'existe pas.
     pub fn remove_group(&mut self, group: u32) -> bool {
         let before = self.series.len();
@@ -711,6 +738,57 @@ mod group_tests {
 
     fn serie(n: u64) -> SeriesSpec {
         SeriesSpec::new(NodeId::from_raw(n))
+    }
+
+    /// #257 : `remove_series` retire exactement la série de rang `index`, sans
+    /// toucher aux autres ni à leurs groupes ; un rang hors borne ne change rien.
+    #[test]
+    fn remove_series_retire_la_serie_designee_et_pas_une_autre() {
+        let mut panel = PanelSpec::default();
+        panel.push_series_batch(vec![serie(1)]);
+        panel.push_series_batch(vec![serie(2), serie(3)]);
+        let avant = panel.clone();
+
+        assert!(!panel.remove_series(3), "hors borne : rien ne change");
+        assert_eq!(panel, avant);
+
+        assert!(panel.remove_series(1));
+        let colonnes: Vec<NodeId> = panel.series.iter().map(|s| s.y).collect();
+        assert_eq!(colonnes, [NodeId::from_raw(1), NodeId::from_raw(3)]);
+        assert_eq!(panel.series[1].group, Some(1), "le groupe garde son membre");
+
+        assert!(panel.remove_series(0));
+        assert_eq!(panel.series.len(), 1);
+        assert_eq!(panel.series[0].y, NodeId::from_raw(3));
+    }
+
+    /// #257 : les calques nommés — le second calque X2/Y2 a les deux axes, le
+    /// calque des lignes seulement X en haut (son Y suit le calque recouvert).
+    #[test]
+    fn les_calques_nommes_disent_quels_axes_ils_affichent() {
+        assert_eq!(
+            (
+                OverlaySpec::SECOND_AXES.x_top,
+                OverlaySpec::SECOND_AXES.y_right
+            ),
+            (true, true)
+        );
+        assert_eq!(
+            (OverlaySpec::TOP_X.x_top, OverlaySpec::TOP_X.y_right),
+            (true, false)
+        );
+        assert_eq!(
+            OverlaySpec::new(false, true),
+            OverlaySpec {
+                x_top: false,
+                y_right: true
+            }
+        );
+        assert_ne!(OverlaySpec::SECOND_AXES, OverlaySpec::TOP_X);
+        // Le constructeur de panneau en tire les axes affichés.
+        let base = PanelSpec::default();
+        let calque = PanelSpec::overlay_on(&base, OverlaySpec::TOP_X);
+        assert!(calque.bottom.visible && !calque.left.visible);
     }
 
     #[test]

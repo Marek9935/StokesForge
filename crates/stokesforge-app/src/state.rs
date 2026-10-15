@@ -50,6 +50,10 @@ use std::sync::Arc;
 use std::thread;
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
+use stokesforge_core::compose::{
+    current_plot_spec, overlay_base, panel_plot_type, row_series, second_layer_of,
+    series_from_columns, spec_has_x, x_prime_columns,
+};
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
 use stokesforge_core::tsv;
@@ -59,8 +63,8 @@ use stokesforge_core::{
 };
 use stokesforge_importer::{import_items, plan_import, ImportItem, ImportPlan, PlannedColumn};
 use stokesforge_plot::{
-    AnnotationRef, AnnotationSpec, ColorUsage, PanelSpec, Panels, PlotSpec, PlotType, SavedColors,
-    SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
+    AnnotationRef, AnnotationSpec, ColorUsage, OverlaySpec, PanelSpec, Panels, PlotSpec, PlotType,
+    SavedColors, SeriesRef, ShapeRef, ShapeSpec, TextAnchor, TextTarget,
 };
 #[cfg(feature = "python")]
 use stokesforge_python::interpreter::EmbeddedPython;
@@ -1225,182 +1229,10 @@ pub(crate) fn visible_columns_in(tree: &Tree, sheet: NodeId) -> Vec<(NodeId, Str
         .collect()
 }
 
-/// Les séries à tracer pour une sélection de colonnes, réparties par calque
-/// (#167) : le calque principal et le calque superposé des rôles X2/Y2.
-#[derive(Debug, Default)]
-pub(crate) struct PlannedSeries {
-    /// Séries de rôle Y, sur les axes principaux.
-    pub(crate) primary: Vec<stokesforge_plot::SeriesSpec>,
-    /// Séries de rôle Y2, sur le second calque (axe X en haut, axe Y à
-    /// droite).
-    pub(crate) secondary: Vec<stokesforge_plot::SeriesSpec>,
-}
-
-impl PlannedSeries {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.primary.is_empty() && self.secondary.is_empty()
-    }
-}
-
-/// Construit les séries de [`Action::PlotColumns`]/[`Action::
-/// AddSeriesToGraph`] à partir des colonnes de rôle Y (ou Y2) présentes dans
-/// `columns`, dans l'ordre où elles apparaissent dans `sheet`.
-///
-/// Règle d'appariement, façon OriginLab : chaque Y est apparié à la colonne
-/// X la plus proche à sa **gauche** dans la feuille (rôle
-/// [`ColumnRole::X`]), en incluant les colonnes X non sélectionnées — sans X
-/// à gauche, l'abscisse reste implicite ([`SeriesSpec::new`](stokesforge_plot::SeriesSpec::new)).
-/// Un Y2 suit la même règle avec les colonnes X2 : ses séries vont dans
-/// [`PlannedSeries::secondary`]. Chaque série prend la couleur de palette de
-/// son rang, `start_index` inclus : décalage utile à
-/// [`AppState::add_series_to_graph`], qui prolonge la palette après les
-/// séries déjà présentes dans le calque visé plutôt que de la reprendre à
-/// zéro (`secondary_start_index` pour le second calque). Rend des listes
-/// vides si `columns` ne contient aucun Y ni Y2 — c'est ce que les deux
-/// appelants lisent pour refuser un graphe ou un ajout vide.
-pub(crate) fn series_from_columns(
-    tree: &Tree,
-    sheet: NodeId,
-    columns: &[NodeId],
-    plot_type: &PlotType,
-    start_index: usize,
-    secondary_start_index: usize,
-) -> PlannedSeries {
-    let ordered = visible_columns_in(tree, sheet);
-    let role_of = |id: NodeId| {
-        tree.node(id)
-            .and_then(Node::as_column)
-            .map(|column| column.meta().role)
-    };
-    let mut planned = PlannedSeries::default();
-    for (position, (column, _, _)) in ordered.iter().enumerate() {
-        if !columns.contains(column) {
-            continue;
-        }
-        let (x_role, list, start) = match role_of(*column) {
-            Some(ColumnRole::Y) => (ColumnRole::X, &mut planned.primary, start_index),
-            Some(ColumnRole::Y2) => (
-                ColumnRole::X2,
-                &mut planned.secondary,
-                secondary_start_index,
-            ),
-            _ => continue,
-        };
-        let x = ordered[..position]
-            .iter()
-            .rev()
-            .find_map(|(id, _, _)| (role_of(*id) == Some(x_role)).then_some(*id));
-        let mut spec = match x {
-            Some(x) => stokesforge_plot::SeriesSpec::new_xy(x, *column),
-            None => stokesforge_plot::SeriesSpec::new(*column),
-        };
-        let index = start + list.len();
-        spec.line = stokesforge_plot::LineSpec::from_palette(index);
-        spec.symbol = stokesforge_plot::SymbolSpec::from_palette(index);
-        spec.plot_type = plot_type.clone();
-        list.push(spec);
-    }
-    planned
-}
-
-/// Le second calque des rôles X2/Y2 (#167) : axe X en haut et axe Y à droite,
-/// chacun avec son échelle.
-fn second_layer() -> stokesforge_plot::OverlaySpec {
-    stokesforge_plot::OverlaySpec {
-        x_top: true,
-        y_right: true,
-    }
-}
-
-/// Les séries « ligne » (#166) de `rows`, ancrées sur `anchor`, avec les styles
-/// de palette à partir du rang `start`.
-fn row_series(
-    anchor: NodeId,
-    rows: &[usize],
-    start: usize,
-    plot_type: &PlotType,
-) -> Vec<stokesforge_plot::SeriesSpec> {
-    rows.iter()
-        .enumerate()
-        .map(|(offset, &row)| {
-            let mut series = stokesforge_plot::SeriesSpec::new(anchor);
-            series.row = Some(row);
-            series.name = crate::tr!("graph-row-series", number = (row + 1));
-            series.line = stokesforge_plot::LineSpec::from_palette(start + offset);
-            series.symbol = stokesforge_plot::SymbolSpec::from_palette(start + offset);
-            series.plot_type = plot_type.clone();
-            series
-        })
-        .collect()
-}
-
-/// Les colonnes de `sheet` qui portent une valeur x' finie, dans l'ordre de la
-/// feuille (#164, #166).
-pub(crate) fn x_prime_columns(tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
-    tree.node(sheet)
-        .map(Node::children)
-        .unwrap_or_default()
-        .iter()
-        .copied()
-        .filter(|id| {
-            tree.node(*id)
-                .and_then(Node::as_column)
-                .is_some_and(|column| column.meta().x_prime.is_some_and(f64::is_finite))
-        })
-        .collect()
-}
-
-/// Le graphe a-t-il déjà un X : une série dont l'abscisse vient d'une colonne
-/// de rôle X, ou une série « ligne » (abscisse = x') ? Décide si le dépôt de
-/// lignes pose la question de l'axe (#166).
-fn spec_has_x(spec: &PlotSpec) -> bool {
-    spec.panels
-        .iter()
-        .flat_map(|panel| &panel.series)
-        .any(|series| series.x.is_some() || series.row.is_some())
-}
-
-/// Le calque ordinaire que `panel` recouvre (lui-même s'il est ordinaire) :
-/// le dernier calque ordinaire qui le précède dans sa case.
-fn overlay_base(spec: &PlotSpec, panel: usize) -> usize {
-    let Some(target) = spec.panels.get(panel) else {
-        return panel;
-    };
-    if target.overlay.is_none() {
-        return panel;
-    }
-    (0..panel)
-        .rev()
-        .find(|index| {
-            spec.panels.get(*index).is_some_and(|candidate| {
-                candidate.overlay.is_none()
-                    && (candidate.row, candidate.column) == (target.row, target.column)
-            })
-        })
-        .unwrap_or(panel)
-}
-
-/// L'indice du second calque (axe X en haut, axe Y à droite) posé sur le
-/// calque ordinaire `base`, s'il existe.
-fn second_layer_of(spec: &PlotSpec, base: usize) -> Option<usize> {
-    let cell = spec
-        .panels
-        .get(base)
-        .map(|panel| (panel.row, panel.column))?;
-    (base + 1..spec.panels.len()).find(|index| {
-        spec.panels.get(*index).is_some_and(|panel| {
-            panel.overlay == Some(second_layer()) && (panel.row, panel.column) == cell
-        })
-    })
-}
-
-/// Le [`PlotSpec`] courant de `graph`, ou `None` si ce n'est pas un graphe de
-/// ce projet.
-pub(crate) fn current_plot_spec(tree: &Tree, graph: NodeId) -> Option<PlotSpec> {
-    match tree.node(graph)?.kind() {
-        NodeKind::Graph { spec, .. } => Some(spec.clone()),
-        _ => None,
-    }
+/// Le nom d'une série « ligne » (#166) : « Row n », avec le numéro affiché
+/// (1 = la première ligne). La phrase est de l'interface ; `compose` la reçoit.
+fn row_series_name(row: usize) -> String {
+    crate::tr!("graph-row-series", number = (row + 1))
 }
 
 /// Nom affiché d'une série dans la liste de la fenêtre des propriétés : la
@@ -1528,16 +1360,6 @@ pub fn drop_payload_action(payload: &ColumnDragPayload, graph: NodeId, panel: us
         columns: payload.columns.clone(),
         plot_type: None,
     }
-}
-
-/// Type de tracé des séries ajoutées à `panel` quand le geste n'en désigne
-/// pas : celui de sa **dernière** série (un calque qui en mélange plusieurs
-/// donne le dernier), [`PlotType::Line`] pour un calque vide.
-pub(crate) fn panel_plot_type(panel: &stokesforge_plot::PanelSpec) -> PlotType {
-    panel
-        .series
-        .last()
-        .map_or(PlotType::Line, |series| series.plot_type.clone())
 }
 
 /// Corps de [`AppState::row_count`], factorisé sur un `&Tree` — voir
@@ -4780,14 +4602,9 @@ impl AppState {
                     }
                     T::Series(series) => {
                         self.edit_plot_object(graph, PlotEditKind::RemoveSeries, |spec| {
-                            let Some(panel) = spec.panels.get_mut(series.panel) else {
-                                return false;
-                            };
-                            if series.index >= panel.series.len() {
-                                return false;
-                            }
-                            panel.series.remove(series.index);
-                            true
+                            spec.panels
+                                .get_mut(series.panel)
+                                .is_some_and(|panel| panel.remove_series(series.index))
                         })
                     }
                     T::Annotation(target) => {
@@ -8495,7 +8312,7 @@ impl AppState {
         // haut, axe Y à droite, échelles propres (#167).
         let mut panels = vec![panel.clone()];
         if !planned.secondary.is_empty() {
-            let mut layer = PanelSpec::overlay_on(&panel, second_layer());
+            let mut layer = PanelSpec::overlay_on(&panel, OverlaySpec::SECOND_AXES);
             layer.push_series_batch(planned.secondary);
             panels.push(layer);
         }
@@ -8578,7 +8395,7 @@ impl AppState {
                         return;
                     };
                     spec.panels
-                        .push(PanelSpec::overlay_on(&base_panel, second_layer()));
+                        .push(PanelSpec::overlay_on(&base_panel, OverlaySpec::SECOND_AXES));
                     spec.panels.len() - 1
                 }
             };
@@ -8604,7 +8421,7 @@ impl AppState {
         };
         spec.panels.push(PanelSpec::overlay_on(
             &base_panel,
-            stokesforge_plot::OverlaySpec { x_top, y_right },
+            OverlaySpec::new(x_top, y_right),
         ));
         self.execute(Command::SetPlotSpec { graph, spec });
     }
@@ -8666,13 +8483,8 @@ impl AppState {
                 let Some(base_panel) = spec.panels.get(base).cloned() else {
                     return;
                 };
-                spec.panels.push(PanelSpec::overlay_on(
-                    &base_panel,
-                    stokesforge_plot::OverlaySpec {
-                        x_top: true,
-                        y_right: false,
-                    },
-                ));
+                spec.panels
+                    .push(PanelSpec::overlay_on(&base_panel, OverlaySpec::TOP_X));
                 spec.panels.len() - 1
             }
             _ => panel,
@@ -8685,7 +8497,13 @@ impl AppState {
             return;
         };
         let start = layer.series.len();
-        layer.push_series_batch(row_series(anchor, &rows, start, &plot_type));
+        layer.push_series_batch(row_series(
+            anchor,
+            &rows,
+            start,
+            &plot_type,
+            row_series_name,
+        ));
         self.execute(Command::SetPlotSpec { graph, spec });
     }
 
@@ -8714,7 +8532,7 @@ impl AppState {
             return;
         };
         let mut panel = PanelSpec::default();
-        panel.push_series_batch(row_series(anchor, &rows, 0, &plot_type));
+        panel.push_series_batch(row_series(anchor, &rows, 0, &plot_type, row_series_name));
         let spec = PlotSpec {
             panels: Panels::new(vec![panel]),
             ..PlotSpec::default()

@@ -1398,9 +1398,11 @@ colonnes purement X, par exemple, ne fait rien plutôt que d'ouvrir un graphe
 vide. Chaque série prend la couleur de palette de son rang
 (`SeriesSpec::from_palette`).
 
-Cette règle vit dans `AppState::plot_columns`/`series_from_columns`
-(`stokesforge-app/src/state.rs`), pas dans `app.rs` : le menu contextuel ne fait
-que choisir le type de tracé et pousser `Action::PlotColumns`. Une seconde
+Cette règle vit dans `stokesforge_core::compose::series_from_columns` (#257 :
+`pyst.plot` et l'annexe d'une analyse l'appliquent aussi, `x_for`) ;
+`AppState::plot_columns` (`stokesforge-app/src/state.rs`) n'émet que la
+commande et les messages d'échec, et le menu contextuel ne fait que choisir le
+type de tracé et pousser `Action::PlotColumns`. Une seconde
 action, `Action::AddSeriesToGraph`, applique la même règle d'appariement mais
 relit le `PlotSpec` courant d'un graphe existant pour y **ajouter** des
 séries (`Command::SetPlotSpec`) sans toucher à celles déjà présentes — elle
@@ -1443,7 +1445,7 @@ en `Action::AddSeriesToGraph` via `state::drop_payload_action`. Relâcher
 ailleurs ne fait rien. L'action porte le **calque** visé (`panel`) et
 **n'impose pas de type de tracé** (`plot_type: None`) : les séries prennent
 celui de la **dernière série** du calque, `Line` pour un calque vide
-(`state::panel_plot_type`). Une seule commande annulable (`SetPlotSpec`).
+(`compose::panel_plot_type`). Une seule commande annulable (`SetPlotSpec`).
 Le calque visé est le **calque actif** du graphe (#161, ci-dessous) :
 `graph_drop_target` et « Send to » lisent `published_active_panel`.
 

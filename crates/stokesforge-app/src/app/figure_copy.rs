@@ -82,7 +82,7 @@ pub(super) fn request_figure_copy(
     if !copy_event_pending(ctx) || !take_figure_copy_gesture(ctx, view) {
         return;
     }
-    if let Some(spec) = crate::state::current_plot_spec(tree, graph) {
+    if let Some(spec) = stokesforge_core::compose::current_plot_spec(tree, graph) {
         actions.push(Action::CopyGraphFigure {
             spec: Box::new(view.framed_spec(&spec)),
         });
@@ -117,7 +117,7 @@ impl StokesForgeApp {
     pub(super) fn request_graph_figure_copy(&mut self, graph: NodeId, actions: &mut Vec<Action>) {
         let tree = self.state.snapshot().tree.clone();
         self.with_graph_view(graph, |view| {
-            if let Some(spec) = crate::state::current_plot_spec(&tree, graph) {
+            if let Some(spec) = stokesforge_core::compose::current_plot_spec(&tree, graph) {
                 actions.push(Action::CopyGraphFigure {
                     spec: Box::new(view.framed_spec(&spec)),
                 });
@@ -200,7 +200,7 @@ mod tests {
         assert!(actions.is_empty(), "{actions:?}");
 
         let (actions, restants) = peint(&mut app, &ctx, tab, copie());
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         let cadre = app
             .read_graph_view(graph, |v| v.framed_spec(&spec))
             .unwrap();
@@ -221,7 +221,7 @@ mod tests {
         let (session, mut app, graph) = banc();
         let ctx = contexte();
         let tab = Some(Tab::Graph(graph));
-        let spec = crate::state::current_plot_spec(app.state.tree(), graph).unwrap();
+        let spec = stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap();
         let series = stokesforge_plot::SeriesRef::new(0, 0);
         assert!(spec.series_at(series).is_some(), "témoin : la série existe");
         app.with_graph_view(graph, |view| view.select_series(Some(series), &spec));
@@ -290,7 +290,7 @@ mod tests {
         app.graph_views.insert(second, GraphView::new());
         let ctx = contexte();
         let spec_de = |app: &StokesForgeApp, graph| {
-            crate::state::current_plot_spec(app.state.tree(), graph).unwrap()
+            stokesforge_core::compose::current_plot_spec(app.state.tree(), graph).unwrap()
         };
         let (actions, _) = peint(&mut app, &ctx, Some(Tab::Graph(second)), copie());
         assert_eq!(
