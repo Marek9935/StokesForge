@@ -412,23 +412,26 @@ const GRADIENT_SWATCH_WIDTH: f32 = 64.0;
 /// fond grisé.
 pub(crate) fn gradient_strip(ui: &mut egui::Ui, colors: &[String]) {
     let width = ui.available_width();
-    paint_gradient(ui, colors, width);
+    paint_gradient(ui, colors, width, egui::Sense::hover());
 }
 
-/// La même bande en pastille de largeur fixe, pour une entrée de liste (#213).
-pub(crate) fn gradient_swatch(ui: &mut egui::Ui, colors: &[String]) {
-    paint_gradient(ui, colors, GRADIENT_SWATCH_WIDTH);
+/// La même bande en pastille de largeur fixe, pour une entrée de liste (#213) ;
+/// elle reçoit le clic, comme le nom qui la suit.
+pub(crate) fn gradient_swatch(ui: &mut egui::Ui, colors: &[String]) -> egui::Response {
+    paint_gradient(ui, colors, GRADIENT_SWATCH_WIDTH, egui::Sense::click())
 }
 
-fn paint_gradient(ui: &mut egui::Ui, colors: &[String], width: f32) {
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(width, GRADIENT_STRIP_HEIGHT),
-        egui::Sense::hover(),
-    );
+fn paint_gradient(
+    ui: &mut egui::Ui,
+    colors: &[String],
+    width: f32,
+    sense: egui::Sense,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, GRADIENT_STRIP_HEIGHT), sense);
     if colors.is_empty() {
         let fill = ui.visuals().widgets.noninteractive.weak_bg_fill;
         ui.painter().rect_filled(rect, 0.0, fill);
-        return;
+        return response;
     }
     let step = rect.width() / colors.len() as f32;
     for (index, color) in colors.iter().enumerate() {
@@ -439,6 +442,7 @@ fn paint_gradient(ui: &mut egui::Ui, colors: &[String], width: f32) {
             paint_swatch(ui.painter(), slice, rgba);
         }
     }
+    response
 }
 
 /// Peint `rgba` dans `rect`, sur un damier si elle n'est pas opaque.

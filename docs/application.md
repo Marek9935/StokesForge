@@ -1845,16 +1845,18 @@ réellement dans `stokesforge-plot` (lu avant d'écrire, comme demandé) :
   « Whole group (n series) » (par défaut) — avec une phrase qui dit ce qui
   s'applique. Portée groupe : style et épaisseur du trait, forme et taille du
   symbole se recopient dans chaque membre (`propagate_style`) ; les réglages
-  propres à une série (nom, type, visibilité, légende) sont **grisés**
-  avec l'info-bulle `curve-scope-locked`, et ses **couleurs sont masquées** (le
-  nuancier les donne, #213) ; le **nuancier** (#178) est actif.
+  propres à une série (nom, visibilité, légende) sont **grisés**
+  avec l'info-bulle `curve-scope-locked`, ses **couleurs sont masquées** (le
+  nuancier les donne, #213) et le **type de tracé** reste réglable, pour la
+  seule série choisie ; la phrase qui dit ce que la portée applique est sous un
+  « ? » à côté du choix, plus en note ; le **nuancier** (#178) est actif.
   Portée série : seule la série bouge (c'est l'exception), ses couleurs
   reviennent, le nuancier est grisé (info-bulle). Série sans groupe : tout est
   actif, ses couleurs sont là et le **nuancier n'est pas affiché**. Nuanciers :
   fournis (`GRADIENT_PRESETS`), enregistrés (projet ou utilisateur, suffixe
   « (Project) » / « (User) », bouton Delete grisé hors nuancier enregistré) ou
   personnalisé à N couleurs (nom + cible + Save). Chaque entrée de la liste
-  montre ses couleurs (`gradient_swatch`) avant son nom ; la bande dessous
+  montre ses couleurs (`gradient_swatch`) avant son nom, et la pastille se clique comme le nom ; la bande dessous
   montre celui du groupe. Il est appliqué **dès qu'on le choisit** (ou qu'on
   change un arrêt), sans bouton : il répartit les couleurs dans l'ordre de la
   liste du brouillon, que OK valide et Cancel défait. Le **groupe retient** ses

@@ -742,7 +742,7 @@ fn axis_editor(
 /// reste (nom, visibilité...) reste éditable normalement.
 ///
 /// `locked` (#177) : on règle le **groupe** de la série, pas la série seule.
-/// Les réglages propres à une série (nom, type, visibilité, présence en
+/// Les réglages propres à une série (nom, visibilité, présence en
 /// légende) sont alors grisés, avec une info-bulle qui dit pourquoi, et les
 /// couleurs masquées (#213 : le nuancier du groupe les donne) ; les autres (style du trait, forme et taille du symbole) restent actifs et la
 /// page les recopie dans tout le groupe.
@@ -763,31 +763,33 @@ pub(super) fn series_editor(
             )
         });
 
+        // Le type de tracé se règle toujours série par série (#213), même en
+        // portée « tout le groupe » ; il ne touche que la série choisie.
+        commit |= form.row(tr!("plot-series-plot-type"), |ui| match &series.plot_type {
+            PlotType::Unknown(_) => {
+                ui.weak(tr!("plot-series-type-unknown"));
+                false
+            }
+            _ => choice(
+                ui,
+                "plot_config_series_type",
+                &mut series.plot_type,
+                &[
+                    PlotType::Scatter,
+                    PlotType::Line,
+                    PlotType::LineScatter,
+                    PlotType::Bar,
+                    PlotType::Histogram,
+                    PlotType::ErrorBar,
+                ]
+                .map(|candidate| {
+                    let label = plot_type_label(&candidate);
+                    ChoiceOption::new(candidate, label)
+                }),
+            ),
+        });
         commit |= per_series(form, locked, |form| {
-            let mut commit = form.row(tr!("plot-series-plot-type"), |ui| match &series.plot_type {
-                PlotType::Unknown(_) => {
-                    ui.weak(tr!("plot-series-type-unknown"));
-                    false
-                }
-                _ => choice(
-                    ui,
-                    "plot_config_series_type",
-                    &mut series.plot_type,
-                    &[
-                        PlotType::Scatter,
-                        PlotType::Line,
-                        PlotType::LineScatter,
-                        PlotType::Bar,
-                        PlotType::Histogram,
-                        PlotType::ErrorBar,
-                    ]
-                    .map(|candidate| {
-                        let label = plot_type_label(&candidate);
-                        ChoiceOption::new(candidate, label)
-                    }),
-                ),
-            });
-            commit |= form.checkbox(&mut series.visible, tr!("plot-series-show"), None);
+            let mut commit = form.checkbox(&mut series.visible, tr!("plot-series-show"), None);
             commit |= form.checkbox(
                 &mut series.show_in_legend,
                 tr!("plot-series-show-in-legend"),
@@ -1463,7 +1465,14 @@ mod tests {
         let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
         assert!(!est_peint(&peints, &PlotSettingsTab::Graph.label()));
         assert!(est_peint(&peints, &tr!("curve-group-section")));
-        assert!(est_peint(&peints, &tr!("curve-scope-group-note")));
+        assert!(
+            !est_peint(&peints, &tr!("curve-scope-group-note")),
+            "la phrase de portée est sous le « ? », plus en note"
+        );
+        assert!(
+            est_peint(&peints, &tr!("plot-series-plot-type")),
+            "le type reste réglable"
+        );
         let original = banc.modele();
 
         // #213 : un groupe neuf n'a aucun nuancier — la liste est vide (aucun
@@ -1514,6 +1523,27 @@ mod tests {
         assert!(
             est_peint(&peints, &tr!("curve-gradient-black-red")),
             "la liste montre le nuancier du groupe"
+        );
+
+        // #213 : la pastille de couleurs d'une entrée se clique comme son nom.
+        ouvrir(&context, &mut banc.state);
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        let nom = texte_exact(&peints, &tr!("curve-gradient-black-blue")).centre;
+        cliquer(
+            &context,
+            nom - egui::vec2(80.0, 0.0),
+            egui::PointerButton::Primary,
+            |ui| plot_settings_window(ui.ctx(), &mut banc.state),
+        );
+        let couleurs: Vec<String> = banc.modele().panels[0]
+            .series
+            .iter()
+            .map(|s| s.line.color.clone())
+            .collect();
+        assert_eq!(
+            couleurs[..2],
+            ["#000000", "#0000ff"],
+            "clic sur la pastille"
         );
 
         // Portée « cette série » : la couleur individuelle revient.

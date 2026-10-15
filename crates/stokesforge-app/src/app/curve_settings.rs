@@ -346,10 +346,15 @@ fn membership_editor(
                         ),
                     ],
                 );
-            });
-            f.note(match scope {
-                EditScope::Group => tr!("curve-scope-group-note"),
-                EditScope::Series => tr!("curve-scope-series-note"),
+                // Ce qui s'applique selon la portée : sous le « ? » (#213),
+                // plus en note grisée.
+                help_text(
+                    ui,
+                    match scope {
+                        EditScope::Group => tr!("curve-scope-group-note"),
+                        EditScope::Series => tr!("curve-scope-series-note"),
+                    },
+                );
             });
         }
         commit
@@ -542,7 +547,11 @@ fn gradient_popup_entry(
     stops: &[String],
 ) {
     ui.horizontal(|ui| {
-        gradient_swatch(ui, &gradient_colors(stops, ENTRY_STEPS));
+        // Toute la ligne se clique (#213) : la pastille comme le nom.
+        let swatch = gradient_swatch(ui, &gradient_colors(stops, ENTRY_STEPS));
+        if swatch.clicked() {
+            *choice = Some(value.clone());
+        }
         ui.selectable_value(choice, Some(value), label);
     });
 }
