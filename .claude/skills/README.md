@@ -107,8 +107,8 @@ dérogation doit dire qu'elle est à corriger, pas qu'elle existe.
 `src/app/` (table dans `docs/application.md`, § Découpage du code), à imports
 explicites ; `app.rs` ne garde que l'orchestration de l'image. Un test suit le
 code qu'il éprouve : déplacer une fonction, c'est déplacer ses tests, puis les
-relire (ce qu'ils prouvent, leur témoin vérifié par mutation) — travail confié
-à un agent Opus à chaque restructuration (#115). Un skill qui cite un chemin
+relire (ce qu'ils prouvent, leur témoin vérifié par mutation) — à chaque
+restructuration, l'agent `perimetre` (Opus) fixe les cas et Sonnet les écrit. Un skill qui cite un chemin
 le cite là où le code vit, pas là où il vivait.
 
 **Regarder avant de conclure.** Un symptôme visuel diagnostiqué depuis le code
@@ -157,6 +157,14 @@ en lecture seule, pour les recherches qui demandent de lire beaucoup de
 fichiers. Il rend une synthèse avec `fichier:ligne` et garde ainsi le contexte
 de la session principale petit. Quand l'utiliser et quand non : `CLAUDE.md`,
 « Délégation ».
+
+## Agent de périmètre
+
+`.claude/agents/perimetre.md` est un sous-agent Opus, en lecture seule, appelé
+une fois par issue avant d'écrire du code : il rend le périmètre (fichiers à
+toucher, cas de test et mutation témoin, pièges, docs à mettre à jour), en 40
+lignes au plus et sans code. Sonnet implémente et écrit les tests d'après ce
+périmètre. Règle complète : `CLAUDE.md`, « Délégation ».
 
 ## Les invoquer à la main
 

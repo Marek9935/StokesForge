@@ -209,8 +209,8 @@ ou par la relecture :
   test partagée est `pub(in crate::app)` dans le module de tests qui la porte
   (`graph_window::tests::graphe`, `project_manager::tests::click_at`,
   `window_chrome::tests::find_icon_centers`). À chaque restructuration, les
-  tests sont écrits et relus par un agent Opus (outil `Agent`, modèle `opus`),
-  avec témoins vérifiés par mutation ;
+  tests sont relus : l'agent `perimetre` (Opus) fixe les cas et leurs
+  témoins, Sonnet les écrit et vérifie chaque témoin par mutation ;
 - les gardes qui lisent le code parcourent tout `src/`, sous-dossiers
   compris (lecteur unique `tests/support/sources.rs`, #116) : un module
   déplacé reste gardé sans rien déclarer. Une fonction qu'une garde attend

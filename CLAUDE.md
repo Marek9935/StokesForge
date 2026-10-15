@@ -76,11 +76,12 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 - `docs/archive/rustrewrite/questions-ouvertes.md` §11 : plafonds/compteurs documentés — vérifier avant de "corriger" un comportement qui ressemble à un bug.
 - Recalcul des formules (#193) : ciblé par empreinte (`stokesforge-session/src/recalc.rs`, invariant 11). **Toute donnée lue par un calcul de formule entre dans l'empreinte** (la version d'une colonne ne couvre que type et valeurs, ni nom, ni méta, ni position), et **toute écriture de données d'une colonne tire une version neuve** par `Project`. Le recalcul complet reste comme oracle (`FormulaRecalc::Full`, batterie `b22`). Étendre le mécanisme (fonction de formule, #184, #186) : tests à écrire dans `docs/tests.md`, « Recalcul ciblé ».
 
-## Délégation à Haiku (contexte)
+## Délégation et choix du modèle
 
-Objectif : garder le contexte de la session principale petit, pas déléguer du jugement.
+Objectif : garder le contexte de la session principale petit, et réserver Opus au jugement, avec une sortie courte.
 
+- **Implémentation (fonctionnalité, correctif, restructuration)** : Opus fixe seulement le périmètre, par l'agent `perimetre` (`.claude/agents/perimetre.md` : fichiers à toucher, cas de test et témoins, pièges, 40 lignes au plus, sans code). **Sonnet** implémente et écrit les tests d'après ce périmètre, puis vérifie chaque témoin par mutation. Pas de relecture Opus en fin de tâche, sauf demande.
 - Une recherche qui demande de lire **beaucoup** (plus d'une dizaine de fichiers, ou sans savoir où chercher) part à l'agent `recherche` (`.claude/agents/recherche.md`, Haiku). Lire soi-même un fichier connu ou faire une recherche ciblée (un `rg`, deux fichiers) : le démarrage à froid d'un agent coûte plus cher.
 - Sa réponse cite `fichier:ligne` ; revérifier soi-même toute conclusion **d'absence** (« n'existe pas », « personne n'appelle ») et tout extrait sur lequel on s'appuie pour écrire du code.
-- Jamais délégués : conception, modèle de données, commandes, invariants, tests (agents Opus, #115), textes d'interface, choix à faire trancher.
+- Jamais délégués à Haiku : conception, modèle de données, commandes, invariants, tests (périmètre par `perimetre`, écriture par Sonnet), textes d'interface, choix à faire trancher.
 - Sortie longue d'une commande (`cargo test`, `clippy`, `cargo build`) : pas d'agent — rediriger le journal complet vers un fichier (`> "$tmp/test.log" 2>&1`) et n'afficher que le résumé (`rg -n 'FAILED|panicked|^error|^warning' …`, `tail`) ; relire le fichier au besoin plutôt que relancer.
