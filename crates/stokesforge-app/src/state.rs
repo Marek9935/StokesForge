@@ -655,10 +655,29 @@ pub enum Action {
         graph: NodeId,
         target: crate::object_manager::VisibilityTarget,
     },
-    /// Déplace une série au rang final dans son calque.
-    ReorderSeries {
+    /// Pose une série dans un conteneur (glisser-déposer) : seule (`group`
+    /// `None`) ou dans un groupe, à ce rang de ce conteneur — voir
+    /// `PanelSpec::place_series`. Une seule entrée d'historique par geste,
+    /// qu'il réordonne, fasse entrer dans un groupe ou en fasse sortir.
+    PlaceSeries {
         graph: NodeId,
         source: stokesforge_plot::SeriesRef,
+        group: Option<u32>,
+        position: usize,
+    },
+    /// Pose un groupe de séries au rang `position` parmi les emplacements de
+    /// son calque (glisser-déposer).
+    PlaceSeriesGroup {
+        graph: NodeId,
+        group: stokesforge_plot::SeriesGroupRef,
+        position: usize,
+    },
+    /// Remet un texte libre ou une forme au rang `index` de sa catégorie, dans
+    /// son calque (glisser-déposer) : l'ordre des objets est l'ordre de
+    /// superposition.
+    ReorderObject {
+        graph: NodeId,
+        target: crate::object_manager::VisibilityTarget,
         index: usize,
     },
     /// Remonte ou descend une série d'un cran (#197) : elle reste dans son
@@ -4734,12 +4753,31 @@ impl AppState {
                     }
                 }
             }
-            Action::ReorderSeries {
+            Action::PlaceSeries {
                 graph,
                 source,
-                index,
+                group,
+                position,
             } => self.edit_plot_object(graph, PlotEditKind::ReorderSeries, |spec| {
-                crate::object_manager::reorder_series(spec, source, index)
+                spec.panels.get_mut(source.panel).is_some_and(|panel| {
+                    panel.place_series(source.index, group, position).is_some()
+                })
+            }),
+            Action::PlaceSeriesGroup {
+                graph,
+                group,
+                position,
+            } => self.edit_plot_object(graph, PlotEditKind::ReorderGroup, |spec| {
+                spec.panels
+                    .get_mut(group.panel)
+                    .is_some_and(|panel| panel.place_group(group.group, position).is_some())
+            }),
+            Action::ReorderObject {
+                graph,
+                target,
+                index,
+            } => self.edit_plot_object(graph, PlotEditKind::ReorderObject, |spec| {
+                crate::object_drag::reorder_object(spec, target, index)
             }),
             Action::MoveSeries { graph, series, up } => {
                 self.edit_plot_object(graph, PlotEditKind::ReorderSeries, |spec| {

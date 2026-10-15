@@ -8870,7 +8870,7 @@ fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
 
 #[test]
 fn object_manager_series_renommage_ordre_suppression_undo_redo() {
-    use stokesforge_app::object_manager::{series_drop, VisibilityTarget as T};
+    use stokesforge_app::object_manager::VisibilityTarget as T;
     use stokesforge_commands::PlotEditKind as K;
     use stokesforge_plot::SeriesRef;
     let dir = tempfile::tempdir().unwrap();
@@ -8894,11 +8894,11 @@ fn object_manager_series_renommage_ordre_suppression_undo_redo() {
     state.dispatch(Action::Redo);
     assert_eq!(graph_spec(&state, graph), renamed);
 
-    let index = series_drop(&renamed, source, SeriesRef::new(1, 2), true).unwrap();
-    state.dispatch(Action::ReorderSeries {
+    state.dispatch(Action::PlaceSeries {
         graph,
         source,
-        index,
+        group: None,
+        position: 2,
     });
     let moved = graph_spec(&state, graph);
     assert_eq!(
@@ -8918,23 +8918,20 @@ fn object_manager_series_renommage_ordre_suppression_undo_redo() {
     assert_eq!(graph_spec(&state, graph), renamed);
     state.dispatch(Action::Redo);
     assert_eq!(graph_spec(&state, graph), moved);
-    assert!(series_drop(&moved, SeriesRef::new(1, 2), SeriesRef::new(0, 0), false).is_none());
-    assert_eq!(
-        series_drop(&moved, SeriesRef::new(1, 2), SeriesRef::new(1, 0), false),
-        Some(0)
-    );
-    assert!(series_drop(&moved, SeriesRef::new(1, 0), SeriesRef::new(1, 1), false).is_none());
 
     let revision = state.revision();
-    state.dispatch(Action::ReorderSeries {
+    // Déjà à sa place, ou cible périmée : aucune commande.
+    state.dispatch(Action::PlaceSeries {
         graph,
         source: SeriesRef::new(1, 2),
-        index: 2,
+        group: None,
+        position: 2,
     });
-    state.dispatch(Action::ReorderSeries {
+    state.dispatch(Action::PlaceSeries {
         graph,
-        source,
-        index: 99,
+        source: SeriesRef::new(9, 9),
+        group: None,
+        position: 0,
     });
     state.dispatch(Action::SetLegendEntryName {
         graph,
@@ -8975,6 +8972,133 @@ fn object_manager_series_renommage_ordre_suppression_undo_redo() {
         2,
         "la dernière série ne supprime pas le calque"
     );
+}
+
+/// Le glisser-déposer de l'Object Manager et de la fenêtre des séries : une
+/// commande par geste, annulable, qu'il réordonne, fasse entrer dans un groupe
+/// ou en fasse sortir ; un groupe se pose en bloc ; un objet libre se pose dans
+/// sa catégorie.
+#[test]
+fn object_manager_placement_des_series_groupes_et_objets_annulable() {
+    use stokesforge_app::object_manager::VisibilityTarget as T;
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_plot::{
+        AnnotationRef, AnnotationSpec, PanelSpec, PlotSpec, SeriesGroupRef, SeriesRef, SeriesSpec,
+        ShapeKind, ShapeRef, ShapeSpec,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut project = Project::new("Placement").unwrap();
+    let mut panel = PanelSpec::at(0, 0);
+    for name in ["A", "B", "C", "D"] {
+        let mut series = SeriesSpec::new(NodeId::from_raw(900));
+        series.name = name.into();
+        panel.series.push(series);
+    }
+    panel.series[1].group = Some(1);
+    panel.series[2].group = Some(1);
+    for text in ["t1", "t2"] {
+        panel.annotations.push(AnnotationSpec::new(text, 0.0, 0.0));
+    }
+    for kind in [ShapeKind::Line, ShapeKind::Arrow] {
+        panel.shapes.push(ShapeSpec::new(kind, 0.0, 0.0, 1.0, 1.0));
+    }
+    let spec = PlotSpec::empty("Titre").with_panels(vec![panel]);
+    let root = project.root();
+    let graph = project.add_graph(root, None, spec.clone()).unwrap();
+    let (_session, mut state) = start(project, &dir.path().join("placement.stf"));
+    let names = |spec: &PlotSpec| {
+        spec.panels[0]
+            .series
+            .iter()
+            .map(|s| s.name.clone())
+            .collect::<Vec<_>>()
+    };
+    let label = |state: &AppState| state.snapshot().history.undo_label.clone();
+
+    // Entrer dans un groupe au rang voulu : A rejoint [B C] entre les deux.
+    state.dispatch(Action::PlaceSeries {
+        graph,
+        source: SeriesRef::new(0, 0),
+        group: Some(1),
+        position: 1,
+    });
+    let joined = graph_spec(&state, graph);
+    assert_eq!(names(&joined), ["B", "A", "C", "D"]);
+    assert_eq!(joined.panels[0].series[1].group, Some(1));
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ReorderSeries))
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), spec, "un seul Annuler rend tout");
+
+    // Sortir d'un groupe pour la tête de liste.
+    state.dispatch(Action::PlaceSeries {
+        graph,
+        source: SeriesRef::new(0, 2),
+        group: None,
+        position: 0,
+    });
+    let left = graph_spec(&state, graph);
+    assert_eq!(names(&left), ["C", "A", "B", "D"]);
+    assert_eq!(left.panels[0].series[0].group, None);
+    state.dispatch(Action::Undo);
+
+    // Un groupe se pose en bloc après la dernière série seule.
+    state.dispatch(Action::PlaceSeriesGroup {
+        graph,
+        group: SeriesGroupRef::new(0, 1),
+        position: 2,
+    });
+    assert_eq!(names(&graph_spec(&state, graph)), ["A", "D", "B", "C"]);
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ReorderGroup))
+    );
+    state.dispatch(Action::Undo);
+
+    // Un texte se pose parmi les textes, une forme parmi les formes.
+    state.dispatch(Action::ReorderObject {
+        graph,
+        target: T::Annotation(AnnotationRef { panel: 0, index: 1 }),
+        index: 0,
+    });
+    let texts = graph_spec(&state, graph);
+    assert_eq!(texts.panels[0].annotations[0].text, "t2");
+    assert_eq!(texts.panels[0].shapes, spec.panels[0].shapes);
+    assert_eq!(
+        label(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ReorderObject))
+    );
+    state.dispatch(Action::ReorderObject {
+        graph,
+        target: T::Shape(ShapeRef { panel: 0, index: 0 }),
+        index: 1,
+    });
+    assert_eq!(
+        graph_spec(&state, graph).panels[0].shapes[0].kind,
+        ShapeKind::Arrow
+    );
+
+    // Rien à faire : aucune commande.
+    let revision = state.revision();
+    state.dispatch(Action::PlaceSeries {
+        graph,
+        source: SeriesRef::new(0, 3),
+        group: None,
+        position: 3,
+    });
+    state.dispatch(Action::PlaceSeriesGroup {
+        graph,
+        group: SeriesGroupRef::new(0, 9),
+        position: 0,
+    });
+    state.dispatch(Action::ReorderObject {
+        graph,
+        target: T::Series(SeriesRef::new(0, 0)),
+        index: 1,
+    });
+    assert_eq!(state.revision(), revision);
 }
 
 #[test]

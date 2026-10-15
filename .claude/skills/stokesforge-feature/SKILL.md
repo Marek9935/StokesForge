@@ -742,9 +742,13 @@ Les textes et objets sélectionnés lisent aussi `with_graph_view` /
 `read_graph_view` (propriétés et barres de format incluses). Le menu
 contextuel et Graph › Selection partagent `object_node_menu`
 (`app/object_manager_ui.rs`, l'arbre peint, à côté du modèle
-`object_manager.rs`). Réordonner une
-série reste dans son groupe ; le rang final est décidé par `series_drop`,
-puis une seule `Action::ReorderSeries` part au relâchement. Les propriétés
+`object_manager.rs`). Série, groupe et objet libre se
+glissent par leur poignée (`reorder_list::reorder_row_with`) : les lignes
+s'écartent en direct (aperçu de spec dans `app/object_dnd.rs`, décisions pures
+dans `crate::object_drag`) et une seule action part au relâchement
+(`PlaceSeries`, `PlaceSeriesGroup`, `ReorderObject`) ; entrer dans un groupe,
+en sortir et échanger des séries seules passent par la même voie, la fenêtre
+des séries modifiant son brouillon directement. Les propriétés
 conservent le calque exact dans `PlotEdit::selected_panel`.
 
 ## Correction définitive d'une analyse (#212)

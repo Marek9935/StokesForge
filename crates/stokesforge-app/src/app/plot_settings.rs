@@ -788,14 +788,13 @@ pub(super) fn series_editor(
                 }),
             ),
         });
+        // « Show series » est la case de la liste des séries (curve_settings.rs).
         commit |= per_series(form, locked, |form| {
-            let mut commit = form.checkbox(&mut series.visible, tr!("plot-series-show"), None);
-            commit |= form.checkbox(
+            form.checkbox(
                 &mut series.show_in_legend,
                 tr!("plot-series-show-in-legend"),
                 None,
-            );
-            commit
+            )
         });
 
         form.section(tr!("plot-series-line-section"));
@@ -1434,10 +1433,14 @@ mod tests {
         peindre_fenetre(&context, &mut banc.state, Vec::new());
         assert_eq!(banc.state.plot_edit().unwrap().selected_series, 1);
         assert_eq!(banc.modele(), original);
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-series-show"));
+        cliquer_libelle(
+            &context,
+            &mut banc.state,
+            &tr!("plot-series-show-in-legend"),
+        );
         let apres = banc.modele();
         assert_eq!(apres.panels[0].series[0], original.panels[0].series[0]);
-        assert!(!apres.panels[0].series[1].visible);
+        assert!(!apres.panels[0].series[1].show_in_legend);
         assert_eq!(apres.panels[0].series[1].name, "Seconde");
     }
 
@@ -1573,17 +1576,25 @@ mod tests {
         banc.state.plot_edit_mut().unwrap().selected_series = 1;
         let original = banc.modele();
 
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-series-show"));
+        cliquer_libelle(
+            &context,
+            &mut banc.state,
+            &tr!("plot-series-show-in-legend"),
+        );
         assert_eq!(banc.modele(), original, "grisé : le clic ne change rien");
 
         cliquer_libelle(&context, &mut banc.state, &tr!("curve-scope-series"));
-        cliquer_libelle(&context, &mut banc.state, &tr!("plot-series-show"));
+        cliquer_libelle(
+            &context,
+            &mut banc.state,
+            &tr!("plot-series-show-in-legend"),
+        );
         let apres = banc.modele();
         assert!(
-            apres.panels[0].series[0].visible,
+            apres.panels[0].series[0].show_in_legend,
             "l'autre membre est intact"
         );
-        assert!(!apres.panels[0].series[1].visible);
+        assert!(!apres.panels[0].series[1].show_in_legend);
         assert_eq!(
             apres.panels[0].series[1].group,
             Some(1),
@@ -2071,10 +2082,14 @@ mod tests {
                 assert!(!est_peint(&peints, &libelle), "{connu:?}");
             }
         }
-        assert!(est_peint(&peints, &tr!("plot-series-show")));
-        let peints = cliquer_libelle(&context, &mut banc.state, &tr!("plot-series-show"));
+        assert!(est_peint(&peints, &tr!("plot-series-show-in-legend")));
+        let peints = cliquer_libelle(
+            &context,
+            &mut banc.state,
+            &tr!("plot-series-show-in-legend"),
+        );
         assert!(
-            !banc.modele().panels[0].series[0].visible,
+            !banc.modele().panels[0].series[0].show_in_legend,
             "toujours éditable"
         );
         assert_eq!(banc.modele().panels[0].series[0].plot_type, inconnu());

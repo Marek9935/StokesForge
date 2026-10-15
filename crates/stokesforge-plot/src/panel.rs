@@ -296,6 +296,13 @@ impl PanelSpec {
     /// noms de groupes disparus. Rend le rang final de la série `index`
     /// (rang d'avant l'appel), qu'un déplacement fait bouger.
     fn apply_slots(&mut self, slots: &[SeriesSlot], index: usize) -> usize {
+        let order = self.reorder_by_slots(slots);
+        order.iter().position(|i| *i == index).unwrap_or(index)
+    }
+
+    /// Le travail d'[`PanelSpec::apply_slots`], qui rend l'ordre obtenu :
+    /// `order[nouveau rang] = ancien rang`.
+    fn reorder_by_slots(&mut self, slots: &[SeriesSlot]) -> Vec<usize> {
         let order: Vec<usize> = slots
             .iter()
             .flat_map(|slot| match slot {
@@ -313,7 +320,7 @@ impl PanelSpec {
             .retain(|id, _| self.series.iter().any(|s| s.group == Some(*id)));
         self.group_gradients
             .retain(|id, _| self.series.iter().any(|s| s.group == Some(*id)));
-        order.iter().position(|i| *i == index).unwrap_or(index)
+        order
     }
 
     /// Place la série `index` dans le groupe `group`, **à la suite** de ses
@@ -368,6 +375,109 @@ impl PanelSpec {
             }
         }
         Some(rank)
+    }
+
+    /// Où se trouve la série `index` : son groupe et son rang dans ce
+    /// conteneur — parmi les emplacements du panneau si elle est seule, parmi
+    /// les membres de son groupe sinon. C'est le couple que rend
+    /// [`PanelSpec::place_series`] pour la retrouver.
+    pub fn series_position(&self, index: usize) -> Option<(Option<u32>, usize)> {
+        let group = self.series.get(index)?.group;
+        let slots = self.slots();
+        match group {
+            None => slots
+                .iter()
+                .position(|slot| matches!(slot, SeriesSlot::Single(i) if *i == index))
+                .map(|rank| (None, rank)),
+            Some(id) => slots.iter().find_map(|slot| match slot {
+                SeriesSlot::Group { id: other, members } if *other == id => members
+                    .iter()
+                    .position(|m| *m == index)
+                    .map(|rank| (Some(id), rank)),
+                _ => None,
+            }),
+        }
+    }
+
+    /// Pose la série `index` dans le conteneur `group` au rang `position` de ce
+    /// conteneur, **comptée une fois la série retirée** (glisser-déposer) :
+    /// `None` la rend seule, au rang `position` parmi les emplacements ;
+    /// `Some(id)` la met dans ce groupe, au rang `position` de ses membres (un
+    /// numéro que personne ne porte crée le groupe). Un rang trop grand va à la
+    /// fin. Un groupe que la série vide disparaît avec son nom.
+    ///
+    /// Rend l'ordre obtenu (`ordre[nouveau rang] = ancien rang`), `None` sans
+    /// rien changer si la série est déjà là ou n'existe pas.
+    pub fn place_series(
+        &mut self,
+        index: usize,
+        group: Option<u32>,
+        position: usize,
+    ) -> Option<Vec<usize>> {
+        if index >= self.series.len() {
+            return None;
+        }
+        let before = self.slots();
+        let mut slots = before.clone();
+        let rank = slots.iter().position(|slot| slot.contains(index))?;
+        let emptied = match &mut slots[rank] {
+            SeriesSlot::Single(_) => true,
+            SeriesSlot::Group { members, .. } => {
+                members.retain(|m| *m != index);
+                members.is_empty()
+            }
+        };
+        if emptied {
+            slots.remove(rank);
+        }
+        let joined = group.and_then(|id| {
+            slots.iter_mut().find_map(|slot| match slot {
+                SeriesSlot::Group { id: other, members } if *other == id => Some(members),
+                _ => None,
+            })
+        });
+        match (group, joined) {
+            (Some(_), Some(members)) => members.insert(position.min(members.len()), index),
+            (Some(id), None) => slots.insert(
+                position.min(slots.len()),
+                SeriesSlot::Group {
+                    id,
+                    members: vec![index],
+                },
+            ),
+            (None, _) => slots.insert(position.min(slots.len()), SeriesSlot::Single(index)),
+        }
+        if slots == before && self.series[index].group == group {
+            return None;
+        }
+        self.series[index].group = group;
+        let order = self.reorder_by_slots(&slots);
+        // Comme `set_series_group` : une série qui rejoint un groupe doté d'un
+        // nuancier en reçoit la couleur.
+        if let Some(id) = group {
+            if let Some(stops) = self.group_gradients.get(&id).cloned() {
+                self.apply_group_gradient(id, &stops);
+            }
+        }
+        Some(order)
+    }
+
+    /// Pose le groupe `group` au rang `position` parmi les emplacements, compté
+    /// une fois le groupe retiré (glisser-déposer). Rend l'ordre obtenu
+    /// (`ordre[nouveau rang] = ancien rang`), `None` si le groupe n'existe pas
+    /// ou ne bouge pas.
+    pub fn place_group(&mut self, group: u32, position: usize) -> Option<Vec<usize>> {
+        let before = self.slots();
+        let mut slots = before.clone();
+        let rank = slots
+            .iter()
+            .position(|slot| matches!(slot, SeriesSlot::Group { id, .. } if *id == group))?;
+        let slot = slots.remove(rank);
+        slots.insert(position.min(slots.len()), slot);
+        if slots == before {
+            return None;
+        }
+        Some(self.reorder_by_slots(&slots))
     }
 
     /// Rassemble les séries `indices` (rangs distincts, dans l'ordre voulu)
@@ -800,6 +910,81 @@ mod group_tests {
         assert_eq!(panel.leave_group(1), Some(1));
         assert_eq!(panel.group_ids(), [2]);
         assert_eq!(panel.leave_group(0), None, "déjà seule");
+    }
+
+    #[test]
+    fn placer_une_serie_seule_entre_deux_emplacements() {
+        let mut panel = panneau();
+        // « 4 » (rang 3) passe en tête des emplacements : 4, 1, [2 3], [5 6].
+        let ordre = panel.place_series(3, None, 0).unwrap();
+        assert_eq!(colonnes(&panel), [4, 1, 2, 3, 5, 6]);
+        assert_eq!(ordre, [3, 0, 1, 2, 4, 5]);
+        // Déjà là : rien ne change.
+        assert!(panel.place_series(0, None, 0).is_none());
+        // Au-delà de la fin : tout à la fin.
+        panel.place_series(0, None, 99).unwrap();
+        assert_eq!(colonnes(&panel), [1, 2, 3, 5, 6, 4]);
+        assert_eq!(panel.series_position(5), Some((None, 3)));
+    }
+
+    #[test]
+    fn placer_une_serie_dans_un_groupe_choisit_son_rang() {
+        let mut panel = panneau();
+        // « 4 » entre dans le groupe 1 entre ses deux membres : 1, [2 4 3], [5 6].
+        panel.place_series(3, Some(1), 1).unwrap();
+        assert_eq!(colonnes(&panel), [1, 2, 4, 3, 5, 6]);
+        assert_eq!(panel.series[2].group, Some(1));
+        assert_eq!(panel.series_position(2), Some((Some(1), 1)));
+        // Réordonner au sein du groupe : [4 2 3].
+        panel.place_series(2, Some(1), 0).unwrap();
+        assert_eq!(colonnes(&panel), [1, 4, 2, 3, 5, 6]);
+        assert!(panel.place_series(1, Some(1), 0).is_none());
+    }
+
+    #[test]
+    fn placer_une_serie_hors_de_son_groupe_la_rend_seule_au_rang_voulu() {
+        let mut panel = panneau();
+        // « 3 » quitte le groupe 1 pour la tête : 3, 1, [2], 4, [5 6].
+        panel.place_series(2, None, 0).unwrap();
+        assert_eq!(colonnes(&panel), [3, 1, 2, 4, 5, 6]);
+        assert_eq!(panel.series[0].group, None);
+        assert_eq!(panel.group_members(1), [2]);
+        // Le dernier membre quitte : le groupe et son nom disparaissent.
+        panel.rename_group(1, "Lot");
+        panel.place_series(2, None, 4).unwrap();
+        assert_eq!(panel.group_ids(), [2]);
+        assert!(panel.group_names.is_empty());
+    }
+
+    #[test]
+    fn placer_une_serie_dans_un_groupe_vers_un_autre_groupe() {
+        let mut panel = panneau();
+        // « 2 » passe du groupe 1 au groupe 2, en tête : 1, [3], 4, [2 5 6].
+        panel.place_series(1, Some(2), 0).unwrap();
+        assert_eq!(colonnes(&panel), [1, 3, 4, 2, 5, 6]);
+        assert_eq!(panel.group_members(2), [3, 4, 5]);
+        assert_eq!(panel.group_members(1), [1]);
+    }
+
+    #[test]
+    fn placer_une_serie_dans_un_groupe_inconnu_le_cree_a_ce_rang() {
+        let mut panel = panneau();
+        panel.place_series(0, Some(9), 1).unwrap();
+        assert_eq!(colonnes(&panel), [2, 3, 1, 4, 5, 6]);
+        assert_eq!(panel.group_members(9), [2]);
+    }
+
+    #[test]
+    fn placer_un_groupe_le_deplace_en_bloc() {
+        let mut panel = panneau();
+        // Le groupe 2 passe en tête : [5 6], 1, [2 3], 4.
+        let ordre = panel.place_group(2, 0).unwrap();
+        assert_eq!(colonnes(&panel), [5, 6, 1, 2, 3, 4]);
+        assert_eq!(ordre, [4, 5, 0, 1, 2, 3]);
+        assert!(panel.place_group(2, 0).is_none(), "déjà en tête");
+        assert!(panel.place_group(7, 0).is_none(), "groupe inconnu");
+        panel.place_group(2, 99).unwrap();
+        assert_eq!(colonnes(&panel), [1, 2, 3, 4, 5, 6]);
     }
 
     #[test]

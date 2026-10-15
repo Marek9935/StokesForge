@@ -30,6 +30,7 @@ use stokesforge_plot::{
 
 use crate::color_picker::{color_field, gradient_strip, gradient_swatch, ColorUsage, PickerEnv};
 use crate::icons::ICON_SIZE;
+use crate::object_drag::{step_panel, DragItem, DropOver};
 use crate::object_manager::group_title;
 use crate::state::{series_list_label, Action, SaveTarget};
 use crate::theme;
@@ -38,8 +39,10 @@ use crate::tr;
 use super::empty_state::empty_state;
 use super::form::{choice, form, ChoiceOption, Form};
 use super::hover_help::help_text;
-use super::list_row::list_row;
+use super::list_row::list_row_draggable;
+use super::object_dnd::{self, Hover};
 use super::plot_settings::series_editor;
+use super::reorder_list::reorder_row_with;
 
 /// Largeur de la liste des séries, à gauche.
 const LIST_WIDTH: f32 = 190.0;
@@ -132,24 +135,83 @@ fn propagate_style(panel: &mut PanelSpec, group: u32, before: &SeriesSpec, index
     }
 }
 
-/// Une ligne de série de la liste ; rend le centre vertical de la ligne.
+/// Le glisser-déposer de la liste : l'élément saisi (le brouillon se modifie
+/// tout de suite, sans aperçu) et la première ligne survolée de l'image.
+struct ListDnd {
+    layer: usize,
+    item: Option<DragItem>,
+    hover: Hover,
+}
+
+/// Une ligne de série de la liste ; rend le centre vertical de la ligne. Sa
+/// poignée la glisse : dans son groupe, vers un autre groupe, hors du groupe,
+/// ou parmi les séries seules.
 fn series_row(
     ui: &mut egui::Ui,
-    panel: &PanelSpec,
+    panel: &mut PanelSpec,
     tree: &Tree,
     index: usize,
     selected: &mut usize,
+    dnd: &ListDnd,
+    commit: &mut bool,
 ) -> f32 {
     let label = series_list_label(tree, &panel.series[index]);
-    let response = ui
+    let row = ui
         .push_id(index, |ui| {
-            list_row(ui, None, &label, *selected == index, false)
+            ui.horizontal(|ui| {
+                let mut clicked = false;
+                let outcome = reorder_row_with(
+                    ui,
+                    ui.id().with("row"),
+                    matches!(
+                        dnd.item,
+                        Some(DragItem::Series { current, .. }) if current == index
+                    ),
+                    |ui| {
+                        // « Show series » : la case de la série, en tête de ligne.
+                        let mut visible = panel.series[index].visible;
+                        if ui
+                            .add(egui::Checkbox::new(&mut visible, ""))
+                            .on_hover_text(tr!("plot-series-show"))
+                            .changed()
+                        {
+                            panel.series[index].visible = visible;
+                            *commit = true;
+                        }
+                        // Toute la ligne, hors case, se clique et se glisse.
+                        let response = list_row_draggable(ui, &label, *selected == index);
+                        clicked = response.clicked();
+                        Some(response)
+                    },
+                );
+                (outcome, clicked)
+            })
         })
         .inner;
-    if response.clicked() {
+    let (outcome, clicked) = row.inner;
+    if clicked {
         *selected = index;
     }
-    response.rect.center().y
+    if outcome.grabbed {
+        *selected = index;
+        object_dnd::begin(
+            ui.ctx(),
+            None,
+            DragItem::Series {
+                panel: dnd.layer,
+                origin: index,
+                current: index,
+            },
+        );
+    }
+    if let Some(rect) = outcome.hover {
+        dnd.hover.offer(DropOver::Series {
+            panel: dnd.layer,
+            index,
+            after: object_dnd::pointer_after(ui, rect),
+        });
+    }
+    row.response.rect.center().y
 }
 
 /// La liste des séries, rangée comme l'Object Manager (#197) : une série seule
@@ -163,6 +225,14 @@ fn series_list(
     tree: &Tree,
     selected: &mut usize,
 ) -> bool {
+    let mut commit = false;
+    let dnd = ListDnd {
+        layer,
+        item: object_dnd::live(ui.ctx())
+            .filter(|live| live.graph.is_none())
+            .map(|live| live.item),
+        hover: Hover::default(),
+    };
     egui::ScrollArea::vertical()
         .id_salt("curve_settings_list")
         .auto_shrink([false, false])
@@ -173,7 +243,7 @@ fn series_list(
             for slot in panel.slots() {
                 match slot {
                     SeriesSlot::Single(index) => {
-                        series_row(ui, panel, tree, index, selected);
+                        series_row(ui, panel, tree, index, selected, &dnd, &mut commit);
                     }
                     SeriesSlot::Group { id, members } => {
                         let state = ui.make_persistent_id(("curve_list_group", layer, id));
@@ -193,17 +263,56 @@ fn series_list(
                                 .unwrap_or(EditScope::Group);
                             let on_group = scope == EditScope::Group && members.contains(selected);
                             let title = group_title(panel, id);
-                            if list_row(ui, None, &title, on_group, false).clicked() {
+                            let mut clicked = false;
+                            let outcome = reorder_row_with(
+                                ui,
+                                ui.id().with("row"),
+                                matches!(
+                                    dnd.item,
+                                    Some(DragItem::Group { group, .. }) if group == id
+                                ),
+                                |ui| {
+                                    let response = list_row_draggable(ui, &title, on_group);
+                                    clicked = response.clicked();
+                                    Some(response)
+                                },
+                            );
+                            if clicked || outcome.grabbed {
                                 if let Some(first) = members.first() {
                                     *selected = *first;
                                 }
                                 ui.data_mut(|d| d.insert_temp(scope_id, EditScope::Group));
                             }
+                            if outcome.grabbed {
+                                object_dnd::begin(
+                                    ui.ctx(),
+                                    None,
+                                    DragItem::Group {
+                                        panel: layer,
+                                        group: id,
+                                    },
+                                );
+                            }
+                            if let Some(rect) = outcome.hover {
+                                dnd.hover.offer(DropOver::Header {
+                                    panel: layer,
+                                    group: id,
+                                    after: object_dnd::pointer_after(ui, rect),
+                                });
+                            }
                         })
                         .body(|ui| {
                             crate::tree_lines::tree_children(ui, |ui, branch| {
                                 for &member in &members {
-                                    let y = series_row(ui, panel, tree, member, selected);
+                                    let y = series_row(
+                                        ui,
+                                        panel,
+                                        tree,
+                                        member,
+                                        selected,
+                                        &dnd,
+                                        &mut commit,
+                                    );
                                     branch.mark(y);
                                 }
                             })
@@ -211,8 +320,25 @@ fn series_list(
                     }
                 }
             }
+            // La sortie d'un groupe qui finit la liste, et le dépôt en fin de
+            // liste : la zone n'existe que pendant un glisser.
+            if dnd.item.is_some() {
+                let row = ui.horizontal(|ui| ui.weak(tr!("object-drag-end"))).response;
+                if ui.rect_contains_pointer(row.rect) {
+                    dnd.hover.offer(DropOver::End { panel: layer });
+                }
+            }
         });
-    let mut commit = false;
+    if let (Some(item), Some(over)) = (dnd.item, dnd.hover.take()) {
+        if let Some((item, order)) = step_panel(panel, item, over) {
+            object_dnd::set_item(ui.ctx(), item);
+            // La série réglée suit sa place dans le nouvel ordre.
+            if let Some(rank) = order.iter().position(|old| old == selected) {
+                *selected = rank;
+            }
+            commit = true;
+        }
+    }
     ui.horizontal(|ui| {
         for (label, up) in [
             (tr!("action-move-series-up"), true),
@@ -1064,5 +1190,134 @@ mod tests {
             "témoin : le groupe a bougé"
         );
         assert_eq!(panel.series[selected].name, "B");
+    }
+
+    /// La page des séries vivante, pour piloter un glisser-déposer image par
+    /// image : le brouillon se modifie tout de suite, sans aperçu.
+    struct Banc {
+        project: stokesforge_core::Project,
+        panel: PanelSpec,
+        selected: usize,
+        committed: bool,
+    }
+
+    fn banc(panel: PanelSpec, selected: usize) -> egui_kittest::Harness<'static, Banc> {
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(900.0, 600.0))
+            .build_ui_state(
+                |ui, banc: &mut Banc| {
+                    let mut env = PickerEnv::default();
+                    let mut actions = Vec::new();
+                    banc.committed |= curve_settings_page(
+                        ui,
+                        &mut banc.panel,
+                        0,
+                        banc.project.tree(),
+                        &mut banc.selected,
+                        &mut env,
+                        &mut actions,
+                    );
+                },
+                Banc {
+                    project: stokesforge_core::Project::new("Séries").unwrap(),
+                    panel,
+                    selected,
+                    committed: false,
+                },
+            );
+        harness
+            .ctx
+            .set_fonts(stokesforge_render_egui::font_definitions());
+        crate::theme::install(&harness.ctx);
+        harness.run();
+        harness
+    }
+
+    fn poignee(harness: &egui_kittest::Harness<'static, Banc>, nom: &str) -> egui::Rect {
+        use egui_kittest::kittest::Queryable;
+        harness.get_by_label(nom).rect()
+    }
+
+    /// Saisit la poignée de `nom` et la mène sur le haut de la ligne de `vers`.
+    fn glisser(harness: &mut egui_kittest::Harness<'static, Banc>, nom: &str, vers: &str) {
+        let from = poignee(harness, nom).center();
+        let target = poignee(harness, vers);
+        let to = egui::pos2(target.center().x, target.top() + 1.0);
+        harness.hover_at(from);
+        harness.step();
+        harness.drag_at(from);
+        harness.step();
+        harness.hover_at(from + egui::vec2(14.0, 0.0));
+        harness.step();
+        harness.hover_at(from + egui::vec2(20.0, 0.0));
+        harness.step();
+        for _ in 0..3 {
+            harness.hover_at(to);
+            harness.step();
+        }
+        harness.drop_at(to);
+        harness.run();
+    }
+
+    fn noms(panel: &PanelSpec) -> Vec<&str> {
+        panel.series.iter().map(|s| s.name.as_str()).collect()
+    }
+
+    /// Une série seule glissée sur un membre rejoint le groupe ; le brouillon
+    /// est modifié tout de suite et la série réglée la suit.
+    #[test]
+    fn glisser_une_serie_seule_sur_un_membre_la_fait_rejoindre_le_groupe() {
+        let mut harness = banc(calque_avec_groupe(), 0);
+        glisser(&mut harness, "A", "B");
+        let banc = harness.state();
+        assert!(banc.committed, "le brouillon est à valider");
+        let a = banc
+            .panel
+            .series
+            .iter()
+            .position(|s| s.name == "A")
+            .unwrap();
+        assert_eq!(banc.panel.series[a].group, Some(1));
+        assert_eq!(banc.panel.group_members(1).len(), 4);
+        assert_eq!(banc.selected, a, "la série réglée suit sa place");
+    }
+
+    /// Un membre glissé sur une série seule quitte son groupe.
+    #[test]
+    fn glisser_un_membre_sur_une_serie_seule_le_fait_sortir_du_groupe() {
+        let mut harness = banc(calque_avec_groupe(), 1);
+        glisser(&mut harness, "B", "A");
+        let banc = harness.state();
+        assert_eq!(noms(&banc.panel), ["B", "A", "C", "D"]);
+        assert_eq!(banc.panel.series[0].group, None);
+        assert_eq!(banc.panel.group_members(1), [2, 3]);
+        assert_eq!(banc.selected, 0);
+    }
+
+    /// Une série seule et un groupe s'échangent ; le groupe se glisse en bloc.
+    #[test]
+    fn glisser_un_groupe_le_deplace_en_bloc_et_la_selection_le_suit() {
+        let mut harness = banc(calque_avec_groupe(), 2);
+        glisser(&mut harness, "Lots", "A");
+        let banc = harness.state();
+        assert_eq!(noms(&banc.panel), ["B", "C", "D", "A"]);
+        assert_eq!(banc.panel.group_members(1), [0, 1, 2]);
+        // Saisir l'en-tête choisit le groupe (sa première série, « B »), qui suit.
+        assert_eq!(banc.panel.series[banc.selected].name, "B");
+    }
+
+    /// Entre deux séries indépendantes, deux séries s'échangent.
+    #[test]
+    fn glisser_une_serie_independante_sur_une_autre_les_echange() {
+        let mut panel = PanelSpec::default();
+        for (n, name) in [(1, "A"), (2, "B"), (3, "C")] {
+            let mut series = SeriesSpec::new(NodeId::from_raw(n));
+            series.name = name.into();
+            panel.series.push(series);
+        }
+        let mut harness = banc(panel, 0);
+        glisser(&mut harness, "A", "C");
+        assert_eq!(noms(&harness.state().panel), ["B", "C", "A"]);
+        assert_eq!(harness.state().selected, 2);
     }
 }

@@ -703,7 +703,8 @@ fn aucun_bouton_selectionnable_hors_d_un_menu() {
          {fautifs:?}"
     );
     // Les briques existent.
-    assert!(fonction_unique(&sources, "list_row")
+    fonction_unique(&sources, "list_row");
+    assert!(fonction_unique(&sources, "list_row_sensed")
         .corps
         .contains("allocate_exact_size"));
     fonction_unique(&sources, "tab_strip_with");

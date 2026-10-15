@@ -28,6 +28,27 @@ struct RowDrag {
     id: egui::Id,
 }
 
+/// Où l'on retient le point saisi de la ligne glissée, relatif à la ligne : un
+/// seul glisser à la fois, donc une seule clé — l'identifiant d'une ligne peut
+/// changer pendant le geste (Object Manager : il suit le rang).
+const GRAB: &str = "reorder_row_grab";
+/// La couche flottante de la ligne glissée.
+const FLOATING: &str = "reorder_row_floating";
+
+/// Ce qu'une image d'une ligne a vu.
+pub(super) struct RowOutcome {
+    /// La ligne qu'une autre ligne, glissée, survole : son cadre.
+    pub hover: Option<egui::Rect>,
+    /// La poignée vient d'être saisie.
+    pub grabbed: bool,
+}
+
+/// Un glisser de ligne est en cours (ou vient d'être relâché, à l'image du
+/// relâchement).
+pub(super) fn dragging(ctx: &egui::Context) -> bool {
+    egui::DragAndDrop::has_payload_of_type::<RowDrag>(ctx)
+}
+
 /// Peint une ligne : la poignée (`grip_alt` pour l'accessibilité, `grip_tip` en
 /// info-bulle) puis `body`. Rend `true` si une autre ligne, glissée, survole
 /// celle-ci : l'appelant mémorise son indice pour [`reorder_move`].
@@ -39,42 +60,73 @@ pub(super) fn reorder_row(
     body: impl FnOnce(&mut egui::Ui),
 ) -> bool {
     let dragged = egui::DragAndDrop::payload::<RowDrag>(ui.ctx()).is_some_and(|drag| drag.id == id);
-    // Seule la poignée se saisit : la ligne garde ses cases cliquables.
-    let started = std::cell::Cell::new(false);
-    let content = |ui: &mut egui::Ui| {
+    reorder_row_with(ui, id, dragged, |ui| {
         let grip = ui.add(
             icon_image(Icon::Grip, IconRole::Neutral)
                 .alt_text(grip_alt)
                 .sense(egui::Sense::drag()),
         );
         let grip = grab_handle(grip).on_hover_text(grip_tip);
-        grip.dnd_set_drag_payload(RowDrag { id });
-        started.set(grip.drag_started());
         body(ui);
+        Some(grip)
+    })
+    .hover
+    .is_some()
+}
+
+/// [`reorder_row`] sans poignée imposée : `body` peint la ligne et rend la
+/// réponse qui **saisit** la ligne (une poignée, ou toute la zone du libellé :
+/// elle doit porter `Sense::drag`), `None` pour une ligne qui ne se glisse pas.
+/// L'appelant dit si la ligne est celle qu'on glisse : quand la liste se
+/// réordonne pendant le geste et que l'identifiant d'une ligne suit son rang,
+/// la charge utile ne la reconnaît plus.
+pub(super) fn reorder_row_with(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    dragged: bool,
+    body: impl FnOnce(&mut egui::Ui) -> Option<egui::Response>,
+) -> RowOutcome {
+    let started = std::cell::Cell::new(false);
+    let content = |ui: &mut egui::Ui| {
+        if let Some(handle) = body(ui) {
+            handle.dnd_set_drag_payload(RowDrag { id });
+            started.set(handle.drag_started());
+        }
     };
     if dragged {
-        let layer = egui::LayerId::new(egui::Order::Tooltip, id);
+        let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new(FLOATING));
         let slot = ui
             .scope_builder(egui::UiBuilder::new().layer_id(layer), content)
             .response
             .rect;
         ui.allocate_space(slot.size());
-        let grab: egui::Vec2 = ui.data(|data| data.get_temp(id)).unwrap_or_default();
+        let grab: egui::Vec2 = ui
+            .data(|data| data.get_temp(egui::Id::new(GRAB)))
+            .unwrap_or_default();
         if let Some(now) = ui.input(|input| input.pointer.interact_pos()) {
             ui.ctx().transform_layer_shapes(
                 layer,
                 egui::emath::TSTransform::from_translation(now - grab - slot.min),
             );
         }
-        return false;
+        return RowOutcome {
+            hover: None,
+            grabbed: false,
+        };
     }
     let row = ui.scope(content).response;
     if started.get() {
         if let Some(start) = ui.input(|input| input.pointer.press_origin()) {
-            ui.data_mut(|data| data.insert_temp(id, start - row.rect.min));
+            ui.data_mut(|data| data.insert_temp(egui::Id::new(GRAB), start - row.rect.min));
         }
     }
-    row.dnd_hover_payload::<RowDrag>().is_some()
+    RowOutcome {
+        hover: row
+            .dnd_hover_payload::<RowDrag>()
+            .is_some()
+            .then_some(row.rect),
+        grabbed: started.get(),
+    }
 }
 
 /// Le déplacement à faire cette image : `ids` sont les identifiants des lignes

@@ -66,6 +66,23 @@ pub(super) fn list_row_label(text: egui::RichText, selected: bool) -> egui::Butt
     egui::Button::new(text).frame(false).selected(selected)
 }
 
+/// [`list_row_label`] suivi d'une zone qui prend tout le reste de la ligne,
+/// l'une et l'autre cliquables et glissables : le clic, le double-clic et le
+/// glisser-déposer valent sur toute la ligne, hors case de visibilité. Le
+/// libellé garde sa place à gauche (un bouton élargi le centrerait).
+pub(super) fn list_row_grip(
+    ui: &mut egui::Ui,
+    text: egui::RichText,
+    selected: bool,
+) -> egui::Response {
+    let label = ui.add(list_row_label(text, selected).sense(egui::Sense::click_and_drag()));
+    let rest = ui.allocate_response(
+        egui::vec2(ui.available_width().max(0.0), label.rect.height()),
+        egui::Sense::click_and_drag(),
+    );
+    label.union(rest)
+}
+
 /// Le fond d'une ligne : fond pâle et filet d'accent si elle est
 /// sélectionnée, gris clair si elle est seulement survolée, rien sinon. Deux
 /// formes à plat (fond, puis filet), jamais un `Shape::Vec` : les tests et
@@ -130,6 +147,30 @@ pub(super) fn list_row(
     selected: bool,
     dimmed: bool,
 ) -> egui::Response {
+    list_row_sensed(ui, icon, text, selected, dimmed, egui::Sense::click())
+}
+
+/// [`list_row`] qui se glisse aussi : toute la ligne saisit (glisser-déposer
+/// des séries, `object_dnd.rs`).
+pub(super) fn list_row_draggable(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
+    list_row_sensed(
+        ui,
+        None,
+        text,
+        selected,
+        false,
+        egui::Sense::click_and_drag(),
+    )
+}
+
+fn list_row_sensed(
+    ui: &mut egui::Ui,
+    icon: Option<egui::Image<'static>>,
+    text: &str,
+    selected: bool,
+    dimmed: bool,
+    sense: egui::Sense,
+) -> egui::Response {
     let galley = egui::WidgetText::from(list_row_text(text, selected)).into_galley(
         ui,
         Some(egui::TextWrapMode::Extend),
@@ -146,7 +187,7 @@ pub(super) fn list_row(
         ui.available_width().max(natural),
         galley.size().y.max(ICON_SIZE) + 2.0 * LIST_ROW_PADDING.y,
     );
-    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let (rect, response) = ui.allocate_exact_size(size, sense);
     let response = super::cursors::clickable(response);
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, text)

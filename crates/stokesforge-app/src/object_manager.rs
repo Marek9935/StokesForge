@@ -458,36 +458,6 @@ pub fn selection_after_history(
     }
 }
 
-/// Rang final après un déplacement dans le groupe. Les dépôts entre calques
-/// sont refusés : ils changeraient les axes de rattachement des données.
-pub fn series_drop(
-    spec: &PlotSpec,
-    source: SeriesRef,
-    onto: SeriesRef,
-    after: bool,
-) -> Option<usize> {
-    let (dragged, target) = (spec.series_at(source)?, spec.series_at(onto)?);
-    // Un groupe reste contigu (#197) : on ne dépose pas une série dans un
-    // groupe qui n'est pas le sien, ni hors du sien.
-    if source.panel != onto.panel || source == onto || dragged.group != target.group {
-        return None;
-    }
-    let slot = onto.index + usize::from(after);
-    let index = slot - usize::from(source.index < slot);
-    (index != source.index).then_some(index)
-}
-pub fn reorder_series(spec: &mut PlotSpec, source: SeriesRef, index: usize) -> bool {
-    let Some(panel) = spec.panels.get_mut(source.panel) else {
-        return false;
-    };
-    if source.index >= panel.series.len() || index >= panel.series.len() || source.index == index {
-        return false;
-    }
-    let series = panel.series.remove(source.index);
-    panel.series.insert(index, series);
-    true
-}
-
 #[derive(Debug, Clone)]
 pub struct SeriesRow {
     pub target: SeriesRef,
@@ -603,9 +573,31 @@ pub fn object_tree_with_selection(
 ) -> Option<ObjectTree> {
     let node = tree.node(graph)?;
     let spec = crate::state::current_plot_spec(tree, graph)?;
-    Some(ObjectTree {
+    Some(object_tree_of_spec(
+        tree,
         graph,
-        title: node.name().to_string(),
+        node.name(),
+        &spec,
+        selected,
+        show_scales,
+        show_objects,
+    ))
+}
+
+/// [`object_tree_with_selection`] pour un spec donné : l'aperçu d'un
+/// glisser-déposer en cours se peint sans que le modèle ait changé.
+pub fn object_tree_of_spec(
+    tree: &Tree,
+    graph: NodeId,
+    title: &str,
+    spec: &PlotSpec,
+    selected: Option<VisibilityTarget>,
+    show_scales: bool,
+    show_objects: bool,
+) -> ObjectTree {
+    ObjectTree {
+        graph,
+        title: title.to_string(),
         layers: spec
             .panels
             .iter()
@@ -711,7 +703,7 @@ pub fn object_tree_with_selection(
                 }
             })
             .collect(),
-    })
+    }
 }
 
 /// Les décisions pures de la projection, sans fenêtre (venues d'`app.rs` avec
@@ -759,41 +751,6 @@ mod tests {
         assert_eq!(T::Axes(0).contents(&spec).len(), 4);
         assert_eq!(T::Axes(1).contents(&spec).len(), 2);
     }
-    /// #197 : un groupe reste contigu au glisser-déposer — on ne dépose une
-    /// série que parmi ses voisines de même groupe (ou parmi les séries seules).
-    #[test]
-    fn le_depot_d_une_serie_respecte_les_groupes() {
-        use crate::object_manager::series_drop;
-        use stokesforge_plot::{PanelSpec, Panels};
-        // A, [B C], D, E
-        let mut panel = PanelSpec::at(0, 0);
-        panel.series = (1..=5)
-            .map(|n| {
-                let mut s = SeriesSpec::new(NodeId::from_raw(n));
-                s.group = (n == 2 || n == 3).then_some(1);
-                s
-            })
-            .collect();
-        let spec = PlotSpec::empty("Test").with_panels(Panels::new(vec![panel]));
-        let at = |index| SeriesRef::new(0, index);
-        assert_eq!(series_drop(&spec, at(3), at(4), true), Some(4), "témoin");
-        assert_eq!(
-            series_drop(&spec, at(1), at(2), true),
-            Some(2),
-            "dans le groupe"
-        );
-        assert_eq!(
-            series_drop(&spec, at(0), at(1), false),
-            None,
-            "dans un groupe"
-        );
-        assert_eq!(
-            series_drop(&spec, at(1), at(3), true),
-            None,
-            "hors du groupe"
-        );
-    }
-
     /// #176 : les lignes haut et droite d'un calque ordinaire commandent le
     /// miroir ; un calque superposé qui occupe le côté grise la case.
     #[test]
@@ -916,9 +873,7 @@ mod tests {
 
     #[test]
     fn undo_redo_suit_la_serie_reordonnee_et_garde_une_edition_de_style() {
-        use crate::object_manager::{
-            reorder_series, selection_after_history, VisibilityTarget as T,
-        };
+        use crate::object_manager::{selection_after_history, VisibilityTarget as T};
         let mut before = PlotSpec::default();
         for name in ["A", "B", "C"] {
             let mut series = SeriesSpec::new(NodeId::from_raw(900));
@@ -926,7 +881,12 @@ mod tests {
             before.panels.get_mut(0).unwrap().series.push(series);
         }
         let mut after = before.clone();
-        assert!(reorder_series(&mut after, SeriesRef::new(0, 0), 2));
+        assert!(after
+            .panels
+            .get_mut(0)
+            .unwrap()
+            .place_series(0, None, 2)
+            .is_some());
         assert_eq!(
             selection_after_history(&after, &before, Some(T::Series(SeriesRef::new(0, 2)))),
             Some(T::Series(SeriesRef::new(0, 0)))

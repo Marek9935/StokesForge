@@ -160,6 +160,7 @@ mod keyboard_shortcuts_window;
 mod list_row;
 mod menu_sections;
 mod menus;
+mod object_dnd;
 mod object_manager_ui;
 #[cfg(test)]
 mod panel_tests;
@@ -1368,6 +1369,9 @@ impl StokesForgeApp {
                 | Action::Redo
                 | Action::MoveSeries { .. }
                 | Action::MoveSeriesGroup { .. }
+                | Action::PlaceSeries { .. }
+                | Action::PlaceSeriesGroup { .. }
+                | Action::ReorderObject { .. }
                 | Action::UngroupSeries { .. }
                 | Action::RemovePlotObject {
                     target: crate::object_manager::VisibilityTarget::SeriesGroup(_),
@@ -1395,21 +1399,14 @@ impl StokesForgeApp {
             Vec::new()
         };
         let selection_change = match &action {
-            Action::ReorderSeries {
-                graph,
-                source,
-                index,
-            } => Some((*graph, Some((*source, *index)), None)),
-            Action::RemovePlotObject { graph, target } => Some((*graph, None, Some(*target))),
+            Action::RemovePlotObject { graph, target } => Some((*graph, *target)),
             Action::RemoveAnnotation { graph, target } => Some((
                 *graph,
-                None,
-                Some(crate::object_manager::VisibilityTarget::Annotation(*target)),
+                crate::object_manager::VisibilityTarget::Annotation(*target),
             )),
             Action::RemoveShape { graph, target } => Some((
                 *graph,
-                None,
-                Some(crate::object_manager::VisibilityTarget::Shape(*target)),
+                crate::object_manager::VisibilityTarget::Shape(*target),
             )),
             _ => None,
         };
@@ -1461,8 +1458,8 @@ impl StokesForgeApp {
         self.close_floating_tabs(removed);
 
         if self.state.revision() != revision_before {
-            if let Some((graph, moved, removed)) = selection_change {
-                self.update_selection_after_action(graph, moved, removed);
+            if let Some((graph, removed)) = selection_change {
+                self.update_selection_after_action(graph, removed);
             }
         }
         if self.state.revision() != revision_before {
@@ -1519,41 +1516,19 @@ impl StokesForgeApp {
         false
     }
 
-    /// Réordonnancement et suppression font suivre la sélection seulement si la commande a agi.
+    /// La suppression fait suivre la sélection seulement si la commande a agi.
     fn update_selection_after_action(
         &mut self,
         graph: NodeId,
-        moved: Option<(stokesforge_plot::SeriesRef, usize)>,
-        removed: Option<crate::object_manager::VisibilityTarget>,
+        removed: crate::object_manager::VisibilityTarget,
     ) {
         if let Some(spec) = crate::state::current_plot_spec(self.state.tree(), graph) {
             self.with_graph_view(graph, |view| {
-                if let Some((source, index)) = moved {
-                    if let Some(selected) =
-                        view.selected_series().filter(|s| s.panel == source.panel)
-                    {
-                        let next = if selected.index == source.index {
-                            index
-                        } else if source.index < selected.index && selected.index <= index {
-                            selected.index - 1
-                        } else if index <= selected.index && selected.index < source.index {
-                            selected.index + 1
-                        } else {
-                            selected.index
-                        };
-                        view.select_series(
-                            Some(stokesforge_plot::SeriesRef::new(source.panel, next)),
-                            &spec,
-                        );
-                    }
-                }
-                if let Some(removed) = removed {
-                    let next = crate::object_manager::selection_after_remove(
-                        selected_manager_target(view),
-                        removed,
-                    );
-                    select_manager_target(view, next, &spec);
-                }
+                let next = crate::object_manager::selection_after_remove(
+                    selected_manager_target(view),
+                    removed,
+                );
+                select_manager_target(view, next, &spec);
             });
         }
     }

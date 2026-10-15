@@ -1,6 +1,6 @@
 //! Object Manager peint (#81–#85, #102, #111, #113) : l'arbre de
 //! [`crate::object_manager::ObjectTree`] en lignes, cases de visibilité, menus
-//! contextuels, glisser des séries et raccourcis clavier (Suppr, F2,
+//! contextuels, glisser par poignée (séries, groupes, objets libres ; `object_dnd.rs`) et raccourcis clavier (Suppr, F2,
 //! Ctrl+flèches). Le modèle (projection du `PlotSpec`, filtres) reste dans
 //! `crate::object_manager` ; la sélection vit dans la `GraphView`. Ce qui
 //! touche la vue (sélection, propriétés, renommage) remonte en
@@ -24,6 +24,7 @@ use stokesforge_core::{NodeId, Tree};
 use stokesforge_render_egui::GraphView;
 
 use crate::icons::{icon_image, Icon, IconRole};
+use crate::object_drag::{DragItem, DropOver};
 use crate::object_manager::{
     GroupRow, LayerRow, LayerSlot, ObjectRow, ObjectTree, SeriesRow, Shown, VisibilityTarget as T,
 };
@@ -38,8 +39,10 @@ use super::graph_text_edit::{
 };
 use super::graph_window::open_shape_properties;
 use super::inplace_edit;
-use super::list_row::{list_row_label, list_row_text, list_row_text_color, ListRowBackground};
+use super::list_row::{list_row_grip, list_row_text, list_row_text_color, ListRowBackground};
 use super::menu_sections::MenuSections;
+use super::object_dnd::{self, Hover};
+use super::reorder_list::reorder_row_with;
 use super::shortcuts::{
     shortcut_text_delete, SHORTCUT_MOVE_SERIES_DOWN, SHORTCUT_MOVE_SERIES_UP,
     SHORTCUT_RENAME_OBJECT,
@@ -64,12 +67,6 @@ pub(super) enum ObjectManagerRequest {
     /// Édite sur place le titre, le titre d'axe ou l'entrée de légende.
     EditText(ContextText),
 }
-#[derive(Clone, Copy)]
-struct SeriesDrag {
-    graph: NodeId,
-    source: stokesforge_plot::SeriesRef,
-}
-
 /// Libellé d'un nœud d'en-tête de l'Object Manager (graphe, calque, groupes) :
 /// un double-clic ouvre ses paramètres, comme sur les autres lignes (#113).
 fn manager_header_label(
@@ -593,6 +590,26 @@ pub(super) fn object_manager_contents(
         empty_state(ui, tr!("object-manager-no-graph"));
         return requests;
     };
+    // Pendant un glisser, la liste se peint d'après l'aperçu du geste (le spec
+    // réel, lui, ne change qu'au relâchement).
+    let live = object_dnd::live(ui.ctx()).filter(|live| live.graph == Some(model.graph));
+    let item = live.as_ref().map(|live| live.item);
+    let preview_model;
+    let (model, shown_spec) = match live.as_ref().and_then(|live| live.preview.as_ref()) {
+        Some(preview) => {
+            preview_model = crate::object_manager::object_tree_of_spec(
+                tree,
+                model.graph,
+                &model.title,
+                preview,
+                item.map(DragItem::target),
+                settings.show_scales,
+                settings.show_objects,
+            );
+            (&preview_model, preview)
+        }
+        None => (model, spec),
+    };
     let focus = ui.make_persistent_id(("object_manager_keys", model.graph));
     // #126 : enregistrer l'ancre avant les lignes. egui rend son focus
     // au relâchement d'un clic, car Rect::NOTHING n'est jamais survolé ;
@@ -606,15 +623,18 @@ pub(super) fn object_manager_contents(
     let mut selected = None;
     let paint = ObjectManagerPaint {
         tree,
-        spec,
+        spec: shown_spec,
         graph: model.graph,
         focus,
         settings,
+        item,
+        hover: Hover::default(),
     };
     egui::ScrollArea::both().show(ui, |ui| {
         crate::tree_lines::begin_tree(ui);
         paint.graph(ui, model, actions, &mut requests, &mut selected);
     });
+    object_dnd::end_of_frame(ui.ctx(), model.graph, spec, paint.hover.take(), actions);
     if ui.memory(|m| m.focused()) == Some(focus) {
         if let Some(target) = selected {
             if target.removable(spec)
@@ -648,6 +668,10 @@ struct ObjectManagerPaint<'a> {
     graph: NodeId,
     focus: egui::Id,
     settings: ObjectManagerSettings,
+    /// L'élément glissé, à sa place dans l'aperçu.
+    item: Option<DragItem>,
+    /// La ligne que l'élément glissé survole, vue pendant la peinture.
+    hover: Hover,
 }
 
 impl ObjectManagerPaint<'_> {
@@ -799,10 +823,30 @@ impl ObjectManagerPaint<'_> {
                         };
                         branch.mark(y);
                     }
+                    // Sortie d'un groupe qui finit la liste (et dépôt en fin de
+                    // liste) : la zone n'existe que pendant un glisser de série
+                    // ou de groupe de ce calque.
+                    if matches!(
+                        self.item,
+                        Some(DragItem::Series { panel, .. } | DragItem::Group { panel, .. })
+                            if panel == layer.index
+                    ) {
+                        let y = self.end_zone(ui, layer.index);
+                        branch.mark(y);
+                    }
                 })
             });
 
         group_toggle.rect.center().y
+    }
+
+    /// La zone « fin de la liste » : une ligne grisée sous la dernière série.
+    fn end_zone(&self, ui: &mut egui::Ui, panel: usize) -> f32 {
+        let row = ui.horizontal(|ui| ui.weak(tr!("object-drag-end"))).response;
+        if ui.rect_contains_pointer(row.rect) {
+            self.hover.offer(DropOver::End { panel });
+        }
+        row.rect.center().y
     }
 
     /// Un groupe de séries (#197) : le nœud, sa case de visibilité mixte, son
@@ -846,7 +890,9 @@ impl ObjectManagerPaint<'_> {
     }
 
     /// L'en-tête d'un groupe : une ligne de liste (#169) sous la case et le
-    /// nom, sélectionnable, ouvrant la fenêtre des séries au double-clic.
+    /// nom, sélectionnable, ouvrant la fenêtre des séries au double-clic. Sa
+    /// poignée déplace le groupe en bloc ; une série glissée dessus le rejoint
+    /// (moitié basse) ou se pose avant lui (moitié haute).
     fn group_header(
         &self,
         ui: &mut egui::Ui,
@@ -858,43 +904,75 @@ impl ObjectManagerPaint<'_> {
         let background = ListRowBackground::reserve(ui);
         let row = ui
             .horizontal(|ui| {
-                object_visibility(
-                    ui,
-                    self.graph,
-                    target,
-                    self.spec,
-                    Shown::from(self.settings),
-                    actions,
-                );
                 let renaming = group_rename_of(ui.ctx(), self.graph, group.target);
                 if let Some(rename) = renaming {
-                    group_name_editor(ui, self.graph, group, rename, actions);
-                    return;
-                }
-                let text = list_row_text(&group.name, group.selected).color(list_row_text_color(
-                    ui,
-                    group.selected,
-                    false,
-                ));
-                let response = ui.add(list_row_label(text, group.selected));
-                if response.clicked() || response.secondary_clicked() {
-                    requests.push(ObjectManagerRequest::Select(target));
-                    ui.memory_mut(|memory| memory.request_focus(self.focus));
-                }
-                if response.double_clicked() {
-                    requests.push(ObjectManagerRequest::Properties(target));
-                }
-                response.context_menu(|ui| {
-                    object_node_menu(
+                    object_visibility(
                         ui,
                         self.graph,
                         target,
                         self.spec,
                         Shown::from(self.settings),
                         actions,
-                        requests,
-                    )
-                });
+                    );
+                    group_name_editor(ui, self.graph, group, rename, actions);
+                    return;
+                }
+                let outcome = reorder_row_with(
+                    ui,
+                    ui.id().with("row"),
+                    self.item.is_some_and(|item| item.target() == target),
+                    |ui| {
+                        object_visibility(
+                            ui,
+                            self.graph,
+                            target,
+                            self.spec,
+                            Shown::from(self.settings),
+                            actions,
+                        );
+                        let text = list_row_text(&group.name, group.selected)
+                            .color(list_row_text_color(ui, group.selected, false));
+                        let response = list_row_grip(ui, text, group.selected);
+                        if response.clicked() || response.secondary_clicked() {
+                            requests.push(ObjectManagerRequest::Select(target));
+                            ui.memory_mut(|memory| memory.request_focus(self.focus));
+                        }
+                        if response.double_clicked() {
+                            requests.push(ObjectManagerRequest::Properties(target));
+                        }
+                        response.context_menu(|ui| {
+                            object_node_menu(
+                                ui,
+                                self.graph,
+                                target,
+                                self.spec,
+                                Shown::from(self.settings),
+                                actions,
+                                requests,
+                            )
+                        });
+                        Some(response)
+                    },
+                );
+                if outcome.grabbed {
+                    object_dnd::begin(
+                        ui.ctx(),
+                        Some(self.graph),
+                        DragItem::Group {
+                            panel: group.target.panel,
+                            group: group.target.group,
+                        },
+                    );
+                    requests.push(ObjectManagerRequest::Select(target));
+                    ui.memory_mut(|memory| memory.request_focus(self.focus));
+                }
+                if let Some(rect) = outcome.hover {
+                    self.hover.offer(DropOver::Header {
+                        panel: group.target.panel,
+                        group: group.target.group,
+                        after: object_dnd::pointer_after(ui, rect),
+                    });
+                }
             })
             .response
             .rect;
@@ -976,7 +1054,7 @@ impl ObjectManagerPaint<'_> {
     ) {
         for object in objects {
             let y = object_manager_object_row(
-                ui, self.graph, object, self.spec, self.focus, actions, requests,
+                ui, self.graph, object, self.spec, self.focus, self, actions, requests,
             );
             branch.mark(y);
             if object.selected {
@@ -995,101 +1073,90 @@ impl ObjectManagerPaint<'_> {
         ui.push_id(series.target, |ui| {
             // #169 : une ligne de liste, fond posé sous la case et l'échantillon.
             let background = ListRowBackground::reserve(ui);
+            let target = series.target;
             let row = ui
                 .horizontal(|ui| {
-                    object_visibility(
+                    // La poignée en tête (comme les formats de copie des
+                    // préférences) : la ligne se glisse, les autres s'écartent.
+                    let outcome = reorder_row_with(
                         ui,
-                        self.graph,
-                        T::Series(series.target),
-                        self.spec,
-                        Shown::from(self.settings),
-                        actions,
+                        ui.id().with("row"),
+                        self.item
+                            .is_some_and(|item| item.target() == T::Series(target)),
+                        |ui| {
+                            object_visibility(
+                                ui,
+                                self.graph,
+                                T::Series(target),
+                                self.spec,
+                                Shown::from(self.settings),
+                                actions,
+                            );
+                            let (rect, swatch) = ui.allocate_exact_size(
+                                egui::vec2(28.0, 18.0),
+                                egui::Sense::click_and_drag(),
+                            );
+                            ui.painter().extend(stokesforge_render_egui::series_swatch(
+                                self.tree,
+                                &series.spec,
+                                rect,
+                            ));
+                            if series.stale {
+                                let image = crate::icons::icon_image(
+                                    crate::icons::Icon::Stale,
+                                    crate::icons::IconRole::Neutral,
+                                )
+                                .sense(egui::Sense::hover());
+                                ui.add(image).on_hover_text(tr!("stale-series-hint"));
+                            }
+                            let text = list_row_text(&series.label, series.selected)
+                                .color(list_row_text_color(ui, series.selected, false));
+                            // #151 : l'échantillon de légende fait partie de la cible,
+                            // comme le nom. Toute la ligne, hors case, saisit et
+                            // clique : on unit les gestes avant de traiter sélection
+                            // et propriétés.
+                            let response = list_row_grip(ui, text, series.selected).union(swatch);
+                            if response.clicked() || response.secondary_clicked() {
+                                requests.push(ObjectManagerRequest::Select(T::Series(target)));
+                                ui.memory_mut(|memory| memory.request_focus(self.focus));
+                            }
+                            if response.double_clicked() {
+                                requests.push(ObjectManagerRequest::Properties(T::Series(target)));
+                            }
+                            response.context_menu(|ui| {
+                                object_node_menu(
+                                    ui,
+                                    self.graph,
+                                    T::Series(target),
+                                    self.spec,
+                                    Shown::from(self.settings),
+                                    actions,
+                                    requests,
+                                )
+                            });
+                            Some(response)
+                        },
                     );
-                    let (rect, swatch) = ui
-                        .allocate_exact_size(egui::vec2(28.0, 18.0), egui::Sense::click_and_drag());
-                    ui.painter().extend(stokesforge_render_egui::series_swatch(
-                        self.tree,
-                        &series.spec,
-                        rect,
-                    ));
-                    if series.stale {
-                        let image = crate::icons::icon_image(
-                            crate::icons::Icon::Stale,
-                            crate::icons::IconRole::Neutral,
-                        )
-                        .sense(egui::Sense::hover());
-                        ui.add(image).on_hover_text(tr!("stale-series-hint"));
-                    }
-                    let text = list_row_text(&series.label, series.selected)
-                        .color(list_row_text_color(ui, series.selected, false));
-                    // #151 : l'échantillon de légende fait partie de la cible,
-                    // comme le nom. Garder l'ID du bouton pour son menu et unir
-                    // les gestes avant de traiter sélection, glisser et propriétés.
-                    let response = ui
-                        .add(
-                            list_row_label(text, series.selected)
-                                .sense(egui::Sense::click_and_drag()),
-                        )
-                        .union(swatch);
-                    if response.clicked() || response.secondary_clicked() || response.drag_started()
-                    {
-                        requests.push(ObjectManagerRequest::Select(T::Series(series.target)));
+                    if outcome.grabbed {
+                        object_dnd::begin(
+                            ui.ctx(),
+                            Some(self.graph),
+                            DragItem::Series {
+                                panel: target.panel,
+                                origin: target.index,
+                                current: target.index,
+                            },
+                        );
+                        requests.push(ObjectManagerRequest::Select(T::Series(target)));
                         ui.memory_mut(|memory| memory.request_focus(self.focus));
                     }
-                    if response.double_clicked() {
-                        requests.push(ObjectManagerRequest::Properties(T::Series(series.target)));
-                    }
-                    response.dnd_set_drag_payload(SeriesDrag {
-                        graph: self.graph,
-                        source: series.target,
-                    });
-                    let drop_index = response
-                        .dnd_hover_payload::<SeriesDrag>()
-                        .filter(|drag| drag.graph == self.graph)
-                        .and_then(|drag| {
-                            let after = ui
-                                .input(|i| i.pointer.interact_pos())
-                                .is_some_and(|p| p.y > response.rect.center().y);
-                            crate::object_manager::series_drop(
-                                self.spec,
-                                drag.source,
-                                series.target,
-                                after,
-                            )
+                    if let Some(rect) = outcome.hover {
+                        self.hover.offer(DropOver::Series {
+                            panel: target.panel,
+                            index: target.index,
+                            after: object_dnd::pointer_after(ui, rect),
                         });
-                    if let Some(index) = drop_index {
-                        let after = ui
-                            .input(|i| i.pointer.interact_pos())
-                            .is_some_and(|p| p.y > response.rect.center().y);
-                        let y = if after {
-                            response.rect.bottom()
-                        } else {
-                            response.rect.top()
-                        };
-                        ui.painter().hline(
-                            response.rect.x_range(),
-                            y,
-                            ui.visuals().selection.stroke,
-                        );
-                        if let Some(drag) = response.dnd_release_payload::<SeriesDrag>() {
-                            actions.push(Action::ReorderSeries {
-                                graph: self.graph,
-                                source: drag.source,
-                                index,
-                            });
-                        }
                     }
-                    response.context_menu(|ui| {
-                        object_node_menu(
-                            ui,
-                            self.graph,
-                            T::Series(series.target),
-                            self.spec,
-                            Shown::from(self.settings),
-                            actions,
-                            requests,
-                        )
-                    });
                 })
                 .response
                 .rect;
@@ -1253,54 +1320,109 @@ fn group_name_editor(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn object_manager_object_row(
     ui: &mut egui::Ui,
     graph: NodeId,
     object: &crate::object_manager::ObjectRow,
     spec: &stokesforge_plot::PlotSpec,
     focus: egui::Id,
+    dnd: &ObjectManagerPaint<'_>,
     actions: &mut Vec<Action>,
     requests: &mut Vec<ObjectManagerRequest>,
 ) -> f32 {
     ui.push_id(object.target, |ui| {
         // #169 : une ligne de liste, fond posé sous la case et l'icône.
         let background = ListRowBackground::reserve(ui);
+        // Un texte libre ou une forme se réordonne **dans sa catégorie** ; les
+        // axes ne bougent pas.
+        let draggable = match object.target {
+            T::Annotation(r) => Some((
+                DragItem::Text {
+                    panel: r.panel,
+                    origin: r.index,
+                    current: r.index,
+                },
+                DropOver::Text {
+                    panel: r.panel,
+                    index: r.index,
+                },
+            )),
+            T::Shape(r) => Some((
+                DragItem::Shape {
+                    panel: r.panel,
+                    origin: r.index,
+                    current: r.index,
+                },
+                DropOver::Shape {
+                    panel: r.panel,
+                    index: r.index,
+                },
+            )),
+            _ => None,
+        };
         let row = ui
             .horizontal(|ui| {
-                object_visibility(ui, graph, object.target, spec, Shown::BASE, actions);
-                let icon = match object.kind {
-                    crate::object_manager::ObjectKind::Text => Icon::TextTool,
-                    crate::object_manager::ObjectKind::Axis => Icon::Axis,
-                    crate::object_manager::ObjectKind::Shape(kind) => match kind {
-                        stokesforge_plot::ShapeKind::Rectangle => Icon::ShapeRectangle,
-                        stokesforge_plot::ShapeKind::Ellipse => Icon::ShapeEllipse,
-                        stokesforge_plot::ShapeKind::Line => Icon::ShapeLine,
-                        stokesforge_plot::ShapeKind::Arrow => Icon::ShapeArrow,
-                    },
+                let mut body = |ui: &mut egui::Ui| {
+                    object_visibility(ui, graph, object.target, spec, Shown::BASE, actions);
+                    let icon = match object.kind {
+                        crate::object_manager::ObjectKind::Text => Icon::TextTool,
+                        crate::object_manager::ObjectKind::Axis => Icon::Axis,
+                        crate::object_manager::ObjectKind::Shape(kind) => match kind {
+                            stokesforge_plot::ShapeKind::Rectangle => Icon::ShapeRectangle,
+                            stokesforge_plot::ShapeKind::Ellipse => Icon::ShapeEllipse,
+                            stokesforge_plot::ShapeKind::Line => Icon::ShapeLine,
+                            stokesforge_plot::ShapeKind::Arrow => Icon::ShapeArrow,
+                        },
+                    };
+                    let icon = ui
+                        .add(
+                            icon_image(icon, IconRole::Neutral)
+                                .sense(egui::Sense::click_and_drag()),
+                        )
+                        .on_hover_text(&object.label);
+                    let text = list_row_text(&object.label, object.selected)
+                        .color(list_row_text_color(ui, object.selected, false));
+                    let response = list_row_grip(ui, text, object.selected).union(icon);
+                    if response.clicked() || response.secondary_clicked() {
+                        requests.push(ObjectManagerRequest::Select(object.target));
+                        ui.memory_mut(|m| m.request_focus(focus));
+                    }
+                    if response.double_clicked() {
+                        requests.push(ObjectManagerRequest::Properties(object.target));
+                    }
+                    response.context_menu(|ui| {
+                        object_node_menu(
+                            ui,
+                            graph,
+                            object.target,
+                            spec,
+                            Shown::BASE,
+                            actions,
+                            requests,
+                        )
+                    });
+                    response
                 };
-                ui.add(icon_image(icon, IconRole::Neutral))
-                    .on_hover_text(&object.label);
-                let text = list_row_text(&object.label, object.selected)
-                    .color(list_row_text_color(ui, object.selected, false));
-                let response = ui.add(list_row_label(text, object.selected));
-                if response.clicked() || response.secondary_clicked() {
+                let Some((item, over)) = draggable else {
+                    body(ui);
+                    return;
+                };
+                let outcome = reorder_row_with(
+                    ui,
+                    ui.id().with("row"),
+                    dnd.item
+                        .is_some_and(|dragged| dragged.target() == object.target),
+                    |ui| Some(body(ui)),
+                );
+                if outcome.grabbed {
+                    object_dnd::begin(ui.ctx(), Some(graph), item);
                     requests.push(ObjectManagerRequest::Select(object.target));
                     ui.memory_mut(|m| m.request_focus(focus));
                 }
-                if response.double_clicked() {
-                    requests.push(ObjectManagerRequest::Properties(object.target));
+                if outcome.hover.is_some() {
+                    dnd.hover.offer(over);
                 }
-                response.context_menu(|ui| {
-                    object_node_menu(
-                        ui,
-                        graph,
-                        object.target,
-                        spec,
-                        Shown::BASE,
-                        actions,
-                        requests,
-                    )
-                });
             })
             .response
             .rect;
@@ -1462,6 +1584,7 @@ pub(super) fn apply_object_request(
 mod tests {
     use super::super::test_support::image_de;
     use super::*;
+    use egui_kittest::kittest::Queryable;
     use stokesforge_core::Project;
     use stokesforge_plot::{
         AnnotationRef, AnnotationSpec, PanelSpec, PlotSpec, SeriesRef, SeriesSpec, ShapeKind,
@@ -2035,36 +2158,20 @@ mod tests {
         }
     }
 
+    /// F2 renomme et Ctrl+↓ descend la série sélectionnée (clavier, sans glisser).
     #[test]
-    fn glisser_une_serie_emet_un_seul_deplacement_au_rang_final() {
+    fn f2_et_ctrl_fleche_agissent_sur_la_serie_selectionnee() {
         let (project, _graph, spec, model) = trois_series();
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let image = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
         image(Vec::new());
         let (output, _, _) = image(Vec::new());
-        let from = text_center(&output, "Premier");
-        let to = text_center(&output, "Dernier") + egui::vec2(0.0, 7.0);
-        image(vec![egui::Event::PointerMoved(from)]);
-        image(vec![pointer(from, true)]);
-        let (_, actions, _) = image(vec![egui::Event::PointerMoved(from + egui::vec2(0.0, 8.0))]);
-        assert!(actions.is_empty(), "l'aperçu n'écrit pas le modèle");
-        image(vec![egui::Event::PointerMoved(to)]);
-        let (_, actions, _) = image(vec![pointer(to, false)]);
-        assert_eq!(actions.len(), 1, "une commande au relâchement");
-        assert!(matches!(
-            actions[0],
-            Action::ReorderSeries {
-                source: SeriesRef { panel: 0, index: 0 },
-                index: 2,
-                ..
-            }
-        ));
-        let (_, actions, _) = image(Vec::new());
-        assert!(
-            actions.is_empty(),
-            "le dépôt ne se répète pas à l'image suivante"
-        );
+        // Un clic sur la ligne donne le focus clavier au panneau.
+        let on = text_center(&output, "Premier");
+        image(vec![egui::Event::PointerMoved(on)]);
+        image(vec![pointer(on, true)]);
+        image(vec![pointer(on, false)]);
         let (_, actions, requests) = image(vec![key(egui::Key::F2, egui::Modifiers::NONE)]);
         assert!(actions.is_empty());
         assert!(requests.iter().any(|r| matches!(
@@ -2080,6 +2187,262 @@ mod tests {
                 ..
             }]
         ));
+    }
+
+    /// Un Object Manager vivant : le spec et son arbre ne changent pas (le
+    /// modèle n'est écrit qu'au relâchement), les actions s'accumulent.
+    struct Banc {
+        project: Project,
+        model: crate::object_manager::ObjectTree,
+        spec: PlotSpec,
+        settings: ObjectManagerSettings,
+        actions: Vec<Action>,
+    }
+
+    type Fixture = (Project, NodeId, PlotSpec, crate::object_manager::ObjectTree);
+
+    fn banc(fixture: Fixture) -> egui_kittest::Harness<'static, Banc> {
+        banc_avec(fixture, ObjectManagerSettings::default())
+    }
+
+    fn banc_avec(
+        (project, _graph, spec, model): Fixture,
+        settings: ObjectManagerSettings,
+    ) -> egui_kittest::Harness<'static, Banc> {
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(420.0, 420.0))
+            .build_ui_state(
+                |ui, banc: &mut Banc| {
+                    object_manager_contents(
+                        ui,
+                        banc.project.tree(),
+                        Some(&banc.model),
+                        Some(&banc.spec),
+                        banc.settings,
+                        &mut banc.actions,
+                    );
+                },
+                Banc {
+                    project,
+                    model,
+                    spec,
+                    settings,
+                    actions: Vec::new(),
+                },
+            );
+        harness
+            .ctx
+            .set_fonts(stokesforge_render_egui::font_definitions());
+        crate::theme::install(&harness.ctx);
+        harness.run();
+        harness
+    }
+
+    /// La zone de saisie d'une ligne (son libellé), par son nom.
+    fn poignee(harness: &egui_kittest::Harness<'static, Banc>, nom: &str) -> egui::Rect {
+        harness.get_by_label(nom).rect()
+    }
+
+    /// Saisit la poignée de `nom`, la mène au point `vers` (en plusieurs
+    /// images, comme une main) et relâche. Les actions émises sont rendues.
+    fn glisser(
+        harness: &mut egui_kittest::Harness<'static, Banc>,
+        nom: &str,
+        vers: impl Fn(&egui_kittest::Harness<'static, Banc>) -> egui::Pos2,
+    ) -> Vec<Action> {
+        let from = poignee(harness, nom).center();
+        harness.hover_at(from);
+        harness.step();
+        harness.drag_at(from);
+        harness.step();
+        harness.hover_at(from + egui::vec2(14.0, 0.0));
+        harness.step();
+        harness.hover_at(from + egui::vec2(20.0, 0.0));
+        harness.step();
+        // La cible se lit une fois : la liste se réordonne sous le pointeur.
+        let to = vers(harness);
+        for _ in 0..3 {
+            harness.hover_at(to);
+            harness.step();
+        }
+        assert!(
+            harness.state().actions.is_empty(),
+            "l'aperçu n'écrit pas le modèle"
+        );
+        harness.drop_at(to);
+        harness.run();
+        std::mem::take(&mut harness.state_mut().actions)
+    }
+
+    /// Le haut de la ligne de `nom` (moitié haute).
+    fn haut_de(nom: &'static str) -> impl Fn(&egui_kittest::Harness<'static, Banc>) -> egui::Pos2 {
+        move |harness| {
+            let rect = poignee(harness, nom);
+            egui::pos2(rect.center().x, rect.top() + 1.0)
+        }
+    }
+
+    /// Glisser « Premier » sur « Dernier » : une seule action, au relâchement,
+    /// avec le rang final.
+    #[test]
+    fn glisser_une_serie_seule_emet_un_seul_placement_au_relachement() {
+        let mut harness = banc(trois_series());
+        let actions = glisser(&mut harness, "Premier", |h| poignee(h, "Dernier").center());
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [Action::PlaceSeries {
+                    source: SeriesRef { panel: 0, index: 0 },
+                    group: None,
+                    position: 2,
+                    ..
+                }]
+            ),
+            "{actions:?}"
+        );
+        harness.run();
+        assert!(
+            harness.state().actions.is_empty(),
+            "le dépôt ne se répète pas à l'image suivante"
+        );
+    }
+
+    /// Lâcher une série là où elle était ne demande rien.
+    #[test]
+    fn relacher_sur_place_ne_demande_rien() {
+        let mut harness = banc(trois_series());
+        let actions = glisser(&mut harness, "Deuxième", |h| {
+            poignee(h, "Deuxième").center()
+        });
+        assert!(actions.is_empty());
+    }
+
+    /// Une série seule glissée sur un membre d'un groupe y entre, au rang de
+    /// la ligne survolée.
+    #[test]
+    fn glisser_une_serie_seule_sur_un_membre_la_fait_entrer_dans_le_groupe() {
+        let mut harness = banc(groupe_nomme());
+        let actions = glisser(&mut harness, "Premier", haut_de("Deuxième"));
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [Action::PlaceSeries {
+                    source: SeriesRef { panel: 0, index: 0 },
+                    group: Some(1),
+                    ..
+                }]
+            ),
+            "{actions:?}"
+        );
+    }
+
+    /// Un membre glissé sur une série seule quitte son groupe.
+    #[test]
+    fn glisser_un_membre_sur_une_serie_seule_le_fait_sortir_du_groupe() {
+        let mut harness = banc(groupe_nomme());
+        let actions = glisser(&mut harness, "Dernier", haut_de("Premier"));
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [Action::PlaceSeries {
+                    source: SeriesRef { panel: 0, index: 2 },
+                    group: None,
+                    position: 0,
+                    ..
+                }]
+            ),
+            "{actions:?}"
+        );
+    }
+
+    /// La zone « fin de la liste » n'existe que pendant un glisser, et sort
+    /// d'un groupe qui finit la liste.
+    #[test]
+    fn la_zone_de_fin_sort_un_membre_d_un_groupe_qui_finit_la_liste() {
+        let mut harness = banc(groupe_nomme());
+        assert!(
+            harness.query_by_label(&tr!("object-drag-end")).is_none(),
+            "pas de zone hors glisser"
+        );
+        let actions = glisser(&mut harness, "Dernier", |h| {
+            h.get_by_label(&tr!("object-drag-end")).rect().center()
+        });
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [Action::PlaceSeries {
+                    source: SeriesRef { panel: 0, index: 2 },
+                    group: None,
+                    position: 2,
+                    ..
+                }]
+            ),
+            "{actions:?}"
+        );
+    }
+
+    /// Un groupe se glisse en bloc par la poignée de son en-tête.
+    #[test]
+    fn glisser_l_entete_d_un_groupe_le_deplace_en_bloc() {
+        let mut harness = banc(groupe_nomme());
+        let actions = glisser(&mut harness, "Lots", haut_de("Premier"));
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [Action::PlaceSeriesGroup {
+                    group: stokesforge_plot::SeriesGroupRef { panel: 0, group: 1 },
+                    position: 0,
+                    ..
+                }]
+            ),
+            "{actions:?}"
+        );
+    }
+
+    /// Un texte libre se réordonne parmi les textes ; jamais parmi les formes.
+    #[test]
+    fn les_objets_libres_gardent_leur_categorie_au_glisser() {
+        let mut project = Project::new("Objets").unwrap();
+        let root = project.root();
+        let mut panel = PanelSpec::default();
+        for note in ["Pic", "Creux"] {
+            panel.annotations.push(AnnotationSpec::new(note, 0.0, 0.0));
+        }
+        for kind in [ShapeKind::Line, ShapeKind::Arrow] {
+            panel.shapes.push(ShapeSpec::new(kind, 0.0, 0.0, 1.0, 1.0));
+        }
+        let spec = PlotSpec::default().with_panels(panel);
+        let graph = project.add_graph(root, None, spec.clone()).unwrap();
+        let model = crate::object_manager::object_tree_with_selection(
+            project.tree(),
+            graph,
+            None,
+            false,
+            true,
+        )
+        .unwrap();
+        let settings = ObjectManagerSettings {
+            objects_open: true,
+            ..ObjectManagerSettings::default()
+        };
+        let mut harness = banc_avec((project, graph, spec, model), settings);
+        let actions = glisser(&mut harness, "Creux", haut_de("Pic"));
+        assert!(
+            matches!(
+                actions.as_slice(),
+                [Action::ReorderObject {
+                    target: T::Annotation(AnnotationRef { panel: 0, index: 1 }),
+                    index: 0,
+                    ..
+                }]
+            ),
+            "{actions:?}"
+        );
+        // Un texte sur une forme : rien ne bouge.
+        let actions = glisser(&mut harness, "Pic", |h| {
+            poignee(h, &tr!("tool-line")).center()
+        });
+        assert!(actions.is_empty(), "{actions:?}");
     }
 
     /// #151 : le clic droit doit cibler la ligne visée, même si une autre
@@ -2525,8 +2888,9 @@ mod tests {
                 .iter()
                 .filter_map(|painted| match &painted.shape {
                     egui::Shape::Rect(rect)
+                        // La case fait 18 px ; la poignée, à sa gauche, 16 px.
                         if (rect.rect.width() - rect.rect.height()).abs() < 1.0
-                            && (8.0..=24.0).contains(&rect.rect.width())
+                            && (rect.rect.width() - 18.0).abs() < 1.0
                             && (rect.rect.center().y - label.y).abs() < 4.0
                             && rect.rect.center().x < label.x =>
                     {

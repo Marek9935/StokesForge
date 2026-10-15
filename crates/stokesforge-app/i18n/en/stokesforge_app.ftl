@@ -1689,4 +1689,7 @@ analysis-correction-trace = Modified data: { $kind }
 # Repère discret des corrections définitives (#212).
 grid-column-modified = Original data replaced by a correction. See Results for the correction settings
 
+
+# Glisser-déposer des séries, des groupes et des objets libres.
+object-drag-end = End of the list
 analysis-needs-column-curve = Analysis requires a curve drawn from a column
