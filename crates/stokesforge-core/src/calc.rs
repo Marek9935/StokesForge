@@ -40,7 +40,9 @@
 
 use std::sync::Arc;
 
-use stokesforge_analysis::ops::{self, AuxInput, Operation, SeriesInput, Value, Warning};
+use stokesforge_analysis::ops::{
+    self, AuxInput, Operation, OperationKind, SeriesInput, Value, Warning,
+};
 use stokesforge_analysis::AnalysisError;
 
 use crate::column::{Column, ColumnMeta, ColumnType, MixedCell, ValueBlock};
@@ -891,4 +893,395 @@ pub fn compute(
         });
     }
     Ok(computed)
+}
+
+/// Le nom d'une colonne de sortie d'analyse, **comme donnée** : les crates du
+/// dessous ne mettent rien en phrase. Une seule règle, partagée par l'interface
+/// et `pyst` (#256) : [`OutputName::of`] choisit la variante depuis la famille,
+/// la clé de sortie et la source ; [`OutputName::english`] en donne la forme
+/// anglaise brute (scripts, journaux) ; l'application la traduit par un `match`
+/// exhaustif vers les clés `analysis-output-*` du catalogue `en`
+/// (`tests/output_names.rs` garde l'accord des deux).
+///
+/// `name` est le nom long de la source, à défaut son nom court ; `column` est
+/// toujours son nom court (« B »).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutputName {
+    /// Le Y corrigé d'une ligne de base : `Intensity (B-corr)`.
+    BaselineCorrected { name: String, column: String },
+    /// Le Y corrigé d'une correction : `Intensity (corrected)`.
+    Corrected { name: String },
+    /// `Baseline of B`.
+    Baseline { column: String },
+    /// `Cumulative integral of B`.
+    Cumulative { column: String },
+    /// `Normalized integral of B`.
+    Normalized { column: String },
+    /// `Intensity (fit)`.
+    Fit { name: String },
+    /// `Intensity (resid.)`.
+    Residuals { name: String },
+    /// `Peak 2 of B` (rang à partir de 1).
+    Peak { index: usize, column: String },
+    /// `Background of B`.
+    Background { column: String },
+    /// `Sum of peaks of B`.
+    PeaksSum { column: String },
+    /// `Intensity (deconvolved)`.
+    Deconvolved { name: String },
+    /// Repli d'une clé que cette version ne connaît pas : le nom de la source.
+    Source { name: String },
+}
+
+/// Le nom court d'une colonne (« B »), à défaut le vide.
+fn short_name(tree: &Tree, column: NodeId) -> String {
+    tree.node(column)
+        .map(|n| n.name().to_string())
+        .unwrap_or_default()
+}
+
+/// Le nom long d'une colonne, ou à défaut son nom court.
+fn long_name(tree: &Tree, column: NodeId) -> String {
+    tree.node(column)
+        .and_then(|n| n.as_column())
+        .map(|c| c.meta().long_name.clone())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| short_name(tree, column))
+}
+
+impl OutputName {
+    /// Le nom de la sortie `key` (et `index`, pour un pic) de `kind` sur `series`.
+    pub fn of(
+        tree: &Tree,
+        kind: OperationKind,
+        series: &SeriesRef,
+        key: &str,
+        index: Option<usize>,
+    ) -> Self {
+        let column = short_name(tree, series.y);
+        let name = long_name(tree, series.y);
+        match (kind, key) {
+            (OperationKind::Baseline, "corrected") => Self::BaselineCorrected { name, column },
+            (_, "corrected") => Self::Corrected { name },
+            (_, "baseline") => Self::Baseline { column },
+            (_, "cumulative") => Self::Cumulative { column },
+            (_, "normalized") => Self::Normalized { column },
+            (_, "fit") => Self::Fit { name },
+            (_, "residuals") => Self::Residuals { name },
+            (_, "peak") => Self::Peak {
+                index: index.unwrap_or(1),
+                column,
+            },
+            (_, "background") => Self::Background { column },
+            (_, "peaks_sum") => Self::PeaksSum { column },
+            (_, "deconvolved") => Self::Deconvolved { name },
+            _ => Self::Source { name },
+        }
+    }
+
+    /// La forme anglaise brute, identique au catalogue `en` de l'application.
+    pub fn english(&self) -> String {
+        match self {
+            Self::BaselineCorrected { name, column } => format!("{name} ({column}-corr)"),
+            Self::Corrected { name } => format!("{name} (corrected)"),
+            Self::Baseline { column } => format!("Baseline of {column}"),
+            Self::Cumulative { column } => format!("Cumulative integral of {column}"),
+            Self::Normalized { column } => format!("Normalized integral of {column}"),
+            Self::Fit { name } => format!("{name} (fit)"),
+            Self::Residuals { name } => format!("{name} (resid.)"),
+            Self::Peak { index, column } => format!("Peak {index} of {column}"),
+            Self::Background { column } => format!("Background of {column}"),
+            Self::PeaksSum { column } => format!("Sum of peaks of {column}"),
+            Self::Deconvolved { name } => format!("{name} (deconvolved)"),
+            Self::Source { name } => name.clone(),
+        }
+    }
+}
+
+/// L'unité d'une colonne de sortie : **toujours celle de la source** pour les
+/// dix clés connues, vide pour une clé inconnue.
+pub fn output_unit(tree: &Tree, series: &SeriesRef, key: &str) -> String {
+    match key {
+        "corrected" | "baseline" | "cumulative" | "normalized" | "fit" | "residuals" | "peak"
+        | "background" | "peaks_sum" | "deconvolved" => tree
+            .node(series.y)
+            .and_then(|n| n.as_column())
+            .map(|c| c.meta().unit.clone())
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+/// Le nom anglais brut d'une famille d'opération : le commentaire des colonnes
+/// de sortie écrites par `pyst` et le `Display` des libellés d'historique. Le
+/// catalogue `analysis-kind-*` de l'application en est la traduction.
+pub fn family_english(kind: OperationKind) -> &'static str {
+    match kind {
+        OperationKind::Baseline => "Baseline",
+        OperationKind::Correct => "Correction",
+        OperationKind::Integrate => "Integration",
+        OperationKind::Fit => "Fit",
+        OperationKind::Peaks => "Peak Decomposition",
+        OperationKind::Reconvolution => "Reconvolution",
+        OperationKind::DirectDeconvolution => "Direct Deconvolution",
+    }
+}
+
+/// Les deux réglages de sortie d'une décomposition en pics qui ne sont pas dans
+/// l'[`Operation`] (ni dans le fichier) : les colonnes « un pic + fond » et la
+/// colonne « somme des pics ». Les cases de la fenêtre et les options de
+/// `pyst.peaks` les portent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PeakOutputs {
+    /// Une colonne par pic et la colonne de fond.
+    pub peak_columns: bool,
+    /// La colonne de la somme des pics.
+    pub sum_column: bool,
+}
+
+impl Default for PeakOutputs {
+    /// Les valeurs par défaut de la fenêtre : tout est écrit.
+    fn default() -> Self {
+        Self {
+            peak_columns: true,
+            sum_column: true,
+        }
+    }
+}
+
+/// La sortie `key` de `op` est-elle à écrire ? Une seule liste pour la fenêtre
+/// d'analyse et `pyst` : les colonnes d'aide (ligne de base, intégrales,
+/// résidus) suivent l'option de l'opération ; celles d'une décomposition en pics
+/// suivent `peaks`. Toute autre sortie est écrite.
+pub fn wants_output(op: &Operation, key: &str, peaks: PeakOutputs) -> bool {
+    match (op, key) {
+        (Operation::Baseline { keep_baseline, .. }, "baseline") => *keep_baseline,
+        (Operation::Integrate { spec }, "cumulative") => spec.cumulative,
+        (Operation::Integrate { spec }, "normalized") => spec.normalize,
+        (Operation::Fit { residuals, .. }, "residuals")
+        | (Operation::Peaks { residuals, .. }, "residuals")
+        | (Operation::Reconvolution { residuals, .. }, "residuals") => *residuals,
+        (Operation::Peaks { .. }, "peak" | "background") => peaks.peak_columns,
+        (Operation::Peaks { .. }, "peaks_sum") => peaks.sum_column,
+        _ => true,
+    }
+}
+
+#[cfg(test)]
+mod output_name_tests {
+    use super::*;
+    use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
+    use stokesforge_analysis::integrate::{IntegrateSpec, Under};
+    use stokesforge_analysis::peaks::{PeakBackground, PeakShape, PeaksSpec};
+
+    /// Une feuille avec la colonne « B » (nom long « Intensity », unité
+    /// « counts ») et la colonne « C » (aucun nom long ni unité).
+    fn fixture() -> (Project, SeriesRef, SeriesRef) {
+        let mut project = Project::new("P").unwrap();
+        let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+        let sheet = project.tree().children(book).unwrap()[0];
+        let b = project
+            .add_column(sheet, None, Some("B"), Column::from_f64(&[1.0, 2.0]))
+            .unwrap();
+        let c = project
+            .add_column(sheet, None, Some("C"), Column::from_f64(&[1.0, 2.0]))
+            .unwrap();
+        project
+            .set_column_meta(
+                b,
+                ColumnMeta {
+                    long_name: "Intensity".into(),
+                    unit: "counts".into(),
+                    ..ColumnMeta::default()
+                },
+            )
+            .unwrap();
+        let series = |y| SeriesRef {
+            x: None,
+            y,
+            sigma: None,
+        };
+        (project, series(b), series(c))
+    }
+
+    fn name(tree: &Tree, kind: OperationKind, s: &SeriesRef, key: &str) -> OutputName {
+        OutputName::of(tree, kind, s, key, None)
+    }
+
+    #[test]
+    fn a_baseline_correction_is_named_after_the_long_name_and_the_short_one() {
+        let (project, b, _) = fixture();
+        let n = name(project.tree(), OperationKind::Baseline, &b, "corrected");
+        assert_eq!(
+            n,
+            OutputName::BaselineCorrected {
+                name: "Intensity".into(),
+                column: "B".into()
+            }
+        );
+        assert_eq!(n.english(), "Intensity (B-corr)");
+        // Hors famille Baseline : le corrigé d'une correction.
+        let n = name(project.tree(), OperationKind::Correct, &b, "corrected");
+        assert_eq!(n.english(), "Intensity (corrected)");
+    }
+
+    #[test]
+    fn without_a_long_name_the_short_name_stands_in() {
+        let (project, _, c) = fixture();
+        let n = name(project.tree(), OperationKind::Baseline, &c, "corrected");
+        assert_eq!(
+            n,
+            OutputName::BaselineCorrected {
+                name: "C".into(),
+                column: "C".into()
+            }
+        );
+        assert_eq!(n.english(), "C (C-corr)");
+    }
+
+    #[test]
+    fn peaks_are_counted_from_one_and_named_after_the_short_name() {
+        let (project, b, _) = fixture();
+        let tree = project.tree();
+        let peak = |index| OutputName::of(tree, OperationKind::Peaks, &b, "peak", index);
+        assert_eq!(peak(Some(2)).english(), "Peak 2 of B");
+        assert_eq!(peak(None).english(), "Peak 1 of B");
+        let sum = name(tree, OperationKind::Peaks, &b, "peaks_sum");
+        assert_eq!(sum.english(), "Sum of peaks of B");
+    }
+
+    #[test]
+    fn every_known_key_has_its_english_form() {
+        let (project, b, _) = fixture();
+        let tree = project.tree();
+        let of = |kind, key| name(tree, kind, &b, key).english();
+        assert_eq!(of(OperationKind::Baseline, "baseline"), "Baseline of B");
+        assert_eq!(
+            of(OperationKind::Integrate, "cumulative"),
+            "Cumulative integral of B"
+        );
+        assert_eq!(
+            of(OperationKind::Integrate, "normalized"),
+            "Normalized integral of B"
+        );
+        assert_eq!(of(OperationKind::Fit, "fit"), "Intensity (fit)");
+        assert_eq!(of(OperationKind::Fit, "residuals"), "Intensity (resid.)");
+        assert_eq!(of(OperationKind::Peaks, "background"), "Background of B");
+        assert_eq!(
+            of(OperationKind::Reconvolution, "deconvolved"),
+            "Intensity (deconvolved)"
+        );
+    }
+
+    #[test]
+    fn an_unknown_key_falls_back_on_the_source_name() {
+        let (project, b, _) = fixture();
+        let n = name(project.tree(), OperationKind::Fit, &b, "something_new");
+        assert_eq!(
+            n,
+            OutputName::Source {
+                name: "Intensity".into()
+            }
+        );
+        assert_eq!(n.english(), "Intensity");
+    }
+
+    #[test]
+    fn the_unit_is_the_one_of_the_source_for_the_ten_keys() {
+        let (project, b, c) = fixture();
+        let tree = project.tree();
+        for key in [
+            "corrected",
+            "baseline",
+            "cumulative",
+            "normalized",
+            "fit",
+            "residuals",
+            "peak",
+            "background",
+            "peaks_sum",
+            "deconvolved",
+        ] {
+            assert_eq!(output_unit(tree, &b, key), "counts", "{key}");
+            assert_eq!(output_unit(tree, &c, key), "", "{key} sans unité");
+        }
+        assert_eq!(output_unit(tree, &b, "something_new"), "");
+    }
+
+    #[test]
+    fn each_family_has_its_english_title() {
+        let titles: Vec<&str> = OperationKind::ALL.map(family_english).to_vec();
+        assert_eq!(
+            titles,
+            [
+                "Baseline",
+                "Correction",
+                "Integration",
+                "Fit",
+                "Peak Decomposition",
+                "Reconvolution",
+                "Direct Deconvolution"
+            ]
+        );
+    }
+
+    fn peaks_op() -> Operation {
+        Operation::Peaks {
+            spec: PeaksSpec {
+                shape: PeakShape::Gaussian,
+                background: PeakBackground::Constant,
+                seeds: Vec::new(),
+                link_widths: false,
+                center_window: None,
+            },
+            auto: None,
+            range: None,
+            residuals: false,
+        }
+    }
+
+    #[test]
+    fn the_peak_options_rule_the_peak_columns_and_the_sum() {
+        let op = peaks_op();
+        for peak_columns in [false, true] {
+            for sum_column in [false, true] {
+                let options = PeakOutputs {
+                    peak_columns,
+                    sum_column,
+                };
+                assert_eq!(wants_output(&op, "peak", options), peak_columns);
+                assert_eq!(wants_output(&op, "background", options), peak_columns);
+                assert_eq!(wants_output(&op, "peaks_sum", options), sum_column);
+                // Ce que les options ne règlent pas reste écrit ou suit l'opération.
+                assert!(wants_output(&op, "fit", options));
+                assert!(!wants_output(&op, "residuals", options));
+            }
+        }
+        assert!(PeakOutputs::default().peak_columns);
+        assert!(PeakOutputs::default().sum_column);
+    }
+
+    #[test]
+    fn the_helper_columns_follow_the_option_of_their_operation() {
+        let options = PeakOutputs::default();
+        let baseline = |keep_baseline| Operation::Baseline {
+            method: BaselineMethod::Constant { point: (0.0, 0.0) },
+            op: BaselineOp::Subtract,
+            keep_baseline,
+        };
+        assert!(wants_output(&baseline(true), "baseline", options));
+        assert!(!wants_output(&baseline(false), "baseline", options));
+        assert!(wants_output(&baseline(false), "corrected", options));
+        let integrate = |cumulative, normalize| Operation::Integrate {
+            spec: IntegrateSpec {
+                ranges: Vec::new(),
+                under: Under::Zero,
+                cumulative,
+                normalize,
+            },
+        };
+        let op = integrate(true, false);
+        assert!(wants_output(&op, "cumulative", options));
+        assert!(!wants_output(&op, "normalized", options));
+    }
 }

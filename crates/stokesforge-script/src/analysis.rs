@@ -23,10 +23,14 @@
 //! `{"series": [dict, …]}`, un dictionnaire par série dans l'ordre de `y` ;
 //! `fit(shared=[noms])` en fait un ajustement global.
 //!
-//! # Limite
+//! # Noms des colonnes écrites
 //!
-//! Les noms longs des colonnes sont en anglais (la langue de l'interface ne
-//! passe pas par les scripts).
+//! Nom long, unité et commentaire sont ceux de la fenêtre d'analyse, par la
+//! règle unique de `stokesforge-core` (`OutputName`, #256) : « Intensity
+//! (B-corr) », « Baseline of B »… L'unité est celle de la source, le
+//! commentaire le titre de la famille. Seule différence : le texte est toujours
+//! en anglais (la langue de l'interface ne passe pas par les scripts). Le nom
+//! est figé à la création ; le recalcul n'en réécrit que les données.
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
@@ -41,7 +45,8 @@ use stokesforge_analysis::ops::{AutoDetect, Operation, Warning};
 use stokesforge_analysis::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec};
 use stokesforge_commands::Command;
 use stokesforge_core::{
-    compute, AuxRef, CalculationDraft, ColumnMeta, Computed, NodeId, OutputDraft, SeriesRef, Tree,
+    compute, family_english, output_unit, wants_output, AuxRef, CalculationDraft, ColumnMeta,
+    Computed, NodeId, OutputDraft, OutputName, PeakOutputs, SeriesRef, Tree,
 };
 
 use crate::bridge::{checked_node, HostError};
@@ -74,32 +79,11 @@ fn finite_range(name: &str, range: Option<(f64, f64)>) -> PyResult<Option<(f64, 
     }
 }
 
-/// Le suffixe anglais du nom long d'une colonne produite.
-fn suffix(key: &str, index: Option<usize>) -> String {
-    match key {
-        "corrected" => "corrected".to_string(),
-        "baseline" => "baseline".to_string(),
-        "cumulative" => "cumulative".to_string(),
-        "normalized" => "normalized".to_string(),
-        "fit" => "fit".to_string(),
-        "residuals" => "resid.".to_string(),
-        "peak" => format!("peak {}", index.unwrap_or(1)),
-        "background" => "background".to_string(),
-        "peaks_sum" => "sum of peaks".to_string(),
-        "deconvolved" => "deconvolved".to_string(),
-        other => other.to_string(),
-    }
-}
-
-fn long_name(tree: &Tree, y: NodeId) -> String {
-    let node = tree.node(y);
-    let short = node.map(|n| n.name().to_string()).unwrap_or_default();
-    node.and_then(|n| n.as_column())
-        .map(|c| c.meta().long_name.clone())
-        .filter(|n| !n.is_empty())
-        .unwrap_or(short)
-}
-
+/// Le lot à enregistrer. Le nom, l'unité et le commentaire de chaque colonne
+/// sont la règle du cœur (`OutputName`, `output_unit`, `family_english`) : les
+/// mêmes que ceux de la fenêtre d'analyse, en anglais ; `wants_output` choisit
+/// les colonnes écrites.
+#[allow(clippy::too_many_arguments)]
 fn draft(
     tree: &Tree,
     series: &[SeriesRef],
@@ -108,24 +92,23 @@ fn draft(
     computed: Computed,
     keep_results: bool,
     auto_recalc: bool,
+    peaks: PeakOutputs,
 ) -> CalculationDraft {
+    let kind = op.kind();
     let outputs = computed
         .columns
         .iter()
+        .filter(|c| wants_output(&op, &c.key, peaks))
         .map(|c| {
-            let source = series[c.series].y;
-            let unit = tree
-                .node(source)
-                .and_then(|n| n.as_column())
-                .map(|col| col.meta().unit.clone())
-                .unwrap_or_default();
+            let source = &series[c.series];
             OutputDraft {
                 series: c.series,
                 key: c.key.clone(),
                 index: c.index,
                 meta: ColumnMeta {
-                    long_name: format!("{} ({})", long_name(tree, source), suffix(&c.key, c.index)),
-                    unit,
+                    long_name: OutputName::of(tree, kind, source, &c.key, c.index).english(),
+                    unit: output_unit(tree, source, &c.key),
+                    comment: family_english(kind).to_string(),
                     ..ColumnMeta::default()
                 },
                 data: c.data.clone(),
@@ -299,6 +282,7 @@ fn run(
     keep_results: bool,
     auto_recalc: bool,
     replace_original: bool,
+    peaks: PeakOutputs,
 ) -> PyResult<Py<PyDict>> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
@@ -348,6 +332,7 @@ fn run(
                 computed,
                 keep_results || replace_original,
                 auto_recalc,
+                peaks,
             );
             if replace_original {
                 let mut ids: Vec<NodeId> = series
@@ -512,6 +497,7 @@ fn baseline(
         keep_results,
         auto_recalc,
         replace_original,
+        PeakOutputs::default(),
     )
 }
 
@@ -548,6 +534,7 @@ fn correct(
         keep_results,
         auto_recalc,
         replace_original,
+        PeakOutputs::default(),
     )
 }
 
@@ -585,6 +572,7 @@ fn integrate(
         keep_results,
         auto_recalc,
         false,
+        PeakOutputs::default(),
     )
 }
 
@@ -669,15 +657,18 @@ fn fit(
         keep_results,
         auto_recalc,
         false,
+        PeakOutputs::default(),
     )
 }
 
 /// Décomposition en pics : `centers=[…]` place les pics, sinon ils sont
 /// détectés (`prominence` en fraction de l'étendue, `max_peaks`).
 /// `center_window` borne chaque centre à ± cette distance de sa position de
-/// départ.
+/// départ. `peak_columns` écrit une colonne par pic (`peak.N`) et le fond
+/// (`background`), `sum_column` la somme des pics (`peaks_sum`) : les deux cases
+/// de la fenêtre, cochées par défaut.
 #[pyfunction]
-#[pyo3(signature = (y, x=None, *, shape="gaussian", background="constant", centers=None, link_widths=false, center_window=None, prominence=0.05, max_peaks=6, fit_range=None, residuals=false, keep_results=false, auto_recalc=true))]
+#[pyo3(signature = (y, x=None, *, shape="gaussian", background="constant", centers=None, link_widths=false, center_window=None, prominence=0.05, max_peaks=6, fit_range=None, residuals=false, peak_columns=true, sum_column=true, keep_results=false, auto_recalc=true))]
 #[allow(clippy::too_many_arguments)]
 fn peaks(
     py: Python<'_>,
@@ -692,6 +683,8 @@ fn peaks(
     max_peaks: usize,
     fit_range: Option<(f64, f64)>,
     residuals: bool,
+    peak_columns: bool,
+    sum_column: bool,
     keep_results: bool,
     auto_recalc: bool,
 ) -> PyResult<Py<PyDict>> {
@@ -747,6 +740,10 @@ fn peaks(
         keep_results,
         auto_recalc,
         false,
+        PeakOutputs {
+            peak_columns,
+            sum_column,
+        },
     )
 }
 
@@ -786,6 +783,7 @@ fn reconvolve(
         keep_results,
         auto_recalc,
         false,
+        PeakOutputs::default(),
     )
 }
 
@@ -823,6 +821,7 @@ fn deconvolve(
         keep_results,
         auto_recalc,
         false,
+        PeakOutputs::default(),
     )
 }
 
@@ -839,7 +838,7 @@ Calculs d'analyse de StokesForge : un appel, un calcul du projet. y peut être u
                       shared=None, fit_range=None, residuals=False, sigma=None)
     pyst.analysis.peaks(y, x=None, *, shape='gaussian', background='constant', centers=None,
                         link_widths=False, center_window=None, prominence=0.05, max_peaks=6,
-                        fit_range=None, residuals=False)
+                        fit_range=None, residuals=False, peak_columns=True, sum_column=True)
     pyst.analysis.reconvolve(y, response, x=None, response_x=None, *, components=1, shift=0.0, ...)
     pyst.analysis.deconvolve(y, response, x=None, response_x=None, *, method='richardson-lucy', ...)
 

@@ -37,8 +37,10 @@ use stokesforge_analysis::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec
 use stokesforge_analysis::AnalysisError;
 use stokesforge_core::{
     compute, AuxRef, Calculation, CalculationDraft, ComputeError, Computed, NodeId, OutputDraft,
-    SeriesRef, Tree,
+    OutputName, SeriesRef, Tree,
 };
+
+use i18n_embed::fluent::FluentLanguageLoader;
 
 use crate::tr;
 
@@ -891,21 +893,6 @@ impl AnalysisForm {
         None
     }
 
-    /// Ce qui s'écrit : la sortie `key` est-elle demandée ?
-    pub fn wants_output(&self, key: &str) -> bool {
-        match (self.kind, key) {
-            (OperationKind::Baseline, "baseline") => self.setup.baseline.baseline_column,
-            (OperationKind::Integrate, "cumulative") => self.setup.integrate.cumulative,
-            (OperationKind::Integrate, "normalized") => self.setup.integrate.normalize,
-            (OperationKind::Fit, "residuals") => self.setup.fit.residuals,
-            (OperationKind::Peaks, "residuals") => self.setup.peaks.residuals,
-            (OperationKind::Peaks, "peak" | "background") => self.setup.peaks.peak_columns,
-            (OperationKind::Peaks, "peaks_sum") => self.setup.peaks.sum_column,
-            (OperationKind::Reconvolution, "residuals") => self.setup.reconv.residuals,
-            _ => true,
-        }
-    }
-
     /// Le lot à enregistrer : toutes les séries calculées, les colonnes
     /// demandées avec leur nom long (M6), les valeurs si on les garde.
     ///
@@ -918,6 +905,12 @@ impl AnalysisForm {
         let operation = self.operation().ok_or(Issue::NoSeries)?;
         let series = self.effective_series();
         let computed = run(tree, &operation, &series, self.aux.as_ref())?;
+        // Les colonnes d'aide suivent l'opération ; les deux cases des pics sont
+        // les seules à vivre dans le formulaire (la liste est celle du cœur).
+        let peak_outputs = stokesforge_core::PeakOutputs {
+            peak_columns: self.setup.peaks.peak_columns,
+            sum_column: self.setup.peaks.sum_column,
+        };
         let existing = self
             .editing
             .and_then(|id| tree.calculation(id))
@@ -926,7 +919,7 @@ impl AnalysisForm {
         let outputs = computed
             .columns
             .into_iter()
-            .filter(|c| self.wants_output(&c.key))
+            .filter(|c| stokesforge_core::wants_output(&operation, &c.key, peak_outputs))
             .map(|c| {
                 let meta = existing
                     .iter()
@@ -991,9 +984,68 @@ fn long_name(tree: &Tree, column: NodeId) -> String {
         .unwrap_or_else(|| short_name(tree, column))
 }
 
+/// Le nom d'une colonne de sortie, dans la langue du chargeur `loader`. La règle
+/// (quel nom, quelles pièces) est celle de `stokesforge_core::OutputName` ; ce
+/// `match` n'a **pas** de branche par défaut : une variante ajoutée au cœur ne
+/// compile pas ici tant qu'elle n'a pas sa clé `analysis-output-*`.
+/// `tests/output_names.rs` garde l'accord de l'anglais avec `english()`.
+pub fn output_name_text_in(loader: &FluentLanguageLoader, name: &OutputName) -> String {
+    macro_rules! tr {
+        ($($arguments:tt)*) => {
+            crate::tr!(in loader; $($arguments)*)
+        };
+    }
+    match name {
+        OutputName::BaselineCorrected { name, column } => tr!(
+            "analysis-output-baseline-corrected",
+            name = name.as_str(),
+            column = column.as_str()
+        ),
+        OutputName::Corrected { name } => {
+            tr!("analysis-output-corrected", name = name.as_str())
+        }
+        OutputName::Baseline { column } => {
+            tr!("analysis-output-baseline", column = column.as_str())
+        }
+        OutputName::Cumulative { column } => {
+            tr!("analysis-output-cumulative", column = column.as_str())
+        }
+        OutputName::Normalized { column } => {
+            tr!("analysis-output-normalized", column = column.as_str())
+        }
+        OutputName::Fit { name } => tr!("analysis-output-fit", name = name.as_str()),
+        OutputName::Residuals { name } => {
+            tr!("analysis-output-residuals", name = name.as_str())
+        }
+        OutputName::Peak { index, column } => tr!(
+            "analysis-output-peak",
+            index = i64::try_from(*index).unwrap_or(i64::MAX),
+            column = column.as_str()
+        ),
+        OutputName::Background { column } => {
+            tr!("analysis-output-background", column = column.as_str())
+        }
+        OutputName::PeaksSum { column } => {
+            tr!("analysis-output-peaks-sum", column = column.as_str())
+        }
+        OutputName::Deconvolved { name } => {
+            tr!("analysis-output-deconvolved", name = name.as_str())
+        }
+        // Le repli d'une clé inconnue est le nom de la source, déjà du texte
+        // de l'utilisateur : rien à traduire.
+        OutputName::Source { name } => name.clone(),
+    }
+}
+
+/// Le nom d'une colonne de sortie, dans la langue courante.
+pub fn output_name_text(name: &OutputName) -> String {
+    output_name_text_in(crate::i18n::loader(), name)
+}
+
 /// Les métadonnées d'une colonne produite (M6) : le nom long dit la sortie et
-/// la source ; l'unité reprend celle de la source quand la sortie est de même
-/// nature ; le commentaire nomme l'opération.
+/// la source (`OutputName`, traduit) ; l'unité est **toujours** celle de la
+/// source (`output_unit`, vide pour une clé inconnue) ; le commentaire nomme
+/// l'opération.
 pub fn output_meta(
     tree: &Tree,
     kind: OperationKind,
@@ -1001,51 +1053,13 @@ pub fn output_meta(
     key: &str,
     index: Option<usize>,
 ) -> stokesforge_core::ColumnMeta {
-    let source = series.y;
-    let column = short_name(tree, source);
-    let name = long_name(tree, source);
-    let long = match (kind, key) {
-        (OperationKind::Baseline, "corrected") => {
-            tr!(
-                "analysis-output-baseline-corrected",
-                name = name,
-                column = column
-            )
-        }
-        (_, "corrected") => tr!("analysis-output-corrected", name = name),
-        (_, "baseline") => tr!("analysis-output-baseline", column = column),
-        (_, "cumulative") => tr!("analysis-output-cumulative", column = column),
-        (_, "normalized") => tr!("analysis-output-normalized", column = column),
-        (_, "fit") => tr!("analysis-output-fit", name = name),
-        (_, "residuals") => tr!("analysis-output-residuals", name = name),
-        (_, "peak") => tr!(
-            "analysis-output-peak",
-            index = i64::try_from(index.unwrap_or(1)).unwrap_or(1),
-            column = column
-        ),
-        (_, "background") => tr!("analysis-output-background", column = column),
-        (_, "peaks_sum") => tr!("analysis-output-peaks-sum", column = column),
-        (_, "deconvolved") => tr!("analysis-output-deconvolved", name = name),
-        _ => name.clone(),
-    };
-    let unit = match key {
-        "cumulative" | "normalized" | "peak" | "background" | "peaks_sum" | "residuals" | "fit"
-        | "baseline" | "corrected" | "deconvolved" => source_unit(tree, source),
-        _ => String::new(),
-    };
+    let name = OutputName::of(tree, kind, series, key, index);
     stokesforge_core::ColumnMeta {
-        long_name: long,
-        unit,
+        long_name: output_name_text(&name),
+        unit: stokesforge_core::output_unit(tree, series, key),
         comment: kind_title(kind),
         ..stokesforge_core::ColumnMeta::default()
     }
-}
-
-fn source_unit(tree: &Tree, column: NodeId) -> String {
-    tree.node(column)
-        .and_then(|n| n.as_column())
-        .map(|c| c.meta().unit.clone())
-        .unwrap_or_default()
 }
 
 /// Le nom d'une famille d'opération, dans la langue courante.

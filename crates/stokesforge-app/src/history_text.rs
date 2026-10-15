@@ -25,7 +25,7 @@ fn number(count: usize) -> i64 {
 }
 
 /// Le nom d'une famille d'opération d'analyse, dans la langue du chargeur.
-fn kind_title(loader: &FluentLanguageLoader, kind: OperationKind) -> String {
+pub fn kind_title(loader: &FluentLanguageLoader, kind: OperationKind) -> String {
     macro_rules! tr {
         ($($arguments:tt)*) => {
             crate::tr!(in loader; $($arguments)*)

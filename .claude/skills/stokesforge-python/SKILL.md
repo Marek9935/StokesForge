@@ -238,6 +238,14 @@ elle, met `ScriptError` en phrase par `errors::script::error_message` (feature
 nouveau suit la même rédaction (ce qui s'est passé, puis quoi faire) et un test qui
 l'asserte compare l'anglais.
 
+Même règle pour les **noms des colonnes écrites par `pyst.analysis`** (#256) : nom
+long, unité et commentaire viennent de `stokesforge_core::OutputName`
+(`english()`), `output_unit` et `family_english`, la règle que la fenêtre
+d'analyse traduit ; `pyst` n'écrit jamais un nom de sortie lui-même, et ses
+options (`peak_columns`, `sum_column`, `keep_baseline`…) passent par
+`wants_output`. Contrat : `stokesforge-script/tests/analysis.rs` et le test
+d'accord `stokesforge-app/tests/output_names.rs`.
+
 La console peinte (barre de titre repliable, zone de saisie, Run/Stop,
 sortie) vit dans `stokesforge-app/src/app/script_console.rs` (#121 :
 `script_header`, `script_contents`, testés sans fenêtre avec et sans

@@ -248,6 +248,133 @@ print('ok')
     assert!(outcome.stdout.contains("ok"), "{}", outcome.stdout);
 }
 
+/// Les colonnes écrites par le dernier calcul : `(clé, nom long, unité, commentaire)`,
+/// triées par clé (le rang d'un pic est dans la clé : `peak` tout court, le
+/// nom long dit le numéro).
+fn sorties(banc: &Banc) -> Vec<(String, String, String, String)> {
+    let snapshot = banc.session.snapshot().unwrap();
+    let (_, calc) = snapshot.tree.calculations().iter().next_back().unwrap();
+    let mut out: Vec<_> = calc
+        .outputs
+        .iter()
+        .map(|o| {
+            let meta = snapshot
+                .tree
+                .node(o.column.unwrap())
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .meta()
+                .clone();
+            (o.key.clone(), meta.long_name, meta.unit, meta.comment)
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// #256 : les noms, l'unité et le commentaire sont ceux de la fenêtre
+/// d'analyse (règle unique de `stokesforge-core`) — mêmes attentes que
+/// `the_saved_batch_names_columns_after_their_source` côté interface.
+#[test]
+fn la_ligne_de_base_porte_les_noms_l_unite_et_le_commentaire_de_l_interface() {
+    let banc = banc();
+    run(
+        &banc,
+        "
+pyst.set_column_meta(y, long_name='Intensity', unit='counts')
+pyst.analysis.baseline(y, x, method='line', points=[(0, 1), (20, 41)], keep_baseline=True)
+",
+    );
+    let sorties = sorties(&banc);
+    let colonne = |cle: &str| sorties.iter().find(|s| s.0 == cle).unwrap().clone();
+    // La source s'appelle « Y » : le nom court de la correction est « Y ».
+    assert_eq!(colonne("corrected").1, "Intensity (Y-corr)");
+    assert_eq!(colonne("baseline").1, "Baseline of Y");
+    for cle in ["corrected", "baseline"] {
+        assert_eq!(colonne(cle).2, "counts", "{cle}");
+        assert_eq!(colonne(cle).3, "Baseline", "{cle}");
+    }
+    assert_eq!(sorties.len(), 2);
+}
+
+#[test]
+fn sans_ligne_de_base_ecrite_seule_la_courbe_corrigee_est_ajoutee() {
+    let banc = banc();
+    run(
+        &banc,
+        "pyst.analysis.baseline(y, x, method='line', points=[(0, 1), (20, 41)])",
+    );
+    let sorties = sorties(&banc);
+    assert_eq!(sorties.len(), 1, "{sorties:?}");
+    // Sans nom long, le nom court sert des deux côtés.
+    assert_eq!(sorties[0].1, "Y (Y-corr)");
+}
+
+const DEUX_PICS: &str = "
+import numpy as np
+book = pyst.create_workbook('Spectre')
+sheet = pyst.create_worksheet(book, 'S')
+sx = pyst.create_column(sheet, 'Lambda')
+sy = pyst.create_column(sheet, 'Counts')
+xs = np.linspace(0, 10, 201)
+ys = 3 * np.exp(-0.5 * ((xs - 3) / 0.4) ** 2) + 2 * np.exp(-0.5 * ((xs - 7) / 0.4) ** 2) + 0.1
+pyst.set_values(sx, xs)
+pyst.set_values(sy, ys)
+pyst.set_column_meta(sx, role='x')
+";
+
+/// #256 : `peaks` a les deux options de la fenêtre, cochées par défaut.
+#[test]
+fn les_pics_ecrivent_par_defaut_les_pics_le_fond_et_la_somme() {
+    let banc = banc();
+    run(
+        &banc,
+        &format!("{DEUX_PICS}\nr = pyst.analysis.peaks(sy, sx, max_peaks=2)\nprint(sorted(r['columns']))"),
+    );
+    let sorties = sorties(&banc);
+    let noms: Vec<(&str, &str)> = sorties
+        .iter()
+        .map(|s| (s.0.as_str(), s.1.as_str()))
+        .collect();
+    assert_eq!(noms.len(), 4, "{noms:?}");
+    for attendu in [
+        ("background", "Background of Counts"),
+        ("peaks_sum", "Sum of peaks of Counts"),
+    ] {
+        assert!(noms.contains(&attendu), "{noms:?}");
+    }
+    let pics: Vec<&str> = sorties
+        .iter()
+        .filter(|s| s.0 == "peak")
+        .map(|s| s.1.as_str())
+        .collect();
+    assert_eq!(pics.len(), 2);
+    assert!(pics.contains(&"Peak 1 of Counts") && pics.contains(&"Peak 2 of Counts"));
+    assert!(sorties.iter().all(|s| s.3 == "Peak Decomposition"));
+}
+
+#[test]
+fn les_options_des_pics_retirent_les_colonnes_comme_les_cases_de_la_fenetre() {
+    let cles = |options: &str| {
+        let banc = banc();
+        run(
+            &banc,
+            &format!("{DEUX_PICS}\npyst.analysis.peaks(sy, sx, max_peaks=2{options})"),
+        );
+        let mut cles: Vec<String> = sorties(&banc).into_iter().map(|s| s.0).collect();
+        cles.dedup();
+        cles
+    };
+    assert_eq!(cles(", peak_columns=False"), ["peaks_sum"]);
+    assert_eq!(
+        cles(", sum_column=False"),
+        ["background", "peak"],
+        "pas de somme"
+    );
+    assert!(cles(", peak_columns=False, sum_column=False").is_empty());
+}
+
 /// #204 : `"exponential"` est l'exponentielle simple (`A·exp(−x/τ)`), comme dans
 /// le menu Fit ; l'avec-palier et la double ont leur propre nom ; la fenêtre
 /// de centre borne les pics.

@@ -117,6 +117,13 @@ phrase par `crates/stokesforge-app/src/errors.rs` :
   pour un échec) ; la garde `aucun_libelle_en_dur` couvre `notice`, `warn` et
   `fail`. Une exception de script se dit « Script failed. See the console » (M10).
 
+Même schéma pour les **noms de colonnes de sortie d'analyse** (#256) : le cœur
+rend une donnée (`stokesforge_core::OutputName`, avec `english()`), l'application
+la met en phrase par `analysis::output_name_text_in` (`match` exhaustif sans `_`
+vers `analysis-output-*`), et `tests/output_names.rs` garde l'accord de
+l'anglais du catalogue avec `english()` : changer un de ces textes, c'est changer
+les deux.
+
 Rédaction : ce qui s'est passé, puis quoi faire seulement si c'est utile ;
 Sentence case, pas de point final sur une ligne unique, ni « please », ni
 excuse, ni jargon interne (*nœud, session, macro, commande, arbre*). Un message

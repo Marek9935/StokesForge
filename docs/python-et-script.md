@@ -185,8 +185,16 @@ seul `pyst.undo()` l'annule avec ses colonnes. Même `compute` que l'interface,
 même recalcul automatique (`auto_recalc`) et même option `keep_results`.
 Retour : un dictionnaire `{columns, values, errors, warnings}` aux clés stables
 du crate de calcul (`"area.total"`, `"param.tau"`, `"peak.height.1"`…) ;
-les avertissements sont en anglais. Les noms longs des colonnes de sortie sont
-anglais aussi. **Limites** : une série par appel (ni lot, ni ajustement global).
+les avertissements sont en anglais. Nom long, unité et commentaire des
+colonnes de sortie sont **ceux de la fenêtre d'analyse** (#256) : une seule
+règle, `stokesforge_core::OutputName` (`Intensity (B-corr)`, `Baseline of B`,
+`Peak 2 of B`…), l'unité de la source, le titre de la famille en commentaire ;
+`pyst` les écrit par `english()`, donc toujours en anglais. Le nom reste figé à
+la création (le recalcul n'en réécrit que les données). `peaks` a, comme la
+fenêtre, `peak_columns=True` (une colonne par pic `peak.N` et le fond
+`background`) et `sum_column=True` (la somme `peaks_sum`) ; les autres
+colonnes d'aide suivent `keep_baseline`, `cumulative`, `normalize`,
+`residuals`. **Limites** : une série par appel (ni lot, ni ajustement global).
 Contrat : `stokesforge-script/tests/analysis.rs`. La dépendance de `script` à
 `stokesforge-analysis` est déclarée dans sa liste blanche (`no_ui_dependency.rs`).
 

@@ -111,7 +111,8 @@ L'interface du traitement mathématique est répartie ainsi :
   famille, réglages de chaque famille (tous conservés quand on change de
   famille), séries, auxiliaire (référence, réponse), `issues()` (ce qui bloque
   Apply), `operation_for(for_preview)`, `preview(tree)`, `draft(tree)` (noms
-  longs des colonnes de sortie, M6), `from_calculation` (édition), les gestes
+  longs des colonnes de sortie, M6 : la règle est `stokesforge_core::OutputName`,
+  traduite ici par `output_name_text_in`, #256), `from_calculation` (édition), les gestes
   de l'aperçu (`add_point`, `add_zone`, `remove_near`). Testé sans fenêtre
   (`tests/analysis.rs`).
 - `src/state/analysis.rs` — l'état et les `Action` (`OpenAnalysis`,

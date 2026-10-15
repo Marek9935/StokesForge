@@ -68,9 +68,9 @@ pub mod tree;
 pub mod tsv;
 
 pub use calc::{
-    compute, AuxRef, Calculation, CalculationDraft, ComputeError, Computed, ComputedColumn,
-    CorrectionRecord, OutputDraft, OutputRef, ResultValue, SeriesRef, SeriesResult, Staleness,
-    MAX_CALCULATION_SERIES,
+    compute, family_english, output_unit, wants_output, AuxRef, Calculation, CalculationDraft,
+    ComputeError, Computed, ComputedColumn, CorrectionRecord, OutputDraft, OutputName, OutputRef,
+    PeakOutputs, ResultValue, SeriesRef, SeriesResult, Staleness, MAX_CALCULATION_SERIES,
 };
 pub use column::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, ImportSource, MetaLine,
