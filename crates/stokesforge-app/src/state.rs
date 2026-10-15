@@ -1075,80 +1075,51 @@ impl From<ScriptOutcome> for ScriptOutput {
 /// usuel.
 pub const MISSING_TEXT_DISPLAY: &str = "\u{00A0}";
 
-/// Lit une saisie dans une colonne `Numeric` ou `DateTime` (#218) : un nombre
-/// (virgule décimale admise) ; en plus, pour `DateTime`, une date (ISO ou
-/// `JJ/MM/AAAA [HH:MM]`, jour d'abord) lue en timestamp POSIX. Un nombre nu
-/// reste donc un timestamp, comme avant #218.
-fn parse_numeric_cell(kind: ColumnType, text: &str) -> Option<f64> {
-    if kind == ColumnType::DateTime {
-        if let Some(value) = stokesforge_core::datetime::parse_datetime(text) {
-            return Some(value);
-        }
-    }
-    stokesforge_core::number_format::parse_input(text)
-}
-
 /// Construit le bloc de valeurs d'une colonne collée depuis un TSV : la
-/// colonne d'indice `col_index` de chaque ligne de `rows`, convertie selon
-/// `kind` avec la même tolérance que [`AppState::commit_cell`] — un texte qui
-/// ne rentre pas dans une colonne `Numeric`/`DateTime` ne devient plus un
-/// `NaN` silencieux (qui affichait la case comme vide au lieu du texte
-/// collé, sans que la colonne change de type) : le bloc rendu est alors
-/// `Mixed`, avec `true` pour demander à l'appelant d'écrire via
-/// `Command::SetCellsPromoting` plutôt que `Command::SetCells`, exactement
-/// comme une saisie tolérante au clavier. Une ligne plus courte que
-/// `col_index` fournit une valeur manquante pour cette colonne.
+/// colonne d'indice `col_index` de chaque ligne de `rows` (une ligne plus
+/// courte fournit une case vide), lue selon `kind` par la règle unique de la
+/// saisie, [`ValueBlock::from_texts`] (#258) — dates des colonnes `DateTime`,
+/// `inf` / `nan` gardés en texte, case vide = valeur manquante. Un texte qui
+/// ne rentre pas dans une colonne `Numeric`/`DateTime` rend un bloc `Mixed`
+/// avec `true` : l'appelant écrit alors par `Command::SetCellsPromoting` et
+/// non `Command::SetCells`, exactement comme une saisie tolérante au clavier.
 fn value_block_from_tsv_column(
     kind: ColumnType,
     rows: &[Vec<String>],
     col_index: usize,
 ) -> (ValueBlock, bool) {
-    match kind {
-        ColumnType::Numeric | ColumnType::DateTime => {
-            let texts: Vec<&str> = rows
-                .iter()
-                .map(|row| row.get(col_index).map(String::as_str).unwrap_or("").trim())
-                .collect();
-            let promoting = texts
-                .iter()
-                .any(|text| !text.is_empty() && parse_numeric_cell(kind, text).is_none());
-            if promoting {
-                let cells = texts
-                    .iter()
-                    .map(|text| MixedCell::from_text((!text.is_empty()).then(|| text.to_string())))
-                    .collect();
-                (ValueBlock::Mixed(cells), true)
-            } else {
-                let values = texts
-                    .iter()
-                    .map(|text| {
-                        if text.is_empty() {
-                            f64::NAN
-                        } else {
-                            parse_numeric_cell(kind, text).unwrap_or(f64::NAN)
-                        }
-                    })
-                    .collect();
-                (ValueBlock::Float(values), false)
-            }
-        }
-        // Colonne mixte : chaque cellule décide pour elle-même, par la même
-        // règle que le cœur (`MixedCell::from_text`) — un jeton qui s'analyse
-        // devient un nombre, les autres restent du texte, et un jeton vide
-        // une cellule vide. C'est le collage qui se rapproche le plus de ce
-        // qu'un tableur fait : rien n'est perdu, et ce qui est un nombre est
-        // traçable. Déjà `Mixed`, jamais de promotion à demander.
-        ColumnType::Mixed => {
-            let cells = rows
-                .iter()
-                .map(|row| {
-                    let text = row.get(col_index).map(String::as_str).unwrap_or("").trim();
-                    MixedCell::from_text((!text.is_empty()).then(|| text.to_string()))
-                })
-                .collect();
-            (ValueBlock::Mixed(cells), false)
+    let texts: Vec<&str> = rows
+        .iter()
+        .map(|row| row.get(col_index).map(String::as_str).unwrap_or(""))
+        .collect();
+    ValueBlock::from_texts(kind, &texts)
+}
+
+/// Vrai si `column` (supposée `Mixed`) ne porterait que des nombres et des
+/// cases vides — au moins un nombre — une fois `write` écrit (`None` : telle
+/// qu'elle est). Une case texte, même `""`, l'en empêche. Sert à la
+/// repromotion en `Numeric` ([`AppState::auto_promote_mixed_column_if_all_numeric`])
+/// et à savoir, **avant** d'écrire un collage, s'il y en aura une.
+fn column_all_numeric_after(column: &Column, write: Option<(usize, &ValueBlock)>) -> bool {
+    let rows = column
+        .len()
+        .max(write.map_or(0, |(start, block)| start + block.len()));
+    let mut any_present = false;
+    for row in 0..rows {
+        let cell = match write {
+            Some((start, block)) if (start..start + block.len()).contains(&row) => match block {
+                ValueBlock::Float(values) => MixedCell::from_f64(values[row - start]),
+                ValueBlock::Mixed(cells) => cells[row - start].clone(),
+            },
+            _ => column.cell(row),
+        };
+        match cell {
+            MixedCell::Empty => {}
+            MixedCell::Number(_) => any_present = true,
+            MixedCell::Text(_) => return false,
         }
     }
+    any_present
 }
 
 /// Corps de [`AppState::cell_text`], factorisé sur un `&Tree` plutôt que sur
@@ -7259,34 +7230,12 @@ impl AppState {
         // une colonne de mesures est le geste courant d'un cahier de manip ;
         // le refuser obligeait à retaper la colonne entière en texte, donc à
         // rendre tout le reste intraçable.
-        let (values, promoting) = match kind {
-            ColumnType::Numeric | ColumnType::DateTime => {
-                let trimmed = text.trim();
-                if trimmed.is_empty() {
-                    // Blanc = valeur manquante, pas zéro : c'est la façon
-                    // d'effacer une cellule numérique.
-                    (ValueBlock::Float(vec![f64::NAN]), false)
-                } else {
-                    match parse_numeric_cell(kind, trimmed) {
-                        Some(value) => (ValueBlock::Float(vec![value]), false),
-                        // Le bloc est texte : `SetCellsPromoting` élargira
-                        // la colonne en `Mixed` pour l'accueillir.
-                        None => (
-                            ValueBlock::Mixed(vec![MixedCell::Text(trimmed.to_string())]),
-                            true,
-                        ),
-                    }
-                }
-            }
-            // La colonne est déjà mixte : chaque cellule décide pour
-            // elle-même (`MixedCell::from_text`), il n'y a plus rien à
-            // promouvoir ni rien à refuser.
-            ColumnType::Mixed => {
-                let trimmed = text.trim();
-                let cell = MixedCell::from_text((!trimmed.is_empty()).then(|| trimmed.to_string()));
-                (ValueBlock::Mixed(vec![cell]), false)
-            }
-        };
+        // La règle unique du texte saisi (`ValueBlock::from_texts`, #258) :
+        // la même que le collage. Un texte qui ne rentre pas dans une colonne
+        // numérique rend un bloc texte, et `SetCellsPromoting` élargit alors
+        // la colonne en `Mixed` pour l'accueillir ; une case vide est une
+        // valeur manquante, pas zéro (la façon d'effacer une cellule).
+        let (values, promoting) = ValueBlock::from_texts(kind, &[text.as_str()]);
         self.execute(if promoting {
             Command::SetCellsPromoting {
                 column,
@@ -7319,20 +7268,13 @@ impl AppState {
 
     /// Convertit `column` (supposée `Mixed`) en `Numeric` si toutes ses
     /// cellules présentes sont des nombres — voir l'appel dans
-    /// [`AppState::commit_cell`].
+    /// [`AppState::commit_cell`] et, pour le collage (#258),
+    /// [`AppState::execute_pasted_cells`].
     fn auto_promote_mixed_column_if_all_numeric(&mut self, column: NodeId) {
         let Some(col) = self.snapshot.tree.node(column).and_then(Node::as_column) else {
             return;
         };
-        let mut any_present = false;
-        for row in 0..col.len() {
-            match col.cell(row) {
-                MixedCell::Empty => {}
-                MixedCell::Number(_) => any_present = true,
-                MixedCell::Text(_) => return,
-            }
-        }
-        if any_present {
+        if column_all_numeric_after(col, None) {
             self.execute(Command::SetColumnType {
                 column,
                 column_type: ColumnType::Numeric,
@@ -7638,7 +7580,7 @@ impl AppState {
                 };
                 let (values, promoting) =
                     value_block_from_tsv_column(kind, &[vec![text.to_string()]], 0);
-                self.execute_pasted_cells(column, row, values, promoting);
+                self.execute_pasted_cells(column, row, values, promoting, kind, false);
             }
         }
     }
@@ -7650,13 +7592,36 @@ impl AppState {
     /// qu'avant. Partagé par les trois points de collage en cellules de
     /// données ([`AppState::paste_single_value`], [`AppState::
     /// paste_relative`], [`AppState::paste_full_columns`]).
+    ///
+    /// `kind` est le type de la colonne **avant** le collage. Si elle était
+    /// `Mixed` et que toutes ses cases présentes sont des nombres après
+    /// l'écriture, elle repasse en `Numeric` (#258), comme après une saisie
+    /// (`Command::SetColumnType`, invariant 1). Un collage reste **une**
+    /// entrée d'historique (invariant 8) : `grouped` dit qu'une macro
+    /// `PasteCells` est déjà ouverte par l'appelant, la repromotion s'y glisse
+    /// avant sa clôture ; sinon, une macro propre n'est ouverte que si une
+    /// repromotion aura lieu (un collage simple reste une entrée simple).
     fn execute_pasted_cells(
         &mut self,
         column: NodeId,
         start: usize,
         values: ValueBlock,
         promoting: bool,
+        kind: ColumnType,
+        grouped: bool,
     ) {
+        let repromote = kind == ColumnType::Mixed
+            && self
+                .snapshot
+                .tree
+                .node(column)
+                .and_then(Node::as_column)
+                .is_some_and(|col| column_all_numeric_after(col, Some((start, &values))));
+        let own_macro = repromote && !grouped;
+        if own_macro && self.handle.begin_macro(MacroKind::PasteCells).is_err() {
+            self.fail(tr!("error-paste-group"));
+            return;
+        }
         self.execute(if promoting {
             Command::SetCellsPromoting {
                 column,
@@ -7672,6 +7637,13 @@ impl AppState {
                 expected_version: None,
             }
         });
+        // Une écriture refusée (colonne formule) ne se suit d'aucune conversion.
+        if repromote && !self.last_action_failed() {
+            self.auto_promote_mixed_column_if_all_numeric(column);
+        }
+        if own_macro {
+            self.end_grouped_macro();
+        }
     }
 
     /// [`GridClipboard::Relative`] : voir [`AppState::apply_paste`] pour la
@@ -7753,7 +7725,7 @@ impl AppState {
                         continue;
                     };
                     let (values, promoting) = value_block_from_tsv_column(kind, rows, index);
-                    self.execute_pasted_cells(column, paste_row, values, promoting);
+                    self.execute_pasted_cells(column, paste_row, values, promoting, kind, grouped);
                 }
                 if grouped {
                     self.end_grouped_macro();
@@ -7845,7 +7817,7 @@ impl AppState {
             };
             let rows: Vec<Vec<String>> = source.data.iter().map(|v| vec![v.clone()]).collect();
             let (values, promoting) = value_block_from_tsv_column(kind, &rows, 0);
-            self.execute_pasted_cells(column, body_start, values, promoting);
+            self.execute_pasted_cells(column, body_start, values, promoting, kind, grouped);
         }
         if grouped {
             self.end_grouped_macro();

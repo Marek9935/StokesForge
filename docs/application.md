@@ -1341,6 +1341,25 @@ feuille (gauche → droite, haut → bas), jamais celui des clics.
   vide : `cell_copy_text_in` la traite avant la mise en texte, jamais par un
   `replace` de `MISSING_TEXT_DISPLAY` après coup, qui effacerait aussi les
   espaces insécables vraiment tapés. L'app ne garde que le choix des cases.
+- **Saisie et collage (#258)** : une seule règle de lecture « texte → valeur de
+  cellule », `ValueBlock::from_texts(kind, &[&str])` (`stokesforge-core`,
+  `column.rs`), appelée par `commit_cell` (une case) et par
+  `value_block_from_tsv_column` (une colonne collée) : une date tapée ou collée
+  donne la même cellule. Chaque case est rognée ; vide = valeur manquante ;
+  `Numeric` lit un nombre fini (virgule décimale admise), `DateTime` lit d'abord
+  une date ou une heure ; `inf`, `nan` et `1e400` restent du **texte** (dans les
+  trois types, colonne `Mixed` déjà ouverte comprise — seule la conversion de
+  type par l'en-tête garde `inf` écrit = infini, règle C2). Un texte illisible
+  dans `Numeric`/`DateTime` rend un bloc `Mixed` et le drapeau « élargit » :
+  écriture par `SetCellsPromoting` (inchangé), les cases lues restant des
+  nombres, la date comprise. Après un collage qui écrase une colonne `Mixed`,
+  si toutes ses cases présentes sont des nombres, elle repasse en `Numeric`
+  (`SetColumnType`, comme après une saisie) ; la repromotion se fait **avant**
+  la clôture du groupe `PasteCells`, et un collage d'une seule colonne n'ouvre ce
+  groupe que lorsqu'une repromotion a lieu : un collage reste une entrée
+  d'historique, un seul Annuler. Une colonne `DateTime` élargie en `Mixed`
+  affiche ensuite la date comme un horodatage numérique, comme pour une date
+  tapée (comportement existant, non modifié).
 - **Effacer** vide chaque bloc, en un seul groupe annulable. **Supprimer et
   remonter** n'est offert que pour un bloc unique (des trous rendraient la
   remontée ambiguë) ; Suppr se contente alors de vider.

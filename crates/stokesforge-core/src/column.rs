@@ -155,9 +155,11 @@ impl MixedCell {
     /// un texte qui s'analyse en nombre fini donne `Number`, tout le reste
     /// donne `Text`.
     ///
-    /// L'analyse est celle de [`parse_f64_text`] — la **seule** du module,
-    /// partagée avec `Text → Numeric` : les deux chemins ne peuvent donc pas
-    /// diverger sur « ce texte est-il un nombre ? ».
+    /// L'analyse est celle de [`parse_f64_text`], partagée avec
+    /// `Text → Numeric` (conversion de type par l'en-tête) : `inf` et `nan`
+    /// y sont lus comme écrits (règle C2). Ce n'est **pas** la règle de la
+    /// saisie ni du collage, qui passent par [`ValueBlock::from_texts`] (#258)
+    /// et gardent `inf` / `nan` en texte.
     pub fn from_text(text: Option<String>) -> Self {
         match text {
             None => MixedCell::Empty,
@@ -371,6 +373,66 @@ impl ValueBlock {
         }
     }
 
+    /// **La** règle « texte saisi ou collé → valeur de cellule » (#258), pour
+    /// une colonne de type `kind` : la saisie d'une case et le collage d'une
+    /// colonne entière passent tous deux par ici, donc une même suite de
+    /// textes donne les mêmes cellules, case par case ou d'un seul bloc.
+    ///
+    /// Chaque texte est rogné. Une case vide est une **valeur manquante**
+    /// (`NaN` dans un bloc `Float`, [`MixedCell::Empty`] dans un bloc
+    /// `Mixed`). Une case se lit comme un nombre **fini** par
+    /// [`crate::number_format::parse_input`] (virgule décimale admise) ; pour
+    /// `DateTime` seulement, une date ou une heure
+    /// ([`crate::datetime::parse_datetime`]) est lue d'abord, en timestamp
+    /// POSIX. Ce qui ne se lit pas reste du `Text` rogné — `inf`, `nan` et
+    /// `1e400` compris : un infini tapé ou collé fausserait en silence axes
+    /// automatiques, intégrales et ajustements (la conversion de type par
+    /// l'en-tête, [`Column::set_column_type`], garde sa règle C2 : `inf`
+    /// écrit y est un infini voulu).
+    ///
+    /// - `Numeric` / `DateTime` : bloc `Float` si toutes les cases se lisent
+    ///   ; sinon bloc `Mixed` où chaque case lue devient un `Number` (une
+    ///   date reste une valeur) et le booléen vaut `true` : l'appelant doit
+    ///   écrire par `Command::SetCellsPromoting`, qui élargit la colonne en
+    ///   `Mixed`.
+    /// - `Mixed` : toujours un bloc `Mixed`, même lecture case par case sans
+    ///   les dates, booléen `false` (rien à élargir).
+    pub fn from_texts(kind: ColumnType, texts: &[&str]) -> (ValueBlock, bool) {
+        let cells: Vec<Option<TextCell>> = texts
+            .iter()
+            .map(|text| {
+                let trimmed = text.trim();
+                (!trimmed.is_empty()).then(|| match parse_cell_number(kind, trimmed) {
+                    Some(value) => TextCell::Number(value),
+                    None => TextCell::Text(trimmed),
+                })
+            })
+            .collect();
+        let promoting = kind != ColumnType::Mixed
+            && cells
+                .iter()
+                .any(|cell| matches!(cell, Some(TextCell::Text(_))));
+        if kind != ColumnType::Mixed && !promoting {
+            let values = cells
+                .iter()
+                .map(|cell| match cell {
+                    Some(TextCell::Number(value)) => *value,
+                    _ => f64::NAN,
+                })
+                .collect();
+            return (ValueBlock::Float(values), false);
+        }
+        let cells = cells
+            .iter()
+            .map(|cell| match cell {
+                None => MixedCell::Empty,
+                Some(TextCell::Number(value)) => MixedCell::Number(*value),
+                Some(TextCell::Text(text)) => MixedCell::Text((*text).to_string()),
+            })
+            .collect();
+        (ValueBlock::Mixed(cells), promoting)
+    }
+
     /// Le même bloc, exprimé en cellules mixtes — sans perte pour `Mixed`
     /// (aucune conversion), et selon les mêmes règles que
     /// [`Column::set_column_type`] pour les deux autres : `NaN` et `None`
@@ -382,6 +444,24 @@ impl ValueBlock {
             ValueBlock::Mixed(values) => values,
         }
     }
+}
+
+/// Une case de texte déjà lue par [`ValueBlock::from_texts`].
+enum TextCell<'a> {
+    Number(f64),
+    Text(&'a str),
+}
+
+/// Le nombre que porte un texte **rogné et non vide** saisi ou collé dans une
+/// colonne de type `kind` — voir [`ValueBlock::from_texts`] : une date
+/// d'abord pour `DateTime` seulement, puis un nombre fini.
+fn parse_cell_number(kind: ColumnType, trimmed: &str) -> Option<f64> {
+    if kind == ColumnType::DateTime {
+        if let Some(value) = crate::datetime::parse_datetime(trimmed) {
+            return Some(value);
+        }
+    }
+    crate::number_format::parse_input(trimmed)
 }
 
 /// Une cellule lue.
@@ -1990,5 +2070,141 @@ mod tests {
         );
         assert!(ValueBlock::empty_for(ColumnType::Numeric).is_empty());
         assert!(ValueBlock::empty_for(ColumnType::Mixed).is_empty());
+    }
+
+    // --- ValueBlock::from_texts (#258) : une seule règle de saisie et de collage.
+
+    const TEXTES_MELES: [&str; 12] = [
+        "1",
+        "1,5",
+        "",
+        "  ",
+        "n/a",
+        "2026-10-15",
+        "10/10/2026 14:30",
+        "86400",
+        "inf",
+        "-Infinity",
+        "nan",
+        "1e400",
+    ];
+
+    fn jour(text: &str) -> f64 {
+        crate::datetime::parse_datetime(text).expect("date lisible")
+    }
+
+    #[test]
+    fn from_texts_en_colonne_vaut_case_par_case_pour_les_trois_types() {
+        for kind in [ColumnType::Numeric, ColumnType::DateTime, ColumnType::Mixed] {
+            let (colonne, promoting_colonne) = ValueBlock::from_texts(kind, &TEXTES_MELES);
+            let mut cas_par_cas = Vec::new();
+            let mut un_promoting = false;
+            for text in TEXTES_MELES {
+                let (bloc, promoting) = ValueBlock::from_texts(kind, &[text]);
+                un_promoting |= promoting;
+                cas_par_cas.extend(bloc.into_mixed());
+            }
+            assert_eq!(
+                colonne.into_mixed(),
+                cas_par_cas,
+                "colonne et cases divergent pour {kind:?}"
+            );
+            assert_eq!(promoting_colonne, un_promoting, "promoting pour {kind:?}");
+        }
+    }
+
+    #[test]
+    fn from_texts_datetime_garde_la_date_comme_valeur_dans_un_bloc_elargi() {
+        let (bloc, promoting) =
+            ValueBlock::from_texts(ColumnType::DateTime, &["2026-10-15", "n/a"]);
+        assert_eq!(
+            bloc,
+            ValueBlock::Mixed(vec![
+                MixedCell::Number(jour("2026-10-15")),
+                MixedCell::Text("n/a".to_string()),
+            ])
+        );
+        assert!(promoting);
+    }
+
+    #[test]
+    fn from_texts_datetime_sans_texte_rebelle_reste_un_bloc_float() {
+        let (bloc, promoting) =
+            ValueBlock::from_texts(ColumnType::DateTime, &["2026-10-15", " 86400 ", ""]);
+        match bloc {
+            ValueBlock::Float(values) => {
+                assert_eq!(values[0], jour("2026-10-15"));
+                assert_eq!(values[1], 86400.0);
+                assert!(values[2].is_nan());
+            }
+            ValueBlock::Mixed(_) => panic!("bloc Float attendu"),
+        }
+        assert!(!promoting);
+    }
+
+    #[test]
+    fn from_texts_numeric_ne_lit_pas_les_dates() {
+        let (bloc, promoting) = ValueBlock::from_texts(ColumnType::Numeric, &["2026-10-15"]);
+        assert_eq!(
+            bloc,
+            ValueBlock::Mixed(vec![MixedCell::Text("2026-10-15".to_string())])
+        );
+        assert!(promoting);
+    }
+
+    #[test]
+    fn from_texts_mixed_ne_lit_ni_infini_ni_nan() {
+        let (bloc, promoting) = ValueBlock::from_texts(ColumnType::Mixed, &["inf", "nan", "-inf"]);
+        assert_eq!(
+            bloc,
+            ValueBlock::Mixed(vec![
+                MixedCell::Text("inf".to_string()),
+                MixedCell::Text("nan".to_string()),
+                MixedCell::Text("-inf".to_string()),
+            ])
+        );
+        assert!(!promoting);
+    }
+
+    #[test]
+    fn from_texts_numeric_garde_infini_et_debordement_en_texte() {
+        for text in ["inf", "1e400"] {
+            let (bloc, promoting) = ValueBlock::from_texts(ColumnType::Numeric, &[text]);
+            assert_eq!(
+                bloc,
+                ValueBlock::Mixed(vec![MixedCell::Text(text.to_string())]),
+                "{text}"
+            );
+            assert!(promoting, "{text}");
+        }
+    }
+
+    #[test]
+    fn from_texts_case_vide_est_une_valeur_manquante_pas_un_texte() {
+        let (bloc, promoting) = ValueBlock::from_texts(ColumnType::Numeric, &["1", ""]);
+        assert_eq!(bloc, ValueBlock::Float(vec![1.0, f64::NAN]));
+        assert!(!promoting);
+        let (bloc, promoting) = ValueBlock::from_texts(ColumnType::Mixed, &["", "  ", "x"]);
+        assert_eq!(
+            bloc,
+            ValueBlock::Mixed(vec![
+                MixedCell::Empty,
+                MixedCell::Empty,
+                MixedCell::Text("x".to_string())
+            ])
+        );
+        assert!(!promoting);
+    }
+
+    #[test]
+    fn from_texts_rogne_le_texte_conserve_et_lit_la_virgule_decimale() {
+        let (bloc, _) = ValueBlock::from_texts(ColumnType::Mixed, &["  1,5 ", "  a b  "]);
+        assert_eq!(
+            bloc,
+            ValueBlock::Mixed(vec![
+                MixedCell::Number(1.5),
+                MixedCell::Text("a b".to_string())
+            ])
+        );
     }
 }

@@ -1506,6 +1506,226 @@ fn pasting_a_mixed_numeric_and_text_block_promotes_the_column_once() {
     assert_eq!(cell(&state, temps, 2), Cell::Float(9.0));
 }
 
+// -- Saisie et collage : une seule règle de lecture (#258) --
+
+/// #258, reproduction : une date collée garde sa valeur de date, comme une date
+/// tapée. Deux lignes `2026-10-15` puis `n/a` collées dans une colonne
+/// DateTime l'élargissent en Mixed ; la première case reste un timestamp, la
+/// seconde est du texte, et un seul Annuler rend la colonne DateTime.
+#[test]
+fn a_pasted_date_keeps_its_value_when_the_column_widens_to_mixed() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    state.dispatch(Action::SetColumnType {
+        column: temps,
+        column_type: ColumnType::DateTime,
+    });
+    let attendu = stokesforge_core::datetime::parse_datetime("2026-10-15").expect("date");
+
+    state.select_cell(sheet1, temps, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "2026-10-15\nn/a".to_string(),
+    });
+
+    assert_eq!(column_type(&state, temps), ColumnType::Mixed);
+    assert_eq!(cell(&state, temps, 0), Cell::Float(attendu));
+    assert_eq!(cell(&state, temps, 1), Cell::Text(Some("n/a".to_string())));
+
+    // Témoin : la même suite tapée case par case donne les mêmes cellules.
+    let (_autre, mut tape) = start_demo(dir.path());
+    let temps_tape = column_id(&tape, sheet_named(tape.tree(), "Sheet1"), "Temps");
+    tape.dispatch(Action::SetColumnType {
+        column: temps_tape,
+        column_type: ColumnType::DateTime,
+    });
+    for (row, text) in ["2026-10-15", "n/a"].into_iter().enumerate() {
+        tape.dispatch(Action::CommitCell {
+            column: temps_tape,
+            row,
+            text: text.to_string(),
+        });
+    }
+    assert_eq!(cell(&tape, temps_tape, 0), cell(&state, temps, 0));
+    assert_eq!(cell(&tape, temps_tape, 1), cell(&state, temps, 1));
+
+    state.dispatch(Action::Undo);
+    assert_eq!(column_type(&state, temps), ColumnType::DateTime);
+    assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
+}
+
+/// #258 : `inf` et `nan` tapés restent du texte, même dans une colonne déjà
+/// Mixed (avant, `MixedCell::from_text` les lisait en nombre) ; la colonne reste
+/// Mixed et un infini n'entre jamais dans les données par la grille.
+#[test]
+fn typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+
+    state.dispatch(Action::CommitCell {
+        column: note,
+        row: 0,
+        text: "inf".to_string(),
+    });
+    assert_eq!(state.cell_text(note, 0), "inf");
+    assert_eq!(cell(&state, note, 0), Cell::Text(Some("inf".to_string())));
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+
+    state.select_cell(sheet1, note, 1);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "-Infinity\nnan".to_string(),
+    });
+    assert_eq!(
+        cell(&state, note, 1),
+        Cell::Text(Some("-Infinity".to_string()))
+    );
+    assert_eq!(cell(&state, note, 2), Cell::Text(Some("nan".to_string())));
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+}
+
+/// #258 : après un collage, une colonne Mixed dont toutes les cases présentes
+/// sont des nombres repasse en Numeric, comme après une saisie. La `Note` de la
+/// démo vaut `[Some("a"), None, Some("")]` : le collage écrase les trois
+/// cases (le `Some("")` bloquerait la repromotion). Un seul Annuler défait le
+/// collage **et** la repromotion.
+#[test]
+fn pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_cell(sheet1, note, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "1\n\n2".to_string(),
+    });
+
+    assert_eq!(column_type(&state, note), ColumnType::Numeric);
+    assert_eq!(cell(&state, note, 0), Cell::Float(1.0));
+    assert!(cell(&state, note, 1).is_missing());
+    assert_eq!(cell(&state, note, 2), Cell::Float(2.0));
+    assert_eq!(
+        state.undo_label(),
+        Some(undo_entry(&HistoryLabel::Macro(MacroKind::PasteCells))),
+        "collage et repromotion forment une entrée"
+    );
+
+    state.dispatch(Action::Undo);
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+    assert_eq!(cell(&state, note, 0), Cell::Text(Some("a".to_string())));
+    assert_eq!(cell(&state, note, 2), Cell::Text(Some(String::new())));
+}
+
+/// #258 : un collage de plusieurs colonnes qui repromeut `Note` reste **une**
+/// entrée d'historique (la repromotion se fait avant la fermeture du groupe).
+#[test]
+fn a_multi_column_paste_with_a_repromotion_is_one_undo() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+    while state.can_undo() {
+        state.dispatch(Action::Undo);
+    }
+
+    state.select_cell(sheet1, signal, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "5\t1\n6\t\n7\t2".to_string(),
+    });
+    assert_eq!(column_type(&state, note), ColumnType::Numeric);
+    assert_eq!(cell(&state, signal, 0), Cell::Float(5.0));
+    assert_eq!(cell(&state, note, 2), Cell::Float(2.0));
+
+    state.dispatch(Action::Undo);
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+    assert_eq!(cell(&state, note, 0), Cell::Text(Some("a".to_string())));
+    assert_eq!(cell(&state, signal, 0), Cell::Float(10.0));
+    assert!(!state.can_undo(), "un seul Annuler a tout défait");
+}
+
+/// #258, les deux autres points de collage : une case copiée collée
+/// (`GridClipboard::Text`) et une colonne entière collée
+/// (`GridClipboard::FullColumns`) repromeuvent aussi, en une entrée.
+#[test]
+fn single_value_and_full_column_pastes_also_repromote_a_mixed_column() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    // Une case : `Signal` passe en Mixed, reçoit un « n/a » puis un nombre.
+    state.dispatch(Action::SetColumnType {
+        column: signal,
+        column_type: ColumnType::Mixed,
+    });
+    state.select_cell(sheet1, signal, 1);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "n/a".to_string(),
+    });
+    assert_eq!(column_type(&state, signal), ColumnType::Mixed);
+    state.select_cell(sheet1, temps, 2);
+    let copie = state.copy_selection(sheet1).expect("sélection non vide");
+    state.select_cell(sheet1, signal, 1);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: copie,
+    });
+    assert_eq!(column_type(&state, signal), ColumnType::Numeric);
+    assert_eq!(cell(&state, signal, 1), Cell::Float(1.0));
+    state.dispatch(Action::Undo);
+    assert_eq!(column_type(&state, signal), ColumnType::Mixed);
+    assert_eq!(cell(&state, signal, 1), Cell::Text(Some("n/a".to_string())));
+
+    // Une colonne entière : `Temps` collée sur la `Note` mixte.
+    let note = column_id(&state, sheet1, "Note");
+    state.select_cell(sheet1, temps, 0);
+    let colonnes = state.copy_full_columns(sheet1).expect("sélection non vide");
+    state.select_cell(sheet1, note, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: colonnes,
+    });
+    assert_eq!(column_type(&state, note), ColumnType::Numeric);
+    assert_eq!(cell(&state, note, 4), Cell::Float(2.0));
+    state.dispatch(Action::Undo);
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+    assert_eq!(cell(&state, note, 0), Cell::Text(Some("a".to_string())));
+}
+
+/// #258 : un collage sur une colonne Mixed qui reste Mixed n'ouvre pas de
+/// groupe pour rien — c'est la même entrée simple qu'avant.
+#[test]
+fn a_paste_that_leaves_a_mixed_column_mixed_is_a_plain_entry() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_cell(sheet1, note, 1);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "x\ny".to_string(),
+    });
+    assert_eq!(column_type(&state, note), ColumnType::Mixed);
+    assert_eq!(
+        state.undo_label(),
+        Some(undo_entry(&HistoryLabel::SetCells {
+            column: Some(ColumnRef(2))
+        }))
+    );
+}
+
 /// Valide un champ d'en-tête via le même chemin que la saisie utilisateur
 /// (`begin_header_edit`/`commit_header_edit`), pour préparer une sélection
 /// de champ dans les tests de copier/coller mixte ci-dessous.

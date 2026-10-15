@@ -466,6 +466,22 @@ méthode de `PanelSpec` qu'ils déclenchent : un test qui appelle
 Le collage rejoue la structure interne quand le texte est celui qu'on a poussé :
 pour éprouver le chemin « texte externe », coller dans une **autre** session.
 
+## Saisie et collage de cellules : une seule règle (#258)
+
+| Mutant (ce qui est cassé) | Vu par |
+|---|---|
+| le bloc élargi repasse par `MixedCell::from_text` (date perdue, `inf` lu en nombre) | `from_texts_datetime_garde_la_date_comme_valeur_dans_un_bloc_elargi`, `from_texts_numeric_garde_infini_et_debordement_en_texte`, `from_texts_en_colonne_vaut_case_par_case_pour_les_trois_types` (`stokesforge-core/src/column.rs`) ; `a_pasted_date_keeps_its_value_when_the_column_widens_to_mixed` (`stokesforge-app/tests/shell.rs`) |
+| la branche `Mixed` lit `inf` / `nan` en nombre (sans `from_texts`) | `from_texts_mixed_ne_lit_ni_infini_ni_nan` ; `typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text` |
+| `parse_f64_text` au lieu de `parse_input` | `from_texts_mixed_ne_lit_ni_infini_ni_nan`, `from_texts_en_colonne_vaut_case_par_case_pour_les_trois_types`, `typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text` |
+| garde `kind == DateTime` retirée (`Numeric` lit les dates) | `from_texts_numeric_ne_lit_pas_les_dates` |
+| case vide lue `Text("")` au lieu de manquante | `from_texts_case_vide_est_une_valeur_manquante_pas_un_texte`, `pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo` |
+| repromotion après collage retirée (aux trois points de collage) | `pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo`, `a_multi_column_paste_with_a_repromotion_is_one_undo`, `single_value_and_full_column_pastes_also_repromote_a_mixed_column` |
+| repromotion appelée après `end_grouped_macro` (deux entrées d'historique) | `a_multi_column_paste_with_a_repromotion_is_one_undo`, `undo_state_is_fresh_right_after_a_grouped_paste` |
+| macro propre ouverte même sans repromotion | `a_paste_that_leaves_a_mixed_column_mixed_is_a_plain_entry` |
+
+`SetCellsPromoting` (stokesforge-commands) est inchangé : seul le bloc qu'on lui
+passe vient désormais de `from_texts`.
+
 ### Remplacement définitif d'une correction (#212)
 
 `commands/tests/calculations.rs` tient l'atomicité données/trace, undo/redo,
