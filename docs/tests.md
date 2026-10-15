@@ -206,6 +206,33 @@ autres gardent leur incertitude), X tous égaux (pente indéterminée), aucun
 paramètre déterminé (`SingularSystem`), ajustement bien posé (aucun
 avertissement), ligne à σ vide ou nul écartée et comptée.
 
+### Bornes, prérequis et réglages d'analyse (#260)
+
+`stokesforge-analysis/tests/limites.rs` : `Model::compile` refuse un degré hors
+plafond (`u32::MAX`) sans rien allouer (le test s'exécute sous `ulimit -v` pour
+voir l'échec d'un `compile` sans plafond plutôt qu'un blocage) ; `MAX_*` et
+leurs bords dans `validate` (100 pics, pas 50) ; `validate` refuse un
+ajustement sans paramètre libre (aucun, ou tous fixés) ; `Operation::readiness`
+a un cas par variante (`NeedsPoints` avec son `have`, `NeedsZone`,
+`BadExpression`, `NoParameter`, `Invalid`) ; `forget_positions` efface
+exactement plages, positions, `initial`/`fixed`/`min`/`max`/`shared`, fenêtre
+de reconvolution, et garde la méthode ; `FitSpec::auto_initial` filtre la plage
+(bornes dans le désordre), ignore les paramètres fixés et les modèles illisibles.
+`stokesforge-app` : `number_field.rs` (le champ « Max peaks » monte à 100 et
+chaque grandeur d'analyse suit la constante du crate), `tests/analysis.rs` (point
+ou zone uniques manquants, degré énorme = prérequis refusé, « Auto » lit la
+plage), `analysis_recent.rs` (la réouverture oublie `fixed`/`shared`, un degré
+énorme des préférences ne fabrique rien).
+
+| Mutant (ce qui est cassé) | Vu par |
+|---|---|
+| `compile` sans plafond | `compile_refuse_un_degre_hors_plafond_sans_allouer` |
+| `readiness` oublie `NeedsZone` | `readiness_dit_ce_qui_manque_a_une_ligne_de_base` |
+| `forget_positions` garde `shared` | `forget_positions_efface_les_plages_et_les_reglages_par_parametre`, `rouvrir_une_entree_oublie_aussi_les_reglages_fixes_et_partages` |
+| `MAX_PEAKS` à 50 | `les_plafonds_sont_ceux_de_la_table_des_grandeurs`, `les_champs_d_analyse_suivent_les_plafonds_du_crate_d_analyse` |
+| `auto_initial` sans filtre de plage | `auto_initial_suit_le_modele_sur_les_points_de_la_plage`, `auto_reads_only_the_fitted_range` |
+| `validate` sans « zéro paramètre libre » | `validate_refuse_un_ajustement_sans_parametre_libre` |
+
 ### Séries pas à jour sur le graphe (#198)
 
 `stokesforge-core/tests/calculations.rs` (`une_serie_tracee_depuis_un_calcul_perime…` :

@@ -32,8 +32,9 @@ use stokesforge_analysis::deconv::{DirectMethod, ReconvSpec};
 use stokesforge_analysis::fit::{FitSpec, ParamSetting};
 use stokesforge_analysis::integrate::{IntegrateSpec, Under};
 use stokesforge_analysis::model::Model;
-use stokesforge_analysis::ops::{AutoDetect, Operation, OperationKind, HEAVY_BATCH};
+use stokesforge_analysis::ops::{AutoDetect, Operation, OperationKind, Readiness, HEAVY_BATCH};
 use stokesforge_analysis::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec};
+use stokesforge_analysis::series::Series;
 use stokesforge_analysis::AnalysisError;
 use stokesforge_core::{
     compute, AuxRef, Calculation, CalculationDraft, ComputeError, Computed, NodeId, OutputDraft,
@@ -326,30 +327,15 @@ impl FitSetup {
 
     /// Remplit les valeurs de départ avec l'estimation automatique du modèle
     /// sur les points `(x, y)` donnés, restreints à la plage ajustée (bouton
-    /// « Auto », #204). Sans effet si le modèle ne se compile pas.
+    /// « Auto », #204). La règle est celle de `FitSpec::auto_initial`
+    /// (`stokesforge-analysis`). Sans effet si le modèle ne se compile pas.
     pub fn auto_initial(&mut self, x: &[f64], y: &[f64]) {
-        let Ok(compiled) = self.model.compile() else {
-            return;
+        let mut spec = FitSpec {
+            model: self.model.clone(),
+            params: std::mem::take(&mut self.params),
         };
-        let (lo, hi) = self
-            .range
-            .map_or((f64::NEG_INFINITY, f64::INFINITY), |(a, b)| {
-                (a.min(b), a.max(b))
-            });
-        let (xs, ys): (Vec<f64>, Vec<f64>) = x
-            .iter()
-            .zip(y)
-            .filter(|(x, _)| **x >= lo && **x <= hi)
-            .map(|(x, y)| (*x, *y))
-            .unzip();
-        let guess = compiled.guess(&stokesforge_analysis::series::Series::new(xs, ys));
-        self.params
-            .resize(compiled.param_count(), ParamSetting::default());
-        for (setting, value) in self.params.iter_mut().zip(guess) {
-            if !setting.fixed {
-                setting.initial = Some(value);
-            }
-        }
+        spec.auto_initial(&Series::new(x.to_vec(), y.to_vec()), self.range);
+        self.params = spec.params;
     }
 
     /// Le modèle change : réglages remis à zéro.
@@ -702,59 +688,40 @@ impl AnalysisForm {
         issues
     }
 
-    /// Les réglages propres à la famille active qui manquent.
+    /// Les réglages propres à la famille active qui manquent : le brouillon se
+    /// décrit en [`Operation`] (même incomplet) et `stokesforge-analysis` dit ce
+    /// qui manque ([`Operation::readiness`]).
     fn setup_issues(&self) -> Option<Issue> {
-        match self.kind {
-            OperationKind::Baseline => {
-                let b = &self.setup.baseline;
-                match b.shape {
-                    BaselineShape::TwoPoints | BaselineShape::Anchors if b.points.len() < 2 => {
-                        Some(Issue::NeedsPoints {
-                            needed: 2,
-                            have: b.points.len(),
-                        })
-                    }
-                    BaselineShape::Constant if b.constant_point.is_none() => {
-                        Some(Issue::NeedsPoints { needed: 1, have: 0 })
-                    }
-                    BaselineShape::ConstantZone if b.constant_zone.is_none() => {
-                        Some(Issue::NeedsZone)
-                    }
-                    BaselineShape::Zones if b.zones.is_empty() => Some(Issue::NeedsZone),
-                    _ => None,
-                }
-            }
-            OperationKind::Fit => match self.setup.fit.model.compile() {
-                Err(AnalysisError::BadExpression(error)) => Some(Issue::BadModel(Some(error))),
-                Err(other) => Some(Issue::Failed(other)),
-                Ok(m) if m.param_count() == 0 => Some(Issue::BadModel(None)),
-                Ok(_) => None,
-            },
-            _ => None,
-        }
+        issue_of(self.draft_operation(false).readiness())
     }
 
     /// L'opération que les réglages décrivent, ou `None` tant qu'un réglage
     /// manque. `for_preview` force les colonnes d'aide (ligne de base,
     /// résidus) pour qu'elles se montrent même non écrites.
     pub fn operation_for(&self, for_preview: bool) -> Option<Operation> {
-        if self.setup_issues().is_some() {
-            return None;
-        }
+        let op = self.draft_operation(for_preview);
+        (op.readiness() == Readiness::Ready).then_some(op)
+    }
+
+    /// L'opération des réglages de la famille active, **sans juger** s'ils
+    /// suffisent : un point ou une zone pas encore posé y est un `NaN`, que
+    /// [`Operation::readiness`] lit comme « à poser ».
+    fn draft_operation(&self, for_preview: bool) -> Operation {
+        const UNPOSED: (f64, f64) = (f64::NAN, f64::NAN);
         let s = &self.setup;
-        Some(match self.kind {
+        match self.kind {
             OperationKind::Baseline => {
                 let b = &s.baseline;
                 let method = match b.shape {
                     BaselineShape::Constant => BaselineMethod::Constant {
-                        point: b.constant_point?,
+                        point: b.constant_point.unwrap_or(UNPOSED),
                     },
                     BaselineShape::ConstantZone => BaselineMethod::ConstantZone {
-                        zone: b.constant_zone?,
+                        zone: b.constant_zone.unwrap_or(UNPOSED),
                     },
                     BaselineShape::TwoPoints => BaselineMethod::Line {
-                        p1: b.points[0],
-                        p2: b.points[1],
+                        p1: b.points.first().copied().unwrap_or(UNPOSED),
+                        p2: b.points.get(1).copied().unwrap_or(UNPOSED),
                     },
                     BaselineShape::Zones => BaselineMethod::Zones {
                         zones: b.zones.clone(),
@@ -822,7 +789,7 @@ impl AnalysisForm {
                     shift: d.shift,
                 }
             }
-        })
+        }
     }
 
     /// L'opération qui sera enregistrée.
@@ -1118,23 +1085,6 @@ pub fn preset_of(op: &Operation) -> Preset {
 }
 
 impl Setup {
-    /// Oublie les **plages** et les valeurs de départ — plages d'intégration,
-    /// d'ajustement et de pics, positions de départ des pics, valeurs initiales
-    /// et bornes des paramètres, fenêtre de reconvolution — pour ne garder que
-    /// les réglages de méthode (#249). La définition d'une ligne de base (ses
-    /// points, ses zones) reste : c'est elle qu'on relance sur le spectre
-    /// suivant.
-    pub fn forget_positions(&mut self) {
-        self.integrate.ranges.clear();
-        self.fit.range = None;
-        self.fit.reset_params();
-        self.peaks.seeds.clear();
-        self.peaks.range = None;
-        self.reconv.spec.window = None;
-        let count = self.reconv.param_count();
-        self.reconv.spec.params = vec![ParamSetting::default(); count];
-    }
-
     /// Reprend les réglages d'une opération existante (modification).
     pub fn load(&mut self, op: &Operation) {
         match op {
@@ -1230,6 +1180,20 @@ impl Setup {
                 }
             }
         }
+    }
+}
+
+/// Ce que `Operation::readiness` dit de l'opération, dans les cas de
+/// l'interface. Un `match` exhaustif sans `_` : une variante nouvelle de
+/// `Readiness` ne compile pas sans son cas (et sa phrase, `issue_message`).
+fn issue_of(readiness: Readiness) -> Option<Issue> {
+    match readiness {
+        Readiness::Ready => None,
+        Readiness::NeedsPoints { needed, have } => Some(Issue::NeedsPoints { needed, have }),
+        Readiness::NeedsZone => Some(Issue::NeedsZone),
+        Readiness::BadExpression(error) => Some(Issue::BadModel(Some(error))),
+        Readiness::NoParameter => Some(Issue::BadModel(None)),
+        Readiness::Invalid(error) => Some(Issue::Failed(error)),
     }
 }
 

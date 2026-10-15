@@ -91,6 +91,10 @@ proposées). Une grandeur neuve s'ajoute à la table, jamais à l'appel ; les 28
   grand pas, décimales, unité et valeurs proposées (la molette suit ces
   valeurs, #233 ; le pas sert aux flèches du clavier). Épaisseur : 0 à 20 pt,
   décimales possibles au clavier.
+  Les plafonds d'un réglage d'analyse (degré 9, itérations 5000, pics **100**,
+  composantes 4) ne sont pas écrits dans la table : elle les lit dans
+  `stokesforge_analysis::ops` (#260), la source que `Operation::validate`
+  applique aussi à `pyst` et au fichier.
 - **Barres d'outils** (N9) : listes éditables (choisir 12 ou taper 15), même
   brique.
 - **Unité** (N10) : dans le libellé (« Line width (pt) »), jamais en suffixe,

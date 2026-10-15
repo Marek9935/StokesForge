@@ -394,7 +394,7 @@ pub fn reconvolve(
     irf: &Series,
     spec: &ReconvSpec,
 ) -> Result<Reconvolution, AnalysisError> {
-    if !(1..=4).contains(&spec.components) {
+    if !(1..=crate::ops::MAX_COMPONENTS).contains(&spec.components) {
         return Err(AnalysisError::InvalidParameter {
             name: "components".into(),
         });

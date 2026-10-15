@@ -126,6 +126,72 @@ fn what_is_missing_is_named_before_any_computation() {
     assert!(matches!(form.issues().as_slice(), [Issue::BadModel(_)]));
 }
 
+/// #260 : le brouillon se décrit en `Operation` et `Operation::readiness` dit
+/// ce qui manque, y compris pour le point ou la zone uniques.
+#[test]
+fn a_constant_baseline_names_its_missing_point_or_zone() {
+    let f = fixture();
+    let mut form = AnalysisForm::new(&Preset::BaselineConstant, series(&f), false);
+    assert_eq!(
+        form.issues(),
+        vec![Issue::NeedsPoints { needed: 1, have: 0 }]
+    );
+    form.add_point(3.0, 7.0);
+    assert!(form.issues().is_empty());
+    form.setup.baseline.shape = BaselineShape::ConstantZone;
+    assert_eq!(form.issues(), vec![Issue::NeedsZone]);
+    form.add_zone(1.0, 5.0);
+    assert!(form.issues().is_empty());
+}
+
+/// #260 : un degré hors plafond (lu d'un fichier) est un prérequis refusé, pas
+/// une allocation de milliards de paramètres.
+#[test]
+fn a_huge_polynomial_degree_is_an_issue_not_an_allocation() {
+    let f = fixture();
+    let mut form = AnalysisForm::new(&Preset::Fit(Model::Linear), series(&f), false);
+    form.setup.fit.model = Model::Polynomial { degree: u32::MAX };
+    assert!(matches!(
+        form.issues().as_slice(),
+        [Issue::Failed(
+            stokesforge_analysis::AnalysisError::InvalidParameter { .. }
+        )]
+    ));
+    assert_eq!(form.setup.fit.param_count(), 0);
+    assert_eq!(form.operation(), None);
+}
+
+/// Le bouton « Auto » ne regarde que la plage ajustée.
+#[test]
+fn auto_reads_only_the_fitted_range() {
+    let f = fixture();
+    let mut form = AnalysisForm::new(&Preset::Fit(Model::Linear), series(&f), false);
+    let xs: Vec<f64> = (0..50).map(f64::from).collect();
+    let ys: Vec<f64> = xs
+        .iter()
+        .map(|x| {
+            if (10.0..=20.0).contains(x) {
+                3.0 * x + 1.0
+            } else {
+                -9000.0
+            }
+        })
+        .collect();
+    form.setup.fit.range = Some((20.0, 10.0));
+    form.setup.fit.auto_initial(&xs, &ys);
+    let initial: Vec<f64> = form
+        .setup
+        .fit
+        .params
+        .iter()
+        .map(|p| p.initial.expect("une valeur de départ"))
+        .collect();
+    assert!((initial[0] - 1.0).abs() < 1e-6 && (initial[1] - 3.0).abs() < 1e-6);
+    form.setup.fit.range = None;
+    form.setup.fit.auto_initial(&xs, &ys);
+    assert!((form.setup.fit.params[1].initial.unwrap() - 3.0).abs() > 1.0);
+}
+
 #[test]
 fn the_operation_reads_only_the_active_family() {
     let f = fixture();

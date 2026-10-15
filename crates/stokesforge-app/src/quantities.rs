@@ -11,6 +11,13 @@
 //! (« Line width (pt) »), clé du catalogue (N10, `docs/textes-interface.md`).
 //! Un `▼` n'apparaît que si la grandeur a des [`Quantity::presets`] ; une borne
 //! d'axe ou un paramètre d'ajustement n'en ont pas.
+//!
+//! Les plafonds d'un réglage d'analyse (degré, itérations, pics, composantes)
+//! ne s'écrivent pas ici : ils sont lus dans `stokesforge_analysis::ops`
+//! (#260), la source que `Operation::validate` applique aussi pour `pyst` et le
+//! fichier.
+
+use stokesforge_analysis::ops as limits;
 
 /// Ce qu'une grandeur fait du mot `auto` et d'un champ vidé (#221, C4/R10).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,19 +166,20 @@ pub const HUE_DEGREES: Quantity = Quantity::whole(15.0).between(0.0, 360.0);
 pub const PERCENT: Quantity = Quantity::whole(10.0).between(0.0, 100.0);
 
 /// Degré d'un polynôme.
-pub const POLYNOMIAL_DEGREE: Quantity = Quantity::whole(1.0).between(1.0, 9.0);
+pub const POLYNOMIAL_DEGREE: Quantity =
+    Quantity::whole(1.0).between(1.0, limits::MAX_DEGREE as f64);
 
 /// Proéminence minimale d'un pic, en pour cent du signal.
 pub const PROMINENCE_PERCENT: Quantity = Quantity::real(0.5, 5.0, 2).between(0.1, 100.0);
 
 /// Nombre maximal de pics cherchés.
-pub const MAX_PEAKS: Quantity = Quantity::whole(5.0).between(1.0, 50.0);
+pub const MAX_PEAKS: Quantity = Quantity::whole(5.0).between(1.0, limits::MAX_PEAKS as f64);
 
 /// Nombre de composantes d'une déconvolution.
-pub const COMPONENTS: Quantity = Quantity::whole(1.0).between(1.0, 4.0);
+pub const COMPONENTS: Quantity = Quantity::whole(1.0).between(1.0, limits::MAX_COMPONENTS as f64);
 
 /// Nombre d'itérations d'un solveur.
-pub const ITERATIONS: Quantity = Quantity::whole(100.0).between(1.0, 5000.0);
+pub const ITERATIONS: Quantity = Quantity::whole(100.0).between(1.0, limits::MAX_ITERATIONS as f64);
 
 /// Un nombre de lignes ou de caractères à sauter à l'import (0 et plus).
 pub const COUNT: Quantity = Quantity::whole(10.0).between(0.0, 9_007_199_254_740_991.0);

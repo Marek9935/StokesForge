@@ -29,6 +29,29 @@ pub struct FitSpec {
     pub params: Vec<ParamSetting>,
 }
 
+impl FitSpec {
+    /// Remplit les valeurs de départ avec l'estimation automatique du modèle
+    /// ([`CompiledModel::guess`]) sur les points de `series` dont X tombe dans
+    /// `range` (bornes incluses, dans n'importe quel ordre ; `None` : toute la
+    /// série, sauf les X non finis). Les réglages par paramètre sont ramenés à
+    /// la longueur du modèle ; un paramètre **fixé** garde sa valeur. Sans
+    /// effet si le modèle ne se compile pas.
+    pub fn auto_initial(&mut self, series: &Series, range: Option<(f64, f64)>) {
+        let Ok(compiled) = self.model.compile() else {
+            return;
+        };
+        let (lo, hi) = range.unwrap_or((f64::NEG_INFINITY, f64::INFINITY));
+        let guess = compiled.guess(&series.restricted(lo, hi));
+        self.params
+            .resize(compiled.param_count(), ParamSetting::default());
+        for (setting, value) in self.params.iter_mut().zip(guess) {
+            if !setting.fixed {
+                setting.initial = Some(value);
+            }
+        }
+    }
+}
+
 /// Une courbe à ajuster : points finis, déjà restreints à la plage voulue.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FitInput {

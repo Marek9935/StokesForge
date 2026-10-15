@@ -14,7 +14,8 @@ use crate::baseline::{self, Baseline, BaselineMethod, BaselineOp};
 use crate::correct::{self, CorrectOp};
 use crate::deconv::{self, DirectMethod, ReconvSpec};
 use crate::error::AnalysisError;
-use crate::fit::{self, FitInput, FitSpec};
+use crate::expr::ExprError;
+use crate::fit::{self, FitInput, FitSpec, ParamSetting};
 use crate::integrate::{self, IntegrateSpec};
 use crate::model::Model;
 use crate::peaks::{self, PeakSeed, PeaksSpec};
@@ -377,16 +378,113 @@ fn restrict(series: &Series, range: Option<(f64, f64)>) -> Result<Series, Analys
     }
 }
 
-/// Exécute `op` sur chaque entrée. Une erreur sur une entrée annule le lot
-/// (l'appelant décide de relancer les autres). Un ajustement global traite
-/// toutes les entrées ensemble.
-/// Plafonds des réglages, communs à l'interface, à `pyst` et au fichier : un
-/// degré de 10⁹ créerait un milliard de paramètres, des itérations sans borne
-/// bloqueraient l'acteur de session au recalcul.
+/// Plafonds des réglages, communs à l'interface (la table des grandeurs de
+/// `stokesforge-app` les lit), à `pyst` et au fichier : un degré de 10⁹
+/// créerait un milliard de paramètres, des itérations sans borne bloqueraient
+/// l'acteur de session au recalcul. `Model::compile` applique aussi
+/// [`MAX_DEGREE`] : un degré lu tel quel d'un fichier ne doit rien allouer
+/// avant d'être refusé.
 pub const MAX_DEGREE: u32 = 9;
 pub const MAX_ITERATIONS: usize = 5000;
+/// Nombre maximal de pics cherchés par la détection automatique.
+pub const MAX_PEAKS: usize = 100;
+/// Nombre maximal de composantes d'une reconvolution (le minimum est 1).
+pub const MAX_COMPONENTS: usize = 4;
+
+/// Ce qui manque à une opération pour être lancée, **sans consulter les
+/// données** : une donnée, jamais une phrase (l'interface la met en phrase par
+/// un `match` exhaustif). Ce que seule la lecture du projet révèle — pas de
+/// série, colonne de référence absente, colonne disparue — n'est pas ici.
+///
+/// Un point ou une zone « pas encore posé » se dit par un `NaN` dans
+/// l'opération, comme partout dans le crate (`NaN` : vide) : le brouillon d'un
+/// formulaire se décrit alors en [`Operation`] même incomplet.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Readiness {
+    /// Rien ne manque.
+    Ready,
+    /// Pas assez de points posés pour la ligne de base.
+    NeedsPoints { needed: usize, have: usize },
+    /// Une zone de fond au moins.
+    NeedsZone,
+    /// L'expression du modèle libre est illisible.
+    BadExpression(ExprError),
+    /// Le modèle n'a aucun paramètre.
+    NoParameter,
+    /// Un réglage est refusé par le calcul (par exemple un degré hors plafond).
+    Invalid(AnalysisError),
+}
 
 impl Operation {
+    /// Ce qui empêche de lancer l'opération, sans lire de donnée (voir
+    /// [`Readiness`]). Ne refait pas [`Operation::validate`] : celui-ci juge les
+    /// plafonds, celui-là ce qui reste à poser.
+    pub fn readiness(&self) -> Readiness {
+        match self {
+            Operation::Baseline { method, .. } => match method {
+                BaselineMethod::Constant { point } if !is_posed(*point) => {
+                    Readiness::NeedsPoints { needed: 1, have: 0 }
+                }
+                BaselineMethod::ConstantZone { zone } if !is_posed(*zone) => Readiness::NeedsZone,
+                BaselineMethod::Line { p1, p2 } => {
+                    let have = [p1, p2].into_iter().filter(|p| is_posed(**p)).count();
+                    if have < 2 {
+                        Readiness::NeedsPoints { needed: 2, have }
+                    } else {
+                        Readiness::Ready
+                    }
+                }
+                BaselineMethod::Zones { zones, .. } if zones.is_empty() => Readiness::NeedsZone,
+                BaselineMethod::Anchors { points, .. } if points.len() < 2 => {
+                    Readiness::NeedsPoints {
+                        needed: 2,
+                        have: points.len(),
+                    }
+                }
+                _ => Readiness::Ready,
+            },
+            Operation::Fit { spec, .. } => match spec.model.compile() {
+                Err(AnalysisError::BadExpression(error)) => Readiness::BadExpression(error),
+                Err(other) => Readiness::Invalid(other),
+                Ok(compiled) if compiled.param_count() == 0 => Readiness::NoParameter,
+                Ok(_) => Readiness::Ready,
+            },
+            Operation::Correct { .. }
+            | Operation::Integrate { .. }
+            | Operation::Peaks { .. }
+            | Operation::Reconvolution { .. }
+            | Operation::DirectDeconvolution { .. } => Readiness::Ready,
+        }
+    }
+
+    /// Retire de l'opération tout ce qui désigne des **données** : plages
+    /// d'intégration, d'ajustement et de pics, positions de départ des pics,
+    /// réglages par paramètre d'un ajustement ou d'une reconvolution (valeurs
+    /// initiales, bornes, paramètres fixés **et partagés**), fenêtre d'une
+    /// reconvolution. Il reste la méthode et ses réglages (modèle, degré,
+    /// fenêtre de recentrage des pics, cases de sortie) et la définition d'une
+    /// ligne de base. La longueur de `params` est gardée.
+    pub fn forget_positions(&mut self) {
+        match self {
+            Operation::Integrate { spec } => spec.ranges.clear(),
+            Operation::Fit { spec, range, .. } => {
+                spec.params = vec![ParamSetting::default(); spec.params.len()];
+                *range = None;
+            }
+            Operation::Peaks { spec, range, .. } => {
+                spec.seeds.clear();
+                *range = None;
+            }
+            Operation::Reconvolution { spec, .. } => {
+                spec.params = vec![ParamSetting::default(); spec.params.len()];
+                spec.window = None;
+            }
+            Operation::Baseline { .. }
+            | Operation::Correct { .. }
+            | Operation::DirectDeconvolution { .. } => {}
+        }
+    }
+
     /// Refuse les réglages hors plafond avant tout calcul.
     pub fn validate(&self) -> Result<(), AnalysisError> {
         let bad = |name: &str| {
@@ -411,9 +509,10 @@ impl Operation {
                 Model::Polynomial { degree } if !(1..=MAX_DEGREE).contains(&degree) => {
                     bad("degree")
                 }
+                _ if no_free_parameter(spec) => Err(AnalysisError::NoFreeParameter),
                 _ => Ok(()),
             },
-            Operation::Peaks { auto, .. } if auto.is_some_and(|a| a.max_peaks > 100) => {
+            Operation::Peaks { auto, .. } if auto.is_some_and(|a| a.max_peaks > MAX_PEAKS) => {
                 bad("max_peaks")
             }
             Operation::Peaks { spec, .. } if spec.center_window.is_some_and(|w| !w.is_finite()) => {
@@ -430,7 +529,9 @@ impl Operation {
                 }
                 _ => Ok(()),
             },
-            Operation::Reconvolution { spec, .. } if !(1..=4).contains(&spec.components) => {
+            Operation::Reconvolution { spec, .. }
+                if !(1..=MAX_COMPONENTS).contains(&spec.components) =>
+            {
                 bad("components")
             }
             _ => Ok(()),
@@ -438,6 +539,23 @@ impl Operation {
     }
 }
 
+/// Le modèle n'a aucun paramètre libre : aucun, ou tous fixés (le solveur
+/// refuse de toute façon avec la même erreur). Un modèle qui ne se compile pas
+/// n'est pas jugé ici : sa propre erreur sort à l'ajustement.
+fn no_free_parameter(spec: &FitSpec) -> bool {
+    spec.model.compile().is_ok_and(|compiled| {
+        (0..compiled.param_count()).all(|j| spec.params.get(j).is_some_and(|p| p.fixed))
+    })
+}
+
+/// Un point ou une zone posé n'a que des coordonnées finies.
+fn is_posed(pair: (f64, f64)) -> bool {
+    pair.0.is_finite() && pair.1.is_finite()
+}
+
+/// Exécute `op` sur chaque entrée. Une erreur sur une entrée annule le lot
+/// (l'appelant décide de relancer les autres). Un ajustement global traite
+/// toutes les entrées ensemble.
 pub fn run(
     op: &Operation,
     inputs: &[SeriesInput],

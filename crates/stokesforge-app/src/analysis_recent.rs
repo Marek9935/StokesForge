@@ -6,8 +6,10 @@
 //!
 //! Une entrée garde l'[`Operation`] du calcul lancé, **sans les plages et les
 //! valeurs de départ** : plages d'intégration, d'ajustement et de pics,
-//! positions de départ des pics, valeurs initiales et bornes des paramètres d'un
-//! ajustement, fenêtre d'une reconvolution. Il reste la méthode, le degré, le
+//! positions de départ des pics, réglages par paramètre d'un ajustement ou d'une
+//! reconvolution (valeurs initiales, bornes, paramètres fixés ou partagés),
+//! fenêtre d'une reconvolution — la règle est `Operation::forget_positions`
+//! (`stokesforge-analysis`). Il reste la méthode, le degré, le
 //! modèle, Subtract ou Divide, les cases de sortie, « Replace original data » —
 //! et la **définition d'une ligne de base** (ses points, ses zones, ses
 //! ancrages), faute de quoi Ctrl+clic ne pourrait jamais relancer une ligne de
@@ -21,12 +23,12 @@
 //! Les entrées vivent dans les préférences de l'application (#148), jamais dans
 //! le `.stf` : elles suivent l'utilisateur d'un projet à l'autre. L'opération
 //! traverse le fichier sous la forme de l'arbre générique de
-//! `stokesforge_analysis::tree` converti en JSON, comme dans le `.stf` : un
-//! réglage nouveau ne change pas le format. Une entrée illisible est ignorée,
+//! `stokesforge_analysis::tree` converti en JSON (le `.stf`, lui, l'écrit en
+//! MessagePack par `tree_to_value`, `stokesforge-persistence`) : un réglage
+//! nouveau ne change pas le format. Une entrée illisible est ignorée,
 //! jamais une erreur (invariant 10).
 
 use stokesforge_analysis::baseline::BaselineMethod;
-use stokesforge_analysis::fit::ParamSetting;
 use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::Operation;
 use stokesforge_analysis::tree::Tree as OpTree;
@@ -54,7 +56,7 @@ impl RecentAnalysis {
             return None;
         }
         Some(Self {
-            operation: forget_positions(form.operation()?),
+            operation: forgotten(form.operation()?),
             replace_original: form.replace_original,
         })
     }
@@ -68,8 +70,9 @@ impl RecentAnalysis {
     /// « Replace original data » n'est pas appliqué ici : la fenêtre ne
     /// l'accorde que si la sélection le permet (`replacement_disabled`).
     pub fn apply(&self, form: &mut AnalysisForm) {
-        form.setup.load(&self.operation);
-        form.setup.forget_positions();
+        // Une entrée venue des préférences peut garder des positions (fichier
+        // édité à la main, ancienne version) : on les oublie à la lecture aussi.
+        form.setup.load(&forgotten(self.operation.clone()));
         form.tool = form.natural_tool();
     }
 
@@ -181,49 +184,11 @@ fn model_name(model: &Model) -> String {
     .to_string()
 }
 
-/// Retire de l'opération tout ce qui désigne des données (voir la doc de tête).
-fn forget_positions(op: Operation) -> Operation {
-    match op {
-        Operation::Integrate { mut spec } => {
-            spec.ranges.clear();
-            Operation::Integrate { spec }
-        }
-        Operation::Fit {
-            mut spec,
-            residuals,
-            ..
-        } => {
-            spec.params = vec![ParamSetting::default(); spec.params.len()];
-            Operation::Fit {
-                spec,
-                range: None,
-                residuals,
-            }
-        }
-        Operation::Peaks {
-            mut spec,
-            auto,
-            residuals,
-            ..
-        } => {
-            spec.seeds.clear();
-            Operation::Peaks {
-                spec,
-                auto,
-                range: None,
-                residuals,
-            }
-        }
-        Operation::Reconvolution {
-            mut spec,
-            residuals,
-        } => {
-            spec.params = vec![ParamSetting::default(); spec.params.len()];
-            spec.window = None;
-            Operation::Reconvolution { spec, residuals }
-        }
-        other => other,
-    }
+/// Retire de l'opération tout ce qui désigne des données (voir la doc de tête) :
+/// la règle est `Operation::forget_positions`, dans `stokesforge-analysis`.
+fn forgotten(mut op: Operation) -> Operation {
+    op.forget_positions();
+    op
 }
 
 /// Range `new` en tête de `list`, sans doublon, `MAX_RECENT` au plus (#249) :
@@ -271,7 +236,7 @@ mod tests {
     use crate::analysis::{BaselineShape, Preset};
     use crate::i18n::{self, Language};
     use stokesforge_analysis::baseline::{BaselineOp, Interpolation};
-    use stokesforge_analysis::fit::FitSpec;
+    use stokesforge_analysis::fit::{FitSpec, ParamSetting};
     use stokesforge_analysis::integrate::{IntegrateSpec, Under};
     use stokesforge_core::SeriesRef;
 
@@ -364,6 +329,55 @@ mod tests {
         };
         assert_eq!(*range, None);
         assert!(spec.params.iter().all(|p| p.initial.is_none() && !p.fixed));
+    }
+
+    /// #260 : une entrée lue des préférences peut garder des positions (fichier
+    /// édité à la main) : la réouverture les oublie, `fixed` et `shared`
+    /// compris, par la règle unique `Operation::forget_positions`.
+    #[test]
+    fn rouvrir_une_entree_oublie_aussi_les_reglages_fixes_et_partages() {
+        let setting = ParamSetting {
+            initial: Some(3.0),
+            fixed: true,
+            min: Some(0.0),
+            max: Some(9.0),
+            shared: true,
+        };
+        let entry = recent(Operation::Fit {
+            spec: FitSpec {
+                model: Model::Linear,
+                params: vec![setting.clone(), setting],
+            },
+            range: Some((1.0, 2.0)),
+            residuals: true,
+        });
+        let mut reopened = form(&entry.preset());
+        entry.apply(&mut reopened);
+        assert_eq!(reopened.setup.fit.range, None);
+        assert_eq!(reopened.setup.fit.params, vec![ParamSetting::default(); 2]);
+        assert!(!reopened.setup.fit.is_global(), "plus de paramètre partagé");
+        assert!(reopened.setup.fit.residuals, "témoin : le réglage reste");
+    }
+
+    /// #260 : un degré énorme lu des préférences ne fabrique aucun paramètre —
+    /// ni à la réouverture, ni dans les prérequis du formulaire.
+    #[test]
+    fn un_degre_enorme_des_preferences_est_refuse_sans_allocation() {
+        let entry = recent(Operation::Fit {
+            spec: FitSpec {
+                model: Model::Polynomial { degree: u32::MAX },
+                params: vec![ParamSetting::default()],
+            },
+            range: None,
+            residuals: false,
+        });
+        let mut reopened = form(&entry.preset());
+        entry.apply(&mut reopened);
+        assert!(matches!(
+            reopened.issues().as_slice(),
+            [crate::analysis::Issue::Failed(_)]
+        ));
+        assert_eq!(reopened.setup.fit.param_count(), 0);
     }
 
     #[test]

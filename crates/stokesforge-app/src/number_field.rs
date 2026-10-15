@@ -697,6 +697,36 @@ mod tests {
         ));
     }
 
+    /// #260 : les plafonds des champs d'analyse sont ceux de
+    /// `stokesforge-analysis`, que `Operation::validate` applique aussi. Le
+    /// champ « Max peaks » monte de 50 à 100 pics.
+    #[test]
+    fn les_champs_d_analyse_suivent_les_plafonds_du_crate_d_analyse() {
+        use stokesforge_analysis::ops::{MAX_COMPONENTS, MAX_DEGREE, MAX_ITERATIONS, MAX_PEAKS};
+        assert_eq!(quantities::POLYNOMIAL_DEGREE.max, f64::from(MAX_DEGREE));
+        assert_eq!(quantities::ITERATIONS.max, MAX_ITERATIONS as f64);
+        assert_eq!(quantities::MAX_PEAKS.max, MAX_PEAKS as f64);
+        assert_eq!(quantities::COMPONENTS.max, MAX_COMPONENTS as f64);
+        assert_eq!(MAX_PEAKS, 100, "décision du 2026-10-15 : 100 pics partout");
+
+        assert_eq!(
+            read(&quantities::MAX_PEAKS, "100"),
+            Verdict::Valid(Entry::Value(100.0))
+        );
+        let Verdict::Clamped {
+            value,
+            bound,
+            limit,
+        } = read(&quantities::MAX_PEAKS, "101")
+        else {
+            panic!("101 dépasse 100");
+        };
+        assert_eq!(
+            (value, bound, limit.as_str()),
+            (Entry::Value(100.0), Bound::Max, "100")
+        );
+    }
+
     #[test]
     fn des_decimales_au_clavier_sont_gardees() {
         assert_eq!(

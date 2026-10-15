@@ -8,6 +8,7 @@
 use crate::error::AnalysisError;
 use crate::expr::Expr;
 use crate::linalg::{least_squares, Matrix};
+use crate::ops::MAX_DEGREE;
 use crate::series::Series;
 
 /// Un modèle de courbe `y = f(x; p)`.
@@ -71,13 +72,21 @@ pub struct CompiledModel {
 }
 
 impl Model {
-    /// Compile le modèle. Seul un modèle libre peut échouer (syntaxe).
+    /// Compile le modèle. Un modèle libre peut échouer (syntaxe), un polynôme
+    /// au-delà de [`MAX_DEGREE`] aussi : `degree + 1` paramètres nommés seraient
+    /// fabriqués avant que `Operation::validate` ne puisse le refuser (un degré
+    /// lu tel quel des préférences ou d'un fichier).
     pub fn compile(&self) -> Result<CompiledModel, AnalysisError> {
         let (expr, params) = match self {
             Model::Linear => (
                 None,
                 vec![ParamDef::free("intercept"), ParamDef::free("slope")],
             ),
+            Model::Polynomial { degree } if *degree > MAX_DEGREE => {
+                return Err(AnalysisError::InvalidParameter {
+                    name: "degree".into(),
+                });
+            }
             Model::Polynomial { degree } => (
                 None,
                 (0..=*degree)
