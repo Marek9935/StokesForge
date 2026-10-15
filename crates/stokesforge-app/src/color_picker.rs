@@ -403,16 +403,31 @@ struct PickerMemory {
 
 /// Hauteur de la bande d'aperçu d'un nuancier.
 const GRADIENT_STRIP_HEIGHT: f32 = 14.0;
+/// Largeur de la pastille d'un nuancier dans une liste.
+const GRADIENT_SWATCH_WIDTH: f32 = 64.0;
 
 /// Aperçu d'un nuancier (#178) : une bande de tranches, une par couleur
 /// `#RRGGBB` de `colors`, sur toute la largeur disponible. Une couleur
-/// illisible laisse sa tranche vide.
+/// illisible laisse sa tranche vide ; sans couleur (#213), la bande est un
+/// fond grisé.
 pub(crate) fn gradient_strip(ui: &mut egui::Ui, colors: &[String]) {
+    let width = ui.available_width();
+    paint_gradient(ui, colors, width);
+}
+
+/// La même bande en pastille de largeur fixe, pour une entrée de liste (#213).
+pub(crate) fn gradient_swatch(ui: &mut egui::Ui, colors: &[String]) {
+    paint_gradient(ui, colors, GRADIENT_SWATCH_WIDTH);
+}
+
+fn paint_gradient(ui: &mut egui::Ui, colors: &[String], width: f32) {
     let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), GRADIENT_STRIP_HEIGHT),
+        Vec2::new(width, GRADIENT_STRIP_HEIGHT),
         egui::Sense::hover(),
     );
     if colors.is_empty() {
+        let fill = ui.visuals().widgets.noninteractive.weak_bg_fill;
+        ui.painter().rect_filled(rect, 0.0, fill);
         return;
     }
     let step = rect.width() / colors.len() as f32;

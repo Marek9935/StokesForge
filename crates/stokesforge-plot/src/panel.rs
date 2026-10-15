@@ -104,6 +104,11 @@ pub struct PanelSpec {
     /// numéro, donc un nom resté derrière un groupe disparu ne repasse jamais
     /// à un groupe neuf.
     pub group_names: std::collections::BTreeMap<u32, String>,
+    /// Arrêts du nuancier appliqué à chaque groupe (#213), par numéro de
+    /// groupe. Un groupe sans entrée n'a reçu aucun nuancier : ses membres
+    /// gardent leurs couleurs. Une série qui rejoint un groupe doté d'un
+    /// nuancier reçoit sa couleur ([`PanelSpec::set_series_group`]).
+    pub group_gradients: std::collections::BTreeMap<u32, Vec<String>>,
 }
 
 impl PanelSpec {
@@ -306,6 +311,8 @@ impl PanelSpec {
         self.series = order.iter().filter_map(|i| taken[*i].take()).collect();
         self.group_names
             .retain(|id, _| self.series.iter().any(|s| s.group == Some(*id)));
+        self.group_gradients
+            .retain(|id, _| self.series.iter().any(|s| s.group == Some(*id)));
         order.iter().position(|i| *i == index).unwrap_or(index)
     }
 
@@ -352,7 +359,15 @@ impl PanelSpec {
             (None, _) => slots.insert(here, SeriesSlot::Single(index)),
         }
         self.series[index].group = group;
-        Some(self.apply_slots(&slots, index))
+        let rank = self.apply_slots(&slots, index);
+        // Dynamique (#213) : la série qui rejoint un groupe doté d'un nuancier
+        // en reçoit la couleur, et le nuancier se répartit de nouveau.
+        if let Some(stops) = group.and_then(|id| self.group_gradients.get(&id).cloned()) {
+            if let Some(id) = group {
+                self.apply_group_gradient(id, &stops);
+            }
+        }
+        Some(rank)
     }
 
     /// Rassemble les séries `indices` (rangs distincts, dans l'ordre voulu)
@@ -438,6 +453,7 @@ impl PanelSpec {
             }
         }
         self.group_names.remove(&group);
+        self.group_gradients.remove(&group);
         changed
     }
 
@@ -446,6 +462,7 @@ impl PanelSpec {
         let before = self.series.len();
         self.series.retain(|s| s.group != Some(group));
         self.group_names.remove(&group);
+        self.group_gradients.remove(&group);
         self.series.len() != before
     }
 
@@ -490,6 +507,28 @@ impl PanelSpec {
             series.symbol.color = color;
         }
         changed
+    }
+
+    /// Retient `stops` comme nuancier du groupe `group` et l'applique à ses
+    /// membres (#213). Faux, sans rien changer, si le groupe n'existe pas ou
+    /// si aucun arrêt n'est lisible ; sinon vrai quand le nuancier retenu ou
+    /// une couleur a changé.
+    pub fn set_group_gradient<S: AsRef<str>>(&mut self, group: u32, stops: &[S]) -> bool {
+        if self.group_members(group).is_empty() || crate::gradient_colors(stops, 1).is_empty() {
+            return false;
+        }
+        let stops: Vec<String> = stops.iter().map(|s| s.as_ref().to_string()).collect();
+        let recolored = self.apply_group_gradient(group, &stops);
+        let retained = self.group_gradients.insert(group, stops.clone());
+        recolored || retained.as_ref() != Some(&stops)
+    }
+
+    /// Le nuancier retenu pour le groupe `group` (#213), s'il en a reçu un.
+    pub fn group_gradient(&self, group: u32) -> Option<&[String]> {
+        self.group_gradients
+            .get(&group)
+            .filter(|_| self.series.iter().any(|s| s.group == Some(group)))
+            .map(Vec::as_slice)
     }
 
     /// Vrai si [`PanelSpec::move_series`] déplacerait la série `index`.
@@ -551,6 +590,7 @@ impl Default for PanelSpec {
             annotations: Vec::new(),
             shapes: Vec::new(),
             group_names: std::collections::BTreeMap::new(),
+            group_gradients: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -603,6 +643,62 @@ mod group_tests {
         assert!(!panel.apply_group_gradient(1, &["pas une couleur"]));
         assert_eq!(panel, avant);
         assert!(!panel.apply_group_gradient(9, &["#000000", "#ffffff"]));
+    }
+
+    /// #213 : le groupe retient son nuancier ; un groupe neuf n'en a pas et
+    /// ses couleurs ne bougent pas.
+    #[test]
+    fn le_groupe_retient_son_nuancier() {
+        let mut panel = PanelSpec::default();
+        panel.push_series_batch((1..=3).map(serie).collect());
+        let avant = panel.clone();
+        assert_eq!(
+            panel.group_gradient(1),
+            None,
+            "groupe neuf : aucun nuancier"
+        );
+        assert!(!panel.set_group_gradient(1, &["pas une couleur"]));
+        assert!(!panel.set_group_gradient(9, &["#000000", "#ffffff"]));
+        assert_eq!(panel, avant, "un nuancier refusé ne retient rien");
+
+        assert!(panel.set_group_gradient(1, &["#000000", "#ff0000"]));
+        assert_eq!(
+            panel.group_gradient(1),
+            Some(&["#000000".to_string(), "#ff0000".to_string()][..])
+        );
+        assert!(
+            !panel.set_group_gradient(1, &["#000000", "#ff0000"]),
+            "déjà là"
+        );
+        assert!(panel.dissolve_group(1));
+        assert_eq!(
+            panel.group_gradient(1),
+            None,
+            "dissoudre oublie le nuancier"
+        );
+    }
+
+    /// #213 : une série qui rejoint le groupe est colorée par son nuancier,
+    /// qui se répartit de nouveau ; sans nuancier, elle garde sa couleur.
+    #[test]
+    fn une_serie_ajoutee_au_groupe_recoit_le_nuancier() {
+        let mut panel = PanelSpec::default();
+        panel.push_series_batch((1..=2).map(serie).collect());
+        panel.push_series_batch(vec![serie(3)]);
+        let couleur = panel.series[2].line.color.clone();
+        panel.push_series_batch((4..=5).map(serie).collect());
+        // Groupe 2 sans nuancier : la série qui l'a rejoint garde sa couleur.
+        assert!(panel.set_series_group(2, Some(2)).is_some());
+        assert_eq!(panel.series[4].line.color, couleur);
+
+        assert!(panel.set_group_gradient(1, &["#000000", "#ffffff"]));
+        assert!(panel.set_series_group(4, Some(1)).is_some());
+        let couleurs: Vec<&str> = panel
+            .group_members(1)
+            .iter()
+            .map(|&m| panel.series[m].line.color.as_str())
+            .collect();
+        assert_eq!(couleurs, ["#000000", "#808080", "#ffffff"]);
     }
 
     /// Un panneau « 1, [2 3], 4, [5 6] », les colonnes valant leur rang.

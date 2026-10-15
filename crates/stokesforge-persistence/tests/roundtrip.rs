@@ -856,6 +856,8 @@ fn non_trivial_spec(
         ],
         // Nom du groupe 3 (#197).
         group_names: [(3, "Séries d'été".to_string())].into(),
+        // Nuancier retenu par le groupe 3 (#213).
+        group_gradients: [(3, vec!["#0000ff".to_string(), "#ff0000".to_string()])].into(),
         ..PanelSpec::at(0, 0)
     };
     let panel_b = PanelSpec {

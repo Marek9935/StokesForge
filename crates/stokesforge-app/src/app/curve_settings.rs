@@ -28,7 +28,7 @@ use stokesforge_plot::{
     gradient_colors, PanelSpec, SavedColors, SeriesSlot, SeriesSpec, GRADIENT_PRESETS,
 };
 
-use crate::color_picker::{color_field, gradient_strip, ColorUsage, PickerEnv};
+use crate::color_picker::{color_field, gradient_strip, gradient_swatch, ColorUsage, PickerEnv};
 use crate::object_manager::group_title;
 use crate::state::{series_list_label, Action, SaveTarget};
 use crate::theme;
@@ -48,6 +48,8 @@ const LIST_FOOTER: f32 = 34.0;
 const CUSTOM_STOPS: [&str; 2] = ["#0000ff", "#ff0000"];
 /// Nombre d'échantillons de l'aperçu d'un nuancier.
 const PREVIEW_STEPS: usize = 24;
+/// Nombre d'échantillons de la pastille d'une entrée de la liste.
+const ENTRY_STEPS: usize = 12;
 
 /// Sur quoi portent les réglages d'une série qui est dans un groupe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,7 +259,10 @@ fn series_page(
     *index = (*index).min(panel.series.len() - 1);
     let group = panel.series[*index].group;
     let whole_group = group.is_some() && scope == EditScope::Group;
-    commit |= gradient_editor(ui, panel, group, whole_group, env, actions);
+    // Hors d'un groupe, il n'y a rien à répartir : pas de nuancier (#213).
+    if let Some(group) = group {
+        commit |= gradient_editor(ui, panel, group, whole_group, env, actions);
+    }
 
     let before = panel.series[*index].clone();
     commit |= series_editor(ui, &mut panel.series[*index], env, whole_group);
@@ -489,17 +494,73 @@ fn choice_stops(choice: &GradientChoice, env: &PickerEnv, custom: &[String]) -> 
     }
 }
 
-/// Nuanciers (#178) : choisir (fourni, enregistré, personnalisé), voir l'aperçu,
-/// enregistrer ou supprimer un nuancier enregistré ; il répartit les couleurs régulièrement sur les séries du groupe
-/// dans l'ordre de la liste. Grisé tant que la portée n'est pas « tout le
-/// groupe » (`enabled`), avec l'info-bulle qui le dit. Le nuancier s'applique
-/// dès qu'on le choisit ou qu'on change un arrêt (brouillon, validé par OK).
-/// Le choix en cours n'est qu'un état de fenêtre ; seules les couleurs
-/// appliquées entrent dans le graphe.
+/// Le choix qui correspond aux `stops` retenus par le groupe (#213) : celui que
+/// la fenêtre se rappelle s'il donne ces arrêts, sinon un nuancier fourni ou
+/// enregistré qui les porte, sinon le nuancier personnalisé.
+fn identify_choice(
+    stops: &[String],
+    remembered: Option<&GradientChoice>,
+    env: &PickerEnv,
+    custom: &[String],
+) -> GradientChoice {
+    let same = |other: &[String]| {
+        other.len() == stops.len()
+            && other
+                .iter()
+                .zip(stops)
+                .all(|(a, b)| a.eq_ignore_ascii_case(b))
+    };
+    if let Some(choice) = remembered {
+        if same(&choice_stops(choice, env, custom)) {
+            return choice.clone();
+        }
+    }
+    if let Some(index) = GRADIENT_PRESETS.iter().position(|preset| {
+        let preset: Vec<String> = preset.stops.iter().map(|s| (*s).to_string()).collect();
+        same(&preset)
+    }) {
+        return GradientChoice::Preset(index);
+    }
+    for target in [SaveTarget::Project, SaveTarget::User] {
+        if let Some(gradient) = saved_of(env, target)
+            .gradients
+            .iter()
+            .find(|gradient| same(&gradient.stops))
+        {
+            return GradientChoice::Saved(target, gradient.name.clone());
+        }
+    }
+    GradientChoice::Custom
+}
+
+/// Une entrée de la liste des nuanciers : ses couleurs, puis son nom (#213).
+fn gradient_popup_entry(
+    ui: &mut egui::Ui,
+    choice: &mut Option<GradientChoice>,
+    value: GradientChoice,
+    label: String,
+    stops: &[String],
+) {
+    ui.horizontal(|ui| {
+        gradient_swatch(ui, &gradient_colors(stops, ENTRY_STEPS));
+        ui.selectable_value(choice, Some(value), label);
+    });
+}
+
+/// Nuanciers (#178, #213) : choisir (fourni, enregistré, personnalisé), voir
+/// ses couleurs dans la liste et en bande, enregistrer ou supprimer un nuancier
+/// enregistré. Il répartit les couleurs régulièrement sur les séries du groupe
+/// dans l'ordre de la liste, et le groupe le **retient** : la liste montre
+/// celui du groupe, vide tant qu'aucun n'a été choisi (la bande est alors
+/// grisée et rien n'est appliqué). Une série qui rejoint le groupe en reçoit la
+/// couleur. Grisé tant que la portée n'est pas « tout le groupe » (`enabled`),
+/// avec l'info-bulle qui le dit. Le nuancier s'applique dès qu'on le choisit ou
+/// qu'on change un arrêt (brouillon, validé par OK). Hors d'un groupe, la page
+/// ne l'appelle pas : il n'y a rien à répartir.
 fn gradient_editor(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
-    group: Option<u32>,
+    group: u32,
     enabled: bool,
     env: &mut PickerEnv,
     actions: &mut Vec<Action>,
@@ -508,14 +569,22 @@ fn gradient_editor(
     let stops_id = egui::Id::new("curve_gradient_stops");
     let name_id = egui::Id::new("curve_gradient_name");
     let target_id = egui::Id::new("curve_gradient_target");
-    let mut choice: GradientChoice = ui
-        .data(|d| d.get_temp(choice_id))
-        .unwrap_or(GradientChoice::Preset(0));
+    let remembered: Option<GradientChoice> = ui.data(|d| d.get_temp(choice_id));
     let mut custom: Vec<String> = ui
         .data(|d| d.get_temp(stops_id))
         .unwrap_or_else(|| CUSTOM_STOPS.iter().map(|s| (*s).to_string()).collect());
     let mut name: String = ui.data(|d| d.get_temp(name_id)).unwrap_or_default();
     let mut target: SaveTarget = ui.data(|d| d.get_temp(target_id)).unwrap_or_default();
+
+    // Ce que montre la liste vient du groupe, pas de la fenêtre : vide s'il n'a
+    // reçu aucun nuancier.
+    let retained: Option<Vec<String>> = panel.group_gradient(group).map(<[String]>::to_vec);
+    let mut choice: Option<GradientChoice> = retained
+        .as_deref()
+        .map(|stops| identify_choice(stops, remembered.as_ref(), env, &custom));
+    if let (Some(GradientChoice::Custom), Some(stops)) = (&choice, &retained) {
+        custom.clone_from(stops);
+    }
 
     let choice_before = choice.clone();
     let custom_before = custom.clone();
@@ -525,29 +594,35 @@ fn gradient_editor(
             f.section(tr!("curve-gradient-section"));
             f.row(tr!("curve-gradient-field"), |ui| {
                 let selected_text = match &choice {
-                    GradientChoice::Preset(index) => GRADIENT_PRESETS
+                    None => String::new(),
+                    Some(GradientChoice::Preset(index)) => GRADIENT_PRESETS
                         .get(*index)
                         .map_or_else(String::new, |preset| gradient_label(preset.id)),
-                    GradientChoice::Saved(target, name) => tr!(
+                    Some(GradientChoice::Saved(target, name)) => tr!(
                         "curve-gradient-saved",
                         name = name.as_str(),
                         target = target.label()
                     ),
-                    GradientChoice::Custom => tr!("curve-gradient-custom"),
+                    Some(GradientChoice::Custom) => tr!("curve-gradient-custom"),
                 };
                 egui::ComboBox::from_id_salt("curve_gradient_combo")
                     .selected_text(selected_text)
                     .show_ui(ui, |ui| {
                         for (index, preset) in GRADIENT_PRESETS.iter().enumerate() {
-                            ui.selectable_value(
+                            let stops: Vec<String> =
+                                preset.stops.iter().map(|s| (*s).to_string()).collect();
+                            gradient_popup_entry(
+                                ui,
                                 &mut choice,
                                 GradientChoice::Preset(index),
                                 gradient_label(preset.id),
+                                &stops,
                             );
                         }
                         for saved_target in [SaveTarget::Project, SaveTarget::User] {
                             for gradient in &saved_of(env, saved_target).gradients {
-                                ui.selectable_value(
+                                gradient_popup_entry(
+                                    ui,
                                     &mut choice,
                                     GradientChoice::Saved(saved_target, gradient.name.clone()),
                                     tr!(
@@ -555,17 +630,20 @@ fn gradient_editor(
                                         name = gradient.name.as_str(),
                                         target = saved_target.label()
                                     ),
+                                    &gradient.stops,
                                 );
                             }
                         }
-                        ui.selectable_value(
+                        gradient_popup_entry(
+                            ui,
                             &mut choice,
                             GradientChoice::Custom,
                             tr!("curve-gradient-custom"),
+                            &custom,
                         );
                     });
                 let saved = match &choice {
-                    GradientChoice::Saved(target, name) => Some((*target, name.clone())),
+                    Some(GradientChoice::Saved(target, name)) => Some((*target, name.clone())),
                     _ => None,
                 };
                 if ui
@@ -579,11 +657,13 @@ fn gradient_editor(
                 {
                     if let Some((target, name)) = saved {
                         actions.push(Action::RemoveSavedGradient { name, target });
-                        choice = GradientChoice::Preset(0);
+                        // Les couleurs déjà posées restent : la liste les relit
+                        // comme un nuancier personnalisé.
+                        choice = Some(GradientChoice::Custom);
                     }
                 }
             });
-            if choice == GradientChoice::Custom {
+            if choice == Some(GradientChoice::Custom) {
                 let mut remove = None;
                 for (index, stop) in custom.iter_mut().enumerate() {
                     f.ui().push_id(index, |ui| {
@@ -645,32 +725,39 @@ fn gradient_editor(
                             stops: custom.clone(),
                             target,
                         });
-                        choice = GradientChoice::Saved(target, name.trim().to_string());
+                        choice = Some(GradientChoice::Saved(target, name.trim().to_string()));
                     }
                 });
             }
-            let active = choice_stops(&choice, env, &custom);
-            gradient_strip(f.ui(), &gradient_colors(&active, PREVIEW_STEPS));
             // Pas de bouton « Appliquer » : comme tous les autres réglages,
             // le nuancier s'écrit dans le brouillon dès qu'on le change
             // (choix, arrêt de couleur) ; Cancel l'efface, OK le valide (#213).
+            let active = choice
+                .as_ref()
+                .map(|choice| choice_stops(choice, env, &custom));
             if enabled && (choice != choice_before || custom != custom_before) {
-                if let Some(group) = group {
-                    commit |= panel.apply_group_gradient(group, &active);
+                if let Some(active) = &active {
+                    commit |= panel.set_group_gradient(group, active);
                 }
             }
+            // La bande montre le nuancier du groupe ; grisée, vide, tant qu'il
+            // n'en a reçu aucun.
+            let strip = active
+                .as_deref()
+                .map(|stops| gradient_colors(stops, PREVIEW_STEPS))
+                .unwrap_or_default();
+            gradient_strip(f.ui(), &strip);
         })
     });
     if !enabled {
-        let reason = if group.is_some() {
-            tr!("curve-gradient-locked")
-        } else {
-            tr!("curve-gradient-needs-group")
-        };
-        out.response.on_hover_text(reason);
+        out.response.on_hover_text(tr!("curve-gradient-locked"));
     }
     ui.data_mut(|d| {
-        d.insert_temp(choice_id, choice);
+        if let Some(choice) = choice {
+            d.insert_temp(choice_id, choice);
+        } else {
+            d.remove::<GradientChoice>(choice_id);
+        }
         d.insert_temp(stops_id, custom);
         d.insert_temp(name_id, name);
         d.insert_temp(target_id, target);

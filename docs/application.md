@@ -1845,18 +1845,23 @@ réellement dans `stokesforge-plot` (lu avant d'écrire, comme demandé) :
   « Whole group (n series) » (par défaut) — avec une phrase qui dit ce qui
   s'applique. Portée groupe : style et épaisseur du trait, forme et taille du
   symbole se recopient dans chaque membre (`propagate_style`) ; les réglages
-  propres à une série (nom, type, visibilité, légende, couleurs) sont **grisés**
-  avec l'info-bulle `curve-scope-locked` ; le **nuancier** (#178) est actif.
-  Portée série : seule la série bouge (c'est l'exception), le nuancier est
-  grisé (info-bulle). Série sans groupe : tout est actif, nuancier grisé
-  (« mettez la série dans un groupe »). Nuanciers : fournis
-  (`GRADIENT_PRESETS`), enregistrés (projet ou utilisateur, suffixe « (Project) »
-  / « (User) », bouton Delete grisé hors nuancier enregistré) ou personnalisé à
-  N couleurs (nom + cible + Save), aperçu, appliqué **dès qu'on le choisit** (ou qu'on change
-  un arrêt), sans bouton : il répartit les couleurs dans l'ordre de la liste
-  du brouillon, que OK valide et Cancel défait (#213). Le choix en cours est un état de fenêtre ;
-  seules les couleurs appliquées et les nuanciers enregistrés entrent dans le
-  modèle. Dans l'Object Manager, le nœud sous le calque s'appelle « Series » ; un
+  propres à une série (nom, type, visibilité, légende) sont **grisés**
+  avec l'info-bulle `curve-scope-locked`, et ses **couleurs sont masquées** (le
+  nuancier les donne, #213) ; le **nuancier** (#178) est actif.
+  Portée série : seule la série bouge (c'est l'exception), ses couleurs
+  reviennent, le nuancier est grisé (info-bulle). Série sans groupe : tout est
+  actif, ses couleurs sont là et le **nuancier n'est pas affiché**. Nuanciers :
+  fournis (`GRADIENT_PRESETS`), enregistrés (projet ou utilisateur, suffixe
+  « (Project) » / « (User) », bouton Delete grisé hors nuancier enregistré) ou
+  personnalisé à N couleurs (nom + cible + Save). Chaque entrée de la liste
+  montre ses couleurs (`gradient_swatch`) avant son nom ; la bande dessous
+  montre celui du groupe. Il est appliqué **dès qu'on le choisit** (ou qu'on
+  change un arrêt), sans bouton : il répartit les couleurs dans l'ordre de la
+  liste du brouillon, que OK valide et Cancel défait. Le **groupe retient** ses
+  arrêts (`PanelSpec::group_gradients`, dans le `.stf`) : la liste en relit le
+  choix (`identify_choice`), **vide** — et la bande grisée — tant qu'aucun n'a
+  été choisi ; une série qui rejoint le groupe (`set_series_group`) en reçoit la
+  couleur. Dans l'Object Manager, le nœud sous le calque s'appelle « Series » ; un
   groupe y est un **nœud parent comme les autres** (#197) : triangle de repli
   (repli initial = celui de « Series », #139), case de visibilité mixte qui ne
   commande que ses membres (`VisibilityTarget::SeriesGroup`), nom éditable sur

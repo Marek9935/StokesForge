@@ -64,6 +64,13 @@ l'Object Manager sous un calque (`VisibilityTarget::Group`, ancien « Plot Group
 affiché « Series ») liste toutes les séries du calque ; chaque groupe de séries y
 est un nœud parent (voir ci-dessous).
 
+**Nuancier d'un groupe (#213).** `PanelSpec::group_gradients`
+(`BTreeMap<u32, Vec<String>>`) retient les arrêts du dernier nuancier appliqué
+à un groupe (`set_group_gradient`) ; sans entrée, aucun nuancier n'a été choisi.
+Une série qui rejoint le groupe (`set_series_group`) est recolorée, dissoudre
+ou supprimer le groupe oublie l'entrée. Ni le nom ni la provenance du nuancier
+ne sont retenus : la fenêtre des séries le reconnaît par ses arrêts.
+
 **Nom, ordre et gestes d'un groupe (#197).** `PanelSpec::group_names`
 (`BTreeMap<u32, String>`) donne un nom à un groupe ; sans entrée, le nom
 automatique « Group n » (`object_manager::group_title`, partout où un groupe est

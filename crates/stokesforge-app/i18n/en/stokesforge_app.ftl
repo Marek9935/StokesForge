@@ -725,7 +725,6 @@ curve-scope-group-note = Line style, line width, symbol shape and size apply to 
 curve-scope-series-note = Changes apply to this series only. It stays in its group; use Leave Group to detach it.
 curve-scope-locked = Per-series setting: switch to "This series only" to change it
 curve-gradient-locked = Switch to "Whole group" to apply a gradient
-curve-gradient-needs-group = Put the series in a group to apply a gradient
 curve-gradient-saved = { $name } ({ $target })
 curve-gradient-delete =
     Delete

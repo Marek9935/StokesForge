@@ -14,9 +14,9 @@ use stokesforge_plot::{
 };
 
 use crate::schema::{
-    AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, GroupNameRecord, KindRecord,
-    LegendPositionRecord, LegendSpecRecord, LineSpecRecord, LineStyleRecord, NodeRecord,
-    OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RoleRecord,
+    AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, GroupGradientRecord, GroupNameRecord,
+    KindRecord, LegendPositionRecord, LegendSpecRecord, LineSpecRecord, LineStyleRecord,
+    NodeRecord, OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RoleRecord,
     SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord,
     ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord, TextAlignRecord, TextAnchorRecord,
     TextFontRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
@@ -571,6 +571,14 @@ fn panel_spec_to_record(panel: &PanelSpec) -> PanelSpecRecord {
                 name: name.clone(),
             })
             .collect(),
+        group_gradients: panel
+            .group_gradients
+            .iter()
+            .map(|(group, stops)| GroupGradientRecord {
+                group: *group,
+                stops: stops.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -672,6 +680,12 @@ fn record_to_panel_spec(record: PanelSpecRecord) -> Result<PanelSpec, ConvertErr
             .into_iter()
             .filter(|entry| !entry.name.is_empty())
             .map(|entry| (entry.group, entry.name))
+            .collect(),
+        group_gradients: record
+            .group_gradients
+            .into_iter()
+            .filter(|entry| !entry.stops.is_empty())
+            .map(|entry| (entry.group, entry.stops))
             .collect(),
     })
 }

@@ -767,6 +767,17 @@ pub(crate) struct PanelSpecRecord {
     /// donc tous automatiques.
     #[serde(default)]
     pub(crate) group_names: Vec<GroupNameRecord>,
+    /// Nuanciers retenus par les groupes de séries (#213) ; absents d'un
+    /// fichier plus ancien, donc aucun groupe n'a de nuancier.
+    #[serde(default)]
+    pub(crate) group_gradients: Vec<GroupGradientRecord>,
+}
+
+/// Les arrêts du nuancier d'un groupe de séries (#213), à plat.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct GroupGradientRecord {
+    pub(crate) group: u32,
+    pub(crate) stops: Vec<String>,
 }
 
 /// Le nom d'un groupe de séries (#197), à plat.
@@ -862,6 +873,7 @@ impl Default for PanelSpecRecord {
             annotations: Vec::new(),
             shapes: Vec::new(),
             group_names: Vec::new(),
+            group_gradients: Vec::new(),
         }
     }
 }

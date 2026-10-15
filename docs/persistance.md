@@ -267,7 +267,10 @@ transporte les nuanciers enregistrés du projet.
 fichiers sans lui se relisent sans groupe. `PanelSpecRecord::group_names` (#197,
 liste de `{ group, name }`, `#[serde(default)]`) : les noms de groupes ; absent,
 tous les groupes portent leur nom automatique, et un nom vide lu d'un fichier
-est écarté.
+est écarté. `PanelSpecRecord::group_gradients` (#213, liste de
+`{ group, stops }`, `#[serde(default)]`) : les arrêts du nuancier retenu par un
+groupe ; absent, aucun groupe n'a de nuancier, et une entrée sans arrêt est
+écartée.
 
 ## Visibilité des objets (#81, #85)
 

@@ -717,7 +717,6 @@ curve-scope-group-note = Le style et l'épaisseur du trait, la forme et la taill
 curve-scope-series-note = Les changements ne touchent que cette série. Elle reste dans son groupe ; « Quitter le groupe » la détache.
 curve-scope-locked = Réglage propre à une série : choisissez « Cette série seulement » pour le modifier
 curve-gradient-locked = Choisissez « Tout le groupe » pour appliquer un nuancier
-curve-gradient-needs-group = Mettez la série dans un groupe pour appliquer un nuancier
 curve-gradient-saved = { $name } ({ $target })
 curve-gradient-delete =
     Supprimer

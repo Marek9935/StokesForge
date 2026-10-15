@@ -743,8 +743,8 @@ fn axis_editor(
 ///
 /// `locked` (#177) : on règle le **groupe** de la série, pas la série seule.
 /// Les réglages propres à une série (nom, type, visibilité, présence en
-/// légende, couleurs) sont alors grisés, avec une info-bulle qui dit pourquoi ;
-/// les autres (style du trait, forme et taille du symbole) restent actifs et la
+/// légende) sont alors grisés, avec une info-bulle qui dit pourquoi, et les
+/// couleurs masquées (#213 : le nuancier du groupe les donne) ; les autres (style du trait, forme et taille du symbole) restent actifs et la
 /// page les recopie dans tout le groupe.
 pub(super) fn series_editor(
     ui: &mut egui::Ui,
@@ -797,15 +797,15 @@ pub(super) fn series_editor(
         });
 
         form.section(tr!("plot-series-line-section"));
-        commit |= per_series(form, locked, |form| {
-            form.color(
+        if !locked {
+            commit |= form.color(
                 &tr!("plot-series-line-color"),
                 &mut series.line.color,
                 ColorUsage::Curves,
                 None,
                 env,
-            )
-        });
+            );
+        }
         commit |= form.row(tr!("plot-series-line-style"), |ui| {
             choice(
                 ui,
@@ -858,15 +858,15 @@ pub(super) fn series_editor(
             )
             .changed
         });
-        commit |= per_series(form, locked, |form| {
-            form.color(
+        if !locked {
+            commit |= form.color(
                 &tr!("plot-series-symbol-color"),
                 &mut series.symbol.color,
                 ColorUsage::Curves,
                 Some(&tr!("plot-color-same-as-line")),
                 env,
-            )
-        });
+            );
+        }
         commit
     })
 }
@@ -1466,7 +1466,32 @@ mod tests {
         assert!(est_peint(&peints, &tr!("curve-scope-group-note")));
         let original = banc.modele();
 
-        cliquer_libelle(&context, &mut banc.state, &tr!("curve-gradient-blue-red"));
+        // #213 : un groupe neuf n'a aucun nuancier — la liste est vide (aucun
+        // nom de nuancier peint), rien n'est coloré — et, le groupe étant
+        // réglé en bloc, la couleur individuelle n'est pas proposée.
+        assert!(banc.modele().panels[0].group_gradients.is_empty());
+        assert!(!est_peint(&peints, &tr!("curve-gradient-blue-red")));
+        assert!(!est_peint(&peints, &tr!("plot-series-line-color")));
+        assert!(!est_peint(&peints, &tr!("plot-series-symbol-color")));
+
+        // La liste n'a pas de texte à cliquer tant qu'elle est vide : on la
+        // clique à gauche du bouton Delete qui la suit.
+        let ouvrir = |context: &egui::Context, state: &mut AppState| {
+            let peints = peindre_fenetre(context, state, Vec::new());
+            let pos = texte_exact(&peints, &tr!("curve-gradient-delete")).centre;
+            cliquer(
+                context,
+                pos - egui::vec2(70.0, 0.0),
+                egui::PointerButton::Primary,
+                |ui| plot_settings_window(ui.ctx(), state),
+            );
+        };
+        ouvrir(&context, &mut banc.state);
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert!(
+            est_peint(&peints, &tr!("curve-gradient-blue-red")),
+            "la liste s'ouvre sur ses nuanciers"
+        );
         assert_eq!(banc.modele(), original, "ouvrir la liste ne colore rien");
         cliquer_libelle(&context, &mut banc.state, &tr!("curve-gradient-black-red"));
         let apres = banc.modele();
@@ -1480,6 +1505,26 @@ mod tests {
             apres.panels[0].series[2], original.panels[0].series[2],
             "la série d'un autre groupe n'est pas touchée"
         );
+        assert_eq!(
+            apres.panels[0].group_gradient(1).map(<[String]>::len),
+            Some(2),
+            "le groupe retient son nuancier"
+        );
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert!(
+            est_peint(&peints, &tr!("curve-gradient-black-red")),
+            "la liste montre le nuancier du groupe"
+        );
+
+        // Portée « cette série » : la couleur individuelle revient.
+        let peints = cliquer_libelle(&context, &mut banc.state, &tr!("curve-scope-series"));
+        assert!(est_peint(&peints, &tr!("plot-series-line-color")));
+
+        // Une série hors groupe n'a pas de nuancier à régler, mais sa couleur.
+        banc.state.plot_edit_mut().unwrap().selected_series = 2;
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert!(!est_peint(&peints, &tr!("curve-gradient-section")));
+        assert!(est_peint(&peints, &tr!("plot-series-line-color")));
     }
 
     /// #177 : portée « tout le groupe » — les réglages propres à une série sont
