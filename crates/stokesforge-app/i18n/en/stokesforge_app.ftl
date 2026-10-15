@@ -141,6 +141,8 @@ action-copy-graph = Copy Graph
 
 menu-window-show-metadata-row = Show Metadata Row
     .hint = Shows the metadata of imported files in the column headers
+menu-workbook-show-x-prime-row = Show x' Row
+    .hint = Shows the x' row in the column headers of this workbook
 action-maximize-window = Maximize Window
     .hint = Fills the workspace with the active window
 action-restore-window = Restore “{ $title }”
@@ -1426,7 +1428,8 @@ results-scope-book = Workbook
 results-empty = No kept results here. Run a calculation from the Analysis menu
 results-no-values = This calculation produced no values
 results-stale-suffix = { $title } (out of date)
-results-row = { $category } · { $title }
+results-replace-hint = The correction overwrites the original data.
+results-row = { $kind } · { $place }
 
 ## Analysis — out-of-date columns (#181)
 analysis-stale-manual = Out of date: the source data changed. Recalculate to update this column
@@ -1594,6 +1597,11 @@ action-preferences = Preferences…
 preferences-title = Preferences
 preferences-general = General
 preferences-export = Export
+preferences-display = Display
+preferences-new-workbooks = New workbooks
+preferences-new-workbooks-note = Rows of the column header shown when a workbook opens. Each workbook can then change its own from its Workbook menu or from its # cell.
+preferences-show-metadata-row = Show Metadata Row
+preferences-show-x-prime-row = Show x' Row
 preferences-copy-graph = Copy Graph
 preferences-copy-graph-note = Formats offered together to other applications, in this order. Drag a row to reorder.
 preferences-copy-move = Move { $format }

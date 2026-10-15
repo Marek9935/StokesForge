@@ -913,6 +913,9 @@ impl eframe::App for StokesForgeApp {
             });
         }
         publish_saved_colors(&ctx, &self.state);
+        let (metadata, x_prime) = self.state.workbook_header_defaults();
+        grid::publish_header_row_defaults(&ctx, metadata, x_prime);
+        analysis_menu::publish_last_presets(&ctx, &self.state);
         graph_targets::publish(&ctx, &self.floating_tabs, self.detached_tabs.keys());
         self.collect_shortcuts(&ctx, &mut actions);
         // Ctrl+C sur le graphique actif, avant que panneaux et contenus ne lisent
@@ -1621,7 +1624,7 @@ mod tests {
     //! complète. Le détachement se teste dans `window_detach.rs`, chaque
     //! surface dans son module.
     use super::graph_window::tests::graphe;
-    use super::grid::{metadata_row_visible, set_metadata_row_visible};
+    use super::grid::{header_rows, set_header_rows, HeaderRows};
     use super::*;
     use crate::state::RowAxis;
     use crate::theme;
@@ -2379,7 +2382,14 @@ mod tests {
         let book = app.state.books()[0].0;
         app.detach_tab(Tab::Book(book));
         let context = egui::Context::default();
-        set_metadata_row_visible(&context, false);
+        set_header_rows(
+            &context,
+            book,
+            HeaderRows {
+                metadata: false,
+                x_prime: false,
+            },
+        );
         context.set_embed_viewports(false);
         theme::install(&context);
         egui_extras::install_image_loaders(&context);
@@ -2444,7 +2454,7 @@ mod tests {
         assert!(app.detached_tabs.is_empty());
         assert!(app.graph_views.is_empty());
         assert!(app.floating_rects.is_empty());
-        assert!(!metadata_row_visible(&context));
+        assert!(!header_rows(&context, Some(book)).metadata);
         assert!(
             output.viewport_output[&egui::ViewportId::from_hash_of(Tab::Book(book))]
                 .commands

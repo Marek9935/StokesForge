@@ -20,9 +20,8 @@ use super::empty_state::empty_state;
 use super::file_drop::claim_file_drop;
 use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
 use super::grid::{
-    columns_menu_contents, grid_contents, metadata_row_visible, plot_menu, plot_rows_menu,
-    set_metadata_row_visible, show_grid_horizontal_bar, show_grid_vertical_bar,
-    show_horizontally_scrollable_grid,
+    columns_menu_contents, grid_contents, plot_menu, plot_rows_menu, show_grid_horizontal_bar,
+    show_grid_vertical_bar, show_horizontally_scrollable_grid, toggle_header_row_menu,
 };
 use super::menu_sections::MenuSections;
 use super::results_pane;
@@ -67,14 +66,7 @@ pub(super) fn workbook_menu(
         }
     });
     sections.section(ui, true, |ui| {
-        let mut show = metadata_row_visible(ctx);
-        if ui
-            .checkbox(&mut show, tr!("menu-window-show-metadata-row"))
-            .on_hover_text(tr!("menu-window-show-metadata-row", "hint"))
-            .changed()
-        {
-            set_metadata_row_visible(ctx, show);
-        }
+        toggle_header_row_menu(ui, book);
     });
 }
 

@@ -801,6 +801,10 @@ pub enum Action {
     /// #149). Préférence de l'application : ni commande, ni historique, ni
     /// `.stf`.
     SetCopyFormats(Vec<crate::preferences::CopyFormatEntry>),
+    /// Règle les rangées d'en-tête (Metadata, x') que montrent les **nouveaux**
+    /// classeurs. Préférence de l'application : ni commande, ni historique, ni
+    /// `.stf` ; les classeurs ouverts gardent leur propre réglage.
+    SetWorkbookHeaderDefaults { metadata: bool, x_prime: bool },
     /// Pose un texte libre (issue #35) : remplace celui de `target`, ou
     /// l'ajoute si `target` est le rang qui suit le dernier
     /// ([`AnnotationRef::set`]). **Une** modification du modèle, donc une
@@ -4974,6 +4978,17 @@ impl AppState {
                     ));
                 }
             }
+            Action::SetWorkbookHeaderDefaults { metadata, x_prime } => {
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_workbook_header_rows(metadata, x_prime)
+                {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::SetPngExportScale(scale) => {
                 if PNG_EXPORT_SCALES.contains(&scale) {
                     self.png_export_scale = scale;
@@ -6397,6 +6412,11 @@ impl AppState {
         if change(&mut spec) && spec != before {
             self.execute(Command::EditPlotSpec { graph, spec, kind });
         }
+    }
+
+    /// Les rangées d'en-tête `(Metadata, x')` des nouveaux classeurs.
+    pub fn workbook_header_defaults(&self) -> (bool, bool) {
+        self.object_manager_preferences.workbook_header_rows()
     }
 
     /// L'écriture du texte des exports SVG (#162).

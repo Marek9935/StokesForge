@@ -28,6 +28,7 @@ use crate::tr;
 enum Page {
     #[default]
     General,
+    Display,
     Export,
 }
 
@@ -54,6 +55,7 @@ pub(super) fn preferences_window(
         |ui| {
             let tabs = [
                 (Page::General, tr!("preferences-general")),
+                (Page::Display, tr!("preferences-display")),
                 (Page::Export, tr!("preferences-export")),
             ];
             tab_strip(
@@ -67,6 +69,7 @@ pub(super) fn preferences_window(
             );
             match page {
                 Page::General => chosen = general_page(ui),
+                Page::Display => display_page(ui, state, actions),
                 Page::Export => export_page(ui, state, actions),
             }
         },
@@ -101,6 +104,26 @@ fn general_page(ui: &mut egui::Ui) -> Option<Language> {
         });
     });
     chosen
+}
+
+/// Les rangées d'en-tête des **nouveaux** classeurs ; les classeurs ouverts
+/// gardent leur réglage propre (menu Classeur, case #).
+fn display_page(ui: &mut egui::Ui, state: &AppState, actions: &mut Vec<Action>) {
+    let (mut metadata, mut x_prime) = state.workbook_header_defaults();
+    let before = (metadata, x_prime);
+    form(ui, "preferences_display", |rows| {
+        rows.section(tr!("preferences-new-workbooks"));
+        rows.note(tr!("preferences-new-workbooks-note"));
+        rows.field(|ui| {
+            ui.checkbox(&mut metadata, tr!("preferences-show-metadata-row"));
+        });
+        rows.field(|ui| {
+            ui.checkbox(&mut x_prime, tr!("preferences-show-x-prime-row"));
+        });
+    });
+    if (metadata, x_prime) != before {
+        actions.push(Action::SetWorkbookHeaderDefaults { metadata, x_prime });
+    }
 }
 
 /// Copy Graph : les formats offerts ensemble, dans l'ordre où les applications
@@ -312,5 +335,30 @@ mod tests {
         harness.run();
         let formats: Vec<CopyFormat> = ordre(&harness).into_iter().map(|(f, _)| f).collect();
         assert_eq!(formats, [CopyFormat::Pdf, CopyFormat::Svg, CopyFormat::Png]);
+    }
+
+    /// Rubrique Display : Metadata est cochée et x' décochée par défaut ; cocher
+    /// x' règle les nouveaux classeurs.
+    #[test]
+    fn la_rubrique_affichage_regle_les_rangees_des_nouveaux_classeurs() {
+        let mut harness = banc();
+        harness.get_by_label(&tr!("preferences-display")).click();
+        harness.run();
+        assert_eq!(
+            harness.state().state.workbook_header_defaults(),
+            (true, false)
+        );
+        harness
+            .get_by_label(&tr!("preferences-show-x-prime-row"))
+            .click();
+        harness.run();
+        harness
+            .get_by_label(&tr!("preferences-show-metadata-row"))
+            .click();
+        harness.run();
+        assert_eq!(
+            harness.state().state.workbook_header_defaults(),
+            (false, true)
+        );
     }
 }

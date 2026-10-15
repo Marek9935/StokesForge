@@ -189,6 +189,12 @@ struct PreferencesFile {
     /// « Show » (#200, maquette M5).
     #[serde(default)]
     analysis_keep_results: Option<bool>,
+    /// Rangées d'en-tête des **nouveaux** classeurs : Metadata (affichée par
+    /// défaut) et x' (cachée par défaut).
+    #[serde(default)]
+    workbook_show_metadata: Option<bool>,
+    #[serde(default)]
+    workbook_show_x_prime: Option<bool>,
     /// Les dernières analyses lancées (#249). Gardée brute : une entrée
     /// illisible est ignorée sans effacer les autres.
     #[serde(default)]
@@ -211,6 +217,8 @@ pub struct Preferences {
     svg_text: SvgTextMode,
     toolbars: Option<serde_json::Value>,
     analysis_keep_results: bool,
+    workbook_show_metadata: bool,
+    workbook_show_x_prime: bool,
     analysis_recent: Vec<crate::analysis_recent::RecentAnalysis>,
     dialogs: BTreeMap<String, DialogGeometry>,
     copy_formats: Vec<CopyFormatEntry>,
@@ -253,6 +261,8 @@ impl Preferences {
             },
             toolbars: file.toolbars,
             analysis_keep_results: file.analysis_keep_results.unwrap_or(false),
+            workbook_show_metadata: file.workbook_show_metadata.unwrap_or(true),
+            workbook_show_x_prime: file.workbook_show_x_prime.unwrap_or(false),
             analysis_recent: read_recent_analyses(file.analysis_recent),
             dialogs: read_dialogs(file.dialogs),
             copy_formats: file
@@ -343,6 +353,25 @@ impl Preferences {
     pub fn save_analysis_keep_results(&mut self, keep: bool) -> std::io::Result<()> {
         self.analysis_keep_results = keep;
         self.save_field("analysis_keep_results", keep.into())
+    }
+
+    /// Les rangées d'en-tête que montre un classeur à son ouverture :
+    /// `(Metadata, x')`, `(true, false)` par défaut.
+    pub fn workbook_header_rows(&self) -> (bool, bool) {
+        (self.workbook_show_metadata, self.workbook_show_x_prime)
+    }
+
+    /// Mémorise les rangées des nouveaux classeurs sans remplacer les autres
+    /// préférences.
+    pub fn save_workbook_header_rows(
+        &mut self,
+        metadata: bool,
+        x_prime: bool,
+    ) -> std::io::Result<()> {
+        self.workbook_show_metadata = metadata;
+        self.workbook_show_x_prime = x_prime;
+        self.save_field("workbook_show_metadata", metadata.into())?;
+        self.save_field("workbook_show_x_prime", x_prime.into())
     }
 
     /// Les dernières analyses lancées, la plus récente en tête (#249).
@@ -516,6 +545,12 @@ mod tests {
     fn la_sortie_par_defaut_des_analyses_est_ecrite_et_relue_sans_perdre_la_langue() {
         let (_dir, path) = written(r#"{ "language": "fr" }"#);
         let mut preferences = Preferences::load_from(Some(path.clone()));
+        assert_eq!(preferences.workbook_header_rows(), (true, false));
+        preferences.save_workbook_header_rows(false, true).unwrap();
+        assert_eq!(
+            Preferences::load_from(preferences.path.clone()).workbook_header_rows(),
+            (false, true)
+        );
         assert!(!preferences.analysis_keep_results(), "Show par défaut");
         preferences.save_analysis_keep_results(true).unwrap();
         let reloaded = Preferences::load_from(Some(path));

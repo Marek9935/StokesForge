@@ -312,6 +312,33 @@ pub(super) fn analysis_menu_contents(
     });
 }
 
+fn last_preset_id(category: Category) -> egui::Id {
+    egui::Id::new(("stokesforge_analysis_last_preset", category))
+}
+
+/// Publie, à chaque image, la dernière méthode lancée de chaque catégorie
+/// (tirée des analyses récentes, #249) : seul canal commun aux menus, au clic
+/// droit des courbes et à celui du graphe, qui n'ont pas l'état sous la main.
+pub(super) fn publish_last_presets(ctx: &egui::Context, state: &AppState) {
+    ctx.data_mut(|data| {
+        for category in Category::ALL {
+            let preset = state
+                .analysis_recent()
+                .iter()
+                .find(|recent| Category::of(recent.operation.kind()) == category)
+                .map_or_else(|| category.default_preset(), |recent| recent.preset());
+            data.insert_temp(last_preset_id(category), preset);
+        }
+    });
+}
+
+/// La méthode préchoisie quand on ouvre la fenêtre d'une catégorie sans en
+/// choisir : la dernière lancée dans cette catégorie, sinon son défaut.
+pub(super) fn category_preset(ctx: &egui::Context, category: Category) -> Preset {
+    ctx.data(|data| data.get_temp::<Preset>(last_preset_id(category)))
+        .unwrap_or_else(|| category.default_preset())
+}
+
 /// Le sous-menu `Analysis ▸` du clic droit (colonne, courbe) : une entrée par
 /// catégorie, qui ouvre la fenêtre de la catégorie (#248). Les méthodes d'une
 /// catégorie se choisissent dans sa fenêtre : un sous-menu de méthodes aurait
@@ -365,14 +392,16 @@ pub(super) fn analysis_entry(
     actions: &mut Vec<Action>,
     target: AnalysisTarget,
 ) {
+    let ctx = ui.ctx().clone();
     analysis_open_menu(
         ui,
         target.enabled(state),
         tr!("analysis-needs-y"),
         |category| {
+            let preset = category_preset(&ctx, category);
             actions.push(match target {
                 AnalysisTarget::Columns { sheet, columns } => Action::OpenAnalysis {
-                    preset: category.default_preset(),
+                    preset: preset.clone(),
                     sheet,
                     columns: columns.to_vec(),
                 },
@@ -381,7 +410,7 @@ pub(super) fn analysis_entry(
                     series,
                     spec,
                 } => Action::OpenGraphAnalysis {
-                    preset: category.default_preset(),
+                    preset: preset.clone(),
                     graph,
                     series: series.to_vec(),
                     spec: Box::new(spec.clone()),
@@ -449,4 +478,62 @@ pub(super) fn calculation_section(
             ui.close();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analysis_recent::RecentAnalysis;
+    use stokesforge_analysis::ops::Operation;
+
+    /// Sans historique, la catégorie ouvre son défaut ; après une analyse
+    /// lancée, elle rouvre cette méthode, et les autres catégories gardent
+    /// leur défaut.
+    #[test]
+    fn une_categorie_rouvre_sa_derniere_methode() {
+        let session = stokesforge_session::Session::spawn(
+            stokesforge_core::Project::new("Récent").unwrap(),
+            None,
+        )
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let mut preferences =
+            crate::preferences::Preferences::load_from(Some(dir.path().join("preferences.json")));
+        let ctx = egui::Context::default();
+        let state = |preferences: &crate::preferences::Preferences| {
+            AppState::new_with_preferences(
+                session.handle(),
+                "test.stokesforge".to_string(),
+                preferences.clone(),
+            )
+            .unwrap()
+        };
+        publish_last_presets(&ctx, &state(&preferences));
+        assert_eq!(
+            category_preset(&ctx, Category::DataManipulation),
+            Preset::BaselineLine
+        );
+        let recent = RecentAnalysis {
+            operation: Operation::Baseline {
+                method: stokesforge_analysis::baseline::BaselineMethod::Zones {
+                    zones: vec![(0.0, 1.0)],
+                    degree: 3,
+                },
+                op: stokesforge_analysis::baseline::BaselineOp::Subtract,
+                keep_baseline: false,
+            },
+            replace_original: false,
+        };
+        preferences.save_analysis_recent(&[recent]).unwrap();
+        publish_last_presets(&ctx, &state(&preferences));
+        assert_eq!(
+            category_preset(&ctx, Category::DataManipulation),
+            Preset::BaselinePolynomial
+        );
+        assert_eq!(
+            category_preset(&ctx, Category::Integrate),
+            Preset::Integrate
+        );
+        session.shutdown().unwrap();
+    }
 }

@@ -1429,7 +1429,7 @@ pub(super) fn apply_object_request(
         ObjectManagerRequest::Select(target) => select_manager_target(view, Some(target), &spec),
         ObjectManagerRequest::Analysis(target, category) => {
             actions.push(Action::OpenGraphAnalysis {
-                preset: category.default_preset(),
+                preset: super::analysis_menu::category_preset(ctx, category),
                 graph,
                 series: analysis_sources(&spec, target),
                 spec: Box::new(view.framed_spec(&spec)),

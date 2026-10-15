@@ -17,14 +17,14 @@ use super::empty_state::empty_state;
 use super::form::{choice, ChoiceOption};
 use super::list_row::list_row;
 use crate::analysis::{
-    kind_title, reference_label, series_label, value_label, value_unit, with_unit, Category,
+    kind_title, reference_label, series_label, value_label, value_unit, with_unit,
 };
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::state::{Action, AppState};
 use crate::{theme, tr};
 
 /// Hauteur du bandeau replié.
-pub(super) const COLLAPSED_HEIGHT: f32 = 26.0;
+pub(super) const COLLAPSED_HEIGHT: f32 = 22.0;
 /// Hauteur du volet déplié.
 const EXPANDED_HEIGHT: f32 = 210.0;
 /// Largeur de la liste des calculs.
@@ -72,36 +72,48 @@ pub(super) fn results_pane(
     let total =
         state.kept_calculations(book, None).len() + state.correction_traces(book, None).len();
     let rect = ui.max_rect();
+    if !ui.visuals().dark_mode {
+        ui.painter()
+            .rect_filled(rect, 0.0, theme::results_pane_fill(ui));
+    }
     ui.painter().hline(
         rect.x_range(),
         rect.top(),
         ui.visuals().widgets.noninteractive.bg_stroke,
     );
-    ui.horizontal(|ui| {
-        let (icon, tip) = if pane.open {
-            (Icon::CaretDown, tr!("results-collapse"))
-        } else {
-            (Icon::CaretRight, tr!("results-expand"))
-        };
-        if icon_button(ui, icon, IconRole::Neutral, tip).clicked() {
-            pane.open = !pane.open;
-        }
-        ui.label(theme::bold(tr!(
-            "results-title",
-            count = i64::try_from(total).unwrap_or(i64::MAX)
-        )));
-        if pane.open {
-            choice(
-                ui,
-                id.with("scope"),
-                &mut pane.whole_book,
-                &[
-                    ChoiceOption::new(false, tr!("results-scope-sheet")),
-                    ChoiceOption::new(true, tr!("results-scope-book")),
-                ],
-            );
-        }
-    });
+    // Bandeau de hauteur fixe, contenu centré verticalement (sinon le titre colle en haut).
+    let header = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), COLLAPSED_HEIGHT));
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(header)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            let (icon, tip) = if pane.open {
+                (Icon::CaretDown, tr!("results-collapse"))
+            } else {
+                (Icon::CaretRight, tr!("results-expand"))
+            };
+            if icon_button(ui, icon, IconRole::Neutral, tip).clicked() {
+                pane.open = !pane.open;
+            }
+            ui.label(theme::bold(tr!(
+                "results-title",
+                count = i64::try_from(total).unwrap_or(i64::MAX)
+            )));
+            if pane.open {
+                choice(
+                    ui,
+                    id.with("scope"),
+                    &mut pane.whole_book,
+                    &[
+                        ChoiceOption::new(false, tr!("results-scope-sheet")),
+                        ChoiceOption::new(true, tr!("results-scope-book")),
+                    ],
+                );
+            }
+        },
+    );
+    ui.advance_cursor_after_rect(header);
     if pane.open {
         let scope = (!pane.whole_book).then_some(sheet);
         let mut calculations = state.kept_calculations(book, scope);
@@ -109,11 +121,20 @@ pub(super) fn results_pane(
         if !calculations.contains(&pane.selected.unwrap_or(NodeId::from_raw(0))) {
             pane.selected = calculations.first().copied();
         }
-        ui.horizontal_top(|ui| {
-            ui.allocate_ui_with_layout(
-                egui::vec2(LIST_WIDTH, ui.available_height()),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
+        // Deux zones aux rectangles bornés : la liste ne dépasse jamais sa part et
+        // le détail revient à la ligne dans le reste, sans élargir la fenêtre.
+        let area = ui.available_rect_before_wrap();
+        let list_width = LIST_WIDTH.min(area.width() * 0.45);
+        let list_rect = egui::Rect::from_min_size(area.min, egui::vec2(list_width, area.height()));
+        let detail_rect = egui::Rect::from_min_max(
+            egui::pos2(list_rect.right() + ui.spacing().item_spacing.x, area.top()),
+            area.max,
+        );
+        ui.advance_cursor_after_rect(area);
+        {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(list_rect), |ui| {
+                ui.set_clip_rect(list_rect.intersect(ui.clip_rect()));
+                {
                     egui::ScrollArea::vertical()
                         .id_salt(id.with("list"))
                         .auto_shrink([false, false])
@@ -122,39 +143,7 @@ pub(super) fn results_pane(
                                 empty_state(ui, tr!("results-empty"));
                             }
                             for calc in &calculations {
-                                let (category, mut title) =
-                                    match state.tree().correction_traces().get(calc) {
-                                        Some(trace) => (
-                                            Category::of(trace.operation.kind()),
-                                            tr!(
-                                                "analysis-correction-trace",
-                                                kind = kind_title(trace.operation.kind())
-                                            ),
-                                        ),
-                                        None => (
-                                            state
-                                                .tree()
-                                                .calculation(*calc)
-                                                .map_or(Category::DataManipulation, |c| {
-                                                    Category::of(c.operation.kind())
-                                                }),
-                                            state.calculation_title(*calc),
-                                        ),
-                                    };
-                                if state
-                                    .tree()
-                                    .calculation(*calc)
-                                    .is_some_and(|c| c.stale.is_some())
-                                {
-                                    title = tr!("results-stale-suffix", title = title.as_str());
-                                }
-                                // La catégorie en tête de ligne (#248) : la liste est
-                                // unique, tous les types y sont mêlés.
-                                let title = tr!(
-                                    "results-row",
-                                    category = category.title(),
-                                    title = title.as_str()
-                                );
+                                let title = row_title(state, *calc);
                                 if list_row(ui, None, &title, pane.selected == Some(*calc), false)
                                     .clicked()
                                 {
@@ -163,20 +152,50 @@ pub(super) fn results_pane(
                                 }
                             }
                         });
-                },
-            );
-            ui.allocate_ui_with_layout(
-                ui.available_size(),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    if let Some(calc) = pane.selected {
-                        detail(ui, state, actions, id, calc);
-                    }
-                },
-            );
-        });
+                }
+            });
+            ui.scope_builder(egui::UiBuilder::new().max_rect(detail_rect), |ui| {
+                ui.set_clip_rect(detail_rect.intersect(ui.clip_rect()));
+                if let Some(calc) = pane.selected {
+                    detail(ui, state, actions, id, calc);
+                }
+            });
+        }
     }
     ui.data_mut(|d| d.insert_temp(id, pane));
+}
+
+/// La ligne de liste, courte pour tenir dans la liste : « Baseline · Spectre/B »
+/// (opération, feuille et colonne source), « (pas à jour) » si besoin.
+fn row_title(state: &AppState, calc: NodeId) -> String {
+    let tree = state.tree();
+    let (kind, first, stale) = match tree.correction_traces().get(&calc) {
+        Some(trace) => (trace.operation.kind(), trace.series.first(), false),
+        None => match tree.calculation(calc) {
+            Some(c) => (c.operation.kind(), c.series.first(), c.stale.is_some()),
+            None => return String::new(),
+        },
+    };
+    let name = |id: NodeId| tree.node(id).map(|n| n.name().to_string());
+    let place = first
+        .and_then(|s| {
+            let sheet = tree.node(s.y).and_then(|n| n.parent()).and_then(name);
+            Some(match sheet {
+                Some(sheet) => format!("{sheet}/{}", name(s.y)?),
+                None => name(s.y)?,
+            })
+        })
+        .unwrap_or_default();
+    let title = tr!(
+        "results-row",
+        kind = kind_title(kind),
+        place = place.as_str()
+    );
+    if stale {
+        tr!("results-stale-suffix", title = title.as_str())
+    } else {
+        title
+    }
 }
 
 /// Le détail d'un calcul : ses gestes, puis le tableau série × valeur.
@@ -188,7 +207,7 @@ fn detail(
     calc_id: NodeId,
 ) {
     if let Some(trace) = state.tree().correction_traces().get(&calc_id) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.label(theme::bold(tr!(
                 "analysis-correction-trace",
                 kind = kind_title(trace.operation.kind())
@@ -205,7 +224,7 @@ fn detail(
                 actions.push(Action::RestoreOriginalData(calc_id));
             }
         });
-        ui.label(tr!("analysis-output-replace-hint"));
+        ui.label(tr!("results-replace-hint"));
         egui::ScrollArea::vertical()
             .id_salt(id.with(("trace", calc_id.raw())))
             .show(ui, |ui| {
@@ -229,7 +248,7 @@ fn detail(
         .as_ref()
         .filter(|_| calc.operation.kind() == stokesforge_analysis::ops::OperationKind::Correct)
         .map(|aux| reference_label(state.tree(), aux));
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(theme::bold(kind_title(calc.operation.kind())));
         if ui
             .button(tr!("action-calculation-edit"))
@@ -495,12 +514,7 @@ mod tests {
         frame(&ctx, &state, book, sheet, &mut actions);
         let output = frame(&ctx, &state, book, sheet, &mut actions);
         let calc = *state.tree().calculations().keys().next().unwrap();
-        let titre = state.calculation_title(calc);
-        let attendu = tr!(
-            "results-row",
-            category = Category::Integrate.title(),
-            title = titre.as_str()
-        );
+        let attendu = row_title(&state, calc);
         assert!(painted(&output, &attendu), "{attendu}");
         session.shutdown().unwrap();
     }

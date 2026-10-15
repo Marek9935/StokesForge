@@ -63,32 +63,81 @@ const HEADER_SUBROW_HEIGHT: f32 = 18.0;
 /// Hauteur de la rangée du nom long, légèrement plus haute — c'est le nom
 /// principal de la colonne.
 const HEADER_LONGNAME_HEIGHT: f32 = 20.0;
-/// Hauteur totale de l'en-tête empilé de la grille docquée (lettre, nom
-/// x', nom long, unité, commentaire, formule, métadonnées).
+/// Hauteur totale de l'en-tête empilé de la grille docquée avec toutes ses
+/// rangées (lettre, x', nom long, unité, commentaire, formule, métadonnées).
 const HEADER_HEIGHT_STACKED: f32 = HEADER_LONGNAME_HEIGHT + 6.0 * HEADER_SUBROW_HEIGHT;
 
-/// Hauteur de l'en-tête empilé selon que la ligne « Metadata » est affichée.
-fn stacked_header_height(show_metadata: bool) -> f32 {
-    if show_metadata {
-        HEADER_HEIGHT_STACKED
-    } else {
-        HEADER_HEIGHT_STACKED - HEADER_SUBROW_HEIGHT
-    }
+/// Les rangées facultatives de l'en-tête d'un classeur : « Metadata » et x'.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct HeaderRows {
+    pub(super) metadata: bool,
+    pub(super) x_prime: bool,
 }
 
-/// La ligne « Metadata » de l'en-tête est-elle affichée ? Réglage de vue,
+impl HeaderRows {
+    /// Sans préférence lue : Metadata affichée, x' cachée.
+    const DEFAULT: Self = Self {
+        metadata: true,
+        x_prime: false,
+    };
+}
+
+/// Hauteur de l'en-tête empilé selon les rangées affichées.
+fn stacked_header_height(rows: HeaderRows) -> f32 {
+    let hidden = usize::from(!rows.metadata) + usize::from(!rows.x_prime);
+    HEADER_HEIGHT_STACKED - hidden as f32 * HEADER_SUBROW_HEIGHT
+}
+
+fn header_rows_default_id() -> egui::Id {
+    egui::Id::new("stokesforge_header_rows_default")
+}
+
+/// Publie le réglage des **nouveaux** classeurs (préférences), à chaque image :
+/// seul canal commun aux viewports, qui partagent le `Context`.
+pub(super) fn publish_header_row_defaults(ctx: &egui::Context, metadata: bool, x_prime: bool) {
+    ctx.data_mut(|data| {
+        data.insert_temp(header_rows_default_id(), HeaderRows { metadata, x_prime });
+    });
+}
+
+/// Les rangées d'en-tête d'un classeur. Réglage de vue **propre au classeur**,
 /// gardé dans la mémoire d'egui (un seul `Context` pour tous les viewports :
 /// les classeurs flottants et détachés le suivent ensemble), jamais dans le
-/// modèle ni l'historique. Affichée par défaut.
-pub(super) fn metadata_row_visible(ctx: &egui::Context) -> bool {
-    ctx.data(|data| data.get_temp::<bool>(egui::Id::new("stokesforge_show_metadata_row")))
-        .unwrap_or(true)
+/// modèle ni l'historique. Tant que l'utilisateur n'y a pas touché, c'est le
+/// réglage des préférences au moment où il regarde.
+pub(super) fn header_rows(ctx: &egui::Context, book: Option<NodeId>) -> HeaderRows {
+    ctx.data(|data| {
+        book.and_then(|book| data.get_temp::<HeaderRows>(header_rows_id(book)))
+            .or_else(|| data.get_temp::<HeaderRows>(header_rows_default_id()))
+    })
+    .unwrap_or(HeaderRows::DEFAULT)
 }
 
-pub(super) fn set_metadata_row_visible(ctx: &egui::Context, visible: bool) {
-    ctx.data_mut(|data| {
-        data.insert_temp(egui::Id::new("stokesforge_show_metadata_row"), visible);
-    });
+fn header_rows_id(book: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_header_rows", book.raw()))
+}
+
+pub(super) fn set_header_rows(ctx: &egui::Context, book: NodeId, rows: HeaderRows) {
+    ctx.data_mut(|data| data.insert_temp(header_rows_id(book), rows));
+}
+
+/// Le classeur d'une feuille.
+pub(super) fn book_of(tree: &stokesforge_core::Tree, sheet: NodeId) -> Option<NodeId> {
+    tree.node(sheet).and_then(|node| node.parent())
+}
+
+/// Bascule d'une rangée pour le classeur `book` seul.
+pub(super) fn toggle_header_row_menu(ui: &mut egui::Ui, book: NodeId) {
+    let ctx = ui.ctx().clone();
+    let mut rows = header_rows(&ctx, Some(book));
+    let before = rows;
+    ui.checkbox(&mut rows.metadata, tr!("menu-window-show-metadata-row"))
+        .on_hover_text(tr!("menu-window-show-metadata-row", "hint"));
+    ui.checkbox(&mut rows.x_prime, tr!("menu-workbook-show-x-prime-row"))
+        .on_hover_text(tr!("menu-workbook-show-x-prime-row", "hint"));
+    if rows != before {
+        set_header_rows(&ctx, book, rows);
+    }
 }
 
 /// Demi-largeur, en points, de la bande de prise du glisser de colonnes : elle
@@ -584,16 +633,19 @@ fn column_header_widget(
         ui.spacing_mut().item_spacing.y = 0.0;
         let is_column_selected =
             column_letter_widget(ui, state, actions, sheet, column, column_index);
-        header_field_widget(
-            ui,
-            state,
-            actions,
-            sheet,
-            column,
-            HeaderField::XPrime,
-            HEADER_SUBROW_HEIGHT,
-            is_column_selected,
-        );
+        let rows = header_rows(ui.ctx(), book_of(state.tree(), sheet));
+        if rows.x_prime {
+            header_field_widget(
+                ui,
+                state,
+                actions,
+                sheet,
+                column,
+                HeaderField::XPrime,
+                HEADER_SUBROW_HEIGHT,
+                is_column_selected,
+            );
+        }
         header_field_widget(
             ui,
             state,
@@ -634,7 +686,7 @@ fn column_header_widget(
             HEADER_SUBROW_HEIGHT,
             is_column_selected,
         );
-        if metadata_row_visible(ui.ctx()) {
+        if rows.metadata {
             metadata_cell_widget(ui, state, actions, column);
         }
     });
@@ -1294,17 +1346,29 @@ fn row_number_header_widget(
                 // `column_header_widget`).
                 state.select_all(sheet);
             }
-            response.context_menu(|ui| selection_context_menu(ui, state, actions, sheet));
+            response.context_menu(|ui| {
+                let mut sections = MenuSections::new();
+                sections.section(ui, true, |ui| {
+                    selection_context_menu(ui, state, actions, sheet);
+                });
+                if let Some(book) = book_of(state.tree(), sheet) {
+                    sections.section(ui, true, |ui| toggle_header_row_menu(ui, book));
+                }
+            });
         });
-        header_row_label_widget(
-            ui,
-            state,
-            actions,
-            sheet,
-            HeaderField::XPrime,
-            HEADER_SUBROW_HEIGHT,
-            &tr!("column-x-prime"),
-        );
+        let book = book_of(state.tree(), sheet);
+        let rows = header_rows(ui.ctx(), book);
+        if rows.x_prime {
+            header_row_label_widget(
+                ui,
+                state,
+                actions,
+                sheet,
+                HeaderField::XPrime,
+                HEADER_SUBROW_HEIGHT,
+                &tr!("column-x-prime"),
+            );
+        }
         header_row_label_widget(
             ui,
             state,
@@ -1341,7 +1405,7 @@ fn row_number_header_widget(
             HEADER_SUBROW_HEIGHT,
             &tr!("workbook-header-formula"),
         );
-        if metadata_row_visible(ui.ctx()) {
+        if rows.metadata {
             ui.scope(|ui| {
                 ui.set_min_height(HEADER_SUBROW_HEIGHT);
                 ui.set_max_height(HEADER_SUBROW_HEIGHT);
@@ -1363,7 +1427,16 @@ fn row_number_header_widget(
                 // clic droit.
                 response.context_menu(|ui| {
                     if ui.button(tr!("workbook-metadata-hide")).clicked() {
-                        set_metadata_row_visible(ui.ctx(), false);
+                        if let Some(book) = book {
+                            set_header_rows(
+                                ui.ctx(),
+                                book,
+                                HeaderRows {
+                                    metadata: false,
+                                    ..rows
+                                },
+                            );
+                        }
                         ui.close();
                     }
                 });
@@ -1521,7 +1594,8 @@ pub(super) fn grid_contents(
     let was_editing = state.editing().is_some() || state.header_editing().is_some();
     let mut extents: Vec<ColumnExtent> = Vec::new();
     let mut row_extents: Vec<RowExtent> = Vec::new();
-    let header_height = stacked_header_height(metadata_row_visible(ui.ctx()));
+    let header_rows = header_rows(ui.ctx(), book_of(state.tree(), sheet));
+    let header_height = stacked_header_height(header_rows);
     let mut table = TableBuilder::new(ui)
         .striped(true)
         .resizable(true)
@@ -2636,6 +2710,15 @@ mod tests {
             let context = egui::Context::default();
             context.set_fonts(stokesforge_render_egui::font_definitions());
             theme::install(&context);
+            // Toutes les rangées de l'en-tête : la mise en page testée est la complète.
+            set_header_rows(
+                &context,
+                book,
+                HeaderRows {
+                    metadata: true,
+                    x_prime: true,
+                },
+            );
             let mut banc = Banc {
                 _session: session,
                 context,
@@ -3279,21 +3362,54 @@ mod tests {
 
     // --- En-tête empilé et gouttière --------------------------------------
 
-    /// La ligne « Metadata » est affichée par défaut, se masque et se réaffiche
-    /// (réglage de vue partagé par tous les viewports), et l'en-tête empilé
-    /// perd exactement une sous-ligne quand elle est masquée.
+    /// Par défaut Metadata est affichée et x' cachée ; le réglage est propre à
+    /// chaque classeur et la préférence ne vaut que pour ceux qui n'y ont pas
+    /// touché. L'en-tête empilé perd une sous-ligne par rangée masquée.
     #[test]
-    fn la_ligne_metadata_se_masque_et_se_reaffiche() {
+    fn les_rangees_d_en_tete_se_reglent_par_classeur() {
         let context = egui::Context::default();
-        assert!(metadata_row_visible(&context));
-        set_metadata_row_visible(&context, false);
-        assert!(!metadata_row_visible(&context));
+        let (a, b) = (NodeId::from_raw(1), NodeId::from_raw(2));
         assert_eq!(
-            stacked_header_height(true) - stacked_header_height(false),
+            header_rows(&context, Some(a)),
+            HeaderRows {
+                metadata: true,
+                x_prime: false
+            }
+        );
+        // La préférence s'applique aux classeurs non réglés…
+        publish_header_row_defaults(&context, false, true);
+        assert_eq!(
+            header_rows(&context, Some(b)),
+            HeaderRows {
+                metadata: false,
+                x_prime: true
+            }
+        );
+        // …mais pas à celui qui a son propre réglage.
+        let own = HeaderRows {
+            metadata: true,
+            x_prime: false,
+        };
+        set_header_rows(&context, a, own);
+        publish_header_row_defaults(&context, true, true);
+        assert_eq!(header_rows(&context, Some(a)), own);
+        assert!(header_rows(&context, Some(b)).x_prime);
+        let all = HeaderRows {
+            metadata: true,
+            x_prime: true,
+        };
+        assert_eq!(
+            stacked_header_height(all) - stacked_header_height(own),
             HEADER_SUBROW_HEIGHT
         );
-        set_metadata_row_visible(&context, true);
-        assert!(metadata_row_visible(&context));
+        assert_eq!(
+            stacked_header_height(all)
+                - stacked_header_height(HeaderRows {
+                    metadata: false,
+                    x_prime: false
+                }),
+            2.0 * HEADER_SUBROW_HEIGHT
+        );
     }
 
     /// L'en-tête empilé, tel que peint : la gouttière porte « # » sur la
@@ -3360,7 +3476,14 @@ mod tests {
             "la lettre {lettre:?} et « # » partagent la rangée des lettres"
         );
 
-        set_metadata_row_visible(&banc.context, false);
+        set_header_rows(
+            &banc.context,
+            banc.book,
+            HeaderRows {
+                metadata: false,
+                x_prime: true,
+            },
+        );
         banc.image(Vec::new());
         banc.image(Vec::new());
         assert!(

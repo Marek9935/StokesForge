@@ -136,6 +136,8 @@ action-copy-graph = Copier le graphique
 
 menu-window-show-metadata-row = Afficher la ligne Métadonnées
     .hint = Affiche les métadonnées des fichiers importés dans les en-têtes de colonnes
+menu-workbook-show-x-prime-row = Afficher la ligne x'
+    .hint = Affiche la ligne x' dans les en-têtes de colonnes de ce classeur
 action-maximize-window = Agrandir la fenêtre
     .hint = Remplit l'espace de travail avec la fenêtre active
 action-restore-window = Restaurer « { $title } »
@@ -1418,7 +1420,8 @@ results-scope-book = Classeur
 results-empty = Aucun résultat gardé ici. Lancer un calcul depuis le menu Analyse
 results-no-values = Ce calcul n'a produit aucune valeur
 results-stale-suffix = { $title } (pas à jour)
-results-row = { $category } · { $title }
+results-replace-hint = La correction écrase les données originales.
+results-row = { $kind } · { $place }
 
 ## Analysis — out-of-date columns (#181)
 analysis-stale-manual = Pas à jour : les données sources ont changé. Recalculez pour mettre cette colonne à jour
@@ -1586,6 +1589,11 @@ action-preferences = Préférences…
 preferences-title = Préférences
 preferences-general = Général
 preferences-export = Export
+preferences-display = Affichage
+preferences-new-workbooks = Nouveaux classeurs
+preferences-new-workbooks-note = Lignes de l'en-tête de colonnes affichées à l'ouverture d'un classeur. Chaque classeur règle ensuite les siennes depuis son menu Classeur ou sa case #.
+preferences-show-metadata-row = Afficher la ligne Métadonnées
+preferences-show-x-prime-row = Afficher la ligne x'
 preferences-copy-graph = Copier le graphique
 preferences-copy-graph-note = Formats offerts ensemble aux autres applications, dans cet ordre. Glissez une ligne pour la déplacer.
 preferences-copy-move = Déplacer { $format }

@@ -173,6 +173,14 @@ pub fn list_row_selected_fill() -> Color32 {
     ACCENT.gamma_multiply(0.14)
 }
 
+/// Fond du volet Results : un cran plus clair que le fond de panneau.
+pub fn results_pane_fill(ui: &egui::Ui) -> Color32 {
+    ui.visuals()
+        .panel_fill
+        .gamma_multiply(1.0)
+        .lerp_to_gamma(Color32::WHITE, 0.45)
+}
+
 /// Fond de la ligne survolée d'une liste (#169).
 pub fn list_row_hover_fill() -> Color32 {
     Color32::from_gray(0xEC)
