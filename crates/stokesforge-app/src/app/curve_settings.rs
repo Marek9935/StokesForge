@@ -29,6 +29,7 @@ use stokesforge_plot::{
 };
 
 use crate::color_picker::{color_field, gradient_strip, gradient_swatch, ColorUsage, PickerEnv};
+use crate::icons::ICON_SIZE;
 use crate::object_manager::group_title;
 use crate::state::{series_list_label, Action, SaveTarget};
 use crate::theme;
@@ -334,27 +335,49 @@ fn membership_editor(
             commit |= group_editor(f, panel, layer, group, index);
             let count = panel.group_members(group).len();
             f.row(tr!("curve-scope-field"), |ui| {
-                choice(
-                    ui,
-                    "curve_scope",
-                    scope,
-                    &[
-                        ChoiceOption::new(EditScope::Series, tr!("curve-scope-series")),
-                        ChoiceOption::new(
-                            EditScope::Group,
-                            tr!("curve-scope-group", count = count),
-                        ),
-                    ],
-                );
-                // Ce qui s'applique selon la portée : sous le « ? » (#213),
-                // plus en note grisée.
-                help_text(
-                    ui,
-                    match scope {
+                // Les deux options sont l'une sous l'autre : le « ? » se pose
+                // au niveau de la dernière, « Whole group ».
+                ui.horizontal(|ui| {
+                    let options = ui.vertical(|ui| {
+                        choice(
+                            ui,
+                            "curve_scope",
+                            scope,
+                            &[
+                                ChoiceOption::new(EditScope::Series, tr!("curve-scope-series")),
+                                ChoiceOption::new(
+                                    EditScope::Group,
+                                    tr!("curve-scope-group", count = count),
+                                ),
+                            ],
+                        );
+                    });
+                    // Ce qui s'applique selon la portée : sous le « ? » (#213),
+                    // plus en note grisée.
+                    let text = match scope {
                         EditScope::Group => tr!("curve-scope-group-note"),
                         EditScope::Series => tr!("curve-scope-series-note"),
-                    },
-                );
+                    };
+                    let rect = options.response.rect;
+                    let at = egui::pos2(
+                        ui.cursor().min.x,
+                        rect.bottom() - ICON_SIZE.max(ui.spacing().interact_size.y),
+                    );
+                    ui.scope_builder(
+                        egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(
+                            at,
+                            egui::vec2(
+                                ICON_SIZE * 2.0,
+                                ICON_SIZE.max(ui.spacing().interact_size.y),
+                            ),
+                        )),
+                        |ui| {
+                            ui.centered_and_justified(|ui| {
+                                help_text(ui, text);
+                            });
+                        },
+                    );
+                });
             });
         }
         commit
