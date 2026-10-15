@@ -1331,6 +1331,16 @@ feuille (gauche → droite, haut → bas), jamais celui des clics.
 - **Coller / Coller à l'identique** : grisés sur une sélection non contiguë
   (`GridMenu::paste_enabled`, cible ambiguë) ; le collage au clavier est refusé
   avec un message.
+- **Format du presse-papiers (#259)** : le texte système est du TSV au format
+  Excel/LibreOffice, écrit et lu par `stokesforge_core::tsv` (`encode`,
+  `decode`, `encode_cell`), sans egui : une case qui porte une tabulation, un
+  saut de ligne ou un guillemet est entourée de guillemets (guillemet doublé),
+  donc un texte multiligne ne décale rien au collage, ici comme dans un
+  tableur. À la lecture, `\r\n` et une fin de ligne terminale sont admis
+  (collage depuis un tableur sous Windows). Une case **manquante** se copie
+  vide : `cell_copy_text_in` la traite avant la mise en texte, jamais par un
+  `replace` de `MISSING_TEXT_DISPLAY` après coup, qui effacerait aussi les
+  espaces insécables vraiment tapés. L'app ne garde que le choix des cases.
 - **Effacer** vide chaque bloc, en un seul groupe annulable. **Supprimer et
   remonter** n'est offert que pour un bloc unique (des trous rendraient la
   remontée ambiguë) ; Suppr se contente alors de vider.

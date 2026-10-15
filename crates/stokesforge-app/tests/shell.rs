@@ -1611,6 +1611,154 @@ fn pure_data_copy_paste_keeps_working_without_header_markers() {
     assert!(matches!(cell(&state, signal, 4), Cell::Float(v) if v.is_nan()));
 }
 
+/// #259 : une case texte qui porte une tabulation ou un retour à la ligne se
+/// colle d'un seul tenant dans une autre session (donc par le seul texte du
+/// presse-papiers, comme depuis un tableur) — rien ne glisse sur les cases
+/// suivantes. Le texte copié est au format Excel/LibreOffice.
+#[test]
+fn a_multiline_text_cell_pastes_into_another_session_without_shifting_anything() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut source) = start_demo(dir.path());
+    let sheet1 = sheet_named(source.tree(), "Sheet1");
+    let signal = column_id(&source, sheet1, "Signal");
+    let note = column_id(&source, sheet1, "Note");
+    let multiline = "ligne 1\nligne 2\r\nTab\tici \"cité\"".to_string();
+    source.dispatch(Action::CommitCell {
+        column: note,
+        row: 0,
+        text: multiline.clone(),
+    });
+    assert_eq!(cell(&source, note, 0), Cell::Text(Some(multiline.clone())));
+
+    source.select_cell(sheet1, signal, 0);
+    source.extend_selection(sheet1, note, 1);
+    let text = source.copy_selection(sheet1).expect("sélection non vide");
+    assert_eq!(
+        text, "10\t\"ligne 1\nligne 2\r\nTab\tici \"\"cité\"\"\"\n\t\n",
+        "la case texte est entre guillemets, la case manquante reste vide"
+    );
+
+    let dir2 = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session2, mut target) = start_demo(dir2.path());
+    let sheet1 = sheet_named(target.tree(), "Sheet1");
+    let signal = column_id(&target, sheet1, "Signal");
+    let note = column_id(&target, sheet1, "Note");
+    target.select_cell(sheet1, signal, 2);
+    target.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+    assert_eq!(cell(&target, signal, 2), Cell::Float(10.0));
+    assert_eq!(cell(&target, note, 2), Cell::Text(Some(multiline)));
+    assert!(matches!(cell(&target, signal, 3), Cell::Float(v) if v.is_nan()));
+    assert_eq!(
+        cell(&target, note, 3),
+        Cell::Text(None),
+        "la ligne suivante n'a reçu que ses propres cases"
+    );
+    assert_eq!(
+        target
+            .tree()
+            .node(note)
+            .and_then(|n| n.as_column())
+            .map(|c| c.len()),
+        Some(4),
+        "deux lignes collées (2 et 3), pas une de plus : le retour à la ligne \
+         de la case n'a rien coupé"
+    );
+}
+
+/// #259 : une seule case texte multiligne copiée puis collée ailleurs reste
+/// une seule case (et non une rangée de cases).
+#[test]
+fn a_single_multiline_text_cell_pastes_as_one_cell() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut source) = start_demo(dir.path());
+    let sheet1 = sheet_named(source.tree(), "Sheet1");
+    let note = column_id(&source, sheet1, "Note");
+    source.dispatch(Action::CommitCell {
+        column: note,
+        row: 0,
+        text: "a\nb\tc".to_string(),
+    });
+    source.select_cell(sheet1, note, 0);
+    let text = source.copy_selection(sheet1).expect("une case");
+
+    let dir2 = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session2, mut target) = start_demo(dir2.path());
+    let sheet1 = sheet_named(target.tree(), "Sheet1");
+    let note = column_id(&target, sheet1, "Note");
+    target.select_cell(sheet1, note, 1);
+    target.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+    assert_eq!(
+        cell(&target, note, 1),
+        Cell::Text(Some("a\nb\tc".to_string()))
+    );
+    assert_eq!(cell(&target, note, 0), Cell::Text(Some("a".to_string())));
+}
+
+/// #259 : un espace insécable tapé dans un texte n'est pas pris pour une case
+/// manquante au copier — il se copie et se recolle tel quel, alors que la case
+/// vraiment manquante reste une case vide.
+#[test]
+fn a_typed_non_breaking_space_survives_copy_and_paste() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut source) = start_demo(dir.path());
+    let sheet1 = sheet_named(source.tree(), "Sheet1");
+    let note = column_id(&source, sheet1, "Note");
+    let signal = column_id(&source, sheet1, "Signal");
+    source.dispatch(Action::CommitCell {
+        column: note,
+        row: 0,
+        text: "5\u{00A0}mm".to_string(),
+    });
+    source.dispatch(Action::CommitCell {
+        column: note,
+        row: 1,
+        text: "m\u{00A0}s".to_string(),
+    });
+    assert_eq!(
+        cell(&source, note, 1),
+        Cell::Text(Some("m\u{00A0}s".to_string())),
+        "la saisie d'un espace insécable est gardée par le modèle"
+    );
+
+    source.select_cell(sheet1, signal, 0);
+    source.extend_selection(sheet1, note, 2);
+    let text = source.copy_selection(sheet1).expect("sélection non vide");
+    assert_eq!(
+        text, "10\t5\u{00A0}mm\n\tm\u{00A0}s\n30\t\n",
+        "les espaces insécables tapés sont copiés ; la case manquante reste vide"
+    );
+
+    let dir2 = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session2, mut target) = start_demo(dir2.path());
+    let sheet1 = sheet_named(target.tree(), "Sheet1");
+    let note = column_id(&target, sheet1, "Note");
+    let signal = column_id(&target, sheet1, "Signal");
+    target.select_cell(sheet1, signal, 0);
+    target.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+    assert_eq!(
+        cell(&target, note, 0),
+        Cell::Text(Some("5\u{00A0}mm".to_string()))
+    );
+    assert_eq!(
+        cell(&target, note, 1),
+        Cell::Text(Some("m\u{00A0}s".to_string()))
+    );
+    assert_eq!(
+        cell(&target, note, 2),
+        Cell::Text(None),
+        "la case vraiment manquante n'est pas devenue un espace insécable"
+    );
+}
+
 /// Un copier/coller purement champs d'en-tête (sélection entièrement dans
 /// l'en-tête, sans toucher la moindre ligne de donnée) va bien sur les
 /// champs de la colonne cible — jamais sur ses données.

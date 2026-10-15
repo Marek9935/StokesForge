@@ -93,6 +93,7 @@ de `window_detach.rs` ; le moteur Python reste dans l’AppState principal.
 ## Copie d'objets et de figures
 
 - Copie d’objets (#105–106) : `NodeCopy` et `InsertCopy` sont génériques, atomiques, avec identifiants de destination neufs. Noms uniques par dossier, chemins canoniques enracinés ; un nom seul ambigu est refusé. Le presse-papiers système réutilise les conversions `.stf`, sans numéro de version ; graphes entre projets avec colonnes embarquées dans un classeur caché persisté (#107), révélé par Show Data. F2 renomme dans les gestionnaires (#130) et édite dans la grille (#143), selon le focus, jamais le nom des feuilles, Ctrl+D des feuilles reste propre au viewport du classeur.
+- Copie de cellules (#259) : le TSV du presse-papiers (format Excel/LibreOffice, cases entre guillemets si tab, saut de ligne ou guillemet) vit dans `stokesforge-core/src/tsv.rs` (`encode`/`decode`), pas dans l'app ; l'app ne choisit que les cases copiées. Une case manquante se vide **avant** la mise en texte (`cell_copy_text_in`), jamais par `.replace(MISSING_TEXT_DISPLAY, "")` après coup (efface les espaces insécables tapés).
 - Copie de la figure d'un graphe (#149) : Ctrl+C sur le graphique actif **sans objet sélectionné** et hors champ de saisie, ou Graph › Export › Copy Graph, offre SVG + PNG + PDF ensemble par `stokesforge-clipboard` (`app/figure_copy.rs`) ; le graphique est « Graph » et jamais « Figure » dans l'interface. Ni commande ni historique. Wayland réel, Windows et macOS ne sont pas exécutés par les tests (`docs/application.md`).
 
 ## Analyse (#181)

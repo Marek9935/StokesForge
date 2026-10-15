@@ -52,6 +52,7 @@ use std::thread;
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
+use stokesforge_core::tsv;
 use stokesforge_core::{
     Cell, Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, Node, NodeCopy, NodeId, Tree,
     ValueBlock,
@@ -1158,17 +1159,32 @@ fn value_block_from_tsv_column(
 /// d'affichage (`MISSING_TEXT_DISPLAY`, bascule scientifique A9/C4 — voir
 /// [`AppState::cell_text`] pour le détail de ces choix).
 pub(crate) fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
-    cell_in(tree, column, row, format_exact)
+    cell_in(tree, column, row, format_exact, MISSING_TEXT_DISPLAY)
+}
+
+/// Ce que le copier écrit pour une case (#259) : comme [`cell_text_in`], mais
+/// une valeur **manquante** donne la chaîne vide, jamais
+/// [`MISSING_TEXT_DISPLAY`] qui n'a de sens qu'à l'écran. La case manquante
+/// est traitée ici, avant la mise en texte : retirer l'espace insécable après
+/// coup effacerait aussi ceux qu'un utilisateur a vraiment tapés dans un texte.
+pub(crate) fn cell_copy_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
+    cell_in(tree, column, row, format_exact, "")
 }
 
 /// Ce que la grille **peint** (#222) : comme [`cell_text_in`], mais un nombre
 /// n'a que 6 chiffres significatifs. L'édition, le copier et la comparaison de
 /// saisie lisent toujours [`cell_text_in`], la valeur entière.
 pub(crate) fn cell_display_in(tree: &Tree, column: NodeId, row: usize) -> String {
-    cell_in(tree, column, row, format_grid)
+    cell_in(tree, column, row, format_grid, MISSING_TEXT_DISPLAY)
 }
 
-fn cell_in(tree: &Tree, column: NodeId, row: usize, number: fn(f64) -> String) -> String {
+fn cell_in(
+    tree: &Tree,
+    column: NodeId,
+    row: usize,
+    number: fn(f64) -> String,
+    missing_text: &str,
+) -> String {
     let Some(column) = tree.node(column).and_then(Node::as_column) else {
         return String::new();
     };
@@ -1185,8 +1201,8 @@ fn cell_in(tree: &Tree, column: NodeId, row: usize, number: fn(f64) -> String) -
     // entre les origines possibles d'une cellule manquante.
     if column.column_type() == ColumnType::Mixed {
         return match column.cell(row) {
-            MixedCell::Empty => MISSING_TEXT_DISPLAY.to_string(),
-            MixedCell::Number(value) if value.is_nan() => MISSING_TEXT_DISPLAY.to_string(),
+            MixedCell::Empty => missing_text.to_string(),
+            MixedCell::Number(value) if value.is_nan() => missing_text.to_string(),
             MixedCell::Number(value) => number(value),
             MixedCell::Text(text) => text,
         };
@@ -1199,7 +1215,7 @@ fn cell_in(tree: &Tree, column: NodeId, row: usize, number: fn(f64) -> String) -
             stokesforge_core::datetime::format_datetime(value).unwrap_or_else(|| number(value))
         }
         Cell::Float(value) => number(value),
-        Cell::Text(None) => MISSING_TEXT_DISPLAY.to_string(),
+        Cell::Text(None) => missing_text.to_string(),
         Cell::Text(Some(text)) => text,
     }
 }
@@ -1919,13 +1935,15 @@ struct FullColumnCopy {
 }
 
 /// Texte propre (TSV, sans caractère de contrôle) pour le presse-papier
-/// **système** — ce que colle un tableur externe qui reçoit `clipboard`. Un
-/// [`GridClipboard::Text`] n'a pas de forme tabulaire, il se rend tel quel.
+/// **système** — ce que colle un tableur externe qui reçoit `clipboard`, au
+/// format Excel/LibreOffice de [`stokesforge_core::tsv`] (case entre
+/// guillemets si elle porte une tabulation, un saut de ligne ou un guillemet).
+/// Un [`GridClipboard::Text`] n'a pas de forme tabulaire : une seule case.
 fn grid_clipboard_to_text(clipboard: &GridClipboard) -> String {
     match clipboard {
-        GridClipboard::Text(text) => text.clone(),
+        GridClipboard::Text(text) => tsv::encode_cell(text),
         GridClipboard::Relative(RelativeCopy::HeaderFields { rows, .. })
-        | GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }) => rows_to_tsv(rows),
+        | GridClipboard::Relative(RelativeCopy::DataRows { rows, .. }) => tsv::encode(rows),
         GridClipboard::FullColumns(columns) => {
             let mut rows: Vec<Vec<String>> = vec![
                 columns.iter().map(|c| c.x_prime.clone()).collect(),
@@ -1946,20 +1964,9 @@ fn grid_clipboard_to_text(clipboard: &GridClipboard) -> String {
                         .collect(),
                 );
             }
-            rows_to_tsv(&rows)
+            tsv::encode(&rows)
         }
     }
-}
-
-/// Sérialise `rows` en TSV (`\t` entre colonnes, `\n` après chaque ligne,
-/// y compris la dernière) — partagé par [`grid_clipboard_to_text`].
-fn rows_to_tsv(rows: &[Vec<String>]) -> String {
-    let mut out = String::new();
-    for row in rows {
-        out.push_str(&row.join("\t"));
-        out.push('\n');
-    }
-    out
 }
 
 /// Reconstruit un [`GridClipboard`] depuis un texte externe (pas le nôtre :
@@ -1972,24 +1979,12 @@ fn rows_to_tsv(rows: &[Vec<String>]) -> String {
 /// de la ligne 0 (règle 1 aussi : un rectangle tabulé ou multi-lignes est
 /// traité comme un rectangle relatif de corps).
 fn external_clipboard_from_text(text: &str) -> GridClipboard {
-    let mut lines: Vec<&str> = text
-        .split('\n')
-        .map(|line| line.trim_end_matches('\r'))
-        .collect();
-    // La plupart des presse-papiers terminent par un `\n` : la ligne vide
-    // qui en résulte ne doit pas devenir une ligne collée de plus.
-    if matches!(lines.last(), Some(line) if line.is_empty()) {
-        lines.pop();
+    let mut rows = tsv::decode(text);
+    // Une seule case (même entre guillemets, même multiligne) : un texte.
+    if rows.len() <= 1 && rows.first().is_none_or(|row| row.len() <= 1) {
+        let cell = rows.pop().and_then(|mut row| row.pop());
+        return GridClipboard::Text(cell.unwrap_or_default());
     }
-    let single_line_without_tab =
-        lines.len() <= 1 && !lines.first().is_some_and(|l| l.contains('\t'));
-    if single_line_without_tab {
-        return GridClipboard::Text(lines.first().copied().unwrap_or("").to_string());
-    }
-    let rows: Vec<Vec<String>> = lines
-        .iter()
-        .map(|line| line.split('\t').map(str::to_string).collect())
-        .collect();
     GridClipboard::Relative(RelativeCopy::DataRows { start: 0, rows })
 }
 
@@ -3882,7 +3877,7 @@ impl AppState {
         let clipboard = if let Some((column, field)) = selection.selected_header_field() {
             GridClipboard::Text(self.header_field_display_text(column, field))
         } else if let Some((column, row)) = selection.single_cell() {
-            GridClipboard::Text(cell_text_in(tree, column, row).replace(MISSING_TEXT_DISPLAY, ""))
+            GridClipboard::Text(cell_copy_text_in(tree, column, row))
         } else if !selection.is_columns() {
             // Un ou plusieurs blocs : bout à bout dans l'ordre de la feuille
             // (#159) quand ils partagent leurs lignes ou leurs colonnes,
@@ -3909,10 +3904,7 @@ impl AppState {
                     .map(|&rank| {
                         columns
                             .iter()
-                            .map(|&column| {
-                                cell_text_in(tree, column, rank as usize)
-                                    .replace(MISSING_TEXT_DISPLAY, "")
-                            })
+                            .map(|&column| cell_copy_text_in(tree, column, rank as usize))
                             .collect()
                     })
                     .collect();
@@ -3940,9 +3932,7 @@ impl AppState {
                 .map(|row| {
                     columns
                         .iter()
-                        .map(|&column| {
-                            cell_text_in(tree, column, row).replace(MISSING_TEXT_DISPLAY, "")
-                        })
+                        .map(|&column| cell_copy_text_in(tree, column, row))
                         .collect()
                 })
                 .collect();
@@ -3979,7 +3969,7 @@ impl AppState {
                     .map(Column::len)
                     .unwrap_or(0);
                 let data = (0..len)
-                    .map(|row| cell_text_in(tree, column, row).replace(MISSING_TEXT_DISPLAY, ""))
+                    .map(|row| cell_copy_text_in(tree, column, row))
                     .collect();
                 FullColumnCopy {
                     x_prime: HeaderField::XPrime.text_of(&meta),
@@ -9089,6 +9079,46 @@ mod tests {
                 start: 0,
                 rows: vec![vec!["a".to_string(), "b".to_string()]],
             })
+        );
+    }
+
+    /// #259 : un tableur externe termine ses lignes par `\r\n` et met entre
+    /// guillemets une case qui porte un retour à la ligne — cette case reste
+    /// une case, et une case seule (même multiligne) reste un texte.
+    #[test]
+    fn external_clipboard_from_text_lit_le_format_des_tableurs() {
+        assert_eq!(
+            external_clipboard_from_text("a\t\"b\nc\"\r\nd\te\r\n"),
+            GridClipboard::Relative(RelativeCopy::DataRows {
+                start: 0,
+                rows: vec![
+                    vec!["a".to_string(), "b\nc".to_string()],
+                    vec!["d".to_string(), "e".to_string()],
+                ],
+            })
+        );
+        assert_eq!(
+            external_clipboard_from_text("\"a\nb\""),
+            GridClipboard::Text("a\nb".to_string())
+        );
+    }
+
+    /// #259 : le texte poussé au système met entre guillemets les cases qui
+    /// portent tabulation, retour à la ligne ou guillemet.
+    #[test]
+    fn grid_clipboard_to_text_met_les_cases_speciales_entre_guillemets() {
+        let clipboard = GridClipboard::Relative(RelativeCopy::DataRows {
+            start: 0,
+            rows: vec![vec!["a\nb".to_string(), "c".to_string()]],
+        });
+        assert_eq!(grid_clipboard_to_text(&clipboard), "\"a\nb\"\tc\n");
+        assert_eq!(
+            grid_clipboard_to_text(&GridClipboard::Text("x\ty".to_string())),
+            "\"x\ty\""
+        );
+        assert_eq!(
+            grid_clipboard_to_text(&GridClipboard::Text("simple".to_string())),
+            "simple"
         );
     }
 

@@ -65,6 +65,7 @@ pub mod path;
 pub mod project;
 pub mod resolve;
 pub mod tree;
+pub mod tsv;
 
 pub use calc::{
     compute, AuxRef, Calculation, CalculationDraft, ComputeError, Computed, ComputedColumn,

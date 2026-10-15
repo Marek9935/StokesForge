@@ -454,6 +454,18 @@ méthode de `PanelSpec` qu'ils déclenchent : un test qui appelle
 | `.stf` : noms de groupe vides gardés au chargement | `un_nom_de_groupe_vide_est_ecarte_au_chargement` (`stokesforge-persistence/src/convert.rs`) |
 | `.stf` : `#[serde(default)]` retiré de `group_names` (ancien fichier illisible) | `un_calque_sans_noms_de_groupe_se_relit_avec_ses_groupes` |
 
+## Copier/coller de cellules (#259)
+
+| Mutant (ce qui est cassé) | Vu par |
+|---|---|
+| `tsv::needs_quotes` toujours faux (simple `join("\t")`) | `stokesforge-core/src/tsv.rs` (aller-retour tab, saut de ligne, guillemet) ; `a_multiline_text_cell_pastes_into_another_session_without_shifting_anything` (`stokesforge-app/tests/shell.rs`) |
+| `decode` sans gestion des guillemets | idem + `a_single_multiline_text_cell_pastes_as_one_cell` |
+| `decode` sans `\r\n` | `un_tableur_windows_termine_ses_lignes_par_crlf`, `external_clipboard_from_text_lit_le_format_des_tableurs` |
+| `cell_copy_text_in` qui retire `MISSING_TEXT_DISPLAY` après coup | `a_typed_non_breaking_space_survives_copy_and_paste` |
+
+Le collage rejoue la structure interne quand le texte est celui qu'on a poussé :
+pour éprouver le chemin « texte externe », coller dans une **autre** session.
+
 ### Remplacement définitif d'une correction (#212)
 
 `commands/tests/calculations.rs` tient l'atomicité données/trace, undo/redo,
