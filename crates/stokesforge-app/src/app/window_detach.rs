@@ -1610,7 +1610,7 @@ mod tests {
     fn l_etat_des_fenetres_est_envoye_a_la_session_sans_toucher_a_la_geometrie_flottante() {
         use stokesforge_session::WindowMode;
         let (session, graph) = graphe();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let book = app.state.books()[0].0;
         let rect = egui::Rect::from_min_size(egui::pos2(40.0, 60.0), egui::vec2(500.0, 300.0));
@@ -1675,7 +1675,7 @@ mod tests {
         }
         for kind in ["classeur", "graphe", "explorateur"] {
             let (session, graph) = graphe();
-            let state = AppState::new(session.handle(), "test.stokesforge".into()).unwrap();
+            let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
             let mut app = StokesForgeApp::new(state);
             let book = app.state.books()[0].0;
             let tab = if kind == "classeur" {
@@ -1775,7 +1775,7 @@ mod tests {
     #[test]
     fn un_graphe_detache_reconstruit_ses_formes_dans_son_viewport() {
         let (session, graph) = graphe();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
         context.set_embed_viewports(false);
@@ -1904,7 +1904,7 @@ mod tests {
                 .unwrap();
         }
         let session = Session::spawn(project, None).unwrap();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
         context.set_embed_viewports(false);
@@ -2062,7 +2062,7 @@ mod tests {
     #[test]
     fn une_fenetre_detachee_repliee_reduit_puis_restaure_son_viewport_os() {
         let (session, graph) = graphe();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
         context.set_embed_viewports(false);
@@ -2232,7 +2232,7 @@ mod tests {
     #[test]
     fn la_fenetre_detachee_recolore_son_contour_selon_le_focus_os() {
         let (session, graph) = graphe();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
         context.set_embed_viewports(false);

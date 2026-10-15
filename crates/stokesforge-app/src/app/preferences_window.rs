@@ -188,7 +188,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let mut state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         if open {
             state.dispatch(Action::OpenPreferences);
         }
@@ -245,7 +245,7 @@ mod tests {
         .unwrap();
         let mut state = AppState::new_with_preferences(
             session.handle(),
-            "test.stokesforge".to_string(),
+            "test.stf".to_string(),
             crate::preferences::Preferences::load_from(None),
         )
         .unwrap();

@@ -480,10 +480,8 @@ fn step_disk_roundtrip(session: &SessionHandle, column_b: NodeId) -> SelfTestSte
         }
     };
 
-    let path = std::env::temp_dir().join(format!(
-        "stokesforge-selftest-{}.stokesforge",
-        std::process::id()
-    ));
+    let path =
+        std::env::temp_dir().join(format!("stokesforge-selftest-{}.stf", std::process::id()));
     let _guard = TempFileGuard(path.clone());
 
     if let Err(error) = session.save(&path) {

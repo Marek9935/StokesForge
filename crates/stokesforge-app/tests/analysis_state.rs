@@ -44,7 +44,7 @@ fn setup(dir: &std::path::Path) -> Setup {
     let session = Session::spawn(project, None).unwrap();
     let state = AppState::new_with_preferences(
         session.handle(),
-        dir.join("p.stokesforge").display().to_string(),
+        dir.join("p.stf").display().to_string(),
         stokesforge_app::preferences::Preferences::load_from(None),
     )
     .unwrap();
@@ -351,7 +351,7 @@ fn the_output_choice_is_remembered_across_sessions() {
         assert_eq!(preferences.analysis_keep_results(), keep_expected);
         s.state = AppState::new_with_preferences(
             s._session.handle(),
-            dir.path().join("p.stokesforge").display().to_string(),
+            dir.path().join("p.stf").display().to_string(),
             preferences,
         )
         .unwrap();
@@ -534,7 +534,7 @@ fn with_preferences(s: &mut Setup, dir: &std::path::Path) -> std::path::PathBuf 
     let preferences = stokesforge_app::preferences::Preferences::load_from(Some(file.clone()));
     s.state = AppState::new_with_preferences(
         s._session.handle(),
-        dir.join("p.stokesforge").display().to_string(),
+        dir.join("p.stf").display().to_string(),
         preferences,
     )
     .unwrap();
@@ -814,7 +814,7 @@ fn une_correction_garde_sa_reference_meme_si_la_colonne_d_origine_disparait() {
     let session = Session::spawn(project, None).unwrap();
     let mut state = AppState::new_with_preferences(
         session.handle(),
-        dir.path().join("p.stokesforge").display().to_string(),
+        dir.path().join("p.stf").display().to_string(),
         stokesforge_app::preferences::Preferences::load_from(Some(dir.path().join("prefs.json"))),
     )
     .unwrap();

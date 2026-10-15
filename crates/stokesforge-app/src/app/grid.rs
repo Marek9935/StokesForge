@@ -24,7 +24,8 @@ use stokesforge_plot::PlotType;
 
 use crate::selection::{GridCursor, Selection};
 use crate::state::{
-    Action, AppState, ColumnDragPayload, GridMenu, HeaderField, MoveDirection, RowDragPayload,
+    Action, AppState, ColumnDragPayload, GridMenu, GridZone, HeaderField, MoveDirection,
+    RowDragPayload,
 };
 use crate::{icons, tr};
 
@@ -563,6 +564,9 @@ fn grid_erase_section(
     sheet: NodeId,
     menu: &GridMenu,
 ) {
+    // Une plage de colonnes entières n'a rien à « remonter » : Delete retire
+    // les colonnes elles-mêmes (`AppState::delete_selected_cells`).
+    let columns = menu.zone == GridZone::Columns;
     sections.section(ui, true, |ui| {
         if menu.offers_keep_formula_data
             && ui
@@ -586,10 +590,18 @@ fn grid_erase_section(
         if menu.offers_delete_shift
             && ui
                 .add(
-                    egui::Button::new(tr!("action-delete-shift-up"))
-                        .shortcut_text(shortcut_text_delete()),
+                    egui::Button::new(if columns {
+                        tr!("action-delete-columns")
+                    } else {
+                        tr!("action-delete-shift-up")
+                    })
+                    .shortcut_text(shortcut_text_delete()),
                 )
-                .on_hover_text(tr!("action-delete-shift-up", "hint"))
+                .on_hover_text(if columns {
+                    tr!("action-delete-columns", "hint")
+                } else {
+                    tr!("action-delete-shift-up", "hint")
+                })
                 .clicked()
         {
             // Passer par l'action directement, sans `consume_delete_key` : un
@@ -2706,7 +2718,7 @@ mod tests {
                 })
                 .collect();
             let session = Session::spawn(project, None).unwrap();
-            let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+            let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
             let context = egui::Context::default();
             context.set_fonts(stokesforge_render_egui::font_definitions());
             theme::install(&context);
@@ -3301,8 +3313,7 @@ mod tests {
                 .add_column(sheet, None, None, Column::from_f64(&[1.0, 2.0]))
                 .unwrap();
             let session = Session::spawn(project, None).unwrap();
-            let mut state =
-                AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+            let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
             state.select_cell(sheet, column, 0);
             let context = egui::Context::default();
             context.set_fonts(stokesforge_render_egui::font_definitions());

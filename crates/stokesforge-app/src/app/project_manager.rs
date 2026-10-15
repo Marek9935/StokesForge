@@ -801,7 +801,7 @@ pub(super) mod tests {
         project.add_empty_workbook(root, None).unwrap();
         let graph = project.add_graph(root, None, PlotSpec::default()).unwrap();
         let session = Session::spawn(project, None).unwrap();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let tree = state.project_tree();
         let book_id = tree
             .iter()
@@ -892,7 +892,7 @@ pub(super) mod tests {
         let note = Tab::Note(project.add_note(root, None, "").unwrap());
         let matrix = Tab::Matrix(project.add_matrix(root, None).unwrap());
         let session = Session::spawn(project, None).unwrap();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let tree = state.project_tree();
         let context = super::super::test_support::contexte();
         let banc = Banc::new(HashSet::from([book, graph, note, matrix]));
@@ -951,7 +951,7 @@ pub(super) mod tests {
     #[test]
     fn le_suivi_du_contenu_actif_preserve_la_selection_multiple() {
         let (session, book, graph, _tree) = project_manager_fixture();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
         let detached_key = egui::Id::new(("project_manager_gestures", viewport_id()));
@@ -1209,7 +1209,7 @@ pub(super) mod tests {
     #[test]
     fn le_panneau_fixe_relie_l_arbre_aux_champs_de_l_application() {
         let (session, book_tab, _graph_tab, _tree) = project_manager_fixture();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let app = RefCell::new(StokesForgeApp::new(state));
         let open = RefCell::new(Vec::new());
         let context = egui::Context::default();

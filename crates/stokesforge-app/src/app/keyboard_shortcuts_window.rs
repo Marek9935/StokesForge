@@ -58,7 +58,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let mut state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         if open {
             state.dispatch(Action::OpenKeyboardShortcuts);
         }

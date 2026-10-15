@@ -1197,7 +1197,7 @@ pub(super) mod tests {
     #[test]
     fn le_pan_principal_atteint_la_figure_sous_la_zone_de_depot() {
         let (session, graph) = graphe();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
         let mut graph_views = HashMap::new();
@@ -1251,7 +1251,7 @@ pub(super) mod tests {
     #[test]
     fn le_pan_principal_atteint_la_figure_dans_la_fenetre_flottante() {
         let (session, graph) = graphe();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
         let mut graph_views = HashMap::new();
@@ -1562,7 +1562,7 @@ pub(super) mod tests {
     #[test]
     fn deposer_des_colonnes_sur_le_graphe_ajoute_une_serie_et_ailleurs_rien() {
         let (session, graph) = graphe();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
         let contents =
@@ -1668,7 +1668,7 @@ pub(super) mod tests {
         }
         let graph = project.add_graph(project.root(), None, spec).unwrap();
         let session = Session::spawn(project, None).unwrap();
-        let state = AppState::new(session.handle(), "test.stokesforge".into()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
         let object = ShapeRef { panel: 0, index: 0 };
         let other = ShapeRef { index: 1, ..object };
         for properties in [true, false] {
@@ -1770,7 +1770,7 @@ pub(super) mod tests {
     fn le_clic_droit_de_la_figure_ouvre_le_menu_de_la_courbe_ou_celui_du_fond() {
         use super::super::test_support::{contexte, image_de};
         let (session, graph) = graphe();
-        let state = AppState::new(session.handle(), "test.stokesforge".into()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
         let spec = crate::state::current_plot_spec(state.tree(), graph).unwrap();
         let series = stokesforge_plot::SeriesRef::new(0, 0);
         for on_curve in [true, false] {

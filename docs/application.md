@@ -253,7 +253,7 @@ Show · Hide ─ Copy · Paste ─ Rename · Duplicate ─ Delete ; un dossier :
 Rename ─ Delete, le renommage s'éditant sur place). Un onglet de feuille
 propose Add Worksheet ─ Rename · Duplicate ─ Delete, la bande vide Add
 Worksheet. Les lettres de colonnes : Plot ▸ · Add Column ─ presse-papiers ─
-Type ▸ · Role ▸ ─ Clear · Delete, au premier niveau (`column_properties_menu`),
+Type ▸ · Role ▸ ─ Clear · Delete (les colonnes elles-mêmes, `AppState::delete_columns`), au premier niveau (`column_properties_menu`),
 la grille vide Add Column ; les cellules, lignes et champs d'en-tête un seul
 groupe presse-papiers puis Clear · Delete, sans Undo/Redo.
 
@@ -642,7 +642,7 @@ table à l'image suivante (`grid_contents`, `pending_vertical_offset`).
 
 ### Géométrie et état des fenêtres
 
-Pour chaque fenêtre de contenu, la session retient (et le `.stokesforge`
+Pour chaque fenêtre de contenu, la session retient (et le `.stf`
 enregistre) sa **géométrie flottante** — position et taille dans l'espace de
 travail — et son **état** : ouverte, maximisée ou fermée, repliée, rang
 d'empilement (`WindowGeometry::view`, voir `docs/persistance.md`). Les deux

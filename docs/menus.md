@@ -116,7 +116,7 @@ Selection ▸ ne subsiste que dans Edit.
 | Cible | Menu |
 |---|---|
 | Cellule, ligne, champ d'en-tête | Cut · Copy · Copy with Header · Paste · Paste in Place ─ Remove Formula, Keep Data (champ Formule portant une formule, #236 ; aussi Workbook › Columns) · Clear · Delete and Shift Up |
-| En-tête de colonne | Plot ▸ · Add Column ─ presse-papiers ─ Type ▸ · Role ▸ ─ Clear · Delete and Shift Up |
+| En-tête de colonne | Plot ▸ · Add Column ─ presse-papiers ─ Type ▸ · Role ▸ ─ Clear · Delete (retire les colonnes ; un seul Annuler les rend) |
 | Grille vide, zone blanche | Add Column |
 | Onglet de feuille, bande vide | Add Worksheet ─ Rename · Duplicate ─ Delete |
 

@@ -126,7 +126,7 @@ fn start(project: Project, path: &Path) -> (Session, AppState) {
 
 /// Session sur le projet de démonstration, fichier de travail dans `dir`.
 fn start_demo(dir: &Path) -> (Session, AppState) {
-    start(demo_project(), &dir.join("projet.stokesforge"))
+    start(demo_project(), &dir.join("projet.stf"))
 }
 
 #[test]
@@ -885,8 +885,8 @@ fn the_full_loop_returns_the_saved_tree_bit_for_bit() {
 #[test]
 fn loading_a_foreign_file_leaves_no_stale_per_book_selection() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
-    let mine = dir.path().join("mien.stokesforge");
-    let other = dir.path().join("autre.stokesforge");
+    let mine = dir.path().join("mien.stf");
+    let other = dir.path().join("autre.stf");
 
     // Le fichier étranger est écrit par une session distincte.
     {
@@ -949,12 +949,7 @@ fn a_failing_load_leaves_the_model_and_history_untouched() {
     let revision = state.snapshot().revision;
     let tree = std::sync::Arc::clone(state.tree());
 
-    state.set_path(
-        dir.path()
-            .join("inexistant.stokesforge")
-            .display()
-            .to_string(),
-    );
+    state.set_path(dir.path().join("inexistant.stf").display().to_string());
     state.dispatch(Action::Load);
 
     // M8 (#229) : un projet illisible est un échec grave, dit par un dialogue.
@@ -978,7 +973,7 @@ fn a_stf_read_error_is_shown_through_the_catalogue() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
 
-    let truncated = dir.path().join("tronque.stokesforge");
+    let truncated = dir.path().join("tronque.stf");
     std::fs::write(&truncated, b"STKF\x01").expect("écriture du fichier de test");
     state.set_path(truncated.display().to_string());
     state.dispatch(Action::Load);
@@ -991,7 +986,7 @@ fn a_stf_read_error_is_shown_through_the_catalogue() {
         )
     );
 
-    let foreign = dir.path().join("etranger.stokesforge");
+    let foreign = dir.path().join("etranger.stf");
     std::fs::write(&foreign, b"hello").expect("écriture du fichier de test");
     state.set_path(foreign.display().to_string());
     state.dispatch(Action::DismissAlert);
@@ -1007,7 +1002,7 @@ fn a_stf_read_error_is_shown_through_the_catalogue() {
 fn a_failing_save_reports_an_error_and_writes_nothing() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
-    let target = dir.path().join("absent").join("projet.stokesforge");
+    let target = dir.path().join("absent").join("projet.stf");
 
     state.set_path(target.display().to_string());
     state.dispatch(Action::Save);
@@ -1186,7 +1181,7 @@ fn row_actions_on_something_that_is_not_a_sheet_are_refused() {
     let graph = project
         .add_graph(root, Some("Graph1"), Default::default())
         .expect("un graphe");
-    let (_session, mut state) = start(project, &dir.path().join("vide.stokesforge"));
+    let (_session, mut state) = start(project, &dir.path().join("vide.stf"));
 
     assert!(state.visible_columns(graph).is_empty());
     assert_eq!(state.row_count(graph), 0);
@@ -1309,7 +1304,7 @@ fn selecting_a_sheet_in_one_book_does_not_affect_another_book() {
         .add_worksheet(book2, Some("Autre"))
         .expect("feuille Autre");
 
-    let (_session, mut state) = start(project, &dir.path().join("projet.stokesforge"));
+    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
     let book1 = book_named(state.tree(), "Book1");
     let book1_sheet2 = sheet_named(state.tree(), "Sheet2");
 
@@ -2742,7 +2737,7 @@ fn les_graphes_du_projet_sont_enumeres_avec_leur_chemin() {
         .add_graph(root, Some("Graph1"), spec)
         .expect("graphe");
 
-    let (session, state) = start(project, &dir.path().join("projet.stokesforge"));
+    let (session, state) = start(project, &dir.path().join("projet.stf"));
     let graphes = state.graphs();
     assert_eq!(graphes.len(), 1, "un seul graphe : {graphes:?}");
     assert_eq!(graphes[0].1, "Graph1");
@@ -2781,7 +2776,7 @@ fn project_tree_stops_at_windows_and_never_descends_into_a_book() {
         .add_note(folder, Some("Note1"), "un texte")
         .expect("note");
 
-    let (_session, state) = start(project, &dir.path().join("projet.stokesforge"));
+    let (_session, state) = start(project, &dir.path().join("projet.stf"));
     let tree = state.project_tree();
 
     let book = tree
@@ -2829,7 +2824,7 @@ fn detached_note_view_keeps_its_buffer_local_and_commits_through_the_root() {
     let note = project
         .add_note(root, Some("Note1"), "avant")
         .expect("note");
-    let (_session, mut state) = start(project, &dir.path().join("projet.stokesforge"));
+    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
 
     let mut detached = state.fork_for_detached_view().unwrap();
     detached.begin_note_edit(note);
@@ -2859,7 +2854,7 @@ fn editing_a_note_commits_on_dispatch_and_is_undoable() {
         .add_note(root, Some("Note1"), "avant")
         .expect("note");
 
-    let (_session, mut state) = start(project, &dir.path().join("projet.stokesforge"));
+    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
     assert_eq!(state.note_text(note), Some("avant".to_string()));
 
     state.begin_note_edit(note);
@@ -2942,7 +2937,7 @@ fn committing_a_note_without_typing_writes_nothing() {
         .add_note(root, Some("Note1"), "inchangé")
         .expect("note");
 
-    let (_session, mut state) = start(project, &dir.path().join("projet.stokesforge"));
+    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
     let revision = state.snapshot().revision;
 
     state.begin_note_edit(note);
@@ -4330,6 +4325,40 @@ fn backspace_on_a_full_row_selection_clears_it_without_shifting() {
     assert_eq!(state.row_count(sheet1), 5, "aucune ligne retirée");
 }
 
+/// Supprimer une sélection de colonnes entières retire les colonnes de la
+/// feuille (et pas seulement leurs cellules) ; Annuler les rend d'un coup,
+/// avec leurs valeurs. Régression : aucune voie de l'interface n'appelait
+/// `Command::DeleteColumn`, « Delete and Shift Up » ne vidait que les cellules.
+#[test]
+fn deleting_selected_columns_removes_them_and_undo_restores_them() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let before = state.visible_columns(sheet1).len();
+
+    state.select_column(sheet1, temps);
+    state.extend_column_selection(sheet1, signal);
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+
+    let after: Vec<NodeId> = state
+        .visible_columns(sheet1)
+        .into_iter()
+        .map(|(id, ..)| id)
+        .collect();
+    assert_eq!(after.len(), before - 2, "les deux colonnes ont disparu");
+    assert!(!after.contains(&temps) && !after.contains(&signal));
+
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        state.visible_columns(sheet1).len(),
+        before,
+        "un seul Annuler rend les deux colonnes"
+    );
+    assert_eq!(cell(&state, temps, 1), Cell::Float(0.5));
+}
+
 /// Suppr (`Action::DeleteSelectedCells`) sur une plage de lignes supprime la
 /// ligne et fait remonter ce qui suit, dans **toutes** les colonnes
 /// touchées, indépendamment de leur longueur propre.
@@ -5110,7 +5139,7 @@ fn plot_columns_sends_y2_to_a_second_layer_paired_with_x2() {
             .expect("colonne")
     };
     let (x, y, x2, y2) = (add("X"), add("Y"), add("X2"), add("Y2"));
-    let (_session, mut state) = start(project, &dir.path().join("projet.stokesforge"));
+    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
     for (column, role) in [
         (x, ColumnRole::X),
         (y, ColumnRole::Y),
@@ -5434,7 +5463,7 @@ fn kinetics(dir: &Path) -> (Session, AppState, NodeId, Vec<NodeId>) {
     let b = add("B", &[4.0, 5.0, 6.0]);
     let c = add("C", &[7.0, 8.0, 9.0]);
     let _sans_x = add("D", &[0.0, 0.0, 0.0]);
-    let (session, mut state) = start(project, &dir.join("projet.stokesforge"));
+    let (session, mut state) = start(project, &dir.join("projet.stf"));
     for (column, time) in [(a, "0"), (b, "10"), (c, "20")] {
         set_header_field(&mut state, column, HeaderField::XPrime, time);
     }
@@ -7995,7 +8024,7 @@ fn demo_with_graph(dir: &Path) -> (Session, AppState, NodeId) {
     let graph = project
         .add_graph(root, Some("Graph1"), spec)
         .expect("graphe");
-    let (session, state) = start(project, &dir.join("projet.stokesforge"));
+    let (session, state) = start(project, &dir.join("projet.stf"));
     (session, state, graph)
 }
 
@@ -10238,11 +10267,11 @@ fn le_titre_porte_le_nom_du_projet_et_un_point_tant_qu_il_n_est_pas_enregistre()
     let (_session, mut state) = start_demo(dir.path());
     state.dispatch(Action::Save);
     let saved = state.window_title();
-    assert!(saved.contains("projet.stokesforge"), "{saved}");
+    assert!(saved.contains("projet.stf"), "{saved}");
     assert!(!saved.contains('•'), "{saved}");
     state.dispatch(Action::AddGraph);
     let dirty = state.window_title();
-    assert!(dirty.contains("projet.stokesforge •"), "{dirty}");
+    assert!(dirty.contains("projet.stf •"), "{dirty}");
     state.dispatch(Action::Save);
     assert_eq!(state.window_title(), saved);
 }

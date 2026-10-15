@@ -1587,7 +1587,7 @@ fn suggested_file_name(path: &str) -> String {
     std::path::Path::new(path)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "demo.stokesforge".to_string())
+        .unwrap_or_else(|| "demo.stf".to_string())
 }
 
 #[cfg(test)]
@@ -2444,7 +2444,7 @@ mod tests {
     #[test]
     fn l_etat_des_fenetres_survit_a_l_enregistrement_et_au_rechargement() {
         let (session, graph) = graphe();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let book = app.state.books()[0].0;
         let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(400.0, 300.0));
@@ -2456,12 +2456,12 @@ mod tests {
         app.maximized_tab = Some(Tab::Book(book));
         app.sync_window_views();
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("fenetres.stokesforge");
+        let path = directory.path().join("fenetres.stf");
         session.handle().save(&path).unwrap();
 
         let reloaded = Session::spawn(Project::new("Vide").unwrap(), None).unwrap();
         reloaded.handle().load(&path).unwrap();
-        let state = AppState::new(reloaded.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(reloaded.handle(), "test.stf".to_string()).unwrap();
         let app = StokesForgeApp::new(state);
         assert_eq!(app.maximized_tab, Some(Tab::Book(book)));
         assert!(
@@ -2487,7 +2487,7 @@ mod tests {
     #[test]
     fn ctrl_guillemet_ouvre_l_assistant_d_import() {
         let (session, _graph) = graphe();
-        let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
@@ -2573,7 +2573,7 @@ mod tests {
             )
             .unwrap();
         let session = Session::spawn(project, None).unwrap();
-        let state = AppState::new(session.handle(), "mesure.stokesforge".to_string()).unwrap();
+        let state = AppState::new(session.handle(), "mesure.stf".to_string()).unwrap();
         let mut app = StokesForgeApp::new(state);
         app.open_tab(Tab::Book(book));
         app.open_tab(Tab::Graph(graph));

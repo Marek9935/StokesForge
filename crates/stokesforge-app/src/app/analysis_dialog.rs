@@ -415,7 +415,7 @@ mod tests {
             )
             .unwrap();
         let session = Session::spawn(project, None).unwrap();
-        let state = AppState::new(session.handle(), "test.stokesforge".into()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
         (session, state, sheet, ids)
     }
 

@@ -182,6 +182,8 @@ action-clear = Effacer
 action-remove-formula-keep-data = Retirer la formule, garder les données
     .hint = Retire la formule et garde les valeurs calculées comme données ordinaires
     .disabled = Sélectionnez une colonne qui a une formule
+action-delete-columns = Supprimer
+    .hint = Retire les colonnes sélectionnées de la feuille. Annuler les rend avec leurs valeurs
 action-delete-shift-up = Supprimer et remonter
     .hint = Supprime tout de suite et remonte les cellules. La touche Suppr efface d'abord, puis supprime
 
@@ -472,6 +474,7 @@ history-macro-set-columns-type = Changer le type des colonnes
 history-macro-set-columns-role = Changer le rôle des colonnes
 history-macro-analysis-to-graph = Analyser et tracer
 history-macro-remove-formula = Retirer la formule
+history-macro-delete-columns = Supprimer des colonnes
 
 ## Annuler et rétablir
 

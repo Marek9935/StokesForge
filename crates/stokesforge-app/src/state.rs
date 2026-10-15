@@ -7476,12 +7476,39 @@ impl AppState {
         let Some(selection) = self.selection.get(&sheet) else {
             return;
         };
+        if selection.is_columns() {
+            let columns = selection.columns(&self.snapshot.tree, sheet);
+            self.delete_columns(&columns);
+            return;
+        }
         let (columns, at, count) = selection.delete_at_count(&self.snapshot.tree, sheet);
         if columns.is_empty() || count == 0 {
             self.clear_selected_cells(sheet);
             return;
         }
         self.execute(Command::DeleteCells { columns, at, count });
+    }
+
+    /// Retire des colonnes entières de leur feuille (menu « Delete » des
+    /// lettres de colonne, Suppr en seconde pression sur une plage de
+    /// colonnes) : un `Command::DeleteColumn` par colonne, groupés pour
+    /// qu'un seul Annuler les rende toutes. Les séries qui les citaient
+    /// restent tracées en gris (invariant 10), rien d'autre à nettoyer.
+    fn delete_columns(&mut self, columns: &[NodeId]) {
+        match columns {
+            [] => {}
+            [column] => self.execute(Command::DeleteColumn { column: *column }),
+            _ => {
+                if self.handle.begin_macro(MacroKind::DeleteColumns).is_err() {
+                    self.fail(tr!("error-columns-group"));
+                    return;
+                }
+                for &column in columns {
+                    self.execute(Command::DeleteColumn { column });
+                }
+                self.end_grouped_macro();
+            }
+        }
     }
 
     /// Colle `text` à partir de l'ancre de la sélection courante de `sheet`

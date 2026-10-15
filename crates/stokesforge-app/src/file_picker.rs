@@ -50,10 +50,10 @@ impl PickRequest {
         match self {
             Self::OpenProject => dialog
                 .set_title(tr!("project-open-title"))
-                .add_filter(tr!("project-file-filter"), &["stf", "stokesforge"]),
+                .add_filter(tr!("project-file-filter"), &["stf"]),
             Self::SaveProjectAs { suggested } => dialog
                 .set_title(tr!("project-save-title"))
-                .add_filter(tr!("project-file-filter"), &["stf", "stokesforge"])
+                .add_filter(tr!("project-file-filter"), &["stf"])
                 .set_file_name(suggested),
             Self::ExportGraph { file_name, .. } => dialog
                 .set_title(tr!("export-dialog-title"))

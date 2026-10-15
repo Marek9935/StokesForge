@@ -1557,7 +1557,7 @@ mod tests {
     fn banc(avec_fichier: bool) -> Banc {
         let config = isoler_la_config();
         let session = Session::spawn(Project::new("Import").unwrap(), None).unwrap();
-        let mut state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let dossier = tempfile::tempdir().unwrap();
         let mut fichiers = Vec::new();
         if avec_fichier {

@@ -428,7 +428,7 @@ mod tests {
             )
             .unwrap();
         let session = Session::spawn(project, None).unwrap();
-        let mut state = AppState::new(session.handle(), "test.stokesforge".into()).unwrap();
+        let mut state = AppState::new(session.handle(), "test.stf".into()).unwrap();
         state.dispatch(Action::OpenAnalysis {
             preset: Preset::Integrate,
             sheet,

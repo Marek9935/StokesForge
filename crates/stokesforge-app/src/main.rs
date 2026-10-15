@@ -15,7 +15,7 @@ use stokesforge_plot::{AxisSpec, LineSpec, PanelSpec, PlotSpec, SeriesSpec};
 use stokesforge_session::Session;
 
 /// Nom du fichier proposé par défaut quand aucun chemin n'est donné.
-const DEFAULT_FILE: &str = "demo.stokesforge";
+const DEFAULT_FILE: &str = "demo.stf";
 
 /// Script d'exemple qui pré-remplit la zone de script : il fonctionne tel
 /// quel sur le projet de démonstration ([`demo_project`]) et illustre le
@@ -147,6 +147,22 @@ fn configure_script_engine(state: &mut AppState) {
 #[cfg(not(feature = "python"))]
 fn configure_script_engine(_state: &mut AppState) {}
 
+/// Donne le rôle X (abscisse) à une colonne de la démonstration : la
+/// première colonne d'une feuille est l'axe des abscisses.
+fn set_x_role(project: &mut Project, column: NodeId) -> anyhow::Result<()> {
+    let mut meta = project
+        .tree()
+        .node(column)
+        .and_then(|node| node.as_column())
+        .map(|column| column.meta().clone())
+        .unwrap_or_default();
+    meta.role = stokesforge_core::ColumnRole::X;
+    project
+        .set_column_meta(column, meta)
+        .context("rôle X de la démonstration")?;
+    Ok(())
+}
+
 /// Projet de démonstration.
 ///
 /// Il est construit pour que les cas tordus du modèle soient visibles dès
@@ -167,7 +183,7 @@ fn demo_project() -> anyhow::Result<Project> {
         .child_by_name(book, "Sheet1")
         .context("lecture de Book1")?
         .context("Sheet1 créée avec le classeur")?;
-    project
+    let a1 = project
         .add_column(
             sheet1,
             None,
@@ -175,6 +191,7 @@ fn demo_project() -> anyhow::Result<Project> {
             Column::from_f64(&[0.0, 0.5, 1.0, 1.5, 2.0]),
         )
         .context("colonne A de Sheet1")?;
+    set_x_role(&mut project, a1)?;
     project
         .add_column(
             sheet1,
@@ -227,6 +244,7 @@ fn demo_project() -> anyhow::Result<Project> {
     let x = project
         .add_column(spectre, None, None, Column::from_f64(&xs))
         .context("colonne A de Spectre")?;
+    set_x_role(&mut project, x)?;
     let y = project
         .add_column(spectre, None, None, Column::from_f64(&ys))
         .context("colonne B de Spectre")?;
@@ -366,7 +384,7 @@ mod startup_tests {
     #[test]
     fn le_demarrage_restaure_les_geometries_du_fichier() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("geometries.stokesforge");
+        let path = directory.path().join("geometries.stf");
         let mut project = Project::new("Disposition sauvegardée").unwrap();
         let book = project.add_workbook(project.root(), None).unwrap();
         let geometry = WindowGeometry {

@@ -187,6 +187,8 @@ action-clear = Clear
 action-remove-formula-keep-data = Remove Formula, Keep Data
     .hint = Removes the formula and keeps the calculated values as ordinary data
     .disabled = Select a column that has a formula
+action-delete-columns = Delete
+    .hint = Removes the selected columns from the sheet. Undo brings them back with their values
 action-delete-shift-up = Delete and Shift Up
     .hint = Deletes now and shifts cells up. The Del key first clears, then deletes
 
@@ -479,6 +481,7 @@ history-macro-set-columns-type = Change Column Types
 history-macro-set-columns-role = Change Column Roles
 history-macro-analysis-to-graph = Analyze and Plot
 history-macro-remove-formula = Remove Formula
+history-macro-delete-columns = Delete Columns
 
 ## Undo and Redo
 

@@ -575,7 +575,7 @@ fn la_garde_voit_les_titres_et_noms_de_filtres_des_boites_de_fichier() {
             1,
         ),
         (
-            r#"fn ouvrir() { dialog.add_filter("Projet StokesForge", &["stf", "stokesforge"]); }"#,
+            r#"fn ouvrir() { dialog.add_filter("Projet StokesForge", &["stf"]); }"#,
             1,
         ),
         (
@@ -605,7 +605,7 @@ fn la_garde_voit_les_titres_et_noms_de_filtres_des_boites_de_fichier() {
 fn la_garde_des_filtres_accepte_les_traductions_et_les_formats_techniques() {
     for code in [
         r#"fn ouvrir() { dialog.set_title(tr!("project-open-title")); }"#,
-        r#"fn ouvrir() { dialog.add_filter(tr!("project-file-filter"), &["stf", "stokesforge"]); }"#,
+        r#"fn ouvrir() { dialog.add_filter(tr!("project-file-filter"), &["stf"]); }"#,
         r#"fn ouvrir() { dialog.add_filter(tr!("filter", count = f(a, b)), &["stf"]); }"#,
         r#"fn exporter() { dialog.add_filter("SVG", &["svg"]).add_filter("PDF", &["pdf"]).add_filter("PNG", &["png"]); }"#,
     ] {

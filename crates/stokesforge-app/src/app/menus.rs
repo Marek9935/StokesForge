@@ -836,7 +836,7 @@ mod tests {
             .add_graph(root, None, PlotSpec::empty("Figure").with_panels(panel))
             .unwrap();
         let session = Session::spawn(project, None).unwrap();
-        let state = AppState::new(session.handle(), "test.stokesforge".into()).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".into()).unwrap();
         (session, StokesForgeApp::new(state), graph)
     }
 

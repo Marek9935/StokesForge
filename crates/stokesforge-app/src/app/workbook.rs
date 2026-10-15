@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn un_classeur_coupe_par_le_bas_de_la_vue_ne_dessine_rien_dessous() {
         let (session, book) = classeur(2, 2);
-        let mut state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
         let id = egui::Id::new("classeur_coupe");
@@ -452,7 +452,7 @@ mod tests {
         events: Vec<egui::Event>,
     ) -> (egui::Rect, Vec<(egui::Rect, egui::Rect)>) {
         let (session, book) = classeur(colonnes, 200);
-        let mut state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let context = egui::Context::default();
         context.set_fonts(stokesforge_render_egui::font_definitions());
         theme::install(&context);
@@ -601,8 +601,7 @@ mod tests {
             (true, tr!("workbook-worksheet-add")),
         ] {
             let context = egui::Context::default();
-            let mut state =
-                AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+            let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
             let mut actions = Vec::new();
             {
                 let mut paint = |events: Vec<egui::Event>| {
@@ -732,7 +731,7 @@ mod tests {
                 .unwrap();
         }
         let session = Session::spawn(project, None).unwrap();
-        let mut state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+        let mut state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let noms: Vec<String> = state
             .worksheets_of(book)
             .into_iter()
@@ -793,7 +792,7 @@ mod tests {
             }
             let sheet = sheets[0];
             let session = Session::spawn(project, None).unwrap();
-            let state = AppState::new(session.handle(), "test.stokesforge".to_string()).unwrap();
+            let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
             let context = egui::Context::default();
             context.set_fonts(stokesforge_render_egui::font_definitions());
             let mut actions = Vec::new();

@@ -84,11 +84,13 @@ pub enum MacroKind {
     AnalysisToGraph,
     /// Retirer la formule d'une colonne, avec ou sans ses valeurs (#236).
     RemoveFormula,
+    /// Supprimer plusieurs colonnes entières d'une feuille.
+    DeleteColumns,
 }
 
 impl MacroKind {
     /// Toutes les natures de groupe, pour les tests exhaustifs.
-    pub const ALL: [MacroKind; 17] = [
+    pub const ALL: [MacroKind; 18] = [
         MacroKind::PasteCells,
         MacroKind::PasteObjects,
         MacroKind::DuplicateObjects,
@@ -106,6 +108,7 @@ impl MacroKind {
         MacroKind::SetColumnsRole,
         MacroKind::AnalysisToGraph,
         MacroKind::RemoveFormula,
+        MacroKind::DeleteColumns,
     ];
 }
 
@@ -312,6 +315,7 @@ impl fmt::Display for MacroKind {
             MacroKind::SetColumnsRole => "Change Column Roles",
             MacroKind::AnalysisToGraph => "Analyze and Plot",
             MacroKind::RemoveFormula => "Remove Formula",
+            MacroKind::DeleteColumns => "Delete Columns",
         })
     }
 }

@@ -104,11 +104,8 @@ mod tests {
             )
             .unwrap();
         let session = Session::spawn(project, None).unwrap();
-        let mut state = AppState::new(
-            session.handle(),
-            dir.join("p.stokesforge").display().to_string(),
-        )
-        .unwrap();
+        let mut state =
+            AppState::new(session.handle(), dir.join("p.stf").display().to_string()).unwrap();
         state.dispatch(Action::PlotColumns {
             sheet,
             columns: vec![x, y],

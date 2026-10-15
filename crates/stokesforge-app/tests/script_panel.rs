@@ -98,7 +98,7 @@ fn start() -> (Session, AppState, NodeId) {
     let session = Session::spawn(project, None).expect("thread de session");
     let mut state = AppState::new_with_preferences(
         session.handle(),
-        "script-test.stokesforge".to_string(),
+        "script-test.stf".to_string(),
         stokesforge_app::preferences::Preferences::load_from(None),
     )
     .expect("état applicatif initial");

@@ -18,7 +18,7 @@ partiel ni différé.
 La session utilise les variantes `save_with_geometries` et
 `load_with_geometries`, qui transportent aussi une table
 `NodeId -> WindowGeometry` (position et taille en points logiques). Ce bloc
-`window_geometries` appartient au même fichier `.stf` ou `.stokesforge`, mais reste
+`window_geometries` appartient au même fichier `.stf`, mais reste
 séparé de l'arbre annulable. Un ancien fichier sans ce bloc se charge avec
 une table vide. L'application transmet les changements de géométrie à
 l'acteur et recharge cette table aussi bien depuis le menu Fichier qu'au

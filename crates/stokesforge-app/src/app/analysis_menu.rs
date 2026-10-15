@@ -503,7 +503,7 @@ mod tests {
         let state = |preferences: &crate::preferences::Preferences| {
             AppState::new_with_preferences(
                 session.handle(),
-                "test.stokesforge".to_string(),
+                "test.stf".to_string(),
                 preferences.clone(),
             )
             .unwrap()
