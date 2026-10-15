@@ -89,6 +89,32 @@ pub mod shapes;
 pub mod subpixel;
 pub mod text;
 
+use stokesforge_core::NodeId;
+
+/// Ce qui peut rater à l'affichage d'un graphe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RenderError {
+    /// Le nœud demandé n'existe pas dans l'instantané.
+    UnknownNode(NodeId),
+    /// Le nœud existe mais n'est pas un graphe.
+    NotAGraph(NodeId),
+    /// Plotters a refusé de tracer. Le message est celui de Plotters : le
+    /// reformuler perdrait la seule information utile.
+    Drawing(String),
+}
+
+impl std::fmt::Display for RenderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownNode(id) => write!(f, "no node {id:?} in this snapshot"),
+            Self::NotAGraph(id) => write!(f, "node {id:?} is not a graph"),
+            Self::Drawing(message) => write!(f, "drawing failed: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for RenderError {}
+
 pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};

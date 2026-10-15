@@ -26,6 +26,7 @@ stokesforge-importer = { path = "../stokesforge-importer" }
 stokesforge-session = { path = "../stokesforge-session" }
 stokesforge-persistence = { path = "../stokesforge-persistence" }
 stokesforge-plot = { path = "../stokesforge-plot" }
+stokesforge-render = { path = "../stokesforge-render" }
 stokesforge-render-egui = { path = "../stokesforge-render-egui" }
 # Export du graphe en SVG, PDF ou PNG (issue #34) : le même pipeline que
 # l'écran, texte Typst compris. Aucune commande : l'export ne touche pas le

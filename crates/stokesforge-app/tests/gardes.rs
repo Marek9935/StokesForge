@@ -33,7 +33,10 @@
 //!   est une constante de `app/shortcuts.rs`, jamais un `consume_key` ni un
 //!   `KeyboardShortcut::new` écrit ailleurs, sans dérogation ;
 //! - `aucun_curseur_hors_du_module_des_curseurs` (#231, X2) : un
-//!   `CursorIcon::…` ne s'écrit que dans `app/cursors.rs`, sans dérogation.
+//!   `CursorIcon::…` ne s'écrit que dans `app/cursors.rs`, sans dérogation ;
+//! - `aucun_module_d_etat_ne_nomme_egui` (#255) : une liste fermée de modules
+//!   d'état (`state.rs`, `selection.rs`, `errors.rs`…) ne nomme ni `egui`, ni
+//!   `eframe`, ni `stokesforge_render_egui`.
 //!
 //! Chaque garde a son **témoin** : le motif interdit, posé dans un autre
 //! fichier qu'`app.rs`, est bien refusé — sans lui, une garde qui ne voit rien
@@ -1386,6 +1389,112 @@ fn la_garde_des_curseurs_voit_un_curseur_ecrit_sur_place() {
         "const R: egui::CursorIcon = egui::CursorIcon::ResizeNorth;"
     )])
     .is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Modules sans egui (#255, chantier #254)
+// ---------------------------------------------------------------------------
+
+/// Les modules d'état et de logique de l'application, qui ne nomment aucun
+/// type d'egui : liste **fermée**, on y ajoute un module, on n'en retire pas
+/// sans décision (`docs/application.md`, « Deux modules, une ligne de partage »).
+const MODULES_SANS_EGUI: &[&str] = &[
+    "state.rs",
+    "state/analysis.rs",
+    "analysis.rs",
+    "analysis_recent.rs",
+    "selection.rs",
+    "object_manager.rs",
+    "object_drag.rs",
+    "preferences.rs",
+    "history_text.rs",
+    "quantities.rs",
+    "user_colors.rs",
+    "object_format.rs",
+    "text_format.rs",
+    "i18n.rs",
+    "i18n/pseudo.rs",
+    "file_picker.rs",
+    "errors.rs",
+];
+
+/// Les identifiants de crate d'egui nommés dans le code de production des
+/// modules de `fermes`, `chemin:ligne`. Un module de la liste absent des
+/// sources est lui aussi une faute (fichier renommé : la garde ne le verrait
+/// plus).
+fn egui_dans_les_modules_fermes(sources: &[Fichier], fermes: &[&str]) -> Vec<String> {
+    let mut trouves = Vec::new();
+    for chemin in fermes {
+        let Some(fichier) = sources.iter().find(|f| f.chemin == *chemin) else {
+            trouves.push(format!("src/{chemin}: introuvable"));
+            continue;
+        };
+        let source = fichier.production();
+        for i in 0..source.masque.len() {
+            if i > 0 && est_ident(source.masque[i - 1]) {
+                continue;
+            }
+            let mot = ident_en(&source.masque, i);
+            if mot == "egui" || mot == "eframe" || mot == "stokesforge_render_egui" {
+                trouves.push(format!(
+                    "src/{}:{}",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    trouves
+}
+
+/// Règle #255 : un module d'état ne nomme ni `egui`, ni `eframe`, ni
+/// `stokesforge_render_egui`. Un type d'egui y entre par une surface
+/// (`app/`), jamais par l'état.
+#[test]
+fn aucun_module_d_etat_ne_nomme_egui() {
+    let sources = sources::sources();
+    let fautifs = egui_dans_les_modules_fermes(&sources, MODULES_SANS_EGUI);
+    assert!(
+        fautifs.is_empty(),
+        "ces modules sont sans egui (liste fermée de `tests/gardes.rs`) ; le type d'egui \
+         vit dans une surface (`app/`) : {fautifs:?}"
+    );
+}
+
+/// Le témoin : `egui::`, `eframe::` et `stokesforge_render_egui::` écrits dans
+/// un module de la liste sont vus ; un commentaire, une chaîne, un identifiant
+/// voisin (`egui_extras`-like, `my_egui`) et le code de test passent ; un
+/// module absent est une faute.
+#[test]
+fn la_garde_sans_egui_voit_un_type_d_egui() {
+    for code in [
+        "use egui::Pos2;",
+        "fn f(p: egui::Pos2) {}",
+        "use eframe::App;",
+        "use stokesforge_render_egui::RenderError;",
+    ] {
+        assert_eq!(
+            egui_dans_les_modules_fermes(&[fichier("selection.rs", code)], &["selection.rs"]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    for code in [
+        "fn f() {} // egui::Pos2",
+        "fn f() { let _ = \"egui\"; }",
+        "fn f(my_egui: u8) {}",
+        "fn f() {}\n#[cfg(test)]\nmod tests { use egui::Pos2; }",
+    ] {
+        assert!(
+            egui_dans_les_modules_fermes(&[fichier("selection.rs", code)], &["selection.rs"])
+                .is_empty(),
+            "faux positif : {code}"
+        );
+    }
+    assert_eq!(
+        egui_dans_les_modules_fermes(&[], &["selection.rs"]).len(),
+        1
+    );
 }
 
 /// Règle #227 (`docs/standard-interface.md`, § Choix, disposition, L4) : deux

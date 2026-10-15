@@ -1172,6 +1172,13 @@ X11 (Xwayland), pas en Wayland natif, et n'ouvre pas le sélecteur `rfd`.
 | `state` | **toute la logique**, sans egui, pilotée par un enum d'`Action` | oui (`tests/shell.rs`) |
 | `app` | la glu `eframe` : traduit clavier et souris en actions, peint l'état | non |
 
+La ligne est gardée (#255) : `aucun_module_d_etat_ne_nomme_egui`
+(`tests/gardes.rs`) refuse `egui`, `eframe` et `stokesforge_render_egui` dans le
+code de production d'une liste fermée de modules d'état (`state.rs`,
+`selection.rs`, `object_manager.rs`, `errors.rs`…). Un type d'egui entre par
+`app/`, jamais par ces modules. `RenderError` vit dans `stokesforge-render`
+(réexportée par `stokesforge-render-egui`) pour que `errors.rs` y reste.
+
 Une fenêtre ne se teste pas en intégration continue. C'est toute la raison du
 découpage : **rien de ce que contient `app` n'est une décision de produit**.
 

@@ -25,6 +25,11 @@ Les deux backends ne diffèrent que par **la façon de poser des pixels**. Types
 de série, échelles, primitives, rognage, légende, décimation, interaction,
 formules : tout est dans `stokesforge-render`.
 
+`RenderError` (nœud inconnu, pas un graphe, échec de Plotters) vit dans
+`stokesforge-render` (#255) ; `stokesforge-render-egui` la réexporte. Ne pas la
+redéfinir côté backend : `errors.rs` de l'app, module « sans egui », la lit
+sans passer par `stokesforge-render-egui`.
+
 ## Piège 1 — la mesure de texte (invariant 4)
 
 `plotters` est pris **sans ses fonts** (`default-features = false`). Deux

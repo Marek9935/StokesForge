@@ -5147,6 +5147,7 @@ dependencies = [
  "stokesforge-persistence",
  "stokesforge-plot",
  "stokesforge-python",
+ "stokesforge-render",
  "stokesforge-render-egui",
  "stokesforge-render-svg",
  "stokesforge-script",

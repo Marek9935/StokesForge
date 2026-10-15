@@ -763,9 +763,9 @@ pub mod analysis {
     }
 }
 
-/// Erreurs d'affichage d'un graphe à l'écran (`stokesforge-render-egui`).
+/// Erreurs d'affichage d'un graphe (`stokesforge-render`, #255).
 pub mod render {
-    use stokesforge_render_egui::RenderError;
+    use stokesforge_render::RenderError;
 
     use crate::tr;
 

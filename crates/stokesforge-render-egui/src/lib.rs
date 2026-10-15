@@ -95,7 +95,9 @@ use stokesforge_core::{NodeId, Tree};
 use stokesforge_plot::{PlotSpec, SeriesAxis};
 use stokesforge_render::formula::FormulaCache;
 use stokesforge_render::pipeline::{self};
+// Descendue dans `stokesforge-render` (#255) : `errors.rs` de l'app la lit sans egui.
 use stokesforge_render::series;
+pub use stokesforge_render::RenderError;
 use stokesforge_session::Revision;
 use stokesforge_session::Snapshot;
 
@@ -300,30 +302,6 @@ const WIDTH_HANDLE_RADIUS: f32 = 7.0;
 /// Distance maximale, en pixels, à laquelle un point est encore « désigné »
 /// par le curseur (tâche R7.2). Au-delà, personne n'est sous la souris.
 pub const HIT_RADIUS: f32 = 12.0;
-
-/// Ce qui peut rater à l'affichage d'un graphe.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RenderError {
-    /// Le nœud demandé n'existe pas dans l'instantané.
-    UnknownNode(NodeId),
-    /// Le nœud existe mais n'est pas un graphe.
-    NotAGraph(NodeId),
-    /// Plotters a refusé de tracer. Le message est celui de Plotters : le
-    /// reformuler perdrait la seule information utile.
-    Drawing(String),
-}
-
-impl std::fmt::Display for RenderError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnknownNode(id) => write!(f, "no node {id:?} in this snapshot"),
-            Self::NotAGraph(id) => write!(f, "node {id:?} is not a graph"),
-            Self::Drawing(message) => write!(f, "drawing failed: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for RenderError {}
 
 /// La source de texte de l'écran : dessin par le `Context`, mesure hors
 /// écran.
