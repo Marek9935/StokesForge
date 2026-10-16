@@ -32,10 +32,13 @@
 //! affichage (`eframe::Frame`). Aucune commande, aucune entrée d'historique.
 
 use eframe::egui;
+use stokesforge_clipboard::{mime, ClipboardError, Representation};
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_render_egui::GraphView;
+use stokesforge_render_svg::ExportFormat;
 
 use crate::state::Action;
+use crate::tr;
 
 use super::grid::keyboard_focus_outside_grid;
 use super::object_manager_ui::selected_manager_target;
@@ -128,11 +131,42 @@ impl StokesForgeApp {
     /// Offre au système les représentations que [`Action::CopyGraphFigure`]
     /// vient de préparer. Un refus remplace le message « copié » par sa cause.
     pub(super) fn offer_figure(&mut self, frame: &eframe::Frame) {
-        let Some(representations) = self.state.take_figure_clipboard() else {
+        let Some(figures) = self.state.take_figure_clipboard() else {
             return;
         };
+        let representations: Vec<Representation> = figures
+            .into_iter()
+            .map(|figure| Representation::new(mime_of(figure.format), figure.bytes))
+            .collect();
         if let Err(error) = stokesforge_clipboard::offer(frame, &representations) {
-            self.state.figure_clipboard_failed(&error);
+            self.state
+                .figure_clipboard_failed(clipboard_error_message(&error));
+        }
+    }
+}
+
+/// Le type MIME sous lequel la figure d'un format d'export est offerte. Un
+/// `match` exhaustif, sans `_` : un format nouveau ne compile pas tant qu'il
+/// n'a pas son type.
+fn mime_of(format: ExportFormat) -> &'static str {
+    match format {
+        ExportFormat::Svg { .. } => mime::SVG,
+        ExportFormat::Png { .. } => mime::PNG,
+        ExportFormat::Pdf => mime::PDF,
+    }
+}
+
+/// La phrase d'une [`ClipboardError`] : les erreurs de l'offre multi-format au
+/// presse-papiers système (#149), mises en phrase ici parce que
+/// `stokesforge-clipboard` (et son winit) reste dans l'application.
+pub(super) fn clipboard_error_message(error: &ClipboardError) -> String {
+    match error {
+        ClipboardError::Empty => tr!("error-clipboard-empty"),
+        ClipboardError::Unsupported(display) => {
+            tr!("error-clipboard-unsupported", display = display.to_string())
+        }
+        ClipboardError::Backend(detail) => {
+            tr!("error-clipboard-backend", detail = detail.as_str())
         }
     }
 }
@@ -142,8 +176,51 @@ mod tests {
     use super::super::graph_window::{graph_view_contents, tests::graphe};
     use super::super::test_support::{cliquer, contexte, image, image_de};
     use super::*;
+    use crate::errors::tests_support::check;
     use crate::state::AppState;
     use stokesforge_session::Session;
+
+    /// Chaque format d'export offert a son type MIME, distinct des autres
+    /// (témoin : deux formats qui partageraient un type seraient indiscernables
+    /// pour l'application destinataire).
+    #[test]
+    fn chaque_format_de_la_figure_a_son_type_mime() {
+        use stokesforge_render_svg::SvgTextMode;
+        let svg = ExportFormat::Svg {
+            text: SvgTextMode::Text,
+        };
+        let png = ExportFormat::Png { scale: 2.0 };
+        assert_eq!(mime_of(svg), "image/svg+xml");
+        assert_eq!(mime_of(png), "image/png");
+        assert_eq!(mime_of(ExportFormat::Pdf), "application/pdf");
+        // L'échelle du PNG ne change pas son type.
+        assert_eq!(mime_of(png), mime_of(ExportFormat::Png { scale: 1.0 }));
+    }
+
+    #[test]
+    fn chaque_erreur_du_presse_papiers_a_sa_phrase() {
+        let samples = [
+            ClipboardError::Empty,
+            ClipboardError::Unsupported("Wayland"),
+            ClipboardError::Backend("selection refused".into()),
+        ];
+        let mut seen = [false; 3];
+        for sample in &samples {
+            let index = match sample {
+                ClipboardError::Empty => 0,
+                ClipboardError::Unsupported(_) => 1,
+                ClipboardError::Backend(_) => 2,
+            };
+            seen[index] = true;
+            check(sample, &clipboard_error_message(sample));
+        }
+        assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+        // Le détail et l'affichage sont repris tels quels dans la phrase.
+        let phrase = clipboard_error_message(&ClipboardError::Backend("selection refused".into()));
+        assert!(phrase.contains("selection refused"), "{phrase}");
+        let phrase = clipboard_error_message(&ClipboardError::Unsupported("Wayland"));
+        assert!(phrase.contains("Wayland"), "{phrase}");
+    }
 
     /// Une application dont le graphique est au premier plan, et sa vue déjà
     /// créée (une vue naît à la première peinture de la fenêtre).

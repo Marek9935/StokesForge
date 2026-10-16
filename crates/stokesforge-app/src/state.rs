@@ -1008,6 +1008,17 @@ pub const INFO_LIFETIME: std::time::Duration = std::time::Duration::from_secs(8)
 /// Nombre de messages gardés pour l'historique de la barre d'état (M6).
 pub const STATUS_HISTORY_LEN: usize = 50;
 
+/// Une forme de la figure copiée (#149) : ses octets et le format d'export qui
+/// les a produits. Neutre vis-à-vis du système : le type MIME et l'offre au
+/// presse-papiers sont l'affaire de la fenêtre (`app/figure_copy.rs`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FigureBytes {
+    /// Le format d'export qui a produit `bytes`.
+    pub format: stokesforge_render_svg::ExportFormat,
+    /// Le contenu.
+    pub bytes: Vec<u8>,
+}
+
 /// Un message à afficher à l'utilisateur, avec sa gravité et son heure.
 ///
 /// Le niveau sépare trois choses que Qt distinguait par le grisage d'une
@@ -2391,7 +2402,7 @@ pub struct AppState {
     object_clipboard_output: Option<String>,
     /// Les représentations de la figure à offrir au système, préparées par
     /// [`Action::CopyGraphFigure`] et relevées par la fenêtre (#149).
-    figure_clipboard: Option<Vec<stokesforge_clipboard::Representation>>,
+    figure_clipboard: Option<Vec<FigureBytes>>,
     copied_objects: Vec<(NodeId, NodeId, bool)>,
     /// Agrandissement des exports PNG (issue #34), un de
     /// [`PNG_EXPORT_SCALES`]. Préférence de session, pas du projet.
@@ -6304,14 +6315,13 @@ impl AppState {
     /// message ; si aucun n'est prêt, rien n'est offert.
     fn copy_graph_figure(&mut self, spec: &PlotSpec) {
         use crate::preferences::CopyFormat;
-        use stokesforge_clipboard::{mime, Representation};
         use stokesforge_render_svg::ExportFormat;
 
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
         // L'ordre et le choix sont ceux de Preferences › Export : l'ordre des
         // représentations est celui où les applications les voient.
-        let wanted: Vec<(&str, &str, ExportFormat)> = self
+        let wanted: Vec<(&str, ExportFormat)> = self
             .copy_formats()
             .iter()
             .filter(|entry| entry.on)
@@ -6319,22 +6329,20 @@ impl AppState {
                 // Le presse-papiers prend toujours le défaut, texte SVG (#162).
                 CopyFormat::Svg => (
                     "SVG",
-                    mime::SVG,
                     ExportFormat::Svg {
                         text: stokesforge_render_svg::SvgTextMode::Text,
                     },
                 ),
                 CopyFormat::Png => (
                     "PNG",
-                    mime::PNG,
                     ExportFormat::Png {
                         scale: self.png_export_scale,
                     },
                 ),
-                CopyFormat::Pdf => ("PDF", mime::PDF, ExportFormat::Pdf),
+                CopyFormat::Pdf => ("PDF", ExportFormat::Pdf),
             })
             .collect();
-        let formats: Vec<ExportFormat> = wanted.iter().map(|(_, _, format)| *format).collect();
+        let formats: Vec<ExportFormat> = wanted.iter().map(|(_, format)| *format).collect();
         let results = match stokesforge_render_svg::export_bytes_many(
             &plot,
             stokesforge_render_svg::DEFAULT_SIZE,
@@ -6348,14 +6356,17 @@ impl AppState {
                 return;
             }
         };
-        let mut representations = Vec::new();
+        let mut figures = Vec::new();
         let mut offered = Vec::new();
         let mut missing = Vec::new();
         let mut first_error = None;
-        for ((name, mime, _), result) in wanted.iter().zip(results) {
+        for ((name, format), result) in wanted.iter().zip(results) {
             match result {
                 Ok(bytes) => {
-                    representations.push(Representation::new(mime, bytes));
+                    figures.push(FigureBytes {
+                        format: *format,
+                        bytes,
+                    });
                     offered.push(*name);
                 }
                 Err(err) => {
@@ -6364,11 +6375,11 @@ impl AppState {
                 }
             }
         }
-        if let Some(err) = first_error.filter(|_| representations.is_empty()) {
+        if let Some(err) = first_error.filter(|_| figures.is_empty()) {
             self.fail(errors::export::error_message(&err));
             return;
         }
-        self.figure_clipboard = Some(representations);
+        self.figure_clipboard = Some(figures);
         let text = if missing.is_empty() {
             tr!("status-graph-copied", formats = offered.join(", "))
         } else {
@@ -6381,17 +6392,20 @@ impl AppState {
         self.notice(text);
     }
 
-    /// Les représentations de la figure que [`Action::CopyGraphFigure`] vient de
+    /// Les formes de la figure que [`Action::CopyGraphFigure`] vient de
     /// préparer, à offrir au presse-papiers système par la fenêtre qui a reçu
-    /// le geste ; relevées une seule fois.
-    pub fn take_figure_clipboard(&mut self) -> Option<Vec<stokesforge_clipboard::Representation>> {
+    /// le geste ; relevées une seule fois. Des octets étiquetés par leur
+    /// [`ExportFormat`](stokesforge_render_svg::ExportFormat) : le type MIME et
+    /// l'offre au système sont l'affaire de la fenêtre (`figure_copy.rs`), qui
+    /// seule connaît `stokesforge-clipboard`.
+    pub fn take_figure_clipboard(&mut self) -> Option<Vec<FigureBytes>> {
         self.figure_clipboard.take()
     }
 
     /// Le système a refusé l'offre de la figure : le message « copié » cède la
-    /// place à la cause.
-    pub fn figure_clipboard_failed(&mut self, error: &stokesforge_clipboard::ClipboardError) {
-        self.fail(errors::clipboard::error_message(error));
+    /// place à la cause, que la fenêtre a déjà mise en phrase.
+    pub fn figure_clipboard_failed(&mut self, message: String) {
+        self.fail(message);
     }
 
     /// Recharge le fichier courant. Un échec de lecture est un échec grave

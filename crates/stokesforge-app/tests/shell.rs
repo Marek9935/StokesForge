@@ -9999,7 +9999,7 @@ fn deleting_a_sheet_needs_no_confirmation_and_keeps_the_last_sheet() {
 /// exports, et la représentation n'est relevée qu'une fois.
 #[test]
 fn copier_la_figure_prepare_svg_png_pdf_sans_toucher_au_modele() {
-    use stokesforge_clipboard::mime;
+    use stokesforge_render_svg::ExportFormat;
     let dir = tempfile::tempdir().expect("dossier temporaire");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     let avant = (graph_spec(&state, graph), state.snapshot().revision);
@@ -10015,10 +10015,14 @@ fn copier_la_figure_prepare_svg_png_pdf_sans_toucher_au_modele() {
         stokesforge_app::tr!("status-graph-copied", formats = "SVG, PNG, PDF")
     );
     let reps = state.take_figure_clipboard().expect("la figure est prête");
-    assert_eq!(
-        reps.iter().map(|r| r.mime).collect::<Vec<_>>(),
-        [mime::SVG, mime::PNG, mime::PDF]
-    );
+    assert!(matches!(
+        reps.iter().map(|r| r.format).collect::<Vec<_>>()[..],
+        [
+            ExportFormat::Svg { .. },
+            ExportFormat::Png { .. },
+            ExportFormat::Pdf
+        ]
+    ));
     assert!(String::from_utf8_lossy(&reps[0].bytes).contains("<svg"));
     assert!(reps[1].bytes.starts_with(b"\x89PNG"));
     // Témoin du réglage : le PNG est à l'échelle 2 (480 × 2).
@@ -10049,7 +10053,7 @@ fn copier_la_figure_prepare_svg_png_pdf_sans_toucher_au_modele() {
 #[test]
 fn copier_la_figure_suit_l_ordre_et_le_choix_des_preferences() {
     use stokesforge_app::preferences::{CopyFormat, CopyFormatEntry};
-    use stokesforge_clipboard::mime;
+    use stokesforge_render_svg::ExportFormat;
     let dir = tempfile::tempdir().expect("dossier temporaire");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     state.dispatch(Action::SetCopyFormats(vec![
@@ -10076,10 +10080,10 @@ fn copier_la_figure_suit_l_ordre_et_le_choix_des_preferences() {
         stokesforge_app::tr!("status-graph-copied", formats = "PDF, PNG")
     );
     let reps = state.take_figure_clipboard().expect("la figure est prête");
-    assert_eq!(
-        reps.iter().map(|r| r.mime).collect::<Vec<_>>(),
-        [mime::PDF, mime::PNG]
-    );
+    assert!(matches!(
+        reps.iter().map(|r| r.format).collect::<Vec<_>>()[..],
+        [ExportFormat::Pdf, ExportFormat::Png { .. }]
+    ));
 }
 
 /// La figure copiée est celle du spec cadré qu'on donne : un zoom change les
@@ -10106,25 +10110,23 @@ fn copier_la_figure_zoomee_copie_ce_qu_on_voit() {
     assert_ne!(svg(&mut state, &zoome), svg(&mut state, &entier));
 }
 
-/// Un refus du système remplace le message « copié » par sa cause, en phrase
-/// du catalogue et pas en `Display` brut.
+/// Un refus du système remplace le message « copié » par sa cause. La phrase
+/// est mise par la fenêtre (`clipboard_error_message`, testée dans
+/// `app/figure_copy.rs`) ; l'état la montre telle quelle, en erreur.
 #[test]
-fn un_refus_du_presse_papiers_est_dit_en_phrase() {
+fn un_refus_du_presse_papiers_remplace_le_message_copie() {
     let dir = tempfile::tempdir().expect("dossier temporaire");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
     state.dispatch(Action::CopyGraphFigure {
         spec: Box::new(graph_spec(&state, graph)),
     });
     assert!(!state.status().expect("message").is_error());
-    state.figure_clipboard_failed(&stokesforge_clipboard::ClipboardError::Backend(
-        "selection refused".into(),
-    ));
+    // La phrase vient de la fenêtre (`clipboard_error_message`, testée dans
+    // `app/figure_copy.rs`) : l'état ne fait que l'afficher en erreur.
+    state.figure_clipboard_failed("Could not copy the graph: selection refused".into());
     let status = state.status().expect("message");
     assert!(status.is_error());
-    assert_eq!(
-        status.text,
-        stokesforge_app::tr!("error-clipboard-backend", detail = "selection refused")
-    );
+    assert_eq!(status.text, "Could not copy the graph: selection refused");
 }
 
 /// #153 : un redimensionnement passe par la même action que l'insertion ;
