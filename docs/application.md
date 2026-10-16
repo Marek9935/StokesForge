@@ -44,7 +44,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/analysis_dialog.rs` | fenêtre d'analyse (`modal_dialog_with`, deux colonnes : formulaire + aperçu) et confirmation de suppression d'un calcul (`calculation_delete_window`) |
 | `app/analysis_forms.rs` | les formulaires par famille (`form_body`, `value_row`, tableau des paramètres) |
 | `app/analysis_handles.rs` | poignées déplaçables d'un calcul sur le graphe du projet (#199) : visibles quand le calcul est sélectionné (sa courbe, ou sa ligne du volet Results), un glisser = un `MoveCalculationHandle` |
-| `app/analysis_preview.rs` | l'aperçu peint à la main : outils Points / Zone / Zoom, aimant (Maj), moyenne (Maj + molette), bande des résidus, cache en mémoire temporaire d'egui |
+| `app/analysis_preview.rs` | l'aperçu peint à la main (la peinture seule) : outils Points / Zone / Zoom, aimant (Maj), moyenne (Maj + molette), bande des résidus, cache en mémoire temporaire d'egui ; sa géométrie et ses graduations viennent de `stokesforge-render` (#261) |
 | `app/results_pane.rs` | volet Results sous la grille d'un classeur : compteur, portée Feuille / Classeur, liste et tableau série × valeur |
 | `app/format.rs` | barres de format de texte et d'objet, barre contextuelle : `format_target`, `text_format_state`, `object_format_state`, `tools_context`, `format_zone`, `format_text`, `format_object`, `run_toolbar_request` (les barres elles-mêmes : `crate::toolbar`) |
 | `app/project_manager.rs` | Project Manager : `project_manager_panel` (panneau fixe) et l'arbre `project_manager_contents_from_tree`, commun au panneau et à la fenêtre détachée |
@@ -134,7 +134,17 @@ L'interface du traitement mathématique est répartie ainsi :
   et pousse un `UpdateCalculation` : **un pas d'historique par geste**, aucun
   si la poignée n'a pas bougé. Le nœud de l'Object Manager n'existe pas (un
   calcul n'est pas un nœud).
-- L'aperçu est peint à la main (pas de graphe du projet) et **calculé sur un fil
+- L'aperçu est peint à la main (pas de graphe du projet) mais **sa géométrie ne
+  lui appartient pas** (#261) : pixel ↔ données, zoom molette, rectangle de
+  zoom, cadre initial (marge de 5 %, bornes mémorisées, inversion), aimantation
+  sur la courbe et graduations viennent de `stokesforge-render`
+  (`PanelTransform::new`, `axis_frame`, `snap_to_curve`, `scale::axis_ticks`) ;
+  l'application construit une transformation par image (une seconde pour la
+  bande des résidus) et convertit en `Pos2`. Les graduations ont donc le pas et
+  le format de celles du graphe (point décimal, sans virgule), et suivent
+  l'échelle logarithmique et l'inversion de l'axe du graphe source. Un zoom ou
+  un rectangle sans image (borne logarithmique ≤ 0) garde le cadre. Il est
+  **calculé sur un fil
   de travail** (#201, `analysis_preview.rs`, `PreviewJobs`) : un seul fil à la
   fois, la demande la plus récente remplace celle qui attend, l'image attend
   40 ms au plus puis montre l'ancien résultat marqué « Calculating… » ; le fil

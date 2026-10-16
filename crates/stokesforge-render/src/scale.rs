@@ -145,6 +145,27 @@ impl TickFormat {
     }
 }
 
+/// Les graduations d'un axe, en espace de données, avec leur libellé : ce que
+/// le graphe pose, pour un appelant qui peint lui-même (l'aperçu de la fenêtre
+/// d'analyse, #261).
+///
+/// `range` est en espace de données, dans l'ordre d'affichage (un axe inversé
+/// se donne `(haut, bas)`). Le pas vient de [`linear_key_points`] avec
+/// [`label_count`] dans l'espace transformé, le format de [`TickFormat`] : le
+/// même chemin que le pipeline, donc les mêmes graduations qu'un graphe de
+/// même cadrage. Vide si une borne n'a pas d'image sur l'échelle ([`forward`]).
+pub fn axis_ticks(scale: AxisScale, range: (f64, f64), decimal_comma: bool) -> Vec<(f64, String)> {
+    let (Some(low), Some(high)) = (forward(scale, range.0), forward(scale, range.1)) else {
+        return Vec::new();
+    };
+    let transformed = (low, high);
+    let format = TickFormat::new(scale, transformed).with_decimal_comma(decimal_comma);
+    linear_key_points(transformed, label_count(scale, transformed))
+        .into_iter()
+        .map(|t| (inverse(scale, t), format.format(t)))
+        .collect()
+}
+
 /// Cadre un axe linéaire de calque superposé (#174) pour que ses graduations
 /// tombent **en face** de celles de l'axe du calque recouvert.
 ///
@@ -433,5 +454,57 @@ mod tests {
         // Une échelle log écrit aussi ses puissances décimales avec la virgule.
         let log = TickFormat::new(AxisScale::Log, (-2.0, 2.0)).with_decimal_comma(true);
         assert_eq!(log.format(-1.0), "0,1");
+    }
+
+    #[test]
+    fn les_graduations_d_un_axe_lineaire_sont_celles_du_pipeline() {
+        let range = (0.0, 10.0);
+        let ticks = axis_ticks(AxisScale::Linear, range, false);
+        let expected = linear_key_points(range, label_count(AxisScale::Linear, range));
+        assert!(expected.len() > 2, "{expected:?}");
+        assert_eq!(ticks.iter().map(|t| t.0).collect::<Vec<_>>(), expected);
+        assert_eq!(ticks.first().map(|t| t.1.as_str()), Some("0"));
+        assert_eq!(ticks.last().map(|t| t.1.as_str()), Some("10"));
+    }
+
+    #[test]
+    fn un_axe_inverse_a_les_memes_graduations() {
+        let sorted = |range| {
+            let mut values: Vec<f64> = axis_ticks(AxisScale::Linear, range, false)
+                .iter()
+                .map(|t| t.0)
+                .collect();
+            values.sort_by(f64::total_cmp);
+            values
+        };
+        let (forward_ticks, reversed_ticks) = (sorted((0.0, 10.0)), sorted((10.0, 0.0)));
+        assert!(forward_ticks.len() > 2);
+        assert_eq!(forward_ticks, reversed_ticks);
+    }
+
+    #[test]
+    fn les_graduations_logarithmiques_sont_les_decades() {
+        let ticks = axis_ticks(AxisScale::Log, (1.0, 1000.0), false);
+        let data: Vec<f64> = ticks.iter().map(|t| t.0.round()).collect();
+        assert_eq!(data, vec![1.0, 10.0, 100.0, 1000.0]);
+        let labels: Vec<&str> = ticks.iter().map(|t| t.1.as_str()).collect();
+        assert_eq!(labels, ["1", "10", "100", "1000"]);
+    }
+
+    #[test]
+    fn la_virgule_decimale_suit_le_reglage() {
+        let range = (0.0, 1.0);
+        let dotted = axis_ticks(AxisScale::Linear, range, false);
+        let comma = axis_ticks(AxisScale::Linear, range, true);
+        assert!(dotted.iter().any(|t| t.1 == "0.5"), "{dotted:?}");
+        assert!(comma.iter().any(|t| t.1 == "0,5"), "{comma:?}");
+        assert!(comma.iter().all(|t| !t.1.contains('.')), "{comma:?}");
+    }
+
+    #[test]
+    fn une_borne_sans_image_ne_donne_aucune_graduation() {
+        assert!(axis_ticks(AxisScale::Log, (0.0, 100.0), false).is_empty());
+        assert!(axis_ticks(AxisScale::Log, (-5.0, 100.0), false).is_empty());
+        assert!(axis_ticks(AxisScale::Linear, (0.0, f64::NAN), false).is_empty());
     }
 }

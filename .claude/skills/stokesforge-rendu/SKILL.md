@@ -104,6 +104,15 @@ Corollaire pratique : une traduction de donnée (une cellule mixte qui devient
 égui n'en garde que l'adaptateur `Pos2` ↔ `(f64, f64)` et la lecture des
 entrées.
 
+**Un écran qui se peint sans passer par `GraphView`** (l'aperçu de la fenêtre
+d'analyse, #261) garde sa **peinture** dans `stokesforge-app` (`rect_filled`,
+`Shape::line`, couleurs de `theme`) mais n'écrit **aucune géométrie** :
+pixel ↔ données, zoom, cadre initial, aimantation et graduations viennent de
+`stokesforge-render` (`PanelTransform::new`, `axis_frame`, `snap_to_curve`,
+`scale::axis_ticks`). Un nouvel écran de ce genre en suit la règle : l'app
+convertit en `Pos2` et dessine, `render` calcule. Jamais un second algorithme
+de pas ou de format de graduation (invariant 5).
+
 ## Ordre de tracé d'un panneau
 
 Il n'est pas arbitraire ; chaque étape dépend de ce que la précédente a appris :
@@ -143,6 +152,7 @@ forcément une sur un axe log.
 | `stokesforge-render-egui/tests/feathering.rs` | le feathering hors de la clé de cache |
 | `stokesforge-render-svg/tests/frontiere.rs` | l'export ne voit ni `egui`, ni `eframe`, ni `winit` — donc se teste sans serveur graphique |
 | `stokesforge-render/src/view.rs`, `src/interact.rs` (modules `tests`) | cadrage d'un geste (zoom, pan, échelle log, axe inversé, calques superposés, axe seul) et point le plus proche (#262), sans egui |
+| `stokesforge-render/src/{interact,scale}.rs` (modules `tests`) | géométrie de l'aperçu d'analyse (#261) : `PanelTransform::new`, cadre initial, `snap_to_curve`, `axis_ticks` |
 | `stokesforge-render/tests/geometrie.rs`, `stokesforge-render-svg/tests/calques.rs` | placement des calques superposés et de leurs axes en haut / à droite (#167) |
 
 Un test qui compare deux chemins peut passer parce que les deux sont justes —

@@ -36,7 +36,7 @@ use crate::scale::{forward, inverse};
 use crate::series;
 use stokesforge_core::resolve::resolve_panel;
 use stokesforge_core::Tree;
-use stokesforge_plot::{AxisScale, PlotSpec, SeriesAxis};
+use stokesforge_plot::{AxisScale, AxisSpec, PlotSpec, SeriesAxis};
 
 /// La correspondance pixel ↔ données d'un panneau déjà tracé.
 ///
@@ -73,8 +73,10 @@ pub enum Gesture {
 /// qu'à mettre en cache.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PanelTransform {
-    origin: (i32, i32),
-    size: (u32, u32),
+    // En `f64` : le rectangle d'un panneau d'interface est fractionnaire, et un
+    // arrondi à l'entier décalerait d'un demi-pixel tout ce qu'on y place.
+    origin: (f64, f64),
+    size: (f64, f64),
     x_range: (f64, f64),
     y_range: (f64, f64),
     x_scale: AxisScale,
@@ -91,12 +93,49 @@ impl PanelTransform {
             return None;
         }
         Some(Self {
-            origin: panel.pixel_origin,
-            size: panel.pixel_size,
+            origin: (
+                f64::from(panel.pixel_origin.0),
+                f64::from(panel.pixel_origin.1),
+            ),
+            size: (f64::from(panel.pixel_size.0), f64::from(panel.pixel_size.1)),
             x_range: panel.x_range,
             y_range: panel.y_range,
             x_scale: panel.x_scale,
             y_scale: panel.y_scale,
+        })
+    }
+
+    /// La transformation d'une zone de tracé qui ne vient pas d'un
+    /// [`DrawnPanel`] — l'aperçu de la fenêtre d'analyse (#261), peint par
+    /// l'application dans un rectangle fractionnaire. `origin` est le coin
+    /// haut-gauche et `size` la taille, en pixels ; `None` si la taille n'est
+    /// pas finie et strictement positive.
+    ///
+    /// Les bornes sont en espace de données **dans l'ordre d'affichage** : un
+    /// axe inversé se donne `(haut, bas)`, comme [`DrawnPanel::x_range`]. Sur
+    /// une échelle logarithmique elles doivent être strictement positives,
+    /// sinon [`Self::pixel_to_data`] et [`Self::data_to_pixel`] rendent `None`.
+    pub fn new(
+        origin: (f64, f64),
+        size: (f64, f64),
+        x_range: (f64, f64),
+        y_range: (f64, f64),
+        x_scale: AxisScale,
+        y_scale: AxisScale,
+    ) -> Option<Self> {
+        let valid = origin.0.is_finite()
+            && origin.1.is_finite()
+            && size.0.is_finite()
+            && size.1.is_finite()
+            && size.0 > 0.0
+            && size.1 > 0.0;
+        valid.then_some(Self {
+            origin,
+            size,
+            x_range,
+            y_range,
+            x_scale,
+            y_scale,
         })
     }
 
@@ -115,8 +154,7 @@ impl PanelTransform {
 
     /// Vrai si le pixel donné tombe dans la zone de tracé de ce panneau.
     pub fn contains(&self, x: f64, y: f64) -> bool {
-        let (ox, oy) = (self.origin.0 as f64, self.origin.1 as f64);
-        let (w, h) = (self.size.0 as f64, self.size.1 as f64);
+        let ((ox, oy), (w, h)) = (self.origin, self.size);
         (ox..=ox + w).contains(&x) && (oy..=oy + h).contains(&y)
     }
 
@@ -126,9 +164,9 @@ impl PanelTransform {
     /// (`pipeline::axis_range`), donc à laisser remonter plutôt qu'à
     /// paniquer.
     pub fn pixel_to_data(&self, x: f64, y: f64) -> Option<(f64, f64)> {
-        let fx = (x - self.origin.0 as f64) / self.size.0 as f64;
+        let fx = (x - self.origin.0) / self.size.0;
         // Le pixel croît vers le bas, la donnée vers le haut : `1.0 - fy`.
-        let fy = 1.0 - (y - self.origin.1 as f64) / self.size.1 as f64;
+        let fy = 1.0 - (y - self.origin.1) / self.size.1;
         let data_x = axis_from_frac(self.x_scale, self.x_range, fx)?;
         let data_y = axis_from_frac(self.y_scale, self.y_range, fy)?;
         Some((data_x, data_y))
@@ -139,8 +177,8 @@ impl PanelTransform {
     pub fn data_to_pixel(&self, x: f64, y: f64) -> Option<(f64, f64)> {
         let fx = axis_to_frac(self.x_scale, self.x_range, x)?;
         let fy = axis_to_frac(self.y_scale, self.y_range, y)?;
-        let px = self.origin.0 as f64 + fx * self.size.0 as f64;
-        let py = self.origin.1 as f64 + (1.0 - fy) * self.size.1 as f64;
+        let px = self.origin.0 + fx * self.size.0;
+        let py = self.origin.1 + (1.0 - fy) * self.size.1;
         Some((px, py))
     }
 
@@ -168,9 +206,9 @@ impl PanelTransform {
     /// était sous le curseur au début du geste reste sous le curseur à la
     /// fin (`tests::glisser_fait_suivre_le_contenu_au_curseur`).
     pub fn pan(&self, dx: f64, dy: f64) -> Option<((f64, f64), (f64, f64))> {
-        let fx = dx / self.size.0 as f64;
+        let fx = dx / self.size.0;
         // Le pixel Y est inversé par rapport à la donnée : le signe change.
-        let fy = -dy / self.size.1 as f64;
+        let fy = -dy / self.size.1;
         let x_range = pan_range(self.x_scale, self.x_range, fx)?;
         let y_range = pan_range(self.y_scale, self.y_range, fy)?;
         Some((x_range, y_range))
@@ -268,6 +306,82 @@ pub fn nearest_on_curve(
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(index, squared)| (index, squared.sqrt()))
+}
+
+/// Le cadrage automatique d'un axe sur `values`, en espace de données et dans
+/// le sens croissant.
+///
+/// Les valeurs sans image sur l'échelle ([`forward`] : non finies, ou ≤ 0 en
+/// logarithmique) sont ignorées. La marge de 5 % se prend dans l'espace
+/// **transformé** — donc en proportion sur un axe log —, un cadre d'étendue
+/// nulle s'élargit de 0,5 de chaque côté, et sans valeur le cadre est `(0, 1)`
+/// transformé (`(1, 10)` en log). C'est le cadre initial de l'aperçu de la
+/// fenêtre d'analyse (#261).
+pub fn fit_range(values: &[f64], scale: AxisScale) -> (f64, f64) {
+    let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
+    for t in values.iter().filter_map(|&value| forward(scale, value)) {
+        low = low.min(t);
+        high = high.max(t);
+    }
+    let (low, high) = if low > high {
+        (0.0, 1.0)
+    } else if low == high {
+        (low - 0.5, high + 0.5)
+    } else {
+        let margin = (high - low) * 0.05;
+        (low - margin, high + margin)
+    };
+    (inverse(scale, low), inverse(scale, high))
+}
+
+/// Le cadre initial d'un axe d'un graphe : [`fit_range`] sur `values`,
+/// remplacé par les bornes mémorisées de l'axe quand son cadrage n'est pas
+/// automatique, puis mis dans le sens d'affichage (`(haut, bas)` si l'axe est
+/// inversé). Un cadrage explicite déjà décroissant sur un axe inversé est donc
+/// remis dans le sens croissant — comportement de l'aperçu d'analyse repris tel
+/// quel, qui diffère de celui du graphe (`pipeline::axis_range`).
+pub fn axis_frame(values: &[f64], axis: &AxisSpec) -> (f64, f64) {
+    let mut range = fit_range(values, axis.scale);
+    if !axis.auto_range {
+        if let (Some(low), Some(high)) = (axis.range_min, axis.range_max) {
+            range = (low, high);
+        }
+    }
+    if axis.inverted {
+        range = (range.1, range.0);
+    }
+    range
+}
+
+/// Le point de la courbe le plus proche de `x` en abscisse, avec l'ordonnée
+/// moyennée sur `n` points centrés sur lui (l'aimantation de l'aperçu
+/// d'analyse, #181 M4 b). `None` pour une courbe vide, ou si `ys` est plus
+/// court que `xs`.
+///
+/// Les abscisses non finies ne sont jamais choisies ; les ordonnées non
+/// finies sont écartées de la moyenne (`None` s'il n'en reste aucune). Au bord,
+/// la fenêtre se tronque au lieu de déborder. Nommée `snap_to_curve` pour ne
+/// pas se confondre avec [`crate::scale::snap_to_decades`].
+pub fn snap_to_curve(xs: &[f64], ys: &[f64], x: f64, n: usize) -> Option<(f64, f64)> {
+    if ys.len() < xs.len() {
+        return None;
+    }
+    let nearest = xs
+        .iter()
+        .enumerate()
+        .filter(|(_, value)| value.is_finite())
+        .min_by(|a, b| (a.1 - x).abs().total_cmp(&(b.1 - x).abs()))?
+        .0;
+    let half = n.max(1) / 2;
+    let low = nearest.saturating_sub(half);
+    let high = (nearest + half + 1).min(ys.len());
+    let (sum, count) = ys[low..high]
+        .iter()
+        .filter(|value| value.is_finite())
+        .fold((0.0, 0_usize), |(sum, count), value| {
+            (sum + value, count + 1)
+        });
+    (count > 0).then(|| (xs[nearest], sum / count as f64))
 }
 
 /// Un point désigné sur une courbe : ce que [`nearest_point`] rend, en
@@ -368,8 +482,8 @@ mod tests {
     /// l'échelle log ne mélange la lecture des chiffres.
     fn carre() -> PanelTransform {
         PanelTransform {
-            origin: (0, 0),
-            size: (100, 100),
+            origin: (0.0, 0.0),
+            size: (100.0, 100.0),
             x_range: (0.0, 100.0),
             y_range: (0.0, 100.0),
             x_scale: AxisScale::Linear,
@@ -439,8 +553,8 @@ mod tests {
     #[test]
     fn zoomer_sur_une_echelle_log_reste_coherent() {
         let t = PanelTransform {
-            origin: (0, 0),
-            size: (100, 100),
+            origin: (0.0, 0.0),
+            size: (100.0, 100.0),
             x_range: (1.0, 1_000.0),
             y_range: (0.0, 100.0),
             x_scale: AxisScale::Log,
@@ -641,5 +755,186 @@ mod tests {
         )
         .expect("un point à portée");
         assert_eq!(hit.point_index, 1);
+    }
+
+    // --- `PanelTransform::new`, cadre initial et aimantation (#261) ---
+
+    fn assert_pixel(got: Option<(f64, f64)>, want: (f64, f64)) {
+        let (x, y) = got.expect("représentable");
+        assert!(
+            (x - want.0).abs() < 1e-9 && (y - want.1).abs() < 1e-9,
+            "{x},{y} au lieu de {want:?}"
+        );
+    }
+
+    #[test]
+    fn une_origine_fractionnaire_donne_les_coins_exacts() {
+        let t = PanelTransform::new(
+            (10.5, 20.25),
+            (200.0, 100.0),
+            (0.0, 10.0),
+            (-1.0, 1.0),
+            AxisScale::Linear,
+            AxisScale::Linear,
+        )
+        .expect("zone valide");
+        assert_pixel(t.data_to_pixel(0.0, -1.0), (10.5, 120.25));
+        assert_pixel(t.data_to_pixel(10.0, 1.0), (210.5, 20.25));
+        let (x, y) = t.pixel_to_data(10.5, 120.25).expect("dans la zone");
+        assert!((x - 0.0).abs() < 1e-9 && (y + 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn une_zone_degeneree_n_a_pas_de_transformation() {
+        let new = |size| {
+            PanelTransform::new(
+                (0.0, 0.0),
+                size,
+                (0.0, 1.0),
+                (0.0, 1.0),
+                AxisScale::Linear,
+                AxisScale::Linear,
+            )
+        };
+        assert!(new((0.0, 10.0)).is_none());
+        assert!(new((10.0, -1.0)).is_none());
+        assert!(new((f64::NAN, 10.0)).is_none());
+        assert!(new((10.0, f64::INFINITY)).is_none());
+        assert!(new((10.0, 10.0)).is_some());
+    }
+
+    #[test]
+    fn echelle_log_inversee_et_zoom_gardent_la_correspondance_des_gestes() {
+        // X log inversé (100 à gauche, 1 à droite), Y log croissant.
+        let t = PanelTransform::new(
+            (0.0, 0.0),
+            (200.0, 100.0),
+            (100.0, 1.0),
+            (10.0, 1000.0),
+            AxisScale::Log,
+            AxisScale::Log,
+        )
+        .expect("zone valide");
+        let center = t.data_to_pixel(10.0, 100.0);
+        assert_pixel(center, (100.0, 50.0));
+        let (x, y) = t.pixel_to_data(100.0, 50.0).expect("dans la zone");
+        assert!((x - 10.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6);
+        assert_pixel(t.data_to_pixel(100.0, 10.0), (0.0, 100.0));
+        assert_pixel(t.data_to_pixel(1.0, 1000.0), (200.0, 0.0));
+        let (x_range, y_range) = t.zoom((100.0, 50.0), 0.5).expect("zoom log défini");
+        let zoomed = PanelTransform {
+            x_range,
+            y_range,
+            ..t
+        };
+        assert_pixel(zoomed.data_to_pixel(10.0, 100.0), (100.0, 50.0));
+        // Le sens des axes survit au zoom : X reste décroissant, Y croissant.
+        assert!(x_range.0 > x_range.1 && y_range.0 < y_range.1);
+    }
+
+    #[test]
+    fn un_rectangle_sur_un_axe_inverse_garde_le_sens_d_affichage() {
+        let t = PanelTransform::new(
+            (0.0, 0.0),
+            (100.0, 100.0),
+            (100.0, 0.0),
+            (0.0, 100.0),
+            AxisScale::Linear,
+            AxisScale::Linear,
+        )
+        .expect("zone valide");
+        let (x_range, _) = t.range_between((10.0, 10.0), (60.0, 40.0)).unwrap();
+        assert_eq!(x_range, (90.0, 40.0));
+    }
+
+    #[test]
+    fn un_zoom_ou_un_rectangle_sur_une_borne_log_invalide_ne_donne_rien() {
+        let t = PanelTransform::new(
+            (0.0, 0.0),
+            (100.0, 100.0),
+            (0.0, 100.0),
+            (0.0, 100.0),
+            AxisScale::Log,
+            AxisScale::Linear,
+        )
+        .expect("zone valide");
+        assert!(t.zoom((50.0, 50.0), 0.5).is_none());
+        assert!(t.range_between((10.0, 10.0), (60.0, 40.0)).is_none());
+    }
+
+    #[test]
+    fn le_cadre_entoure_les_valeurs_finies_avec_une_marge() {
+        let close = |got: (f64, f64), want: (f64, f64)| {
+            assert!(
+                (got.0 - want.0).abs() < 1e-12 && (got.1 - want.1).abs() < 1e-12,
+                "{got:?} au lieu de {want:?}"
+            );
+        };
+        close(
+            fit_range(&[0.0, 10.0, f64::NAN], AxisScale::Linear),
+            (-0.5, 10.5),
+        );
+        close(fit_range(&[1.0, 3.0], AxisScale::Linear), (0.9, 3.1));
+        close(fit_range(&[2.0, 2.0], AxisScale::Linear), (1.5, 2.5));
+        close(fit_range(&[], AxisScale::Linear), (0.0, 1.0));
+        close(
+            fit_range(&[1.0, 10.0, 100.0], AxisScale::Log),
+            (10f64.powf(-0.1), 10f64.powf(2.1)),
+        );
+        // Seuls les positifs comptent en log ; sans eux, une décade.
+        close(
+            fit_range(&[-5.0, 0.0, 1.0, 100.0], AxisScale::Log),
+            (10f64.powf(-0.1), 10f64.powf(2.1)),
+        );
+        close(fit_range(&[-5.0, 0.0], AxisScale::Log), (1.0, 10.0));
+    }
+
+    #[test]
+    fn le_cadre_d_un_axe_suit_son_cadrage_et_son_sens() {
+        let mut axis = AxisSpec::default();
+        assert_eq!(axis_frame(&[0.0, 10.0], &axis).0, -0.5);
+        axis.inverted = true;
+        assert_eq!(axis_frame(&[0.0, 10.0], &axis), (10.5, -0.5));
+        axis.auto_range = false;
+        axis.range_min = Some(2.0);
+        axis.range_max = Some(8.0);
+        assert_eq!(axis_frame(&[0.0, 10.0], &axis), (8.0, 2.0));
+        // Cadrage explicite non automatique mais incomplet : on garde les données.
+        axis.range_max = None;
+        assert_eq!(axis_frame(&[0.0, 10.0], &axis), (10.5, -0.5));
+        // Cadrage explicite ignoré tant que le cadrage est automatique.
+        axis.range_max = Some(8.0);
+        axis.auto_range = true;
+        axis.inverted = false;
+        assert_eq!(axis_frame(&[0.0, 10.0], &axis), (-0.5, 10.5));
+    }
+
+    #[test]
+    fn l_aimantation_prend_le_point_le_plus_proche_et_moyenne_autour() {
+        let xs = [0.0, 1.0, 2.0, 3.0, 4.0];
+        let ys = [10.0, 20.0, 60.0, 20.0, 10.0];
+        assert_eq!(snap_to_curve(&xs, &ys, 2.2, 1), Some((2.0, 60.0)));
+        let (x, y) = snap_to_curve(&xs, &ys, 2.2, 3).unwrap();
+        assert_eq!(x, 2.0);
+        assert!((y - 100.0 / 3.0).abs() < 1e-12);
+        // n = 2 : la demi-fenêtre vaut 1, soit trois points.
+        let (_, y) = snap_to_curve(&xs, &ys, 2.2, 2).unwrap();
+        assert!((y - 100.0 / 3.0).abs() < 1e-12);
+        // Au bord, la fenêtre se tronque au lieu de déborder.
+        assert_eq!(snap_to_curve(&xs, &ys, -5.0, 3), Some((0.0, 15.0)));
+        assert_eq!(snap_to_curve(&[], &[], 1.0, 3), None);
+    }
+
+    #[test]
+    fn l_aimantation_ne_panique_pas_sur_des_donnees_incoherentes() {
+        // `ys` plus court que `xs` : rien, et surtout pas de panique.
+        assert_eq!(snap_to_curve(&[0.0, 1.0, 2.0], &[1.0], 2.0, 3), None);
+        // Une abscisse non finie n'est jamais choisie ; une ordonnée non finie
+        // est écartée de la moyenne.
+        let xs = [f64::NAN, 1.0, 2.0];
+        let ys = [5.0, f64::NAN, 7.0];
+        assert_eq!(snap_to_curve(&xs, &ys, 1.1, 3), Some((1.0, 6.0)));
+        assert_eq!(snap_to_curve(&[f64::NAN], &[1.0], 0.0, 1), None);
+        assert_eq!(snap_to_curve(&[1.0], &[f64::NAN], 1.0, 1), None);
     }
 }

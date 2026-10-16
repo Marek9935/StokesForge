@@ -123,7 +123,9 @@ pub use color::{parse_hex, rgb_or};
 pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use hit::{component_at, AxisSide, PlotComponent};
-pub use interact::{nearest_on_curve, Gesture, PanelTransform};
+pub use interact::{
+    axis_frame, fit_range, nearest_on_curve, snap_to_curve, Gesture, PanelTransform,
+};
 pub use pipeline::{
     draw, draw_on, AxisArea, AxisAreas, DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot,
     DrawnText,

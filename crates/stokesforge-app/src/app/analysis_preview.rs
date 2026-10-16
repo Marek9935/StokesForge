@@ -5,7 +5,10 @@
 //! L'aperçu se peint lui-même — il ne passe pas par `GraphView` : il n'a ni
 //! calque, ni légende, ni historique, et ses clics **écrivent dans le
 //! formulaire** (`AnalysisForm::add_point`, `add_zone`, `remove_near`), pas
-//! dans le modèle. Sa géométrie (`View`, `snap`) est pure et testée.
+//! dans le modèle. Sa **peinture** reste ici ; sa **géométrie** — pixel ↔
+//! données, zoom, graduations, aimantation, cadre initial — vient de
+//! `stokesforge_render` (`PanelTransform`, `axis_ticks`, `snap_to_curve`,
+//! `axis_frame`, #261) : l'application ne fait que convertir en `Pos2`.
 //!
 //! # Gestes
 //!
@@ -37,6 +40,9 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 use stokesforge_core::{Computed, Tree};
+use stokesforge_plot::{AxisScale, AxisSpec};
+use stokesforge_render::scale::axis_ticks;
+use stokesforge_render::{axis_frame, fit_range, snap_to_curve, PanelTransform};
 
 use crate::analysis::{
     issue_message, series_points, series_rows, AnalysisForm, Issue, PreviewTool, AVERAGE_RANGE,
@@ -44,168 +50,51 @@ use crate::analysis::{
 use crate::theme;
 use crate::tr;
 
-/// Le cadre de données visible : `[x0, x1] × [y0, y1]`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct View {
-    pub x0: f64,
-    pub x1: f64,
-    pub y0: f64,
-    pub y1: f64,
-    x_log: bool,
-    y_log: bool,
-    x_inverted: bool,
-    y_inverted: bool,
+/// Le cadre de données visible : les bornes de X puis de Y, **dans l'ordre
+/// d'affichage** (un axe inversé a sa borne haute en premier), comme les prend
+/// [`PanelTransform::new`].
+type Frame = ((f64, f64), (f64, f64));
+
+/// Les axes (bas, ordonnée) de la courbe du graphe dont vient la série
+/// courante ; `None` sans graphe source — l'aperçu est alors linéaire et non
+/// inversé.
+fn source_axes(form: &AnalysisForm) -> Option<(&AxisSpec, &AxisSpec)> {
+    let (spec, sources) = form.graph_source.as_ref()?;
+    let source = sources.get(form.current)?;
+    let panel = spec.panels.get(source.panel)?;
+    let curve = panel.series.get(source.index)?;
+    Some((&panel.bottom, panel.axis(curve.axis.side())))
 }
 
-impl View {
-    /// Le cadre qui contient les valeurs finies de `xs` et `ys`, avec 5 % de
-    /// marge ; un cadre d'étendue nulle est élargi.
-    pub(super) fn around(xs: &[f64], ys: &[f64]) -> View {
-        fn bounds(values: &[f64]) -> (f64, f64) {
-            let mut lo = f64::INFINITY;
-            let mut hi = f64::NEG_INFINITY;
-            for v in values.iter().copied().filter(|v| v.is_finite()) {
-                lo = lo.min(v);
-                hi = hi.max(v);
-            }
-            if lo > hi {
-                (0.0, 1.0)
-            } else if lo == hi {
-                (lo - 0.5, hi + 0.5)
-            } else {
-                let margin = (hi - lo) * 0.05;
-                (lo - margin, hi + margin)
-            }
-        }
-        let (x0, x1) = bounds(xs);
-        let (y0, y1) = bounds(ys);
-        View {
-            x0,
-            x1,
-            y0,
-            y1,
-            x_log: false,
-            y_log: false,
-            x_inverted: false,
-            y_inverted: false,
-        }
-    }
-
-    fn fraction(lo: f64, hi: f64, value: f64, log: bool, inverted: bool) -> f64 {
-        let transform = |v: f64| if log { v.log10() } else { v };
-        let fraction = (transform(value) - transform(lo)) / (transform(hi) - transform(lo));
-        if inverted {
-            1.0 - fraction
-        } else {
-            fraction
-        }
-    }
-
-    fn value(lo: f64, hi: f64, fraction: f64, log: bool, inverted: bool) -> f64 {
-        let fraction = if inverted { 1.0 - fraction } else { fraction };
-        if log {
-            10.0_f64.powf(lo.log10() + fraction * (hi.log10() - lo.log10()))
-        } else {
-            lo + fraction * (hi - lo)
-        }
-    }
-
-    pub(super) fn to_screen(self, rect: egui::Rect, x: f64, y: f64) -> egui::Pos2 {
-        let u = Self::fraction(self.x0, self.x1, x, self.x_log, self.x_inverted);
-        let v = Self::fraction(self.y0, self.y1, y, self.y_log, self.y_inverted);
-        egui::pos2(
-            rect.left() + u as f32 * rect.width(),
-            rect.bottom() - v as f32 * rect.height(),
-        )
-    }
-
-    pub(super) fn to_data(self, rect: egui::Rect, p: egui::Pos2) -> (f64, f64) {
-        let u = f64::from((p.x - rect.left()) / rect.width());
-        let v = f64::from((rect.bottom() - p.y) / rect.height());
-        (
-            Self::value(self.x0, self.x1, u, self.x_log, self.x_inverted),
-            Self::value(self.y0, self.y1, v, self.y_log, self.y_inverted),
-        )
-    }
-
-    /// Le cadre agrandi (`factor` > 1) ou rétréci autour de `anchor`, qui
-    /// reste au même endroit de l'écran.
-    pub(super) fn zoomed(self, anchor: (f64, f64), factor: f64) -> View {
-        let scale = |lo: f64, hi: f64, at: f64, log: bool| {
-            if log {
-                let (lo, hi, at) = (lo.log10(), hi.log10(), at.log10());
-                (
-                    10.0_f64.powf(at + (lo - at) * factor),
-                    10.0_f64.powf(at + (hi - at) * factor),
-                )
-            } else {
-                (at + (lo - at) * factor, at + (hi - at) * factor)
-            }
-        };
-        let (x0, x1) = scale(self.x0, self.x1, anchor.0, self.x_log);
-        let (y0, y1) = scale(self.y0, self.y1, anchor.1, self.y_log);
-        View {
-            x0,
-            x1,
-            y0,
-            y1,
-            ..self
-        }
-    }
-
-    /// Le cadre dont deux coins sont `a` et `b` (coordonnées de données).
-    pub(super) fn between(self, a: (f64, f64), b: (f64, f64)) -> View {
-        View {
-            x0: a.0.min(b.0),
-            x1: a.0.max(b.0),
-            y0: a.1.min(b.1),
-            y1: a.1.max(b.1),
-            ..self
-        }
-    }
+/// La transformation de `rect` pour ces bornes ; `None` pour un rectangle sans
+/// surface. Le rectangle d'egui est fractionnaire : origine et taille passent
+/// en `f64` sans arrondi.
+fn transform_for(
+    rect: egui::Rect,
+    x: (f64, f64),
+    y: (f64, f64),
+    scales: (AxisScale, AxisScale),
+) -> Option<PanelTransform> {
+    PanelTransform::new(
+        (f64::from(rect.min.x), f64::from(rect.min.y)),
+        (f64::from(rect.width()), f64::from(rect.height())),
+        x,
+        y,
+        scales.0,
+        scales.1,
+    )
 }
 
-/// Le point de la courbe le plus proche de `x`, avec Y moyenné sur `n` points
-/// centrés sur lui (aimantation de Maj, M4 b). `None` pour une courbe vide.
-pub(super) fn snap(xs: &[f64], ys: &[f64], x: f64, n: usize) -> Option<(f64, f64)> {
-    let nearest = xs
-        .iter()
-        .enumerate()
-        .min_by(|a, b| (a.1 - x).abs().total_cmp(&(b.1 - x).abs()))?
-        .0;
-    let half = n.max(1) / 2;
-    let lo = nearest.saturating_sub(half);
-    let hi = (nearest + half + 1).min(ys.len());
-    let window = &ys[lo..hi];
-    Some((
-        xs[nearest],
-        window.iter().sum::<f64>() / window.len() as f64,
-    ))
+/// Le pixel d'une donnée ; `None` si elle n'a pas d'image (hors d'une échelle
+/// logarithmique, non finie).
+fn to_screen(transform: &PanelTransform, x: f64, y: f64) -> Option<egui::Pos2> {
+    let (px, py) = transform.data_to_pixel(x, y)?;
+    Some(egui::pos2(px as f32, py as f32))
 }
 
-/// Le pas « rond » d'une graduation pour couvrir `span` en environ 5 pas.
-pub(super) fn tick_step(span: f64) -> f64 {
-    let raw = span / 5.0;
-    if !raw.is_finite() || raw <= 0.0 {
-        return 1.0;
-    }
-    let magnitude = 10f64.powf(raw.log10().floor());
-    let fraction = raw / magnitude;
-    let nice = if fraction < 1.5 {
-        1.0
-    } else if fraction < 3.5 {
-        2.0
-    } else if fraction < 7.5 {
-        5.0
-    } else {
-        10.0
-    };
-    nice * magnitude
-}
-
-fn format_tick(value: f64, step: f64) -> String {
-    let decimals = (-step.log10().floor()).max(0.0) as usize;
-    stokesforge_core::number_format::format_tick(value, decimals)
+/// La donnée sous un pixel.
+fn to_data(transform: &PanelTransform, pos: egui::Pos2) -> Option<(f64, f64)> {
+    transform.pixel_to_data(f64::from(pos.x), f64::from(pos.y))
 }
 
 /// Ce que l'aperçu rend à la fenêtre : les valeurs de la série montrée, ou ce
@@ -397,7 +286,7 @@ impl PreviewJobs {
 struct StoredView {
     key: (usize, u64),
     source: Option<(stokesforge_plot::PlotSpec, Vec<stokesforge_plot::SeriesRef>)>,
-    view: View,
+    frame: Frame,
 }
 
 /// Recadre l'aperçu sur ses données (bouton « Reset View »).
@@ -527,13 +416,20 @@ pub(super) fn preview(
             .map(|c| &c.data)
     };
 
-    // Le cadre : mémorisé par série, recadré au double clic.
+    // Le cadre : mémorisé par série, recadré au double clic. Les échelles et le
+    // sens des axes viennent du graphe source ; le cadrage initial et la
+    // géométrie, de `stokesforge_render`.
+    let axes = source_axes(form);
+    let scales = (
+        axes.map_or(AxisScale::Linear, |(x, _)| x.scale),
+        axes.map_or(AxisScale::Linear, |(_, y)| y.scale),
+    );
     let view_id = id.with("view");
     let key = (form.current, series.y.raw());
-    let mut view = ui
+    let mut frame: Frame = ui
         .data_mut(|d| d.get_temp::<StoredView>(view_id))
         .filter(|s| s.key == key && s.source == form.graph_source)
-        .map(|s| s.view)
+        .map(|s| s.frame)
         .unwrap_or_else(|| {
             let mut all_y = ys.clone();
             for k in ["corrected", "deconvolved"] {
@@ -541,52 +437,13 @@ pub(super) fn preview(
                     all_y.extend(c.iter().copied());
                 }
             }
-            let mut frame = View::around(&xs, &all_y);
-            if let Some((spec, sources)) = &form.graph_source {
-                if let Some(source) = sources.get(form.current) {
-                    if let Some(panel) = spec.panels.get(source.panel) {
-                        let Some(curve) = panel.series.get(source.index) else {
-                            return frame;
-                        };
-                        let y = panel.axis(curve.axis.side());
-                        frame.x_log = panel.bottom.scale == stokesforge_plot::AxisScale::Log;
-                        frame.y_log = y.scale == stokesforge_plot::AxisScale::Log;
-                        frame.x_inverted = panel.bottom.inverted;
-                        frame.y_inverted = y.inverted;
-                        let positive_bounds = |values: &[f64]| {
-                            let values: Vec<_> = values
-                                .iter()
-                                .copied()
-                                .filter(|v| v.is_finite() && *v > 0.0)
-                                .map(f64::log10)
-                                .collect();
-                            let bounds = View::around(&values, &values);
-                            (10.0_f64.powf(bounds.x0), 10.0_f64.powf(bounds.x1))
-                        };
-                        if frame.x_log {
-                            (frame.x0, frame.x1) = positive_bounds(&xs);
-                        }
-                        if frame.y_log {
-                            (frame.y0, frame.y1) = positive_bounds(&all_y);
-                        }
-                        if let (Some(lo), Some(hi)) =
-                            (panel.bottom.range_min, panel.bottom.range_max)
-                        {
-                            if !panel.bottom.auto_range {
-                                frame.x0 = lo;
-                                frame.x1 = hi;
-                            }
-                        }
-                        if let (Some(lo), Some(hi)) = (y.range_min, y.range_max) {
-                            if !y.auto_range {
-                                frame.y0 = lo;
-                                frame.y1 = hi;
-                            }
-                        }
-                    }
-                }
+            match axes {
+                Some((x, y)) => (axis_frame(&xs, x), axis_frame(&all_y, y)),
+                None => (
+                    fit_range(&xs, AxisScale::Linear),
+                    fit_range(&all_y, AxisScale::Linear),
+                ),
             }
-            frame
         });
 
     let dark = ui.visuals().dark_mode;
@@ -610,35 +467,36 @@ pub(super) fn preview(
         ui.visuals().widgets.noninteractive.bg_stroke,
         egui::StrokeKind::Inside,
     );
+    // Un rectangle sans surface, ou des bornes sans image : rien à placer.
+    let Some(transform) = transform_for(plot_rect, frame.0, frame.1, scales) else {
+        return outcome;
+    };
     let text_color = ui.visuals().text_color();
     let font = egui::FontId::proportional(11.0);
 
-    // Graduations.
-    let step_x = tick_step(view.x1 - view.x0);
-    let step_y = tick_step(view.y1 - view.y0);
-    let mut x = (view.x0 / step_x).ceil() * step_x;
-    while x <= view.x1 {
-        let p = view.to_screen(plot_rect, x, view.y0);
-        painter.text(
-            egui::pos2(p.x, plot_rect.bottom() + 2.0),
-            egui::Align2::CENTER_TOP,
-            format_tick(x, step_x),
-            font.clone(),
-            text_color,
-        );
-        x += step_x;
+    // Graduations : le pas et le format du graphe (`axis_ticks`), le point
+    // décimal comme avant.
+    for (x, label) in axis_ticks(scales.0, frame.0, false) {
+        if let Some(p) = to_screen(&transform, x, frame.1 .0) {
+            painter.text(
+                egui::pos2(p.x, plot_rect.bottom() + 2.0),
+                egui::Align2::CENTER_TOP,
+                label,
+                font.clone(),
+                text_color,
+            );
+        }
     }
-    let mut y = (view.y0 / step_y).ceil() * step_y;
-    while y <= view.y1 {
-        let p = view.to_screen(plot_rect, view.x0, y);
-        painter.text(
-            egui::pos2(plot_rect.left() - 3.0, p.y),
-            egui::Align2::RIGHT_CENTER,
-            format_tick(y, step_y),
-            font.clone(),
-            text_color,
-        );
-        y += step_y;
+    for (y, label) in axis_ticks(scales.1, frame.1, false) {
+        if let Some(p) = to_screen(&transform, frame.0 .0, y) {
+            painter.text(
+                egui::pos2(plot_rect.left() - 3.0, p.y),
+                egui::Align2::RIGHT_CENTER,
+                label,
+                font.clone(),
+                text_color,
+            );
+        }
     }
 
     let plot = painter.with_clip_rect(plot_rect);
@@ -652,27 +510,29 @@ pub(super) fn preview(
             }
         };
         for (x, y) in rows_x.iter().zip(ys) {
-            if x.is_finite() && y.is_finite() {
-                let point = view.to_screen(plot_rect, *x, *y);
-                if point.x.is_finite() && point.y.is_finite() {
-                    run.push(point);
-                } else {
-                    flush(&mut run);
-                }
-            } else {
-                flush(&mut run);
+            let point = (x.is_finite() && y.is_finite())
+                .then(|| to_screen(&transform, *x, *y))
+                .flatten()
+                .filter(|point| point.x.is_finite() && point.y.is_finite());
+            match point {
+                Some(point) => run.push(point),
+                None => flush(&mut run),
             }
         }
         flush(&mut run);
     };
 
     // Zones et plages.
-    let frame = view;
-    let band = move |plot: &egui::Painter, a: f64, b: f64| {
-        let l = frame.to_screen(plot_rect, a, frame.y0).x;
-        let r = frame.to_screen(plot_rect, b, frame.y0).x;
+    let base = frame.1 .0;
+    let band = |plot: &egui::Painter, a: f64, b: f64| {
+        let (Some(l), Some(r)) = (
+            to_screen(&transform, a, base),
+            to_screen(&transform, b, base),
+        ) else {
+            return;
+        };
         plot.rect_filled(
-            egui::Rect::from_x_y_ranges(l..=r, plot_rect.y_range()),
+            egui::Rect::from_x_y_ranges(l.x..=r.x, plot_rect.y_range()),
             0.0,
             theme::preview_zone_fill(),
         );
@@ -697,8 +557,13 @@ pub(super) fn preview(
                     if !x.is_finite() || !y.is_finite() {
                         return (f64::NAN, f64::NAN);
                     }
-                    let p = view.to_screen(plot_rect, *x, *y) - plot_rect.min;
-                    (f64::from(p.x), f64::from(p.y))
+                    match to_screen(&transform, *x, *y) {
+                        Some(p) => {
+                            let p = p - plot_rect.min;
+                            (f64::from(p.x), f64::from(p.y))
+                        }
+                        None => (f64::NAN, f64::NAN),
+                    }
                 })
                 .collect();
             plot.extend(stokesforge_render_egui::analysis_curve(
@@ -738,13 +603,17 @@ pub(super) fn preview(
     // Repères posés.
     let marker = theme::preview_marker_color();
     for (px, py) in marks_of(form) {
-        let p = view.to_screen(plot_rect, px, py);
-        plot.circle(p, 4.0, marker, egui::Stroke::new(1.0, text_color));
+        if let Some(p) = to_screen(&transform, px, py) {
+            plot.circle(p, 4.0, marker, egui::Stroke::new(1.0, text_color));
+        }
     }
     for cx in seeds_of(form) {
-        let top = view.to_screen(plot_rect, cx, view.y1);
-        let bottom = view.to_screen(plot_rect, cx, view.y0);
-        plot.line_segment([top, bottom], egui::Stroke::new(1.0, marker));
+        if let (Some(top), Some(bottom)) = (
+            to_screen(&transform, cx, frame.1 .1),
+            to_screen(&transform, cx, frame.1 .0),
+        ) {
+            plot.line_segment([top, bottom], egui::Stroke::new(1.0, marker));
+        }
     }
 
     // Résidus sous la courbe.
@@ -759,36 +628,40 @@ pub(super) fn preview(
             .filter(|v| v.is_finite())
             .fold(0.0_f64, |m, v| m.max(v.abs()))
             .max(f64::MIN_POSITIVE);
-        let sub = View {
-            x0: view.x0,
-            x1: view.x1,
-            y0: -bound * 1.1,
-            y1: bound * 1.1,
-            y_log: false,
-            y_inverted: false,
-            ..view
-        };
+        // Même X que la courbe ; Y linéaire, non inversé, centré sur zéro.
+        let sub = transform_for(
+            strip,
+            frame.0,
+            (-bound * 1.1, bound * 1.1),
+            (scales.0, AxisScale::Linear),
+        );
         painter.rect_stroke(
             strip,
             0.0,
             ui.visuals().widgets.noninteractive.bg_stroke,
             egui::StrokeKind::Inside,
         );
-        let clip = painter.with_clip_rect(strip);
-        let zero = sub.to_screen(strip, view.x0, 0.0).y;
-        clip.hline(strip.x_range(), zero, egui::Stroke::new(0.5, text_color));
-        let mut run: Vec<egui::Pos2> = Vec::new();
-        for (x, r) in rows_x.iter().zip(res) {
-            if x.is_finite() && r.is_finite() {
-                run.push(sub.to_screen(strip, *x, *r));
-            } else if run.len() > 1 {
-                clip.add(egui::Shape::line(std::mem::take(&mut run), result));
-            } else {
-                run.clear();
+        if let Some(sub) = sub {
+            let clip = painter.with_clip_rect(strip);
+            if let Some(zero) = to_screen(&sub, frame.0 .0, 0.0) {
+                clip.hline(strip.x_range(), zero.y, egui::Stroke::new(0.5, text_color));
             }
-        }
-        if run.len() > 1 {
-            clip.add(egui::Shape::line(run, result));
+            let mut run: Vec<egui::Pos2> = Vec::new();
+            for (x, r) in rows_x.iter().zip(res) {
+                let point = (x.is_finite() && r.is_finite())
+                    .then(|| to_screen(&sub, *x, *r))
+                    .flatten();
+                match point {
+                    Some(point) => run.push(point),
+                    None if run.len() > 1 => {
+                        clip.add(egui::Shape::line(std::mem::take(&mut run), result));
+                    }
+                    None => run.clear(),
+                }
+            }
+            if run.len() > 1 {
+                clip.add(egui::Shape::line(run, result));
+            }
         }
         painter.text(
             egui::pos2(strip.left() + 3.0, strip.top() + 1.0),
@@ -813,13 +686,14 @@ pub(super) fn preview(
     // Gestes.
     let shift = ui.input(|i| i.modifiers.shift);
     let hover = response.hover_pos().filter(|p| plot_rect.contains(*p));
-    if let Some(pos) = hover {
-        let (hx, hy) = view.to_data(plot_rect, pos);
+    let hover_data = hover.and_then(|pos| to_data(&transform, pos));
+    if let (Some(pos), Some((hx, hy))) = (hover, hover_data) {
         let mut label = format!("x = {hx:.6}\ny = {hy:.6}");
         if shift && form.tool == PreviewTool::Points {
-            if let Some((sx, sy)) = snap(&xs, &ys, hx, form.average) {
-                let p = view.to_screen(plot_rect, sx, sy);
-                plot.circle_stroke(p, 6.0, egui::Stroke::new(1.5, marker));
+            if let Some((sx, sy)) = snap_to_curve(&xs, &ys, hx, form.average) {
+                if let Some(p) = to_screen(&transform, sx, sy) {
+                    plot.circle_stroke(p, 6.0, egui::Stroke::new(1.5, marker));
+                }
                 label = format!(
                     "x = {sx:.6}\ny = {sy:.6}\n{}",
                     tr!(
@@ -845,7 +719,10 @@ pub(super) fn preview(
                 form.average = next as usize;
             } else {
                 let factor = f64::from(-scroll * 0.004).exp();
-                view = view.zoomed((hx, hy), factor);
+                // Un zoom sans image (borne logarithmique ≤ 0) garde le cadre.
+                if let Some(next) = transform.zoom((f64::from(pos.x), f64::from(pos.y)), factor) {
+                    frame = next;
+                }
             }
         }
     }
@@ -864,11 +741,10 @@ pub(super) fn preview(
         if let (Some(from), Some(to)) = (origin, response.interact_pointer_pos()) {
             match form.tool {
                 PreviewTool::Zone => {
-                    band(
-                        &plot,
-                        view.to_data(plot_rect, from).0,
-                        view.to_data(plot_rect, to).0,
-                    );
+                    if let (Some(a), Some(b)) = (to_data(&transform, from), to_data(&transform, to))
+                    {
+                        band(&plot, a.0, b.0);
+                    }
                 }
                 PreviewTool::Zoom => {
                     plot.rect_stroke(
@@ -884,22 +760,29 @@ pub(super) fn preview(
     }
     if response.drag_stopped_by(egui::PointerButton::Primary) {
         if let (Some(from), Some(to)) = (origin, response.interact_pointer_pos()) {
-            let a = view.to_data(plot_rect, from);
-            let b = view.to_data(plot_rect, to);
             match form.tool {
-                PreviewTool::Zone => form.add_zone(a.0, b.0),
+                PreviewTool::Zone => {
+                    if let (Some(a), Some(b)) = (to_data(&transform, from), to_data(&transform, to))
+                    {
+                        form.add_zone(a.0, b.0);
+                    }
+                }
                 PreviewTool::Zoom if (from - to).abs().max_elem() > 4.0 => {
-                    view = view.between(a, b);
+                    if let Some(next) = transform.range_between(
+                        (f64::from(from.x), f64::from(from.y)),
+                        (f64::from(to.x), f64::from(to.y)),
+                    ) {
+                        frame = next;
+                    }
                 }
                 _ => {}
             }
         }
     }
     if response.clicked_by(egui::PointerButton::Primary) && form.tool == PreviewTool::Points {
-        if let Some(pos) = hover {
-            let (cx, cy) = view.to_data(plot_rect, pos);
+        if let Some((cx, cy)) = hover_data {
             let (px, py) = if shift {
-                snap(&xs, &ys, cx, form.average).unwrap_or((cx, cy))
+                snap_to_curve(&xs, &ys, cx, form.average).unwrap_or((cx, cy))
             } else {
                 (cx, cy)
             };
@@ -907,9 +790,10 @@ pub(super) fn preview(
         }
     }
     if response.secondary_clicked() {
-        if let Some(pos) = hover {
-            let (cx, _) = view.to_data(plot_rect, pos);
-            let tolerance = (view.x1 - view.x0) * 8.0 / f64::from(plot_rect.width());
+        if let Some((cx, _)) = hover_data {
+            // L'étendue de X est négative quand l'axe est inversé : la
+            // tolérance est une distance.
+            let tolerance = (frame.0 .1 - frame.0 .0).abs() * 8.0 / f64::from(plot_rect.width());
             form.remove_near(cx, tolerance);
         }
     }
@@ -922,7 +806,7 @@ pub(super) fn preview(
                 StoredView {
                     key,
                     source: form.graph_source.clone(),
-                    view,
+                    frame,
                 },
             )
         });
@@ -1077,108 +961,6 @@ mod tests {
             "une fenêtre rouverte se calcule tout de suite, sans frappe à attendre"
         );
     }
-
-    #[test]
-    fn le_cadre_entoure_les_valeurs_finies_avec_une_marge() {
-        let view = View::around(&[0.0, 10.0, f64::NAN], &[1.0, 3.0]);
-        assert_eq!((view.x0, view.x1), (-0.5, 10.5));
-        assert!((view.y0 - 0.9).abs() < 1e-12 && (view.y1 - 3.1).abs() < 1e-12);
-        let flat = View::around(&[2.0, 2.0], &[]);
-        assert_eq!((flat.x0, flat.x1), (1.5, 2.5));
-        assert_eq!(
-            (flat.y0, flat.y1),
-            (0.0, 1.0),
-            "aucune donnée : cadre unité"
-        );
-    }
-
-    #[test]
-    fn echelle_log_inversee_et_zoom_gardent_la_correspondance_des_gestes() {
-        let view = View {
-            x0: 1.0,
-            x1: 100.0,
-            y0: 10.0,
-            y1: 1000.0,
-            x_log: true,
-            y_log: true,
-            x_inverted: true,
-            y_inverted: false,
-        };
-        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 100.0));
-        let center = view.to_screen(rect, 10.0, 100.0);
-        assert_eq!(center, rect.center());
-        let point = view.to_data(rect, center);
-        assert!((point.0 - 10.0).abs() < 1e-6);
-        assert!((point.1 - 100.0).abs() < 1e-6);
-        assert_eq!(view.to_screen(rect, 100.0, 10.0), rect.left_bottom());
-        assert_eq!(view.to_screen(rect, 1.0, 1000.0), rect.right_top());
-        let zoom = view.zoomed((10.0, 100.0), 0.5);
-        assert_eq!(zoom.to_screen(rect, 10.0, 100.0), center);
-        assert!(zoom.x_log && zoom.y_log && zoom.x_inverted);
-    }
-
-    #[test]
-    fn ecran_et_donnees_sont_des_fonctions_inverses() {
-        let view = View {
-            x0: 0.0,
-            x1: 10.0,
-            y0: -1.0,
-            y1: 1.0,
-            ..View::around(&[], &[])
-        };
-        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(200.0, 100.0));
-        let p = view.to_screen(rect, 2.5, 0.5);
-        let (x, y) = view.to_data(rect, p);
-        assert!((x - 2.5).abs() < 1e-4 && (y - 0.5).abs() < 1e-4);
-        assert_eq!(view.to_screen(rect, 0.0, -1.0), rect.left_bottom());
-        assert_eq!(view.to_screen(rect, 10.0, 1.0), rect.right_top());
-    }
-
-    #[test]
-    fn le_zoom_garde_le_point_ancre_fixe() {
-        let view = View {
-            x0: 0.0,
-            x1: 10.0,
-            y0: 0.0,
-            y1: 10.0,
-            ..View::around(&[], &[])
-        };
-        let zoomed = view.zoomed((2.0, 4.0), 0.5);
-        assert_eq!((zoomed.x0, zoomed.x1), (1.0, 6.0));
-        assert_eq!((zoomed.y0, zoomed.y1), (2.0, 7.0));
-        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 100.0));
-        let before = view.to_screen(rect, 2.0, 4.0);
-        let after = zoomed.to_screen(rect, 2.0, 4.0);
-        assert!((before - after).length() < 1e-3, "l'ancre reste à l'écran");
-        // L'ancre garde sa position **relative** : (2-0)/10 == (2-1)/5.
-        assert!(
-            ((2.0 - view.x0) / (view.x1 - view.x0) - (2.0 - zoomed.x0) / (zoomed.x1 - zoomed.x0))
-                .abs()
-                < 1e-12
-        );
-    }
-
-    #[test]
-    fn l_aimantation_prend_le_point_le_plus_proche_et_moyenne_autour() {
-        let xs = [0.0, 1.0, 2.0, 3.0, 4.0];
-        let ys = [10.0, 20.0, 60.0, 20.0, 10.0];
-        assert_eq!(snap(&xs, &ys, 2.2, 1), Some((2.0, 60.0)));
-        let (x, y) = snap(&xs, &ys, 2.2, 3).unwrap();
-        assert_eq!(x, 2.0);
-        assert!((y - 100.0 / 3.0).abs() < 1e-12);
-        // Au bord, la fenêtre se tronque au lieu de déborder.
-        assert_eq!(snap(&xs, &ys, -5.0, 3), Some((0.0, 15.0)));
-        assert_eq!(snap(&[], &[], 1.0, 3), None);
-    }
-
-    #[test]
-    fn les_graduations_sont_rondes() {
-        assert_eq!(tick_step(10.0), 2.0);
-        assert_eq!(tick_step(1.0), 0.2);
-        assert_eq!(tick_step(0.0), 1.0);
-        assert_eq!(format_tick(0.4, 0.2), "0.4");
-        assert_eq!(format_tick(6.0, 2.0), "6");
-    }
 }
 
 /// #251 : un glisser de l'outil Zone pose la zone au relâchement, alors
@@ -1251,5 +1033,75 @@ mod zone_tests {
     fn glisser_trace_une_zone_du_polynome() {
         let form = glisser(None, Preset::BaselinePolynomial);
         assert_eq!(form.setup.baseline.zones.len(), 1);
+    }
+
+    /// Pose un point par un clic gauche puis le retire par un clic droit au
+    /// même pixel ; rend le point après chacun des deux clics. Avec `inverted`,
+    /// l'axe X du graphe source est inversé : l'étendue de X est alors négative
+    /// et la tolérance de `remove_near` doit rester une distance.
+    fn poser_puis_retirer(inverted: bool) -> [Option<(f64, f64)>; 2] {
+        let mut project = stokesforge_core::Project::new("Clic droit").unwrap();
+        let (x, y) = colonnes_xy(&mut project);
+        let tree = project.tree().clone();
+        let series = vec![SeriesRef {
+            x: Some(x),
+            y,
+            sigma: None,
+        }];
+        let mut form = AnalysisForm::new(&Preset::BaselineConstant, series, false);
+        let mut panel = stokesforge_plot::PanelSpec::at(0, 0);
+        panel.bottom.inverted = inverted;
+        panel
+            .series
+            .push(stokesforge_plot::SeriesSpec::new_xy(x, y));
+        let spec = stokesforge_plot::PlotSpec::empty("Source").with_panels(panel);
+        form.graph_source = Some((spec, vec![stokesforge_plot::SeriesRef::new(0, 0)]));
+        assert_eq!(form.tool, PreviewTool::Points);
+        let context = contexte();
+        let id = egui::Id::new("clic_droit");
+        let pos = egui::pos2(700.0, 400.0);
+        let button = |button, pressed| egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let primary = egui::PointerButton::Primary;
+        let secondary = egui::PointerButton::Secondary;
+        let mut after_left = None;
+        let steps = [
+            vec![],
+            vec![egui::Event::PointerMoved(pos)],
+            vec![button(primary, true)],
+            vec![button(primary, false)],
+            vec![],
+            vec![button(secondary, true)],
+            vec![button(secondary, false)],
+            vec![],
+        ];
+        for (rank, events) in steps.into_iter().enumerate() {
+            image(&context, events, |ui| {
+                preview(ui, id, &mut form, &tree, 0);
+            });
+            if rank == 4 {
+                after_left = form.setup.baseline.constant_point;
+            }
+        }
+        [after_left, form.setup.baseline.constant_point]
+    }
+
+    /// Le clic droit retire le repère visé, quel que soit le sens de l'axe X :
+    /// la tolérance `(x1 - x0) · 8 / largeur` serait négative sur un axe
+    /// inversé sans `abs`.
+    #[test]
+    fn clic_droit_retire_le_point_pose_meme_sur_un_axe_x_inverse() {
+        for inverted in [false, true] {
+            let [posed, removed] = poser_puis_retirer(inverted);
+            assert!(posed.is_some(), "le clic gauche pose le point ({inverted})");
+            assert_eq!(
+                removed, None,
+                "le clic droit le retire (inversé : {inverted})"
+            );
+        }
     }
 }
