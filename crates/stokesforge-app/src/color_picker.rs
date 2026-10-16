@@ -27,7 +27,7 @@
 //! « Enregistrer » garde la couleur courante **dans le projet** (par
 //! défaut : elle voyage avec le `.stf`, et s'annule par Ctrl+Z) ou **pour
 //! l'utilisateur** (sur cette machine, dans tous les projets) — voir
-//! [`crate::state::SaveTarget`]. Une couleur enregistrée ne réapparaît que
+//! [`stokesforge_app_state::state::SaveTarget`]. Une couleur enregistrée ne réapparaît que
 //! dans la palette de son usage. Clic droit sur une couleur enregistrée : la
 //! retirer. Ce module ne touche ni au modèle ni au disque : il dépose des
 //! [`SavedColorRequest`] dans le [`PickerEnv`] fourni par l'appelant, qui
@@ -59,9 +59,9 @@ use stokesforge_plot::{SavedColors, CURVE_PALETTES};
 
 use crate::app::hover_help::help_text;
 use crate::number_field::number_field;
-use crate::quantities;
-use crate::state::{AppState, SaveTarget};
-use crate::tr;
+use stokesforge_app_state::quantities;
+use stokesforge_app_state::state::{AppState, SaveTarget};
+use stokesforge_app_state::tr;
 
 /// Une rangée nommée d'échantillons.
 #[derive(Debug, Clone, PartialEq)]
@@ -303,8 +303,8 @@ pub struct SavedColorRequest {
 
 impl SavedColorRequest {
     /// L'action qui exécute la demande.
-    pub fn into_action(self) -> crate::state::Action {
-        use crate::state::Action;
+    pub fn into_action(self) -> stokesforge_app_state::state::Action {
+        use stokesforge_app_state::state::Action;
         match self.edit {
             SavedColorEdit::Save => Action::SaveColor {
                 usage: self.usage,
@@ -1479,7 +1479,7 @@ mod tests {
     /// préférences de la machine.
     #[test]
     fn les_couleurs_publiees_se_relisent_projet_et_utilisateur_a_leur_place() {
-        use crate::state::Action;
+        use stokesforge_app_state::state::Action;
         use stokesforge_core::Project;
         use stokesforge_session::Session;
 

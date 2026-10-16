@@ -20,9 +20,9 @@ use stokesforge_analysis::model::Model;
 use stokesforge_core::{ColumnRole, NodeId};
 
 use super::menu_sections::MenuSections;
-use crate::analysis::{Category, Preset, RecentTarget};
-use crate::state::{Action, AppState};
-use crate::tr;
+use stokesforge_app_state::analysis::{Category, Preset, RecentTarget};
+use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::tr;
 
 /// La cible du menu : colonnes du classeur, ou séries exactes du graphe
 /// sélectionné et description cadrée par sa vue (#210).
@@ -483,8 +483,8 @@ pub(super) fn calculation_section(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis_recent::RecentAnalysis;
     use stokesforge_analysis::ops::Operation;
+    use stokesforge_app_state::analysis_recent::RecentAnalysis;
 
     /// Sans historique, la catégorie ouvre son défaut ; après une analyse
     /// lancée, elle rouvre cette méthode, et les autres catégories gardent
@@ -497,10 +497,11 @@ mod tests {
         )
         .unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let mut preferences =
-            crate::preferences::Preferences::load_from(Some(dir.path().join("preferences.json")));
+        let mut preferences = stokesforge_app_state::preferences::Preferences::load_from(Some(
+            dir.path().join("preferences.json"),
+        ));
         let ctx = egui::Context::default();
-        let state = |preferences: &crate::preferences::Preferences| {
+        let state = |preferences: &stokesforge_app_state::preferences::Preferences| {
             AppState::new_with_preferences(
                 session.handle(),
                 "test.stf".to_string(),

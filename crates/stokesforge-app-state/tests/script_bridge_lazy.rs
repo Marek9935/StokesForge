@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use stokesforge_app::state::{Action, AppState};
+use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_core::{Column, Project};
 use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_session::Session;
@@ -67,7 +67,7 @@ fn the_bridge_starts_only_at_the_first_script() {
     let mut state = AppState::new_with_preferences(
         session.handle(),
         "script-test.stf".to_string(),
-        stokesforge_app::preferences::Preferences::load_from(None),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
     )
     .expect("état applicatif initial");
 

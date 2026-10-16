@@ -12,7 +12,7 @@
 use eframe::egui;
 use stokesforge_core::NodeId;
 
-use crate::state::Action;
+use stokesforge_app_state::state::Action;
 
 /// Inscrit `paths` aux fichiers d'import récents (dossier de config). Un échec
 /// d'écriture est sans conséquence : la liste est un confort.

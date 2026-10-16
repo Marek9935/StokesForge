@@ -42,9 +42,10 @@ use std::collections::BTreeMap;
 
 use eframe::egui;
 
-use crate::preferences::DialogGeometry as SavedGeometry;
-use crate::state::{Action, AppState};
-use crate::{theme, tr};
+use crate::theme;
+use stokesforge_app_state::preferences::DialogGeometry as SavedGeometry;
+use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::tr;
 
 use super::grid::keyboard_focus_outside_grid;
 use super::window_chrome::{

@@ -50,8 +50,8 @@ use stokesforge_core::number_format::{format_exact, format_grid};
 use crate::app::shortcuts;
 use crate::field_state::{self, Bound, Verdict};
 use crate::list_frame;
-use crate::quantities::{AutoKind, Quantity};
-use crate::tr;
+use stokesforge_app_state::quantities::{AutoKind, Quantity};
+use stokesforge_app_state::tr;
 
 /// Largeur d'un champ numérique, en points (la « courte » de L2, #227).
 pub const FIELD_WIDTH: f32 = crate::theme::FIELD_WIDTH_SHORT;
@@ -561,7 +561,7 @@ pub fn format_value(value: f64, decimals: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::quantities;
+    use stokesforge_app_state::quantities;
 
     fn touche(key: egui::Key) -> egui::Event {
         touche_avec(key, egui::Modifiers::NONE)

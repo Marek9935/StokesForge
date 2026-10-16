@@ -11,8 +11,8 @@
 use eframe::egui;
 
 use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
-use crate::state::{Action, AppState, StaleExport};
-use crate::tr;
+use stokesforge_app_state::state::{Action, AppState, StaleExport};
+use stokesforge_app_state::tr;
 
 /// Peint la confirmation tant qu'un export attend, et pousse la réponse.
 pub(super) fn stale_export_window(
@@ -74,8 +74,8 @@ pub(super) fn stale_export_window(
 mod tests {
     use super::super::test_support::{cliquer, contexte, image_de, painted, texte_exact, textes};
     use super::*;
-    use crate::analysis::Preset;
     use stokesforge_analysis::model::Model;
+    use stokesforge_app_state::analysis::Preset;
     use stokesforge_core::{Column, ColumnMeta, ColumnRole, NodeId, Project};
     use stokesforge_plot::PlotType;
     use stokesforge_session::Session;
@@ -256,7 +256,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (_session, state, graph) = banc(dir.path());
         let marques = |state: &AppState| -> Vec<bool> {
-            crate::object_manager::object_tree(state.tree(), graph, None)
+            stokesforge_app_state::object_manager::object_tree(state.tree(), graph, None)
                 .unwrap()
                 .layers[0]
                 .series

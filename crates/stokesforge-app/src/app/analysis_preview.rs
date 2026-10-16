@@ -44,11 +44,11 @@ use stokesforge_plot::{AxisScale, AxisSpec};
 use stokesforge_render::scale::axis_ticks;
 use stokesforge_render::{axis_frame, fit_range, snap_to_curve, PanelTransform};
 
-use crate::analysis::{
+use crate::theme;
+use stokesforge_app_state::analysis::{
     issue_message, series_points, series_rows, AnalysisForm, Issue, PreviewTool, AVERAGE_RANGE,
 };
-use crate::theme;
-use crate::tr;
+use stokesforge_app_state::tr;
 
 /// Le cadre de données visible : les bornes de X puis de Y, **dans l'ordre
 /// d'affichage** (un axe inversé a sa borne haute en premier), comme les prend
@@ -819,10 +819,14 @@ fn zones_of(form: &AnalysisForm) -> Vec<(f64, f64)> {
     use stokesforge_analysis::ops::OperationKind as K;
     let s = &form.setup;
     match form.kind {
-        K::Baseline if s.baseline.shape == crate::analysis::BaselineShape::ConstantZone => {
+        K::Baseline
+            if s.baseline.shape == stokesforge_app_state::analysis::BaselineShape::ConstantZone =>
+        {
             s.baseline.constant_zone.into_iter().collect()
         }
-        K::Baseline if s.baseline.shape == crate::analysis::BaselineShape::Zones => {
+        K::Baseline
+            if s.baseline.shape == stokesforge_app_state::analysis::BaselineShape::Zones =>
+        {
             s.baseline.zones.clone()
         }
         K::Integrate => s.integrate.ranges.clone(),
@@ -835,8 +839,8 @@ fn zones_of(form: &AnalysisForm) -> Vec<(f64, f64)> {
 
 /// Les points posés (droite, points d'ancrage).
 fn marks_of(form: &AnalysisForm) -> Vec<(f64, f64)> {
-    use crate::analysis::BaselineShape;
     use stokesforge_analysis::ops::OperationKind as K;
+    use stokesforge_app_state::analysis::BaselineShape;
     match form.kind {
         K::Baseline if form.setup.baseline.shape == BaselineShape::Constant => {
             form.setup.baseline.constant_point.into_iter().collect()
@@ -865,8 +869,8 @@ fn seeds_of(form: &AnalysisForm) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::Preset;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use stokesforge_app_state::analysis::Preset;
 
     fn form_and_tree() -> (AnalysisForm, Arc<Tree>) {
         let project = stokesforge_core::Project::new("Aperçu").unwrap();
@@ -969,7 +973,7 @@ mod tests {
 mod zone_tests {
     use super::super::test_support::{colonnes_xy, contexte, image};
     use super::*;
-    use crate::analysis::{BaselineShape, Preset};
+    use stokesforge_app_state::analysis::{BaselineShape, Preset};
     use stokesforge_core::SeriesRef;
 
     /// Glisse sur l'aperçu de gauche à droite, au milieu de la hauteur.

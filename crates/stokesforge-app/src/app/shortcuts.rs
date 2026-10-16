@@ -16,8 +16,8 @@
 
 use eframe::egui;
 
-use crate::state::Action;
-use crate::tr;
+use stokesforge_app_state::state::Action;
+use stokesforge_app_state::tr;
 
 /// Échap — annule la saisie en cours, ferme la liste ou le dialogue.
 pub(crate) const KEY_ESCAPE: egui::KeyboardShortcut =

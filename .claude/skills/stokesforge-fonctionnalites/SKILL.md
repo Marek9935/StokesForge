@@ -68,7 +68,7 @@ n'existe pas encore » aussi — c'est la plus facile à se tromper.
 
 | La question porte sur | Page | Code |
 |---|---|---|
-| grille, saisie, sélection, copier/coller, menus contextuels, raccourcis, fenêtres, thème, console de script | `docs/application.md` | `stokesforge-app/src/state.rs`, `app.rs` et `src/app/` (barre de menus : `app/menus.rs`), `selection.rs` |
+| grille, saisie, sélection, copier/coller, menus contextuels, raccourcis, fenêtres, thème, console de script | `docs/application.md` | `stokesforge-app-state/src/state.rs`, `stokesforge-app/src/app.rs` et `src/app/` (barre de menus : `app/menus.rs`), `selection.rs` |
 | types de colonnes, valeurs manquantes, colonnes mixtes, noms et champs d'en-tête | `docs/modele-de-donnees.md` | `stokesforge-core` |
 | annulation, macros, ce qu'un Ctrl+Z ramène | `docs/commandes-et-historique.md` | `stokesforge-commands/src/command.rs` |
 | enregistrement, format de fichier, compatibilité | `docs/persistance.md` | `stokesforge-persistence` |
@@ -125,7 +125,7 @@ se choisit par « File » → « Language » → « Français » (tout de suite,
 redémarrer, et retenu au lancement suivant). Quand on décrit un menu, donner le
 nom **dans la langue de l'utilisateur** (celle de sa question), avec l'autre
 entre parenthèses la première fois : « Add Text » (« Ajouter un texte »). Les
-noms viennent des catalogues `crates/stokesforge-app/i18n/{en,fr}/stokesforge_app.ftl`.
+noms viennent des catalogues `crates/stokesforge-app-state/i18n/{en,fr}/stokesforge_app.ftl`.
 
 **Les clics droits** (#152, `docs/menus.md`) : le menu dépend de ce qu'on vise
 et propose des actions directes, sans sous-menu qui répète la cible — clic

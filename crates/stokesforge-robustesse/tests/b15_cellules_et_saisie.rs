@@ -11,10 +11,10 @@
 //! - **rendre illisible** ce que le logiciel existe pour montrer (une mesure
 //!   physique de l'ordre de 10⁻¹⁹).
 //!
-//! `AppState` ne dépend pas d'egui (voir `stokesforge-app/tests/shell.rs`) : tout
+//! `AppState` ne dépend pas d'egui (voir `stokesforge-app-state/tests/shell.rs`) : tout
 //! ce qui suit tourne sans serveur graphique.
 
-use stokesforge_app::state::AppState;
+use stokesforge_app_state::state::AppState;
 use stokesforge_core::{Cell, Column, ColumnType, ColumnValues, NodeId, Project};
 use stokesforge_session::{Session, SessionHandle};
 
@@ -182,11 +182,11 @@ fn b15_une_chaine_vide_survit_a_la_traversee_de_sa_cellule() {
 /// ne distinguait à l'écran une chaîne vide présente d'une valeur absente
 /// (`cell_text` rendait `""` pour les deux). Corrigé dans `state.rs::
 /// cell_text` : une valeur absente s'affiche désormais comme un espace
-/// insécable ([`stokesforge_app::state::MISSING_TEXT_DISPLAY`]) plutôt que comme
+/// insécable ([`stokesforge_app_state::state::MISSING_TEXT_DISPLAY`]) plutôt que comme
 /// une chaîne vide.
 #[test]
 fn b15_a9_option2_la_grille_distingue_absent_de_vide() {
-    use stokesforge_app::state::MISSING_TEXT_DISPLAY;
+    use stokesforge_app_state::state::MISSING_TEXT_DISPLAY;
 
     let (_session, handle, texte, _nombres) = banc();
     let state = AppState::new(handle, "x.stf".to_string()).expect("état");

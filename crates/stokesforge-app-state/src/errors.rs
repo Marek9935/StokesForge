@@ -1188,8 +1188,8 @@ pub mod io {
 }
 
 /// Le contrôle commun des tests de chaque famille.
-#[cfg(test)]
-pub(crate) mod tests_support {
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests_support {
     use std::fmt::Display;
 
     /// Mots du jargon interne qu'une phrase d'erreur n'emploie pas

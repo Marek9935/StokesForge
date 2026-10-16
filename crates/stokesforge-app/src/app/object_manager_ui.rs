@@ -1,8 +1,8 @@
 //! Object Manager peint (#81–#85, #102, #111, #113) : l'arbre de
-//! [`crate::object_manager::ObjectTree`] en lignes, cases de visibilité, menus
+//! [`stokesforge_app_state::object_manager::ObjectTree`] en lignes, cases de visibilité, menus
 //! contextuels, glisser par poignée (séries, groupes, objets libres ; `object_dnd.rs`) et raccourcis clavier (Suppr, F2,
 //! Ctrl+flèches). Le modèle (projection du `PlotSpec`, filtres) reste dans
-//! `crate::object_manager` ; la sélection vit dans la `GraphView`. Ce qui
+//! `stokesforge_app_state::object_manager` ; la sélection vit dans la `GraphView`. Ce qui
 //! touche la vue (sélection, propriétés, renommage) remonte en
 //! [`ObjectManagerRequest`], exécuté après la peinture par
 //! [`StokesForgeApp::run_object_manager_request`], qui sert aussi le menu
@@ -24,13 +24,13 @@ use stokesforge_core::{NodeId, Tree};
 use stokesforge_render_egui::GraphView;
 
 use crate::icons::{icon_image, Icon, IconRole};
-use crate::object_drag::{DragItem, DropOver};
-use crate::object_manager::{
+use stokesforge_app_state::object_drag::{DragItem, DropOver};
+use stokesforge_app_state::object_manager::{
     GroupRow, LayerRow, LayerSlot, ObjectRow, ObjectTree, SeriesRow, Shown, VisibilityTarget as T,
 };
-use crate::preferences::{ObjectManagerGroup, ObjectManagerSettings};
-use crate::state::{active_graph, Action};
-use crate::tr;
+use stokesforge_app_state::preferences::{ObjectManagerGroup, ObjectManagerSettings};
+use stokesforge_app_state::state::{active_graph, Action};
+use stokesforge_app_state::tr;
 
 use super::empty_state::empty_state;
 use super::graph_text_edit::{
@@ -55,12 +55,12 @@ use super::StokesForgeApp;
 
 #[derive(Clone, Copy)]
 pub(super) enum ObjectManagerRequest {
-    Select(crate::object_manager::VisibilityTarget),
+    Select(stokesforge_app_state::object_manager::VisibilityTarget),
     Analysis(
-        crate::object_manager::VisibilityTarget,
-        crate::analysis::Category,
+        stokesforge_app_state::object_manager::VisibilityTarget,
+        stokesforge_app_state::analysis::Category,
     ),
-    Properties(crate::object_manager::VisibilityTarget),
+    Properties(stokesforge_app_state::object_manager::VisibilityTarget),
     Rename(stokesforge_plot::SeriesRef),
     /// Édite sur place le nom d'un groupe de séries (#197).
     RenameGroup(stokesforge_plot::SeriesGroupRef),
@@ -72,7 +72,7 @@ pub(super) enum ObjectManagerRequest {
 fn manager_header_label(
     ui: &mut egui::Ui,
     text: &str,
-    target: crate::object_manager::VisibilityTarget,
+    target: stokesforge_app_state::object_manager::VisibilityTarget,
     requests: &mut Vec<ObjectManagerRequest>,
 ) -> egui::Response {
     let response = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
@@ -80,9 +80,9 @@ fn manager_header_label(
     if response.clicked()
         && matches!(
             target,
-            crate::object_manager::VisibilityTarget::Panel(_)
-                | crate::object_manager::VisibilityTarget::Group(_)
-                | crate::object_manager::VisibilityTarget::Axes(_)
+            stokesforge_app_state::object_manager::VisibilityTarget::Panel(_)
+                | stokesforge_app_state::object_manager::VisibilityTarget::Group(_)
+                | stokesforge_app_state::object_manager::VisibilityTarget::Axes(_)
         )
     {
         requests.push(ObjectManagerRequest::Select(target));
@@ -95,8 +95,8 @@ fn manager_header_label(
 
 pub(super) fn selected_manager_target(
     view: &GraphView,
-) -> Option<crate::object_manager::VisibilityTarget> {
-    use crate::object_manager::VisibilityTarget as T;
+) -> Option<stokesforge_app_state::object_manager::VisibilityTarget> {
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
     view.selected_group()
         .map(T::SeriesGroup)
         .or_else(|| view.selected_series().map(T::Series))
@@ -106,10 +106,10 @@ pub(super) fn selected_manager_target(
 }
 pub(super) fn select_manager_target(
     view: &mut GraphView,
-    target: Option<crate::object_manager::VisibilityTarget>,
+    target: Option<stokesforge_app_state::object_manager::VisibilityTarget>,
     spec: &stokesforge_plot::PlotSpec,
 ) {
-    use crate::object_manager::VisibilityTarget as T;
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
     match target {
         Some(T::Series(t)) => view.select_series(Some(t), spec),
         Some(T::SeriesGroup(t)) => view.select_series_group(Some(t), spec),
@@ -365,16 +365,16 @@ pub(super) fn object_node_menu(
                     .get(object.panel)
                     .map_or(0, |panel| panel.shapes.len());
                 for order in [
-                    crate::state::ShapeOrder::ToFront,
-                    crate::state::ShapeOrder::ToBack,
+                    stokesforge_app_state::state::ShapeOrder::ToFront,
+                    stokesforge_app_state::state::ShapeOrder::ToBack,
                 ] {
                     let (label, hint, index) = match order {
-                        crate::state::ShapeOrder::ToFront => (
+                        stokesforge_app_state::state::ShapeOrder::ToFront => (
                             tr!("action-bring-to-front"),
                             tr!("action-bring-to-front", "hint"),
                             count.saturating_sub(1),
                         ),
-                        crate::state::ShapeOrder::ToBack => (
+                        stokesforge_app_state::state::ShapeOrder::ToBack => (
                             tr!("action-send-to-back"),
                             tr!("action-send-to-back", "hint"),
                             0,
@@ -458,7 +458,7 @@ fn move_reason(up: bool) -> String {
 /// Pourquoi la case ou l'entrée Show/Hide d'un objet est grisée (#226) : un
 /// axe miroir déjà dessiné par un calque du dessus, sinon rien à basculer.
 fn visibility_reason(
-    target: crate::object_manager::VisibilityTarget,
+    target: stokesforge_app_state::object_manager::VisibilityTarget,
     spec: &stokesforge_plot::PlotSpec,
 ) -> String {
     if target.is_blocked_mirror(spec) {
@@ -471,7 +471,7 @@ fn visibility_reason(
 fn object_visibility(
     ui: &mut egui::Ui,
     graph: NodeId,
-    target: crate::object_manager::VisibilityTarget,
+    target: stokesforge_app_state::object_manager::VisibilityTarget,
     spec: &stokesforge_plot::PlotSpec,
     shown: Shown,
     actions: &mut Vec<Action>,
@@ -571,12 +571,12 @@ pub(super) fn object_manager_settings_menu(
 pub(super) fn object_manager_contents(
     ui: &mut egui::Ui,
     tree: &Tree,
-    model: Option<&crate::object_manager::ObjectTree>,
+    model: Option<&stokesforge_app_state::object_manager::ObjectTree>,
     spec: Option<&stokesforge_plot::PlotSpec>,
     settings: ObjectManagerSettings,
     actions: &mut Vec<Action>,
 ) -> Vec<ObjectManagerRequest> {
-    use crate::object_manager::VisibilityTarget as T;
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
     let mut requests = Vec::new();
     let background = ui.interact(
         ui.available_rect_before_wrap(),
@@ -597,7 +597,7 @@ pub(super) fn object_manager_contents(
     let preview_model;
     let (model, shown_spec) = match live.as_ref().and_then(|live| live.preview.as_ref()) {
         Some(preview) => {
-            preview_model = crate::object_manager::object_tree_of_spec(
+            preview_model = stokesforge_app_state::object_manager::object_tree_of_spec(
                 tree,
                 model.graph,
                 &model.title,
@@ -1268,7 +1268,7 @@ pub(super) fn open_group_name_editor(
     if panel.group_members(group.group).is_empty() {
         return;
     }
-    let name = crate::object_manager::group_title(panel, group.group);
+    let name = stokesforge_app_state::object_manager::group_title(panel, group.group);
     ctx.data_mut(|data| {
         data.insert_temp(
             group_rename_id(graph),
@@ -1324,7 +1324,7 @@ fn group_name_editor(
 fn object_manager_object_row(
     ui: &mut egui::Ui,
     graph: NodeId,
-    object: &crate::object_manager::ObjectRow,
+    object: &stokesforge_app_state::object_manager::ObjectRow,
     spec: &stokesforge_plot::PlotSpec,
     focus: egui::Id,
     dnd: &ObjectManagerPaint<'_>,
@@ -1366,14 +1366,16 @@ fn object_manager_object_row(
                 let mut body = |ui: &mut egui::Ui| {
                     object_visibility(ui, graph, object.target, spec, Shown::BASE, actions);
                     let icon = match object.kind {
-                        crate::object_manager::ObjectKind::Text => Icon::TextTool,
-                        crate::object_manager::ObjectKind::Axis => Icon::Axis,
-                        crate::object_manager::ObjectKind::Shape(kind) => match kind {
-                            stokesforge_plot::ShapeKind::Rectangle => Icon::ShapeRectangle,
-                            stokesforge_plot::ShapeKind::Ellipse => Icon::ShapeEllipse,
-                            stokesforge_plot::ShapeKind::Line => Icon::ShapeLine,
-                            stokesforge_plot::ShapeKind::Arrow => Icon::ShapeArrow,
-                        },
+                        stokesforge_app_state::object_manager::ObjectKind::Text => Icon::TextTool,
+                        stokesforge_app_state::object_manager::ObjectKind::Axis => Icon::Axis,
+                        stokesforge_app_state::object_manager::ObjectKind::Shape(kind) => {
+                            match kind {
+                                stokesforge_plot::ShapeKind::Rectangle => Icon::ShapeRectangle,
+                                stokesforge_plot::ShapeKind::Ellipse => Icon::ShapeEllipse,
+                                stokesforge_plot::ShapeKind::Line => Icon::ShapeLine,
+                                stokesforge_plot::ShapeKind::Arrow => Icon::ShapeArrow,
+                            }
+                        }
                     };
                     let icon = ui
                         .add(
@@ -1454,7 +1456,7 @@ impl StokesForgeApp {
         let spec =
             graph.and_then(|graph| stokesforge_core::compose::current_plot_spec(&tree, graph));
         let model = graph.and_then(|graph| {
-            crate::object_manager::object_tree_with_selection(
+            stokesforge_app_state::object_manager::object_tree_with_selection(
                 &tree,
                 graph,
                 selection,
@@ -1592,7 +1594,7 @@ mod tests {
         ShapeRef, ShapeSpec, TextTarget,
     };
 
-    use crate::object_manager::VisibilityTarget as T;
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
 
     #[test]
     fn analyse_du_groupe_garde_ses_membres_et_le_spec_de_la_vue() {
@@ -1612,7 +1614,7 @@ mod tests {
             graph,
             ObjectManagerRequest::Analysis(
                 T::Series(SeriesRef::new(0, 0)),
-                crate::analysis::Category::DataManipulation,
+                stokesforge_app_state::analysis::Category::DataManipulation,
             ),
             &mut actions,
         );
@@ -1629,7 +1631,12 @@ mod tests {
 
     /// Un graphe de trois séries (« Premier », « Deuxième », « Dernier »), la
     /// première sélectionnée, et son arbre d'Object Manager.
-    fn trois_series() -> (Project, NodeId, PlotSpec, crate::object_manager::ObjectTree) {
+    fn trois_series() -> (
+        Project,
+        NodeId,
+        PlotSpec,
+        stokesforge_app_state::object_manager::ObjectTree,
+    ) {
         let mut project = Project::new("Objets").unwrap();
         let root = project.root();
         let mut panel = PanelSpec::default();
@@ -1640,9 +1647,12 @@ mod tests {
         }
         let spec = PlotSpec::default().with_panels(panel);
         let graph = project.add_graph(root, None, spec.clone()).unwrap();
-        let model =
-            crate::object_manager::object_tree(project.tree(), graph, Some(SeriesRef::new(0, 0)))
-                .unwrap();
+        let model = stokesforge_app_state::object_manager::object_tree(
+            project.tree(),
+            graph,
+            Some(SeriesRef::new(0, 0)),
+        )
+        .unwrap();
         (project, graph, spec, model)
     }
 
@@ -1651,7 +1661,7 @@ mod tests {
     fn image(
         ctx: &egui::Context,
         tree: &Tree,
-        model: Option<&crate::object_manager::ObjectTree>,
+        model: Option<&stokesforge_app_state::object_manager::ObjectTree>,
         spec: Option<&PlotSpec>,
         events: Vec<egui::Event>,
     ) -> (egui::FullOutput, Vec<Action>, Vec<ObjectManagerRequest>) {
@@ -1940,7 +1950,7 @@ mod tests {
         let graph = project
             .add_graph(project.root(), None, spec.clone())
             .unwrap();
-        let model = crate::object_manager::object_tree_with_selection(
+        let model = stokesforge_app_state::object_manager::object_tree_with_selection(
             project.tree(),
             graph,
             None,
@@ -2074,7 +2084,7 @@ mod tests {
             show_scales: true,
             ..Default::default()
         };
-        let model = crate::object_manager::object_tree_with_selection(
+        let model = stokesforge_app_state::object_manager::object_tree_with_selection(
             project.tree(),
             graph,
             None,
@@ -2194,13 +2204,18 @@ mod tests {
     /// modèle n'est écrit qu'au relâchement), les actions s'accumulent.
     struct Banc {
         project: Project,
-        model: crate::object_manager::ObjectTree,
+        model: stokesforge_app_state::object_manager::ObjectTree,
         spec: PlotSpec,
         settings: ObjectManagerSettings,
         actions: Vec<Action>,
     }
 
-    type Fixture = (Project, NodeId, PlotSpec, crate::object_manager::ObjectTree);
+    type Fixture = (
+        Project,
+        NodeId,
+        PlotSpec,
+        stokesforge_app_state::object_manager::ObjectTree,
+    );
 
     fn banc(fixture: Fixture) -> egui_kittest::Harness<'static, Banc> {
         banc_avec(fixture, ObjectManagerSettings::default())
@@ -2414,7 +2429,7 @@ mod tests {
         }
         let spec = PlotSpec::default().with_panels(panel);
         let graph = project.add_graph(root, None, spec.clone()).unwrap();
-        let model = crate::object_manager::object_tree_with_selection(
+        let model = stokesforge_app_state::object_manager::object_tree_with_selection(
             project.tree(),
             graph,
             None,
@@ -2511,7 +2526,7 @@ mod tests {
         let (_, actions, requests) = clic_menu(&paint, entry, egui::PointerButton::Primary);
         assert!(actions.is_empty(), "la vue doit encore fournir le cadrage");
         assert!(requests.iter().any(|request| matches!(request,
-            ObjectManagerRequest::Analysis(T::Series(series), crate::analysis::Category::DataManipulation) if *series == SeriesRef::new(0, 1)
+            ObjectManagerRequest::Analysis(T::Series(series), stokesforge_app_state::analysis::Category::DataManipulation) if *series == SeriesRef::new(0, 1)
         )));
     }
 
@@ -2568,7 +2583,12 @@ mod tests {
 
     /// Trois séries, les deux dernières en groupe nommé « Lots » (#197), et
     /// l'arbre d'Object Manager de ce graphe.
-    fn groupe_nomme() -> (Project, NodeId, PlotSpec, crate::object_manager::ObjectTree) {
+    fn groupe_nomme() -> (
+        Project,
+        NodeId,
+        PlotSpec,
+        stokesforge_app_state::object_manager::ObjectTree,
+    ) {
         let (mut project, graph, mut spec, _) = trois_series();
         let panel = spec.panels.get_mut(0).unwrap();
         panel.series[1].group = Some(1);
@@ -2577,7 +2597,8 @@ mod tests {
         project
             .set_plot_spec(graph, spec.clone())
             .expect("spec avec groupe");
-        let model = crate::object_manager::object_tree(project.tree(), graph, None).unwrap();
+        let model = stokesforge_app_state::object_manager::object_tree(project.tree(), graph, None)
+            .unwrap();
         (project, graph, spec, model)
     }
 
@@ -2620,7 +2641,8 @@ mod tests {
         let mut project = project;
         let graph = project.tree().node(project.root()).unwrap().children()[0];
         project.set_plot_spec(graph, spec.clone()).unwrap();
-        let model = crate::object_manager::object_tree(project.tree(), graph, None).unwrap();
+        let model = stokesforge_app_state::object_manager::object_tree(project.tree(), graph, None)
+            .unwrap();
         let ctx = super::super::test_support::contexte();
         ctx.all_styles_mut(|style| style.animation_time = 0.0);
         let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
@@ -2876,7 +2898,8 @@ mod tests {
             panel.series[1].visible = visible;
             let spec = PlotSpec::default().with_panels(panel);
             let graph = project.add_graph(root, None, spec.clone()).unwrap();
-            let model = crate::object_manager::object_tree(project.tree(), graph, None);
+            let model =
+                stokesforge_app_state::object_manager::object_tree(project.tree(), graph, None);
             let ctx = egui::Context::default();
             crate::theme::install(&ctx);
             let image = |events| image(&ctx, project.tree(), model.as_ref(), Some(&spec), events);
@@ -2924,7 +2947,8 @@ mod tests {
         use egui::containers::panel::PanelState;
         let (project, graph, _, _) = trois_series();
         let session = stokesforge_session::Session::spawn(project, None).unwrap();
-        let state = crate::state::AppState::new(session.handle(), String::new()).unwrap();
+        let state =
+            stokesforge_app_state::state::AppState::new(session.handle(), String::new()).unwrap();
         let mut app = StokesForgeApp::new(state);
         let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
         let paint = |app: &mut StokesForgeApp, context: &egui::Context| {

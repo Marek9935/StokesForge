@@ -65,7 +65,7 @@ format est PPM. Aucune interaction possible.
 ## Tests
 
 ```sh
-cargo test -p stokesforge-app --test shell   # boucle complète sans fenêtre, ~7 s
+cargo test -p stokesforge-app-state --test shell   # boucle complète sans fenêtre (sans egui à compiler), ~7 s
 ```
 
 Suite complète : voir `CLAUDE.md` (Commandes) et `stokesforge-verification`.

@@ -84,7 +84,7 @@ clone sa poignée pour un thread reste « lui-même » ; deux appels
 **indépendants** à `Session::handle()` sont deux émetteurs **distincts**, même
 dans le même processus. `SessionHandle::with_new_identity()` donne une poignée
 vers la même session avec une identité **neuve** : c'est ce qu'emploient les
-vues détachées (`AppState::fork_for_detached_view`) et le moteur de script, pour
+vues détachées (`AppState::fork_for_detached_view`, dans `stokesforge-app-state`) et le moteur de script, pour
 que leurs écritures soient refusées (`ForeignMacro`) pendant une macro ouverte
 par l'interface — au lieu d'y être absorbées puis annulées avec elle (issue
 #21).

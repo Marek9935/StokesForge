@@ -5,7 +5,7 @@
 //! ([`StokesForgeApp::run_toolbar_request`]).
 //!
 //! Les boutons eux-mêmes vivent dans `crate::toolbar` ; la mise en balises
-//! Typst d'un passage dans `crate::text_format` ; ici, le lien entre les deux
+//! Typst d'un passage dans `stokesforge_app_state::text_format` ; ici, le lien entre les deux
 //! et la sélection de la vue de graphe (flottante ou détachée). La police, et
 //! pour un titre ou la légende le corps et la couleur, sont des champs de la
 //! zone ([`StokesForgeApp::format_zone`], #77/#78/#90), jamais une balise
@@ -17,8 +17,8 @@ use eframe::egui;
 use stokesforge_core::NodeId;
 use stokesforge_render_egui::{GraphView, TextTarget};
 
-use crate::state::{active_graph, Action, ActiveTabKind};
 use crate::toolbar::ToolbarRequest;
+use stokesforge_app_state::state::{active_graph, Action, ActiveTabKind};
 
 use super::graph_text_edit::{
     annotation_editor_id, pending_format_id, pending_zone_font_id, text_editor_id,
@@ -242,7 +242,7 @@ impl StokesForgeApp {
     /// déplacement (`ObjectFormat::apply` dit si quelque chose a changé).
     fn format_object(
         &mut self,
-        format: &crate::object_format::ObjectFormat,
+        format: &stokesforge_app_state::object_format::ObjectFormat,
         active_tab: Option<Tab>,
         actions: &mut Vec<Action>,
     ) {
@@ -290,11 +290,11 @@ impl StokesForgeApp {
     fn format_zone(
         &mut self,
         ctx: &egui::Context,
-        format: &crate::text_format::TextFormat,
+        format: &stokesforge_app_state::text_format::TextFormat,
         active_tab: Option<Tab>,
         actions: &mut Vec<Action>,
     ) -> bool {
-        use crate::text_format::TextFormat;
+        use stokesforge_app_state::text_format::TextFormat;
         let Some(graph) = active_graph(active_tab_kind(active_tab)) else {
             return false;
         };
@@ -421,7 +421,7 @@ impl StokesForgeApp {
                 actions.push(Action::SetTextContent {
                     graph,
                     target,
-                    text: crate::text_format::apply(&text, 0..length, format).text,
+                    text: stokesforge_app_state::text_format::apply(&text, 0..length, format).text,
                 });
             }
             return true;
@@ -482,11 +482,11 @@ impl StokesForgeApp {
     fn format_text(
         &mut self,
         ctx: &egui::Context,
-        format: crate::text_format::TextFormat,
+        format: stokesforge_app_state::text_format::TextFormat,
         active_tab: Option<Tab>,
         actions: &mut Vec<Action>,
     ) {
-        use crate::text_format::{apply, TextFormat};
+        use stokesforge_app_state::text_format::{apply, TextFormat};
         // La police est un attribut de la zone, jamais une balise (issue
         // #78) ; le corps aussi pour un titre ou la légende (issue #77).
         if self.format_zone(ctx, &format, active_tab, actions) {
@@ -582,11 +582,11 @@ mod tests {
     use super::super::object_manager_ui::{selected_manager_target, ObjectManagerRequest};
     use super::super::project_manager::tests::{click_at, find_text_center};
     use super::*;
-    use crate::object_format::ObjectFormat;
-    use crate::state::AppState;
-    use crate::text_format::{apply, TextFormat};
     use crate::theme;
     use crate::toolbar::{BarEnv, FormatTarget, ToolbarId, ToolsContext};
+    use stokesforge_app_state::object_format::ObjectFormat;
+    use stokesforge_app_state::state::AppState;
+    use stokesforge_app_state::text_format::{apply, TextFormat};
     use stokesforge_core::Project;
     use stokesforge_plot::{
         AnnotationRef, AnnotationSpec, AxisSide, PanelSpec, PlotSpec, SeriesRef, SeriesSpec,
@@ -1074,7 +1074,7 @@ mod tests {
         output.textures_delta.clear();
         let mut actions = Vec::new();
         app.format_object(
-            &crate::object_format::ObjectFormat::LineWidth(4.0),
+            &stokesforge_app_state::object_format::ObjectFormat::LineWidth(4.0),
             Some(Tab::Graph(graph)),
             &mut actions,
         );
@@ -1097,7 +1097,7 @@ mod tests {
     }
     #[test]
     fn les_objets_masques_et_le_format_suivent_la_vue_detachee() {
-        use crate::object_manager::VisibilityTarget as T;
+        use stokesforge_app_state::object_manager::VisibilityTarget as T;
         use stokesforge_plot::{
             AnnotationRef, AnnotationSpec, ShapeKind, ShapeRef, ShapeSpec, TextTarget,
         };
@@ -1150,7 +1150,7 @@ mod tests {
         );
         app.format_text(
             &ctx,
-            crate::text_format::TextFormat::Size(28.0),
+            stokesforge_app_state::text_format::TextFormat::Size(28.0),
             Some(Tab::Graph(graph)),
             &mut actions,
         );

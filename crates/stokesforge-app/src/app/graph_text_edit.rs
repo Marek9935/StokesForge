@@ -19,9 +19,9 @@ use stokesforge_render_egui::{GraphView, TextTarget};
 
 use crate::color_picker::{ColorUsage, PickerEnv};
 use crate::number_field::number_field;
-use crate::quantities;
-use crate::state::{series_list_label, Action};
-use crate::tr;
+use stokesforge_app_state::quantities;
+use stokesforge_app_state::state::{series_list_label, Action};
+use stokesforge_app_state::tr;
 
 use super::inplace_edit;
 use crate::color_picker::{saved_colors_id, SavedColorRequest};
@@ -105,7 +105,9 @@ fn apply_pending_format(ctx: &egui::Context, field: egui::Id, buffer: &mut Strin
     use egui::text::{CCursor, CCursorRange};
     let Some(format) = ctx
         .data_mut(|data| {
-            data.remove_temp::<Option<crate::text_format::TextFormat>>(pending_format_id())
+            data.remove_temp::<Option<stokesforge_app_state::text_format::TextFormat>>(
+                pending_format_id(),
+            )
         })
         .flatten()
     else {
@@ -123,7 +125,7 @@ fn apply_pending_format(ctx: &egui::Context, field: egui::Id, buffer: &mut Strin
         })
     });
     let selection = selection.start.min(length)..selection.end.min(length);
-    let done = crate::text_format::apply(buffer, selection, &format);
+    let done = stokesforge_app_state::text_format::apply(buffer, selection, &format);
     *buffer = done.text;
     state.cursor.set_char_range(Some(CCursorRange::two(
         CCursor::new(done.selection.start),
@@ -212,7 +214,7 @@ pub(super) fn open_legend_entry_editor(
     let Some(anchor) = view.legend_entry_screen_box(panel, series) else {
         return;
     };
-    let original = crate::state::series_list_label(tree, spec_series);
+    let original = stokesforge_app_state::state::series_list_label(tree, spec_series);
     start_text_editor(
         ctx,
         view,
@@ -277,7 +279,7 @@ pub(super) fn open_group_name_editor_in_graph(
         ctx,
         view,
         TextEditTarget::GroupName(graph_group),
-        crate::object_manager::group_title(panel, graph_group.group),
+        stokesforge_app_state::object_manager::group_title(panel, graph_group.group),
         anchor,
     );
 }
@@ -539,7 +541,7 @@ pub(super) fn annotation_editor_ui(
                     );
                     for request in requests {
                         if let crate::toolbar::ToolbarRequest::FormatText(
-                            crate::text_format::TextFormat::Align(align),
+                            stokesforge_app_state::text_format::TextFormat::Align(align),
                         ) = request
                         {
                             editor.draft.align = align;
@@ -693,8 +695,8 @@ fn commit_annotation_editor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::text_format::TextFormat;
     use egui::text::{CCursor, CCursorRange};
+    use stokesforge_app_state::text_format::TextFormat;
     use stokesforge_plot::SeriesRef;
     use stokesforge_render_egui::{AnnotationRef, AnnotationSpec};
 
@@ -1047,7 +1049,7 @@ mod tests {
 #[cfg(test)]
 mod selection_entre_deux_formats {
     use super::*;
-    use crate::text_format::TextFormat;
+    use stokesforge_app_state::text_format::TextFormat;
 
     fn image(ctx: &egui::Context, field: egui::Id, buffer: &mut String, blur: bool) {
         let _ = crate::app::test_support::image(ctx, vec![], |ui| {

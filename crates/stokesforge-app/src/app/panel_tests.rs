@@ -716,7 +716,7 @@ fn detacher_et_rattacher_la_console_conserve_le_travail_python_et_sa_sortie() {
 /// instantané ne changent. Le stockage injecté ne touche pas la machine.
 #[test]
 fn les_reglages_reveillent_et_changent_le_panneau_detache_comme_le_panneau_ancre() {
-    use crate::preferences::{ObjectManagerGroup, Preferences};
+    use stokesforge_app_state::preferences::{ObjectManagerGroup, Preferences};
     let mut project = Project::new("Réglages détachés").unwrap();
     let mut spec = stokesforge_plot::PlotSpec::empty("Titre témoin");
     spec.panels

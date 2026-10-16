@@ -4,9 +4,9 @@
 
 use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::OperationKind;
-use stokesforge_app::analysis::{Edge, HandleSlot, Preset, RangeSet};
-use stokesforge_app::i18n::{self, Language};
-use stokesforge_app::state::{Action, AppState, CalculationDelete};
+use stokesforge_app_state::analysis::{Edge, HandleSlot, Preset, RangeSet};
+use stokesforge_app_state::i18n::{self, Language};
+use stokesforge_app_state::state::{Action, AppState, CalculationDelete};
 use stokesforge_core::{Column, ColumnMeta, ColumnRole, NodeId, Project};
 use stokesforge_session::Session;
 
@@ -45,7 +45,7 @@ fn setup(dir: &std::path::Path) -> Setup {
     let state = AppState::new_with_preferences(
         session.handle(),
         dir.join("p.stf").display().to_string(),
-        stokesforge_app::preferences::Preferences::load_from(None),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
     )
     .unwrap();
     Setup {
@@ -347,7 +347,8 @@ fn the_output_choice_is_remembered_across_sessions() {
     let file = dir.path().join("preferences.json");
     let make = |keep_expected: bool| {
         let mut s = setup(dir.path());
-        let preferences = stokesforge_app::preferences::Preferences::load_from(Some(file.clone()));
+        let preferences =
+            stokesforge_app_state::preferences::Preferences::load_from(Some(file.clone()));
         assert_eq!(preferences.analysis_keep_results(), keep_expected);
         s.state = AppState::new_with_preferences(
             s._session.handle(),
@@ -434,7 +435,7 @@ fn analyse_depuis_graphe_garde_x_sigma_styles_calque_groupe_et_annulation() {
     assert_eq!(form.graph, Some(graph));
     assert_eq!(form.graph_source.as_ref().unwrap().0, spec);
     assert_eq!(
-        stokesforge_app::analysis::series_points(s.state.tree(), &form.series[0]).0[0],
+        stokesforge_app_state::analysis::series_points(s.state.tree(), &form.series[0]).0[0],
         10.0
     );
     let form = s.state.analysis_form_mut().unwrap();
@@ -531,7 +532,8 @@ fn remplacement_partage_attend_confirmation_et_annuler_garde_le_formulaire() {
 /// configuration réelle de la machine.
 fn with_preferences(s: &mut Setup, dir: &std::path::Path) -> std::path::PathBuf {
     let file = dir.join("preferences.json");
-    let preferences = stokesforge_app::preferences::Preferences::load_from(Some(file.clone()));
+    let preferences =
+        stokesforge_app_state::preferences::Preferences::load_from(Some(file.clone()));
     s.state = AppState::new_with_preferences(
         s._session.handle(),
         dir.join("p.stf").display().to_string(),
@@ -541,8 +543,8 @@ fn with_preferences(s: &mut Setup, dir: &std::path::Path) -> std::path::PathBuf 
     file
 }
 
-fn target(s: &Setup) -> stokesforge_app::analysis::RecentTarget {
-    stokesforge_app::analysis::RecentTarget::Columns {
+fn target(s: &Setup) -> stokesforge_app_state::analysis::RecentTarget {
+    stokesforge_app_state::analysis::RecentTarget::Columns {
         sheet: s.sheet,
         columns: vec![s.x, s.y],
     }
@@ -594,7 +596,7 @@ fn les_analyses_lancees_sont_retenues_sans_doublon_et_survivent_a_la_session() {
     assert_eq!(s.state.analysis_recent(), before.as_slice());
 
     // Les entrées vivent dans les préférences, pas dans le projet.
-    let preferences = stokesforge_app::preferences::Preferences::load_from(Some(file));
+    let preferences = stokesforge_app_state::preferences::Preferences::load_from(Some(file));
     assert_eq!(preferences.analysis_recent(), before.as_slice());
 }
 
@@ -815,7 +817,9 @@ fn une_correction_garde_sa_reference_meme_si_la_colonne_d_origine_disparait() {
     let mut state = AppState::new_with_preferences(
         session.handle(),
         dir.path().join("p.stf").display().to_string(),
-        stokesforge_app::preferences::Preferences::load_from(Some(dir.path().join("prefs.json"))),
+        stokesforge_app_state::preferences::Preferences::load_from(Some(
+            dir.path().join("prefs.json"),
+        )),
     )
     .unwrap();
     state.dispatch(Action::OpenAnalysis {

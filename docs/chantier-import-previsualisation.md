@@ -166,7 +166,7 @@ défaut plutôt que de faire échouer le chargement.
   `Mixed`.** Seule une colonne qui rencontre réellement un jeton non
   numérique devient `Mixed` — vérifié par
   `importing_a_non_numeric_cell_produces_a_mixed_column_with_the_original_text`
-  (`crates/stokesforge-app/tests/shell.rs`), qui affirme aussi l'inverse sur la
+  (`crates/stokesforge-app-state/tests/shell.rs`), qui affirme aussi l'inverse sur la
   colonne numérique voisine dans le même fichier.
 - **Le correctif du bug de champ de texte vit dans `grid_contents`, pas dans
   `import_window`.** C'est là que le problème naissait (`consume_key` sur

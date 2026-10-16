@@ -53,16 +53,16 @@ qu'une fonctionnalité existe, ni qu'elle reste à faire. **Le code fait foi.**
 | change le **modèle** (colonnes, arbre, `PlotSpec`, texte de note…) | une `Command` de `stokesforge-commands` | jamais une primitive `stokesforge-core` en direct (invariant 1) ; voir le skill **stokesforge-commande** |
 | est un **réglage de vue propre à un document** (rangées d'en-tête d'un classeur) | mémoire d'egui sous l'identifiant du nœud, défaut des nouveaux documents en préférence publiée dans le `Context` (`grid::header_rows`) | jamais un drapeau global : tous les classeurs le suivraient ; rien dans le modèle ni le `.stf` |
 | change le **cadrage de vue** (zoom, pan) | `ViewState` sur `GraphView` | ce n'est **pas** une mutation du modèle : personne ne veut annuler un zoom par Ctrl+Z |
-| est une **décision** d'interface (quoi proposer, quoi griser, comment nommer) | `stokesforge-app/src/state.rs` | doit rester testable sans fenêtre |
+| est une **décision** d'interface (quoi proposer, quoi griser, comment nommer) | `stokesforge-app-state/src/state.rs` (crate **sans egui**, #263 : un `use egui` n'y compile pas) | doit rester testable sans fenêtre |
 | est du **dessin ou de l'événement** egui | le module de **la surface** dans `stokesforge-app/src/app/` (grille `grid.rs`, classeur `workbook.rs`, graphe `graph_window.rs`, menus `menus.rs`, barres de format `format.rs`, dialogue `plot_settings.rs`…, table complète dans `docs/application.md`, § Découpage du code ; voir § 2 octies) — `app.rs` n'en reçoit que l'appel | rien de ce qu'ils contiennent n'est une décision de produit ; jamais une logique de surface dans `app.rs` |
 | est une **fonctionnalité de tracé** | `stokesforge-render` (générique sur le backend) | jamais dans un seul backend (invariant 5) ; voir le skill **stokesforge-rendu** |
 | lit un **fichier de données** | `stokesforge-import` | reste indépendant de l'UI, de `core`, des commandes et de la session |
 
 Une action qui a besoin de l'**état de vue** (le zoom d'une `GraphView`, qui
 vit dans `StokesForgeApp::graph_views` ou la vue détachée, jamais dans
-`AppState`) : la couche `app` le lit et le **met dans l'`Action`**, `state.rs` fait le travail et le dit dans la barre d'état. Modèle :
+`AppState`) : la couche `app` le lit et le **met dans l'`Action`**, `state.rs` (de `stokesforge-app-state`) fait le travail et le dit dans la barre d'état. Modèle :
 `Action::ExportGraph { path, spec }`, dont le spec est déjà cadré par
-`GraphView::framed_spec` (issue #34) — testable dans `tests/shell.rs` sans
+`GraphView::framed_spec` (issue #34) — testable dans `stokesforge-app-state/tests/shell.rs` sans
 fenêtre, et identique depuis une fenêtre détachée.
 
 Un **geste continu sur un graphe** (glisser, édition sur place) n'émet pas une
@@ -90,9 +90,9 @@ Un geste qui ajoute des séries à un graphe **réutilise l'`Action` du dépôt*
 des graphiques ouverts est publiée dans le `Context` à chaque image, seul canal
 commun aux viewports. Aucune seconde voie d'ajout de série.
 
-La ligne de partage `state.rs` / `app` (`app.rs` et `src/app/`) est la colonne
-vertébrale du crate UI : `state` porte toute la logique, pilotée par un enum
-`Action`, et se teste en CI (`tests/shell.rs`) ; `app` ne fait que traduire
+La ligne de partage `stokesforge-app-state` / `stokesforge-app` (`app.rs` et `src/app/`) est la colonne
+vertébrale de l'interface, tenue par le compilateur (#263) : `state` porte toute la logique, pilotée par un enum
+`Action`, et se teste en CI (`stokesforge-app-state/tests/shell.rs`) ; `app` ne fait que traduire
 clavier et souris en `Action` et peindre. Une fenêtre ne se teste pas en
 intégration continue — c'est toute la raison du découpage. Si une règle
 métier se retrouve dans `app`, elle devient invérifiable.
@@ -122,7 +122,7 @@ renvoie ses actions à la racine.
 Avant de toucher à une surface d'interface :
 
 ```sh
-rg "fn <nom>|fn detached_<nom>" crates/stokesforge-app/src/
+rg "fn <nom>|fn detached_<nom>" crates/stokesforge-app/src/ crates/stokesforge-app-state/src/
 ```
 
 Deux résultats → le changement se fait deux fois, ou mieux : **se factorise**.
@@ -212,7 +212,7 @@ ou par la relecture :
   tests sont relus : l'agent `perimetre` (Opus) fixe les cas et leurs
   témoins, Sonnet les écrit et vérifie chaque témoin par mutation ;
 - les gardes qui lisent le code parcourent tout `src/`, sous-dossiers
-  compris (lecteur unique `tests/support/sources.rs`, #116) : un module
+  compris, ceux des deux crates app (lecteur unique `stokesforge-app/tests/support/sources.rs`, #116, #263) : un module
   déplacé reste gardé sans rien déclarer. Une fonction qu'une garde attend
   (`import_window`, `modal_dialog_with`, une entrée de `ZONE_43`…) et qu'on
   renomme fait échouer la garde : mettre la garde à jour, ne pas la
@@ -549,9 +549,9 @@ vérifier quand une action est ajoutée :
 4. **le libellé**, qui vient de `state` (`AppState::undo_label`,
    `GridMenu::target_label`…), jamais écrit en dur dans la couche `app` quand une
    contextualisation existe déjà. **Tout libellé est une clé du catalogue
-   `en`** (`crates/stokesforge-app/i18n/en/stokesforge_app.ftl`), lue par `tr!("clé")` —
+   `en`** (`crates/stokesforge-app-state/i18n/en/stokesforge_app.ftl`), lue par `tr!("clé")` —
    jamais un littéral, même pour un bouton de passage (verrouillé par
-   `aucun_libelle_en_dur`, `tests/libelles.rs`). Rédiger le texte selon le
+   `aucun_libelle_en_dur`, `stokesforge-app/tests/libelles.rs`). Rédiger le texte selon le
    skill **stokesforge-textes-interface** (mécanique : ajout d'une clé, pseudo-langue,
    garde). Une action a **un** libellé : la clé `action-*`, partagée par la barre de
    menus, le menu contextuel et la barre d'état ; son infobulle est l'attribut
@@ -600,7 +600,7 @@ Le menu contextuel de la grille suit ces règles, en plus de la grammaire de
   Type ▸ et Role ▸ n'ont pas de raccourci : leur équivalent est le menu
   *Workbook*.)
 - **La décision vit dans `AppState::grid_menu` → `GridMenu`**, pas dans le code
-  egui. C'est ce qui la rend vérifiable sans fenêtre dans `tests/shell.rs` :
+  egui. C'est ce qui la rend vérifiable sans fenêtre dans `stokesforge-app-state/tests/shell.rs` :
   quels gestes ont un sens dans cette zone (`GridZone::Header`/`Data`/
   `Columns`/`Rows`), lesquels griser, comment accorder les libellés en nombre.
 - **Les entrées sont des verbes nus** — règle de toute la grammaire, pas
@@ -652,8 +652,8 @@ décisions au lieu d'`AskUserQuestion` :
 
 ## 4. Tests — et, si c'est visuel, regarder
 
-Toute logique ajoutée dans `state.rs` se teste dans
-`crates/stokesforge-app/tests/shell.rs` — sans fenêtre, sans serveur graphique.
+Toute logique ajoutée dans `state.rs` (`stokesforge-app-state`) se teste dans
+`crates/stokesforge-app-state/tests/shell.rs` — sans fenêtre, sans serveur graphique.
 
 **Les tests couvrent la géométrie, pas l'apparence.** Un changement visuel
 (contour, alignement, largeur, troncature, surbrillance, icône) n'est pas
@@ -710,12 +710,12 @@ touche (`python`), relecture du diff, message de commit en français.
 - [ ] champs, messages, dialogues, grisage, clavier conformes à `docs/standard-interface.md` (§2 novies) ; brique *à venir* non appelée ; brique ou garde créée → passée à *en place* dans la page et les skills
 - [ ] existant réutilisé plutôt que dupliqué
 - [ ] mutation du modèle → `Command` annulable (skill **stokesforge-commande**)
-- [ ] logique dans `state.rs`, glu egui seulement dans la couche `app` (`app.rs` et `src/app/`)
+- [ ] logique dans `state.rs` (`stokesforge-app-state`), glu egui seulement dans la couche `app` (`app.rs` et `src/app/`)
 - [ ] place dans la barre de menus **et** les menus contextuels étudiée (§2 quater) ; rien n'est accessible seulement au clic droit
 - [ ] les quatre surfaces en accord : raccourci, menu, grisage, libellé
 - [ ] libellés : clés du catalogue `en` + `tr!`, aucun littéral (`aucun_libelle_en_dur`) ; un changement visuel est regardé aussi en `STOKESFORGE_LANG=en-XA`
 - [ ] entrée de menu rangée dans une section de la grammaire (`docs/menus.md`), séparateurs par `MenuSections::section` seulement, *absente* ou *grisée avec `.disabled`* ; menu contextuel de la grille : décision dans `GridMenu`
-- [ ] test au bon endroit : décision d'`AppState` dans `tests/shell.rs`, geste peint dans le module `tests` de la surface (`src/app/<surface>.rs`), autre crate sinon
+- [ ] test au bon endroit : décision d'`AppState` dans `stokesforge-app-state/tests/shell.rs`, geste peint dans le module `tests` de la surface (`src/app/<surface>.rs`), autre crate sinon
 - [ ] changement visuel **regardé** (capture), pas seulement testé
 - [ ] `//!` du module mis à jour (le *pourquoi*) + page `docs/` (le *quoi*)
 - [ ] `fmt` + `clippy` + `cargo test --workspace` verts
@@ -736,7 +736,7 @@ Réinitialiser, ne remplace jamais un état egui déjà mémorisé. La section O
 est propre au graphique ou au calque ; ne pas la confondre avec les axes.
 Le modèle du viewport détaché transporte tous les réglages et doit se réveiller
 sur leur seul changement. Pour tester leurs actions, injecter un fichier
-temporaire avec `AppState::new_with_preferences`, jamais la configuration réelle.
+temporaire avec `AppState::new_with_preferences`, jamais la configuration réelle. Un test de `stokesforge-app` qui bâtit un `AppState` par `new` n'atteint pas la configuration réelle grâce à la feature `test-support` (#263, `isolation_preferences.rs`).
 
 Les textes et objets sélectionnés lisent aussi `with_graph_view` /
 `read_graph_view` (propriétés et barres de format incluses). Le menu

@@ -18,9 +18,9 @@ use stokesforge_core::{NodeId, Tree};
 use stokesforge_plot::PlotSpec;
 use stokesforge_render_egui::GraphView;
 
-use crate::analysis::{series_rows, AnalysisForm, Edge, Handle, HandleSlot};
-use crate::state::Action;
 use crate::theme;
+use stokesforge_app_state::analysis::{series_rows, AnalysisForm, Edge, Handle, HandleSlot};
+use stokesforge_app_state::state::Action;
 
 /// Rayon de saisie d'une poignée, en points egui.
 const GRAB_RADIUS: f32 = 7.0;

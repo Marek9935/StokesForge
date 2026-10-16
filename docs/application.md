@@ -20,6 +20,24 @@ définitifs qu'elles accueilleront.
 Toolkit : `eframe` / `egui` (disposition et rendu), `rfd` (sélecteur de
 fichiers natif).
 
+### Deux crates : l'état et la coquille (#263)
+
+L'application est coupée en deux crates, et c'est le compilateur qui tient la
+frontière. **`stokesforge-app-state`** (sans egui) reçoit tout ce que
+l'application décide sans le dessiner : `state.rs` + `state/` (`AppState`,
+`Action`), `selection.rs`, `preferences.rs`, `analysis.rs`,
+`analysis_recent.rs`, `object_manager.rs`, `object_drag.rs`,
+`history_text.rs`, `quantities.rs`, `user_colors.rs`, `object_format.rs`,
+`text_format.rs`, `errors.rs`, `i18n.rs` (avec les catalogues `i18n/`) et
+`file_picker.rs`. **`stokesforge-app`** garde `main.rs`, `app.rs`, `app/`,
+`theme.rs`, `icons.rs`, `field_state.rs`, `number_field.rs`, `toolbar.rs`,
+`list_frame.rs`, `tree_lines.rs` et `color_picker.rs` : tout ce qui nomme un type
+d'egui, et l'offre de la figure au presse-papiers (`stokesforge-clipboard` tire
+winit, donc ne peut pas descendre). Dans les chemins de ce document, un module
+sans préfixe est dans `stokesforge-app/src/` s'il est sous `app/` ou nommé
+`theme`, `icons`, `field_state`, `number_field`, `toolbar`, `list_frame`,
+`tree_lines`, `color_picker`, et dans `stokesforge-app-state/src/` sinon.
+
 ### Découpage du code : `app.rs` et `src/app/` (#115)
 
 `app.rs` ne garde que l'**orchestration** de l'image ; chaque surface
@@ -65,7 +83,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/plot_settings.rs` | propriétés du graphe : `plot_settings_window`, ses onglets, un éditeur par page, l'aide à la syntaxe des formules (`formula_field`, `formula_help`) ; `column_metadata_window` |
 | `app/hover_help.rs` | brique commune de l'aide au survol d'un champ (#197) : `hover_help`, l'icône grisée à droite du champ dont la bulle montre le rappel |
 | `field_state.rs` (racine du crate, comme `color_picker.rs`) | brique commune de l'état d'un champ (#219) : `FieldIssue` (refusé rouge / ramené orange), `show_issue`, mémoire de 2 s (`flag`, `active`), cycle d'un champ texte validé (`edit_text`, `decide`, `Verdict`) |
-| `number_field.rs`, `quantities.rs` (racine du crate) | brique « nombre » (#220) : `number_field` (champ texte, flèche pleine dans le cadre si la grandeur a des valeurs, flèches du clavier, molette au survol qui suit la liste, liste dans une `egui::Area`) et la table des grandeurs (`Quantity`) ; construite sur `field_state::edit_text_with_arrow` ; `list_frame.rs` : flèche et fonds partagés avec les listes déroulantes (#234) |
+| `number_field.rs` (racine du crate) et `quantities.rs` (dans `stokesforge-app-state`) | brique « nombre » (#220) : `number_field` (champ texte, flèche pleine dans le cadre si la grandeur a des valeurs, flèches du clavier, molette au survol qui suit la liste, liste dans une `egui::Area`) et la table des grandeurs (`Quantity`) ; construite sur `field_state::edit_text_with_arrow` ; `list_frame.rs` : flèche et fonds partagés avec les listes déroulantes (#234) |
 | `app/confirmations.rs` | dialogues bloquants de l'application (#229) : « Discard Changes · Cancel · Save », échec grave (M8), écrasement d'un export, choix d'axe d'un dépôt de lignes ; classement confirmation / choix en tête du module |
 | `app/dialogs.rs` | brique commune des dialogues modaux : `modal_dialog`, `modal_dialog_with`, `modal_wizard` (assistant), `modal_read_only` (Close seul), `modal_confirm` (Cancel par défaut, verbe destructeur), `modal_save_changes` (trio, Entrée = Save), `modal_alert` (M8), corps commun `modal_frame` ; pied ordonné (F6), zone de message (erreur de `AppState::dialog_error`, sinon raison du principal grisé), Échap à deux niveaux, géométrie par sorte de dialogue dans les préférences et focus initial sur le premier champ (#228) ; `sync_dialogs`, appelé par `show_edit_dialogs`, relie pied, préférences et état |
 | `app/form.rs` | brique commune du formulaire (#227) : `form` et `Form` (grille à deux colonnes : `row`, `field`, `checkbox`, `color`, `note`, `section`, `enabled`), choix exclusif fixe `choice` / `choice_by` (radios pour 2–3 options, liste dès 4, `choice_layout`) |
@@ -74,7 +92,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/list_row.rs` | brique commune de la ligne de liste sélectionnable (#169) : `list_row`, `ListRowBackground`, `list_row_label`, `list_row_text`, `LIST_ROW_MARK` ; Project Manager, Object Manager, liste des séries des propriétés |
 | `app/shortcuts.rs` | **registre unique des touches** (#231) : constantes `SHORTCUT_*` et `KEY_*`, leurs rappels, tableau `HELP` qui engendre Help › Keyboard Shortcuts, consommation d'annuler/rétablir dans le viewport actif (`collect_undo_redo_shortcuts`) |
 | `app/preferences_window.rs` | File › Preferences (#148) : rubriques General (langue), Display (rangées Metadata et x' des nouveaux classeurs, `Action::SetWorkbookHeaderDefaults`) et Export (formats de Copy Graph : ordre au glisser, cases, `Action::SetCopyFormats`, préférence `copy_formats`), appliquées tout de suite, `modal_read_only` |
-| `app/object_dnd.rs` | état du glisser des séries, groupes et objets libres, partagé par l'Object Manager (aperçu, une action au relâchement) et la fenêtre des séries (brouillon modifié en direct) ; décisions pures dans `crate::object_drag` (`step`, `finish`) : entrer dans un groupe, en sortir, échanger des séries seules, déplacer un groupe en bloc, réordonner texte ou forme dans sa catégorie ; zone « fin de la liste » pendant le glisser |
+| `app/object_dnd.rs` | état du glisser des séries, groupes et objets libres, partagé par l'Object Manager (aperçu, une action au relâchement) et la fenêtre des séries (brouillon modifié en direct) ; décisions pures dans `stokesforge_app_state::object_drag` (`step`, `finish`) : entrer dans un groupe, en sortir, échanger des séries seules, déplacer un groupe en bloc, réordonner texte ou forme dans sa catégorie ; zone « fin de la liste » pendant le glisser |
 | `app/reorder_list.rs` | brique commune d'une liste réordonnée au glisser : poignée `Grip`, ligne qui suit le pointeur, lignes qui s'écartent en direct (`reorder_row`, `reorder_move`, `move_before`) ; seule la poignée se saisit, pour ne pas voler le clic des cases |
 | `app/keyboard_shortcuts_window.rs` | Help › Keyboard Shortcuts (#231, K5) : fenêtre en lecture seule, engendrée de `HELP` |
 | `app/busy.rs`, `app/empty_state.rs` | briques « travail en cours » (indicateur après 0,5 s, progression, Stop après 3 s ; #232 ; import en fond et recalcul de formules #239) et « état vide » (phrase grisée centrée qui dit le geste) |
@@ -107,7 +125,7 @@ future reste dans un commit séparé d'un déplacement.
 
 L'interface du traitement mathématique est répartie ainsi :
 
-- `src/analysis.rs` — **le modèle de formulaire** `AnalysisForm` (sans egui) :
+- `stokesforge-app-state/src/analysis.rs` — **le modèle de formulaire** `AnalysisForm` (sans egui) :
   famille, réglages de chaque famille (tous conservés quand on change de
   famille), séries, auxiliaire (référence, réponse), `issues()` (ce qui bloque
   Apply : `Operation::readiness()` de `stokesforge-analysis` pour les points, la
@@ -116,8 +134,8 @@ L'interface du traitement mathématique est répartie ainsi :
   longs des colonnes de sortie, M6 : la règle est `stokesforge_core::OutputName`,
   traduite ici par `output_name_text_in`, #256), `from_calculation` (édition), les gestes
   de l'aperçu (`add_point`, `add_zone`, `remove_near`). Testé sans fenêtre
-  (`tests/analysis.rs`).
-- `src/state/analysis.rs` — l'état et les `Action` (`OpenAnalysis`,
+  (`stokesforge-app-state/tests/analysis.rs`).
+- `stokesforge-app-state/src/state/analysis.rs` — l'état et les `Action` (`OpenAnalysis`,
   `EditCalculation`, `ApplyAnalysis`, `RecalculateCalculations`,
   `DetachCalculation`, `RequestDeleteCalculation`/`ConfirmDeleteCalculation`) ;
   Apply passe par `AddCalculation`/`UpdateCalculation` et garde la fenêtre
@@ -894,7 +912,7 @@ problème à résoudre, pour un onglet comme pour l'autre). Le contournement :
 `DetachedTabViewModel::snapshot`, un clone de `Snapshot` (bon marché),
 resynchronisé depuis `self.state` à chaque image avant l'appel — même schéma
 que `ProjectManagerViewModel::tree`. Toute lecture pure passe par des
-fonctions libres de `crate::state`, factorisées sur un `&Tree` pour
+fonctions libres de `stokesforge_app_state::state`, factorisées sur un `&Tree` pour
 l'occasion (`cell_text_in`, `visible_columns_in`, `row_count_in`,
 `worksheets_of_in`, `note_text_in`, `node_title_in`) : le corps exact de la
 méthode `AppState` correspondante, pas une réécriture — le dock et une
@@ -1025,7 +1043,7 @@ est ignoré à la lecture. Le `//!` du module dit pourquoi le panneau est un
 
 ### Thème
 
-L'appli **ne suit pas** le thème clair/sombre du système : `stokesforge_app::theme`
+L'appli **ne suit pas** le thème clair/sombre du système : `stokesforge-app::theme`
 pose, une seule fois au démarrage (`main.rs`, dans la fermeture de création
 d'`eframe::run_native`, aux côtés du réglage des polices), une palette maison
 dérivée de `egui::Visuals::light()` — jamais du sombre. `Context::set_theme`
@@ -1065,20 +1083,20 @@ ailleurs.
 L'interface s'écrit **d'abord en anglais** ; le français en est une traduction
 (chantier #39). Seule l'application traduit : Fluent (`i18n-embed`,
 `i18n-embed-fl`, `rust-embed`, plus `fluent-syntax` pour la pseudo-langue) est
-une dépendance de `stokesforge-app` et d'aucun autre crate — `core`, `commands`,
+une dépendance de `stokesforge-app-state` (catalogues, chargeur, `tr!`) et de `stokesforge-app` (la vérification de `fl!` à la compilation) et d'aucun autre crate — `core`, `commands`,
 `session` et les autres rendent des données structurées que l'application met
 en phrase (#46, #47). Le pourquoi du choix de Fluent (clé et arguments vérifiés
-à la compilation) est en tête de `src/i18n.rs`.
+à la compilation) est en tête de `stokesforge-app-state/src/i18n.rs`.
 
 | Où | Quoi |
 |---|---|
-| `crates/stokesforge-app/i18n/en/stokesforge_app.ftl` | le catalogue de référence ; une clé absente d'ici n'existe pas |
-| `crates/stokesforge-app/i18n/fr/stokesforge_app.ftl` | la traduction française, complète (#49) : même ensemble de clés que `en`, même commit |
-| `crates/stokesforge-app/i18n.toml` | `fallback_language = "en"`, dossier des catalogues |
-| `src/i18n.rs` | chargeur, langue courante, macro `tr!` ; `src/i18n/pseudo.rs` : la pseudo-langue |
-| `src/preferences.rs` | `preferences.json`, même dossier de configuration que `couleurs.json` |
-| `src/history_text.rs` | les libellés d'historique (`HistoryLabel`) en phrases, clés `history-*` (#46) |
-| `tests/libelles.rs` | la garde `aucun_libelle_en_dur` (absolue : aucune dérogation) |
+| `crates/stokesforge-app-state/i18n/en/stokesforge_app.ftl` | le catalogue de référence ; une clé absente d'ici n'existe pas |
+| `crates/stokesforge-app-state/i18n/fr/stokesforge_app.ftl` | la traduction française, complète (#49) : même ensemble de clés que `en`, même commit |
+| `crates/stokesforge-app-state/i18n.toml`, `crates/stokesforge-app/i18n.toml` | `fallback_language = "en"`, dossier des catalogues ; `fl!` lit l'`i18n.toml` du crate **appelant**, donc les deux fixent `domain = "stokesforge_app"` et celui de l'app pointe le catalogue d'`app-state` |
+| `stokesforge-app-state/src/i18n.rs` | chargeur, langue courante, macro `tr!` ; `src/i18n/pseudo.rs` : la pseudo-langue |
+| `stokesforge-app-state/src/preferences.rs` | `preferences.json`, même dossier de configuration que `couleurs.json` |
+| `stokesforge-app-state/src/history_text.rs` | les libellés d'historique (`HistoryLabel`) en phrases, clés `history-*` (#46) |
+| `stokesforge-app/tests/libelles.rs` | la garde `aucun_libelle_en_dur` (absolue : aucune dérogation), qui lit les sources des deux crates, et les clés mortes |
 
 **`tr!` est l'unique point d'entrée** : `tr!("menu-file")`, ou avec arguments
 nommés `tr!("history-insert-rows", count = n)`. Il enveloppe `fl!` ; une clé ou un
@@ -1127,13 +1145,13 @@ La zone #43 (propriétés du graphe, éditeur de texte, pied des
 dialogues, export) reste gardée plus strictement (`ZONE_43` : aucun littéral
 textuel dans ses fonctions, quelle que soit la forme de l'appel). Une clé du
 catalogue `en` qu'aucun source de `src/` n'emploie fait échouer
-`aucune_cle_du_catalogue_n_est_morte`. Mécanique détaillée : skill
+`aucune_cle_du_catalogue_n_est_morte` (`tests/libelles.rs`, qui lit `src/` des deux crates). Mécanique détaillée : skill
 `stokesforge-textes-interface`.
 
 **Erreurs affichées (#47).** Les crates du dessous rendent des erreurs
 structurées dont le `Display` (`#[error(...)]`) est en **anglais brut** — ce que
 lisent le CLI, `pyst` et les journaux — et que personne ne traduit. L'application
-les met en phrase par `src/errors.rs` : une fonction `error_message` par
+les met en phrase par `stokesforge-app-state/src/errors.rs` : une fonction `error_message` par
 famille (`model` pour `CoreError`, `commands`, `session`, `file` pour
 `PersistenceError`, `import`, `formula`, `render`, `export`, et `script` avec la
 feature `python`), qui associe chaque variante à une clé `error-*` du catalogue
@@ -1157,7 +1175,7 @@ Enregistrer sous (Ctrl+Maj+S) demande une destination ; Enregistrer
 
 **Fil à part (#192).** Tous les sélecteurs (Open, Save As, export du graphe,
 assistant d'import) passent par `Action::PickFile(PickRequest)` et
-`file_picker.rs` : `rfd` s'exécute sur un fil dédié, la réponse revient par un
+`file_picker.rs` (dans `stokesforge-app-state`) : `rfd` s'exécute sur un fil dédié, la réponse revient par un
 canal sondé à chaque image (`StokesForgeApp::poll_file_picker`). Avant, l'appel
 synchrone sur le fil d'egui gelait l'application quand le sélecteur se fermait
 sans que le portail ne réponde (`wait_for_response` de `rfd` n'a pas de délai) ;
@@ -1180,17 +1198,38 @@ X11 (Xwayland), pas en Wayland natif, et n'ouvre pas le sélecteur `rfd`.
 
 ### Deux modules, une ligne de partage
 
-| Module | Contenu | Testable en CI |
+| Crate | Contenu | Testable en CI |
 |---|---|---|
-| `state` | **toute la logique**, sans egui, pilotée par un enum d'`Action` | oui (`tests/shell.rs`) |
-| `app` | la glu `eframe` : traduit clavier et souris en actions, peint l'état | non |
+| `stokesforge-app-state` (`state`…) | **toute la logique**, sans egui, pilotée par un enum d'`Action` | oui (`stokesforge-app-state/tests/shell.rs`) |
+| `stokesforge-app` (`app`…) | la glu `eframe` : traduit clavier et souris en actions, peint l'état | non |
 
-La ligne est gardée (#255) : `aucun_module_d_etat_ne_nomme_egui`
-(`tests/gardes.rs`) refuse `egui`, `eframe` et `stokesforge_render_egui` dans le
-code de production d'une liste fermée de modules d'état (`state.rs`,
-`selection.rs`, `object_manager.rs`, `errors.rs`…). Un type d'egui entre par
-`app/`, jamais par ces modules. `RenderError` vit dans `stokesforge-render`
-(réexportée par `stokesforge-render-egui`) pour que `errors.rs` y reste.
+La ligne est gardée par le compilateur (#263), qui a remplacé la garde de texte
+de #255 (`aucun_module_d_etat_ne_nomme_egui`, retirée) : `stokesforge-app-state`
+ne dépend ni d'`egui`, ni d'`eframe`, ni de `winit`, ni de `wgpu`, ni de
+`stokesforge-render-egui` ni de `stokesforge-clipboard`
+(`stokesforge-app-state/tests/no_ui_dependency.rs`, liste blanche lue par
+`stokesforge-arch-guard`). Un type d'egui entre par `stokesforge-app`, jamais par
+l'état. Il refuse aussi, de fait, un `crate::app` dans l'état (#128) : l'état
+n'a plus de module `app` à nommer. `RenderError` vit dans `stokesforge-render`
+(réexportée par `stokesforge-render-egui`) pour que `errors.rs` y reste. Les
+modules sont importés un à un (`use stokesforge_app_state::state::Action;`), sans
+`pub use` à la racine ; seul `tr!` est exporté à la racine du crate.
+
+Deux conséquences à connaître :
+
+- **Copie de la figure.** L'état ne garde que des octets neutres
+  (`state::FigureBytes` : un `ExportFormat` et ses octets, relevés par
+  `AppState::take_figure_clipboard`) ; `app/figure_copy.rs` les traduit en types
+  MIME (`mime_of`) et met en phrase l'erreur (`clipboard_error_message`, clés
+  `error-clipboard-*`) avant de la passer à `AppState::figure_clipboard_failed`.
+- **`cfg(test)` ne passe pas la frontière du crate.** Ce que l'état isole sous
+  `cfg(test)` — le chemin des préférences (`preferences::default_path`), la langue
+  de départ (`i18n::startup_language`), `set_object_manager_open_for_test` — l'est
+  aussi sous la feature `test-support` de `stokesforge-app-state`, que la
+  dev-dependency de `stokesforge-app` active : sans elle, les tests de l'app
+  (qui bâtissent un `AppState` par `new`) liraient et écriraient le vrai
+  `preferences.json` (`stokesforge-app/tests/isolation_preferences.rs`). Cette
+  feature ne se met jamais dans un `[dependencies]`.
 
 Une fenêtre ne se teste pas en intégration continue. C'est toute la raison du
 découpage : **rien de ce que contient `app` n'est une décision de produit**.
@@ -1227,7 +1266,7 @@ nulle part ailleurs :
    `AppState::new` ne touche pas à `ScriptEngine` ; seul le premier
    `RunScript` le construit. Le temps de démarrage de l'interpréteur est l'un
    des motifs du portage — le perdre à l'ouverture annulerait le bénéfice.
-   Verrouillé par `tests/script_bridge_lazy.rs`.
+   Verrouillé par `stokesforge-app-state/tests/script_bridge_lazy.rs`.
 2. **`RunScript` ne bloque jamais l'appelant** : le travail part sur un **fil
    détaché** (création paresseuse du moteur comprise) et l'appel revient
    aussitôt.
@@ -1291,7 +1330,7 @@ auront besoin) ; ils ne sont simplement pas appelés par le menu contextuel.
 La **décision** (quels gestes ont un sens ici, lesquels griser, comment
 nommer la cible le jour où c'est utile) vit dans `AppState::grid_menu` →
 `GridMenu`, pas dans le code egui : c'est ce qui la rend vérifiable sans
-fenêtre dans `tests/shell.rs`, comme le reste de la matrice copier/coller.
+fenêtre dans `stokesforge-app-state/tests/shell.rs`, comme le reste de la matrice copier/coller.
 Deux contextualisations s'y jouent :
 
 - l'accord en nombre de `target_label` (« la cellule » / « les champs » /
@@ -1412,7 +1451,7 @@ vide. Chaque série prend la couleur de palette de son rang
 
 Cette règle vit dans `stokesforge_core::compose::series_from_columns` (#257 :
 `pyst.plot` et l'annexe d'une analyse l'appliquent aussi, `x_for`) ;
-`AppState::plot_columns` (`stokesforge-app/src/state.rs`) n'émet que la
+`AppState::plot_columns` (`stokesforge-app-state/src/state.rs`) n'émet que la
 commande et les messages d'échec, et le menu contextuel ne fait que choisir le
 type de tracé et pousser `Action::PlotColumns`. Une seconde
 action, `Action::AddSeriesToGraph`, applique la même règle d'appariement mais
@@ -1783,7 +1822,7 @@ damier (dans l'échantillon du sélecteur). **Une palette par usage** (`stokesfo
 **dans le projet** (par défaut — commande annulable `SetSavedColors`,
 enregistrée dans le `.stf`) ou **pour l'utilisateur** (fichier
 `couleurs.json` du dossier de configuration de StokesForge, à côté des recettes
-d'import, hors historique — `crate::user_colors`), au choix
+d'import, hors historique — `stokesforge_app_state::user_colors`), au choix
 (`state::SaveTarget`). Une couleur enregistrée ne réapparaît que dans la
 palette de son usage ; clic droit dessus pour la retirer
 (`Action::SaveColor`/`RemoveSavedColor`). Le sélecteur ne touche ni au
@@ -2001,7 +2040,7 @@ reste touchée par la sélection, seule sa portion réellement écrite est
 affectée par Vider/Supprimer). `AppState::select_row`/`extend_row_selection`/
 `is_row_selected` en sont les pendants de `select_column`/
 `extend_column_selection`/`is_column_selected`, et `SelectionKind::FullRows`
-(`crate::selection`) le pendant de `SelectionKind::Columns` — même règle de
+(`stokesforge_app_state::selection`) le pendant de `SelectionKind::Columns` — même règle de
 non-franchissement de frontière : un glisser qui part de la gouttière et croise
 une cellule ou la rangée des lettres repose une sélection simple plutôt que
 d'étendre silencieusement sans effet, et réciproquement.
@@ -2020,7 +2059,7 @@ champ pour **toutes** les colonnes visibles de la feuille — symétrique de
 `row_number_widget` côté données. `AppState::select_header_row`/
 `extend_header_row_selection`/`is_header_row_selected` en sont les pendants
 de `select_row`/`extend_row_selection`/`is_row_selected`, et
-`SelectionKind::HeaderRows` (`crate::selection`) le pendant de `FullRows`
+`SelectionKind::HeaderRows` (`stokesforge_app_state::selection`) le pendant de `FullRows`
 pour la zone d'en-tête : elle touche toutes les colonnes et, symétriquement,
 ne touche jamais les données (`row_range()` y vaut toujours `None`).
 
@@ -2291,10 +2330,15 @@ interaction (clics, clavier), voir le skill `run-stokesforge`.
 
 ### Tests
 
-`tests/shell.rs` (la boucle complète, sans fenêtre), `tests/script_panel.rs`,
-`tests/script_bridge_lazy.rs` (l'interpréteur ne démarre pas tout seul),
-`tests/perf_write_under_snapshot.rs`, `tests/libelles.rs` (la garde de
-traduction, voir « Interface multilingue »).
+Dans `stokesforge-app-state/tests/` (sans fenêtre, et sans egui ni wgpu à
+compiler) : `shell.rs` (la boucle complète), `script_panel.rs`,
+`script_bridge_lazy.rs` (l'interpréteur ne démarre pas tout seul),
+`perf_write_under_snapshot.rs`, `analysis.rs`, `analysis_state.rs`,
+`project_objects.rs`, `output_names.rs`, `history_text.rs`,
+`language_switch.rs` et la garde de frontière `no_ui_dependency.rs`. Dans
+`stokesforge-app/tests/` : `libelles.rs` (la garde de traduction et les clés
+mortes, voir « Interface multilingue »), `gardes.rs` (gardes de texte sur les
+sources des deux crates), `isolation_preferences.rs`, `wayland_{uri,bridge}.rs`.
 
 ## `stokesforge-cli`
 

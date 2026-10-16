@@ -18,9 +18,9 @@
 //!
 //! # Découpage
 //!
-//! - [`state`] : toute la logique, **sans egui**, pilotée par un enum
-//!   d'actions — donc testable en intégration continue, sans serveur
-//!   graphique (`tests/shell.rs`) ;
+//! - `stokesforge-app-state` (crate voisin, #263) : toute la logique, **sans
+//!   egui**, pilotée par un enum d'actions — donc testable en intégration
+//!   continue, sans serveur graphique (`stokesforge-app-state/tests/shell.rs`) ;
 //! - [`app`] : la glu `eframe`, qui traduit clavier et souris en actions et
 //!   peint l'état. Rien de ce qu'elle contient n'est une décision de produit ;
 //! - [`theme`] : la palette visuelle maison, posée une fois sur le
@@ -33,41 +33,26 @@
 //! raccourci clavier, l'entrée de menu, son grisage et son libellé
 //! (« Annuler *Renommer* »). Ici, chacun de ces quatre points est du code
 //! explicite : le raccourci dans [`app`], le grisage par `add_enabled`, le
-//! libellé par [`state::AppState::undo_label`].
+//! libellé par `AppState::undo_label` (de `stokesforge-app-state`).
 
 #![cfg_attr(
     not(test),
     warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
-pub mod analysis;
-pub mod analysis_recent;
 pub mod app;
 pub mod color_picker;
-pub mod errors;
 pub mod field_state;
-pub mod file_picker;
-pub mod history_text;
-pub mod i18n;
 pub mod icons;
 pub mod list_frame;
 pub mod number_field;
-pub mod object_drag;
-pub mod object_format;
-pub mod object_manager;
-pub mod preferences;
-pub mod quantities;
-pub mod selection;
-pub mod state;
-pub mod text_format;
 pub mod theme;
 pub mod toolbar;
 pub mod tree_lines;
-pub mod user_colors;
 
 /// Le lecteur des sources partagé par toutes les gardes qui lisent le code
-/// (#116) : celles d'`icons`, de `theme` et d'`i18n` ici, celles de `tests/`
-/// par le même fichier.
+/// (#116) : celles d'`icons` et de `theme` ici, celles de `tests/` par le même
+/// fichier. Depuis #263 il lit aussi `stokesforge-app-state/src/`.
 #[cfg(test)]
 #[path = "../tests/support/sources.rs"]
 mod sources;

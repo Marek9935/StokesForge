@@ -3,7 +3,7 @@
 //! décimales et des valeurs qu'on propose.
 //!
 //! Un champ numérique ne réécrit jamais `0.0..=20.0` ni `speed(0.1)` : il
-//! nomme sa grandeur ici et la brique [`crate::number_field`] fait le reste.
+//! nomme sa grandeur ici et la brique `stokesforge_app::number_field` fait le reste.
 //! Changer la plage de l'épaisseur du trait, c'est changer une ligne de ce
 //! fichier, pour tous les champs d'épaisseur à la fois.
 //!

@@ -122,8 +122,8 @@ use eframe::egui;
 use stokesforge_core::NodeId;
 use stokesforge_render_egui::GraphView;
 
-use crate::state::{Action, AppState, WindowKind};
-use crate::tr;
+use stokesforge_app_state::state::{Action, AppState, WindowKind};
+use stokesforge_app_state::tr;
 
 use super::contents::tab_contents;
 use super::tab::tab_title;
@@ -151,14 +151,18 @@ pub(super) fn window_pointer_pressed(
 }
 
 /// Les fenêtres de l'arbre du Project Manager, à plat.
-pub(super) fn window_nodes(tree: &[crate::state::ProjectTreeNode]) -> Vec<(NodeId, WindowKind)> {
+pub(super) fn window_nodes(
+    tree: &[stokesforge_app_state::state::ProjectTreeNode],
+) -> Vec<(NodeId, WindowKind)> {
     let mut out = Vec::new();
     for node in tree {
         match node {
-            crate::state::ProjectTreeNode::Folder { children, .. } => {
+            stokesforge_app_state::state::ProjectTreeNode::Folder { children, .. } => {
                 out.extend(window_nodes(children));
             }
-            crate::state::ProjectTreeNode::Window { id, kind, .. } => out.push((*id, *kind)),
+            stokesforge_app_state::state::ProjectTreeNode::Window { id, kind, .. } => {
+                out.push((*id, *kind))
+            }
         }
     }
     out
@@ -663,7 +667,7 @@ impl StokesForgeApp {
 mod tests {
     use super::super::window_chrome::show_window_in_layer;
     use super::*;
-    use crate::state::ProjectTreeNode;
+    use stokesforge_app_state::state::ProjectTreeNode;
 
     /// #154 : le clic explicite reprend le suivi, même sans changement d'onglet.
     #[test]

@@ -28,9 +28,9 @@ stokesforge-script = { path = "../stokesforge-script", optional = true, features
 stokesforge-python = { path = "../stokesforge-python", optional = true, features = ["python"] }
 
 [dev-dependencies]
-# La coquille UI, pour les batteries qui éprouvent la traduction
-# cellule ↔ texte (`AppState` ne dépend pas d'egui : voir `tests/shell.rs`).
-stokesforge-app = { path = "../stokesforge-app" }
+# L'état de l'application, pour les batteries qui éprouvent la traduction
+# cellule ↔ texte (`stokesforge-app-state` ne dépend pas d'egui : #263).
+stokesforge-app-state = { path = "../stokesforge-app-state" }
 proptest = "1"
 tempfile = "3"
 rmp-serde = "1.3.1"

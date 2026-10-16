@@ -34,8 +34,8 @@ Et côté application : l'assistant vit dans
 d'entrée appelé par `app.rs`, ses six étapes, l'aperçu, les tables de libellés —
 et ses tests unitaires l'y suivent (étapes peintes avec leur aperçu,
 Terminer/Annuler, clic droit sur une ligne, libellés distincts) ; l'état
-(`ImportState`, `import_line_action`…) reste dans `state.rs`, testé par
-`tests/shell.rs`. **Les textes de l'assistant** (`import_window` et ses six
+(`ImportState`, `import_line_action`…) reste dans `state.rs` (`stokesforge-app-state`), testé par
+`stokesforge-app-state/tests/shell.rs`. **Les textes de l'assistant** (`import_window` et ses six
 étapes, `ImportStep::title`, tables `separator_label`, `column_role_label`…) sont
 des clés `import-*` du catalogue `en`, employées par `tr!` ; les termes viennent
 de `docs/textes-interface.md` § 2.4 (*Delimiter*, pas « separator » ; *Template*,

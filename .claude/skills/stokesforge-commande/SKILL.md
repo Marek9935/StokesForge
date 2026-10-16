@@ -125,9 +125,9 @@ Dans cet ordre, en s'arrêtant aux maillons que la commande touche réellement :
    `AppState::dispatch`, puis le câblage UI (skill **stokesforge-feature** pour les
    quatre surfaces : raccourci, menu, grisage, libellé). **La phrase
    d'historique** s'écrit ici : la clé `history-*` dans
-   `i18n/en/stokesforge_app.ftl` (Title Case, verbe, pluriel par sélecteur Fluent —
+   `stokesforge-app-state/i18n/en/stokesforge_app.ftl` (Title Case, verbe, pluriel par sélecteur Fluent —
    skill **stokesforge-textes-interface**) et la branche de
-   `history_text.rs` (`match` exhaustif : une variante sans phrase ne compile
+   `stokesforge-app-state/src/history_text.rs` (`match` exhaustif : une variante sans phrase ne compile
    pas). `tests/history_text.rs` vérifie que le catalogue `en` et le `Display`
    disent la même chose : le mettre d'accord.
 
@@ -145,7 +145,7 @@ Dans cet ordre, en s'arrêtant aux maillons que la commande touche réellement :
 | chemin d'écriture non annulable | `b21` doit rester vert |
 | écriture de données de colonne | le geste ajouté aux tirages de `b14` (version ↔ contenu) et de `b22` (recalcul ciblé contre complet) |
 | mémoire | `stokesforge-commands/tests/memory_pinning.rs` : l'historique n'épingle pas indéfiniment de gros buffers |
-| interface | `stokesforge-app/tests/shell.rs` pour l'`Action` correspondante |
+| interface | `stokesforge-app-state/tests/shell.rs` pour l'`Action` correspondante |
 
 Le banc de robustesse a des batteries dédiées qu'il vaut mieux étendre que
 dupliquer : `b5` (macros), `b12` (commandes acceptées sans effet), `b14`

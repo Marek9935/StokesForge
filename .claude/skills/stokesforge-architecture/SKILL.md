@@ -100,7 +100,8 @@ ouvrir de fenêtre.
 | `stokesforge-render-svg` | poser ce même dessin dans un SVG, un PDF, un PNG |
 | `stokesforge-clipboard` | offrir une figure au presse-papiers du système (SVG, PNG, PDF à la fois) |
 | `stokesforge-script` / `stokesforge-python` | exécuter des scripts Python qui pilotent le projet |
-| `stokesforge-app` | la fenêtre |
+| `stokesforge-app-state` | l'état de l'application **sans fenêtre** : ce qui se décide (actions, sélection, préférences, textes traduits, erreurs en phrases) ; il ne connaît aucune bibliothèque d'interface, et c'est le compilateur qui le garantit |
+| `stokesforge-app` | la fenêtre : elle peint cet état et traduit clavier et souris en actions |
 | `stokesforge-cli` | la ligne de commande : `import` (fichier d'appareil → `.stf`) et, avec Python, `run` (exécuter un script sans fenêtre) |
 | `stokesforge-robustesse` | 22 batteries de tests qui poussent le reste à ses limites |
 | `stokesforge-arch-guard` | outil de test : lit les manifestes pour vérifier qu'aucun paquet ne dépend de ce qu'il ne doit pas connaître |

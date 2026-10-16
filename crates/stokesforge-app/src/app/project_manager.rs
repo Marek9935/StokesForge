@@ -1,6 +1,6 @@
 //! Arbre du Project Manager : une seule écriture pour le panneau fixe et la
 //! fenêtre OS détachée, sur un arbre déjà construit
-//! ([`crate::state::ProjectTreeNode`]). Ce que les clics demandent (ouvrir,
+//! ([`stokesforge_app_state::state::ProjectTreeNode`]). Ce que les clics demandent (ouvrir,
 //! fermer, sélectionner, afficher, masquer) s'accumule dans
 //! [`PmInteraction`], appliqué par `StokesForgeApp` après la peinture.
 //!
@@ -17,8 +17,8 @@ use std::collections::HashSet;
 use eframe::egui;
 
 use crate::icons::{icon_image, Icon, IconRole};
-use crate::state::{Action, ProjectTreeNode, WindowKind};
-use crate::tr;
+use stokesforge_app_state::state::{Action, ProjectTreeNode, WindowKind};
+use stokesforge_app_state::tr;
 use stokesforge_core::NodeId;
 
 use super::inplace_edit;
@@ -718,8 +718,8 @@ pub(super) mod tests {
 
     use super::super::list_row::LIST_ROW_MARK;
     use super::super::test_support::painted;
-    use crate::state::AppState;
     use crate::theme;
+    use stokesforge_app_state::state::AppState;
 
     /// Trouve le centre du texte peint contenant `needle` dans `shapes` —
     /// utilisé pour cliquer une entrée du Project Manager sans supposer sa

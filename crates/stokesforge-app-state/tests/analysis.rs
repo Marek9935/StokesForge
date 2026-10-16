@@ -6,12 +6,12 @@
 use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
 use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::{Operation, OperationKind, HEAVY_BATCH};
-use stokesforge_app::analysis::{
+use stokesforge_app_state::analysis::{
     model_formula_source, preset_of, value_unit, with_unit, AnalysisForm, BaselineShape, Issue,
     Preset, DEFAULT_AVERAGE,
 };
-use stokesforge_app::analysis::{Edge, HandleSlot, RangeSet};
-use stokesforge_app::i18n::{self, Language};
+use stokesforge_app_state::analysis::{Edge, HandleSlot, RangeSet};
+use stokesforge_app_state::i18n::{self, Language};
 use stokesforge_core::{Column, ColumnMeta, NodeId, Project, SeriesRef};
 
 struct Fixture {
@@ -361,7 +361,7 @@ fn preview_gestures_write_into_the_active_family() {
 
 #[test]
 fn the_natural_tool_follows_the_family() {
-    use stokesforge_app::analysis::PreviewTool;
+    use stokesforge_app_state::analysis::PreviewTool;
     let f = fixture();
     let tool = |preset: Preset| AnalysisForm::new(&preset, series(&f), false).tool;
     assert_eq!(tool(Preset::BaselineAnchors), PreviewTool::Points);
@@ -372,7 +372,7 @@ fn the_natural_tool_follows_the_family() {
 
 #[test]
 fn reference_candidates_exclude_the_processed_series_and_pair_their_x() {
-    use stokesforge_app::analysis::{aux_candidates, aux_for, series_points};
+    use stokesforge_app_state::analysis::{aux_candidates, aux_for, series_points};
     let mut f = fixture();
     let sheet = f.project.tree().node(f.y).unwrap().parent().unwrap();
     let other = f
@@ -400,7 +400,7 @@ fn reference_candidates_exclude_the_processed_series_and_pair_their_x() {
 
 #[test]
 fn value_labels_name_known_keys_and_keep_unknown_ones() {
-    use stokesforge_app::analysis::value_label;
+    use stokesforge_app_state::analysis::value_label;
     i18n::set_language(Language::English);
     assert_eq!(value_label("param.tau", None), "tau");
     assert_eq!(value_label("stat.r_squared", None), "R²");
@@ -453,7 +453,7 @@ fn changing_the_components_keeps_the_shift_settings_at_the_end() {
 
 #[test]
 fn the_preview_is_not_recomputed_for_the_tool_or_the_average() {
-    use stokesforge_app::analysis::PreviewTool;
+    use stokesforge_app_state::analysis::PreviewTool;
     let f = fixture();
     let form = AnalysisForm::new(&Preset::BaselineLine, series(&f), false);
     let mut other = form.clone();
@@ -578,9 +578,9 @@ fn auto_fills_the_starting_values_of_a_free_model_from_the_data() {
 
 #[test]
 fn every_builtin_model_formula_compiles_in_typst() {
-    use stokesforge_render_egui::formula;
+    use stokesforge_render::formula;
     let fonts =
-        formula::resolve_fonts(&stokesforge_render_egui::FontChoice::default()).expect("polices");
+        formula::resolve_fonts(&stokesforge_render::FontChoice::default()).expect("polices");
     for model in Preset::fit_models() {
         match model_formula_source(&model) {
             Some(source) => {

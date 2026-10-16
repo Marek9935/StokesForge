@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use anyhow::Context as _;
 use stokesforge_app::app::StokesForgeApp;
-use stokesforge_app::state::AppState;
+use stokesforge_app_state::state::AppState;
 use stokesforge_core::{Column, NodeId, Project};
 use stokesforge_plot::{AxisSpec, LineSpec, PanelSpec, PlotSpec, SeriesSpec};
 use stokesforge_session::Session;
@@ -69,7 +69,7 @@ fn main() -> anyhow::Result<()> {
             // l'appli impose sur le `Context` avant le premier rendu »).
             stokesforge_app::theme::install(&cc.egui_ctx);
             let mut app = StokesForgeApp::new(state);
-            app.load_toolbar_layout(&stokesforge_app::preferences::Preferences::load());
+            app.load_toolbar_layout(&stokesforge_app_state::preferences::Preferences::load());
             Ok(Box::new(app))
         }),
     );
@@ -120,7 +120,7 @@ fn session_for_project(requested: Option<PathBuf>) -> anyhow::Result<(Session, P
 
 /// Localise l'interpréteur embarqué et le pose sur `state`, **sans le
 /// démarrer** — `EmbeddedPython::locate`/`with_home` ne touchent pas à
-/// CPython, seul le premier script le fait (voir `stokesforge_app::state`, section
+/// CPython, seul le premier script le fait (voir `stokesforge_app_state::state`, section
 /// « Le script Python »). C'est délibérément le binaire, pas `AppState`, qui
 /// décide d'où vient l'interpréteur : `AppState` reste indépendante de la
 /// disposition d'une distribution empaquetée.

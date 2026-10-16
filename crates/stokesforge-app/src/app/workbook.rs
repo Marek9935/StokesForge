@@ -13,8 +13,9 @@
 use eframe::egui;
 use stokesforge_core::NodeId;
 
-use crate::state::{Action, AppState};
-use crate::{theme, tr};
+use crate::theme;
+use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::tr;
 
 use super::empty_state::empty_state;
 use super::file_drop::claim_file_drop;

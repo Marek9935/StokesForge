@@ -9,17 +9,17 @@
 //! exactement comme les verrait la fenêtre.
 //!
 //! Exige le préfixe vendorisé et l'environnement Python décrit dans
-//! `.codex/README.md`, puis `cargo test -p stokesforge-app --features python
+//! `.codex/README.md`, puis `cargo test -p stokesforge-app-state --features python
 //! --test script_panel`. `scripts/python-test.sh` lance aussi les tests de
-//! l'application, dont ce fichier et le parcours numpy → colonnes → graphe.
+//! l'état de l'application, dont ce fichier et le parcours numpy → colonnes → graphe.
 //!
 //! # `Action::RunScript` ne bloque pas
 //!
 //! [`AppState::dispatch`] ne bloque jamais, `RunScript` compris (voir la doc
-//! de tête de `stokesforge_app::state`) : le résultat n'arrive que par
+//! de tête de `stokesforge_app_state::state`) : le résultat n'arrive que par
 //! [`AppState::poll_script`]. Chaque test attend donc une exécution en
 //! sondant cette méthode dans une boucle courte ([`run_and_wait`]) — le même
-//! geste que `crate::app` fait à chaque image, jamais un `sleep` bloquant qui
+//! geste que `stokesforge_app::app` fait à chaque image, jamais un `sleep` bloquant qui
 //! espère juste.
 //!
 //! # Le démarrage paresseux de l'interpréteur n'est PAS prouvé ici
@@ -39,7 +39,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use stokesforge_app::state::{Action, AppState};
+use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_core::{Column, NodeId, Project};
 use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_session::Session;
@@ -87,7 +87,7 @@ fn demo_project() -> Project {
 
 /// Démarre une session sur le projet de démonstration et l'état applicatif
 /// associé, avec un descripteur d'interpréteur posé (mais **pas démarré** —
-/// voir la doc de `stokesforge_app::state`). Rend la session, à garder vivante,
+/// voir la doc de `stokesforge_app_state::state`). Rend la session, à garder vivante,
 /// et la feuille explicite que les tests pilotent, comme `tests/shell.rs`.
 fn start() -> (Session, AppState, NodeId) {
     let project = demo_project();
@@ -99,7 +99,7 @@ fn start() -> (Session, AppState, NodeId) {
     let mut state = AppState::new_with_preferences(
         session.handle(),
         "script-test.stf".to_string(),
-        stokesforge_app::preferences::Preferences::load_from(None),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
     )
     .expect("état applicatif initial");
     state.set_python(EmbeddedPython::with_home(home()));
@@ -117,7 +117,7 @@ fn column_id(state: &AppState, sheet: NodeId, name: &str) -> NodeId {
 }
 
 /// Pose `source` comme script courant, le lance et attend — en sondant
-/// [`AppState::poll_script`], comme `crate::app` le fait à chaque image —
+/// [`AppState::poll_script`], comme `stokesforge_app::app` le fait à chaque image —
 /// que le résultat soit prêt. Panique si `TIMEOUT` est dépassé.
 fn run_and_wait(state: &mut AppState, source: &str) {
     state.set_script_source(source.to_string());
@@ -171,7 +171,7 @@ fn the_grid_reflects_the_model_after_a_script_without_any_extra_action() {
     );
 
     // Aucune action supplémentaire n'a été dispatchée : c'est `poll_script`,
-    // sondé par `run_and_wait` (comme `crate::app` le fait à chaque image),
+    // sondé par `run_and_wait` (comme `stokesforge_app::app` le fait à chaque image),
     // qui a rafraîchi l'instantané. C'est le piège de cette tâche.
     assert_eq!(state.cell_text(temps, 0), "42");
     assert_eq!(state.cell_text(temps, 4), "42");

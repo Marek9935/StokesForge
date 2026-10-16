@@ -16,12 +16,13 @@ use super::analysis_handles::select_calculation;
 use super::empty_state::empty_state;
 use super::form::{choice, ChoiceOption};
 use super::list_row::list_row;
-use crate::analysis::{
+use crate::icons::{icon_button, Icon, IconRole};
+use crate::theme;
+use stokesforge_app_state::analysis::{
     kind_title, reference_label, series_label, value_label, value_unit, with_unit,
 };
-use crate::icons::{icon_button, Icon, IconRole};
-use crate::state::{Action, AppState};
-use crate::{theme, tr};
+use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::tr;
 
 /// Hauteur du bandeau replié.
 pub(super) const COLLAPSED_HEIGHT: f32 = 22.0;
@@ -402,7 +403,7 @@ fn correction_settings(ui: &mut egui::Ui, operation: &stokesforge_analysis::ops:
 mod tests {
     use super::super::test_support::{cliquer, contexte, image_de, painted, texte_exact, textes};
     use super::*;
-    use crate::analysis::Preset;
+    use stokesforge_app_state::analysis::Preset;
     use stokesforge_core::{Column, ColumnMeta, ColumnRole, Project};
     use stokesforge_session::Session;
 

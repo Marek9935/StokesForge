@@ -9,7 +9,7 @@
 //! lancer avec :
 //!
 //! ```text
-//! cargo test -p stokesforge-app --release --test perf_write_under_snapshot -- --ignored --nocapture
+//! cargo test -p stokesforge-app-state --release --test perf_write_under_snapshot -- --ignored --nocapture
 //! ```
 //!
 //! Le test est marqué `#[ignore]` : il alloue une colonne de 8 Mo et prend

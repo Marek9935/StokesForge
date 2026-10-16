@@ -8,9 +8,9 @@
 //! chargeur global dépend de l'environnement.
 
 use stokesforge_analysis::ops::OperationKind;
-use stokesforge_app::analysis::output_name_text_in;
-use stokesforge_app::history_text::kind_title;
-use stokesforge_app::i18n::{build_loader, pseudo, Language};
+use stokesforge_app_state::analysis::output_name_text_in;
+use stokesforge_app_state::history_text::kind_title;
+use stokesforge_app_state::i18n::{build_loader, pseudo, Language};
 use stokesforge_core::{family_english, OutputName};
 
 /// Le rang de chaque variante, `match` exhaustif sans branche par défaut : une

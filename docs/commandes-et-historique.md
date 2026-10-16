@@ -161,8 +161,8 @@ Le crate ne met **rien** en phrase et ne dépend pas de Fluent :
 | Où | Rôle |
 |---|---|
 | `stokesforge-commands` | rend la donnée ; `Display` en **anglais** pour les journaux et le CLI |
-| `stokesforge-app/src/history_text.rs` | `history_text` : la variante en phrase, par `tr!` et les clés `history-*` du catalogue `en`, pluriels Fluent ; `match` exhaustif |
-| `stokesforge-app/tests/history_text.rs` | le catalogue `en` et le `Display` disent la même chose, variante par variante |
+| `stokesforge-app-state/src/history_text.rs` | `history_text` : la variante en phrase, par `tr!` et les clés `history-*` du catalogue `en`, pluriels Fluent ; `match` exhaustif |
+| `stokesforge-app-state/tests/history_text.rs` | le catalogue `en` et le `Display` disent la même chose, variante par variante |
 
 `begin_macro` prend un `MacroKind`, énumération **fermée** (coller, effacer la
 sélection, propriétés du graphe, actualiser, importer, créer un classeur ou une

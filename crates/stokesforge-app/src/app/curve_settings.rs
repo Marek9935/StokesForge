@@ -20,7 +20,7 @@
 //! l'utilisateur (même motif que les couleurs, `SavedColors::gradients`),
 //! ou personnalisés ; ils se suppriment depuis la même liste.
 //!
-//! [`PlotSettingsTab::Series`]: crate::state::PlotSettingsTab::Series
+//! [`PlotSettingsTab::Series`]: stokesforge_app_state::state::PlotSettingsTab::Series
 
 use eframe::egui;
 use stokesforge_core::Tree;
@@ -30,11 +30,11 @@ use stokesforge_plot::{
 
 use crate::color_picker::{color_field, gradient_strip, gradient_swatch, ColorUsage, PickerEnv};
 use crate::icons::ICON_SIZE;
-use crate::object_drag::{step_panel, DragItem, DropOver};
-use crate::object_manager::group_title;
-use crate::state::{series_list_label, Action, SaveTarget};
 use crate::theme;
-use crate::tr;
+use stokesforge_app_state::object_drag::{step_panel, DragItem, DropOver};
+use stokesforge_app_state::object_manager::group_title;
+use stokesforge_app_state::state::{series_list_label, Action, SaveTarget};
+use stokesforge_app_state::tr;
 
 use super::empty_state::empty_state;
 use super::form::{choice, form, ChoiceOption, Form};

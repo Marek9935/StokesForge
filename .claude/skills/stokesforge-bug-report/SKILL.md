@@ -153,7 +153,7 @@ d'écrire « le mécanisme n'existe pas », chercher si le code porte déjà
 l'intention :
 
 ```sh
-rg "AddColumnAndSelect|Action::|Command::" crates/stokesforge-app/src/
+rg "AddColumnAndSelect|Action::|Command::" crates/stokesforge-app/src/ crates/stokesforge-app-state/src/
 ```
 
 Si une `Action`, une `Command` ou une fonction porte déjà le comportement
@@ -163,7 +163,7 @@ code à écrire. Les deux diagnostics envoient à des endroits opposés.
 
 Réciproquement : une entrée de menu à ajouter peut cacher un câblage entier à
 créer. `Command::DeleteColumn` existe dans `stokesforge-commands` mais
-`rg DeleteColumn crates/stokesforge-app/src/` ne renvoie rien — « ajouter Supprimer
+`rg DeleteColumn crates/stokesforge-app/src/ crates/stokesforge-app-state/src/` ne renvoie rien — « ajouter Supprimer
 au menu » est donc une `Action` + un `dispatch` + un test, pas une ligne d'UI.
 
 ### Chercher le doublon docké / détaché
@@ -172,13 +172,13 @@ Piège structurel de `stokesforge-app` : un contenu a longtemps existé **en deu
 écritures**, une pour la fenêtre flottante et une pour la fenêtre détachée
 (`book_contents` / `detached_book_contents`…). Classeur, graphe, note et matrice sont
 désormais unifiés ; un doublon réintroduit se trouve par
-`rg "fn detached_" crates/stokesforge-app/src/`. Un rapport qui ne cite qu'une des
+`rg "fn detached_" crates/stokesforge-app/src/ crates/stokesforge-app-state/src/`. Un rapport qui ne cite qu'une des
 deux écritures fait livrer un correctif à moitié.
 
 ### Un message d'erreur faux ou ambigu
 
-Le texte d'une erreur affichée vient du catalogue (`i18n/en/stokesforge_app.ftl`, clé
-`error-*`) et de l'association variante → clé de `crates/stokesforge-app/src/errors.rs` ;
+Le texte d'une erreur affichée vient du catalogue (`stokesforge-app-state/i18n/en/stokesforge_app.ftl`, clé
+`error-*`) et de l'association variante → clé de `crates/stokesforge-app-state/src/errors.rs` ;
 le texte brut anglais du crate d'origine (`#[error(...)]`) n'est lu que par le CLI,
 `pyst` et les journaux. Localiser le message **par sa clé**, pas par le littéral, et
 dire si c'est la phrase du catalogue, l'association, ou le `detail` brut du crate
@@ -277,7 +277,7 @@ elle se met à passer, on retire `#[ignore]` et le garde-fou prend le relais.
 | comportement local d'une fonction | `#[cfg(test)]` dans le `src/` concerné |
 | contrat public ou frontière d'un crate | `crates/<crate>/tests/` |
 | le socle aux limites | la batterie `bN` de `stokesforge-robustesse` |
-| logique d'interface | `crates/stokesforge-app/tests/shell.rs` (sans fenêtre) |
+| logique d'interface | `crates/stokesforge-app-state/tests/shell.rs` (sans fenêtre) |
 
 Un symptôme purement visuel n'est **pas** testable en CI : les tests couvrent
 la géométrie, pas l'apparence. Le dire plutôt que de fabriquer un test qui

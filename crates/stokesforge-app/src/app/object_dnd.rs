@@ -3,7 +3,7 @@
 //! fenêtre des séries (`curve_settings.rs`).
 //!
 //! La décision — où va l'élément selon la ligne survolée — est pure et vit
-//! dans `crate::object_drag`. Ici : retenir ce qui est saisi, lire où est le
+//! dans `stokesforge_app_state::object_drag`. Ici : retenir ce qui est saisi, lire où est le
 //! pointeur, et, pour l'Object Manager, tenir l'**aperçu**.
 //!
 //! L'Object Manager lit le spec de l'instantané, qu'une commande seule peut
@@ -24,8 +24,8 @@ use stokesforge_core::NodeId;
 use stokesforge_plot::PlotSpec;
 
 use super::reorder_list::dragging;
-use crate::object_drag::{self, DragItem, Drop, DropOver};
-use crate::state::Action;
+use stokesforge_app_state::object_drag::{self, DragItem, Drop, DropOver};
+use stokesforge_app_state::state::Action;
 
 const LIVE: &str = "object_dnd_live";
 

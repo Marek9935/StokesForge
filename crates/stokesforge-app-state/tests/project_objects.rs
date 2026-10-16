@@ -1,6 +1,6 @@
 //! #105 : décisions du Project Manager sans serveur d'affichage.
 
-use stokesforge_app::state::{Action, AppState};
+use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_commands::{HistoryLabel, MacroKind};
 use stokesforge_core::{Column, NodeId, NodeKind, Project};
 use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
@@ -30,7 +30,7 @@ fn fixture() -> (Session, AppState, NodeId, NodeId, NodeId) {
     let state = AppState::new_with_preferences(
         session.handle(),
         String::new(),
-        stokesforge_app::preferences::Preferences::load_from(None),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
     )
     .unwrap();
     (session, state, book, graph, y)
@@ -194,26 +194,26 @@ fn graphe_collable_dans_son_projet_et_embarque_ses_donnees_dans_un_autre() {
     other.dispatch(Action::PasteObjects { parent, text });
     let copied = other.take_copied_objects()[0].1;
     assert!(!other.plot_spec(copied).unwrap().references(y));
-    let books = stokesforge_app::state::graph_data_books(other.tree(), copied);
+    let books = stokesforge_app_state::state::graph_data_books(other.tree(), copied);
     assert_eq!(books.len(), 1);
     let book = books[0];
     assert!(
         matches!(other.tree().node(book).unwrap().kind(), NodeKind::Workbook { meta, .. } if meta.hidden)
     );
-    let entry = stokesforge_app::state::ProjectTreeNode::Window {
+    let entry = stokesforge_app_state::state::ProjectTreeNode::Window {
         id: book,
         name: other.tree().node(book).unwrap().name().into(),
-        kind: stokesforge_app::state::WindowKind::Book,
+        kind: stokesforge_app_state::state::WindowKind::Book,
     };
     assert!(!other.project_tree().contains(&entry));
     // #152 : « Show Data » d'une courbe ne révèle que le classeur de cette courbe.
     let series = stokesforge_plot::SeriesRef::new(0, 0);
     assert_eq!(
-        stokesforge_app::state::series_data_books(other.tree(), copied, series),
+        stokesforge_app_state::state::series_data_books(other.tree(), copied, series),
         books
     );
     assert!(
-        stokesforge_app::state::series_data_books(
+        stokesforge_app_state::state::series_data_books(
             other.tree(),
             copied,
             stokesforge_plot::SeriesRef::new(0, 99)
@@ -295,7 +295,7 @@ fn collage_dans_un_autre_dossier_et_deplacement_groupes() {
     let mut state = AppState::new_with_preferences(
         session.handle(),
         String::new(),
-        stokesforge_app::preferences::Preferences::load_from(None),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
     )
     .unwrap();
     state.dispatch(Action::MoveObjects {
@@ -349,8 +349,8 @@ fn deux_collages_de_graphe_sont_independants_et_figes() {
         graphs.push(graph);
     }
     assert_ne!(
-        stokesforge_app::state::graph_data_books(target.tree(), graphs[0]),
-        stokesforge_app::state::graph_data_books(target.tree(), graphs[1])
+        stokesforge_app_state::state::graph_data_books(target.tree(), graphs[0]),
+        stokesforge_app_state::state::graph_data_books(target.tree(), graphs[1])
     );
     target.dispatch(Action::Undo);
     target.dispatch(Action::Undo);

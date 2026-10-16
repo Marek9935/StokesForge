@@ -45,5 +45,8 @@ cargo test -p stokesforge-script --features python "$@"
 RUST_TEST_THREADS=1 cargo test -p stokesforge-robustesse --features python "$@"
 
 # Intégration de la console et CLI headless : mêmes variables, même runtime.
+# L'état (console de script, pont paresseux) vit dans `stokesforge-app-state`
+# depuis #263 ; la coquille `stokesforge-app` relaie la feature.
+cargo test -p stokesforge-app-state --features python "$@"
 cargo test -p stokesforge-app --features python "$@"
 cargo test -p stokesforge-cli --features python "$@"

@@ -1,7 +1,7 @@
 //! L'onglet [`Tab`] : la désignation d'une fenêtre de contenu ouverte (classeur,
 //! graphe, matrice, note) par son nœud, ses deux traductions vers le modèle
 //! ([`tab_for_window`], [`tab_node`]), son titre ([`tab_title`],
-//! [`tab_title_from_tree`]) et son miroir lisible par `crate::state`
+//! [`tab_title_from_tree`]) et son miroir lisible par `stokesforge_app_state::state`
 //! ([`active_tab_kind`]).
 //!
 //! Module à part (#117) : la brique des fenêtres (`window_chrome`), la pile
@@ -10,8 +10,8 @@
 
 use stokesforge_core::{NodeId, Tree};
 
-use crate::state::{node_title_in, ActiveTabKind, AppState, WindowKind};
-use crate::tr;
+use stokesforge_app_state::state::{node_title_in, ActiveTabKind, AppState, WindowKind};
+use stokesforge_app_state::tr;
 
 /// Un onglet, c'est-à-dire une fenêtre de contenu ouverte.
 ///
@@ -77,7 +77,7 @@ pub(super) fn tab_title_from_tree(tree: &Tree, tab: Tab) -> String {
 }
 
 /// Traduit le [`Tab`] que voit `StokesForgeApp::ui` vers
-/// [`ActiveTabKind`], le miroir public que `crate::state` peut lire sans
+/// [`ActiveTabKind`], le miroir public que `stokesforge_app_state::state` peut lire sans
 /// connaître `Tab` — seul point de contact entre les deux, voir la doc de
 /// tête d'[`ActiveTabKind`].
 pub(super) fn active_tab_kind(tab: Option<Tab>) -> ActiveTabKind {
@@ -223,7 +223,7 @@ mod tests {
         assert_eq!(distincts.len(), titres.len(), "{titres:?}");
     }
 
-    /// `crate::state` lit l'onglet actif par son miroir : chaque nature y
+    /// `stokesforge_app_state::state` lit l'onglet actif par son miroir : chaque nature y
     /// garde sa variante et son nœud, et l'absence d'onglet reste une
     /// absence. Le même `NodeId` partout : seule la nature distingue les
     /// variantes, une nature prise pour une autre se verrait.

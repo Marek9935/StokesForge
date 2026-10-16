@@ -14,8 +14,8 @@
 
 use eframe::egui;
 
-use crate::state::{Action, AppState, ScriptOutput};
-use crate::tr;
+use stokesforge_app_state::state::{Action, AppState, ScriptOutput};
+use stokesforge_app_state::tr;
 
 use super::empty_state::empty_state;
 use super::shortcuts::SHORTCUT_RUN_SCRIPT;

@@ -34,9 +34,17 @@
 //!   `KeyboardShortcut::new` écrit ailleurs, sans dérogation ;
 //! - `aucun_curseur_hors_du_module_des_curseurs` (#231, X2) : un
 //!   `CursorIcon::…` ne s'écrit que dans `app/cursors.rs`, sans dérogation ;
-//! - `aucun_module_d_etat_ne_nomme_egui` (#255) : une liste fermée de modules
-//!   d'état (`state.rs`, `selection.rs`, `errors.rs`…) ne nomme ni `egui`, ni
-//!   `eframe`, ni `stokesforge_render_egui`.
+//! - `aucun_selecteur_rfd_hors_du_module` (#192) : un `rfd::…` ne s'écrit que
+//!   dans `file_picker.rs`, qui vit dans `stokesforge-app-state` (#263).
+//!
+//! L'ancienne garde « les modules d'état ne nomment pas egui » (#255) n'est
+//! plus : depuis #263 ces modules vivent dans `stokesforge-app-state`, qui ne
+//! dépend d'aucun crate d'interface, et c'est le compilateur qui refuse un
+//! `egui::` (de même qu'un `crate::app` — #128 — dans l'état).
+//!
+//! Les sources lues sont celles des deux crates : `stokesforge-app` (`app.rs`,
+//! `app/menus.rs`) et `stokesforge-app-state` (préfixe `app-state/` :
+//! `app-state/state.rs`).
 //!
 //! Chaque garde a son **témoin** : le motif interdit, posé dans un autre
 //! fichier qu'`app.rs`, est bien refusé — sans lui, une garde qui ne voit rien
@@ -409,12 +417,20 @@ fn la_lecture_descend_dans_les_sous_dossiers() {
 }
 
 /// Sur le vrai dépôt : les sous-dossiers de `src/` sont lus (`i18n/pseudo.rs`
-/// échappait à `aucun_libelle_en_dur` avant #116), et aucun fichier de
-/// production n'est pris pour du test.
+/// échappait à `aucun_libelle_en_dur` avant #116), ceux de
+/// `stokesforge-app-state/src/` aussi (préfixe `app-state/`, #263), et aucun
+/// fichier de production n'est pris pour du test.
 #[test]
 fn la_vraie_lecture_voit_les_sous_dossiers_de_src() {
     let sources = sources::sources();
-    for attendu in ["app.rs", "lib.rs", "i18n/pseudo.rs", "app/window_chrome.rs"] {
+    for attendu in [
+        "app.rs",
+        "lib.rs",
+        "app/window_chrome.rs",
+        // L'état, dans son crate voisin (#263) : préfixe `app-state/`.
+        "app-state/state.rs",
+        "app-state/i18n/pseudo.rs",
+    ] {
         let fichier = sources
             .iter()
             .find(|f| f.chemin == attendu)
@@ -1391,112 +1407,6 @@ fn la_garde_des_curseurs_voit_un_curseur_ecrit_sur_place() {
     .is_empty());
 }
 
-// ---------------------------------------------------------------------------
-// Modules sans egui (#255, chantier #254)
-// ---------------------------------------------------------------------------
-
-/// Les modules d'état et de logique de l'application, qui ne nomment aucun
-/// type d'egui : liste **fermée**, on y ajoute un module, on n'en retire pas
-/// sans décision (`docs/application.md`, « Deux modules, une ligne de partage »).
-const MODULES_SANS_EGUI: &[&str] = &[
-    "state.rs",
-    "state/analysis.rs",
-    "analysis.rs",
-    "analysis_recent.rs",
-    "selection.rs",
-    "object_manager.rs",
-    "object_drag.rs",
-    "preferences.rs",
-    "history_text.rs",
-    "quantities.rs",
-    "user_colors.rs",
-    "object_format.rs",
-    "text_format.rs",
-    "i18n.rs",
-    "i18n/pseudo.rs",
-    "file_picker.rs",
-    "errors.rs",
-];
-
-/// Les identifiants de crate d'egui nommés dans le code de production des
-/// modules de `fermes`, `chemin:ligne`. Un module de la liste absent des
-/// sources est lui aussi une faute (fichier renommé : la garde ne le verrait
-/// plus).
-fn egui_dans_les_modules_fermes(sources: &[Fichier], fermes: &[&str]) -> Vec<String> {
-    let mut trouves = Vec::new();
-    for chemin in fermes {
-        let Some(fichier) = sources.iter().find(|f| f.chemin == *chemin) else {
-            trouves.push(format!("src/{chemin}: introuvable"));
-            continue;
-        };
-        let source = fichier.production();
-        for i in 0..source.masque.len() {
-            if i > 0 && est_ident(source.masque[i - 1]) {
-                continue;
-            }
-            let mot = ident_en(&source.masque, i);
-            if mot == "egui" || mot == "eframe" || mot == "stokesforge_render_egui" {
-                trouves.push(format!(
-                    "src/{}:{}",
-                    fichier.chemin,
-                    ligne_de(&source.original, i)
-                ));
-            }
-        }
-    }
-    trouves
-}
-
-/// Règle #255 : un module d'état ne nomme ni `egui`, ni `eframe`, ni
-/// `stokesforge_render_egui`. Un type d'egui y entre par une surface
-/// (`app/`), jamais par l'état.
-#[test]
-fn aucun_module_d_etat_ne_nomme_egui() {
-    let sources = sources::sources();
-    let fautifs = egui_dans_les_modules_fermes(&sources, MODULES_SANS_EGUI);
-    assert!(
-        fautifs.is_empty(),
-        "ces modules sont sans egui (liste fermée de `tests/gardes.rs`) ; le type d'egui \
-         vit dans une surface (`app/`) : {fautifs:?}"
-    );
-}
-
-/// Le témoin : `egui::`, `eframe::` et `stokesforge_render_egui::` écrits dans
-/// un module de la liste sont vus ; un commentaire, une chaîne, un identifiant
-/// voisin (`egui_extras`-like, `my_egui`) et le code de test passent ; un
-/// module absent est une faute.
-#[test]
-fn la_garde_sans_egui_voit_un_type_d_egui() {
-    for code in [
-        "use egui::Pos2;",
-        "fn f(p: egui::Pos2) {}",
-        "use eframe::App;",
-        "use stokesforge_render_egui::RenderError;",
-    ] {
-        assert_eq!(
-            egui_dans_les_modules_fermes(&[fichier("selection.rs", code)], &["selection.rs"]).len(),
-            1,
-            "non vu : {code}"
-        );
-    }
-    for code in [
-        "fn f() {} // egui::Pos2",
-        "fn f() { let _ = \"egui\"; }",
-        "fn f(my_egui: u8) {}",
-        "fn f() {}\n#[cfg(test)]\nmod tests { use egui::Pos2; }",
-    ] {
-        assert!(
-            egui_dans_les_modules_fermes(&[fichier("selection.rs", code)], &["selection.rs"])
-                .is_empty(),
-            "faux positif : {code}"
-        );
-    }
-    assert_eq!(
-        egui_dans_les_modules_fermes(&[], &["selection.rs"]).len(),
-        1
-    );
-}
-
 /// Règle #227 (`docs/standard-interface.md`, § Choix, disposition, L4) : deux
 /// constantes d'espacement dans `theme.rs`, aucun `add_space` numérique
 /// ailleurs.
@@ -1551,21 +1461,99 @@ fn la_garde_des_espacements_voit_un_nombre_ecrit_sur_place() {
 // ---------------------------------------------------------------------------
 
 /// `AppState::new` charge `~/.config/stokesforge/preferences.json` : un test
-/// d'intégration passe par `new_with_preferences`.
+/// d'intégration passe par `new_with_preferences`. Les tests d'intégration de
+/// l'état vivent dans `stokesforge-app-state/tests/` (#263) : on lit les deux
+/// dossiers `tests/`. (Les tests unitaires de `src/`, eux, bâtissent leur
+/// `AppState` par `new` : `tests/isolation_preferences.rs` tient que cela
+/// n'atteint pas le vrai fichier.) Seul `isolation_preferences.rs` appelle
+/// `AppState::new` : c'est le test qui prouve que l'appel est sans danger,
+/// `XDG_CONFIG_HOME` redirigé vers un dossier temporaire.
 #[test]
 fn aucun_test_d_integration_n_utilise_appstate_new() {
-    let dossier = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let manifeste = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dossiers = [
+        manifeste.join("tests"),
+        manifeste.join("../stokesforge-app-state/tests"),
+    ];
     let mut fautifs = Vec::new();
-    for entree in std::fs::read_dir(dossier).expect("dossier tests") {
-        let chemin = entree.expect("entrée").path();
-        if chemin.extension().is_some_and(|e| e == "rs")
-            && chemin.file_name().is_some_and(|n| n != "gardes.rs")
-            && std::fs::read_to_string(&chemin)
-                .expect("lecture")
-                .contains("AppState::new(")
-        {
-            fautifs.push(chemin.display().to_string());
+    for dossier in dossiers {
+        for entree in std::fs::read_dir(&dossier).expect("dossier tests") {
+            let chemin = entree.expect("entrée").path();
+            if chemin.extension().is_some_and(|e| e == "rs")
+                && chemin
+                    .file_name()
+                    .is_some_and(|n| n != "gardes.rs" && n != "isolation_preferences.rs")
+                && std::fs::read_to_string(&chemin)
+                    .expect("lecture")
+                    .contains("AppState::new(")
+            {
+                fautifs.push(chemin.display().to_string());
+            }
         }
     }
     assert!(fautifs.is_empty(), "AppState::new dans {fautifs:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Un seul sélecteur de fichiers natif (#192)
+// ---------------------------------------------------------------------------
+
+/// Le seul fichier où `rfd::` peut s'écrire : le chemin de `file_picker.rs`
+/// dans la liste des sources (crate d'état, #263).
+const MODULE_DU_SELECTEUR: &str = "app-state/file_picker.rs";
+
+/// Les `rfd::` écrits hors de [`MODULE_DU_SELECTEUR`] dans le code (commentaires
+/// exclus, tests compris), `chemin:ligne`.
+fn selecteurs_rfd_hors_du_module(sources: &[Fichier]) -> Vec<String> {
+    sources
+        .iter()
+        .filter(|fichier| fichier.chemin != MODULE_DU_SELECTEUR)
+        .flat_map(|fichier| {
+            fichier
+                .code()
+                .lines()
+                .enumerate()
+                .filter(|(_, ligne)| ligne.contains("rfd::"))
+                .map(|(index, _)| format!("src/{}:{}", fichier.chemin, index + 1))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Garde (#192) : un `rfd::FileDialog` appelé hors de `file_picker.rs` serait
+/// synchrone sur le fil de l'interface — le gel du portail.
+#[test]
+fn aucun_selecteur_rfd_hors_du_module() {
+    let sources = sources::sources();
+    assert!(
+        sources.iter().any(|f| f.chemin == MODULE_DU_SELECTEUR),
+        "{MODULE_DU_SELECTEUR} non lu : la garde ne verrait plus le module"
+    );
+    let fautifs = selecteurs_rfd_hors_du_module(&sources);
+    assert!(
+        fautifs.is_empty(),
+        "sélecteur de fichiers hors de file_picker.rs — passer par \
+         Action::PickFile(PickRequest) : {fautifs:?}"
+    );
+}
+
+/// Le témoin : un `rfd::` écrit dans une surface est vu ; le module du
+/// sélecteur (au chemin de la liste réelle) et un commentaire passent.
+#[test]
+fn la_garde_du_selecteur_voit_un_rfd_hors_du_module() {
+    let code = "fn f() { let _ = rfd::FileDialog::new(); }";
+    assert_eq!(
+        selecteurs_rfd_hors_du_module(&[fichier("app/menus.rs", code)]).len(),
+        1
+    );
+    assert_eq!(
+        selecteurs_rfd_hors_du_module(&[fichier("app-state/state.rs", code)]).len(),
+        1
+    );
+    assert!(selecteurs_rfd_hors_du_module(&[fichier(MODULE_DU_SELECTEUR, code)]).is_empty());
+    assert!(selecteurs_rfd_hors_du_module(&[fichier(
+        "app/menus.rs",
+        "fn f() {} // rfd::FileDialog"
+    )])
+    .is_empty());
 }

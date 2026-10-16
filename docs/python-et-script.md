@@ -518,7 +518,7 @@ hors script continue d'aller sur la sortie du processus.
   poignées après renommage, déplacement, suppression/annulation et chargement.
 - Lancer les tests Python : `scripts/python-test.sh`, qui pose les trois
   variables d'environnement nécessaires et teste pont, scripts, robustesse,
-  application et CLI. Le parcours `script_panel` lit numpy, crée les résultats
+  application et CLI. Le parcours `script_panel` (`stokesforge-app-state/tests/`) lit numpy, crée les résultats
   et un graphe, puis annule/rétablit l'ensemble depuis `AppState`. Côté robustesse, `b7` (frontière
   Rust ↔ Python dans les deux sens) et `b9` (script sous contrainte) sont
   derrière la même feature.

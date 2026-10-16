@@ -91,7 +91,7 @@ Le `Display` (`#[error(...)]`) des crates du dessous (core, commands,
 persistence, import, script, render-svg…) est **de l'anglais brut**, concis et
 lisible par un utilisateur du CLI ou de `pyst` : il n'est jamais traduit et aucun
 de ces crates ne dépend de Fluent. L'application met chaque erreur affichée en
-phrase par `crates/stokesforge-app/src/errors.rs` :
+phrase par `crates/stokesforge-app-state/src/errors.rs` :
 
 - une fonction `error_message(&Erreur) -> String` par famille
   (`errors::model`, `commands`, `session`, `file`, `import`, `formula`,
@@ -134,13 +134,13 @@ faux ou ambigu se corrige dans le catalogue (`en`), pas dans le crate du dessous
 
 L'interface est écrite **d'abord en anglais** ; le français est une traduction
 (chantier #39). Tout passe par Fluent, dans `stokesforge-app` seulement. Le pourquoi
-est en tête de `crates/stokesforge-app/src/i18n.rs` ; la vue d'ensemble dans
+est en tête de `crates/stokesforge-app-state/src/i18n.rs` ; la vue d'ensemble dans
 `docs/application.md` § « Interface multilingue ».
 
 ### Ajouter un texte
 
 1. **Écrire la clé dans le catalogue de référence**
-   `crates/stokesforge-app/i18n/en/stokesforge_app.ftl`, jamais ailleurs d'abord. Nom en
+   `crates/stokesforge-app-state/i18n/en/stokesforge_app.ftl`, jamais ailleurs d'abord. Nom en
    minuscules et tirets, `zone-objet[-précision]` : `menu-file`,
    `plot-axis-log-scale`. L'infobulle d'un contrôle est un attribut de sa clé
    (`.hint`, lue par `tr!("clé", "hint")`) ; celle d'une entrée grisée, qui dit
@@ -176,10 +176,10 @@ est en tête de `crates/stokesforge-app/src/i18n.rs` ; la vue d'ensemble dans
 
 **Libellés d'historique** (#46) : une clé `history-*` par variante de
 `HistoryLabel` (et par forme : cible connue ou non), branchée dans
-`src/history_text.rs`. Title Case, verbe d'abord ; un nom choisi par
+`stokesforge-app-state/src/history_text.rs`. Title Case, verbe d'abord ; un nom choisi par
 l'utilisateur est entre « “ ” », une colonne se dit « Column A » (lettre de la
 grille). Le `Display` anglais de `stokesforge-commands` doit dire la même chose que
-le catalogue : `tests/history_text.rs` le vérifie.
+le catalogue : `stokesforge-app-state/tests/history_text.rs` le vérifie.
 
 Un test qui compare une langue précise bâtit son chargeur et écrit
 `tr!(in loader; "clé", arg = …)` : même vérification à la compilation, sans
@@ -191,7 +191,7 @@ chargeur directement dans l'interface.
 
 ### Ce que le compilateur vérifie, et ce qu'il ne vérifie pas
 
-`fl!` lit `i18n/en/stokesforge_app.ftl` à la compilation : **une clé inexistante ou un
+`fl!` lit `stokesforge-app-state/i18n/en/stokesforge_app.ftl` à la compilation (par l'`i18n.toml` du crate appelant : celui de `stokesforge-app` pointe le catalogue d'`app-state`, les deux fixent `domain = "stokesforge_app"`) : **une clé inexistante ou un
 argument que le message ne déclare pas ne compile pas.** Vérifié à la main le
 2026-10-01 (écriture jetée, puis retirée, d'un `tr!("clef-inexistante")` dans
 `main.rs`) :
@@ -208,7 +208,7 @@ cet essai à la main** et mettre la date ici.
 
 Le compilateur ne voit **pas** : une clé de `fr` absente de `en` (ou l'inverse),
 des arguments différents d'une langue à l'autre — ce sont les tests de
-`src/i18n.rs` (complétude `fr = en`, mêmes arguments) qui les attrapent ; ni un
+`stokesforge-app-state/src/i18n.rs` (complétude `fr = en`, mêmes arguments) qui les attrapent ; ni un
 littéral écrit en dur — c'est la garde ci-dessous.
 
 ### Choisir la langue
@@ -227,11 +227,11 @@ de panique (invariant 10).
 encore au prochain démarrage. Un test qui compare un texte exact **épingle**
 l'anglais (`set_language(English)`) pour ne pas dépendre de la préférence de
 celui qui teste ; un test qui change la langue globale a son propre binaire
-(`tests/language_switch.rs`).
+(`stokesforge-app-state/tests/language_switch.rs`).
 
 ### La pseudo-langue `en-XA`
 
-Fabriquée à la volée depuis `en` (`src/i18n/pseudo.rs`), sans fichier à tenir :
+Fabriquée à la volée depuis `en` (`stokesforge-app-state/src/i18n/pseudo.rs`), sans fichier à tenir :
 lettres accentuées, texte allongé de 30 %, message encadré de `[[ ]]`. Lancer
 l'application avec `STOKESFORGE_LANG=en-XA` (et la capture, voir
 `stokesforge-bug-report/references/voir-l-interface.md`) :
@@ -247,7 +247,7 @@ se lirait comme une clé de variante).
 
 ### La garde `aucun_libelle_en_dur`
 
-`crates/stokesforge-app/tests/libelles.rs` lit toutes les sources de `src/` et refuse
+`crates/stokesforge-app/tests/libelles.rs` lit toutes les sources de `src/` des deux crates (`stokesforge-app` et `stokesforge-app-state`) et refuse
 un littéral textuel dans `label`, `button`, `menu_button`, `checkbox`, `radio`,
 `radio_value`, `selectable_value`, `selectable_label`, `toggle_value`,
 `on_hover_text`, `heading`, `hint_text`, `selected_text`, `with_title`, `set_title`,
@@ -280,7 +280,7 @@ du texte ; un texte posé par un chemin que la garde ne voit pas (un `&str` pass
 en variable, un titre de `modal_dialog_with`) reste à la charge de la capture en
 pseudo-langue.
 
-`aucune_cle_du_catalogue_n_est_morte` (`src/i18n.rs`) est le pendant : une clé
+`aucune_cle_du_catalogue_n_est_morte` (`stokesforge-app/tests/libelles.rs`) est le pendant : une clé
 de `en` dont le nom n'apparaît dans aucune source de `src/` échoue. Une clé
 retirée du code se retire du catalogue dans le même commit.
 

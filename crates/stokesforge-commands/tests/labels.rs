@@ -480,7 +480,7 @@ fn a_missing_node_gives_the_generic_label() {
 }
 
 /// Le pluriel anglais du `Display` : seul 1 est au singulier. Le même cas est
-/// tenu côté interface par le catalogue (`stokesforge-app/tests/shell.rs`).
+/// tenu côté interface par le catalogue (`stokesforge-app-state/tests/history_text.rs`).
 #[test]
 fn the_english_display_pluralizes_rows() {
     let text = |count| HistoryLabel::InsertRows { count }.to_string();

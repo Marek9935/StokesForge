@@ -4,7 +4,7 @@
 //!
 //! Une fenêtre ne se teste pas en intégration continue. Toute la logique du
 //! banc vit donc ici, pilotée par un enum d'[`Action`] ; la couche `eframe`
-//! (module [`crate::app`]) ne fait que traduire clavier et souris en actions
+//! (module `stokesforge_app::app`) ne fait que traduire clavier et souris en actions
 //! et peindre l'état. C'est ce qui rend la boucle complète — modèle →
 //! commande → annulation → sauvegarde → rechargement — vérifiable
 //! automatiquement (`tests/shell.rs`).
@@ -34,11 +34,11 @@
 //!    figerait la fenêtre, y compris le bouton « Arrêter ». `run_script` lance
 //!    donc (la création paresseuse du moteur comprise) sur un **fil détaché**
 //!    et revient aussitôt ; [`AppState::poll_script`], à appeler à **chaque
-//!    image** par [`crate::app`] (et par un test qui attend une exécution),
+//!    image** par `stokesforge_app::app` (et par un test qui attend une exécution),
 //!    sonde le résultat par `try_recv` et l'applique dès qu'il est prêt —
 //!    rafraîchissement de l'instantané compris. C'est ce qui rend `dispatch`
 //!    sûr à appeler depuis la boucle de rendu pour **toutes** les actions,
-//!    script inclus, sans cas particulier côté `crate::app`.
+//!    script inclus, sans cas particulier côté `stokesforge_app::app`.
 //! 3. **Une exception de script n'est pas une erreur d'application.** Elle
 //!    atterrit dans la sortie ([`AppState::script_output`]) avec sa trace
 //!    d'appels ; le message de statut posé par `poll_script` reste neutre
@@ -139,7 +139,7 @@ pub enum Action {
     AddWorkbook,
     /// Sélectionne la feuille affichée dans la grille du classeur qui la
     /// contient (le classeur est déduit du parent de `id` dans l'arbre) — un
-    /// classeur affiché dans son propre onglet [`crate::app`], la sélection
+    /// classeur affiché dans son propre onglet `stokesforge_app::app`, la sélection
     /// d'une feuille dans l'un n'affecte jamais celle d'un autre classeur
     /// ouvert simultanément.
     SelectSheet(NodeId),
@@ -351,7 +351,7 @@ pub enum Action {
     },
     /// Colle en position absolue depuis le presse-papier interne — Ctrl+Maj+
     /// V. `egui-winit` le traduit en le **même** `egui::Event::Paste` que
-    /// Ctrl+V (`is_paste_command` ne teste jamais `shift`) : `crate::app`
+    /// Ctrl+V (`is_paste_command` ne teste jamais `shift`) : `stokesforge_app::app`
     /// les distingue en lisant `modifiers.shift` au moment de l'événement,
     /// et jette le texte porté par l'événement — tout vient ici du dernier
     /// [`AppState::copy_selection`]/
@@ -1139,12 +1139,12 @@ fn column_all_numeric_after(column: &Column, write: Option<(usize, &ValueBlock)>
 
 /// Corps de [`AppState::cell_text`], factorisé sur un `&Tree` plutôt que sur
 /// `&self` : c'est ce qui permet à une fenêtre détachée
-/// ([`crate::app::StokesForgeApp::show_detached_tabs`], qui ne porte qu'un clone
+/// (`stokesforge_app::app::StokesForgeApp::show_detached_tabs`, qui ne porte qu'un clone
 /// de [`Snapshot`], jamais `AppState` elle-même — voir sa doc de tête) de
 /// peindre une grille identique à celle du dock, sans dupliquer la règle
 /// d'affichage (`MISSING_TEXT_DISPLAY`, bascule scientifique A9/C4 — voir
 /// [`AppState::cell_text`] pour le détail de ces choix).
-pub(crate) fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
+pub fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
     cell_in(tree, column, row, format_exact, MISSING_TEXT_DISPLAY)
 }
 
@@ -1226,7 +1226,7 @@ pub(crate) fn cell_is_numeric_in(tree: &Tree, column: NodeId, row: usize) -> boo
 
 /// Corps de [`AppState::visible_columns`], factorisé sur un `&Tree` — voir
 /// [`cell_text_in`].
-pub(crate) fn visible_columns_in(tree: &Tree, sheet: NodeId) -> Vec<(NodeId, String, ColumnType)> {
+pub fn visible_columns_in(tree: &Tree, sheet: NodeId) -> Vec<(NodeId, String, ColumnType)> {
     let Some(node) = tree.node(sheet) else {
         return Vec::new();
     };
@@ -1249,7 +1249,7 @@ fn row_series_name(row: usize) -> String {
 /// Nom affiché d'une série dans la liste de la fenêtre des propriétés : la
 /// même règle que la légende du graphe, [`stokesforge_core::series_label`] (source
 /// unique, issue #25).
-pub(crate) fn series_list_label(tree: &Tree, series: &stokesforge_plot::SeriesSpec) -> String {
+pub fn series_list_label(tree: &Tree, series: &stokesforge_plot::SeriesSpec) -> String {
     stokesforge_core::series_label(series, tree)
 }
 
@@ -1347,7 +1347,7 @@ pub struct PendingRowDrop {
 /// (voir [`Action::AddSeriesToGraph`]). Typée plutôt qu'une chaîne : c'est ce
 /// qu'exigent `egui::Response::dnd_set_drag_payload`/`dnd_hover_payload`/
 /// `dnd_release_payload` (`Any + Send + Sync`), et ce que [`drop_payload_action`]
-/// relit au dépôt pour construire l'action. `Clone` : `crate::app` la clone
+/// relit au dépôt pour construire l'action. `Clone` : `stokesforge_app::app` la clone
 /// une fois par bord de grille testé (gauche puis droite) avant de savoir
 /// lequel a effectivement démarré le glisser.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1362,7 +1362,7 @@ pub struct ColumnDragPayload {
 /// graphe `graph` — toujours [`Action::AddSeriesToGraph`], sans type de tracé
 /// imposé : les séries prennent celui du calque (#160, voir
 /// [`panel_plot_type`]). Fonction pure, séparée du code de peinture de
-/// `crate::app::graph_window::graph_drop_target` pour être testable sans
+/// `stokesforge_app::app::graph_window::graph_drop_target` pour être testable sans
 /// fenêtre.
 pub fn drop_payload_action(payload: &ColumnDragPayload, graph: NodeId, panel: usize) -> Action {
     Action::AddSeriesToGraph {
@@ -1375,13 +1375,13 @@ pub fn drop_payload_action(payload: &ColumnDragPayload, graph: NodeId, panel: us
 
 /// Corps de [`AppState::row_count`], factorisé sur un `&Tree` — voir
 /// [`cell_text_in`].
-pub(crate) fn row_count_in(tree: &Tree, sheet: NodeId) -> usize {
+pub fn row_count_in(tree: &Tree, sheet: NodeId) -> usize {
     tree.row_count(sheet).unwrap_or(0)
 }
 
 /// Corps de [`AppState::worksheets_of`], factorisé sur un `&Tree` — voir
 /// [`cell_text_in`].
-pub(crate) fn worksheets_of_in(tree: &Tree, book: NodeId) -> Vec<(NodeId, String)> {
+pub fn worksheets_of_in(tree: &Tree, book: NodeId) -> Vec<(NodeId, String)> {
     let Some(node) = tree.node(book) else {
         return Vec::new();
     };
@@ -1393,7 +1393,7 @@ pub(crate) fn worksheets_of_in(tree: &Tree, book: NodeId) -> Vec<(NodeId, String
 
 /// Corps de [`AppState::note_text`], factorisé sur un `&Tree` — voir
 /// [`cell_text_in`].
-pub(crate) fn note_text_in(tree: &Tree, note: NodeId) -> Option<String> {
+pub fn note_text_in(tree: &Tree, note: NodeId) -> Option<String> {
     match tree.node(note)?.kind() {
         NodeKind::Note { text, .. } => Some(text.clone()),
         _ => None,
@@ -1401,9 +1401,9 @@ pub(crate) fn note_text_in(tree: &Tree, note: NodeId) -> Option<String> {
 }
 
 /// Nom d'un nœud, ou `"{missing} {id} (deleted)"` s'il n'existe plus dans
-/// `tree` — pendant de `crate::app::tab::node_title`, factorisé sur un `&Tree`
+/// `tree` — pendant de `stokesforge_app::app::tab::node_title`, factorisé sur un `&Tree`
 /// pour la même raison que [`cell_text_in`].
-pub(crate) fn node_title_in(tree: &Tree, id: NodeId, missing: impl FnOnce() -> String) -> String {
+pub fn node_title_in(tree: &Tree, id: NodeId, missing: impl FnOnce() -> String) -> String {
     tree.node(id)
         .map(|node| node.name().to_string())
         .unwrap_or_else(|| crate::tr!("window-deleted", kind = missing(), id = id.to_string()))
@@ -1448,8 +1448,11 @@ pub enum HeaderField {
 }
 
 /// Valeur saisie dans la ligne x' : `Ok(None)` pour un texte vide, `Err`
-/// quand ce n'est pas un nombre fini (texte, NaN, infini).
-pub(crate) fn parse_x_prime(text: &str) -> Result<Option<f64>, ()> {
+/// quand ce n'est pas un nombre fini (texte, NaN, infini). L'erreur n'a pas de
+/// contenu : l'appelant n'a qu'un message à poser (`error-*`), d'où l'`allow`
+/// que la visibilité `pub` (#263) rend nécessaire.
+#[allow(clippy::result_unit_err)]
+pub fn parse_x_prime(text: &str) -> Result<Option<f64>, ()> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Ok(None);
@@ -1463,14 +1466,14 @@ pub(crate) fn parse_x_prime(text: &str) -> Result<Option<f64>, ()> {
 impl HeaderField {
     /// Nombre de champs empilés. Le rang d'un champ dans la grille est
     /// `index() - COUNT` (`-COUNT..=-1`), les lignes de données commençant à 0.
-    pub(crate) const COUNT: usize = 5;
+    pub const COUNT: usize = 5;
 
     /// Position parmi les champs, dans l'ordre où ils sont empilés à
     /// l'écran (de haut en bas, 0 = `XPrime`) — sert à comparer deux
     /// champs pour savoir si l'un est « au-dessus » de l'autre, en
     /// particulier pour la plage de champs d'en-tête sélectionnée (voir
     /// [`crate::selection::Selection::is_header_field_selected`]).
-    pub(crate) fn index(self) -> usize {
+    pub fn index(self) -> usize {
         match self {
             HeaderField::XPrime => 0,
             HeaderField::LongName => 1,
@@ -1538,12 +1541,12 @@ impl HeaderField {
     }
 
     /// Champ du rang `rank` (`-COUNT..=-1`) de la grille.
-    pub(crate) fn from_rank(rank: isize) -> Self {
+    pub fn from_rank(rank: isize) -> Self {
         Self::from_index((rank + Self::COUNT as isize) as usize)
     }
 
     /// Rang du champ dans la grille (`-COUNT..=-1`).
-    pub(crate) fn rank(self) -> isize {
+    pub fn rank(self) -> isize {
         self.index() as isize - Self::COUNT as isize
     }
 }
@@ -1830,7 +1833,7 @@ pub struct HeaderEdit {
 }
 
 /// Saisie en cours dans une note. Le pendant exact de [`CellEdit`] pour
-/// [`Tab::Note`](crate::app) : un seul tampon à la fois (voir la doc de
+/// `stokesforge_app::app::Tab::Note` : un seul tampon à la fois (voir la doc de
 /// [`AppState::note_editing`]), envoyé au modèle seulement à la validation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NoteEdit {
@@ -1841,10 +1844,10 @@ pub struct NoteEdit {
 }
 
 /// Nature d'onglet actif, vue par [`AppState`] — un miroir minimal de
-/// l'énumération privée `Tab` de [`crate::app`], juste assez pour que la
+/// l'énumération privée `Tab` de `stokesforge_app::app`, juste assez pour que la
 /// question « le menu « Graphique » doit-il s'afficher ? »
 /// ([`active_graph`]) se pose sans fenêtre, dans
-/// `tests/shell.rs`. `crate::app` traduit son `Tab` vers celui-ci au seul
+/// `tests/shell.rs`. `stokesforge_app::app` traduit son `Tab` vers celui-ci au seul
 /// point de contact (`StokesForgeApp::ui`), rien d'autre ne le lit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ActiveTabKind {
@@ -1864,7 +1867,7 @@ pub enum ActiveTabKind {
 /// Le graphe sélectionné, d'après la nature de l'onglet actif — `None` sauf
 /// pour [`ActiveTabKind::Graph`]. Décide la présence du menu « Graphique »
 /// dans la barre de menus. Fonction pure, séparée du code de peinture de
-/// `crate::app` pour être testable sans fenêtre.
+/// `stokesforge_app::app` pour être testable sans fenêtre.
 pub fn active_graph(active: ActiveTabKind) -> Option<NodeId> {
     match active {
         ActiveTabKind::Graph(id) => Some(id),
@@ -1951,7 +1954,7 @@ pub enum ShapeOrder {
 }
 
 /// Un composant d'un graphe visé par un clic droit — traduit par
-/// `crate::app` depuis ce que le rendu désigne sous le pointeur.
+/// `stokesforge_app::app` depuis ce que le rendu désigne sous le pointeur.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlotTarget {
     /// Le fond de la figure, hors de tout composant.
@@ -2134,7 +2137,7 @@ struct ImportJob {
     reply: mpsc::Receiver<Vec<ImportItem>>,
 }
 
-/// État transitoire de la fenêtre d'import (voir [`crate::app`] pour son
+/// État transitoire de la fenêtre d'import (voir `stokesforge_app::app` pour son
 /// rendu) : jamais dans l'historique, jamais envoyé à l'acteur — même
 /// famille que [`HeaderEdit`]/[`CellEdit`]/[`NoteEdit`]. Porte tout ce que la
 /// fenêtre a besoin de retenir entre deux images, y compris le
@@ -2325,7 +2328,7 @@ pub struct ImportColumnPreview {
 /// nœud que ce lecteur ne comprend pas, invariant 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowKind {
-    /// Classeur — [`crate::app`] l'ouvre en `Tab::Book`.
+    /// Classeur — `stokesforge_app::app` l'ouvre en `Tab::Book`.
     Book,
     /// Graphe — `Tab::Graph`.
     Graph,
@@ -2379,7 +2382,7 @@ pub struct AppState {
     /// voir [`AppState::selected_sheet_in`] — la carte n'a donc jamais besoin
     /// d'être pré-remplie.
     selected_sheets: std::collections::HashMap<NodeId, NodeId>,
-    /// Chemin du fichier de travail (saisi à la main, cf. `crate::app`).
+    /// Chemin du fichier de travail (saisi à la main, cf. `stokesforge_app::app`).
     path: String,
     /// Repère conservateur de l'enregistrement, sans épingler les buffers
     /// d'un ancien arbre. Une annulation demande aussi confirmation.
@@ -2545,7 +2548,7 @@ impl AppState {
     /// l'acteur ne répond pas — il n'y a alors rien à afficher du tout.
     ///
     /// Ne présélectionne aucune feuille : avec un classeur par onglet
-    /// (`crate::app::Tab::Book`), il n'y a plus de « la » grille à préparer
+    /// (`stokesforge_app::app::Tab::Book`), il n'y a plus de « la » grille à préparer
     /// à l'ouverture — chaque onglet de classeur retombe sur sa première
     /// feuille de lui-même ([`AppState::selected_sheet_in`]) dès qu'il
     /// s'ouvre.
@@ -2862,7 +2865,7 @@ impl AppState {
         self.snapshot.history.can_undo
     }
 
-    /// Révision courante de l'instantané — sert à `crate::app` à détecter,
+    /// Révision courante de l'instantané — sert à `stokesforge_app::app` à détecter,
     /// après un [`AppState::dispatch`], si l'action a réellement produit une
     /// commande (`Action::PlotColumns` sur une sélection sans Y n'en envoie
     /// aucune, la révision ne bouge pas).
@@ -2891,7 +2894,7 @@ impl AppState {
     /// graphe ouvert ([`ColumnDragPayload`]), ou `None` si `sheet` n'a
     /// aucune sélection ou si sa sélection ne couvre aucune colonne
     /// ([`Selection::columns`]) — pas de glisser possible sans colonne, même
-    /// depuis la zone de prise. `crate::app::grid::grid_contents` l'appelle à
+    /// depuis la zone de prise. `stokesforge_app::app::grid::grid_contents` l'appelle à
     /// chaque image pour savoir s'il y a quoi que ce soit à proposer au
     /// glisser ; ne rien avoir sélectionné y désactive la zone de prise tout
     /// entière plutôt que de la laisser démarrer un glisser vide.
@@ -3648,7 +3651,7 @@ impl AppState {
     }
 
     /// Copie la sélection courante de `sheet` — Ctrl+C (et la première
-    /// moitié de Ctrl+X, voir [`crate::app`]). `None` si `sheet` n'a pas de
+    /// moitié de Ctrl+X, voir `stokesforge_app::app`). `None` si `sheet` n'a pas de
     /// sélection ou si elle ne désigne plus de colonne valide (rien à
     /// pousser au presse-papier).
     ///
@@ -3796,7 +3799,7 @@ impl AppState {
     /// Texte affiché d'un champ d'en-tête (hors édition) — même détail que
     /// `app::grid::header_field_widget`, factorisé ici pour être partagé
     /// avec [`AppState::copy_selection`]/[`AppState::copy_full_columns`].
-    pub(crate) fn header_field_display_text(&self, column: NodeId, field: HeaderField) -> String {
+    pub fn header_field_display_text(&self, column: NodeId, field: HeaderField) -> String {
         field.text_of(&self.column_meta(column))
     }
 
@@ -3913,7 +3916,7 @@ impl AppState {
     /// [`AppState::editing`] pour une note — un seul tampon à la fois, pour
     /// la même raison de principe (même si rien ici ne force la limite à un
     /// seul tampon : une note n'est pas virtualisée comme une grille d'un
-    /// million de lignes, mais suivre la même convention garde `crate::app`
+    /// million de lignes, mais suivre la même convention garde `stokesforge_app::app`
     /// simple, un seul mécanisme d'édition différée à comprendre).
     pub fn note_editing(&self) -> Option<&NoteEdit> {
         self.note_editing.as_ref()
@@ -3969,7 +3972,7 @@ impl AppState {
     /// (voir [`PlotEdit::base`]). `graph` sans
     /// spec (nœud supprimé, ou pas un graphe) laisse le brouillon inchangé :
     /// c'est à l'appelant de vérifier `self.tree().node(graph)` avant
-    /// d'afficher le panneau (voir `node_title` dans `crate::app::tab`).
+    /// d'afficher le panneau (voir `node_title` dans `stokesforge_app::app::tab`).
     pub fn begin_plot_edit(&mut self, graph: NodeId) {
         let Some(model) = self.plot_spec(graph) else {
             return;
@@ -4106,7 +4109,7 @@ impl AppState {
 
     /// Les classeurs du projet, sous la forme `(identifiant, chemin
     /// lisible)`. Le pendant exact de [`AppState::graphs`], pour la
-    /// disposition initiale de [`crate::app::StokesForgeApp::new`] : ouvrir le
+    /// disposition initiale de `stokesforge_app::app::StokesForgeApp::new` : ouvrir le
     /// premier classeur du projet, comme le premier graphe l'était déjà.
     pub fn books(&self) -> Vec<(NodeId, String)> {
         let tree = &self.snapshot.tree;
@@ -4256,8 +4259,8 @@ impl AppState {
     /// `preferences.json` de la machine (ce que fait
     /// `Action::SetObjectManagerOpen`) : un test ne dépend ainsi ni ne
     /// modifie la préférence de l'utilisateur.
-    #[cfg(test)]
-    pub(crate) fn set_object_manager_open_for_test(&mut self, open: bool) {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn set_object_manager_open_for_test(&mut self, open: bool) {
         self.object_manager_open = open;
     }
 
@@ -4930,7 +4933,7 @@ impl AppState {
     }
 
     /// Sonde le fil détaché d'une exécution de script en cours, sans jamais
-    /// bloquer. À appeler à **chaque image** (voir [`crate::app`]) : sans
+    /// bloquer. À appeler à **chaque image** (voir `stokesforge_app::app`) : sans
     /// notification poussée de l'acteur, c'est le seul endroit qui rafraîchit
     /// l'instantané après un script — l'oublier laisserait la grille figée
     /// alors que le modèle a changé.
@@ -5997,13 +6000,13 @@ impl AppState {
     /// système illisible au moment d'un « Coller » pris dans un menu
     /// contextuel (voir `app::grid::system_clipboard_text`) : cet échec
     /// naît côté plateforme, jamais dans le modèle.
-    pub(crate) fn notice(&mut self, text: String) {
+    pub fn notice(&mut self, text: String) {
         self.dialog_error = None;
         self.record(text, StatusLevel::Info);
     }
 
     /// Enregistre un avertissement (M4) : visible jusqu'au message suivant.
-    pub(crate) fn warn(&mut self, text: String) {
+    pub fn warn(&mut self, text: String) {
         self.dialog_error = None;
         self.record(text, StatusLevel::Warning);
     }

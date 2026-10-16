@@ -26,9 +26,9 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use stokesforge_app::history_text::history_text;
-use stokesforge_app::selection::Selection;
-use stokesforge_app::state::{
+use stokesforge_app_state::history_text::history_text;
+use stokesforge_app_state::selection::Selection;
+use stokesforge_app_state::state::{
     active_graph, drop_payload_action, drop_rows_action, file_drop_plan, Action, ActiveTabKind,
     AlertKind, AppState, ColumnDragPayload, GridZone, HeaderField, ImportDestination,
     MoveDirection, PlotAxis, PlotEdit, PlotSettingsTab, PlotTarget, RowAxis, StatusLevel,
@@ -118,7 +118,7 @@ fn start(project: Project, path: &Path) -> (Session, AppState) {
     let state = AppState::new_with_preferences(
         session.handle(),
         path.display().to_string(),
-        stokesforge_app::preferences::Preferences::load_from(None),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
     )
     .expect("état applicatif initial");
     (session, state)
@@ -969,7 +969,7 @@ fn a_failing_load_leaves_the_model_and_history_untouched() {
 fn a_stf_read_error_is_shown_through_the_catalogue() {
     // Compared in English: the test must not depend on `STOKESFORGE_LANG` or on the
     // saved preference of whoever runs it.
-    stokesforge_app::i18n::set_language(stokesforge_app::i18n::Language::English);
+    stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
 
@@ -1225,12 +1225,12 @@ fn selecting_something_that_is_not_a_sheet_is_refused() {
 /// compare la **structure** (quelle entrée, quels paramètres), pas une langue ;
 /// les phrases anglaises sont tenues par `tests/history_text.rs`.
 fn undo_entry(label: &HistoryLabel) -> String {
-    stokesforge_app::tr!("history-undo-entry", label = history_text(label))
+    stokesforge_app_state::tr!("history-undo-entry", label = history_text(label))
 }
 
 /// Le texte du menu Rétablir pour `label`, comme [`undo_entry`].
 fn redo_entry(label: &HistoryLabel) -> String {
-    stokesforge_app::tr!("history-redo-entry", label = history_text(label))
+    stokesforge_app_state::tr!("history-redo-entry", label = history_text(label))
 }
 
 // -- 12. Libellés --
@@ -1367,7 +1367,7 @@ fn cancelling_an_edit_discards_the_buffer() {
 
 // -- Divers : la sélection de la grille (souris + Ctrl+C/X/V) --
 //
-// `crate::app` (egui) traduit clic/glisser en `AppState::select_cell`/
+// `stokesforge_app::app` (egui) traduit clic/glisser en `AppState::select_cell`/
 // `extend_selection`, puis Ctrl+C/Ctrl+Maj+C/X/V/Ctrl+Maj+V en
 // `AppState::copy_selection`/`AppState::copy_full_columns`/
 // `Action::ClearSelectedCells`/`Action::Paste`/`Action::PasteAbsolute` —
@@ -1377,7 +1377,7 @@ fn cancelling_an_edit_discards_the_buffer() {
 // ([`AppState::select_cell`]) est un rectangle 1×1 comme un autre pour
 // `Selection` (voir `crate::selection::Selection::single_cell` et ses tests
 // unitaires) — les trois tests qui suivent le vérifient au niveau où
-// `crate::app` s'arrête.
+// `stokesforge_app::app` s'arrête.
 
 #[test]
 fn a_single_cell_selection_copies_exactly_that_cell() {
@@ -1745,7 +1745,7 @@ fn set_header_field(state: &mut AppState, column: NodeId, field: HeaderField, te
 /// coup par coup : un glisser parti d'un champ d'en-tête qui atteint une
 /// cellule de donnée s'arrête au champ Formule (voir `crate::selection`),
 /// donc ne peut plus jamais produire une copie mixte. Ce test le vérifie au
-/// niveau où `crate::app` s'arrête : la sélection clampée ne copie que des
+/// niveau où `stokesforge_app::app` s'arrête : la sélection clampée ne copie que des
 /// champs, et coller ce résultat sur une cellule de donnée (sortes
 /// différentes) ne colle rien plutôt que de mal se répartir.
 #[test]
@@ -1788,7 +1788,7 @@ fn extending_a_header_selection_into_data_clamps_instead_of_mixing_a_copy() {
 
     // Collée sur une cellule de donnée de `Signal` : sortes différentes
     // (champs copiés, ancre sur une donnée), rien ne se colle (règle 2 de
-    // la matrice de comportement, voir `stokesforge_app::state`).
+    // la matrice de comportement, voir `stokesforge_app_state::state`).
     state.select_cell(sheet1, signal, 1);
     state.dispatch(Action::Paste {
         sheet: sheet1,
@@ -2023,7 +2023,7 @@ fn pure_header_field_copy_paste_writes_header_fields_not_data() {
 
 /// Un copier de champs d'en-tête collé sur une cellule de donnée ne colle
 /// rien : les deux sortes ne se mélangent jamais (règle 2 de la matrice de
-/// comportement, voir `stokesforge_app::state`) — le pendant de
+/// comportement, voir `stokesforge_app_state::state`) — le pendant de
 /// [`pure_header_field_copy_paste_writes_header_fields_not_data`] côté
 /// ancre de l'autre sorte.
 #[test]
@@ -2222,7 +2222,7 @@ fn keep_formula_data_is_only_offered_on_a_formula_field() {
 }
 
 // -- Matrice de comportement copier/coller (§3, voir la doc de tête de
-// `stokesforge_app::state`) --
+// `stokesforge_app_state::state`) --
 //
 // Les tests plus haut couvrent déjà plusieurs lignes de la matrice (case
 // unique → `Text`, rectangle relatif de données ou de champs, débordement
@@ -2235,7 +2235,7 @@ fn keep_formula_data_is_only_offered_on_a_formula_field() {
 /// Une seule case copiée — ici un champ d'en-tête — devient `Text` : son
 /// texte seul. C'est ce qui permet de copier la formule d'une colonne dans
 /// le champ Formule d'une autre, l'exemple qui motive la règle (voir la doc
-/// de tête de `stokesforge_app::state`).
+/// de tête de `stokesforge_app_state::state`).
 #[test]
 fn copying_a_single_formula_field_can_paste_it_into_another_columns_formula_field() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
@@ -2987,7 +2987,7 @@ fn the_grid_menu_is_absent_without_a_selection() {
 // par la seule feature `python` de ce crate ; sans elle, ni l'un ni l'autre
 // n'est compilé dans le binaire — il n'existe donc littéralement aucun code
 // capable de démarrer CPython, quelle que soit la façon dont `AppState` est
-// construite ou utilisée. `cargo tree -p stokesforge-app` (sans `--features
+// construite ou utilisée. `cargo tree -p stokesforge-app-state` (sans `--features
 // python`) le confirme : ni `stokesforge-python` ni `stokesforge-script` n'y
 // apparaissent.
 //
@@ -3020,7 +3020,7 @@ fn script_available_is_false_and_run_script_explains_why_without_the_feature() {
     );
     assert_eq!(
         status.text,
-        stokesforge_app::tr!("error-script-unavailable"),
+        stokesforge_app_state::tr!("error-script-unavailable"),
         "le message explique pourquoi : {}",
         status.text
     );
@@ -3051,7 +3051,7 @@ fn interrupt_script_is_also_explained_without_the_feature() {
     assert!(status.is_error());
     assert_eq!(
         status.text,
-        stokesforge_app::tr!("error-script-unavailable")
+        stokesforge_app_state::tr!("error-script-unavailable")
     );
 }
 
@@ -3119,7 +3119,7 @@ fn les_graphes_du_projet_sont_enumeres_avec_leur_chemin() {
 /// Le Project Manager s'arrête à `Workbook`/`Graph`/`Matrix`/`Note` : jamais
 /// de descente dans les feuilles d'un classeur ni dans le contenu d'un
 /// graphe (§1 de la tâche). `books()` reste le pendant à plat de `graphs()`,
-/// utilisé par la disposition initiale de `crate::app::StokesForgeApp::new`.
+/// utilisé par la disposition initiale de `stokesforge_app::app::StokesForgeApp::new`.
 #[test]
 fn books_are_enumerated_like_graphs_with_their_readable_path() {
     let dir = tempfile::tempdir().expect("dossier temporaire");
@@ -3134,7 +3134,7 @@ fn books_are_enumerated_like_graphs_with_their_readable_path() {
 /// fenêtre, jamais les feuilles d'un classeur.
 #[test]
 fn project_tree_stops_at_windows_and_never_descends_into_a_book() {
-    use stokesforge_app::state::{ProjectTreeNode, WindowKind};
+    use stokesforge_app_state::state::{ProjectTreeNode, WindowKind};
 
     let dir = tempfile::tempdir().expect("dossier temporaire");
     let mut project = demo_project();
@@ -3652,7 +3652,7 @@ fn new_import_recipe_resets_to_a_permissive_default() {
     let import = state.import_state().expect("fenêtre d'import ouverte");
     assert_eq!(
         import.recipe.name,
-        stokesforge_app::tr!("import-template-untitled")
+        stokesforge_app_state::tr!("import-template-untitled")
     );
     assert_eq!(import.recipe.separator, Separator::Auto);
     assert_eq!(import.recipe.decimal, DecimalStyle::Dot);
@@ -6116,7 +6116,7 @@ fn column_drag_payload_needs_whole_columns() {
 
 /// Avec une sélection de colonnes entières, la charge utile porte la feuille
 /// et **toutes** les colonnes sélectionnées dans l'ordre de la feuille —
-/// aussi non contiguës —, que `crate::app::grid::grid_contents` glisse depuis
+/// aussi non contiguës —, que `stokesforge_app::app::grid::grid_contents` glisse depuis
 /// le bord du bloc et que [`drop_payload_action`] relit au dépôt.
 #[test]
 fn column_drag_payload_carries_the_sheet_and_its_selected_columns() {
@@ -6308,7 +6308,7 @@ fn plotted_graph(state: &mut AppState) -> NodeId {
 fn a_right_clicked_component_opens_the_settings_page_that_sets_it() {
     // Compared in English: the test must not depend on `STOKESFORGE_LANG` or on the
     // saved preference of whoever runs it.
-    stokesforge_app::i18n::set_language(stokesforge_app::i18n::Language::English);
+    stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
     assert_eq!(
         PlotTarget::Title.settings_page(),
         (PlotSettingsTab::Graph, None)
@@ -6770,7 +6770,7 @@ fn editing_an_axis_scale_through_the_draft_is_visible_after_commit() {
 /// annulable : elle apparaît dans l'arbre, Annuler la retire.
 #[test]
 fn saving_a_color_in_the_project_is_undoable() {
-    use stokesforge_app::state::SaveTarget;
+    use stokesforge_app_state::state::SaveTarget;
     use stokesforge_plot::ColorUsage;
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
@@ -6807,7 +6807,7 @@ fn saving_a_color_in_the_project_is_undoable() {
 /// l'utilisateur, hors projet et hors historique ; la retirer aussi.
 #[test]
 fn saving_a_color_for_the_user_writes_the_user_file() {
-    use stokesforge_app::state::SaveTarget;
+    use stokesforge_app_state::state::SaveTarget;
     use stokesforge_plot::ColorUsage;
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
@@ -6842,7 +6842,7 @@ fn saving_a_color_for_the_user_writes_the_user_file() {
 /// (fichier, hors historique), se remplace par son nom et se supprime.
 #[test]
 fn les_nuanciers_s_enregistrent_dans_le_projet_ou_chez_l_utilisateur_et_se_suppriment() {
-    use stokesforge_app::state::SaveTarget;
+    use stokesforge_app_state::state::SaveTarget;
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
     let path = dir.path().join("config").join("couleurs.json");
@@ -7066,7 +7066,7 @@ fn dropping_files_on_a_book_imports_them_as_one_undo_entry() {
     assert!(!status.is_error());
     assert_eq!(
         status.text,
-        stokesforge_app::tr!("status-import-dropped", count = 2, models = "Untitled"),
+        stokesforge_app_state::tr!("status-import-dropped", count = 2, models = "Untitled"),
         "{}",
         status.text
     );
@@ -7237,7 +7237,7 @@ fn import_keeps_file_metadata_on_every_column() {
     }
     assert_eq!(
         state.file_metadata_summary(columns[0].0),
-        stokesforge_app::tr!("workbook-metadata-summary", count = 3)
+        stokesforge_app_state::tr!("workbook-metadata-summary", count = 3)
     );
 
     let revision = state.revision();
@@ -7353,7 +7353,7 @@ fn jasco_like(dir: &std::path::Path) -> std::path::PathBuf {
 /// Les étapes s'enchaînent dans l'ordre, bornées aux deux bouts.
 #[test]
 fn import_wizard_steps_go_forward_and_back_within_bounds() {
-    use stokesforge_app::state::ImportStep;
+    use stokesforge_app_state::state::ImportStep;
     let _recipes = isolate_recipe_store();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
@@ -7465,7 +7465,7 @@ fn import_wizard_unifies_header_and_confirms_recipe_deletion() {
 /// des données.
 #[test]
 fn import_preview_line_actions_adjust_the_recipe() {
-    use stokesforge_app::state::ImportLineAction;
+    use stokesforge_app_state::state::ImportLineAction;
     let _recipes = isolate_recipe_store();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
@@ -7731,7 +7731,10 @@ fn stop_during_a_heavy_recalculation_undoes_the_command() {
     assert!(!state.snapshot().history.can_undo);
     let status = state.status().expect("message");
     assert!(!status.is_error());
-    assert_eq!(status.text, stokesforge_app::tr!("status-recalc-stopped"));
+    assert_eq!(
+        status.text,
+        stokesforge_app_state::tr!("status-recalc-stopped")
+    );
 }
 
 #[test]
@@ -7969,7 +7972,7 @@ fn the_wizard_chooses_the_model_from_the_first_file() {
     state.open_import(None::<NodeId>);
     assert_eq!(
         state.import_state().unwrap().recipe.name,
-        stokesforge_app::tr!("import-template-untitled")
+        stokesforge_app_state::tr!("import-template-untitled")
     );
 
     state.add_import_paths(vec![fixture_path("jasco_fluo_tab.txt")]);
@@ -8348,7 +8351,7 @@ fn a_multi_block_file_gives_one_sheet_per_block_and_refreshes_per_block() {
     assert_eq!(column_values(&state, second, 1), vec![30.0, 40.0, 50.0]);
     assert_eq!(
         state.status().unwrap().text,
-        stokesforge_app::tr!("status-import-done", imported = 1, total = 1)
+        stokesforge_app_state::tr!("status-import-done", imported = 1, total = 1)
     );
 
     // Le fichier change : chaque bloc se met à jour dans sa propre feuille.
@@ -8560,7 +8563,7 @@ fn le_nom_propose_est_celui_du_graphe() {
     let dir = tempfile::tempdir().expect("dossier temporaire");
     let (_session, state, graph) = demo_with_graph(dir.path());
     assert_eq!(
-        stokesforge_app::state::export_file_name(state.tree(), graph),
+        stokesforge_app_state::state::export_file_name(state.tree(), graph),
         "Graph1.svg"
     );
 }
@@ -8638,7 +8641,7 @@ fn un_texte_libre_sajoute_se_deplace_et_se_retire_en_un_pas_chacun() {
 /// et passer au premier plan un objet déjà dessus non plus.
 #[test]
 fn un_objet_graphique_sajoute_sempile_et_se_retire_en_un_pas_chacun() {
-    use stokesforge_app::state::ShapeOrder;
+    use stokesforge_app_state::state::ShapeOrder;
     use stokesforge_plot::{ShapeKind, ShapeRef, ShapeSpec};
     let dir = tempfile::tempdir().expect("dossier temporaire");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
@@ -8919,7 +8922,7 @@ fn un_titre_et_un_nom_de_legende_se_modifient_en_un_pas() {
 
 #[test]
 fn object_manager_visibilite_groupe_annulable_et_persistante() {
-    use stokesforge_app::object_manager::{object_tree, VisibilityTarget};
+    use stokesforge_app_state::object_manager::{object_tree, VisibilityTarget};
     use stokesforge_plot::{
         AnnotationSpec, PanelSpec, PlotSpec, SeriesRef, SeriesSpec, ShapeKind, ShapeSpec,
     };
@@ -9058,7 +9061,7 @@ fn object_manager_project() -> (Project, NodeId, stokesforge_plot::PlotSpec) {
 /// autres courbes ; Annuler/Rétablir restaure le graphique et sa projection.
 #[test]
 fn object_manager_supprime_une_courbe_sans_toucher_aux_donnees() {
-    use stokesforge_app::object_manager::{object_tree, VisibilityTarget as T};
+    use stokesforge_app_state::object_manager::{object_tree, VisibilityTarget as T};
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesRef, SeriesSpec};
     let dir = tempfile::tempdir().unwrap();
     let mut project = demo_project();
@@ -9119,7 +9122,7 @@ fn object_manager_supprime_une_courbe_sans_toucher_aux_donnees() {
 /// chacune avec son motif d'historique ; une cible périmée n'en crée aucune.
 #[test]
 fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
-    use stokesforge_app::object_manager::{object_tree, LayerSlot, VisibilityTarget as T};
+    use stokesforge_app_state::object_manager::{object_tree, LayerSlot, VisibilityTarget as T};
     use stokesforge_commands::PlotEditKind as K;
     use stokesforge_plot::{SeriesGroupRef, SeriesRef};
     let dir = tempfile::tempdir().unwrap();
@@ -9267,7 +9270,7 @@ fn les_gestes_d_un_groupe_de_series_sont_annulables_et_persistent() {
 
 #[test]
 fn object_manager_series_renommage_ordre_suppression_undo_redo() {
-    use stokesforge_app::object_manager::VisibilityTarget as T;
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
     use stokesforge_commands::PlotEditKind as K;
     use stokesforge_plot::SeriesRef;
     let dir = tempfile::tempdir().unwrap();
@@ -9377,7 +9380,7 @@ fn object_manager_series_renommage_ordre_suppression_undo_redo() {
 /// sa catégorie.
 #[test]
 fn object_manager_placement_des_series_groupes_et_objets_annulable() {
-    use stokesforge_app::object_manager::VisibilityTarget as T;
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
     use stokesforge_commands::PlotEditKind as K;
     use stokesforge_plot::{
         AnnotationRef, AnnotationSpec, PanelSpec, PlotSpec, SeriesGroupRef, SeriesRef, SeriesSpec,
@@ -9500,7 +9503,7 @@ fn object_manager_placement_des_series_groupes_et_objets_annulable() {
 
 #[test]
 fn object_manager_proprietes_ouvrent_la_serie_du_bon_calque_et_annulent() {
-    use stokesforge_app::object_manager::VisibilityTarget as T;
+    use stokesforge_app_state::object_manager::VisibilityTarget as T;
     use stokesforge_plot::SeriesRef;
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
@@ -9531,7 +9534,9 @@ fn object_manager_proprietes_ouvrent_la_serie_du_bon_calque_et_annulent() {
 
 #[test]
 fn object_manager_reglages_persistants_et_reset_restent_hors_historique() {
-    use stokesforge_app::preferences::{ObjectManagerGroup, ObjectManagerSettings, Preferences};
+    use stokesforge_app_state::preferences::{
+        ObjectManagerGroup, ObjectManagerSettings, Preferences,
+    };
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("preferences.json");
     let (project, graph, before) = object_manager_project();
@@ -9583,7 +9588,7 @@ fn object_manager_reglages_persistants_et_reset_restent_hors_historique() {
 
 #[test]
 fn object_manager_reglage_reste_actif_si_le_stockage_echoue() {
-    use stokesforge_app::preferences::{ObjectManagerGroup, Preferences};
+    use stokesforge_app_state::preferences::{ObjectManagerGroup, Preferences};
     let dir = tempfile::tempdir().unwrap();
     // Un dossier à la place du fichier provoque une erreur portable,
     // sans dépendre des permissions ou de l'identité de l'utilisateur CI.
@@ -9608,7 +9613,9 @@ fn object_manager_reglage_reste_actif_si_le_stockage_echoue() {
 
 #[test]
 fn object_manager_textes_lies_jamais_listes_sans_revelation() {
-    use stokesforge_app::object_manager::{object_tree_with_selection, VisibilityTarget as T};
+    use stokesforge_app_state::object_manager::{
+        object_tree_with_selection, VisibilityTarget as T,
+    };
     use stokesforge_plot::{AnnotationRef, ShapeRef, TextTarget};
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
@@ -9661,7 +9668,9 @@ fn object_manager_textes_lies_jamais_listes_sans_revelation() {
 
 #[test]
 fn object_manager_show_objects_liste_ou_cache_les_objets_libres() {
-    use stokesforge_app::object_manager::{object_tree_with_selection, VisibilityTarget as T};
+    use stokesforge_app_state::object_manager::{
+        object_tree_with_selection, VisibilityTarget as T,
+    };
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
     let (_session, mut state) = start(project, &dir.path().join("objets.stf"));
@@ -9686,14 +9695,14 @@ fn object_manager_show_objects_liste_ou_cache_les_objets_libres() {
 
 #[test]
 fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
-    use stokesforge_app::object_manager::{
+    use stokesforge_app_state::object_manager::{
         object_tree_with_selection, AxisRef, ObjectKind, VisibilityTarget as T,
     };
     use stokesforge_plot::AxisSide;
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
     let (_session, mut state) = start(project, &dir.path().join("cache.stf"));
-    let axes = |tree: &stokesforge_app::object_manager::ObjectTree| -> Vec<T> {
+    let axes = |tree: &stokesforge_app_state::object_manager::ObjectTree| -> Vec<T> {
         tree.layers[0]
             .axes
             .iter()
@@ -9766,7 +9775,9 @@ fn object_manager_echelles_cachees_par_defaut_une_case_par_axe() {
 
 #[test]
 fn object_manager_arbre_objets_libres_visibilite_et_fichier() {
-    use stokesforge_app::object_manager::{object_tree_with_selection, VisibilityTarget as T};
+    use stokesforge_app_state::object_manager::{
+        object_tree_with_selection, VisibilityTarget as T,
+    };
     use stokesforge_plot::{AnnotationRef, AxisSide, ShapeRef, TextTarget};
     let dir = tempfile::tempdir().unwrap();
     let (project, graph, before) = object_manager_project();
@@ -10012,7 +10023,7 @@ fn copier_la_figure_prepare_svg_png_pdf_sans_toucher_au_modele() {
     assert!(!status.is_error(), "{}", status.text);
     assert_eq!(
         status.text,
-        stokesforge_app::tr!("status-graph-copied", formats = "SVG, PNG, PDF")
+        stokesforge_app_state::tr!("status-graph-copied", formats = "SVG, PNG, PDF")
     );
     let reps = state.take_figure_clipboard().expect("la figure est prête");
     assert!(matches!(
@@ -10052,7 +10063,7 @@ fn copier_la_figure_prepare_svg_png_pdf_sans_toucher_au_modele() {
 /// ceux qui le sont.
 #[test]
 fn copier_la_figure_suit_l_ordre_et_le_choix_des_preferences() {
-    use stokesforge_app::preferences::{CopyFormat, CopyFormatEntry};
+    use stokesforge_app_state::preferences::{CopyFormat, CopyFormatEntry};
     use stokesforge_render_svg::ExportFormat;
     let dir = tempfile::tempdir().expect("dossier temporaire");
     let (_session, mut state, graph) = demo_with_graph(dir.path());
@@ -10077,7 +10088,7 @@ fn copier_la_figure_suit_l_ordre_et_le_choix_des_preferences() {
     assert!(!status.is_error(), "{}", status.text);
     assert_eq!(
         status.text,
-        stokesforge_app::tr!("status-graph-copied", formats = "PDF, PNG")
+        stokesforge_app_state::tr!("status-graph-copied", formats = "PDF, PNG")
     );
     let reps = state.take_figure_clipboard().expect("la figure est prête");
     assert!(matches!(
@@ -10515,7 +10526,7 @@ fn changing_type_and_role_of_several_columns_is_one_undo_step() {
 /// hors historique et hors projet, et se relit à la session suivante.
 #[test]
 fn la_geometrie_d_un_dialogue_ferme_va_dans_les_preferences() {
-    use stokesforge_app::preferences::{DialogGeometry, Preferences};
+    use stokesforge_app_state::preferences::{DialogGeometry, Preferences};
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("preferences.json");
     let session = Session::spawn(Project::new("Vide").unwrap(), None).unwrap();
@@ -10565,7 +10576,7 @@ fn une_erreur_va_dans_le_pied_du_dialogue_ouvert_seulement() {
 
     // Témoin : sans dialogue, une erreur (préférences impossibles à écrire :
     // un dossier à la place du fichier) va dans la barre d'état.
-    use stokesforge_app::preferences::Preferences;
+    use stokesforge_app_state::preferences::Preferences;
     let session = Session::spawn(Project::new("Vide").unwrap(), None).unwrap();
     let mut state = AppState::new_with_preferences(
         session.handle(),

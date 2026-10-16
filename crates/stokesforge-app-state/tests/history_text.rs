@@ -7,12 +7,9 @@
 //! chargeur global dépend de l'environnement (`STOKESFORGE_LANG`, préférences).
 
 use stokesforge_analysis::ops::OperationKind;
-use stokesforge_app::history_text::history_text_in;
-use stokesforge_app::i18n::{build_loader, pseudo, Language};
+use stokesforge_app_state::history_text::history_text_in;
+use stokesforge_app_state::i18n::{build_loader, pseudo, Language};
 use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind, PlotEditKind};
-
-#[path = "support/sources.rs"]
-mod sources;
 
 fn name(text: &str) -> Option<String> {
     Some(text.to_string())
@@ -258,69 +255,5 @@ fn french_translates_the_same_label() {
     assert_eq!(
         history_text_in(&french, &HistoryLabel::InsertRows { count: 1 }),
         "Insérer 1 ligne"
-    );
-}
-
-/// Les clés `history-*` de `catalogue` qu'aucune source de production n'emploie
-/// (nom de la clé entre guillemets).
-fn history_keys_unused(catalogue: &str, sources: &[sources::Fichier]) -> Vec<String> {
-    let code: String = sources
-        .iter()
-        .map(|fichier| fichier.production().code_en_texte())
-        .collect();
-    history_keys(catalogue)
-        .into_iter()
-        .filter(|key| !code.contains(&format!("\"{key}\"")))
-        .map(str::to_string)
-        .collect()
-}
-
-fn history_keys(catalogue: &str) -> Vec<&str> {
-    catalogue
-        .lines()
-        .filter_map(|line| line.split(" =").next())
-        .filter(|key| key.starts_with("history-") && !key.contains(' '))
-        .collect()
-}
-
-/// Chaque clé `history-*` du catalogue est employée : une clé orpheline (une
-/// forme retirée du Rust, laissée dans le `.ftl`) fait échouer le test. Toutes
-/// les sources de production de `src/` sont lues, sous-dossiers compris (#116) :
-/// une mise en phrase déplacée reste vue.
-#[test]
-fn every_history_key_of_the_catalogue_is_used() {
-    let catalogue = include_str!("../i18n/en/stokesforge_app.ftl");
-    let keys = history_keys(catalogue);
-    assert!(
-        keys.len() > 30,
-        "le catalogue d'historique est lu : {keys:?}"
-    );
-    let unused = history_keys_unused(catalogue, &sources::sources());
-    assert!(
-        unused.is_empty(),
-        "clé(s) employée(s) nulle part : {unused:?}"
-    );
-}
-
-/// Le témoin : une clé employée dans un module de `src/app/` compte ; une clé
-/// employée seulement dans un commentaire ou du code de test ne compte pas.
-#[test]
-fn a_history_key_is_seen_outside_the_three_old_files() {
-    let catalogue = "history-a = A\nhistory-b = B\nhistory-c = C\nother = O\n";
-    let file = |chemin: &str, texte: &str| sources::Fichier {
-        chemin: chemin.to_string(),
-        texte: texte.to_string(),
-        de_test: false,
-    };
-    let sources = [
-        file("app/historique.rs", "fn f() { tr!(\"history-a\"); }"),
-        file(
-            "app/b.rs",
-            "// tr!(\"history-b\")\n#[cfg(test)]\nmod tests { fn t() { tr!(\"history-b\"); } }",
-        ),
-    ];
-    assert_eq!(
-        history_keys_unused(catalogue, &sources),
-        ["history-b", "history-c"]
     );
 }

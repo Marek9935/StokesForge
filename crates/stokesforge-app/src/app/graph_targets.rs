@@ -18,10 +18,10 @@ use stokesforge_core::{NodeId, Tree};
 
 use super::graph_window::published_active_panel;
 use super::tab::{tab_title_from_tree, Tab};
-use crate::state::{
+use stokesforge_app_state::state::{
     drop_payload_action, drop_rows_action, Action, ColumnDragPayload, RowDragPayload,
 };
-use crate::tr;
+use stokesforge_app_state::tr;
 
 /// Les graphiques ouverts, dans l'ordre : attachés puis détachés.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

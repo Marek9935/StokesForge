@@ -1,7 +1,7 @@
 //! La glu `eframe` : l'**orchestration** d'une image. [`StokesForgeApp`]
 //! porte l'état de présentation (fenêtres flottantes et détachées, vues de
 //! graphe, sélection du Project Manager) autour de l'[`AppState`], seul
-//! dépositaire de la logique : tout ce qui décide est dans [`crate::state`],
+//! dépositaire de la logique : tout ce qui décide est dans [`stokesforge_app_state::state`],
 //! qui se teste sans fenêtre. Ce module ne garde que ce qu'un déplacement
 //! casserait (#115, #122) ; chaque surface vit dans son module de `src/app/`,
 //! avec sa doc de tête.
@@ -124,9 +124,9 @@
 //! `ScriptEngine::run` **bloque** jusqu'au terme du script ; l'appeler depuis
 //! cette boucle de rendu figerait la fenêtre entière, bouton « Arrêter »
 //! compris — le défaut le plus visible que cette console puisse avoir. La
-//! parade n'est **pas** ici : elle vit dans [`crate::state::AppState::
+//! parade n'est **pas** ici : elle vit dans [`stokesforge_app_state::state::AppState::
 //! dispatch`], qui traite `RunScript` en lançant le travail sur un fil
-//! détaché et en revenant aussitôt (voir la doc de tête de `crate::state`).
+//! détaché et en revenant aussitôt (voir la doc de tête de `stokesforge_app_state::state`).
 //! Ce module n'a donc que deux choses à faire, chaque image : appeler
 //! [`AppState::poll_script`] pour récupérer un résultat prêt, et demander un
 //! nouveau rendu ([`egui::Context::request_repaint`]) tant qu'un script
@@ -189,7 +189,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::file_picker::{FilePicker, PickRequest};
 use analysis_dialog::{analysis_replace_window, analysis_window, calculation_delete_window};
 use file_drop::{
     begin_file_drop, finish_file_drop, open_project_in_new_window, remember_recent_imports,
@@ -212,6 +211,7 @@ use shortcuts::{
 };
 use stale_export::stale_export_window;
 use status_history::status_history_window;
+use stokesforge_app_state::file_picker::{FilePicker, PickRequest};
 use tab::{active_tab_kind, tab_for_window, tab_node, Tab};
 use window_detach::{
     snapshot_stamp, DetachedProjectManagerRequests, DetachedTab, ProjectManagerViewModel,
@@ -225,12 +225,14 @@ use stokesforge_render_egui::GraphView;
 use stokesforge_session::WindowGeometry;
 
 use crate::color_picker::publish_saved_colors;
-use crate::errors;
-use crate::i18n;
-use crate::preferences::Preferences;
-use crate::state::{active_graph, Action, AppState, ImportDestination, UnsavedChoice};
 use crate::toolbar::{BarEnv, ToolbarLayout, ToolbarState};
-use crate::tr;
+use stokesforge_app_state::errors;
+use stokesforge_app_state::i18n;
+use stokesforge_app_state::preferences::Preferences;
+use stokesforge_app_state::state::{
+    active_graph, Action, AppState, ImportDestination, UnsavedChoice,
+};
+use stokesforge_app_state::tr;
 
 /// Variable d'environnement du mécanisme d'auto-fermeture (voir
 /// [`StokesForgeApp::new`]).
@@ -972,7 +974,7 @@ impl StokesForgeApp {
         // Sonde un script terminé sur son fil détaché **avant** de peindre :
         // sans notification poussée de l'acteur, c'est le seul endroit qui
         // rafraîchit l'instantané après un script (voir la doc de tête de
-        // `crate::state`). Ne bloque jamais, même sans script en cours.
+        // `stokesforge_app_state::state`). Ne bloque jamais, même sans script en cours.
         self.state.poll_script();
         // Le travail continue aussi quand sa console est masquée ou repliée.
         if self.state.script_running() {
@@ -1374,7 +1376,7 @@ impl StokesForgeApp {
                 | Action::ReorderObject { .. }
                 | Action::UngroupSeries { .. }
                 | Action::RemovePlotObject {
-                    target: crate::object_manager::VisibilityTarget::SeriesGroup(_),
+                    target: stokesforge_app_state::object_manager::VisibilityTarget::SeriesGroup(_),
                     ..
                 }
         ) {
@@ -1403,11 +1405,11 @@ impl StokesForgeApp {
             Action::RemovePlotObject { graph, target } => Some((*graph, *target)),
             Action::RemoveAnnotation { graph, target } => Some((
                 *graph,
-                crate::object_manager::VisibilityTarget::Annotation(*target),
+                stokesforge_app_state::object_manager::VisibilityTarget::Annotation(*target),
             )),
             Action::RemoveShape { graph, target } => Some((
                 *graph,
-                crate::object_manager::VisibilityTarget::Shape(*target),
+                stokesforge_app_state::object_manager::VisibilityTarget::Shape(*target),
             )),
             _ => None,
         };
@@ -1468,7 +1470,7 @@ impl StokesForgeApp {
                 if let Some(next) =
                     stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)
                 {
-                    let target = crate::object_manager::selection_after_history(
+                    let target = stokesforge_app_state::object_manager::selection_after_history(
                         &previous,
                         &next,
                         Some(target),
@@ -1523,11 +1525,11 @@ impl StokesForgeApp {
     fn update_selection_after_action(
         &mut self,
         graph: NodeId,
-        removed: crate::object_manager::VisibilityTarget,
+        removed: stokesforge_app_state::object_manager::VisibilityTarget,
     ) {
         if let Some(spec) = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph) {
             self.with_graph_view(graph, |view| {
-                let next = crate::object_manager::selection_after_remove(
+                let next = stokesforge_app_state::object_manager::selection_after_remove(
                     selected_manager_target(view),
                     removed,
                 );
@@ -1573,7 +1575,9 @@ impl StokesForgeApp {
             memory.data.remove_by_type::<AnnotationEditor>();
             memory
                 .data
-                .remove::<Option<crate::text_format::TextFormat>>(pending_format_id());
+                .remove::<Option<stokesforge_app_state::text_format::TextFormat>>(
+                    pending_format_id(),
+                );
             memory.data.remove::<Option<String>>(pending_zone_font_id());
             memory.data.remove_by_type::<egui::scroll_area::State>();
             if let Some(focused) = memory.focused() {
@@ -1604,8 +1608,8 @@ mod tests {
     use super::graph_window::tests::graphe;
     use super::grid::{header_rows, set_header_rows, HeaderRows};
     use super::*;
-    use crate::state::RowAxis;
     use crate::theme;
+    use stokesforge_app_state::state::RowAxis;
     use stokesforge_core::{Column, Project};
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
     use stokesforge_session::Session;
@@ -1620,7 +1624,7 @@ mod tests {
         let state = AppState::new(session.handle(), String::new()).unwrap();
         let book = window_stack::window_nodes(&state.project_tree())
             .into_iter()
-            .find(|(_, kind)| *kind == crate::state::WindowKind::Book)
+            .find(|(_, kind)| *kind == stokesforge_app_state::state::WindowKind::Book)
             .map(|(id, _)| Tab::Book(id))
             .unwrap();
         let tab = Tab::Graph(graph);
@@ -1716,7 +1720,7 @@ mod tests {
         let state = AppState::new(session.handle(), String::new()).unwrap();
         let book = window_stack::window_nodes(&state.project_tree())
             .into_iter()
-            .find(|(_, kind)| *kind == crate::state::WindowKind::Book)
+            .find(|(_, kind)| *kind == stokesforge_app_state::state::WindowKind::Book)
             .map(|(id, _)| Tab::Book(id))
             .unwrap();
         let tab = Tab::Graph(graph);
@@ -2135,7 +2139,7 @@ mod tests {
         let group = stokesforge_plot::SeriesGroupRef::new(0, 1);
         let remove = |graph| Action::RemovePlotObject {
             graph,
-            target: crate::object_manager::VisibilityTarget::SeriesGroup(group),
+            target: stokesforge_app_state::object_manager::VisibilityTarget::SeriesGroup(group),
         };
         for (selected, expected) in [(3, Some("D")), (0, Some("A")), (1, None)] {
             let (session, graph) = graphe_a_groupe();
@@ -2257,7 +2261,7 @@ mod tests {
         assert!(!commandes.contains(&egui::ViewportCommand::Close));
         assert_eq!(
             app.state.unsaved_pending(),
-            Some(&crate::state::UnsavedGesture::Quit)
+            Some(&stokesforge_app_state::state::UnsavedGesture::Quit)
         );
         app.dispatch_actions(
             &context,
@@ -2407,7 +2411,7 @@ mod tests {
             .centre;
         assert_eq!(
             app.state.unsaved_pending(),
-            Some(&crate::state::UnsavedGesture::NewProject)
+            Some(&stokesforge_app_state::state::UnsavedGesture::NewProject)
         );
         assert!(app.state.tree().node(graph).is_some());
         // Témoins : sans eux, les assertions de vide plus bas passeraient

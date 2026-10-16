@@ -5131,6 +5131,31 @@ dependencies = [
  "eframe",
  "egui_extras",
  "egui_kittest",
+ "i18n-embed-fl",
+ "serde",
+ "serde_json",
+ "stokesforge-analysis",
+ "stokesforge-app-state",
+ "stokesforge-clipboard",
+ "stokesforge-commands",
+ "stokesforge-core",
+ "stokesforge-import",
+ "stokesforge-plot",
+ "stokesforge-python",
+ "stokesforge-render",
+ "stokesforge-render-egui",
+ "stokesforge-render-svg",
+ "stokesforge-session",
+ "tempfile",
+ "url",
+ "winit",
+]
+
+[[package]]
+name = "stokesforge-app-state"
+version = "0.0.0"
+dependencies = [
+ "directories",
  "fluent-syntax",
  "i18n-embed",
  "i18n-embed-fl",
@@ -5139,7 +5164,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stokesforge-analysis",
- "stokesforge-clipboard",
+ "stokesforge-arch-guard",
  "stokesforge-commands",
  "stokesforge-core",
  "stokesforge-import",
@@ -5148,13 +5173,10 @@ dependencies = [
  "stokesforge-plot",
  "stokesforge-python",
  "stokesforge-render",
- "stokesforge-render-egui",
  "stokesforge-render-svg",
  "stokesforge-script",
  "stokesforge-session",
  "tempfile",
- "url",
- "winit",
 ]
 
 [[package]]
@@ -5343,7 +5365,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "stokesforge-analysis",
- "stokesforge-app",
+ "stokesforge-app-state",
  "stokesforge-commands",
  "stokesforge-core",
  "stokesforge-persistence",

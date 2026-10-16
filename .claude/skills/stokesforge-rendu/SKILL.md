@@ -27,7 +27,7 @@ formules : tout est dans `stokesforge-render`.
 
 `RenderError` (nœud inconnu, pas un graphe, échec de Plotters) vit dans
 `stokesforge-render` (#255) ; `stokesforge-render-egui` la réexporte. Ne pas la
-redéfinir côté backend : `errors.rs` de l'app, module « sans egui », la lit
+redéfinir côté backend : `errors.rs` de `stokesforge-app-state` (crate sans egui), la lit
 sans passer par `stokesforge-render-egui`.
 
 ## Piège 1 — la mesure de texte (invariant 4)

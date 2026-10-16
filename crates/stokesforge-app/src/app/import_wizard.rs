@@ -12,14 +12,16 @@
 use eframe::egui;
 use stokesforge_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 
-use crate::errors;
-use crate::file_picker::PickRequest;
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::number_field::number_field;
-use crate::quantities;
-use crate::state::{Action, AppState, ImportDestination, ImportLineAction, ImportStep};
 use crate::theme::{section_title, FIELD_WIDTH_MEDIUM, FIELD_WIDTH_SHORT};
-use crate::tr;
+use stokesforge_app_state::errors;
+use stokesforge_app_state::file_picker::PickRequest;
+use stokesforge_app_state::quantities;
+use stokesforge_app_state::state::{
+    Action, AppState, ImportDestination, ImportLineAction, ImportStep,
+};
+use stokesforge_app_state::tr;
 
 use super::dialogs::{
     modal_confirm, modal_wizard, ConfirmOutcome, DialogFooter, DialogOutcome, FOOTER_BUTTON_SIZE,
@@ -1488,8 +1490,10 @@ mod tests {
         encoding_label, import_line_preview_widget, import_window, line_role_color,
         recipe_combo_text, separator_label, thousands_label,
     };
-    use crate::state::{Action, AppState, ImportDestination, ImportLineAction, ImportStep};
-    use crate::tr;
+    use stokesforge_app_state::state::{
+        Action, AppState, ImportDestination, ImportLineAction, ImportStep,
+    };
+    use stokesforge_app_state::tr;
 
     use super::super::test_support::{
         cliquer, contexte, distincts, image, texte_exact, textes, touche, Texte,

@@ -19,12 +19,12 @@ use crate::color_picker::{ColorUsage, PickerEnv, SavedColorEdit};
 use crate::field_state::{self, FieldIssue};
 use crate::icons::ICON_SIZE;
 use crate::number_field::number_field;
-use crate::quantities;
-use crate::state::{
+use crate::theme::{bold, FieldWidth};
+use stokesforge_app_state::quantities;
+use stokesforge_app_state::state::{
     parse_x_prime, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
 };
-use crate::theme::{bold, FieldWidth};
-use crate::tr;
+use stokesforge_app_state::tr;
 
 use super::curve_settings::curve_settings_page;
 use super::dialogs::{modal_dialog, modal_read_only, DialogOutcome};
@@ -53,7 +53,7 @@ const CURVE_SETTINGS_HEIGHT: f32 = 500.0;
 /// graphe était actif.
 ///
 /// Édite le [`stokesforge_plot::PlotSpec`] au travers d'un brouillon transitoire
-/// ([`crate::state::PlotEdit`]), jamais directement.
+/// ([`stokesforge_app_state::state::PlotEdit`]), jamais directement.
 ///
 /// **Stratégie anti-inflation d'historique** : chaque widget met à jour le
 /// brouillon en direct (retour visuel immédiat), et `commit` — un simple
@@ -973,9 +973,11 @@ mod tests {
         symbol_shape_label, theme_editor,
     };
     use crate::color_picker::PickerEnv;
-    use crate::i18n::{self, pseudo, Language, LANGUAGE_VARIABLE};
-    use crate::state::{series_list_label, Action, AppState, PlotAxis, PlotSettingsTab};
-    use crate::tr;
+    use stokesforge_app_state::i18n::{self, pseudo, Language, LANGUAGE_VARIABLE};
+    use stokesforge_app_state::state::{
+        series_list_label, Action, AppState, PlotAxis, PlotSettingsTab,
+    };
+    use stokesforge_app_state::tr;
 
     use super::super::test_support::{
         cliquer, colonnes_xy, contexte, distincts, image, texte_exact, textes, touche, Texte,

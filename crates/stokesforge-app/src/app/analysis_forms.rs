@@ -19,15 +19,16 @@ use stokesforge_core::{NodeId, Tree};
 use super::analysis_dialog::{exact_result_label, format_value};
 use super::form::{choice, choice_by, ChoiceOption, Form};
 use super::hover_help::{help_beside, help_text};
-use crate::analysis::{
+use crate::icons::{icon_button, Icon, IconRole};
+use crate::number_field::{number_field, NumberResponse};
+use crate::theme;
+use crate::theme::FieldWidth;
+use stokesforge_app_state::analysis::{
     aux_candidates, aux_for, kind_title, reference_label, series_label, with_unit, AnalysisForm,
     BaselineShape, Category, DirectAlgorithm, Preset,
 };
-use crate::icons::{icon_button, Icon, IconRole};
-use crate::number_field::{number_field, NumberResponse};
-use crate::quantities;
-use crate::theme::FieldWidth;
-use crate::{theme, tr};
+use stokesforge_app_state::quantities;
+use stokesforge_app_state::tr;
 
 /// Un nombre réel modifiable, sans bornes mais **fini** (la brique refuse
 /// « inf » et « nan » : ils deviendraient `null` dans le fichier et feraient
@@ -612,7 +613,7 @@ fn x_extent_of(xs: &[f64]) -> Option<(f64, f64)> {
 
 fn x_extent(form: &AnalysisForm, tree: &Tree) -> Option<(f64, f64)> {
     let series = form.series.get(form.current)?;
-    x_extent_of(&crate::analysis::series_points(tree, series).0)
+    x_extent_of(&stokesforge_app_state::analysis::series_points(tree, series).0)
 }
 
 fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
@@ -621,7 +622,7 @@ fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &T
     let (shown_x, shown_y) = form
         .series
         .get(form.current)
-        .map(|s| crate::analysis::series_points(tree, s))
+        .map(|s| stokesforge_app_state::analysis::series_points(tree, s))
         .unwrap_or_default();
     let extent = x_extent_of(&shown_x);
     let f = &mut form.setup.fit;
@@ -642,7 +643,7 @@ fn fit_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &T
     }) {
         f.set_model(model);
     }
-    if let Some(source) = crate::analysis::model_formula_source(&f.model) {
+    if let Some(source) = stokesforge_app_state::analysis::model_formula_source(&f.model) {
         rows.field(|ui| {
             let color = ui.visuals().text_color();
             stokesforge_render_egui::formula_label(ui, source, 15.0, color);
@@ -1167,7 +1168,7 @@ mod tests {
 
     #[test]
     fn peindre_une_constante_ne_detruit_pas_les_reglages_des_autres_formes() {
-        use crate::analysis::{AnalysisForm, BaselineShape, Preset};
+        use stokesforge_app_state::analysis::{AnalysisForm, BaselineShape, Preset};
         let context = contexte();
         let mut form = AnalysisForm::new(&Preset::BaselineAnchors, vec![], false);
         let points = vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)];
@@ -1200,7 +1201,7 @@ mod tests {
     /// l'entrée.
     #[test]
     fn la_reference_vient_sous_le_type_d_analyse() {
-        use crate::analysis::{AnalysisForm, Preset};
+        use stokesforge_app_state::analysis::{AnalysisForm, Preset};
         use stokesforge_core::Project;
         let context = contexte();
         let project = Project::new("essai").unwrap();
@@ -1211,9 +1212,9 @@ mod tests {
         });
         let peints = textes(&formes);
         let y = |libelle: String| texte_exact(&peints, &libelle).centre.y;
-        let entree = y(crate::tr!("analysis-block-input"));
-        let type_ = y(crate::tr!("analysis-block-type"));
-        let reference = y(crate::tr!("analysis-field-reference"));
+        let entree = y(stokesforge_app_state::tr!("analysis-block-input"));
+        let type_ = y(stokesforge_app_state::tr!("analysis-block-type"));
+        let reference = y(stokesforge_app_state::tr!("analysis-field-reference"));
         assert!(entree < type_, "Input au-dessus d'Analysis type");
         assert!(type_ < reference, "Reference sous Analysis type");
     }

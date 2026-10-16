@@ -21,7 +21,7 @@
 //!
 //! [`HistoryLabel`] s'affiche en **anglais** : c'est le texte des journaux et
 //! du CLI, qui ne traduisent pas (chantier #39). Il double le catalogue `en`
-//! de l'application (clés `history-*`) ; `stokesforge-app/tests/shell.rs` vérifie
+//! de l'application (clés `history-*`) ; `stokesforge-app-state/tests/history_text.rs` vérifie
 //! que les deux disent la même chose, variante par variante.
 
 use std::fmt;

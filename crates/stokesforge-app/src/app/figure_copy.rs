@@ -37,8 +37,8 @@ use stokesforge_core::{NodeId, Tree};
 use stokesforge_render_egui::GraphView;
 use stokesforge_render_svg::ExportFormat;
 
-use crate::state::Action;
-use crate::tr;
+use stokesforge_app_state::state::Action;
+use stokesforge_app_state::tr;
 
 use super::grid::keyboard_focus_outside_grid;
 use super::object_manager_ui::selected_manager_target;
@@ -176,8 +176,8 @@ mod tests {
     use super::super::graph_window::{graph_view_contents, tests::graphe};
     use super::super::test_support::{cliquer, contexte, image, image_de};
     use super::*;
-    use crate::errors::tests_support::check;
-    use crate::state::AppState;
+    use stokesforge_app_state::errors::tests_support::check;
+    use stokesforge_app_state::state::AppState;
     use stokesforge_session::Session;
 
     /// Chaque format d'export offert a son type MIME, distinct des autres

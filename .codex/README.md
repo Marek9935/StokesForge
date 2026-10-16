@@ -97,8 +97,8 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 | Tracé, axes, légendes, export, Typst | `docs/rendu.md` | `stokesforge-render` d'abord, puis `stokesforge-render-egui` / `stokesforge-render-svg`, `stokesforge-core/src/resolve.rs` |
 | Menus et clics droits | `docs/menus.md` (grammaire), `docs/application.md` (§ Menus thématiques) | `stokesforge-app/src/app/menu_sections.rs`, `menus.rs`, `object_manager_ui.rs`, `project_manager.rs`, `grid.rs`, `graph_window.rs`, `tab_strip.rs` |
 | Comportement de l'interface (champs, messages, dialogues, grisage, clavier) | `docs/standard-interface.md` (#217, sections *en place* / *à venir*) | le module de la surface dans `src/app/`, `app/dialogs.rs`, `app/shortcuts.rs`, `theme.rs` |
-| Fenêtre, grille, raccourcis | `docs/application.md` (§ Découpage du code) | `stokesforge-app/src/state.rs`, le module de la surface dans `src/app/` (`app.rs` pour l'orchestration seule), `selection.rs`, `object_manager.rs`, `theme.rs` ; `stokesforge-session` |
-| Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app/src/state.rs` et `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
+| Fenêtre, grille, raccourcis | `docs/application.md` (§ Découpage du code) | `stokesforge-app-state/src/state.rs`, le module de la surface dans `src/app/` (`app.rs` pour l'orchestration seule), `selection.rs`, `object_manager.rs` (aussi dans `stokesforge-app-state/src/`), `stokesforge-app/src/theme.rs` ; `stokesforge-session` |
+| Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app-state/src/state.rs` et `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
 | Python embarqué et scripts `pyst` | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
 | Tests et robustesse | `docs/tests.md` | tests du crate ; index `stokesforge-robustesse/src/lib.rs`, puis batterie `bN` concernée |
 | Distribution | `crates/stokesforge-python/README.md`, `docs/application.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
@@ -139,7 +139,7 @@ l'ancienne implémentation reste accessible sous le tag `legacy-python`.
   `stokesforge-clipboard` (SVG, PNG, PDF offerts ensemble ; Wayland par le patch
   `vendor/smithay-clipboard`) et `app/figure_copy.rs`, jamais par `copy_text`.
 - Dans l'application, réutiliser `Action` / `AppState::dispatch` pour les
-  actions concernées. Garder la logique testable dans `state.rs` et la
+  actions concernées. Garder la logique testable dans `state.rs` (crate `stokesforge-app-state`, sans egui) et la
   traduction des événements et l'affichage dans le module de la surface
   (`src/app/`), `app.rs` ne gardant que l'orchestration de l'image.
 - L'import reste indépendant de l'UI, de `core`, des commandes et de la
@@ -205,7 +205,7 @@ Pour Python, examiner d'abord l'interpréteur dans
 `scripts/python-vendor.sh` télécharge les versions déclarées dans
 `vendor/python/lock.env`. Puis `scripts/python-test.sh` configure PyO3, le
 rpath et le préfixe embarqué, et teste `stokesforge-python`, `stokesforge-script`,
-`stokesforge-robustesse` (en série), `stokesforge-app` et `stokesforge-cli` avec `python`.
+`stokesforge-robustesse` (en série), `stokesforge-app-state`, `stokesforge-app` et `stokesforge-cli` avec `python`.
 Le travail CI `test-python` exécute ce script automatiquement et bloque en
 cas d'échec. Les reproductions `#[ignore]` exigent encore `-- --ignored`.
 Appliquer le même environnement aux vérifications Clippy avec

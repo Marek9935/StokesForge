@@ -1005,8 +1005,8 @@ impl Selection {
     /// qui ne vaut que pour un clic direct sur la rangée des lettres, ceci
     /// vaut aussi pour un simple rectangle de cellules de données dont
     /// `column` fait partie. Sert à teinter la rangée des lettres d'une
-    /// intensité intermédiaire ([`crate::theme::
-    /// header_letter_row_touched_fill`]) quand une cellule de sa colonne est
+    /// intensité intermédiaire (`stokesforge_app::theme::
+    /// header_letter_row_touched_fill`) quand une cellule de sa colonne est
     /// sélectionnée sans que la colonne elle-même le soit — le repère « ta
     /// colonne est concernée » d'un tableur.
     pub fn touches_column(&self, tree: &Tree, sheet: NodeId, column: NodeId) -> bool {

@@ -11,7 +11,7 @@ tenue par la relecture se perd.
 | # | Règle | Ce qui la tient |
 |---|---|---|
 | 1 | Aucune mutation du modèle hors d'une commande, pour les clients d'une session | la propriété : l'acteur détient le `&mut Project` de la session (la construction, les tests et le CLI passent par les primitives de `core`) ; `b21` |
-| 2 | Aucune dépendance UI sous `stokesforge-session` | `tests/no_ui_dependency.rs`, une liste blanche par crate |
+| 2 | Aucune dépendance UI sous `stokesforge-session`, ni dans l'état de l'application (`stokesforge-app-state`, #263) | `tests/no_ui_dependency.rs`, une liste blanche par crate |
 | 3 | `stokesforge-plot` ne connaît aucun moteur de rendu | sa seule dépendance est `stokesforge-id` |
 | 4 | Une seule source de mesure de texte | `stokesforge-render/tests/mesure.rs` + le test d'accord |
 | 5 | Une fonctionnalité de tracé n'entre pas dans un seul backend | `stokesforge-render` est générique sur `DrawingBackend` |
@@ -50,7 +50,12 @@ explicitement : la décision devient consciente au lieu de se glisser par un
 `use`.
 
 Crates gardés ainsi : `stokesforge-core`, `stokesforge-plot`, `stokesforge-commands`,
-`stokesforge-persistence`, `stokesforge-session`, `stokesforge-script`, `stokesforge-import`. La
+`stokesforge-persistence`, `stokesforge-session`, `stokesforge-script`, `stokesforge-import`,
+`stokesforge-importer`, `stokesforge-clipboard`, `stokesforge-analysis` et
+`stokesforge-app-state` (#263 : l'état de l'application, ses textes et ses erreurs
+mises en phrase ; ni `egui`, ni `eframe`, ni `winit`, ni `stokesforge-clipboard`
+qui le tire — la liste blanche les refuse, et le compilateur remplace la garde
+de texte de #255). La
 lecture du manifeste est **commune** (`stokesforge-arch-guard`) : dépendances
 normales, de build, conditionnelles (`[target.…]`), optionnelles et renommées
 (`package = …`, jugées sur leur nom réel) ; les `dev-dependencies` sont hors
@@ -223,7 +228,7 @@ et jamais une série silencieusement vide. Renommer ou déplacer une colonne
 référencée ne casse d'ailleurs rien du tout — une référence est un `NodeId`,
 pas un nom.
 
-Corollaire côté UI : `AppState::dispatch` ne rend **jamais** d'erreur ; toute
+Corollaire côté UI : `AppState::dispatch` (`stokesforge-app-state`) ne rend **jamais** d'erreur ; toute
 erreur devient un message de statut affiché.
 
 ## 11. Un recalcul ciblé rend exactement le recalcul complet

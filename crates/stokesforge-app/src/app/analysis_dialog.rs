@@ -19,10 +19,13 @@ use super::dialogs::{
     modal_confirm, modal_dialog_with, ConfirmOutcome, DialogFooter, DialogOutcome,
 };
 use super::form::{choice, ChoiceOption};
-use crate::analysis::{issue_message, kind_title, value_label, value_unit, Category, PreviewTool};
 use crate::icons::{icon_button, Icon, IconRole};
-use crate::state::{Action, AppState, CalculationDelete};
-use crate::{theme, tr};
+use crate::theme;
+use stokesforge_app_state::analysis::{
+    issue_message, kind_title, value_label, value_unit, Category, PreviewTool,
+};
+use stokesforge_app_state::state::{Action, AppState, CalculationDelete};
+use stokesforge_app_state::tr;
 
 /// Largeur de la colonne des réglages.
 const FORM_WIDTH: f32 = 330.0;
@@ -374,8 +377,8 @@ pub(super) fn analysis_replace_window(
 mod tests {
     use super::super::test_support::{cliquer, contexte, image_de, painted, texte_exact, textes};
     use super::*;
-    use crate::analysis::Preset;
     use stokesforge_analysis::model::Model;
+    use stokesforge_app_state::analysis::Preset;
     use stokesforge_core::{Column, ColumnMeta, ColumnRole, NodeId, Project};
     use stokesforge_session::Session;
 

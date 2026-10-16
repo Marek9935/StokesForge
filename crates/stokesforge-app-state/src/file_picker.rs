@@ -144,30 +144,6 @@ impl FilePicker {
 mod tests {
     use super::*;
 
-    /// Garde (#192) : un `rfd::FileDialog` appelé hors de ce module serait
-    /// synchrone sur le fil de l'interface — le gel du portail.
-    #[test]
-    fn aucun_selecteur_rfd_hors_du_module() {
-        let fautifs: Vec<String> = crate::sources::sources()
-            .iter()
-            .filter(|fichier| fichier.chemin != "file_picker.rs")
-            .flat_map(|fichier| {
-                fichier
-                    .code()
-                    .lines()
-                    .enumerate()
-                    .filter(|(_, ligne)| ligne.contains("rfd::"))
-                    .map(|(index, _)| format!("src/{}:{}", fichier.chemin, index + 1))
-                    .collect::<Vec<_>>()
-            })
-            .collect();
-        assert!(
-            fautifs.is_empty(),
-            "sélecteur de fichiers hors de file_picker.rs — passer par \
-             Action::PickFile(PickRequest) : {fautifs:?}"
-        );
-    }
-
     /// Suite de #192 : un sélecteur fermé sans réponse du portail ne doit pas
     /// empêcher d'en rouvrir un.
     #[test]

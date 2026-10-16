@@ -29,8 +29,8 @@ rg -n 'FAILED|panicked|^error|^warning|test result' "$tmp/test.log" | head -40
 Un `| tail` ou un `| head` direct, sans fichier, perd le détail d'un échec.
 
 **Les travaux `fmt`, `clippy` et `test` n'activent pas `python`.** Le travail
-`test-python` est automatique et bloquant ; il teste les cinq crates du chemin
-Python. Clippy Python exige encore l'environnement embarqué explicitement.
+`test-python` est automatique et bloquant ; il teste les six crates du chemin
+Python (dont `stokesforge-app-state`, depuis #263). Clippy Python exige encore l'environnement embarqué explicitement.
 `fmt` vérifie la mise en forme, pas la compilation de ce chemin. Typst, lui,
 n'est plus une feature (issue #29) : `cargo test --workspace` le couvre.
 `--all-features` n'active plus que Python et exige son environnement. Les commandes et
@@ -43,7 +43,7 @@ tester explicitement**, sinon elle valide du code mort.
 | Le changement touche… | Lancer en plus |
 |---|---|
 | `stokesforge-python`, `stokesforge-script`, la surface `pyst` | `scripts/python-test.sh` (pose `PYO3_CONFIG_FILE`) |
-| l'intégration Python de `stokesforge-app` ou le CLI `run` | `scripts/python-test.sh` couvre ces crates ; appliquer son environnement à Clippy ; `scripts/cli-dist.sh` si l'empaquetage CLI change |
+| l'intégration Python de `stokesforge-app-state`/`stokesforge-app` ou le CLI `run` | `scripts/python-test.sh` couvre ces crates ; appliquer son environnement à Clippy ; `scripts/cli-dist.sh` si l'empaquetage CLI change |
 | les formules Typst, `stokesforge-render::formula` | rien de plus : `cargo test --workspace` les couvre (dépendance ferme), export SVG/PDF/PNG compris (#34) ; le texte Typst d'un SVG reste du texte `<text>` par défaut (#162, `stokesforge-render-svg/tests/typst.rs`) |
 | une reproduction `#[ignore]` de robustesse | `cargo test -p stokesforge-robustesse -- --ignored` |
 | le recalcul des formules (`stokesforge-session/src/recalc.rs`), une donnée lue par une formule, une écriture de colonne | `b22` et `recalc_cible.rs` passent dans `cargo test --workspace`, mais un oracle vert ne prouve rien si le tirage ne produit pas le geste : suivre `docs/tests.md`, « Recalcul ciblé » (pas ajouté au tirage, cas nommé avec témoin, mutation de la composante) |
@@ -59,7 +59,7 @@ tester explicitement**, sinon elle valide du code mort.
 | intégration | `crates/*/tests/` | une propriété de crate : contrat public, frontière, accord entre chemins |
 | robustesse | `stokesforge-robustesse/tests/b1`…`b22` | le socle aux limites (index dans son `src/lib.rs`) |
 
-Logique d'interface : `stokesforge-app/tests/shell.rs`, sans fenêtre. Si une
+Logique d'interface : `stokesforge-app-state/tests/shell.rs`, sans fenêtre (et sans egui à compiler : `cargo test -p stokesforge-app-state`). Si une
 décision doit vivre près de l'UI, l'extraire en **fonction pure** puis la
 tester — c'est l'idiome du dépôt (`app::grid::column_grip_bands`,
 `state::active_graph`, `state::drop_payload_action`). Un geste **peint** (clic,
@@ -90,17 +90,18 @@ Ils ne vérifient pas un comportement mais une propriété de frontière. S'ils
 
 | Test | Ce qu'il tient |
 |---|---|
-| `*/tests/no_ui_dependency.rs` | liste blanche des dépendances du crate, lues par `stokesforge-arch-guard` (#24) : `[dependencies]`, `[build-dependencies]`, variantes conditionnelles `[target.…]`, optionnelles, nom réel des renommées ; `[dev-dependencies]` exclues (invariant 2). Un crate sans ce fichier n'est pas gardé |
+| `*/tests/no_ui_dependency.rs` (onze crates, dont `stokesforge-app-state` depuis #263 : l'état de l'application n'a ni `egui`, ni `eframe`, ni `winit`, ni `stokesforge-clipboard`) | liste blanche des dépendances du crate, lues par `stokesforge-arch-guard` (#24) : `[dependencies]`, `[build-dependencies]`, variantes conditionnelles `[target.…]`, optionnelles, nom réel des renommées ; `[dev-dependencies]` exclues (invariant 2). Un crate sans ce fichier n'est pas gardé |
 | `stokesforge-render-svg/tests/frontiere.rs` | l'export se teste sans serveur graphique |
 | `stokesforge-render/tests/mesure.rs` | la source unique de mesure de texte (invariant 4) |
 | `stokesforge-render-egui/tests/accord.rs` | écran et export aux mêmes pixels |
 | `stokesforge-render-egui/tests/feathering.rs` | le feathering hors de la clé de cache (invariant 6) |
-| `stokesforge-app/tests/script_bridge_lazy.rs` | l'interpréteur Python ne démarre pas à l'ouverture de la fenêtre |
-| `stokesforge-app/tests/libelles.rs` | `aucun_libelle_en_dur` : aucun texte d'interface en dur. Absolue, sans dérogation ; `aucune_cle_du_catalogue_n_est_morte` (`src/i18n.rs`) : une clé de `en` sans emploi échoue |
-| `stokesforge-app/tests/gardes.rs` | aucune `egui::Window` brute ; la fenêtre des propriétés passe par la brique commune ; aucun `use …::*` hors du code de test (`aucun_import_global_hors_des_tests`, absolue) ; aucun séparateur brut dans un menu ; aspect commun #169 : bouton sélectionnable seulement dans un menu, une liste déroulante ou le sélecteur de couleur, aucune couleur en dur hors de `theme.rs` / `color_picker.rs`, aucun filet juste avant un titre de section ; aucun `add_space` littéral hors de `theme.rs` (#227) ; les modules d'état de la liste fermée `MODULES_SANS_EGUI` ne nomment ni `egui`, ni `eframe`, ni `stokesforge_render_egui` (#255) : un module sans egui nouveau s'y ajoute |
+| `stokesforge-app-state/tests/script_bridge_lazy.rs` | l'interpréteur Python ne démarre pas à l'ouverture de la fenêtre |
+| `stokesforge-app/tests/libelles.rs` | `aucun_libelle_en_dur` : aucun texte d'interface en dur. Absolue, sans dérogation ; `aucune_cle_du_catalogue_n_est_morte` : une clé de `en` sans emploi dans les sources des **deux** crates échoue |
+| `stokesforge-app/tests/gardes.rs` | aucune `egui::Window` brute ; la fenêtre des propriétés passe par la brique commune ; aucun `use …::*` hors du code de test (`aucun_import_global_hors_des_tests`, absolue) ; aucun séparateur brut dans un menu ; aspect commun #169 : bouton sélectionnable seulement dans un menu, une liste déroulante ou le sélecteur de couleur, aucune couleur en dur hors de `theme.rs` / `color_picker.rs`, aucun filet juste avant un titre de section ; aucun `add_space` littéral hors de `theme.rs` (#227) ; un `rfd::` seulement dans `file_picker.rs` (`aucun_selecteur_rfd_hors_du_module`) ; aucun test d'intégration n'appelle `AppState::new`. L'ancienne garde « les modules d'état ne nomment pas egui » (#255) est retirée : le compilateur la remplace (#263), un module sans egui nouveau va simplement dans `stokesforge-app-state` |
 | `stokesforge-app/src/theme.rs` (tests) | aucun `ScrollStyle` hors du thème ; aucun `strong()` d'egui, tout gras par `theme::bold` |
-| `stokesforge-app/tests/support/sources.rs` | pas un test : le lecteur **unique** des gardes qui lisent le code (récursif sur `src/`, vue de production, recherche de fonction par nom, #116). Une garde nouvelle qui lit le code passe par lui — jamais `include_str!("app.rs")` ni un fichier nommé — et pose son témoin dans un autre fichier qu'`app.rs` |
-| `stokesforge-app/src/i18n.rs` (tests) | complétude `fr ⊆ en` avec les mêmes arguments, pseudo-langue `en-XA`, pluriels et typographie françaises ; **bloquant** : une clé ajoutée à `en` s'ajoute à `fr` dans le même commit |
+| `stokesforge-app/tests/support/sources.rs` | pas un test : le lecteur **unique** des gardes qui lisent le code (récursif sur `src/` des deux crates, `stokesforge-app-state` sous le préfixe `app-state/`, vue de production, recherche de fonction par nom, #116). Une garde nouvelle qui lit le code passe par lui — jamais `include_str!("app.rs")` ni un fichier nommé — et pose son témoin dans un autre fichier qu'`app.rs` |
+| `stokesforge-app-state/src/i18n.rs` (tests) | complétude `fr ⊆ en` avec les mêmes arguments, pseudo-langue `en-XA`, pluriels et typographie françaises ; **bloquant** : une clé ajoutée à `en` s'ajoute à `fr` dans le même commit |
+| `stokesforge-app/tests/isolation_preferences.rs` | les tests de l'app (qui bâtissent un `AppState` par `new`) n'atteignent pas le vrai `preferences.json` : la feature `test-support` de la dev-dependency d'`app-state` (`cfg(test)` ne passe pas la frontière du crate, #263) ; retirée, le test échoue |
 | `stokesforge-commands/tests/memory_pinning.rs` | l'historique n'épingle pas de gros buffers |
 
 Gardes **en place** du standard d'interface (#217) : `aucun_champ_numerique_hors_de_la_brique`
@@ -220,7 +221,7 @@ Un résultat vert sans les features concernées ne valide pas ces chemins.
 - [ ] `cargo fmt --all -- --check`
 - [ ] `cargo clippy --workspace --all-targets -- -D warnings`
 - [ ] `cargo test --workspace`
-- [ ] features hors défaut touchées → contrôles ciblés `python`, y compris `stokesforge-app` si concerné
+- [ ] features hors défaut touchées → contrôles ciblés `python`, y compris `stokesforge-app-state` et `stokesforge-app` si concernés
 - [ ] aucun garde-fou d'architecture affaibli ; témoins intacts
 - [ ] texte d'interface : clés dans `en`, complétude `fr = en` verte (clé écrite dans les **deux** catalogues), `aucun_libelle_en_dur` et `aucune_cle_du_catalogue_n_est_morte` verts (aucune dérogation, aucune clé orpheline), capture en `en-XA` si le texte est visuel
 - [ ] changement d'interface avec interaction (menu, dialogue, saisie, annulation) : si l'affichage est disponible, le rejouer avec [`run-stokesforge`](../run-stokesforge/SKILL.md) avant de dire « c'est fait » (conseillé, pas bloquant : X11 seulement, ni Wayland natif ni glisser) ; sinon le dire dans le compte rendu

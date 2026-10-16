@@ -31,9 +31,9 @@ use stokesforge_core::NodeId;
 use stokesforge_render_egui::DEFAULT_FIGURE_SIZE;
 use stokesforge_render_svg::SvgTextMode;
 
-use crate::i18n;
-use crate::state::{active_graph, Action};
-use crate::tr;
+use stokesforge_app_state::i18n;
+use stokesforge_app_state::state::{active_graph, Action};
+use stokesforge_app_state::tr;
 
 use super::busy::{work_in_progress, Work};
 use super::graph_text_edit::add_annotation_at;
@@ -399,11 +399,15 @@ impl StokesForgeApp {
     ) {
         ui.menu_button(tr!("menu-graph"), |ui| {
             let spec = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph);
-            let shown = crate::object_manager::Shown::from(self.state.object_manager_settings());
+            let shown = stokesforge_app_state::object_manager::Shown::from(
+                self.state.object_manager_settings(),
+            );
             let target = self
                 .read_graph_view(graph, selected_manager_target)
                 .flatten();
-            let has_data = !crate::state::graph_data_books(self.state.tree(), graph).is_empty();
+            let has_data =
+                !stokesforge_app_state::state::graph_data_books(self.state.tree(), graph)
+                    .is_empty();
             let moved = spec.as_ref().is_some_and(|spec| spec.has_text_anchors());
             let mut sections = MenuSections::new();
             sections.section(ui, true, |ui| {
@@ -509,8 +513,8 @@ impl StokesForgeApp {
                         tr!("action-mirror-axis-right", "hint"),
                     ),
                 ] {
-                    let target = crate::object_manager::VisibilityTarget::Axis(
-                        crate::object_manager::AxisRef { panel, side },
+                    let target = stokesforge_app_state::object_manager::VisibilityTarget::Axis(
+                        stokesforge_app_state::object_manager::AxisRef { panel, side },
                     );
                     let ordinary = spec
                         .as_ref()
@@ -602,7 +606,7 @@ impl StokesForgeApp {
                     });
                     ui.menu_button(tr!("menu-graph-png-resolution"), |ui| {
                         let current = self.state.png_export_scale();
-                        for scale in crate::state::PNG_EXPORT_SCALES {
+                        for scale in stokesforge_app_state::state::PNG_EXPORT_SCALES {
                             let (w, h) = DEFAULT_FIGURE_SIZE;
                             let (width, height) =
                                 ((w as f32 * scale) as u32, (h as f32 * scale) as u32);
@@ -771,9 +775,9 @@ impl StokesForgeApp {
 /// Une ligne de message selon son niveau : texte courant, texte en teinte
 /// d'avertissement avec son triangle, ou texte rouge avec sa croix. Partagée
 /// par la barre d'état et la fenêtre d'historique.
-pub(super) fn status_line(ui: &mut egui::Ui, status: &crate::state::StatusMessage) {
+pub(super) fn status_line(ui: &mut egui::Ui, status: &stokesforge_app_state::state::StatusMessage) {
     use crate::icons::{icon_image, Icon, IconRole};
-    use crate::state::StatusLevel;
+    use stokesforge_app_state::state::StatusLevel;
     match status.level {
         StatusLevel::Info => {
             ui.label(&status.text);
@@ -815,7 +819,7 @@ mod tests {
     use super::super::shortcuts::shortcut_text_delete;
     use super::super::test_support::{self, colonnes_xy};
     use super::*;
-    use crate::state::AppState;
+    use stokesforge_app_state::state::AppState;
     use stokesforge_core::{NodeId, Project};
     use stokesforge_plot::{AnnotationRef, AnnotationSpec, PanelSpec, PlotSpec, SeriesSpec};
     use stokesforge_session::Session;
@@ -847,7 +851,7 @@ mod tests {
         let file = dir.path().join("mesure.csv");
         std::fs::write(&file, "1,10\n2,20\n").unwrap();
         state.dispatch(Action::ImportFiles {
-            destination: crate::state::ImportDestination::NewBookForAll,
+            destination: stokesforge_app_state::state::ImportDestination::NewBookForAll,
             recipe: stokesforge_import::ImportRecipe::new("Sans titre"),
             paths: vec![file],
         });
@@ -1252,7 +1256,7 @@ mod tests {
         assert_eq!(
             clique(&mut app, &ctx, tab, entry.center),
             vec![Action::OpenGraphAnalysis {
-                preset: crate::analysis::Preset::Integrate,
+                preset: stokesforge_app_state::analysis::Preset::Integrate,
                 graph,
                 series: vec![stokesforge_plot::SeriesRef::new(0, 0)],
                 spec: Box::new(spec),
@@ -1262,7 +1266,7 @@ mod tests {
 
     #[test]
     fn le_menu_analyse_se_grise_sans_colonne_y_et_ouvre_la_fenetre() {
-        use crate::analysis::Preset;
+        use stokesforge_app_state::analysis::Preset;
         let (session, mut app, _) = banc();
         let book = app.state.books()[0].0;
         app.open_tab(Tab::Book(book));
@@ -1394,7 +1398,7 @@ mod tests {
     /// clic ouvre la fenêtre, Ctrl+clic lance (même geste, `run` en plus).
     #[test]
     fn le_menu_analyse_liste_les_dernieres_analyses_et_ctrl_clic_les_lance() {
-        use crate::analysis::{Preset, RecentTarget};
+        use stokesforge_app_state::analysis::{Preset, RecentTarget};
         let (session, mut app, _) = banc();
         let book = app.state.books()[0].0;
         app.open_tab(Tab::Book(book));
@@ -1641,7 +1645,7 @@ mod tests {
     /// garde le menu ouvert.
     #[test]
     fn les_axes_miroirs_se_cochent_depuis_le_menu_graphique() {
-        use crate::object_manager::{AxisRef, VisibilityTarget};
+        use stokesforge_app_state::object_manager::{AxisRef, VisibilityTarget};
         let (session, mut app, graph) = banc();
         let tab = Some(Tab::Graph(graph));
         for (label, side) in [
@@ -1738,7 +1742,7 @@ mod tests {
             clique(&mut app, &ctx, tab, pos),
             vec![Action::RemovePlotObject {
                 graph,
-                target: crate::object_manager::VisibilityTarget::Annotation(target),
+                target: stokesforge_app_state::object_manager::VisibilityTarget::Annotation(target),
             }]
         );
         session.shutdown().unwrap();
@@ -1749,7 +1753,7 @@ mod tests {
     /// `run_object_manager_request`, comme celles de l'arbre.
     #[test]
     fn le_contenu_selectionne_du_menu_graphique_passe_par_l_object_manager() {
-        use crate::object_manager::VisibilityTarget;
+        use stokesforge_app_state::object_manager::VisibilityTarget;
         let (session, mut app, graph) = banc();
         let tab = Some(Tab::Graph(graph));
         let ouvre_le_contenu = |app: &mut StokesForgeApp| {
@@ -1856,7 +1860,7 @@ mod tests {
                 tr!("menu-graph-png-resolution"),
             ],
         );
-        let scale = crate::state::PNG_EXPORT_SCALES
+        let scale = stokesforge_app_state::state::PNG_EXPORT_SCALES
             .iter()
             .copied()
             .find(|scale| *scale != app.state.png_export_scale())
@@ -1897,7 +1901,7 @@ mod tests {
             clique(&mut app, &ctx, tab, pos),
             vec![Action::OpenPlotSettings {
                 graph,
-                tab: crate::state::PlotSettingsTab::Axes,
+                tab: stokesforge_app_state::state::PlotSettingsTab::Axes,
                 axis: None
             }]
         );
@@ -1907,7 +1911,7 @@ mod tests {
 
     #[test]
     fn les_sous_menus_des_reglages_emettent_les_actions_communes() {
-        use crate::preferences::ObjectManagerGroup;
+        use stokesforge_app_state::preferences::ObjectManagerGroup;
         let (session, mut app, _) = banc();
         app.state.set_object_manager_open_for_test(true);
         // Les réglages restent accessibles sans graphique actif.

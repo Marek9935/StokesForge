@@ -23,7 +23,7 @@ use eframe::egui;
 
 use crate::icons::{icon_button, Icon, IconRole};
 use crate::theme;
-use crate::tr;
+use stokesforge_app_state::tr;
 
 use super::inplace_edit;
 use super::menu_sections::MenuSections;
@@ -600,7 +600,7 @@ fn tab_strip_contents<K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq>(
 }
 
 /// Ce que la bande d'onglets demande sur une feuille ; l'appelant en fait des
-/// [`Action`](crate::state::Action).
+/// [`Action`](stokesforge_app_state::state::Action).
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum TabEvent<K> {
     BeginRename(K),

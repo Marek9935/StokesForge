@@ -727,10 +727,11 @@ fn la_garde_voit_les_sous_dossiers_et_le_code_apres_un_module_de_test() {
     assert!(ecarts(&[de_test]).is_empty());
 }
 
-/// Les dépendances de traduction n'existent que dans `stokesforge-app` : aucun
-/// crate du dessous ne traduit (chantier #39). Les listes blanches de
-/// `no_ui_dependency` en couvrent déjà une partie ; celui-ci couvre le reste du
-/// workspace.
+/// Les dépendances de traduction n'existent que dans l'application, c'est-à-dire
+/// `stokesforge-app` et `stokesforge-app-state` (qui porte le catalogue, `tr!` et
+/// le chargeur, #263) : aucun crate du dessous ne traduit (chantier #39). Les
+/// listes blanches de `no_ui_dependency` en couvrent déjà une partie ; celui-ci
+/// couvre le reste du workspace.
 #[test]
 fn les_dependances_de_traduction_restent_dans_stokesforge_app() {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -749,7 +750,7 @@ fn les_dependances_de_traduction_restent_dans_stokesforge_app() {
             continue;
         };
         vus += 1;
-        if nom == "stokesforge-app" {
+        if nom == "stokesforge-app" || nom == "stokesforge-app-state" {
             continue;
         }
         for ligne in contenu.lines() {
@@ -761,4 +762,172 @@ fn les_dependances_de_traduction_restent_dans_stokesforge_app() {
         }
     }
     assert!(vus > 10, "le workspace n'a pas été parcouru");
+}
+
+// ---------------------------------------------------------------------------
+// Le catalogue et ses clés (#48, #46) : lus avec les sources des DEUX crates
+// ---------------------------------------------------------------------------
+
+/// Le catalogue `en`, qui vit dans `stokesforge-app-state` (#263) ; ses clés
+/// sont employées dans les sources de l'un et l'autre crate.
+const EN: &str = include_str!("../../stokesforge-app-state/i18n/en/stokesforge_app.ftl");
+
+/// Les clés des messages de `catalogue` (une par ligne qui commence une entrée ;
+/// les attributs et les termes `-x` n'en sont pas).
+fn cles_du_catalogue(catalogue: &str) -> Vec<&str> {
+    catalogue
+        .lines()
+        .filter(|ligne| ligne.starts_with(|c: char| c.is_ascii_lowercase()))
+        .filter_map(|ligne| ligne.split(" =").next())
+        .filter(|cle| !cle.contains(' ') && !cle.contains('.'))
+        .collect()
+}
+
+/// Les clés de `catalogue` que le texte d'aucune source (tests compris : une clé
+/// employée par un test compte) ne cite entre guillemets.
+fn cles_mortes<'c>(catalogue: &'c str, sources: &[Fichier]) -> Vec<&'c str> {
+    let texte: String = sources.iter().map(|f| f.texte.as_str()).collect();
+    cles_du_catalogue(catalogue)
+        .into_iter()
+        .filter(|cle| !texte.contains(&format!("\"{cle}\"")))
+        .collect()
+}
+
+/// Une clé du catalogue `en` que le code n'emploie nulle part est une clé morte
+/// (un texte qu'on croit visible, ou le reste d'une conversion) : elle fait
+/// échouer ce test (#48). Une clé est employée quand son nom, entre guillemets,
+/// figure dans une source de `src/` — la liste récursive, des deux crates,
+/// partagée par toutes les gardes qui lisent le code (#116, #263).
+#[test]
+fn aucune_cle_du_catalogue_n_est_morte() {
+    let cles = cles_du_catalogue(EN);
+    assert!(
+        cles.len() > 500,
+        "le catalogue est lu : {} clés",
+        cles.len()
+    );
+    let mortes = cles_mortes(EN, &sources::sources());
+    assert!(
+        mortes.is_empty(),
+        "{} clé(s) de `en` sans emploi dans `src/` : {mortes:?}",
+        mortes.len()
+    );
+}
+
+/// Le témoin : les menus et le reste de l'interface sont écrits dans
+/// `stokesforge-app`, le catalogue vit dans `stokesforge-app-state`. Lue sur le
+/// seul crate d'état, la liste des clés mortes n'est pas vide (les `menu-*`) :
+/// la garde ne tient donc que parce qu'elle lit les deux.
+#[test]
+fn la_garde_des_cles_mortes_lit_les_deux_crates() {
+    let etat: Vec<Fichier> = sources::sources()
+        .into_iter()
+        .filter(|f| f.chemin.starts_with(sources::PREFIXE_ETAT))
+        .collect();
+    assert!(!etat.is_empty());
+    let mortes = cles_mortes(EN, &etat);
+    assert!(
+        mortes.iter().any(|cle| cle.starts_with("menu-")),
+        "les menus sont employés par stokesforge-app seulement : {mortes:?}"
+    );
+    // Et une clé citée en commentaire seulement reste employée (le texte brut
+    // est lu) : le témoin de la lecture elle-même.
+    let fichier = Fichier {
+        chemin: "app/x.rs".into(),
+        texte: "fn f() { tr!(\"cle-a\"); }".into(),
+        de_test: false,
+    };
+    assert_eq!(cles_mortes("cle-a = A\ncle-b = B\n", &[fichier]), ["cle-b"]);
+}
+
+/// Le `notice`/`fail` de l'état est gardé : les messages de la barre d'état
+/// (`AppState::notice`/`fail`) sont des `tr!`, et la garde lit `state.rs` — du
+/// crate voisin depuis #263 (préfixe `app-state/`). Retirer ce crate de la
+/// lecture fait échouer ce test : sans lui, l'essentiel des messages ne serait
+/// plus gardé.
+#[test]
+fn la_garde_lit_les_messages_d_etat_du_crate_d_etat() {
+    let sources = sources::sources();
+    let etat = sources
+        .iter()
+        .find(|f| f.chemin == "app-state/state.rs")
+        .expect("state.rs est lu");
+    let appels = etat
+        .production()
+        .code_en_texte()
+        .matches(".notice(")
+        .count();
+    assert!(appels > 10, "les `notice` de state.rs sont lus : {appels}");
+    // Le témoin : un littéral posé là serait vu.
+    let mut fautif = etat.clone();
+    fautif
+        .texte
+        .push_str("\nimpl AppState { fn t(&mut self) { self.notice(\"Terminé\".into()); } }\n");
+    assert_eq!(ecarts(&[fautif]).len(), 1);
+    assert!(ecarts(std::slice::from_ref(etat)).is_empty());
+}
+
+/// Les clés `history-*` de `catalogue` qu'aucune source de production n'emploie
+/// (nom de la clé entre guillemets).
+fn history_keys_unused(catalogue: &str, sources: &[sources::Fichier]) -> Vec<String> {
+    let code: String = sources
+        .iter()
+        .map(|fichier| fichier.production().code_en_texte())
+        .collect();
+    history_keys(catalogue)
+        .into_iter()
+        .filter(|key| !code.contains(&format!("\"{key}\"")))
+        .map(str::to_string)
+        .collect()
+}
+
+fn history_keys(catalogue: &str) -> Vec<&str> {
+    catalogue
+        .lines()
+        .filter_map(|line| line.split(" =").next())
+        .filter(|key| key.starts_with("history-") && !key.contains(' '))
+        .collect()
+}
+
+/// Chaque clé `history-*` du catalogue est employée : une clé orpheline (une
+/// forme retirée du Rust, laissée dans le `.ftl`) fait échouer le test. Toutes
+/// les sources de production des deux `src/` sont lues, sous-dossiers compris
+/// (#116, #263) : la mise en phrase est dans `stokesforge-app-state`, mais
+/// `app/menus.rs` en emploie.
+#[test]
+fn every_history_key_of_the_catalogue_is_used() {
+    let catalogue = EN;
+    let keys = history_keys(catalogue);
+    assert!(
+        keys.len() > 30,
+        "le catalogue d'historique est lu : {keys:?}"
+    );
+    let unused = history_keys_unused(catalogue, &sources::sources());
+    assert!(
+        unused.is_empty(),
+        "clé(s) employée(s) nulle part : {unused:?}"
+    );
+}
+
+/// Le témoin : une clé employée dans un module de `src/app/` compte ; une clé
+/// employée seulement dans un commentaire ou du code de test ne compte pas.
+#[test]
+fn a_history_key_is_seen_outside_the_three_old_files() {
+    let catalogue = "history-a = A\nhistory-b = B\nhistory-c = C\nother = O\n";
+    let file = |chemin: &str, texte: &str| sources::Fichier {
+        chemin: chemin.to_string(),
+        texte: texte.to_string(),
+        de_test: false,
+    };
+    let sources = [
+        file("app/historique.rs", "fn f() { tr!(\"history-a\"); }"),
+        file(
+            "app/b.rs",
+            "// tr!(\"history-b\")\n#[cfg(test)]\nmod tests { fn t() { tr!(\"history-b\"); } }",
+        ),
+    ];
+    assert_eq!(
+        history_keys_unused(catalogue, &sources),
+        ["history-b", "history-c"]
+    );
 }

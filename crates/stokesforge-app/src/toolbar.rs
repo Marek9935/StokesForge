@@ -25,7 +25,7 @@
 //! # Mémoire
 //!
 //! Seule la **visibilité** de chaque barre (menu View) vit dans les préférences
-//! de l'utilisateur ([`crate::preferences`], champ `toolbars`), pas dans le
+//! de l'utilisateur ([`stokesforge_app_state::preferences`], champ `toolbars`), pas dans le
 //! `.stf`. La lecture tolère un fichier écrit par une autre version : barre
 //! inconnue ignorée, barre absente visible, ancien champ `placement` ignoré.
 
@@ -33,17 +33,17 @@ use eframe::egui::{self, Pos2, Rect};
 use serde::{Deserialize, Serialize};
 
 use crate::icons::{icon_image, Icon, IconRole};
-use crate::state::Action;
-use crate::tr;
+use stokesforge_app_state::state::Action;
+use stokesforge_app_state::tr;
 use stokesforge_core::NodeId;
 use stokesforge_plot::{PlotType, TextAlign};
 use stokesforge_render_egui::GraphTool;
 
 use crate::color_picker::{ColorUsage, PickerEnv};
 use crate::number_field::{auto_number_field, number_field};
-use crate::object_format::ObjectFormat;
-use crate::quantities;
-use crate::text_format::TextFormat;
+use stokesforge_app_state::object_format::ObjectFormat;
+use stokesforge_app_state::quantities;
+use stokesforge_app_state::text_format::TextFormat;
 
 /// Les barres existantes — un enum fermé : ajouter une barre, c'est ajouter une
 /// variante, son nom (`toolbar-*`) et son contenu dans [`bar_contents`].
@@ -714,7 +714,7 @@ fn graph_tools(
         if let Some(graph) = graph {
             requests.push(ToolbarRequest::Action(Box::new(Action::OpenPlotSettings {
                 graph,
-                tab: crate::state::PlotSettingsTab::Graph,
+                tab: stokesforge_app_state::state::PlotSettingsTab::Graph,
                 axis: None,
             })));
         }

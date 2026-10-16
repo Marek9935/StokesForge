@@ -42,7 +42,7 @@ interface. Ne pas appliquer l'exception par analogie à une future liaison.
 ## Métadonnées Cargo
 
 Le workspace déclare
-`GPL-3.0-or-later WITH AdditionRef-StokesForge-Extension` ; les dix-huit
+`GPL-3.0-or-later WITH AdditionRef-StokesForge-Extension` ; les vingt
 crates héritent de `license`. Les textes sont `LICENSE` et `LICENSE-EXCEPTION`.
 `AdditionRef-StokesForge-Extension` identifie cette permission supplémentaire.
 La syntaxe [SPDX 3.0](https://spdx.github.io/spdx-spec/v3.0.1/annexes/spdx-license-expressions/)

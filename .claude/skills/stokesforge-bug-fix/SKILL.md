@@ -43,7 +43,7 @@ Garder la capture d'avant : elle sert de preuve au moment de montrer l'après.
 ### « Jamais câblé » ≠ « câblé et cassé »
 
 Avant de conclure qu'un comportement manque, chercher si le code porte déjà
-l'intention (`rg "Action::|Command::|fn <nom>" crates/stokesforge-app/src/`). Si une
+l'intention (`rg "Action::|Command::|fn <nom>" crates/stokesforge-app/src/ crates/stokesforge-app-state/src/`). Si une
 `Action` ou une `Command` existe déjà pour ce geste, le bug est **une condition
 qui échoue**, pas du code à écrire — et on cherche alors pourquoi elle ne se
 déclenche pas. Les deux diagnostics envoient à des endroits opposés du fichier.
@@ -73,7 +73,7 @@ Le réflexe coûteux est de réparer là où le symptôme se voit. Table de renv
 | séries ajoutées au mauvais calque, « Send to » qui vise le mauvais graphique ou manque | l'indice du calque (`PlotSpec::panels`, jamais `(row, column)`, #167), le calque actif publié (`graph_window::published_active_panel`, #161), `app/graph_targets.rs` (#165) et `state::drop_payload_action` / `drop_rows_action` |
 | dialogue (propriétés du graphe, import) qui se peint ou valide mal | `app/plot_settings.rs`, `app/import_wizard.rs` ; cadre et blocage communs dans `app/dialogs.rs` |
 | fichier déposé au mauvais endroit | `app/file_drop.rs` (qui réclame le dépôt, un emplacement par viewport) puis `state::file_drop_plan` (la décision) |
-| comportement présent en flottant, absent en fenêtre détachée | deux écritures là où il en faudrait une (`rg "fn detached_" crates/stokesforge-app/src/`), ou un état d'`AppState` jamais recopié dans la vue détachée (`fork_for_detached_view`, `sync_detached_snapshot`, `adopt_detached_book_view`). Factoriser si la contrainte `'static` de `show_viewport_deferred` ne s'y oppose pas, sinon corriger **les deux** |
+| comportement présent en flottant, absent en fenêtre détachée | deux écritures là où il en faudrait une (`rg "fn detached_" crates/stokesforge-app/src/ crates/stokesforge-app-state/src/`), ou un état d'`AppState` jamais recopié dans la vue détachée (`fork_for_detached_view`, `sync_detached_snapshot`, `adopt_detached_book_view`). Factoriser si la contrainte `'static` de `show_viewport_deferred` ne s'y oppose pas, sinon corriger **les deux** |
 | blocage de l'interface | quelque chose de bloquant appelé depuis la boucle de rendu (cf. `ScriptEngine::run`, résolu par un fil détaché + `poll_script`) |
 
 **Si le correctif demande un arbitrage, demander.** Un bug dont la correction
@@ -91,8 +91,8 @@ Deux règles de conduite qui orientent la forme du correctif :
   d'interface casse cette règle ; la nuance « impossible pour l'instant »
   (annuler à vide) n'est d'ailleurs pas une erreur.
 - **Un message d'erreur faux ou ambigu se corrige dans le catalogue** : la
-  phrase vit dans `crates/stokesforge-app/i18n/en/stokesforge_app.ftl` (clé `error-*`),
-  associée à sa variante dans `crates/stokesforge-app/src/errors.rs`. Le `Display`
+  phrase vit dans `crates/stokesforge-app-state/i18n/en/stokesforge_app.ftl` (clé `error-*`),
+  associée à sa variante dans `crates/stokesforge-app-state/src/errors.rs`. Le `Display`
   anglais du crate d'origine (`#[error(...)]`) ne se modifie que s'il est lui-même
   faux — il est lu par le CLI et `pyst`. Une variante d'erreur **nouvelle** s'associe
   dans `errors.rs` (le `match` exhaustif le force) avec un exemple dans le test de

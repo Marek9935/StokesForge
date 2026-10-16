@@ -10,8 +10,8 @@ use eframe::egui;
 use super::dialogs::{modal_read_only, DialogOutcome};
 use super::empty_state::empty_state;
 use super::menus::status_line;
-use crate::state::{Action, AppState};
-use crate::tr;
+use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::tr;
 
 /// « HH:MM:SS » (UTC) d'un instant.
 fn clock(at: std::time::SystemTime) -> String {

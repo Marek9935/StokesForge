@@ -337,7 +337,7 @@ Deux propriétés à connaître avant d'y toucher :
 
 `stokesforge_core::compose` est le sens inverse de `resolve` : il lit le `Tree`
 et fabrique des `SeriesSpec`, ou lit un `PlotSpec`. Une seule règle pour
-l'interface (`AppState::plot_columns`, `add_series_to_graph`, `add_rows_to_graph`,
+l'interface (`AppState::plot_columns`, dans `stokesforge-app-state`, `add_series_to_graph`, `add_rows_to_graph`,
 `plot_rows`, la fenêtre d'analyse), `pyst.plot` et l'annexe d'une analyse :
 
 - **appariement** (`series_from_columns`, `x_for`) : chaque Y est apparié au X

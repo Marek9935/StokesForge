@@ -30,7 +30,7 @@
 use eframe::egui;
 
 use crate::theme;
-use crate::tr;
+use stokesforge_app_state::tr;
 
 /// Durée d'affichage du cadre orange d'une valeur ramenée, en secondes.
 pub const CLAMPED_SECONDS: f64 = 2.0;

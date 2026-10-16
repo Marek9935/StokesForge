@@ -3,8 +3,8 @@
 //! Un seul test, dans son propre binaire : le chargeur de langue est global, et
 //! deux tests qui le changent en parallèle se marcheraient dessus.
 
-use stokesforge_app::i18n::{self, Language};
-use stokesforge_app::tr;
+use stokesforge_app_state::i18n::{self, Language};
+use stokesforge_app_state::tr;
 
 #[test]
 fn the_language_changes_at_runtime() {

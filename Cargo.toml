@@ -18,6 +18,7 @@ members = [
     "crates/stokesforge-python",
     "crates/stokesforge-script",
     "crates/stokesforge-cli",
+    "crates/stokesforge-app-state",
     "crates/stokesforge-app",
     "crates/stokesforge-robustesse",
     "crates/stokesforge-arch-guard",

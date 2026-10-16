@@ -23,7 +23,7 @@
 # # Ce que ce script NE prouve PAS
 #
 # `stokesforge-app` démarre l'interpréteur **paresseusement**, au premier script
-# (voir `stokesforge_app::state`) : son ouverture-fermeture par auto-fermeture ne
+# (voir `stokesforge_app_state::state`) : son ouverture-fermeture par auto-fermeture ne
 # lance donc aucun script et ne touche jamais Python. C'est exactement le
 # trou que `stokesforge-selftest` comble : lui seul, dans ce script, exécute
 # réellement un script Python depuis le paquet.

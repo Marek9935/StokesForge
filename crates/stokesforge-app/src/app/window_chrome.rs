@@ -14,7 +14,7 @@
 use eframe::egui;
 
 use crate::icons::{icon_image, Icon, IconRole, ICON_SIZE};
-use crate::tr;
+use stokesforge_app_state::tr;
 
 use super::tab::Tab;
 

@@ -17,8 +17,8 @@ use std::time::Duration;
 
 use eframe::egui;
 
-use crate::state::Action;
-use crate::tr;
+use stokesforge_app_state::state::Action;
+use stokesforge_app_state::tr;
 
 /// Durée avant laquelle un travail reste invisible (P1).
 pub(super) const SHOW_AFTER: Duration = Duration::from_millis(500);

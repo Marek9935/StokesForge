@@ -1,6 +1,6 @@
 # Architecture
 
-Dix-huit crates, une seule direction de dépendance, et une feature
+Vingt crates, une seule direction de dépendance, et une feature
 optionnelle (`python`). Cette page donne la carte ; le détail de chaque étage est dans
 sa propre page.
 
@@ -39,8 +39,13 @@ stokesforge-importer (core, import) — plan de feuilles et colonnes du modèle,
                commandes : partagé par l'application, le CLI et les scripts
 stokesforge-clipboard (aucune dépendance stokesforge) — offre multi-format au
                presse-papiers système (SVG, PNG, PDF), un backend par affichage
-stokesforge-app    (analysis, clipboard, commands, core, import, importer, persistence, plot,
-               python, render-egui, render-svg, script, session)
+stokesforge-app-state (analysis, commands, core, import, importer, persistence, plot,
+               render, render-svg, session ; script et python en option) — l'état de
+               l'application SANS interface : AppState, sélection, préférences,
+               formulaires d'analyse, textes (Fluent) et erreurs mises en phrase
+stokesforge-app    (app-state, analysis, clipboard, commands, core, import, plot,
+               render, render-egui, render-svg, session ; python en option) — la
+               coquille eframe : peint l'état, traduit clavier et souris en actions
 ```
 
 `stokesforge-robustesse` est à part : il dépend du socle et du pont Python, et ne
@@ -65,7 +70,8 @@ dépendances.
 | `stokesforge-render-svg` | export SVG, et par-dessus PDF et PNG | [rendu](rendu.md) |
 | `stokesforge-python` | interpréteur CPython embarqué, aller-retour numpy | [python](python-et-script.md) |
 | `stokesforge-script` | le fil de script, la surface `pyst`, l'interruption | [python](python-et-script.md) |
-| `stokesforge-app` | la coquille UI eframe (banc d'essai) ; **seul** crate qui traduit l'interface (Fluent : `i18n-embed`, `i18n-embed-fl`, `rust-embed`, `fluent-syntax`) | [application](application.md) |
+| `stokesforge-app-state` | l'état de l'application **sans egui** (#263) : `AppState` et ses `Action`, sélection, préférences, formulaires d'analyse, Object Manager, texte d'interface (`tr!`, catalogues Fluent `en`/`fr`) et erreurs mises en phrase ; testable sans fenêtre (`tests/shell.rs`). Ni `egui`, ni `eframe`, ni `winit`, ni `wgpu` : le compilateur tient la frontière | [application](application.md) |
+| `stokesforge-app` | la coquille UI eframe (banc d'essai) : fenêtres, grille, menus, thème, icônes, copie de la figure au presse-papiers ; peint l'état de `stokesforge-app-state`. Avec lui, **seuls** crates qui traduisent l'interface (Fluent : `i18n-embed`, `i18n-embed-fl`, `rust-embed`, `fluent-syntax`) | [application](application.md) |
 | `stokesforge-cli` | import et scripts Python sans interface | [application](application.md) |
 | `stokesforge-importer` | du résultat de `stokesforge-import` aux colonnes du modèle (plan de feuilles, construction des colonnes) — sans commandes ni interface, partagé par l'application, le CLI et les scripts | [application](application.md) |
 | `stokesforge-clipboard` | offre d'un même contenu au presse-papiers système sous plusieurs types MIME (la figure d'un graphe : SVG, PNG, PDF) ; Wayland, X11, Windows, macOS ; indépendant du reste du workspace | [application](application.md) |
@@ -77,9 +83,12 @@ dépendances.
 Le découpage n'est pas décoratif ; chacune de ces trois frontières est
 **vérifiée par un test** et non par la relecture.
 
-1. **Aucune dépendance UI sous `stokesforge-session`.** `stokesforge-analysis`, `stokesforge-core`,
+1. **Aucune dépendance UI sous `stokesforge-session`, ni dans l'état de
+   l'application.** `stokesforge-analysis`, `stokesforge-core`,
    `stokesforge-plot`, `stokesforge-commands`, `stokesforge-persistence`, `stokesforge-session`,
-   `stokesforge-script`, `stokesforge-import`, `stokesforge-importer` et `stokesforge-clipboard` portent chacun un
+   `stokesforge-script`, `stokesforge-import`, `stokesforge-importer`, `stokesforge-clipboard` et
+   `stokesforge-app-state` (#263 : l'état de l'application, sans egui ; la liste
+   blanche y refuse `winit` et `stokesforge-clipboard`, qui le tire) portent chacun un
    `tests/no_ui_dependency.rs` : une liste blanche de dépendances, qui force
    une décision consciente à toute nouvelle arête plutôt que de compter sur une
    relecture. La lecture du manifeste est commune (`stokesforge-arch-guard`) :
@@ -120,7 +129,7 @@ teste entièrement sans elle.
 
 | Feature | Crates | Ce qu'elle ajoute | Ce qu'elle exige |
 |---|---|---|---|
-| `python` | `stokesforge-python`, `stokesforge-script`, `stokesforge-app`, `stokesforge-robustesse` | PyO3, interpréteur embarqué, fil de script, console de script | `PYO3_CONFIG_FILE` (voir `scripts/python-config.sh`) et l'interpréteur vendorisé de `vendor/python/` |
+| `python` | `stokesforge-python`, `stokesforge-script`, `stokesforge-app-state`, `stokesforge-app`, `stokesforge-robustesse` | PyO3, interpréteur embarqué, fil de script, console de script | `PYO3_CONFIG_FILE` (voir `scripts/python-config.sh`) et l'interpréteur vendorisé de `vendor/python/` |
 
 Sans la feature `python`, les crates concernés compilent vides — c'est la
 condition du droit d'abandonner Python sans rien démonter. Conséquence

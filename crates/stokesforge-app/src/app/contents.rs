@@ -12,8 +12,8 @@ use eframe::egui;
 use stokesforge_core::{NodeId, Tree};
 use stokesforge_render_egui::GraphView;
 
-use crate::state::{Action, AppState};
-use crate::tr;
+use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::tr;
 
 use super::graph_window::graph_drop_target;
 use super::tab::Tab;
@@ -59,7 +59,7 @@ pub(super) fn matrix_contents(ui: &mut egui::Ui, _tree: &Tree, _matrix: NodeId) 
 }
 
 /// Contenu d'un [`Tab::Note`] : un éditeur multi-lignes, sur le même principe
-/// de saisie différée que `cell_widget` (`grid.rs`) — le tampon ([`crate::state::
+/// de saisie différée que `cell_widget` (`grid.rs`) — le tampon ([`stokesforge_app_state::state::
 /// NoteEdit`]) n'atteint le modèle qu'à la perte de focus, jamais à chaque
 /// frappe (sinon l'historique compterait une entrée par caractère). Échap
 /// abandonne la saisie sans rien écrire, comme pour une cellule.

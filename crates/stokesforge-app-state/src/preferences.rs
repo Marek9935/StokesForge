@@ -526,11 +526,15 @@ fn read_recent_analyses(
 /// configuration, fichier `preferences.json` — le même dossier que
 /// `couleurs.json` et `import_recipes.json`.
 ///
-/// Sous `cfg(test)` : `None`. Un test unitaire n'écrit jamais dans les vraies
-/// préférences de la machine (#250) ; les tests d'intégration, eux, passent
-/// par `AppState::new_with_preferences` et un `Preferences::load_from`.
+/// Sous `cfg(test)` **ou** la feature `test-support` : `None`. Un test unitaire
+/// n'écrit jamais dans les vraies préférences de la machine (#250) ; les tests
+/// d'intégration, eux, passent par `AppState::new_with_preferences` et un
+/// `Preferences::load_from`. `cfg(test)` ne vaut que pour les tests de CE
+/// crate : ceux de `stokesforge-app`, qui bâtissent un `AppState` par `new`
+/// (#263), activent `test-support` par leur dev-dependency — jamais un build
+/// normal (`tests/isolation_preferences.rs` de `stokesforge-app`).
 fn default_path() -> Option<PathBuf> {
-    if cfg!(test) {
+    if cfg!(any(test, feature = "test-support")) {
         return None;
     }
     directories::ProjectDirs::from("", "", "StokesForge")

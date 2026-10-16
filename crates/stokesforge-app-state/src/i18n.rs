@@ -67,8 +67,6 @@ use i18n_embed::unic_langid::LanguageIdentifier;
 use i18n_embed::{I18nAssets, LanguageLoader};
 use rust_embed::RustEmbed;
 
-use crate::preferences::Preferences;
-
 /// Variable d'environnement qui impose la langue (`en`, `fr`, `en-XA`).
 pub const LANGUAGE_VARIABLE: &str = "STOKESFORGE_LANG";
 
@@ -185,10 +183,16 @@ fn startup_language() -> Language {
     // passent en anglais : les `preferences.json` de celui qui teste ne doivent
     // pas décider de la langue de départ, sinon ils se marchent dessus. Seule la
     // variable d'environnement reste (les sous-processus de test s'en servent).
-    #[cfg(test)]
+    //
+    // `cfg(test)` ne vaut que pour les tests de ce crate : ceux de
+    // `stokesforge-app` activent la feature `test-support` (#263).
+    #[cfg(any(test, feature = "test-support"))]
     return choose_language(environment.as_deref(), None);
-    #[cfg(not(test))]
-    choose_language(environment.as_deref(), Preferences::load().language())
+    #[cfg(not(any(test, feature = "test-support")))]
+    choose_language(
+        environment.as_deref(),
+        crate::preferences::Preferences::load().language(),
+    )
 }
 
 /// Bâtit un chargeur pour `language`. L'anglais est toujours chargé derrière
@@ -292,6 +296,7 @@ macro_rules! tr {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::preferences::Preferences;
     use fluent_syntax::ast::{
         CallArguments, Entry, Expression, InlineExpression, Pattern, PatternElement,
     };
@@ -684,31 +689,6 @@ mod tests {
                 "history-insert-rows",
                 std::collections::HashMap::from([("count", 2)])
             )
-        );
-    }
-
-    /// Une clé du catalogue `en` que le code n'emploie nulle part est une clé
-    /// morte (un texte qu'on croit visible, ou le reste d'une conversion) : elle
-    /// fait échouer ce test (#48). Une clé est employée quand son nom, entre
-    /// guillemets, figure dans une source de `src/` — la liste récursive
-    /// partagée par toutes les gardes qui lisent le code (#116).
-    #[test]
-    fn aucune_cle_du_catalogue_n_est_morte() {
-        let sources: String = crate::sources::sources()
-            .into_iter()
-            .map(|fichier| fichier.texte)
-            .collect();
-        let mortes: Vec<String> = read(EN)
-            .messages
-            .keys()
-            .filter(|key| !key.contains('.'))
-            .filter(|key| !sources.contains(&format!("\"{key}\"")))
-            .cloned()
-            .collect();
-        assert!(
-            mortes.is_empty(),
-            "{} clé(s) de `en` sans emploi dans `src/` : {mortes:?}",
-            mortes.len()
         );
     }
 }

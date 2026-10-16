@@ -19,7 +19,7 @@ use super::hover_help::help_beside;
 use super::reorder_list::{move_before, reorder_move, reorder_row};
 use super::tab_strip::{tab_strip, TabStripSide};
 use crate::number_field::number_field;
-use crate::quantities::Quantity;
+use stokesforge_app_state::quantities::Quantity;
 
 /// Les rubriques, dans l'ordre de #148 (+ Analysis, décision M5 de #181).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -179,7 +179,7 @@ const SCALE: Quantity = Quantity::whole(10.0).between(75.0, 200.0);
 const MINUTES: Quantity = Quantity::whole(5.0).between(1.0, 120.0);
 const UNDO: Quantity = Quantity::whole(50.0).between(10.0, 1000.0);
 const CONFIDENCE: Quantity = Quantity::whole(1.0).between(50.0, 99.0);
-const ITER: Quantity = crate::quantities::ITERATIONS;
+const ITER: Quantity = stokesforge_app_state::quantities::ITERATIONS;
 
 const FOLDER_KINDS: [&str; 4] = ["Open", "Save", "Import", "Export"];
 

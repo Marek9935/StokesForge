@@ -1,8 +1,10 @@
-# Configuration de i18n-embed pour `stokesforge-app` (issue #41).
-# L'anglais est la langue source : le catalogue `en` est la référence, `fl!` en
-# vérifie les clés à la compilation, et toute clé absente d'une autre langue
-# reprend l'anglais.
+# Configuration de i18n-embed pour `stokesforge-app` (issue #41, #263).
+# Le catalogue vit dans `stokesforge-app-state` (qui porte `tr!` et le
+# chargeur) ; l'application n'en a besoin que pour la vérification à la
+# compilation de `fl!` (clés et arguments), qui lit l'`i18n.toml` du crate
+# appelant. Même domaine que celui de `stokesforge-app-state/i18n.toml`.
 fallback_language = "en"
 
 [fluent]
-assets_dir = "i18n"
+assets_dir = "../stokesforge-app-state/i18n"
+domain = "stokesforge_app"

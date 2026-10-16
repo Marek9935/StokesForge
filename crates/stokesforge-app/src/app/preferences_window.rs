@@ -18,10 +18,10 @@ use super::dialogs::{modal_read_only, DialogOutcome};
 use super::form::{choice, form, ChoiceOption};
 use super::reorder_list::{move_before, reorder_move, reorder_row};
 use super::tab_strip::{tab_strip, TabStripSide};
-use crate::i18n::{self, Language};
-use crate::preferences::{CopyFormat, CopyFormatEntry};
-use crate::state::{Action, AppState};
-use crate::tr;
+use stokesforge_app_state::i18n::{self, Language};
+use stokesforge_app_state::preferences::{CopyFormat, CopyFormatEntry};
+use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::tr;
 
 /// Les rubriques, dans l'ordre de #148 déjà livrées.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -246,7 +246,7 @@ mod tests {
         let mut state = AppState::new_with_preferences(
             session.handle(),
             "test.stf".to_string(),
-            crate::preferences::Preferences::load_from(None),
+            stokesforge_app_state::preferences::Preferences::load_from(None),
         )
         .unwrap();
         state.dispatch(Action::OpenPreferences);

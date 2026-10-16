@@ -19,14 +19,14 @@ use stokesforge_session::Snapshot;
 
 use crate::color_picker::{color_field, ColorUsage, PickerEnv};
 use crate::number_field::number_field;
-use crate::object_manager::{AxisRef, VisibilityTarget};
-use crate::quantities;
-use crate::state::{
+use crate::theme;
+use stokesforge_app_state::object_manager::{AxisRef, VisibilityTarget};
+use stokesforge_app_state::quantities;
+use stokesforge_app_state::state::{
     drop_payload_action, drop_rows_action, export_file_name, Action, AppState, ColumnDragPayload,
     PlotAxis, PlotSettingsTab, PlotTarget, RowDragPayload,
 };
-use crate::theme;
-use crate::tr;
+use stokesforge_app_state::tr;
 
 use super::analysis_handles::calculation_handles;
 use super::dialogs::{modal_dialog, DialogOutcome};
@@ -62,7 +62,7 @@ const GRAPH_CONTROLS_HEIGHT: f32 = 28.0;
 /// Un survol avec une [`ColumnDragPayload`] active dessine un contour sobre
 /// autour du graphe (teinte de sélection de `theme`, pas de palette
 /// inventée) ; un relâchement au-dessus pousse
-/// [`crate::state::drop_payload_action`] dans `actions`, converti en
+/// [`stokesforge_app_state::state::drop_payload_action`] dans `actions`, converti en
 /// [`Action::AddSeriesToGraph`]. Relâcher ailleurs qu'au-dessus d'un graphe
 /// ne pousse rien : `dnd_release_payload` ne répond que si le pointeur est
 /// contenu dans ce rectangle au moment du relâchement.
@@ -363,7 +363,7 @@ pub(super) fn graph_view_contents(
                         if ui.input_mut(|i| i.consume_shortcut(&super::shortcuts::KEY_DELETE)) {
                             actions.push(Action::RemovePlotObject {
                                 graph: graph_id,
-                                target: crate::object_manager::VisibilityTarget::SeriesGroup(group),
+                                target: stokesforge_app_state::object_manager::VisibilityTarget::SeriesGroup(group),
                             });
                         }
                     } else if let Some(series) = view.selected_series() {
@@ -383,7 +383,10 @@ pub(super) fn graph_view_contents(
                         if ui.input_mut(|i| i.consume_shortcut(&super::shortcuts::KEY_DELETE)) {
                             actions.push(Action::RemovePlotObject {
                                 graph: graph_id,
-                                target: crate::object_manager::VisibilityTarget::Series(series),
+                                target:
+                                    stokesforge_app_state::object_manager::VisibilityTarget::Series(
+                                        series,
+                                    ),
                             });
                         }
                     }
@@ -397,7 +400,7 @@ pub(super) fn graph_view_contents(
         Err(err) => {
             ui.colored_label(
                 ui.visuals().error_fg_color,
-                crate::errors::render::error_message(&err),
+                stokesforge_app_state::errors::render::error_message(&err),
             );
         }
     }
@@ -649,7 +652,7 @@ fn graph_context_menu(
                 graph_id,
                 object,
                 spec,
-                crate::object_manager::Shown::BASE,
+                stokesforge_app_state::object_manager::Shown::BASE,
                 actions,
                 &mut requests,
             ),
@@ -877,7 +880,7 @@ fn annotation_interactions(
             stokesforge_render_egui::GraphEvent::OpenSeriesProperties(series) => {
                 actions.push(Action::OpenObjectProperties {
                     graph,
-                    target: crate::object_manager::VisibilityTarget::Series(series),
+                    target: stokesforge_app_state::object_manager::VisibilityTarget::Series(series),
                 });
             }
             stokesforge_render_egui::GraphEvent::OpenShapeProperties(shape) => {
@@ -963,7 +966,7 @@ pub(super) fn request_graph_export(
         None => spec,
     };
     actions.push(Action::PickFile(
-        crate::file_picker::PickRequest::ExportGraph {
+        stokesforge_app_state::file_picker::PickRequest::ExportGraph {
             spec: Box::new(spec),
             file_name: export_file_name(tree, graph),
         },
@@ -1025,7 +1028,7 @@ pub(super) mod tests {
     use super::super::test_support::colonnes_xy;
     use super::*;
 
-    use crate::state::ShapeOrder;
+    use stokesforge_app_state::state::ShapeOrder;
     use stokesforge_core::Project;
     use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec, ShapeKind, ShapeRef, ShapeSpec};
     use stokesforge_session::Session;
@@ -1947,7 +1950,7 @@ pub(super) mod tests {
                     graph,
                     VisibilityTarget::Shape(object),
                     &spec,
-                    crate::object_manager::Shown::BASE,
+                    stokesforge_app_state::object_manager::Shown::BASE,
                     &mut actions,
                     &mut requests,
                 );
@@ -2032,7 +2035,7 @@ pub(super) mod tests {
                         graph,
                         VisibilityTarget::Shape(object),
                         &spec,
-                        crate::object_manager::Shown::BASE,
+                        stokesforge_app_state::object_manager::Shown::BASE,
                         &mut Vec::new(),
                         &mut requests,
                     );
@@ -2147,7 +2150,7 @@ pub(super) mod tests {
     #[test]
     fn les_raccourcis_d_un_groupe_selectionne_visent_le_groupe() {
         use super::super::object_manager_ui::group_rename_pending;
-        use crate::object_manager::VisibilityTarget;
+        use stokesforge_app_state::object_manager::VisibilityTarget;
         use stokesforge_plot::{SeriesGroupRef, SeriesRef};
 
         let mut project = Project::new("Groupes").unwrap();

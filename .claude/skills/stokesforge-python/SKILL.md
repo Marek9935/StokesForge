@@ -43,7 +43,7 @@ scripts/python-test.sh -- --ignored   # + les reproductions de la frontière
 ```
 
 Ce script teste `stokesforge-python`, `stokesforge-script`, `stokesforge-robustesse` (en
-série), `stokesforge-app` et `stokesforge-cli`. `test-python` l'exécute automatiquement
+série), `stokesforge-app-state`, `stokesforge-app` et `stokesforge-cli`. `test-python` l'exécute automatiquement
 en CI et bloque en cas d'échec. Les reproductions ignorées restent explicites.
 Appliquer le même environnement (`PYO3_CONFIG_FILE`, rpath,
 `STOKESFORGE_PYTHON_HOME`) aux vérifications Clippy ; voir
@@ -209,12 +209,12 @@ Il ne modifie ni la surface native `pyst` ni le paquet habituel.
 ## Côté application : la console ne fige pas la fenêtre
 
 `ScriptEngine::run` **bloque** jusqu'au terme du script. Trois décisions
-vivent dans `stokesforge-app/src/state.rs`, pas dans `app.rs` :
+vivent dans `stokesforge-app-state/src/state.rs`, pas dans `app.rs` :
 
 1. **l'interpréteur ne démarre jamais à l'ouverture de la fenêtre** — seul le
    premier `RunScript` le construit. Le temps de démarrage de l'interpréteur
    est l'un des motifs du portage ; le payer à l'ouverture annulerait le
-   bénéfice. Verrouillé par `stokesforge-app/tests/script_bridge_lazy.rs` ;
+   bénéfice. Verrouillé par `stokesforge-app-state/tests/script_bridge_lazy.rs` ;
 2. **`RunScript` ne bloque jamais l'appelant** : le travail part sur un fil
    détaché et l'appel revient aussitôt ;
 3. **`poll_script` est à appeler à chaque image** : il sonde le résultat et
@@ -249,7 +249,7 @@ long, unité et commentaire viennent de `stokesforge_core::OutputName`
 d'analyse traduit ; `pyst` n'écrit jamais un nom de sortie lui-même, et ses
 options (`peak_columns`, `sum_column`, `keep_baseline`…) passent par
 `wants_output`. Contrat : `stokesforge-script/tests/analysis.rs` et le test
-d'accord `stokesforge-app/tests/output_names.rs`.
+d'accord `stokesforge-app-state/tests/output_names.rs`.
 
 La console peinte (barre de titre repliable, zone de saisie, Run/Stop,
 sortie) vit dans `stokesforge-app/src/app/script_console.rs` (#121 :
@@ -265,10 +265,10 @@ voit un script — restent en anglais, ce ne sont pas des textes d'interface.
 - `stokesforge-script/tests/graphs.rs` et `tests/mutations.rs` — tracé natif,
   cellules exactes, commandes, rollback et undo/redo ;
 - `stokesforge-cli/tests/run.rs` — exécution, `.stf`, erreurs et absence de feature ;
-- `stokesforge-app/tests/script_panel.rs` — parcours numpy → colonnes → graphe ;
+- `stokesforge-app-state/tests/script_panel.rs` — parcours numpy → colonnes → graphe ;
 - `stokesforge-script/tests/navigation.rs` — navigation, métadonnées et lecture
   exacte des cellules (lot #66), sans mutation ni dépendance à l'interface ;
-- `stokesforge-app/tests/script_bridge_lazy.rs` — l'interpréteur ne démarre pas tout
+- `stokesforge-app-state/tests/script_bridge_lazy.rs` — l'interpréteur ne démarre pas tout
   seul ;
 - `stokesforge-robustesse` : `b7` (frontière Rust ↔ Python), `b9` (script sous
   contrainte, qui garde le seul `#[ignore]` restant du banc, motif écrit dans

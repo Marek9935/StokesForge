@@ -1,0 +1,65 @@
+[package]
+name = "stokesforge-app-state"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+description = "État de l'application StokesForge sans interface graphique (#263) : décisions, préférences, sélection, textes et erreurs mises en phrase, testables sans fenêtre."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Le pont Python (fil de script + interpréteur embarqué) est optionnel :
+# sans cette feature, le crate compile, teste et s'exécute sans tirer PyO3 ni
+# exiger d'interpréteur vendorisé. La console de script reste visible mais
+# désactivée (cf. `state::AppState::script_available`). `stokesforge-app` la
+# relaie par sa propre feature `python`.
+python = ["dep:stokesforge-script", "dep:stokesforge-python"]
+# Les gardes d'isolation de ce qui touche à l'utilisateur réel (#250) : le
+# chemin des préférences (`preferences::default_path`), la langue de départ
+# (`i18n::startup_language`) et `set_object_manager_open_for_test` ne sont
+# isolés que sous `cfg(test)`, qui ne vaut que pour les tests de CE crate. Les
+# tests de `stokesforge-app` (qui bâtissent un `AppState`) l'activent par leur
+# dev-dependency. Jamais dans un build normal.
+test-support = []
+
+[dependencies]
+stokesforge-analysis = { path = "../stokesforge-analysis" }
+stokesforge-core = { path = "../stokesforge-core" }
+stokesforge-commands = { path = "../stokesforge-commands" }
+stokesforge-import = { path = "../stokesforge-import" }
+stokesforge-importer = { path = "../stokesforge-importer" }
+stokesforge-session = { path = "../stokesforge-session" }
+stokesforge-persistence = { path = "../stokesforge-persistence" }
+stokesforge-plot = { path = "../stokesforge-plot" }
+# `RenderError` (mise en phrase dans `errors.rs`) et la géométrie de graphe sans
+# egui.
+stokesforge-render = { path = "../stokesforge-render" }
+# Export du graphe en SVG, PDF ou PNG (issue #34) : le même pipeline que
+# l'écran. Aucune commande : l'export ne touche pas le modèle.
+stokesforge-render-svg = { path = "../stokesforge-render-svg" }
+# Chemins optionnels, activés uniquement par la feature `python` de CE crate :
+# c'est elle qui active la feature `python` de chacun (dont dépend l'existence
+# même de leurs types publics, cf. la doc de tête de leurs `lib.rs`).
+stokesforge-script = { path = "../stokesforge-script", optional = true, features = ["python"] }
+stokesforge-python = { path = "../stokesforge-python", optional = true, features = ["python"] }
+# Sélecteur de fichiers natif (`file_picker`). N'apporte ici que
+# `raw-window-handle` : ni egui, ni winit.
+rfd = "0.17.2"
+directories = "5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Interface multilingue (issue #41, chantier #39) : Fluent. `fl!`
+# (i18n-embed-fl) vérifie à la compilation qu'une clé et ses arguments existent
+# dans le catalogue `en` ; rust-embed embarque `i18n/` dans le binaire.
+# `fluent-syntax` sert à produire la pseudo-langue `en-XA` depuis le catalogue
+# `en` (`i18n::pseudo`).
+i18n-embed = { version = "0.16.0", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10.1"
+rust-embed = "8.12.0"
+fluent-syntax = "0.12"
+
+[dev-dependencies]
+stokesforge-arch-guard = { path = "../stokesforge-arch-guard" }
+tempfile = "3"

@@ -21,8 +21,10 @@
 
 use eframe::egui;
 
-use crate::state::{Action, AlertKind, AppState, RowAxis, UnsavedChoice, UnsavedGesture};
-use crate::tr;
+use stokesforge_app_state::state::{
+    Action, AlertKind, AppState, RowAxis, UnsavedChoice, UnsavedGesture,
+};
+use stokesforge_app_state::tr;
 
 use super::dialogs::{
     modal_alert, modal_confirm, modal_dialog_with, modal_save_changes, AlertOutcome,
@@ -43,15 +45,17 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
                 tr!("alert-save-failed-title"),
                 tr!("alert-save-failed"),
                 (tr!("alert-save-as"), tr!("alert-save-as", "hint")),
-                Action::PickFile(crate::file_picker::PickRequest::SaveProjectAs {
-                    suggested: super::suggested_file_name(state.path()),
-                }),
+                Action::PickFile(
+                    stokesforge_app_state::file_picker::PickRequest::SaveProjectAs {
+                        suggested: super::suggested_file_name(state.path()),
+                    },
+                ),
             ),
             AlertKind::OpenFailed => (
                 tr!("alert-open-failed-title"),
                 tr!("alert-open-failed"),
                 (tr!("alert-open-another"), tr!("alert-open-another", "hint")),
-                Action::PickFile(crate::file_picker::PickRequest::OpenProject),
+                Action::PickFile(stokesforge_app_state::file_picker::PickRequest::OpenProject),
             ),
         };
         match modal_alert(

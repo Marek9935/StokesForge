@@ -1,5 +1,5 @@
-//! Lecture des sources de `stokesforge-app` pour les garde-fous qui lisent le
-//! code (#116, chantier #115).
+//! Lecture des sources de `stokesforge-app` **et de `stokesforge-app-state`**
+//! pour les garde-fous qui lisent le code (#116, chantier #115 ; #263).
 //!
 //! # Une seule liste de fichiers
 //!
@@ -81,22 +81,53 @@ pub fn dossier_src() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
-/// Toutes les sources de `stokesforge-app`, sous-dossiers compris, triées par
-/// chemin.
+/// Le dossier `src/` de `stokesforge-app-state`, l'état sans egui (#263).
+pub fn dossier_src_etat() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("stokesforge-app-state")
+        .join("src")
+}
+
+/// Le préfixe des chemins des sources de `stokesforge-app-state` dans la liste
+/// de [`sources`] : `app-state/state.rs`, `app-state/i18n/pseudo.rs`. Les
+/// sources de `stokesforge-app` n'en ont pas (`app.rs`, `app/menus.rs`).
+pub const PREFIXE_ETAT: &str = "app-state/";
+
+/// Toutes les sources de l'application, sous-dossiers compris, triées par
+/// chemin : celles de `stokesforge-app` (chemin relatif à son `src/`) **et**
+/// celles de `stokesforge-app-state` (même chemin, préfixé de
+/// [`PREFIXE_ETAT`]). Le texte d'interface, lui, se pose dans les deux.
 pub fn sources() -> Vec<Fichier> {
-    lire(&dossier_src())
+    lire_dossiers(&[
+        (dossier_src().as_path(), ""),
+        (dossier_src_etat().as_path(), PREFIXE_ETAT),
+    ])
 }
 
 /// Toutes les sources `.rs` sous `racine`, sous-dossiers compris, triées par
 /// chemin ; les fichiers de test sont marqués.
 pub fn lire(racine: &Path) -> Vec<Fichier> {
-    let mut chemins = Vec::new();
-    parcourir(racine, "", &mut chemins);
-    chemins.sort();
+    lire_dossiers(&[(racine, "")])
+}
+
+/// Les sources `.rs` de chaque `(racine, préfixe)`, sous-dossiers compris, dont
+/// le chemin est précédé de son préfixe ; triées par chemin, fichiers de test
+/// marqués.
+pub fn lire_dossiers(dossiers: &[(&Path, &str)]) -> Vec<Fichier> {
+    let mut chemins: Vec<(PathBuf, String)> = Vec::new();
+    for (racine, prefixe) in dossiers {
+        let mut relatifs = Vec::new();
+        parcourir(racine, "", &mut relatifs);
+        for relatif in relatifs {
+            chemins.push((racine.join(&relatif), format!("{prefixe}{relatif}")));
+        }
+    }
+    chemins.sort_by(|a, b| a.1.cmp(&b.1));
     let mut fichiers: Vec<Fichier> = chemins
         .into_iter()
-        .map(|chemin| {
-            let texte = std::fs::read_to_string(racine.join(&chemin)).expect("source lisible");
+        .map(|(complet, chemin)| {
+            let texte = std::fs::read_to_string(complet).expect("source lisible");
             Fichier {
                 chemin,
                 texte,

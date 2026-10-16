@@ -6,9 +6,9 @@ use eframe::egui;
 
 use super::dialogs::{modal_read_only, DialogOutcome};
 use super::shortcuts::{HelpArea, HELP};
-use crate::state::{Action, AppState};
 use crate::theme;
-use crate::tr;
+use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::tr;
 
 /// Peint la fenêtre tant qu'elle est ouverte.
 pub(super) fn keyboard_shortcuts_window(

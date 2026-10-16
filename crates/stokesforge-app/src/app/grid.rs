@@ -22,12 +22,13 @@ use egui_extras::{Column as TableColumn, TableBuilder};
 use stokesforge_core::{ColumnRole, ColumnType, NodeId};
 use stokesforge_plot::PlotType;
 
-use crate::selection::{GridCursor, Selection};
-use crate::state::{
+use crate::icons;
+use stokesforge_app_state::selection::{GridCursor, Selection};
+use stokesforge_app_state::state::{
     Action, AppState, ColumnDragPayload, GridMenu, GridZone, HeaderField, MoveDirection,
     RowDragPayload,
 };
-use crate::{icons, tr};
+use stokesforge_app_state::tr;
 
 use super::empty_state::empty_state;
 use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
@@ -3513,7 +3514,7 @@ mod tests {
     /// lorsque la gouttière est rétrécie à sa largeur minimale.
     #[test]
     fn les_libelles_de_gouttiere_restent_sur_une_seule_ligne() {
-        use crate::i18n::{build_loader, Language};
+        use stokesforge_app_state::i18n::{build_loader, Language};
         let mut banc = Banc::new();
         for language in [Language::English, Language::French, Language::PseudoEnglish] {
             let loader = build_loader(language);
@@ -3734,7 +3735,7 @@ mod tests {
     /// d'avertissement (#200) ; à jour, il n'en porte pas (témoin).
     #[test]
     fn l_en_tete_d_une_colonne_perimee_porte_l_icone_d_avertissement() {
-        use crate::analysis::Preset;
+        use stokesforge_app_state::analysis::Preset;
         let mut banc = Banc::new();
         egui_extras::install_image_loaders(&banc.context);
         let icones = |banc: &mut Banc| {

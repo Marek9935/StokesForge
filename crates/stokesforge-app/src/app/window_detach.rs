@@ -104,7 +104,7 @@
 //! image racine pour publier cet état avant le redessin des lecteurs.
 //! Toute lecture pure (texte de cellule, colonnes visibles, feuilles d'un
 //! classeur, texte d'une note) passe par les fonctions libres de
-//! `crate::state` factorisées sur un `&Tree` pour l'occasion
+//! `stokesforge_app_state::state` factorisées sur un `&Tree` pour l'occasion
 //! (`cell_text_in`, `visible_columns_in`, `row_count_in`, `worksheets_of_in`,
 //! `note_text_in`, `node_title_in`) — le corps exact de la méthode
 //! `AppState` correspondante, pas une réécriture : une fenêtre flottante et
@@ -155,8 +155,8 @@ use stokesforge_core::NodeId;
 use stokesforge_render_egui::GraphView;
 use stokesforge_session::{Snapshot, WindowGeometry};
 
-use crate::state::{Action, AppState, ProjectTreeNode};
-use crate::tr;
+use stokesforge_app_state::state::{Action, AppState, ProjectTreeNode};
+use stokesforge_app_state::tr;
 
 use super::contents::{matrix_contents, note_contents};
 use super::figure_copy::request_figure_copy;
@@ -250,10 +250,10 @@ pub(super) struct ObjectManagerModel {
     pub(super) stamp: (u64, u64, u64),
     pub(super) tree: Arc<stokesforge_core::Tree>,
     pub(super) graph: Option<NodeId>,
-    pub(super) selection: Option<crate::object_manager::VisibilityTarget>,
-    pub(super) model: Option<crate::object_manager::ObjectTree>,
+    pub(super) selection: Option<stokesforge_app_state::object_manager::VisibilityTarget>,
+    pub(super) model: Option<stokesforge_app_state::object_manager::ObjectTree>,
     pub(super) spec: Option<stokesforge_plot::PlotSpec>,
-    pub(super) settings: crate::preferences::ObjectManagerSettings,
+    pub(super) settings: stokesforge_app_state::preferences::ObjectManagerSettings,
 }
 
 #[derive(Default)]
