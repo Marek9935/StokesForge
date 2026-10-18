@@ -394,8 +394,8 @@ pub struct NearestPoint {
     pub series: usize,
     /// Indice du point désigné dans sa série.
     pub point_index: usize,
-    /// Position du point, dans l'espace de la géométrie préparée
-    /// ([`series::prepare`]).
+    /// Position du point, en données (jamais les exposants d'un axe
+    /// logarithmique).
     pub data: (f64, f64),
     /// Position du point, en pixels de la figure.
     pub pixel: (f64, f64),
@@ -448,20 +448,34 @@ pub fn nearest_point(
         let series::Geometry::Curve { points, .. } = &prepared.geometry else {
             continue;
         };
-        let Some((point_index, distance)) = nearest_on_curve(transform, points, cursor) else {
+        // La géométrie préparée est dans l'espace transformé (log10 sur un axe
+        // log) ; `PanelTransform` attend des données et applique `forward`
+        // lui-même : sans ce retour, le logarithme serait pris deux fois (#268).
+        let data_points: Vec<(f64, f64)> = points
+            .iter()
+            .map(|&(x, y)| {
+                (
+                    inverse(spec_panel.bottom.scale, x),
+                    inverse(spec_panel.left.scale, y),
+                )
+            })
+            .collect();
+        let Some((point_index, distance)) = nearest_on_curve(transform, &data_points, cursor)
+        else {
             continue;
         };
         if best.is_some_and(|hit| hit.distance <= distance) {
             continue;
         }
-        let Some(pixel) = transform.data_to_pixel(points[point_index].0, points[point_index].1)
+        let Some(pixel) =
+            transform.data_to_pixel(data_points[point_index].0, data_points[point_index].1)
         else {
             continue;
         };
         best = Some(NearestPoint {
             series: series_index,
             point_index,
-            data: points[point_index],
+            data: data_points[point_index],
             pixel,
             distance,
         });
@@ -663,6 +677,38 @@ mod tests {
         assert_eq!(hit.data, (50.0, 50.0));
         assert_eq!(hit.pixel, (50.0, 50.0));
         assert!((hit.distance - 5f64.sqrt()).abs() < 1e-9, "{hit:?}");
+    }
+
+    #[test]
+    fn un_point_est_designe_sur_des_axes_logarithmiques() {
+        // #268 : le logarithme ne doit être pris qu'une fois.
+        let colonnes = vec![
+            vec![1.0, 10.0, 100.0, 1000.0],
+            vec![10.0, 100.0, 1000.0, 10_000.0],
+        ];
+        let (project, ids) = projet(&colonnes);
+        let mut spec_panel = PanelSpec::at(0, 0);
+        spec_panel.bottom.scale = AxisScale::Log;
+        spec_panel.left.scale = AxisScale::Log;
+        spec_panel.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
+        let spec = PlotSpec::empty("Log").with_panels(spec_panel);
+        let drawn = panel(0, 0, 0);
+        let transform = PanelTransform {
+            origin: (0.0, 0.0),
+            size: (300.0, 400.0),
+            x_range: (1.0, 1000.0),
+            y_range: (10.0, 10_000.0),
+            x_scale: AxisScale::Log,
+            y_scale: AxisScale::Log,
+        };
+        for (index, (&x, &y)) in colonnes[0].iter().zip(&colonnes[1]).enumerate() {
+            let cursor = transform.data_to_pixel(x, y).unwrap();
+            let hit = nearest_point(project.tree(), &spec, &drawn, &transform, cursor, 3.0)
+                .unwrap_or_else(|| panic!("point {index} non désigné"));
+            assert_eq!(hit.point_index, index);
+            assert!(hit.distance < 1e-6, "{hit:?}");
+            assert!((hit.data.0 / x - 1.0).abs() < 1e-9 && (hit.data.1 / y - 1.0).abs() < 1e-9);
+        }
     }
 
     #[test]
