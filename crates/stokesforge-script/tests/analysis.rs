@@ -216,8 +216,12 @@ fn le_calcul_se_recalcule_quand_la_source_change() {
 r = pyst.analysis.correct(y, ref, x, op='divide')
 out = r['columns']['corrected']
 assert pyst.column(out)[2] == 2.5
+# La référence est figée en copie (#248) : modifier l'original ne change rien.
 pyst.set_values(ref, [4.0] * 21)
-assert pyst.column(out)[2] == 1.25, list(pyst.column(out))[:4]
+assert pyst.column(out)[2] == 2.5, list(pyst.column(out))[:4]
+# La source, elle, est relue : y / 2 = 5 / 2.
+pyst.set_values(y, [10.0] * 21)
+assert pyst.column(out)[2] == 5.0, list(pyst.column(out))[:4]
 "#,
     );
 }
