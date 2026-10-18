@@ -125,6 +125,15 @@ Le dépôt contient déjà des échantillons sous `test/import/` : s'en servir
 plutôt que d'en inventer, et vérifier avant d'en committer un nouveau qu'il ne
 contient pas de données que l'utilisateur ne veut pas publier.
 
+## Import de l'application : un seul chemin en fond
+
+L'import de menu et le glisser-déposer passent tous deux par
+`AppState::start_import` (fil `stokesforge-app-import`, source fermée
+`Menu(recette)` ou `Dépôt{repli, classeur cible}`), appliqué par `poll_import`
+(#266). Ne jamais lire ni analyser un fichier sur le fil de l'interface ;
+un résultat reçu pendant que les propriétés du graphe sont ouvertes est gardé
+et appliqué après leur fermeture (invariants 1 et 8).
+
 ## Checklist
 
 - [ ] doc de tête de `lib.rs` lue ; note de passation confrontée au code

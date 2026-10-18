@@ -170,7 +170,8 @@ ou par la relecture :
 - **un module par surface** : grille `grid.rs`, classeur `workbook.rs`,
   graphe `graph_window.rs` et `graph_text_edit.rs`, Object Manager peint
   `object_manager_ui.rs`, Project Manager `project_manager.rs`, console
-  `script_console.rs`, dépôt `file_drop.rs`, contenus partagés `contents.rs`,
+  `script_console.rs`, dépôt `file_drop.rs` (l'import déposé passe par
+  `start_import`, en fond, #266), contenus partagés `contents.rs`,
   menus et barre d'état `menus.rs`, barres de format `format.rs`, dialogues
   `import_wizard.rs` et `plot_settings.rs`, « Send to » `graph_targets.rs`,
   copie de la figure `figure_copy.rs` ; fenêtres : `window_chrome.rs`

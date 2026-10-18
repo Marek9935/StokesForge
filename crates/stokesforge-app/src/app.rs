@@ -1338,9 +1338,6 @@ impl StokesForgeApp {
             Action::ImportFiles {
                 destination: ImportDestination::NewBookPerFile | ImportDestination::NewBookForAll,
                 ..
-            } | Action::DropFiles {
-                target_book: None,
-                ..
             }
         ) {
             let root = self.state.tree().root();

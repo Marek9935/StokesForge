@@ -2103,11 +2103,8 @@ pub fn file_drop_plan(paths: &[PathBuf], target_book: Option<NodeId>) -> DropPla
 /// une colonne et une ligne dont une valeur est un nombre. Sinon le dépôt
 /// ouvre la fenêtre d'import plutôt que de créer une feuille vide ou
 /// illisible.
-fn reads_well(path: &std::path::Path, recipe: &stokesforge_import::ImportRecipe) -> bool {
-    let Ok(bytes) = std::fs::read(path) else {
-        return false;
-    };
-    stokesforge_import::parse(&bytes, recipe).is_ok_and(|table| {
+fn reads_well(bytes: &[u8], recipe: &stokesforge_import::ImportRecipe) -> bool {
+    stokesforge_import::parse(bytes, recipe).is_ok_and(|table| {
         table
             .columns
             .iter()
@@ -2124,17 +2121,42 @@ struct LastImport {
     paths: Vec<PathBuf>,
 }
 
-/// Import en cours sur un fil de fond : l'analyse des fichiers (la partie
-/// lente) ne bloque pas l'interface ; les feuilles sont créées par
-/// [`AppState::poll_import`] quand tout est prêt.
+/// D'où vient un import en fond : de l'assistant/menu (une recette choisie
+/// par l'utilisateur) ou d'un dépôt de fichiers (un modèle par fichier).
+enum ImportSource {
+    Menu(stokesforge_import::ImportRecipe),
+    Drop {
+        /// Modèle des fichiers que le choix automatique ne reconnaît pas.
+        fallback: stokesforge_import::ImportRecipe,
+        /// Classeur sous le curseur au moment du dépôt.
+        target_book: Option<NodeId>,
+    },
+}
+
+/// Ce que le fil d'import rend : les éléments lus, les fichiers qui ne se
+/// lisent pas (dépôt seulement) et les modèles utilisés.
+struct ImportReply {
+    items: Vec<ImportItem>,
+    unreadable: Vec<PathBuf>,
+    models: Vec<String>,
+}
+
+/// Import en cours sur un fil de fond : la lecture et l'analyse des fichiers
+/// (la partie lente) ne bloquent pas l'interface ; les feuilles sont créées
+/// par [`AppState::poll_import`] quand tout est prêt.
 struct ImportJob {
     destination: ImportDestination,
+    /// `Some(classeur cible)` pour un dépôt, `None` pour l'import de menu.
+    dropped: Option<Option<NodeId>>,
     total: usize,
     done: Arc<std::sync::atomic::AtomicUsize>,
     /// Posé par Stop : le fil d'analyse s'arrête entre deux fichiers.
     stop: Arc<std::sync::atomic::AtomicBool>,
     started: std::time::Instant,
-    reply: mpsc::Receiver<Vec<ImportItem>>,
+    reply: mpsc::Receiver<ImportReply>,
+    /// Réponse reçue mais pas appliquée : les propriétés du graphe sont
+    /// ouvertes et leur macro d'historique absorberait l'import.
+    ready: Option<ImportReply>,
 }
 
 /// État transitoire de la fenêtre d'import (voir `stokesforge_app::app` pour son
@@ -4426,7 +4448,7 @@ impl AppState {
                 destination,
                 recipe,
                 paths,
-            } => self.start_import(destination, recipe, paths),
+            } => self.start_import(destination, ImportSource::Menu(recipe), paths),
             Action::ReopenLastImport => self.reopen_last_import(),
             Action::RefreshFromSource { sheet } => self.refresh_from_source(sheet),
             Action::ViewColumnMetadata { column } => self.metadata_view = Some(column),
@@ -5030,7 +5052,8 @@ impl AppState {
 
     /// Traite un dépôt de fichiers ([`Action::DropFiles`]). Les `.stf` sont mis
     /// en file pour ouverture ([`AppState::take_projects_to_open`]). Les
-    /// autres fichiers sont lus avec le modèle reconnu, sinon le dernier utilisé, à défaut la
+    /// autres fichiers passent par [`AppState::start_import`] : lus sur le fil
+    /// de fond avec le modèle reconnu, sinon le dernier utilisé, à défaut la
     /// recette permissive ; ceux qui se lisent correctement partent dans un
     /// seul import annulable, les autres ouvrent la fenêtre d'import
     /// pré-remplie pour être réglés à la main.
@@ -5053,10 +5076,6 @@ impl AppState {
         if plan.data.is_empty() {
             return;
         }
-        // Un modèle par fichier : le choix automatique (extension, nom,
-        // signature de contenu), sinon le dernier modèle réellement utilisé,
-        // sinon la recette permissive.
-        let store = stokesforge_import::RecipeStore::load_with_builtins();
         let fallback = self
             .last_import
             .as_ref()
@@ -5064,58 +5083,22 @@ impl AppState {
             .unwrap_or_else(|| {
                 stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"))
             });
-        let mut items: Vec<ImportItem> = Vec::new();
-        let mut bad: Vec<PathBuf> = Vec::new();
-        let mut models: Vec<String> = Vec::new();
-        for path in plan.data {
-            let mut recipe = std::fs::read(&path)
-                .ok()
-                .and_then(|bytes| {
-                    stokesforge_import::choose_recipe(store.recipes(), &path, &bytes).cloned()
-                })
-                .unwrap_or_else(|| fallback.clone());
-            // Le geste du dépôt ajoute une feuille par fichier : les options
-            // de remplacement ou de fusion du dernier assistant ne doivent
-            // pas modifier sa destination ni écraser une feuille existante.
-            recipe.import_mode = stokesforge_import::ImportMode::NewSheet;
-            recipe.files_layout = stokesforge_import::FilesLayout::SheetPerFile;
-            if reads_well(&path, &recipe) {
-                if !models.contains(&recipe.name) {
-                    models.push(recipe.name.clone());
-                }
-                items.extend(import_items(&path, &recipe));
-            } else {
-                bad.push(path);
-            }
-        }
-        if !items.is_empty() {
-            let count = items.len();
-            self.apply_import(plan.destination, items);
-            if self
-                .status
-                .as_ref()
-                .is_some_and(|status| !status.is_error())
-            {
-                self.notice(tr!(
-                    "status-import-dropped",
-                    count = count,
-                    models = models.join(", ")
-                ));
-            }
-        }
-        if !bad.is_empty() {
-            self.open_import(target_book);
-            if let Some(import) = &mut self.import_state {
-                import.paths = bad;
-            }
-        }
+        self.start_import(
+            plan.destination,
+            ImportSource::Drop {
+                fallback,
+                target_book,
+            },
+            plan.data,
+        );
     }
 
-    /// Lance l'analyse des fichiers sur un fil de fond ([`Action::StartImport`]).
+    /// Lance la lecture et l'analyse des fichiers sur un fil de fond : entrée
+    /// unique de l'import de menu ([`Action::StartImport`]) et du dépôt.
     fn start_import(
         &mut self,
         destination: ImportDestination,
-        recipe: stokesforge_import::ImportRecipe,
+        source: ImportSource,
         paths: Vec<PathBuf>,
     ) {
         if paths.is_empty() {
@@ -5131,29 +5114,76 @@ impl AppState {
         let worker_done = Arc::clone(&done);
         let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
-        let worker_recipe = recipe.clone();
+        let dropped = match &source {
+            ImportSource::Menu(_) => None,
+            ImportSource::Drop { target_book, .. } => Some(*target_book),
+        };
         let spawned = thread::Builder::new()
             .name("stokesforge-app-import".to_owned())
             .spawn(move || {
-                let mut parsed: Vec<ImportItem> = Vec::new();
+                let mut reply = ImportReply {
+                    items: Vec::new(),
+                    unreadable: Vec::new(),
+                    models: Vec::new(),
+                };
+                // Un modèle par fichier pour un dépôt : le choix automatique
+                // (extension, nom, signature de contenu), sinon le dernier
+                // modèle réellement utilisé, sinon la recette permissive.
+                let store = match &source {
+                    ImportSource::Drop { .. } => {
+                        Some(stokesforge_import::RecipeStore::load_with_builtins())
+                    }
+                    ImportSource::Menu(_) => None,
+                };
                 for path in paths {
                     if worker_stop.load(std::sync::atomic::Ordering::Relaxed) {
                         break;
                     }
-                    parsed.extend(import_items(&path, &worker_recipe));
+                    match (&source, &store) {
+                        (ImportSource::Drop { fallback, .. }, Some(store)) => {
+                            let bytes = std::fs::read(&path).ok();
+                            let mut recipe = bytes
+                                .as_deref()
+                                .and_then(|bytes| {
+                                    stokesforge_import::choose_recipe(store.recipes(), &path, bytes)
+                                        .cloned()
+                                })
+                                .unwrap_or_else(|| fallback.clone());
+                            // Le geste du dépôt ajoute une feuille par fichier :
+                            // les options de remplacement ou de fusion du
+                            // dernier assistant ne doivent pas modifier sa
+                            // destination ni écraser une feuille existante.
+                            recipe.import_mode = stokesforge_import::ImportMode::NewSheet;
+                            recipe.files_layout = stokesforge_import::FilesLayout::SheetPerFile;
+                            if bytes.as_deref().is_some_and(|b| reads_well(b, &recipe)) {
+                                if !reply.models.contains(&recipe.name) {
+                                    reply.models.push(recipe.name.clone());
+                                }
+                                reply.items.extend(import_items(&path, &recipe));
+                            } else {
+                                reply.unreadable.push(path);
+                            }
+                        }
+                        (ImportSource::Menu(recipe), _) => {
+                            reply.items.extend(import_items(&path, recipe));
+                        }
+                        (ImportSource::Drop { .. }, None) => {}
+                    }
                     worker_done.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
-                let _ = reply_tx.send(parsed);
+                let _ = reply_tx.send(reply);
             });
         match spawned {
             Ok(_) => {
                 self.import_job = Some(ImportJob {
                     destination,
+                    dropped,
                     total,
                     done,
                     stop,
                     started: std::time::Instant::now(),
                     reply,
+                    ready: None,
                 });
                 self.notice(tr!("status-import-progress", done = 0, total = total));
             }
@@ -5198,31 +5228,68 @@ impl AppState {
     /// l'analyse est finie, crée les feuilles. Rend vrai si l'import vient de
     /// s'appliquer. Ne bloque jamais.
     pub fn poll_import(&mut self) -> bool {
-        let Some(job) = &self.import_job else {
+        let Some(job) = &mut self.import_job else {
             return false;
         };
-        match job.reply.try_recv() {
-            Ok(parsed) => {
-                let Some(job) = self.import_job.take() else {
+        if job.ready.is_none() {
+            match job.reply.try_recv() {
+                Ok(reply) => job.ready = Some(reply),
+                Err(mpsc::TryRecvError::Empty) => {
+                    let (done, total) = (
+                        job.done.load(std::sync::atomic::Ordering::Relaxed),
+                        job.total,
+                    );
+                    self.notice(tr!("status-import-progress", done = done, total = total));
                     return false;
-                };
-                self.apply_import(job.destination, parsed);
-                true
-            }
-            Err(mpsc::TryRecvError::Empty) => {
-                let (done, total) = (
-                    job.done.load(std::sync::atomic::Ordering::Relaxed),
-                    job.total,
-                );
-                self.notice(tr!("status-import-progress", done = done, total = total));
-                false
-            }
-            Err(mpsc::TryRecvError::Disconnected) => {
-                self.import_job = None;
-                self.fail(tr!("error-import-stopped"));
-                false
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.import_job = None;
+                    self.fail(tr!("error-import-stopped"));
+                    return false;
+                }
             }
         }
+        // Les propriétés du graphe tiennent la macro d'historique de la
+        // racine : on garde le travail et on l'applique à leur fermeture.
+        if self.plot_settings.is_some() {
+            return false;
+        }
+        let Some(mut job) = self.import_job.take() else {
+            return false;
+        };
+        let Some(reply) = job.ready.take() else {
+            return false;
+        };
+        let applied = job.dropped.is_none() || !reply.items.is_empty();
+        if applied {
+            let count = reply.items.len();
+            self.apply_import(job.destination, reply.items);
+            if job.dropped.is_some()
+                && self
+                    .status
+                    .as_ref()
+                    .is_some_and(|status| !status.is_error())
+            {
+                self.notice(tr!(
+                    "status-import-dropped",
+                    count = count,
+                    models = reply.models.join(", ")
+                ));
+            }
+        }
+        if let Some(target_book) = job.dropped {
+            if !reply.unreadable.is_empty() {
+                if self.import_state.is_some() {
+                    self.add_import_paths(reply.unreadable);
+                } else {
+                    self.open_import(target_book);
+                    if let Some(import) = &mut self.import_state {
+                        import.paths = reply.unreadable;
+                    }
+                }
+            }
+        }
+        applied
     }
 
     /// Fichiers importés avec succès depuis le dernier appel, pour les
@@ -5580,7 +5647,11 @@ impl AppState {
         let name = recipe.name.clone();
         state.store.upsert(recipe.clone());
         let saved = state.store.save();
-        state.baseline = recipe.clone();
+        // Comme `save_import_recipe` : sans écriture réussie, garder l'ancienne
+        // référence pour que le modèle importé reste « modifié » (non enregistré).
+        if saved.is_ok() {
+            state.baseline = recipe.clone();
+        }
         state.recipe = recipe;
         state.save_as_name = name.clone();
         match saved {

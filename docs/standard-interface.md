@@ -461,7 +461,9 @@ Comment c'est tenu :
 - Au-delà d'≈ 0,5 s : indicateur tournant + mot (« Importing… ») à l'endroit
   du résultat ; barre de progression si le nombre d'étapes est connu (P1).
 - Bouton **Stop** pour tout travail de plus de quelques secondes (import
-  multiple, script, recalcul lourd) (P2).
+  multiple, script, recalcul lourd) (P2). L'import par glisser-déposer suit la
+  même voie que File › Import (lecture, choix du modèle et analyse sur le fil
+  de fond, #266).
 - **État vide** : phrase grisée centrée qui dit ce qui manque et le geste pour
   le créer (P3) : `empty_state`, partout (classeur sans colonne ou sans
   feuille, graphe sans série, Object Manager, Results, historique des messages,

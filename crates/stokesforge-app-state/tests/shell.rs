@@ -6935,6 +6935,7 @@ fn dropping_files_during_plot_settings_is_refused_without_touching_the_macro() {
         paths: vec![file],
         target_book: None,
     });
+    wait_import(&mut state);
     assert!(
         !state.status().unwrap().is_error(),
         "le dépôt passe après fermeture du dialogue"
@@ -6977,6 +6978,7 @@ fn dropping_files_uses_the_last_recipe_and_always_creates_new_sheets() {
         paths: files,
         target_book: Some(book),
     });
+    wait_import(&mut state);
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 2);
     let sheet = sheet_named(state.tree(), "depot1");
     let columns = state.visible_columns(sheet);
@@ -7010,6 +7012,7 @@ fn dropping_an_unknown_file_without_history_uses_the_default_recipe() {
         paths: vec![path],
         target_book: Some(book),
     });
+    wait_import(&mut state);
     let sheet = sheet_named(state.tree(), "inconnu");
     let x = state.visible_columns(sheet)[0].0;
     assert_eq!(cell_f64(&state, x, 0), 1., "première ligne conservée");
@@ -7059,6 +7062,7 @@ fn dropping_files_on_a_book_imports_them_as_one_undo_entry() {
         paths: vec![file_a, file_b],
         target_book: Some(book),
     });
+    wait_import(&mut state);
 
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 2);
     assert!(state.import_state().is_none(), "aucune fenêtre d'import");
@@ -7090,6 +7094,7 @@ fn dropping_files_elsewhere_creates_a_new_book() {
         paths: vec![file],
         target_book: None,
     });
+    wait_import(&mut state);
 
     assert_eq!(
         state.tree().node(root).unwrap().children().len(),
@@ -7136,6 +7141,7 @@ fn dropping_an_unreadable_file_opens_the_import_window_prefilled() {
         paths: vec![bad.clone(), good],
         target_book: Some(book),
     });
+    wait_import(&mut state);
 
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
     let import = state.import_state().expect("fenêtre d'import ouverte");
@@ -7337,6 +7343,32 @@ fn un_echec_d_enregistrement_garde_le_modele_d_import_modifie() {
     assert!(
         !state.import_recipe_modified(),
         "la référence reste le dernier succès"
+    );
+}
+
+/// #267 : un modèle importé dont l'enregistrement échoue reste « modifié ».
+#[test]
+fn un_echec_d_enregistrement_d_un_modele_importe_le_garde_modifie() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    let mut recipe = state.import_state_mut().unwrap().recipe.clone();
+    recipe.name = "importé".to_string();
+    recipe.skip_chars = 7;
+    let json = dir.path().join("modele.json");
+    std::fs::write(&json, recipe.to_json()).unwrap();
+
+    let config = directories::ProjectDirs::from("", "", "StokesForge").unwrap();
+    let file = config.config_dir().join("import_recipes.json");
+    let _ = std::fs::remove_file(&file);
+    std::fs::create_dir_all(&file).unwrap();
+    state.import_import_recipe(&json);
+
+    assert!(state.dialog_error().is_some());
+    assert!(
+        state.import_recipe_modified(),
+        "non écrit sur disque : la référence reste l'ancienne"
     );
 }
 
@@ -7806,6 +7838,206 @@ fn a_background_import_reports_progress_then_applies_in_one_entry() {
     assert!(!state.can_undo(), "une seule entrée pour tout le lot");
 }
 
+/// Attend la fin de l'import en fond (lecture, analyse, puis application par
+/// `poll_import`), sans jamais attendre indéfiniment.
+fn wait_import(state: &mut AppState) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while state.import_progress().is_some() {
+        state.poll_import();
+        assert!(std::time::Instant::now() < deadline, "import trop long");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+/// Un dépôt de gros fichier rend la main aussitôt (#266) : la lecture et
+/// l'analyse se font sur le fil de fond, rien n'est encore créé.
+#[test]
+fn dropping_a_big_csv_returns_immediately_and_applies_later() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheets_before = state.worksheets_of(book).len();
+    let file = dir.path().join("gros.csv");
+    let mut text = String::new();
+    for i in 0..100_000 {
+        text.push_str(&format!("{i},{},{},{}\n", i * 2, i * 3, i * 4));
+    }
+    std::fs::write(&file, text).unwrap();
+
+    state.dispatch(Action::DropFiles {
+        paths: vec![file],
+        target_book: Some(book),
+    });
+
+    assert!(state.import_work().is_some(), "travail en cours (P1/P2)");
+    assert_eq!(
+        state.worksheets_of(book).len(),
+        sheets_before,
+        "rien encore"
+    );
+    wait_import(&mut state);
+    assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
+}
+
+/// Un fichier illisible n'empêche pas le bon : l'assistant ne s'ouvre qu'au
+/// retour du fil, avec le seul fichier illisible.
+#[test]
+fn a_background_drop_opens_the_wizard_only_when_the_thread_answers() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let bad = dir.path().join("binaire.dat");
+    std::fs::write(&bad, [0u8, 159, 146, 150, 0, 0]).unwrap();
+    let good = dir.path().join("bon.csv");
+    std::fs::write(&good, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::DropFiles {
+        paths: vec![bad.clone(), good],
+        target_book: Some(book),
+    });
+    assert!(state.import_state().is_none(), "assistant fermé pendant");
+    wait_import(&mut state);
+    assert_eq!(state.import_state().expect("assistant").paths, vec![bad]);
+}
+
+/// Tous illisibles : l'assistant s'ouvre, aucune macro vide dans l'historique.
+#[test]
+fn a_drop_of_only_unreadable_files_opens_the_wizard_without_history() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let bad = dir.path().join("binaire.dat");
+    std::fs::write(&bad, [0u8, 159, 146, 150, 0, 0]).unwrap();
+    state.dispatch(Action::DropFiles {
+        paths: vec![bad.clone()],
+        target_book: None,
+    });
+    wait_import(&mut state);
+    assert_eq!(state.import_state().expect("assistant").paths, vec![bad]);
+    assert!(!state.can_undo(), "aucune entrée d'historique");
+    assert_ne!(
+        state.status().map(|status| status.text.clone()),
+        Some(stokesforge_app_state::tr!(
+            "status-import-dropped",
+            count = 0,
+            models = ""
+        )),
+        "aucun import appliqué, aucun message de dépôt"
+    );
+}
+
+/// Stop pendant un dépôt : rien n'est appliqué, l'assistant ne s'ouvre pas.
+#[test]
+fn stopping_a_background_drop_applies_nothing() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let sheets_before = state.worksheets_of(book).len();
+    let bad = dir.path().join("binaire.dat");
+    std::fs::write(&bad, [0u8, 159, 146, 150, 0, 0]).unwrap();
+    let good = dir.path().join("bon.csv");
+    std::fs::write(&good, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::DropFiles {
+        paths: vec![bad, good],
+        target_book: Some(book),
+    });
+    state.dispatch(Action::StopImport);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert!(!state.poll_import());
+    assert_eq!(state.worksheets_of(book).len(), sheets_before);
+    assert!(state.import_state().is_none());
+    assert!(!state.can_undo());
+}
+
+/// Le message « modèles utilisés » est propre au dépôt : un import de menu
+/// ne l'affiche pas.
+#[test]
+fn a_menu_import_does_not_report_a_drop() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let file = dir.path().join("menu.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::StartImport {
+        destination: ImportDestination::ActiveBook(book),
+        recipe: ImportRecipe::new("Menu"),
+        paths: vec![file],
+    });
+    wait_import(&mut state);
+    let status = state.status().unwrap();
+    assert!(!status.is_error());
+    assert_ne!(
+        status.text,
+        stokesforge_app_state::tr!("status-import-dropped", count = 1, models = ""),
+        "pas de message de dépôt"
+    );
+}
+
+/// Un dépôt pendant un import en cours est refusé.
+#[test]
+fn dropping_files_during_a_running_import_is_refused() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let a = dir.path().join("a.csv");
+    std::fs::write(&a, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::DropFiles {
+        paths: vec![a.clone()],
+        target_book: Some(book),
+    });
+    assert!(state.import_work().is_some());
+    state.dispatch(Action::DropFiles {
+        paths: vec![a],
+        target_book: Some(book),
+    });
+    let status = state.status().unwrap();
+    assert!(status.is_error());
+    assert_eq!(
+        status.text,
+        stokesforge_app_state::tr!("error-import-running")
+    );
+    wait_import(&mut state);
+}
+
+/// Propriétés du graphe ouvertes quand le fil répond : l'application est
+/// différée, la macro du graphe reste intacte, puis l'import s'applique en
+/// entrée séparée.
+#[test]
+fn a_background_drop_waits_for_the_plot_settings_to_close() {
+    let _recipes = isolate_recipe_store();
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start_demo(dir.path());
+    let book = book_named(state.tree(), "Book1");
+    let graph = plotted_graph(&mut state);
+    let sheets_before = state.worksheets_of(book).len();
+    let file = dir.path().join("depot.csv");
+    std::fs::write(&file, "1,10\n2,20\n").unwrap();
+    state.dispatch(Action::DropFiles {
+        paths: vec![file],
+        target_book: Some(book),
+    });
+    state.dispatch(Action::OpenPlotSettings {
+        graph,
+        tab: PlotSettingsTab::Graph,
+        axis: None,
+    });
+    let before = session.handle().snapshot().unwrap();
+    assert!(before.history.in_macro, "le dialogue ouvre sa macro");
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(!state.poll_import(), "différé");
+    let during = session.handle().snapshot().unwrap();
+    assert_eq!(*during.tree, *before.tree);
+    assert!(during.history.in_macro);
+    assert!(state.import_progress().is_some(), "travail gardé");
+    state.cancel_plot_settings();
+    wait_import(&mut state);
+    assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
+}
+
 /// Stop (#232, P2) : l'import en fond s'arrête, rien n'est créé, ni
 /// historique, et un nouvel import peut repartir aussitôt.
 #[test]
@@ -7947,6 +8179,7 @@ fn dropping_a_jasco_file_picks_the_builtin_model_automatically() {
         paths: vec![fixture_path("jasco_uvvis_semicolon.csv")],
         target_book: Some(book),
     });
+    wait_import(&mut state);
 
     assert_eq!(state.worksheets_of(book).len(), before + 1);
     assert!(state.import_state().is_none(), "lu sans assistant");
@@ -8044,6 +8277,7 @@ fn dropping_files_of_different_formats_uses_one_model_each_in_one_entry() {
         ],
         target_book: Some(book),
     });
+    wait_import(&mut state);
 
     assert_eq!(state.worksheets_of(book).len(), before + 2);
     let status = state.status().unwrap();

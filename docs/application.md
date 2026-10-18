@@ -424,9 +424,13 @@ file (`take_projects_to_open`) et `app.rs` lance un second processus
 (`file_drop::open_project_in_new_window`)
 `stokesforge-app <chemin>`. Chaque fichier utilise le modèle qui le reconnaît,
 sinon le dernier modèle utilisé dans cette session, sinon la recette permissive.
-Il passe par la conversion et l'application communes à l'assistant — une
-seule entrée « Importer » ; un fichier qui ne donne aucune valeur numérique
-ouvre à la place la fenêtre d'import pré-remplie. Décision pure :
+Lecture, choix du modèle et analyse se font sur le fil de fond de l'import de
+menu (#266) : `drop_files` ne garde sur le fil de l'interface que les refus et
+la mise en file des `.stf`, puis passe par `start_import`, entrée unique de
+l'import (indicateur et Stop comme File › Import ; un dépôt pendant un import
+en cours est refusé). `poll_import` applique le résultat — une
+seule entrée « Importer » — et pose le message des modèles utilisés ; un fichier qui ne donne aucune valeur numérique
+ouvre à la place la fenêtre d'import pré-remplie, au retour du fil. Décision pure :
 `state::file_drop_plan`. Le dépôt crée toujours de nouvelles feuilles, même
 si la recette du dernier import remplaçait ou fusionnait une feuille. Le lien
 File › Import › Reopen Last
@@ -437,7 +441,8 @@ la destination reste ce classeur ; sur un graphe, une note, une matrice ou le
 Project Manager, un nouveau classeur. Les dépôts sont isolés par viewport et
 leurs actions reviennent à la session principale. Un dépôt est refusé tant
 que les propriétés du graphe sont ouvertes, pour garder leur macro
-d'historique indépendante de l'import. Les événements de dépôt sont
+d'historique indépendante de l'import ; si elles s'ouvrent pendant que le fil
+lit, `poll_import` garde le résultat et l'applique après leur fermeture. Les événements de dépôt sont
 testés sans fenêtre. Le dépôt réel depuis Fichiers en Wayland natif est
 confirmé par l'utilisateur le 2026-10-02 ; les fenêtres OS détachées et
 les autres cas du protocole ci-dessous restent à valider manuellement.
