@@ -162,7 +162,11 @@ fn grid_of(x: &[f64], w: &mut DeconvWarnings) -> Result<Grid, AnalysisError> {
     let mut steps: Vec<f64> = x.windows(2).map(|p| p[1] - p[0]).collect();
     steps.sort_by(f64::total_cmp);
     let step = steps[steps.len() / 2];
-    let nodes = ((x[n - 1] - x[0]) / step).round() as usize + 1;
+    // La grille doit couvrir le dernier X : arrondi supérieur (à l'erreur de
+    // flottant près, pour qu'un dernier nœud qui tombe pile ne gagne pas un
+    // nœud de plus), sinon la relecture hors grille donnerait NaN.
+    let ratio = (x[n - 1] - x[0]) / step;
+    let nodes = (ratio - 1e-9 * ratio.max(1.0)).ceil().max(0.0) as usize + 1;
     if nodes > MAX_GRID {
         return Err(AnalysisError::InvalidParameter {
             name: "signal".into(),
@@ -788,5 +792,40 @@ mod tests {
             reconvolve(&s, &irf, &spec),
             Err(AnalysisError::InvalidParameter { .. })
         ));
+    }
+
+    #[test]
+    fn grille_non_uniforme_couvre_le_dernier_x() {
+        // Dernier X (4,4) entre deux nœuds du pas médian : le dernier point
+        // ne doit être ni NaN (directe) ni NonFiniteModel (réconvolution).
+        let irf = irf_series(40, 0.1, 1.0, 0.3);
+        let x = vec![0.0, 1.0, 2.0, 3.0, 4.4];
+        let signal = Series::new(x.clone(), vec![1.0, 2.0, 3.0, 2.0, 1.0]);
+        for method in [
+            DirectMethod::RichardsonLucy { iterations: 20 },
+            DirectMethod::Wiener { noise: Some(0.01) },
+        ] {
+            let d = deconvolve(&signal, &irf, 0.0, method).unwrap();
+            assert!(d.warnings.non_uniform_signal);
+            assert!(
+                d.values.iter().all(|v| v.is_finite()),
+                "{method:?}: {:?}",
+                d.values
+            );
+        }
+        let signal = Series::new(vec![0.0, 1.0, 2.0, 3.0, 4.2], vec![1.0, 2.0, 3.0, 2.0, 1.0]);
+        let spec = ReconvSpec {
+            components: 1,
+            params: vec![],
+            shift_initial: 0.0,
+            fit_shift: false,
+            window: None,
+        };
+        let r = reconvolve(&signal, &irf, &spec);
+        assert!(
+            !matches!(r, Err(AnalysisError::NonFiniteModel)),
+            "{:?}",
+            r.err()
+        );
     }
 }
