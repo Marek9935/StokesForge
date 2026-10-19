@@ -305,6 +305,80 @@ fn validate_refuse_un_decalage_ou_une_fenetre_non_finis() {
 }
 
 #[test]
+fn validate_refuse_toute_ancre_non_finie_et_l_accepte_finie() {
+    for interpolation in [Interpolation::Segments, Interpolation::Spline] {
+        let anchors = |points| {
+            baseline(BaselineMethod::Anchors {
+                points,
+                interpolation,
+            })
+        };
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for p in [(bad, 3.0), (3.0, bad)] {
+                assert_eq!(
+                    anchors(vec![p, (0.0, 1.0), (5.0, 2.0)]).validate(),
+                    invalid("points")
+                );
+                assert_eq!(
+                    anchors(vec![(0.0, 1.0), p, (5.0, 2.0)]).validate(),
+                    invalid("points")
+                );
+                assert_eq!(
+                    anchors(vec![(0.0, 1.0), (5.0, 2.0), p]).validate(),
+                    invalid("points")
+                );
+            }
+        }
+        assert_eq!(
+            anchors(vec![(0.0, 1.0), (5.0, 2.0), (3.0, 3.0)]).validate(),
+            Ok(())
+        );
+    }
+}
+
+#[test]
+fn run_des_ancres_refuse_le_non_fini_et_compte_les_ancres_posees() {
+    let input = SeriesInput {
+        x: vec![0.0, 1.0, 2.0, 3.0, 4.0],
+        y: vec![1.0, 2.0, 3.0, 4.0, 5.0],
+        sigma: None,
+    };
+    let anchors = |points| {
+        baseline(BaselineMethod::Anchors {
+            points,
+            interpolation: Interpolation::Segments,
+        })
+    };
+    let good = anchors(vec![(4.0, 4.0), (0.0, 0.0), (2.0, 2.0)]);
+    let out = run(&good, std::slice::from_ref(&input), None).unwrap();
+    let points = out[0]
+        .values
+        .iter()
+        .find(|v| v.key == "baseline.points")
+        .unwrap();
+    assert_eq!(points.value, 3.0);
+    // Ligne de base y = x : la série corrigée vaut 1 partout.
+    let corrected = &out[0]
+        .columns
+        .iter()
+        .find(|c| c.key == "corrected")
+        .unwrap()
+        .data;
+    for c in corrected {
+        assert!((c - 1.0).abs() < 1e-12);
+    }
+    // Un NaN : refusé par `run`, jamais compté ni écarté en silence.
+    let bad = anchors(vec![(0.0, 0.0), (2.0, 2.0), (f64::NAN, 1.0)]);
+    assert_eq!(bad.readiness(), Readiness::Ready);
+    assert_eq!(
+        run(&bad, std::slice::from_ref(&input), None).unwrap_err(),
+        AnalysisError::InvalidParameter {
+            name: "points".into()
+        }
+    );
+}
+
+#[test]
 fn validate_refuse_un_ajustement_sans_parametre_libre() {
     // Aucun paramètre : l'expression n'en contient pas.
     assert_eq!(
@@ -401,6 +475,21 @@ fn readiness_dit_ce_qui_manque_a_une_ligne_de_base() {
         Readiness::NeedsPoints { needed: 2, have: 1 }
     );
     assert_eq!(anchors(vec![(0.0, 1.0), (2.0, 3.0), nan]), Readiness::Ready);
+    // Position de l'ancre non posée, coordonnée en défaut, infinis.
+    let inf = (f64::INFINITY, 1.0);
+    assert_eq!(
+        anchors(vec![nan, (0.0, 1.0)]),
+        Readiness::NeedsPoints { needed: 2, have: 1 }
+    );
+    assert_eq!(
+        anchors(vec![(1.0, f64::NEG_INFINITY), (0.0, 1.0), inf]),
+        Readiness::NeedsPoints { needed: 2, have: 1 }
+    );
+    assert_eq!(
+        anchors(vec![nan, nan, nan]),
+        Readiness::NeedsPoints { needed: 2, have: 0 }
+    );
+    assert_eq!(anchors(vec![nan, (0.0, 1.0), (2.0, 3.0)]), Readiness::Ready);
 }
 
 #[test]

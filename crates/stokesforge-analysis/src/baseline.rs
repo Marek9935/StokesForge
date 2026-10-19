@@ -642,6 +642,131 @@ mod tests {
         assert!((d.eval(0.0) - 5.0).abs() < 1e-12);
     }
 
+    fn anchors(points: Vec<(f64, f64)>, interpolation: Interpolation) -> BaselineMethod {
+        BaselineMethod::Anchors {
+            points,
+            interpolation,
+        }
+    }
+
+    #[test]
+    fn une_ancre_non_finie_est_refusee_en_toute_position_et_coordonnee() {
+        let s = line_series();
+        let invalid = AnalysisError::InvalidParameter {
+            name: "points".into(),
+        };
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            // Fautive en X seul, en Y seul, ou les deux ; première, milieu,
+            // dernière ; même seule (le refus passe avant le décompte).
+            for p in [(bad, 2.0), (2.0, bad), (bad, bad)] {
+                for points in [
+                    vec![p, (1.0, 1.0), (3.0, 2.0)],
+                    vec![(1.0, 1.0), p, (3.0, 2.0)],
+                    vec![(1.0, 1.0), (3.0, 2.0), p],
+                    vec![p],
+                ] {
+                    for interpolation in [Interpolation::Segments, Interpolation::Spline] {
+                        assert_eq!(
+                            build(&anchors(points.clone(), interpolation), &s).unwrap_err(),
+                            invalid,
+                            "{points:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn les_ancres_valides_donnent_les_valeurs_de_reference() {
+        let s = Series::default();
+        // Segments : deux pentes, ancres traversées exactement.
+        let seg = build(
+            &anchors(
+                vec![(0.0, 0.0), (2.0, 4.0), (4.0, 0.0)],
+                Interpolation::Segments,
+            ),
+            &s,
+        )
+        .unwrap();
+        assert_eq!(seg.points_used, 3);
+        for (x, y) in [(0.0, 0.0), (1.0, 2.0), (2.0, 4.0), (3.0, 2.0), (4.0, 0.0)] {
+            assert!((seg.eval(x) - y).abs() < 1e-12, "x={x}");
+        }
+        // Spline naturelle sur (0,0) (1,1) (2,0) : dérivée seconde −3 au milieu,
+        // donc 0,5 + 3·0,375/6 = 0,6875 à mi-intervalle.
+        let sp = build(
+            &anchors(
+                vec![(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)],
+                Interpolation::Spline,
+            ),
+            &s,
+        )
+        .unwrap();
+        assert_eq!(sp.points_used, 3);
+        for (x, y) in [
+            (0.0, 0.0),
+            (1.0, 1.0),
+            (2.0, 0.0),
+            (0.5, 0.6875),
+            (1.5, 0.6875),
+        ] {
+            assert!((sp.eval(x) - y).abs() < 1e-12, "x={x}");
+        }
+    }
+
+    #[test]
+    fn les_ancres_non_triees_donnent_la_meme_ligne_que_triees() {
+        let s = Series::default();
+        for interpolation in [Interpolation::Segments, Interpolation::Spline] {
+            let sorted = build(
+                &anchors(
+                    vec![(0.0, 1.0), (2.0, 5.0), (3.0, 2.0), (6.0, 4.0)],
+                    interpolation,
+                ),
+                &s,
+            )
+            .unwrap();
+            let shuffled = build(
+                &anchors(
+                    vec![(3.0, 2.0), (0.0, 1.0), (6.0, 4.0), (2.0, 5.0)],
+                    interpolation,
+                ),
+                &s,
+            )
+            .unwrap();
+            assert_eq!(sorted.points_used, 4);
+            assert_eq!(shuffled.points_used, 4);
+            for x in [-1.0, 0.0, 1.0, 2.5, 3.0, 4.5, 6.0, 7.0] {
+                assert_eq!(sorted.eval(x), shuffled.eval(x), "x={x}");
+            }
+        }
+    }
+
+    #[test]
+    fn trop_peu_d_ancres_ou_x_egaux_sont_refuses_sans_confusion() {
+        let s = Series::default();
+        for interpolation in [Interpolation::Segments, Interpolation::Spline] {
+            for points in [vec![], vec![(1.0, 1.0)]] {
+                let found = points.len();
+                assert_eq!(
+                    build(&anchors(points, interpolation), &s).unwrap_err(),
+                    AnalysisError::NotEnoughAnchors { found, needed: 2 }
+                );
+            }
+            // X égaux (y compris non adjacents dans la liste) : DuplicateAnchor.
+            for points in [
+                vec![(1.0, 1.0), (1.0, 2.0)],
+                vec![(1.0, 1.0), (3.0, 2.0), (1.0, 5.0)],
+            ] {
+                assert_eq!(
+                    build(&anchors(points, interpolation), &s).unwrap_err(),
+                    AnalysisError::DuplicateAnchor
+                );
+            }
+        }
+    }
+
     #[test]
     fn zones_trop_petites() {
         let s = line_series();
