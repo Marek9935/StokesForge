@@ -9,6 +9,7 @@
 
 ## Window
 
+window-title-untitled = Untitled project
 window-title-project = { $name } — StokesForge
 window-title-project-unsaved = { $name } • — StokesForge
 window-title-project-manager = StokesForge — Project Manager
@@ -1521,6 +1522,7 @@ error-plot-settings-block-detached = Graph properties are open. Apply or cancel 
 error-preferences-not-saved = Could not save the preferences: { $cause }
 error-colors-session-only = Saved colors will last for this session only: { $cause }
 error-script-vanished = The script engine stopped unexpectedly. Run the script again
+error-save-script-running = Wait for the script to finish before saving
 error-drop-plot-settings-open = Apply or cancel the graph properties before dropping files
 error-import-running = An import is already running
 status-import-progress = Importing… { $done } of { $total } { $total ->

@@ -198,10 +198,12 @@ impl StokesForgeApp {
                     ui.close();
                 }
                 if ui
-                    .add(
+                    .add_enabled(
+                        !self.state.script_running(),
                         egui::Button::new(tr!("action-save"))
                             .shortcut_text(ctx.format_shortcut(&SHORTCUT_SAVE)),
                     )
+                    .on_disabled_hover_text(tr!("disabled-script-running"))
                     .clicked()
                 {
                     actions.push(Action::Save);

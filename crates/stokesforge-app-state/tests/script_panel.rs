@@ -39,7 +39,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::state::{Action, AppState, UnsavedChoice};
 use stokesforge_core::{Column, NodeId, Project};
 use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_session::Session;
@@ -301,4 +301,43 @@ pyst.plot(y, x, name='Graph1', title='$t^2$')
     assert_eq!(*state.snapshot().tree, *before);
     state.dispatch(Action::Redo);
     assert_eq!(*state.snapshot().tree, *after);
+}
+
+/// #315 : Save est refusé pendant un script (rien n'est écrit, un message le
+/// dit) et abandonne le geste en attente ; une fois le script fini, un Save
+/// ne rejoue pas ce geste.
+#[test]
+fn save_est_refuse_pendant_un_script() {
+    let (_session, mut state, _sheet) = start();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("pendant.stf");
+    state.set_path(file.display().to_string());
+    state.dispatch(Action::AddWorkbook);
+    state.set_script_source("import time\ntime.sleep(0.5)\n".to_string());
+    state.dispatch(Action::RunScript);
+    assert!(state.script_running());
+
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
+    assert!(!file.exists(), "rien n'est écrit pendant le script");
+    assert!(state.status().is_some_and(|status| status.is_error()));
+    assert!(!state.take_quit_ready());
+
+    let deadline = Instant::now() + TIMEOUT;
+    while state.script_running() {
+        assert!(Instant::now() <= deadline);
+        thread::sleep(Duration::from_millis(1));
+        state.poll_script();
+    }
+    state.dispatch(Action::Save);
+    assert!(
+        file.is_file(),
+        "témoin : Save écrit une fois le script fini"
+    );
+    assert!(
+        !state.take_quit_ready(),
+        "le geste en attente a été abandonné"
+    );
 }

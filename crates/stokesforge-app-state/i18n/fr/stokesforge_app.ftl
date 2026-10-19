@@ -9,6 +9,7 @@
 
 ## Fenêtre
 
+window-title-untitled = Projet sans titre
 window-title-project = { $name } — StokesForge
 window-title-project-unsaved = { $name } • — StokesForge
 window-title-project-manager = StokesForge — Gestionnaire de projet
@@ -1517,6 +1518,7 @@ error-plot-settings-block-detached = Les propriétés du graphe sont ouvertes. L
 error-preferences-not-saved = Impossible d'enregistrer les préférences : { $cause }
 error-colors-session-only = Les couleurs enregistrées ne seront gardées que pour cette session : { $cause }
 error-script-vanished = Le moteur de script s'est arrêté. Relancer le script
+error-save-script-running = Attendre la fin du script avant d'enregistrer
 error-drop-plot-settings-open = Valider ou annuler les propriétés du graphe avant de déposer des fichiers
 error-import-running = Un import est déjà en cours
 status-import-progress = Import en cours… { $done } sur { $total } { $total ->

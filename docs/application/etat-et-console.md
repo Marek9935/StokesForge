@@ -102,8 +102,13 @@ relecture**. C'est le point à vérifier en premier quand une action est ajouté
 ### Binaire
 
 `stokesforge-app [chemin]`. Si `chemin` existe, le projet est chargé depuis ce
-fichier ; sinon un projet de démonstration est construit et `chemin` devient la
-cible d'un futur enregistrement.
+fichier (et seul ce cas le marque « enregistré » : `AppState::mark_loaded`) ;
+sinon un projet de démonstration est construit et `chemin` devient la cible
+d'un futur enregistrement. Sans argument, la démonstration n'a **pas** de
+chemin (#315) : le titre porte « Untitled project » et le premier Ctrl+S ouvre
+le sélecteur, qui suggère `demo.stf` ; un `demo.stf` du dossier courant n'est
+ni pris pour le projet ni écrasé sans contrôle. **File › Save** et le bouton de
+la barre sont grisés pendant l'exécution d'un script (`disabled-script-running`).
 
 Les colonnes du projet de démonstration utilisent les noms automatiques
 `A`, `B`, `C`… ; le script prérempli lit `[Book1]Sheet1!A`, la première

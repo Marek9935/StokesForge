@@ -369,3 +369,20 @@ remplacées (colonne, copie de son original) sont écrites comme sorties de clé
 `"original"` de l'enregistrement, sans changement de schéma ; la copie vit dans
 le classeur caché des copies d'analyse (#248), classeur ordinaire `hidden`
 marqué par son commentaire de fenêtre.
+
+## Chemin de travail et repère « enregistré » (#315)
+
+Côté `AppState` (pas dans le format) : le repère « enregistré » (`saved_revision`,
+qui fait disparaître le « • » du titre et dispense de la question « enregistrer ? »)
+n'est posé que par un **vrai chargement** (`load`, `open_project`, ou
+`AppState::mark_loaded` appelé par le binaire après `stokesforge-app <chemin>`).
+Il n'est jamais déduit de l'existence d'un fichier au chemin : sinon un `demo.stf`
+du dossier courant passerait pour le projet et Ctrl+S l'écraserait sans le contrôle
+de l'enregistrement. Sans argument, la démonstration n'a pas de chemin.
+
+- `Action::SaveAs { path }` remplace le chemin puis enregistre ; en cas d'échec le
+  chemin précédent est **rétabli** (après `save`), pour que le Ctrl+S suivant
+  n'écrive pas sur le fichier qui vient d'échouer.
+- Aucun enregistrement pendant l'exécution d'un script : `save` refuse
+  (`error-save-script-running`) et abandonne le geste en attente ; le bouton et le
+  menu sont grisés.

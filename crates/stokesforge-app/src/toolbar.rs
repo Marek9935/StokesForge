@@ -341,6 +341,8 @@ pub struct BarEnv {
     pub undo_label: Option<String>,
     pub redo_label: Option<String>,
     pub new_project_enabled: bool,
+    /// Un script s'exécute : *Save* est grisé (#315).
+    pub save_blocked: bool,
     /// Un graphe est au premier plan (sinon *Export* est grisé, comme le menu
     /// Graph est absent).
     pub export_enabled: bool,
@@ -443,9 +445,9 @@ pub fn bar_contents(
                 Icon::Save,
                 IconRole::Neutral,
                 tr!("action-save"),
-                None,
+                env.save_blocked.then(|| tr!("disabled-script-running")),
                 &shortcuts.save,
-                true,
+                !env.save_blocked,
             ) {
                 requests.push(ToolbarRequest::Action(Box::new(Action::Save)));
             }

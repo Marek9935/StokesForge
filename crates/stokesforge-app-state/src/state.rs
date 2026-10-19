@@ -100,6 +100,13 @@ pub enum Action {
     Redo,
     /// Enregistre le projet dans le fichier courant ([`AppState::path`]).
     Save,
+    /// Enregistre sous `path` et en fait le fichier courant. Sur échec, le
+    /// chemin précédent est rétabli : le Ctrl+S suivant n'écrit pas sur le
+    /// fichier qui vient d'échouer (#315).
+    SaveAs {
+        /// Destination choisie.
+        path: String,
+    },
     /// Recharge le projet depuis le fichier courant.
     Load,
     /// Demande un projet vide ; attend la réponse « Discard Changes · Cancel ·
@@ -2652,9 +2659,9 @@ impl AppState {
         let snapshot = handle.snapshot()?;
         let keep_results_default = preferences.analysis_keep_results();
         let analysis_recent = preferences.analysis_recent().to_vec();
-        let saved_revision = std::path::Path::new(&path)
-            .is_file()
-            .then_some((snapshot.revision, snapshot.geometry_revision));
+        // Jamais déduit de `path` : un fichier qui existe n'est pas un projet
+        // chargé (#315). `main` pose le repère par [`AppState::mark_loaded`].
+        let saved_revision = None;
         let mut state = Self {
             handle,
             snapshot,
@@ -2831,6 +2838,14 @@ impl AppState {
     /// Remplace le chemin du fichier de travail.
     pub fn set_path(&mut self, path: String) {
         self.path = path;
+    }
+
+    /// Déclare le projet courant **chargé depuis** [`AppState::path`] : il
+    /// n'a alors rien à enregistrer. Appelé par le binaire après un vrai
+    /// chargement, jamais pour un projet de démonstration ni parce qu'un
+    /// fichier du même nom existe (#315).
+    pub fn mark_loaded(&mut self) {
+        self.saved_revision = Some((self.snapshot.revision, self.snapshot.geometry_revision));
     }
 
     /// Enregistre la géométrie de la fenêtre de contenu `node` auprès de
@@ -4393,7 +4408,10 @@ impl AppState {
         match action {
             Action::Undo => self.undo(),
             Action::Redo => self.redo(),
-            Action::Save => self.save(),
+            Action::Save => {
+                self.save();
+            }
+            Action::SaveAs { path } => self.save_as(path),
             Action::Load => {
                 self.load();
             }
@@ -6255,9 +6273,13 @@ impl AppState {
     /// Titre de la fenêtre : nom du projet, « • » tant qu'il n'est pas
     /// enregistré (S-R15) : « essai.stf • — StokesForge ».
     pub fn window_title(&self) -> String {
-        let name = std::path::Path::new(&self.path)
-            .file_name()
-            .map_or_else(|| self.path.clone(), |n| n.to_string_lossy().into_owned());
+        let name = if self.path.is_empty() {
+            tr!("window-title-untitled")
+        } else {
+            std::path::Path::new(&self.path)
+                .file_name()
+                .map_or_else(|| self.path.clone(), |n| n.to_string_lossy().into_owned())
+        };
         if self.has_unsaved_work(false) {
             tr!("window-title-project-unsaved", name = name)
         } else {
@@ -6431,7 +6453,15 @@ impl AppState {
     /// Enregistre ; puis poursuit le geste qui attendait l'enregistrement
     /// (réponse Save, S-F4). Un échec est un échec grave (S-M8) : dialogue
     /// bloquant, et le geste en attente est abandonné.
-    fn save(&mut self) {
+    fn save(&mut self) -> bool {
+        // Un script écrit dans le modèle depuis son fil : enregistrer
+        // maintenant figerait un état intermédiaire (#315). Le bouton est
+        // grisé ; ce refus est la garde de l'état.
+        if self.script_running() {
+            self.after_save = None;
+            self.fail(tr!("error-save-script-running"));
+            return false;
+        }
         let path = PathBuf::from(&self.path);
         match self.handle.save(&path) {
             Ok(()) => {
@@ -6443,6 +6473,7 @@ impl AppState {
                 if let Some(gesture) = self.after_save.take() {
                     self.perform_unsaved(gesture);
                 }
+                true
             }
             Err(err) => {
                 self.after_save = None;
@@ -6450,7 +6481,19 @@ impl AppState {
                     kind: AlertKind::SaveFailed,
                     message: errors::session::error_message(&err),
                 });
+                false
             }
+        }
+    }
+
+    /// Enregistre sous `path`. Le chemin n'est remplacé que si
+    /// l'enregistrement réussit (modèle de [`AppState::open_project`]) ; il
+    /// est rétabli **après** `save`, dont le geste en attente peut changer de
+    /// projet.
+    fn save_as(&mut self, path: String) {
+        let previous = std::mem::replace(&mut self.path, path);
+        if !self.save() {
+            self.path = previous;
         }
     }
 

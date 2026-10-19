@@ -1083,6 +1083,88 @@ fn a_failing_save_reports_an_error_and_writes_nothing() {
     assert!(!target.parent().is_some_and(Path::exists));
 }
 
+/// #315 : un fichier qui existe au chemin de départ ne fait pas du projet un
+/// projet « enregistré » — seul un vrai chargement ([`AppState::mark_loaded`])
+/// pose le repère. Sinon Ctrl+S écraserait ce fichier sans contrôle.
+#[test]
+fn un_fichier_existant_ne_rend_pas_le_projet_enregistre_sans_chargement() {
+    let dir = tempfile::tempdir().unwrap();
+    let existing = dir.path().join("existant.stf");
+    let (writer, _) = start_demo(dir.path());
+    writer.handle().save(&existing).unwrap();
+    assert!(existing.is_file());
+
+    let (_session, mut state) = start(demo_project(), &existing);
+    let title = state.window_title();
+    assert!(title.contains("existant.stf •"), "{title}");
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    assert_eq!(state.unsaved_pending(), Some(&UnsavedGesture::Quit));
+
+    // Témoin : le chargement explicite pose le repère.
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
+    state.mark_loaded();
+    let title = state.window_title();
+    assert!(!title.contains('•'), "{title}");
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    assert!(state.unsaved_pending().is_none());
+}
+
+/// #315 : « Enregistrer sous » raté rétablit l'ancien chemin ; le Ctrl+S
+/// suivant n'écrit pas sur le fichier qui vient d'échouer.
+#[test]
+fn un_enregistrer_sous_rate_retablit_l_ancien_chemin() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let old = dir.path().join("projet.stf");
+    let target = dir.path().join("absent").join("x.stf");
+
+    state.dispatch(Action::SaveAs {
+        path: target.display().to_string(),
+    });
+    assert_eq!(
+        state.alert().map(|alert| alert.kind),
+        Some(AlertKind::SaveFailed)
+    );
+    assert_eq!(state.path(), old.display().to_string());
+
+    state.dispatch(Action::DismissAlert);
+    state.dispatch(Action::Save);
+    assert!(old.is_file(), "Save écrit l'ancien fichier");
+    assert!(!target.exists());
+    assert!(!target.parent().is_some_and(Path::exists));
+}
+
+#[test]
+fn un_enregistrer_sous_reussi_change_de_chemin_et_marque_enregistre() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start_demo(dir.path());
+    let target = dir.path().join("nouveau.stf");
+    state.dispatch(Action::AddGraph);
+    state.dispatch(Action::SaveAs {
+        path: target.display().to_string(),
+    });
+    assert!(target.is_file());
+    assert_eq!(state.path(), target.display().to_string());
+    let title = state.window_title();
+    assert!(title.contains("nouveau.stf"), "{title}");
+    assert!(!title.contains('•'), "{title}");
+}
+
+/// #315 : sans chemin, le titre ne reste pas vide.
+#[test]
+fn sans_chemin_le_titre_porte_un_nom_de_repli() {
+    let (_session, state) = start(demo_project(), Path::new(""));
+    let title = state.window_title();
+    assert!(
+        title.starts_with(&stokesforge_app_state::tr!("window-title-untitled")),
+        "{title}"
+    );
+}
+
 // -- 10. Colonnes de longueurs différentes --
 
 #[test]

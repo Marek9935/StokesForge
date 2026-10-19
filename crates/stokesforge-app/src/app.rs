@@ -716,8 +716,9 @@ impl StokesForgeApp {
             }
             PickRequest::SaveProjectAs { .. } => {
                 if let Some(path) = first {
-                    self.state.set_path(path.display().to_string());
-                    actions.push(Action::Save);
+                    actions.push(Action::SaveAs {
+                        path: path.display().to_string(),
+                    });
                 }
             }
             PickRequest::ExportGraph { spec, .. } => {
@@ -1018,6 +1019,7 @@ impl StokesForgeApp {
             undo_label: self.state.undo_label(),
             redo_label: self.state.redo_label(),
             new_project_enabled: self.state.can_new_project(),
+            save_blocked: self.state.script_running(),
             export_enabled: active_graph(active_tab_kind(active_tab)).is_some(),
             tools: self.tools_context(active_tab),
             text_format: self.format_target(ctx, active_tab),
@@ -1358,6 +1360,7 @@ impl StokesForgeApp {
                 | Action::OpenProject { .. }
                 | Action::Load
                 | Action::Save
+                | Action::SaveAs { .. }
                 | Action::ConfirmUnsaved(_)
         );
         // L'historique et les gestes qui changent le rang des séries ou la
