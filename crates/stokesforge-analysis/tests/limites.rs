@@ -993,3 +993,90 @@ fn run_refuse_une_borne_de_zone_non_finie_et_calcule_sinon() {
         assert!(corrected.data.iter().all(|v| v.abs() < 1e-9), "{z:?}");
     }
 }
+
+// ── Largeur de graine imposée (#285) : validate, decompose et run d'accord ─
+
+fn pic_gaussien() -> SeriesInput {
+    let x: Vec<f64> = (0..300).map(|i| f64::from(i) * 0.1).collect();
+    let y = x
+        .iter()
+        .map(|v| 5.0 * (-4.0 * std::f64::consts::LN_2 * ((v - 15.0) / 2.0).powi(2)).exp())
+        .collect();
+    SeriesInput { x, y, sigma: None }
+}
+
+fn pics_graine(fwhm: Option<f64>) -> Operation {
+    Operation::Peaks {
+        spec: PeaksSpec {
+            shape: PeakShape::Gaussian,
+            background: PeakBackground::None,
+            seeds: vec![PeakSeed {
+                center: 14.0,
+                height: None,
+                fwhm,
+            }],
+            link_widths: false,
+            center_window: None,
+        },
+        auto: None,
+        range: None,
+        residuals: false,
+    }
+}
+
+#[test]
+fn largeur_de_graine_validate_decompose_et_run_donnent_la_meme_variante() {
+    use stokesforge_analysis::peaks::decompose;
+    let input = pic_gaussien();
+    let serie = Series::new(input.x.clone(), input.y.clone());
+    for fwhm in [0.0, -0.0, -1.0, f64::NEG_INFINITY] {
+        let op = pics_graine(Some(fwhm));
+        let Operation::Peaks { spec, .. } = &op else {
+            unreachable!()
+        };
+        assert_eq!(op.validate(), invalid("seeds"), "validate {fwhm:e}");
+        assert_eq!(
+            decompose(&serie, spec),
+            Err(AnalysisError::InvalidParameter {
+                name: "seeds".into()
+            }),
+            "decompose {fwhm:e}"
+        );
+        assert_eq!(
+            run(&op, std::slice::from_ref(&input), None).unwrap_err(),
+            AnalysisError::InvalidParameter {
+                name: "seeds".into()
+            },
+            "run {fwhm:e}"
+        );
+    }
+    // NaN et inf : refusés par `validate` (donc par `run`) avec la même
+    // variante, avant que `decompose` n'ait à s'en soucier.
+    for fwhm in [f64::NAN, f64::INFINITY] {
+        let op = pics_graine(Some(fwhm));
+        assert_eq!(op.validate(), invalid("seeds"));
+        assert_eq!(
+            run(&op, std::slice::from_ref(&input), None).unwrap_err(),
+            AnalysisError::InvalidParameter {
+                name: "seeds".into()
+            }
+        );
+    }
+    // Une largeur valide, ou absente, passe les trois.
+    for fwhm in [None, Some(2.0), Some(f64::MIN_POSITIVE)] {
+        assert_eq!(pics_graine(fwhm).validate(), Ok(()));
+    }
+    let ok = run(&pics_graine(None), std::slice::from_ref(&input), None).unwrap();
+    assert_eq!(ok.len(), 1);
+}
+
+#[test]
+fn hauteur_de_graine_minuscule_est_acceptee_par_run_avec_l_avertissement_non_converge() {
+    use stokesforge_analysis::ops::Warning;
+    let mut op = pics_graine(None);
+    if let Operation::Peaks { spec, .. } = &mut op {
+        spec.seeds[0].height = Some(1e-9);
+    }
+    let out = run(&op, &[pic_gaussien()], None).unwrap();
+    assert!(out[0].warnings.contains(&Warning::NotConverged));
+}

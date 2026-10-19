@@ -648,6 +648,162 @@ mod tests {
         assert!((r.peaks[0].height - 5.0).abs() < 1e-3 && r.r_squared > 0.999);
     }
 
+    fn une_gaussienne() -> Series {
+        let x = grid(300, 0.0, 30.0);
+        let y: Vec<f64> = x.iter().map(|&v| gauss(v, 5.0, 15.0, 2.0)).collect();
+        Series::new(x, y)
+    }
+
+    fn graine_invalide() -> AnalysisError {
+        AnalysisError::InvalidParameter {
+            name: "seeds".into(),
+        }
+    }
+
+    #[test]
+    fn largeur_imposee_nulle_negative_ou_signee_est_refusee() {
+        let s = une_gaussienne();
+        for fwhm in [0.0, -0.0, -1.0, -f64::MIN_POSITIVE, f64::NEG_INFINITY] {
+            assert_eq!(
+                decompose(&s, &seed_spec(None, Some(fwhm))).unwrap_err(),
+                graine_invalide(),
+                "fwhm = {fwhm:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn largeur_imposee_minuscule_ou_non_finie_n_est_pas_jugee_par_decompose() {
+        // `decompose` ne refuse que `<= 0` ; le reste (NaN, inf, positif
+        // minuscule) est du ressort de `validate` ou du solveur, qui échoue
+        // sans rendre de faux ajustement (comportement actuel épinglé).
+        let s = une_gaussienne();
+        for fwhm in [f64::MIN_POSITIVE, 1e-300, 1e-9, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                decompose(&s, &seed_spec(None, Some(fwhm))).unwrap_err(),
+                AnalysisError::SingularSystem,
+                "fwhm = {fwhm:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn sans_largeur_imposee_le_resultat_est_inchange() {
+        let r = decompose(&une_gaussienne(), &seed_spec(None, None)).unwrap();
+        let p = &r.peaks[0];
+        assert!((p.height - 5.0).abs() < 1e-3, "{}", p.height);
+        assert!((p.center - 15.0).abs() < 1e-3, "{}", p.center);
+        assert!((p.fwhm - 2.0).abs() < 2e-3, "{}", p.fwhm);
+        assert!((r.r_squared - 1.0).abs() < 1e-6 && !r.plateau);
+    }
+
+    #[test]
+    fn largeur_valide_imposee_proche_de_la_vraie_ajuste_bien() {
+        let r = decompose(&une_gaussienne(), &seed_spec(None, Some(2.5))).unwrap();
+        assert!((r.peaks[0].fwhm - 2.0).abs() < 2e-3 && r.r_squared > 0.999999);
+    }
+
+    #[test]
+    fn graine_valide_et_graine_fautive_donnent_la_meme_erreur_dans_les_deux_ordres() {
+        let s = une_gaussienne();
+        let bonne = PeakSeed {
+            center: 15.0,
+            height: None,
+            fwhm: Some(2.0),
+        };
+        let mauvaise = PeakSeed {
+            center: 5.0,
+            height: None,
+            fwhm: Some(0.0),
+        };
+        for seeds in [vec![bonne, mauvaise], vec![mauvaise, bonne]] {
+            let mut spec = seed_spec(None, None);
+            spec.seeds = seeds;
+            assert_eq!(decompose(&s, &spec).unwrap_err(), graine_invalide());
+        }
+    }
+
+    #[test]
+    fn plusieurs_graines_valides_retrouvent_leurs_pics() {
+        let s = two_gaussians();
+        let mut spec = seed_spec(None, None);
+        spec.background = PeakBackground::Linear;
+        spec.seeds = vec![
+            PeakSeed {
+                center: 19.0,
+                height: None,
+                fwhm: Some(3.0),
+            },
+            PeakSeed {
+                center: 33.0,
+                height: None,
+                fwhm: Some(4.0),
+            },
+        ];
+        let r = decompose(&s, &spec).unwrap();
+        let attendu = [(10.0, 20.0, 4.0), (6.0, 32.0, 5.0)];
+        for (p, (h, c, w)) in r.peaks.iter().zip(attendu) {
+            assert!((p.height - h).abs() < 1e-3, "h {} vs {h}", p.height);
+            assert!((p.center - c).abs() < 1e-3, "c {} vs {c}", p.center);
+            assert!((p.fwhm - w).abs() < 2e-3, "w {} vs {w}", p.fwhm);
+        }
+        assert!(r.r_squared > 0.999999 && !r.plateau);
+    }
+
+    #[test]
+    fn hauteur_imposee_minuscule_est_signalee_non_convergee() {
+        // Pas refusée (la hauteur est de signe libre) : le solveur s'arrête
+        // sur un plateau, ce que `plateau` (donc `Warning::NotConverged`)
+        // signale ; le résultat n'est pas un ajustement.
+        let r = decompose(&une_gaussienne(), &seed_spec(Some(1e-9), None)).unwrap();
+        assert!(r.plateau && r.r_squared < 1e-6, "{r:?}");
+    }
+
+    #[test]
+    fn hauteur_imposee_nulle_ou_negative_converge_comme_sans_hauteur() {
+        for h in [Some(0.0), Some(-4.0)] {
+            let r = decompose(&une_gaussienne(), &seed_spec(h, None)).unwrap();
+            let p = &r.peaks[0];
+            assert!((p.height - 5.0).abs() < 1e-3 && (p.center - 15.0).abs() < 1e-3);
+            assert!(r.r_squared > 0.999999, "{h:?}");
+        }
+    }
+
+    #[test]
+    fn centre_hors_donnees_ou_sur_le_bord_comportement_actuel() {
+        // Graine loin du pic : hauteur lue ~0, gradient nul, le centre reste
+        // où il est posé (R² négatif, aucun drapeau). Comportement épinglé.
+        let s = une_gaussienne();
+        for c in [-5.0, 0.0, 30.0] {
+            let mut spec = seed_spec(None, None);
+            spec.seeds[0].center = c;
+            let r = decompose(&s, &spec).unwrap();
+            assert_eq!(r.peaks[0].center, c);
+            assert!(
+                r.peaks[0].height.abs() < 1e-30 && r.r_squared < 0.0,
+                "c = {c}"
+            );
+        }
+        let mut spec = seed_spec(None, None);
+        spec.seeds[0].center = 100.0;
+        assert_eq!(
+            decompose(&s, &spec).unwrap_err(),
+            AnalysisError::SingularSystem
+        );
+    }
+
+    #[test]
+    fn fenetre_de_centre_nulle_fige_le_centre() {
+        // Choix documenté (#285, « écarté ») : `center_window: Some(0.0)`
+        // verrouille le centre sur la graine. Ce test est là pour qu'on voie
+        // ce choix changer.
+        let mut spec = seed_spec(None, None);
+        spec.center_window = Some(0.0);
+        let r = decompose(&une_gaussienne(), &spec).unwrap();
+        assert_eq!(r.peaks[0].center, 14.0);
+        assert!(r.r_squared < 0.99);
+    }
+
     #[test]
     fn lorentzienne_et_voigt_retrouvent_leurs_parametres() {
         let x = grid(800, -40.0, 40.0);
