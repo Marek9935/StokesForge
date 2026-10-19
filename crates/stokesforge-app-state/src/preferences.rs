@@ -170,16 +170,16 @@ pub const MAX_DIALOG_GEOMETRIES: usize = 32;
 /// reste lisible.
 #[derive(Debug, Default, serde::Deserialize)]
 struct PreferencesFile {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     language: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     object_manager_open: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     object_manager_show_scales: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     object_manager_settings: Option<ObjectManagerSettings>,
     /// `"text"` ou `"outlines"` (#162) ; toute autre valeur : le défaut.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     svg_text: Option<String>,
     /// Gardée brute : c'est `toolbar::ToolbarLayout::from_json` qui la lit, en
     /// tolérant ce qu'une autre version y a écrit.
@@ -187,17 +187,17 @@ struct PreferencesFile {
     toolbars: Option<serde_json::Value>,
     /// Sortie par défaut des analyses : `true` « Keep in Results », `false`
     /// « Show » (#200, maquette M5).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     analysis_keep_results: Option<bool>,
     /// Boîte de dialogue quand R² d'un calcul est très faible (#288) ; absent :
     /// active.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     analysis_low_r2_dialog: Option<bool>,
     /// Rangées d'en-tête des **nouveaux** classeurs : Metadata (affichée par
     /// défaut) et x' (cachée par défaut).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     workbook_show_metadata: Option<bool>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient")]
     workbook_show_x_prime: Option<bool>,
     /// Les dernières analyses lancées (#249). Gardée brute : une entrée
     /// illisible est ignorée sans effacer les autres.
@@ -210,6 +210,17 @@ struct PreferencesFile {
     /// brute : une liste illisible retombe sur le défaut.
     #[serde(default)]
     copy_formats: Option<serde_json::Value>,
+}
+
+/// Lit un champ en tolérant une valeur du mauvais type : il retombe sur son
+/// défaut (`None`) sans invalider les autres champs du fichier (#297).
+fn lenient<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = <serde_json::Value as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 /// Les préférences de l'utilisateur, et le fichier d'où elles viennent.
@@ -612,9 +623,8 @@ mod tests {
         assert!(!Preferences::load_from(Some(path)).analysis_low_r2_dialog());
     }
 
-    /// Épingle : une valeur non booléenne rend le fichier illisible en bloc
-    /// (serde) ; toutes les préférences retombent sur leur défaut, la langue
-    /// comprise, pas seulement ce champ.
+    /// Une valeur non booléenne ne fait retomber que son champ sur le défaut ;
+    /// les autres préférences, la langue comprise, sont gardées (#297).
     #[test]
     fn une_valeur_non_booleenne_retombe_sur_le_defaut() {
         for brut in ["\"oui\"", "0", "1", "[]", "{}"] {
@@ -623,11 +633,7 @@ mod tests {
             ));
             let preferences = Preferences::load_from(Some(path));
             assert!(preferences.analysis_low_r2_dialog(), "{brut}");
-            assert_eq!(
-                preferences.language(),
-                None,
-                "{brut}: fichier écarté en bloc"
-            );
+            assert_eq!(preferences.language(), Some("fr"), "{brut}");
         }
     }
 

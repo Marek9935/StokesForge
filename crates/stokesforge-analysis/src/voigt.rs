@@ -103,7 +103,8 @@ pub fn faddeeva(x: f64, y: f64) -> (f64, f64) {
 /// NaN. Une largeur gaussienne nulle ou négligeable devant la lorentzienne
 /// (`σ·1e30 < γ`) donne la limite lorentzienne, une largeur lorentzienne nulle
 /// la limite gaussienne ; l'écart est alors < 1e-60 en relatif, et évite le
-/// débordement de `den²` dans `faddeeva`.
+/// débordement de `den²` dans `faddeeva`. Loin du centre (`|x| > 1e8·σ√2`),
+/// la queue lorentzienne est utilisée de même.
 pub fn profile(x: f64, fwhm_g: f64, fwhm_l: f64) -> f64 {
     if fwhm_g < 0.0 || fwhm_l < 0.0 || (fwhm_g == 0.0 && fwhm_l == 0.0) {
         return f64::NAN;
@@ -119,6 +120,11 @@ pub fn profile(x: f64, fwhm_g: f64, fwhm_l: f64) -> f64 {
             / (sigma * (2.0 * std::f64::consts::PI).sqrt());
     }
     let s2 = sigma * std::f64::consts::SQRT_2;
+    // Queue : |x/s2| > 1e8, la correction à la limite lorentzienne est
+    // < 1e-16 en relatif, et `faddeeva` déborderait sur |z|² (#295).
+    if x.abs() > 1e8 * s2 {
+        return gamma / (std::f64::consts::PI * (x * x + gamma * gamma));
+    }
     faddeeva(x / s2, gamma / s2).0 / (sigma * (2.0 * std::f64::consts::PI).sqrt())
 }
 
@@ -362,12 +368,15 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "bug #295"]
     fn largeurs_toutes_deux_infimes_loin_du_centre() {
         for (fg, fl) in [(1e-160, 1e-160), (1e-300, 1e-300)] {
             let v = profile(0.5, fg, fl);
             assert!(v.is_finite() && v >= 0.0, "({fg},{fl}) {v}");
+            // Queue lorentzienne γ/(π·x²), γ = fl/2.
+            let attendu = fl / 2.0 / (std::f64::consts::PI * 0.25);
+            assert!((v / attendu - 1.0).abs() < 1e-9, "({fg},{fl}) {v}");
         }
+        assert!(profile(1000.0, 1e-300, 1e-300).is_finite());
     }
 
     #[test]
