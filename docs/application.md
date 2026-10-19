@@ -397,7 +397,10 @@ fermeture de la fenêtre posent la même question (`Action::OpenProject`,
 enregistrement raté s'annonce par un dialogue bloquant (M8, `AppState::alert`)
 et garde le projet et le chemin courants. Le repère est conservateur : toute
 révision depuis l'enregistrement, y compris une annulation, ou une géométrie
-modifiée demande confirmation. Il ne conserve aucun ancien arbre en mémoire.
+modifiée demande confirmation. Une commande appliquée compte comme une
+modification **même pendant un recalcul long**, avant que l'instantané soit
+relu (`AppState::applied_revision`, #239) : fermer ou ouvrir pose la question.
+Il ne conserve aucun ancien arbre en mémoire.
 Un nouveau projet encore vide ne demande pas de confirmation.
 
 Le remplacement passe par `SessionHandle::new_project`, vide l'historique et

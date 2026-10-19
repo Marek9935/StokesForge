@@ -2575,6 +2575,12 @@ pub struct AppState {
     /// pas rafraîchi (l'acteur ne répondrait qu'à la fin) et la barre d'état
     /// montre l'indicateur et Stop.
     recalc_since: Option<std::time::Instant>,
+    /// Plus haute révision rendue par l'acteur à une commande de cette
+    /// interface. Pendant un recalcul long l'instantané n'est pas relu
+    /// (`recalc_since`) : sans ce repère, [`AppState::has_unsaved_work`] ne
+    /// verrait pas la commande déjà appliquée et fermer la fenêtre perdrait
+    /// la modification sans poser la question.
+    applied_revision: u64,
     /// Dernier import réussi, pour le reprendre dans l'assistant.
     last_import: Option<LastImport>,
     /// Fichiers importés avec succès, à inscrire aux fichiers récents par la
@@ -2699,6 +2705,7 @@ impl AppState {
             pending_stale_export: None,
             import_job: None,
             recalc_since: None,
+            applied_revision: 0,
             last_import: None,
             recent_to_record: Vec::new(),
             script_source: String::new(),
@@ -6250,7 +6257,8 @@ impl AppState {
         // Interruptible (#239) : la commande est appliquée sans attendre le
         // recalcul des formules, que Stop peut arrêter.
         match self.handle.execute_interruptible(command) {
-            Ok(_) => {
+            Ok(revision) => {
+                self.applied_revision = self.applied_revision.max(revision);
                 self.notice(history_text(&label));
                 self.settle_recalc();
             }
@@ -6581,6 +6589,7 @@ impl AppState {
                 if let Some(text) = discarded_calculations_text(&report) {
                     self.warn(text);
                 }
+                self.applied_revision = 0;
                 self.refresh();
                 self.saved_revision =
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));
@@ -6692,7 +6701,12 @@ impl AppState {
 
     /// Du travail serait-il perdu : changements depuis l'enregistrement, ou
     /// saisie en cours (ici ou dans une vue, `pending_edits`) ?
+    ///
+    /// La révision comparée est la plus haute de l'instantané et de
+    /// `applied_revision` : tant qu'un recalcul long court, l'instantané garde
+    /// l'ancienne révision alors que la commande est déjà dans l'acteur (#239).
     fn has_unsaved_work(&self, pending_edits: bool) -> bool {
+        let revision = self.snapshot.revision.max(self.applied_revision);
         let has_content = self
             .snapshot
             .tree
@@ -6700,8 +6714,8 @@ impl AppState {
             .is_some_and(|node| !node.children().is_empty());
         let changed = self
             .saved_revision
-            .map_or(has_content || self.snapshot.revision != 0, |saved| {
-                saved != (self.snapshot.revision, self.snapshot.geometry_revision)
+            .map_or(has_content || revision != 0, |saved| {
+                saved != (revision, self.snapshot.geometry_revision)
             });
         changed
             || pending_edits
@@ -6730,6 +6744,7 @@ impl AppState {
                 self.import_state = None;
                 self.last_import = None;
                 self.delete_repeat = None;
+                self.applied_revision = 0;
                 self.refresh();
                 self.saved_revision =
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));

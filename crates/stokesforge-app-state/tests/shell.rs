@@ -7853,6 +7853,69 @@ fn without_stop_the_heavy_recalculation_keeps_the_command() {
     assert!(state.snapshot().history.can_undo);
 }
 
+/// Attend la fin du recalcul en cours, puis laisse l'état le relever.
+fn finish_recalculation(state: &mut AppState) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+    while state.recalc_work().is_some() {
+        assert!(std::time::Instant::now() < deadline, "recalcul trop long");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    state.poll_recalc();
+}
+
+/// Projet enregistré, puis une commande dont le recalcul dépasse l'attente :
+/// l'instantané garde l'ancienne révision, mais la commande est dans
+/// l'acteur. Fermer, créer un projet ou en ouvrir un autre doit poser la
+/// question « enregistrer ? » — sinon la modification est perdue sans un mot.
+#[test]
+fn closing_during_a_heavy_recalculation_still_asks_to_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("lourd.stf");
+    let (_session, mut state) = start(heavy_formula_project(), &file);
+    state.dispatch(Action::Save);
+    let clean_title = state.window_title();
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    assert!(state.take_quit_ready(), "enregistré : Quit direct");
+
+    state.dispatch(Action::AddGraph);
+    assert!(state.recalc_work().is_some(), "recalcul encore en cours");
+    assert_ne!(state.window_title(), clean_title, "titre : modifié");
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    assert!(state.unsaved_pending().is_some(), "la question est posée");
+    assert!(!state.take_quit_ready());
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
+
+    state.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    assert!(state.unsaved_pending().is_some(), "Nouveau demande aussi");
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
+    finish_recalculation(&mut state);
+}
+
+/// Témoin inverse : enregistrer pendant le recalcul remet le projet « propre »
+/// — la révision appliquée ne doit pas rester au-dessus du repère enregistré.
+#[test]
+fn saving_during_a_heavy_recalculation_clears_the_unsaved_mark() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("lourd.stf");
+    let (_session, mut state) = start(heavy_formula_project(), &file);
+    state.dispatch(Action::Save);
+    state.dispatch(Action::AddGraph);
+    assert!(state.recalc_work().is_some());
+    state.dispatch(Action::Save);
+    finish_recalculation(&mut state);
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    assert!(state.unsaved_pending().is_none(), "plus rien à perdre");
+    assert!(state.take_quit_ready());
+}
+
 // -- Import en fond, reprise du dernier import, fichiers récents (issue #6) --
 
 /// L'analyse tourne sur un fil de fond : `start_import` rend la main, la
