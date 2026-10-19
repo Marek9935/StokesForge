@@ -253,6 +253,13 @@ pub fn decompose(series: &Series, spec: &PeaksSpec) -> Result<PeaksFit, Analysis
             name: "peaks".into(),
         });
     }
+    // Une largeur imposée nulle ou négative ferait partir le solveur sur sa
+    // borne basse : ajustement faux, sans erreur (#285).
+    if spec.seeds.iter().any(|p| p.fwhm.is_some_and(|f| f <= 0.0)) {
+        return Err(AnalysisError::InvalidParameter {
+            name: "seeds".into(),
+        });
+    }
     let wc = spec.shape.width_count();
     let s = series;
     if s.x.len() < 3 {
@@ -604,6 +611,41 @@ mod tests {
             "centre {}",
             r.peaks[0].center
         );
+    }
+
+    fn seed_spec(height: Option<f64>, fwhm: Option<f64>) -> PeaksSpec {
+        PeaksSpec {
+            shape: PeakShape::Gaussian,
+            background: PeakBackground::None,
+            seeds: vec![PeakSeed {
+                center: 14.0,
+                height,
+                fwhm,
+            }],
+            link_widths: false,
+            center_window: None,
+        }
+    }
+
+    #[test]
+    fn graine_a_largeur_nulle_est_refusee_sans_ajustement_faux() {
+        let x = grid(300, 0.0, 30.0);
+        let y: Vec<f64> = x.iter().map(|&v| gauss(v, 5.0, 15.0, 2.0)).collect();
+        let s = Series::new(x, y);
+        // Témoin : sans largeur imposée, l'ajustement retrouve le pic.
+        let ok = decompose(&s, &seed_spec(None, None)).unwrap();
+        assert!((ok.peaks[0].center - 15.0).abs() < 1e-3 && ok.r_squared > 0.999);
+        for fwhm in [0.0, -1.0] {
+            assert_eq!(
+                decompose(&s, &seed_spec(None, Some(fwhm))).unwrap_err(),
+                AnalysisError::InvalidParameter {
+                    name: "seeds".into()
+                }
+            );
+        }
+        // Une hauteur imposée sensée (4.0) reste acceptée et ajuste bien.
+        let r = decompose(&s, &seed_spec(Some(4.0), None)).unwrap();
+        assert!((r.peaks[0].height - 5.0).abs() < 1e-3 && r.r_squared > 0.999);
     }
 
     #[test]

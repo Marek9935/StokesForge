@@ -257,6 +257,10 @@ fn validate_refuse_une_graine_ou_une_proeminence_non_finie() {
         assert_eq!(seeded(1.0, Some(bad), None).validate(), invalid("seeds"));
         assert_eq!(seeded(1.0, None, Some(bad)).validate(), invalid("seeds"));
     }
+    // Une largeur imposée nulle ou négative est refusée (#285).
+    for bad in [0.0, -1.0] {
+        assert_eq!(seeded(1.0, None, Some(bad)).validate(), invalid("seeds"));
+    }
     let prominent = |min_prominence| Operation::Peaks {
         spec: match peaks(3) {
             Operation::Peaks { spec, .. } => spec,

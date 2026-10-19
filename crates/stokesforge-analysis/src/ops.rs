@@ -544,14 +544,14 @@ impl Operation {
                 bad("min_prominence")
             }
             // Une graine posée n'a que des valeurs finies (centre toujours ;
-            // hauteur et largeur quand elles sont données). La validité
-            // propre de la hauteur et de la largeur (nulle, négative) est
-            // jugée ailleurs.
+            // hauteur et largeur quand elles sont données). La largeur
+            // imposée est de plus strictement positive (#285) ; la hauteur,
+            // de signe libre, est jugée par l'ajustement.
             Operation::Peaks { spec, .. }
                 if !spec.seeds.iter().all(|s| {
                     s.center.is_finite()
                         && s.height.is_none_or(f64::is_finite)
-                        && s.fwhm.is_none_or(f64::is_finite)
+                        && s.fwhm.is_none_or(|f| f.is_finite() && f > 0.0)
                 }) =>
             {
                 bad("seeds")
