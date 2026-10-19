@@ -89,6 +89,21 @@ pub enum PersistenceError {
         /// Compteur de sauvegarde réellement présent sur le disque.
         found: u64,
     },
+    /// `save` a trouvé à l'emplacement visé un fichier qui porte la signature
+    /// StokesForge mais qu'on ne sait pas lire (en-tête tronqué, version 0,
+    /// corps indécodable — copie interrompue, fichier d'une version proche).
+    /// Écrire par-dessus le détruirait sans retour : on refuse, et c'est à
+    /// l'utilisateur de le déplacer ou de choisir un autre nom.
+    #[error(
+        "{path} exists but cannot be read as a StokesForge file ({detail}): \
+         refusing to overwrite it"
+    )]
+    UnreadableTarget {
+        /// Chemin du fichier visé par `save`.
+        path: PathBuf,
+        /// Pourquoi il ne se lit pas (même texte que le refus au chargement).
+        detail: String,
+    },
 }
 
 /// Alias de résultat du crate.

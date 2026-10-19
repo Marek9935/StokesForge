@@ -572,6 +572,7 @@ error-file-corrupt = { $path } est endommagé : { $detail }
 error-file-invalid-project = { $path } ne contient pas de projet valide : { $detail }
 error-file-unknown-feature = { $path } utilise des fonctions d'une version plus récente de StokesForge ({ $detail })
 error-file-changed = { $path } a été modifié ailleurs depuis son ouverture ou son enregistrement. Le recharger avant d'enregistrer
+error-file-unreadable-target = Impossible d'enregistrer sur { $path } : c'est un fichier StokesForge illisible ({ $detail }). Utilisez Enregistrer sous avec un autre nom, ou déplacez d'abord ce fichier
 
 # Import
 error-import-binary = Le fichier n'est pas un texte lisible

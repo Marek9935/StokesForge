@@ -271,9 +271,13 @@ pub fn save_with_geometries(
     geometries: &HashMap<NodeId, WindowGeometry>,
     path: &Path,
 ) -> PersistenceResult<()> {
-    let disk_counter = peek_save_counter(path)?;
+    // Un fichier que ce processus n'a jamais chargé ni écrit vers ce chemin :
+    // rien ne prouve qu'il se relit, on le vérifie en entier avant de le
+    // remplacer. Un fichier déjà suivi (compteur égal) est le nôtre.
+    let tracked = tracked_counter(path, project);
+    let disk_counter = peek_save_counter(path, tracked.is_none())?;
     if let Some(found) = disk_counter {
-        if let Some(expected) = tracked_counter(path, project) {
+        if let Some(expected) = tracked {
             if expected != found {
                 return Err(PersistenceError::ConcurrentModification {
                     path: path.to_path_buf(),
@@ -703,14 +707,19 @@ fn track_counter(path: &Path, project: &Project, counter: u64) {
 /// `save` fait avant d'écraser une cible existante.
 ///
 /// `Ok(None)` si le fichier n'existe pas encore (rien à comparer : la
-/// sauvegarde est la première) ou s'il n'est pas reconnaissable comme un
-/// fichier de ce format (comportement historique conservé pour une cible qui
-/// n'est pas un `.stf` — B8 ne couvre que la collision entre deux écritures
-/// de ce format-ci, pas le remplacement d'un fichier étranger). Un fichier
-/// plus récent que ce lecteur (`version > FORMAT_VERSION`) reste refusé,
-/// comme au chargement : mieux vaut ne pas écraser à l'aveugle un fichier
-/// qu'on ne sait pas lire.
-fn peek_save_counter(path: &Path) -> PersistenceResult<Option<u64>> {
+/// sauvegarde est la première) ou s'il ne porte pas la signature de ce format
+/// (comportement historique conservé pour une cible qui n'est pas un `.stf` —
+/// B8 ne couvre que la collision entre deux écritures de ce format-ci, pas le
+/// remplacement d'un fichier étranger). Un fichier **qui porte la signature**
+/// mais qu'on ne sait pas lire — en-tête tronqué, version 0, corps
+/// indécodable — est refusé (`UnreadableTarget`), comme celui d'une version
+/// plus récente (`UnsupportedVersion`) : mieux vaut ne pas écraser à l'aveugle
+/// un fichier qu'on ne sait pas lire.
+/// `validate` : en plus du décodage, reconstruit le projet comme `load` le
+/// ferait, pour refuser (`UnreadableTarget`) un corps qui se décode mais que le
+/// chargement rejetterait. `save` ne le demande que pour une cible que ce
+/// processus n'a jamais chargée ni écrite (sinon le fichier est le nôtre).
+fn peek_save_counter(path: &Path, validate: bool) -> PersistenceResult<Option<u64>> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -724,14 +733,22 @@ fn peek_save_counter(path: &Path) -> PersistenceResult<Option<u64>> {
     if bytes.len() < MAGIC.len() || &bytes[..MAGIC.len()] != MAGIC.as_slice() {
         return Ok(None);
     }
+    // À partir d'ici la cible se dit StokesForge : si elle ne se lit pas, on
+    // refuse de l'écraser (mêmes diagnostics que `load`, dans le même ordre).
     if bytes.len() < MAGIC.len() + 4 {
-        return Ok(None);
+        return Err(PersistenceError::UnreadableTarget {
+            path: path.to_path_buf(),
+            detail: "header truncated before the version number".to_string(),
+        });
     }
     let mut version_bytes = [0u8; 4];
     version_bytes.copy_from_slice(&bytes[MAGIC.len()..MAGIC.len() + 4]);
     let version = u32::from_le_bytes(version_bytes);
     if version == 0 {
-        return Ok(None);
+        return Err(PersistenceError::UnreadableTarget {
+            path: path.to_path_buf(),
+            detail: "version number 0 in the header".to_string(),
+        });
     }
     if version > FORMAT_VERSION {
         return Err(PersistenceError::UnsupportedVersion {
@@ -741,11 +758,31 @@ fn peek_save_counter(path: &Path) -> PersistenceResult<Option<u64>> {
         });
     }
     match rmp_serde::from_slice::<FileBody>(&bytes[MAGIC.len() + 4..]) {
-        Ok(body) => Ok(Some(body.save_counter)),
-        // Le corps ne se décode pas : `save` n'est pas l'endroit qui
-        // diagnostique une corruption (c'est le rôle de `load`) — on traite
-        // ce cas comme « rien à comparer » plutôt que de bloquer l'écriture.
-        Err(_) => Ok(None),
+        Ok(mut body) => {
+            let save_counter = body.save_counter;
+            if validate {
+                // Le corps se décode, mais `load` le refuserait-il (modèle
+                // incohérent, identifiant hors borne) ? Alors le remplacer
+                // détruirait un fichier que seul un outil plus tolérant sait
+                // encore lire.
+                let unreadable = |source: PersistenceError| PersistenceError::UnreadableTarget {
+                    path: path.to_path_buf(),
+                    detail: source.to_string(),
+                };
+                for &id in std::mem::take(&mut body.window_geometries).keys() {
+                    check_node_id(id, path).map_err(unreadable)?;
+                }
+                build_project_reported(body, path).map_err(unreadable)?;
+            }
+            Ok(Some(save_counter))
+        }
+        // Le corps ne se décode pas : `save` ne diagnostique pas (c'est le
+        // rôle de `load`), mais il ne détruit pas non plus un fichier qu'il
+        // ne sait pas lire — un `.stf` tronqué serait irrécupérable.
+        Err(source) => Err(PersistenceError::UnreadableTarget {
+            path: path.to_path_buf(),
+            detail: source.to_string(),
+        }),
     }
 }
 
@@ -784,6 +821,51 @@ mod tests {
         };
         let project = build_project(body, Path::new("test.plyx")).expect("modèle valide");
         assert_eq!(project.next_id_hint(), 6);
+    }
+
+    /// Un corps qui se décode mais que `load` refuserait (nœud orphelin) n'est
+    /// pas écrasé par `save` : la cible est illisible pour nous. Un fichier que
+    /// ce processus vient de charger se réenregistre, lui, sans cette
+    /// vérification coûteuse.
+    #[test]
+    fn save_refuses_a_target_that_decodes_but_does_not_load() {
+        let root = folder_record(1, "Racine", vec![]);
+        let orphan = NodeRecord {
+            id: 2,
+            name: "Perdu".to_string(),
+            parent: Some(99),
+            kind: KindRecord::Folder { children: vec![] },
+        };
+        let body = FileBody {
+            root: 1,
+            next_id_hint: 3,
+            nodes: vec![root, orphan],
+            save_counter: 0,
+            saved_colors: Default::default(),
+            calculations: Default::default(),
+            correction_traces: Default::default(),
+            window_geometries: std::collections::HashMap::new(),
+        };
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&rmp_serde::to_vec_named(&body).expect("encodage"));
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let path = dir.path().join("incoherent.stf");
+        std::fs::write(&path, &bytes).expect("écriture du fichier de test");
+
+        let project = Project::new("Neuf").expect("projet");
+        let err = save(&project, &path).unwrap_err();
+        assert!(
+            matches!(err, PersistenceError::UnreadableTarget { .. }),
+            "{err:?}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "fichier intact");
+
+        // Un fichier sain, chargé puis réenregistré : aucun blocage.
+        let good = dir.path().join("sain.stf");
+        save(&project, &good).expect("première écriture");
+        let loaded = load(&good).expect("relecture");
+        save(&loaded, &good).expect("réenregistrement du fichier chargé");
     }
 
     /// Critère 8 : un corps bien formé mais structurellement incohérent doit

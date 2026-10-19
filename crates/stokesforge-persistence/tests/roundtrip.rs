@@ -1087,3 +1087,58 @@ fn column_import_source_survives_save_and_load() {
     let column = loaded.tree().node(a).unwrap().as_column().unwrap();
     assert_eq!(column.meta().import_source, Some(source));
 }
+
+/// Un fichier qui porte la signature `STKF` mais ne se lit pas (copie
+/// interrompue, version 0, corps indécodable) n'est jamais écrasé par `save` :
+/// le remplacer le rendrait irrécupérable. Le fichier reste intact octet pour
+/// octet et l'erreur le dit.
+#[test]
+fn save_refuses_to_overwrite_an_unreadable_stokesforge_file() {
+    let project = Project::new("Neuf").expect("projet");
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let cases: [(&str, Vec<u8>); 3] = [
+        ("en-tête tronqué", b"STKF\x01".to_vec()),
+        ("version 0", b"STKF\x00\x00\x00\x00corps".to_vec()),
+        (
+            "corps indécodable",
+            b"STKF\x01\x00\x00\x00\xc1\xc1\xc1".to_vec(),
+        ),
+    ];
+    for (name, bytes) in cases {
+        let path = dir.path().join("cible.stf");
+        std::fs::write(&path, &bytes).expect("écriture du fichier de test");
+        let err = save(&project, &path).expect_err(name);
+        assert!(
+            matches!(err, PersistenceError::UnreadableTarget { .. }),
+            "{name} : {err:?}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "{name} : intact");
+    }
+}
+
+/// Une cible qui ne porte pas la signature (autre format, fichier vide) reste
+/// remplaçable, comme avant : seul un `.stf` illisible est protégé.
+#[test]
+fn save_still_overwrites_a_foreign_or_empty_target() {
+    let project = Project::new("Neuf").expect("projet");
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    for bytes in [&b"PK\x03\x04reste"[..], &b""[..]] {
+        let path = dir.path().join("cible.stf");
+        std::fs::write(&path, bytes).expect("écriture du fichier de test");
+        save(&project, &path).expect("remplacement d'une cible étrangère");
+        load(&path).expect("le fichier écrit se relit");
+    }
+}
+
+#[test]
+fn unreadable_target_error_displays_in_plain_english() {
+    let error = PersistenceError::UnreadableTarget {
+        path: "/data/run.stf".into(),
+        detail: "header truncated".into(),
+    };
+    assert_eq!(
+        error.to_string(),
+        "/data/run.stf exists but cannot be read as a StokesForge file \
+         (header truncated): refusing to overwrite it"
+    );
+}

@@ -78,7 +78,13 @@ Les rajouter après coup coûterait une migration.
 1. **Écriture atomique.** `save` écrit dans un fichier temporaire du même
    répertoire que la destination, puis le renomme sur la cible. Un lecteur ne
    voit jamais un fichier à moitié écrit ; une écriture qui échoue ne laisse
-   aucune trace sur la destination.
+   aucune trace sur la destination. Une cible qui porte la signature `STKF`
+   mais ne se lit pas (copie interrompue, corps indécodable, ou corps que
+   `load` refuserait : modèle incohérent) n'est **pas** écrasée :
+   `UnreadableTarget`, l'utilisateur déplace le fichier ou choisit un autre
+   nom. La reconstruction complète n'est faite que pour une cible que le
+   processus n'a jamais chargée ni écrite. Une cible étrangère ou vide reste
+   remplaçable.
 2. **Numéro de version en premier**, lu et vérifié **avant** de toucher au
    corps. Fichier plus récent → `UnsupportedVersion` ; fichier qui n'est pas un
    StokesForge → `NotAStokesForgeFile`. Jamais de tentative de décoder un corps

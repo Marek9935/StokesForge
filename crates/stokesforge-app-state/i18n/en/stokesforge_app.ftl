@@ -576,6 +576,7 @@ error-file-corrupt = { $path } is damaged: { $detail }
 error-file-invalid-project = { $path } does not contain a valid project: { $detail }
 error-file-unknown-feature = { $path } uses features from a newer version of StokesForge ({ $detail })
 error-file-changed = { $path } was modified elsewhere since it was opened or saved. Reload it before saving
+error-file-unreadable-target = Cannot save over { $path }: it is a StokesForge file that cannot be read ({ $detail }). Use Save As with another name, or move that file first
 
 # Import
 error-import-binary = The file is not readable text

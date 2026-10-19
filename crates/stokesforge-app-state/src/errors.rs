@@ -339,6 +339,11 @@ pub mod file {
             PersistenceError::ConcurrentModification { path, .. } => {
                 tr!("error-file-changed", path = path.display().to_string())
             }
+            PersistenceError::UnreadableTarget { path, detail } => tr!(
+                "error-file-unreadable-target",
+                path = path.display().to_string(),
+                detail = detail.as_str()
+            ),
         }
     }
 
@@ -377,8 +382,12 @@ pub mod file {
                     expected: 1,
                     found: 2,
                 },
+                PersistenceError::UnreadableTarget {
+                    path: path(),
+                    detail: "header truncated".into(),
+                },
             ];
-            let mut seen = [false; 7];
+            let mut seen = [false; 8];
             for sample in &samples {
                 let index = match sample {
                     PersistenceError::Io { .. } => 0,
@@ -388,6 +397,7 @@ pub mod file {
                     PersistenceError::InvalidModel { .. } => 4,
                     PersistenceError::UnknownVariant { .. } => 5,
                     PersistenceError::ConcurrentModification { .. } => 6,
+                    PersistenceError::UnreadableTarget { .. } => 7,
                 };
                 seen[index] = true;
             }
