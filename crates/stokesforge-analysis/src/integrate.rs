@@ -106,7 +106,11 @@ pub fn integrate(series: &Series, spec: &IntegrateSpec) -> Result<Integrated, An
             points,
         });
     }
+    // Un débordement (aire infinie) n'est pas une aire : NaN, comme les autres
+    // valeurs non finies du module (#275), pour que la normalisation ne donne
+    // pas un 0 trompeur (`y / inf`).
     let total: f64 = areas.iter().map(|a| a.area).sum();
+    let total = if total.is_finite() { total } else { f64::NAN };
 
     let cumulative = spec.cumulative.then(|| {
         // Cumul sur la série triée, puis remis dans l'ordre d'entrée.
@@ -119,7 +123,7 @@ pub fn integrate(series: &Series, spec: &IntegrateSpec) -> Result<Integrated, An
                 let (a, b) = (order[k - 1], order[k]);
                 acc += 0.5 * (series.y[a] + series.y[b]) * (series.x[b] - series.x[a]);
             }
-            out[order[k]] = acc;
+            out[order[k]] = if acc.is_finite() { acc } else { f64::NAN };
         }
         out
     });
@@ -239,6 +243,20 @@ mod tests {
         sp.normalize = true;
         let r = integrate(&s, &sp).unwrap();
         assert!(r.normalized.unwrap().iter().all(|v| v.is_nan()));
+    }
+
+    #[test]
+    fn debordement_de_l_aire_donne_nan_et_non_zero() {
+        let s = Series::new(vec![0.0, 10.0], vec![1e308, 1e308]);
+        let mut sp = spec();
+        sp.cumulative = true;
+        sp.normalize = true;
+        let r = integrate(&s, &sp).unwrap();
+        assert!(r.total.is_nan());
+        assert!(r.normalized.unwrap().iter().all(|v| v.is_nan()));
+        let c = r.cumulative.unwrap();
+        assert_eq!(c[0], 0.0);
+        assert!(c[1].is_nan());
     }
 
     #[test]
