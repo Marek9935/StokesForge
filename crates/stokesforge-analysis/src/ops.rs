@@ -434,7 +434,11 @@ impl Operation {
                         Readiness::Ready
                     }
                 }
-                BaselineMethod::Zones { zones, .. } if zones.is_empty() => Readiness::NeedsZone,
+                BaselineMethod::Zones { zones, .. }
+                    if zones.is_empty() || !zones.iter().all(|z| is_posed(*z)) =>
+                {
+                    Readiness::NeedsZone
+                }
                 BaselineMethod::Anchors { points, .. } if points.len() < 2 => {
                     Readiness::NeedsPoints {
                         needed: 2,
@@ -493,14 +497,9 @@ impl Operation {
             })
         };
         match self {
-            Operation::Baseline {
-                method: BaselineMethod::Constant { point },
-                ..
-            } if !point.0.is_finite() || !point.1.is_finite() => bad("point"),
-            Operation::Baseline {
-                method: BaselineMethod::ConstantZone { zone },
-                ..
-            } if !zone.0.is_finite() || !zone.1.is_finite() => bad("zone"),
+            Operation::Baseline { method, .. } if method.check_finite().is_err() => {
+                method.check_finite()
+            }
             Operation::Baseline {
                 method: BaselineMethod::Zones { degree, .. },
                 ..

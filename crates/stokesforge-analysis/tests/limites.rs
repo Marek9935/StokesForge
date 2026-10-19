@@ -131,6 +131,17 @@ fn validate_accepte_le_plafond_et_refuse_au_dela() {
 }
 
 #[test]
+fn validate_refuse_une_borne_de_zone_non_finie() {
+    let zones = |zones| baseline(BaselineMethod::Zones { zones, degree: 1 });
+    assert_eq!(zones(vec![(0.0, 1.0)]).validate(), Ok(()));
+    assert_eq!(zones(vec![(f64::NAN, 1.0)]).validate(), invalid("zones"));
+    assert_eq!(
+        zones(vec![(0.0, 1.0), (2.0, f64::INFINITY)]).validate(),
+        invalid("zones")
+    );
+}
+
+#[test]
 fn validate_refuse_un_ajustement_sans_parametre_libre() {
     // Aucun paramètre : l'expression n'en contient pas.
     assert_eq!(
@@ -203,6 +214,7 @@ fn readiness_dit_ce_qui_manque_a_une_ligne_de_base() {
     let zones = |zones| baseline(BaselineMethod::Zones { zones, degree: 1 }).readiness();
     assert_eq!(zones(Vec::new()), Readiness::NeedsZone);
     assert_eq!(zones(vec![(0.0, 1.0)]), Readiness::Ready);
+    assert_eq!(zones(vec![(0.0, 1.0), (nan.0, 2.0)]), Readiness::NeedsZone);
     // Points d'ancrage.
     let anchors = |points: Vec<(f64, f64)>| {
         baseline(BaselineMethod::Anchors {

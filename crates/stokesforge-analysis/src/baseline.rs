@@ -162,15 +162,36 @@ fn eval_spline(pts: &[(f64, f64)], second: &[f64], x: f64) -> f64 {
     a * y0 + b * y1 + ((a * a * a - a) * second[i - 1] + (b * b * b - b) * second[i]) * h * h / 6.0
 }
 
+impl BaselineMethod {
+    /// Refuse une coordonnée non finie (NaN, ±inf) posée par l'utilisateur :
+    /// `f64::min/max` et les comparaisons l'ignoreraient en silence (une borne
+    /// de zone NaN deviendrait la zone `[b, b]`). Source unique de la règle,
+    /// appelée par [`build`] et par `Operation::validate` ; une méthode qui
+    /// porte des coordonnées s'ajoute ici.
+    pub(crate) fn check_finite(&self) -> Result<(), AnalysisError> {
+        let (name, finite) = match self {
+            BaselineMethod::Constant { point } => ("point", pair_finite(*point)),
+            BaselineMethod::ConstantZone { zone } => ("zone", pair_finite(*zone)),
+            BaselineMethod::Zones { zones, .. } => ("zones", zones.iter().all(|z| pair_finite(*z))),
+            _ => return Ok(()),
+        };
+        if finite {
+            Ok(())
+        } else {
+            Err(AnalysisError::InvalidParameter { name: name.into() })
+        }
+    }
+}
+
+fn pair_finite(pair: (f64, f64)) -> bool {
+    pair.0.is_finite() && pair.1.is_finite()
+}
+
 /// Fabrique la ligne de base de `method`. `series` ne sert qu'à la méthode par
 /// zones (les points de fond).
 pub fn build(method: &BaselineMethod, series: &Series) -> Result<Baseline, AnalysisError> {
+    method.check_finite()?;
     match method {
-        BaselineMethod::Constant { point } if !point.0.is_finite() || !point.1.is_finite() => {
-            Err(AnalysisError::InvalidParameter {
-                name: "point".into(),
-            })
-        }
         BaselineMethod::Constant { point } => Ok(Baseline {
             shape: Shape::Poly {
                 coeffs: vec![point.1],
@@ -179,11 +200,6 @@ pub fn build(method: &BaselineMethod, series: &Series) -> Result<Baseline, Analy
             },
             points_used: 1,
         }),
-        BaselineMethod::ConstantZone { zone } if !zone.0.is_finite() || !zone.1.is_finite() => {
-            Err(AnalysisError::InvalidParameter {
-                name: "zone".into(),
-            })
-        }
         BaselineMethod::ConstantZone { zone } => {
             let values: Vec<f64> = series
                 .x
@@ -452,6 +468,22 @@ mod tests {
             assert!((b.eval(v) - want).abs() < 1e-8, "x={v}");
         }
         assert!(b.as_line().is_none());
+    }
+
+    #[test]
+    fn une_borne_de_zone_non_finie_est_refusee() {
+        let x: Vec<f64> = (0..5).map(f64::from).collect();
+        let s = Series::new(x.clone(), x.iter().map(|v| v + 1.0).collect());
+        for bad in [f64::NAN, f64::INFINITY] {
+            for zones in [vec![(bad, 2.0)], vec![(0.0, 1.0), (3.0, bad)]] {
+                assert_eq!(
+                    build(&BaselineMethod::Zones { zones, degree: 0 }, &s).unwrap_err(),
+                    AnalysisError::InvalidParameter {
+                        name: "zones".into()
+                    }
+                );
+            }
+        }
     }
 
     #[test]
