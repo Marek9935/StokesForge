@@ -354,3 +354,48 @@ fn les_copies_figees_et_les_originaux_survivent_au_fichier() {
     assert_eq!(restored, vec![10.0, 20.0, 30.0]);
     assert!(back.analysis_store_sheet().is_none());
 }
+
+/// Un calcul dont l'opération est illisible n'est pas perdu en silence (#278) :
+/// le rapport de chargement le nomme, et le reste du projet se charge.
+#[test]
+fn un_calcul_illisible_est_nomme_par_le_rapport_et_le_reste_se_charge() {
+    let project = project_with_calculation();
+    let id = project.tree().calculations().keys().next().unwrap().raw();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("p.stf");
+    save(&project, &path).unwrap();
+
+    // Même longueur : on abîme l'opération (« subtract » n'existe plus) sans
+    // décaler le moindre octet du fichier.
+    let mut bytes = std::fs::read(&path).unwrap();
+    let needle = b"subtract";
+    let at = bytes
+        .windows(needle.len())
+        .position(|w| w == needle)
+        .expect("l'opération est écrite dans le fichier");
+    bytes[at..at + needle.len()].copy_from_slice(b"subtraXX");
+    std::fs::write(&path, &bytes).unwrap();
+
+    let (loaded, _geometries, report) = stokesforge_persistence::load_with_report(&path).unwrap();
+    assert!(loaded.tree().calculations().is_empty());
+    assert_eq!(
+        report.discarded_calculations,
+        vec![stokesforge_persistence::DiscardedCalculation {
+            id,
+            kind: Some("correct".into())
+        }]
+    );
+    // Le reste du projet est là.
+    assert_eq!(
+        loaded.tree().root(),
+        project.tree().root(),
+        "la racine est celle du fichier"
+    );
+    assert_eq!(loaded.tree().len(), project.tree().len());
+    // Un fichier sain ne rapporte rien.
+    save(&project, &path).unwrap();
+    assert!(stokesforge_persistence::load_with_report(&path)
+        .unwrap()
+        .2
+        .is_clean());
+}

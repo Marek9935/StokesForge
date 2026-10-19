@@ -245,6 +245,11 @@ impl CalculationDraft {
                 "a calculation keeps one result per series".to_string(),
             ));
         }
+        // Une opération invalide (non-fini, plafond) ne s'enregistre pas : elle
+        // serait écrite puis perdue à la relecture du `.stf` (#278).
+        self.operation
+            .validate()
+            .map_err(|e| CoreError::Structure(e.to_string()))?;
         Ok(())
     }
 }
@@ -259,10 +264,6 @@ impl Project {
         expected_versions: &[(NodeId, u64)],
     ) -> CoreResult<NodeId> {
         draft.validate()?;
-        draft
-            .operation
-            .validate()
-            .map_err(|e| CoreError::Structure(e.to_string()))?;
         let mut inputs: Vec<NodeId> = draft
             .series
             .iter()

@@ -962,6 +962,72 @@ fn a_failing_load_leaves_the_model_and_history_untouched() {
     assert!(state.can_undo(), "l'historique est préservé");
 }
 
+/// Un calcul illisible dans le fichier est écarté (le projet se charge) mais
+/// dit par un avertissement de la barre d'état, plus en silence (#278).
+#[test]
+fn loading_a_file_with_an_unreadable_calculation_warns() {
+    use stokesforge_analysis::correct::CorrectOp;
+    use stokesforge_analysis::ops::Operation;
+    use stokesforge_core::{
+        CalculationDraft, Column, ColumnMeta, OutputDraft, SeriesRef, SeriesResult,
+    };
+    stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("calcul.stf");
+
+    let mut project = Project::new("P").unwrap();
+    let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+    let sheet = project.tree().children(book).unwrap()[0];
+    let y = project
+        .add_column(sheet, None, Some("Y"), Column::from_f64(&[1.0, 2.0]))
+        .unwrap();
+    project
+        .add_calculation(CalculationDraft {
+            operation: Operation::Correct {
+                op: CorrectOp::Subtract,
+            },
+            series: vec![SeriesRef {
+                x: None,
+                y,
+                sigma: None,
+            }],
+            aux: None,
+            outputs: vec![OutputDraft {
+                series: 0,
+                key: "corrected".into(),
+                index: None,
+                meta: ColumnMeta::default(),
+                data: vec![0.0, 1.0],
+            }],
+            results: vec![SeriesResult::default()],
+            keep_results: true,
+            auto_recalc: true,
+        })
+        .unwrap();
+    stokesforge_persistence::save(&project, &path).expect("écriture");
+    // Même longueur : l'opération devient illisible sans décaler un octet.
+    let mut bytes = std::fs::read(&path).unwrap();
+    let at = bytes
+        .windows(8)
+        .position(|w| w == b"subtract")
+        .expect("l'opération est dans le fichier");
+    bytes[at..at + 8].copy_from_slice(b"subtraXX");
+    std::fs::write(&path, &bytes).unwrap();
+
+    let (_session, mut state) = start_demo(dir.path());
+    state.set_path(path.display().to_string());
+    state.dispatch(Action::Load);
+
+    assert!(state.alert().is_none(), "le projet se charge");
+    let status = state.status().expect("un message");
+    assert_eq!(status.level, StatusLevel::Warning);
+    assert!(
+        status.text.contains("could not be read") && status.text.contains('#'),
+        "{}",
+        status.text
+    );
+}
+
 /// Une erreur de lecture `.stf` s'affiche par la phrase du catalogue de
 /// l'application (#47), pas par le texte brut du crate du dessous : « is damaged »
 /// ici, « corrupt file » dans le `Display` que lit le CLI.

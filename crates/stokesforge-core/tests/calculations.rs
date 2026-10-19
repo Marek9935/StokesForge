@@ -148,6 +148,42 @@ fn un_echec_laisse_l_arbre_intact() {
     assert_eq!(f.project.tree(), &before);
 }
 
+/// Une opération à valeur non finie ne s'enregistre pas (#278) : elle serait
+/// écrite puis perdue à la relecture du `.stf`.
+#[test]
+fn une_operation_non_finie_est_refusee_a_l_ajout_et_a_la_mise_a_jour() {
+    use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
+    let nan_baseline = || Operation::Baseline {
+        method: BaselineMethod::Constant {
+            point: (f64::NAN, 1.0),
+        },
+        op: BaselineOp::Subtract,
+        keep_baseline: false,
+    };
+    let mut f = fixture();
+    let before = f.project.tree().clone();
+    let mut d = draft(&f, vec![out(0, "corrected", vec![1.0], "a")]);
+    d.operation = nan_baseline();
+    assert!(matches!(
+        f.project.add_calculation(d),
+        Err(CoreError::Structure(_))
+    ));
+    assert_eq!(f.project.tree(), &before);
+
+    let id = f
+        .project
+        .add_calculation(draft(&f, vec![out(0, "corrected", vec![1.0], "a")]))
+        .unwrap();
+    let before = f.project.tree().clone();
+    let mut d = draft(&f, vec![out(0, "corrected", vec![1.0], "a")]);
+    d.operation = nan_baseline();
+    assert!(matches!(
+        f.project.update_calculation(id, d),
+        Err(CoreError::Structure(_))
+    ));
+    assert_eq!(f.project.tree(), &before);
+}
+
 #[test]
 fn les_identifiants_de_calcul_ne_sont_jamais_reutilises() {
     let mut f = fixture();

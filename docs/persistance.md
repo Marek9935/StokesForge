@@ -334,6 +334,14 @@ textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
 - Lecture tolérante (invariant 10) : un calcul dont l'opération est illisible, ou
   dont un identifiant dépasse `MAX_NODE_ID`, est **écarté** sans échec — ses
   colonnes restent des colonnes ordinaires. Un avertissement inconnu est ignoré.
+  L'écart n'est plus silencieux (#278) : `load_with_report` rend un `LoadReport`
+  (`discarded_calculations` : id du fichier, famille d'opération si elle se lit),
+  que la session transmet (`SessionHandle::load_with_report`) et qu'`AppState`
+  affiche en avertissement (`status-load-calculations-discarded`). L'enregistrement
+  illisible n'est **pas conservé** (il ne se reconstruit pas) : il disparaît à la
+  prochaine sauvegarde. En amont, `Project::add_calculation`/`update_calculation`
+  refusent par `Operation::validate` toute opération qui ne se relirait pas (nombre
+  non fini), pour qu'un tel enregistrement ne soit pas écrit.
 - Les colonnes de sortie sont des colonnes normales du classeur : le fichier garde
   leurs valeurs, aucun recalcul n'est nécessaire à l'ouverture pour un calcul manuel.
 - Une copie d'objets (#105) n'emporte pas les calculs : les colonnes copiées

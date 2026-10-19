@@ -172,6 +172,10 @@ pub use snapshot::{HistoryState, Revision, Snapshot};
 /// peut donc pas nommer un type défini ici).
 pub use stokesforge_persistence::{WindowGeometry, WindowMode, WindowView};
 
+/// Ce qu'un `Load` a écarté sans échouer (calculs illisibles, #278) : données
+/// neutres de `stokesforge-persistence`, mises en phrase par l'application.
+pub use stokesforge_persistence::{DiscardedCalculation, LoadReport};
+
 /// Identité stable et comparable d'un émetteur de requêtes (A4,
 /// `guide-de-correction-robustesse.md` §F6).
 ///
@@ -399,6 +403,14 @@ impl SessionHandle {
     /// MacroOpen))` si une macro est ouverte — dans ce cas, comme pour tout
     /// échec, ni le projet ni l'historique ne sont touchés.
     pub fn load(&self, path: &Path) -> SessionResult<Revision> {
+        self.load_with_report(path)
+            .map(|(revision, _report)| revision)
+    }
+
+    /// Comme [`Self::load`], mais rend aussi le [`LoadReport`] de ce que la
+    /// lecture a écarté sans échouer (calculs illisibles, #278), pour que
+    /// l'appelant le signale.
+    pub fn load_with_report(&self, path: &Path) -> SessionResult<(Revision, LoadReport)> {
         self.request(|reply| Request::Load {
             path: path.to_path_buf(),
             reply,

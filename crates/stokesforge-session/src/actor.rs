@@ -13,7 +13,7 @@ use crate::error::{SessionError, SessionResult};
 use crate::gauge::{RecalcEnd, RecalcGauge};
 use crate::recalc::{FormulaRecalc, Recalculator};
 use crate::snapshot::{HistoryState, Revision, Snapshot};
-use crate::{ClientId, WindowGeometry};
+use crate::{ClientId, LoadReport, WindowGeometry};
 
 /// Requête envoyée à l'acteur par un [`crate::SessionHandle`]. Privée au
 /// crate : les clients ne construisent jamais de `Request` eux-mêmes, ils
@@ -123,7 +123,7 @@ pub(crate) enum Request {
         path: PathBuf,
         /// Réponse : nouvelle révision, ou erreur (persistance, ou
         /// `Command(MacroOpen)` si une macro est ouverte).
-        reply: Sender<SessionResult<Revision>>,
+        reply: Sender<SessionResult<(Revision, LoadReport)>>,
     },
     /// Remplace le projet par un projet vide, avec les mêmes gardes que Load.
     NewProject {
@@ -398,8 +398,8 @@ pub(crate) fn run(
                 let _ = reply.send(outcome);
             }
             Request::Load { path, reply } => {
-                let outcome =
-                    load_project(&mut project, &mut history, &mut geometries, &path).map(|()| {
+                let outcome = load_project(&mut project, &mut history, &mut geometries, &path).map(
+                    |report| {
                         revision += 1;
                         // Les valeurs d'une colonne-formule sont écrites sur
                         // le disque (`stokesforge-persistence`, voir sa doc) mais
@@ -429,8 +429,9 @@ pub(crate) fn run(
                         // un client de rendu doit le savoir même si son contenu,
                         // par coïncidence, ressemblait à l'ancien.
                         geometry_revision += 1;
-                        revision
-                    });
+                        (revision, report)
+                    },
+                );
                 let _ = reply.send(outcome);
             }
             Request::NewProject { reply } => {
@@ -498,11 +499,11 @@ fn load_project(
     history: &mut History,
     geometries: &mut HashMap<NodeId, WindowGeometry>,
     path: &Path,
-) -> SessionResult<()> {
+) -> SessionResult<LoadReport> {
     if history.in_macro() {
         return Err(SessionError::Command(CommandError::MacroOpen("load")));
     }
-    let (loaded, loaded_geometries) = stokesforge_persistence::load_with_geometries(path)?;
+    let (loaded, loaded_geometries, report) = stokesforge_persistence::load_with_report(path)?;
     *project = loaded;
     *geometries = loaded_geometries;
     // L'acteur est mono-thread et rien n'a pu rouvrir de macro entre la
@@ -510,7 +511,7 @@ fn load_project(
     // ici. On ignore tout de même le résultat plutôt que d'appeler
     // `unwrap`/`expect`, bannis hors tests.
     let _ = history.clear();
-    Ok(())
+    Ok(report)
 }
 
 /// Retire de `geometries` toute entrée dont le `NodeId` n'existe plus dans

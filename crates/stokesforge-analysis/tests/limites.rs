@@ -193,6 +193,114 @@ fn validate_refuse_un_decalage_initial_non_fini() {
 }
 
 #[test]
+fn validate_refuse_une_plage_non_finie() {
+    let fit_in = |range| match fit(Model::Linear, Vec::new()) {
+        Operation::Fit {
+            spec, residuals, ..
+        } => Operation::Fit {
+            spec,
+            range,
+            residuals,
+        },
+        _ => unreachable!(),
+    };
+    let peaks_in = |range| match peaks(3) {
+        Operation::Peaks {
+            spec,
+            auto,
+            residuals,
+            ..
+        } => Operation::Peaks {
+            spec,
+            auto,
+            range,
+            residuals,
+        },
+        _ => unreachable!(),
+    };
+    assert_eq!(fit_in(Some((0.0, 1.0))).validate(), Ok(()));
+    assert_eq!(peaks_in(Some((0.0, 1.0))).validate(), Ok(()));
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(fit_in(Some((bad, 1.0))).validate(), invalid("range"));
+        assert_eq!(fit_in(Some((0.0, bad))).validate(), invalid("range"));
+        assert_eq!(peaks_in(Some((0.0, bad))).validate(), invalid("range"));
+    }
+}
+
+#[test]
+fn validate_refuse_une_graine_ou_une_proeminence_non_finie() {
+    let seeded = |center, height, fwhm| match peaks(3) {
+        Operation::Peaks {
+            mut spec,
+            auto,
+            range,
+            residuals,
+        } => {
+            spec.seeds = vec![PeakSeed {
+                center,
+                height,
+                fwhm,
+            }];
+            Operation::Peaks {
+                spec,
+                auto: None,
+                range,
+                residuals: residuals && auto.is_some(),
+            }
+        }
+        _ => unreachable!(),
+    };
+    assert_eq!(seeded(1.0, Some(2.0), Some(0.5)).validate(), Ok(()));
+    assert_eq!(seeded(1.0, None, None).validate(), Ok(()));
+    for bad in [f64::NAN, f64::INFINITY] {
+        assert_eq!(seeded(bad, None, None).validate(), invalid("seeds"));
+        assert_eq!(seeded(1.0, Some(bad), None).validate(), invalid("seeds"));
+        assert_eq!(seeded(1.0, None, Some(bad)).validate(), invalid("seeds"));
+    }
+    let prominent = |min_prominence| Operation::Peaks {
+        spec: match peaks(3) {
+            Operation::Peaks { spec, .. } => spec,
+            _ => unreachable!(),
+        },
+        auto: Some(AutoDetect {
+            min_prominence,
+            max_peaks: 3,
+        }),
+        range: None,
+        residuals: false,
+    };
+    assert_eq!(prominent(0.1).validate(), Ok(()));
+    for bad in [f64::NAN, f64::INFINITY] {
+        assert_eq!(prominent(bad).validate(), invalid("min_prominence"));
+    }
+}
+
+#[test]
+fn validate_refuse_un_decalage_ou_une_fenetre_non_finis() {
+    let direct = |shift| Operation::DirectDeconvolution {
+        method: DirectMethod::RichardsonLucy { iterations: 5 },
+        shift,
+    };
+    assert_eq!(direct(0.5).validate(), Ok(()));
+    assert_eq!(direct(f64::NAN).validate(), invalid("shift"));
+    let windowed = |window| Operation::Reconvolution {
+        spec: ReconvSpec {
+            components: 1,
+            params: Vec::new(),
+            shift_initial: 0.0,
+            fit_shift: true,
+            window,
+        },
+        residuals: false,
+    };
+    assert_eq!(windowed(Some((0.0, 1.0))).validate(), Ok(()));
+    assert_eq!(
+        windowed(Some((0.0, f64::NAN))).validate(),
+        invalid("window")
+    );
+}
+
+#[test]
 fn validate_refuse_un_ajustement_sans_parametre_libre() {
     // Aucun paramètre : l'expression n'en contient pas.
     assert_eq!(

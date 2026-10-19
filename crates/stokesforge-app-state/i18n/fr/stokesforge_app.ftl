@@ -212,6 +212,11 @@ status-level-warning = Avertissement
 status-level-error = Erreur
 status-saved = Enregistré dans { $path }
 status-loaded = Chargé depuis { $path }
+status-load-calculations-discarded =
+    { $count ->
+        [one] Un calcul illisible a été écarté du projet ({ $ids })
+       *[other] { $count } calculs illisibles ont été écartés du projet ({ $ids })
+    }
 status-nothing-to-undo = Rien à annuler
 status-nothing-to-redo = Rien à rétablir
 status-clipboard-unreadable = Presse-papiers vide ou illisible

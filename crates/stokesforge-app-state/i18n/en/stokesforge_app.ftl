@@ -217,6 +217,11 @@ status-level-warning = Warning
 status-level-error = Error
 status-saved = Saved to { $path }
 status-loaded = Loaded from { $path }
+status-load-calculations-discarded =
+    { $count ->
+        [one] One calculation could not be read and was left out of the project ({ $ids })
+       *[other] { $count } calculations could not be read and were left out of the project ({ $ids })
+    }
 status-nothing-to-undo = Nothing to undo
 status-nothing-to-redo = Nothing to redo
 status-clipboard-unreadable = Clipboard is empty or unreadable

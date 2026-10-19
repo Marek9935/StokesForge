@@ -234,6 +234,9 @@ plage), `analysis_recent.rs` (la réouverture oublie `fixed`/`shared`, un degré
 | `MAX_PEAKS` à 50 | `les_plafonds_sont_ceux_de_la_table_des_grandeurs`, `les_champs_d_analyse_suivent_les_plafonds_du_crate_d_analyse` |
 | `auto_initial` sans filtre de plage | `auto_initial_suit_le_modele_sur_les_points_de_la_plage`, `auto_reads_only_the_fitted_range` |
 | `validate` sans « zéro paramètre libre » | `validate_refuse_un_ajustement_sans_parametre_libre` |
+| `validate` laisse passer plage, graine, proéminence, décalage ou fenêtre non finis (#278) | `validate_refuse_une_plage_non_finie`, `validate_refuse_une_graine_ou_une_proeminence_non_finie`, `validate_refuse_un_decalage_ou_une_fenetre_non_finis` |
+| `add_/update_calculation` sans `Operation::validate` (#278) | `une_operation_non_finie_est_refusee_a_l_ajout_et_a_la_mise_a_jour` (core) |
+| calcul illisible écarté sans rapport (#278) | `un_calcul_illisible_est_nomme_par_le_rapport_et_le_reste_se_charge` (persistance), `loading_a_file_with_an_unreadable_calculation_warns` (app-state) |
 
 ### Séries pas à jour sur le graphe (#198)
 

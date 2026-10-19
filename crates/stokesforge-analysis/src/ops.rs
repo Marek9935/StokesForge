@@ -512,6 +512,7 @@ impl Operation {
                 method: BaselineMethod::Zones { degree, .. },
                 ..
             } if !(1..=MAX_DEGREE).contains(degree) => bad("degree"),
+            Operation::Fit { range, .. } if range.is_some_and(|r| !is_posed(r)) => bad("range"),
             Operation::Fit { spec, .. } => match spec.model {
                 Model::Polynomial { degree } if !(1..=MAX_DEGREE).contains(&degree) => {
                     bad("degree")
@@ -528,6 +529,26 @@ impl Operation {
             Operation::Peaks { spec, .. } if spec.center_window.is_some_and(|w| !w.is_finite()) => {
                 bad("center_window")
             }
+            Operation::Peaks { auto, .. }
+                if auto.is_some_and(|a| !a.min_prominence.is_finite()) =>
+            {
+                bad("min_prominence")
+            }
+            // Une graine posée n'a que des valeurs finies (centre toujours ;
+            // hauteur et largeur quand elles sont données). La validité
+            // propre de la hauteur et de la largeur (nulle, négative) est
+            // jugée ailleurs.
+            Operation::Peaks { spec, .. }
+                if !spec.seeds.iter().all(|s| {
+                    s.center.is_finite()
+                        && s.height.is_none_or(f64::is_finite)
+                        && s.fwhm.is_none_or(f64::is_finite)
+                }) =>
+            {
+                bad("seeds")
+            }
+            Operation::Peaks { range, .. } if range.is_some_and(|r| !is_posed(r)) => bad("range"),
+            Operation::DirectDeconvolution { shift, .. } if !shift.is_finite() => bad("shift"),
             Operation::DirectDeconvolution { method, .. } => match method {
                 DirectMethod::RichardsonLucy { iterations }
                     if !(1..=MAX_ITERATIONS).contains(iterations) =>
@@ -546,6 +567,9 @@ impl Operation {
             }
             Operation::Reconvolution { spec, .. } if !spec.shift_initial.is_finite() => {
                 bad("shift_initial")
+            }
+            Operation::Reconvolution { spec, .. } if spec.window.is_some_and(|w| !is_posed(w)) => {
+                bad("window")
             }
             _ => Ok(()),
         }

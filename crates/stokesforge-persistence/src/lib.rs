@@ -112,6 +112,36 @@ use schema::{FileBody, NodeRecord, FORMAT_VERSION, MAGIC};
 
 pub use error::{PersistenceError, PersistenceResult};
 
+/// Un calcul que la lecture n'a pas pu garder : son enregistrement est
+/// illisible (opération inconnue ou invalide, identifiant hors borne). Donnée
+/// neutre : la mise en phrase est l'affaire de l'application.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscardedCalculation {
+    /// Identifiant du calcul dans le fichier.
+    pub id: u64,
+    /// Famille d'opération (`"baseline"`…) quand l'enregistrement la porte
+    /// encore ; `None` si même cela est illisible.
+    pub kind: Option<String>,
+}
+
+/// Ce que la lecture d'un `.stf` a dégradé sans échouer (invariant 10) :
+/// l'appelant le montre à l'utilisateur au lieu de perdre en silence. Les
+/// éléments écartés ne sont **pas conservés** — un enregistrement illisible ne
+/// peut pas être reconstruit — et disparaissent donc à la prochaine
+/// sauvegarde.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LoadReport {
+    /// Calculs d'analyse écartés (#278).
+    pub discarded_calculations: Vec<DiscardedCalculation>,
+}
+
+impl LoadReport {
+    /// Rien n'a été écarté.
+    pub fn is_clean(&self) -> bool {
+        self.discarded_calculations.is_empty()
+    }
+}
+
 /// Position et taille d'une fenêtre de l'UI (classeur, graphe, matrice,
 /// note), en points logiques — même unité que le reste d'egui.
 ///
@@ -333,6 +363,15 @@ pub fn load(path: &Path) -> PersistenceResult<Project> {
 pub fn load_with_geometries(
     path: &Path,
 ) -> PersistenceResult<(Project, HashMap<NodeId, WindowGeometry>)> {
+    load_with_report(path).map(|(project, geometries, _report)| (project, geometries))
+}
+
+/// Comme [`load_with_geometries`], mais rend aussi le [`LoadReport`] de ce que
+/// la lecture a écarté (calculs illisibles, #278). C'est la fonction qu'appelle
+/// la session, pour que l'application le signale.
+pub fn load_with_report(
+    path: &Path,
+) -> PersistenceResult<(Project, HashMap<NodeId, WindowGeometry>, LoadReport)> {
     let bytes = std::fs::read(path).map_err(|source| PersistenceError::Io {
         path: path.to_path_buf(),
         source,
@@ -376,7 +415,7 @@ pub fn load_with_geometries(
     for &id in raw_geometries.keys() {
         check_node_id(id, path)?;
     }
-    let project = build_project(body, path)?;
+    let (project, report) = build_project_reported(body, path)?;
     track_counter(path, &project, save_counter);
 
     // Une clé sans nœud correspondant (fichier corrompu, ou géométrie
@@ -395,7 +434,7 @@ pub fn load_with_geometries(
         })
         .collect();
 
-    Ok((project, geometries))
+    Ok((project, geometries, report))
 }
 
 /// Classe une erreur de décodage du corps : une **variante d'énumération**
@@ -423,6 +462,11 @@ fn classify_body_error(source: rmp_serde::decode::Error, path: &Path) -> Persist
 /// (cas ceinture du compteur d'identifiants, champs inconnus, modèle
 /// invalide) sans repasser par l'encodage MessagePack.
 fn build_project(body: FileBody, path: &Path) -> PersistenceResult<Project> {
+    build_project_reported(body, path).map(|(project, _report)| project)
+}
+
+/// [`build_project`], avec le rapport de ce que la reconstruction a écarté.
+fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Project, LoadReport)> {
     check_node_id(body.root, path)?;
     check_node_id(body.next_id_hint, path)?;
     let mut nodes = Vec::with_capacity(body.nodes.len());
@@ -451,6 +495,8 @@ fn build_project(body: FileBody, path: &Path) -> PersistenceResult<Project> {
         nodes.push(node);
     }
 
+    let (kept, discarded_calculations) =
+        calculations::records_to_calculations(body.calculations, MAX_NODE_ID);
     let tree = Tree::from_nodes(NodeId::from_raw(body.root), nodes)
         .map_err(|source| PersistenceError::InvalidModel {
             path: path.to_path_buf(),
@@ -461,11 +507,13 @@ fn build_project(body: FileBody, path: &Path) -> PersistenceResult<Project> {
             body.correction_traces,
             MAX_NODE_ID,
         ))
-        .with_calculations(calculations::records_to_calculations(
-            body.calculations,
-            MAX_NODE_ID,
-        ));
-    Ok(Project::from_tree(Arc::new(tree), body.next_id_hint))
+        .with_calculations(kept);
+    Ok((
+        Project::from_tree(Arc::new(tree), body.next_id_hint),
+        LoadReport {
+            discarded_calculations,
+        },
+    ))
 }
 
 /// Refuse un identifiant de nœud (ou `next_id_hint`) au-delà de

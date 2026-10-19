@@ -19,6 +19,8 @@ use stokesforge_core::{
     Staleness, Tree as ModelTree,
 };
 
+use crate::DiscardedCalculation;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct CalculationRecord {
     pub(crate) id: u64,
@@ -278,7 +280,10 @@ pub(crate) fn records_to_corrections(
     records: Vec<CalculationRecord>,
     max_id: u64,
 ) -> BTreeMap<NodeId, Arc<CorrectionRecord>> {
+    // Une trace de correction illisible reste écartée sans rapport : c'est
+    // une trace d'historique, pas un calcul que l'utilisateur voit.
     records_to_calculations(records, max_id)
+        .0
         .into_iter()
         .filter(|(_, c)| {
             matches!(
@@ -309,12 +314,18 @@ pub(crate) fn records_to_corrections(
 // ── Enregistrement → modèle ─────────────────────────────────────────────
 
 /// Un identifiant au-delà de `max` écarte le calcul entier (même borne que
-/// les nœuds, B1) ; l'opération illisible aussi. Rend les calculs gardés.
+/// les nœuds, B1) ; l'opération illisible aussi. Rend les calculs gardés et la
+/// liste de ceux qui sont écartés (#278) : un enregistrement illisible n'est
+/// pas conservé, mais il n'est plus perdu sans bruit.
 pub(crate) fn records_to_calculations(
     records: Vec<CalculationRecord>,
     max_id: u64,
-) -> BTreeMap<NodeId, Arc<Calculation>> {
+) -> (
+    BTreeMap<NodeId, Arc<Calculation>>,
+    Vec<DiscardedCalculation>,
+) {
     let mut out = BTreeMap::new();
+    let mut discarded = Vec::new();
     for r in records {
         let mut all_ids = std::iter::once(r.id)
             .chain(
@@ -325,9 +336,11 @@ pub(crate) fn records_to_calculations(
             .chain(r.aux.iter().flat_map(|a| std::iter::once(a.y).chain(a.x)))
             .chain(r.outputs.iter().filter_map(|o| o.column));
         if !all_ids.all(|i| i <= max_id) {
+            discarded.push(discarded_calculation(&r));
             continue;
         }
         let Ok(operation) = Operation::from_tree(&value_to_tree(&r.operation)) else {
+            discarded.push(discarded_calculation(&r));
             continue;
         };
         let id = NodeId::from_raw(r.id);
@@ -385,7 +398,22 @@ pub(crate) fn records_to_calculations(
         };
         out.insert(id, Arc::new(calc));
     }
-    out
+    (out, discarded)
+}
+
+/// Ce qu'on sait d'un calcul qu'on écarte : son identifiant, et la famille
+/// d'opération quand l'enregistrement la porte encore lisiblement.
+fn discarded_calculation(r: &CalculationRecord) -> DiscardedCalculation {
+    let kind = match value_to_tree(&r.operation) {
+        Tree::Map(entries) => entries
+            .into_iter()
+            .find_map(|(k, v)| match (k.as_str(), v) {
+                ("kind", Tree::Text(kind)) => Some(kind),
+                _ => None,
+            }),
+        _ => None,
+    };
+    DiscardedCalculation { id: r.id, kind }
 }
 
 #[cfg(test)]
@@ -421,16 +449,30 @@ mod tests {
 
     #[test]
     fn une_operation_illisible_ecarte_le_calcul_sans_echec() {
-        let kept = records_to_calculations(vec![record(good_operation(), 7)], 1000);
+        let (kept, discarded) = records_to_calculations(vec![record(good_operation(), 7)], 1000);
         assert_eq!(kept.len(), 1);
+        assert!(discarded.is_empty());
         let junk = Value::Map(vec![(Value::from("kind"), Value::from("teleportation"))]);
-        assert!(records_to_calculations(vec![record(junk, 7)], 1000).is_empty());
-        assert!(records_to_calculations(vec![record(Value::Nil, 7)], 1000).is_empty());
+        let (kept, discarded) = records_to_calculations(vec![record(junk, 7)], 1000);
+        assert!(kept.is_empty());
+        // L'écart est signalé, avec la famille quand elle se lit (#278).
+        assert_eq!(
+            discarded,
+            vec![DiscardedCalculation {
+                id: 50,
+                kind: Some("teleportation".into())
+            }]
+        );
+        let (kept, discarded) = records_to_calculations(vec![record(Value::Nil, 7)], 1000);
+        assert!(kept.is_empty());
+        assert_eq!(discarded, vec![DiscardedCalculation { id: 50, kind: None }]);
     }
 
     #[test]
     fn un_identifiant_hors_borne_ecarte_le_calcul() {
-        assert!(records_to_calculations(vec![record(good_operation(), 5000)], 1000).is_empty());
+        let (kept, discarded) = records_to_calculations(vec![record(good_operation(), 5000)], 1000);
+        assert!(kept.is_empty());
+        assert_eq!(discarded.len(), 1);
     }
 
     #[test]
@@ -449,7 +491,7 @@ mod tests {
             ],
             ..Default::default()
         }];
-        let kept = records_to_calculations(vec![r], 1000);
+        let (kept, _) = records_to_calculations(vec![r], 1000);
         let calc = kept.values().next().unwrap();
         assert_eq!(calc.results[0].warnings, vec![Warning::IrfStepMismatch]);
     }

@@ -1098,6 +1098,33 @@ pub const MISSING_TEXT_DISPLAY: &str = "\u{00A0}";
 /// ne rentre pas dans une colonne `Numeric`/`DateTime` rend un bloc `Mixed`
 /// avec `true` : l'appelant écrit alors par `Command::SetCellsPromoting` et
 /// non `Command::SetCells`, exactement comme une saisie tolérante au clavier.
+/// Plafond d'identifiants nommés dans l'avertissement de chargement : au-delà,
+/// la liste est abrégée par « … » (le compte, lui, reste exact).
+const DISCARDED_IDS_SHOWN: usize = 5;
+
+/// L'avertissement de chargement pour les calculs que la lecture a écartés
+/// (#278), `None` quand rien ne l'a été. Les identifiants sont ceux du fichier.
+fn discarded_calculations_text(report: &stokesforge_session::LoadReport) -> Option<String> {
+    let discarded = &report.discarded_calculations;
+    if discarded.is_empty() {
+        return None;
+    }
+    let mut ids = discarded
+        .iter()
+        .take(DISCARDED_IDS_SHOWN)
+        .map(|d| format!("#{}", d.id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    if discarded.len() > DISCARDED_IDS_SHOWN {
+        ids.push_str(", …");
+    }
+    Some(crate::tr!(
+        "status-load-calculations-discarded",
+        count = discarded.len(),
+        ids = ids
+    ))
+}
+
 fn value_block_from_tsv_column(
     kind: ColumnType,
     rows: &[Vec<String>],
@@ -6486,14 +6513,19 @@ impl AppState {
     /// (M8) : dialogue bloquant ; rend `false`.
     fn load(&mut self) -> bool {
         let path = PathBuf::from(&self.path);
-        match self.handle.load(&path) {
-            Ok(_) => {
+        match self.handle.load_with_report(&path) {
+            Ok((_, report)) => {
                 // Les identifiants du fichier n'ont aucun rapport avec ceux de
                 // l'arbre précédent : la sélection doit être revalidée, ce que
                 // fait `refresh`.
                 self.editing = None;
                 let text = crate::tr!("status-loaded", path = self.path.as_str());
                 self.notice(text);
+                // Un calcul illisible est écarté (invariant 10) mais dit : le
+                // message remplace « Chargé » dans la barre d'état (#278).
+                if let Some(text) = discarded_calculations_text(&report) {
+                    self.warn(text);
+                }
                 self.refresh();
                 self.saved_revision =
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));
