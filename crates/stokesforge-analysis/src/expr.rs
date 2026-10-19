@@ -12,6 +12,9 @@
 //! parenthèses. Les noms `x`, `pi`, `e` sont réservés ; tout autre nom hors
 //! appel est un **paramètre**, dans l'ordre de sa première apparition.
 //! La multiplication implicite (`2x`) n'existe pas.
+//!
+//! Logarithmes (#287) : `log(x)` et `log10(x)` en base 10, `ln(x)` naturel,
+//! `log2(x)`, `logx(x, b)` en base `b` ; x < 0, `b ≤ 0` ou `b = 1` donnent NaN.
 
 use std::fmt;
 
@@ -88,14 +91,18 @@ enum Func {
     Min,
     Max,
     Atan2,
+    Logx,
 }
 
 impl Func {
     fn from_name(name: &str) -> Option<(Func, usize)> {
         Some(match name {
             "exp" => (Func::Exp, 1),
-            "ln" | "log" => (Func::Ln, 1),
-            "log10" => (Func::Log10, 1),
+            "ln" => (Func::Ln, 1),
+            // `log` est en base 10 (usage des chimistes, #287) ; `logx(x, b)`
+            // prend la base en second argument.
+            "log" | "log10" => (Func::Log10, 1),
+            "logx" => (Func::Logx, 2),
             "log2" => (Func::Log2, 1),
             "sqrt" => (Func::Sqrt, 1),
             "abs" => (Func::Abs, 1),
@@ -161,6 +168,10 @@ impl Func {
             Func::Min => a.min(b),
             Func::Max => a.max(b),
             Func::Atan2 => a.atan2(b),
+            // Base ≤ 0 ou = 1 : NaN (ln b = 0 donnerait ±inf ou 0/0) ; x ≤ 0 :
+            // `ln` donne déjà NaN (−inf pour 0, que l'on garde comme `ln`).
+            Func::Logx if b.is_nan() || b <= 0.0 || b == 1.0 => f64::NAN,
+            Func::Logx => a.ln() / b.ln(),
         }
     }
 }
@@ -603,6 +614,31 @@ mod tests {
         assert_eq!(ev("max(x, 3)", 5.0, &[]), 5.0);
         assert_eq!(ev("pow(2, 10)", 0.0, &[]), 1024.0);
         assert!((ev("log10(1000)", 0.0, &[]) - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn logarithmes_base_10_naturel_et_base_choisie() {
+        // `log` = base 10 (#287), `ln` = naturel, `logx(x, b)` = base b.
+        assert!((ev("log(100)", 0.0, &[]) - 2.0).abs() < 1e-12);
+        assert!((ev("log(1000)", 0.0, &[]) - 3.0).abs() < 1e-12);
+        assert!((ev("ln(e)", 0.0, &[]) - 1.0).abs() < 1e-15);
+        assert!((ev("logx(8, 2)", 0.0, &[]) - 3.0).abs() < 1e-12);
+        assert!((ev("logx(x, 10)", 1000.0, &[]) - 3.0).abs() < 1e-12);
+        assert!(ev("logx(-1, 2)", 0.0, &[]).is_nan());
+        assert!(ev("logx(x, 2)", -4.0, &[]).is_nan());
+        assert!(ev("logx(8, 1)", 0.0, &[]).is_nan());
+        assert!(ev("logx(8, 0)", 0.0, &[]).is_nan());
+        assert!(ev("logx(8, -2)", 0.0, &[]).is_nan());
+        assert!(ev("log(x)", -1.0, &[]).is_nan());
+        // Arité : une erreur de lecture, comme pour `pow`.
+        assert!(matches!(
+            Expr::parse("logx(8)").unwrap_err().kind,
+            ExprErrorKind::WrongArgumentCount { .. }
+        ));
+        assert!(matches!(
+            Expr::parse("log(8, 2)").unwrap_err().kind,
+            ExprErrorKind::WrongArgumentCount { .. }
+        ));
     }
 
     #[test]
