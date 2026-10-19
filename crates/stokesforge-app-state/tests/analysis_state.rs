@@ -1513,3 +1513,50 @@ fn une_erreur_d_ecriture_de_la_preference_est_dite_et_l_etat_est_applique() {
     );
     assert!(!s.state.analysis_low_r2_dialog(), "valable pour la session");
 }
+
+// ---- Blindage de la pastille et de la boîte groupée (#290) ------------
+
+/// La boîte et la liste de la pastille disent la même chose, mot pour mot : un
+/// seul recalcul fait tomber deux ajustements (le cas à deux types se lit dans
+/// `low_r2_project.rs`, les pics ne se recalculant pas d'eux-mêmes).
+#[test]
+fn la_boite_et_la_liste_de_la_pastille_ont_le_meme_texte() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    fit(&mut s, true, true);
+    fit(&mut s, true, true);
+    scramble(&mut s);
+    assert_eq!(groups(&s), vec![(OperationKind::Fit, 2)]);
+    let boite = s.state.alert().expect("une boîte").message.clone();
+    assert_eq!(boite, s.state.low_r2_list_text());
+    assert!(boite.contains("2 fits"), "{boite}");
+}
+
+/// La liste ouverte se referme d'elle-même quand le dernier calcul faible est
+/// supprimé, et rouvre à l'annulation seulement sur demande.
+#[test]
+fn la_liste_se_referme_a_la_suppression_du_dernier_calcul_faible() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    fit(&mut s, true, false);
+    s.state.dispatch(Action::OpenLowR2List);
+    assert!(s.state.low_r2_list_open());
+    let id = only_calculation(&s);
+    s.state.dispatch(Action::RequestDeleteCalculation(id));
+    s.state.dispatch(Action::ConfirmDeleteCalculation(
+        CalculationDelete::WithColumns,
+    ));
+    assert_eq!(s.state.low_r2_total(), 0);
+    assert!(!s.state.low_r2_list_open(), "fermée avec le dernier compte");
+    s.state.dispatch(Action::Undo);
+    assert_eq!(s.state.low_r2_total(), 1);
+    assert!(!s.state.low_r2_list_open(), "pas rouverte d'elle-même");
+    // Ouvrir deux fois, fermer deux fois : idempotent.
+    s.state.dispatch(Action::OpenLowR2List);
+    s.state.dispatch(Action::OpenLowR2List);
+    assert!(s.state.low_r2_list_open());
+    s.state.dispatch(Action::CloseLowR2List);
+    s.state.dispatch(Action::CloseLowR2List);
+    assert!(!s.state.low_r2_list_open());
+}
