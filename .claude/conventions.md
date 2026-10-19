@@ -115,6 +115,51 @@ de `window_detach.rs` ; le moteur Python reste dans l’AppState principal.
   Le choix de destination utilise `ChoiceOption::disabled` pour les sources
   en lecture seule ; les sources tracées plusieurs fois exigent `modal_confirm`.
 
+## Erreurs : texte brut anglais en bas, phrase du catalogue dans l'application
+
+Le `Display` (`#[error(...)]`) des crates du dessous (core, commands,
+persistence, import, script, render-svg…) est **de l'anglais brut**, concis et
+lisible par un utilisateur du CLI ou de `pyst` : il n'est jamais traduit et aucun
+de ces crates ne dépend de Fluent. L'application met chaque erreur affichée en
+phrase par `crates/stokesforge-app-state/src/errors.rs` :
+
+- une fonction `error_message(&Erreur) -> String` par famille
+  (`errors::model`, `commands`, `session`, `file`, `import`, `formula`,
+  `render`, `export`, `script` sous la feature `python`) ;
+- chaque variante → une clé `error-<famille>-<cause>` du catalogue `en`, ses
+  champs en arguments nommés (`tr!("error-file-corrupt", path = …, detail = …)`) ;
+- le `match` est **exhaustif, sans `_`** : une variante nouvelle ne compile pas
+  tant qu'on ne l'a pas associée. À défaut de phrase, `errors::fallback` renvoie
+  son `Display` anglais (rien ne disparaît) ;
+- le test de la famille construit une valeur de chaque variante et vérifie
+  phrase non vide, sans jargon (R9), sans point final : en ajouter une pour la
+  variante nouvelle ;
+- un `detail` (cause décrite par le crate d'origine) ou un message du système
+  est repris tel quel, en anglais ;
+- **jamais** `to_string()` ni `{err}` d'une erreur montrée à l'utilisateur.
+- une `std::io::Error` passe par `errors::io::error_message(&err)` (clés
+  `error-io-*`), et le message de contexte la reçoit en variable
+  (`tr!("error-template-export", cause = …)`). `ErrorKind` est
+  `#[non_exhaustive]` : cette famille garde un repli `_` (`error-io-other`),
+  seule exception à « sans `_` ».
+- les messages de la barre d'état (`AppState::notice` / `warn` / `fail`) passent par
+  `tr!` (clés `status-*` pour une information ou un avertissement, `error-*`
+  pour un échec) ; la garde `aucun_libelle_en_dur` couvre `notice`, `warn` et
+  `fail`. Une exception de script se dit « Script failed. See the console » (M10).
+
+Même schéma pour les **noms de colonnes de sortie d'analyse** (#256) : le cœur
+rend une donnée (`stokesforge_core::OutputName`, avec `english()`), l'application
+la met en phrase par `analysis::output_name_text_in` (`match` exhaustif sans `_`
+vers `analysis-output-*`), et `tests/output_names.rs` garde l'accord de
+l'anglais du catalogue avec `english()` : changer un de ces textes, c'est changer
+les deux.
+
+Rédaction : ce qui s'est passé, puis quoi faire seulement si c'est utile ;
+Sentence case, pas de point final sur une ligne unique, ni « please », ni
+excuse, ni jargon interne (*nœud, session, macro, commande, arbre*). Un message
+faux ou ambigu se corrige dans le catalogue (`en`), pas dans le crate du dessous
+— sauf si c'est le texte brut anglais lui-même qui est faux.
+
 ## Script `pyst`
 
 - `pyst` : les écritures de #67 réutilisent les commandes, dans une macro `Script` ouverte à la première mutation et avortée sur erreur non rattrapée/interruption. Le moteur possède sa propre identité de client ; les poignées sont revalidées après réservation. `set_values` remplace longueur et cellules sans changer le type ni la provenance ; `set_column` reste strict. `undo()` annule le groupe courant et fait un point de validation. Les objets graphiques (`add_shape`, `remove_shape`, #76) rejoignent également ce groupe, avec relecture du spec sous réservation. Contrat : `stokesforge-script/tests/mutations.rs`, `tests/graphs.rs`, `docs/python-et-script.md`.
