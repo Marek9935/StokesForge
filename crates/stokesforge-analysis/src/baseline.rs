@@ -276,8 +276,12 @@ pub fn build(method: &BaselineMethod, series: &Series) -> Result<Baseline, Analy
             let lo = xs.iter().cloned().fold(f64::INFINITY, f64::min);
             let hi = xs.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             // Conditionnement : t = (x − centre)/demi-étendue ∈ [-1, 1].
-            let center = (lo + hi) / 2.0;
-            let scale = ((hi - lo) / 2.0).max(f64::MIN_POSITIVE);
+            // Moitiés calculées avant la somme/différence : `lo + hi` et `hi − lo`
+            // débordent pour des X extrêmes. Étendue nulle (X tous égaux) : échelle 1,
+            // t = 0 partout, sans quoi `t` deviendrait énorme et `0·inf` donnerait NaN.
+            let center = lo / 2.0 + hi / 2.0;
+            let half = hi / 2.0 - lo / 2.0;
+            let scale = if half > 0.0 { half } else { 1.0 };
             let mut a = Matrix::zeros(xs.len(), needed);
             for (i, &x) in xs.iter().enumerate() {
                 let t = (x - center) / scale;
@@ -532,6 +536,39 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn zones_x_tous_egaux_degre_0_reste_fini_loin_du_centre() {
+        // #274 : l'échelle plancher MIN_POSITIVE rendait t énorme, `0·inf` = NaN.
+        let s = Series::new(vec![0.0, 0.0], vec![1.0, 3.0]);
+        let b = build(
+            &BaselineMethod::Zones {
+                zones: vec![(0.0, 0.0)],
+                degree: 0,
+            },
+            &s,
+        )
+        .unwrap();
+        assert!((b.eval(0.0) - 2.0).abs() < 1e-12);
+        assert!((b.eval(5.0) - 2.0).abs() < 1e-12);
+        assert!((b.eval(1e10) - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn zones_x_extremes_donnent_une_droite_et_non_duplicate_x() {
+        // #274 : `hi − lo` débordait en infini, d'où un DuplicateX trompeur.
+        let s = Series::new(vec![-1e308, 0.0, 1e308], vec![-1.0, 0.0, 1.0]);
+        let b = build(
+            &BaselineMethod::Zones {
+                zones: vec![(-1e308, 1e308)],
+                degree: 1,
+            },
+            &s,
+        )
+        .unwrap();
+        assert!(b.eval(0.0).abs() < 1e-9);
+        assert!((b.eval(1e308) - 1.0).abs() < 1e-9);
     }
 
     #[test]
