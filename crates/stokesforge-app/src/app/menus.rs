@@ -781,20 +781,30 @@ impl StokesForgeApp {
     }
 }
 
+/// Texte et teinte de la pastille des R² faibles (#290), sans contexte egui :
+/// `None` quand il n'y en a aucun (pas de pastille).
+fn low_r2_badge_content(total: usize, dark_mode: bool) -> Option<(String, egui::Color32)> {
+    use stokesforge_app_state::r_squared::{badge_text, RSquaredLevel};
+    (total > 0).then(|| {
+        (
+            badge_text(total),
+            crate::theme::r_squared_color(RSquaredLevel::Dialog, dark_mode),
+        )
+    })
+}
+
 /// La pastille « ⚠ 13 R² faibles » (#290) : icône d'avertissement et texte dans
 /// la teinte rouge de R² (`theme::r_squared_color`) ; un clic ouvre la liste par
 /// type, l'infobulle le dit.
 fn low_r2_badge(ui: &mut egui::Ui, total: usize, actions: &mut Vec<Action>) {
     use crate::icons::{icon_image, Icon, IconRole};
-    use stokesforge_app_state::r_squared::RSquaredLevel;
-    let color = crate::theme::r_squared_color(RSquaredLevel::Dialog, ui.visuals().dark_mode);
+    let Some((text, color)) = low_r2_badge_content(total, ui.visuals().dark_mode) else {
+        return;
+    };
     let response = ui
         .scope(|ui| {
             ui.add(icon_image(Icon::Stale, IconRole::Neutral));
-            ui.label(
-                crate::theme::bold(stokesforge_app_state::r_squared::badge_text(total))
-                    .color(color),
-            );
+            ui.label(crate::theme::bold(text).color(color));
         })
         .response;
     let response = super::cursors::clickable(
@@ -861,6 +871,43 @@ mod tests {
     use stokesforge_core::{NodeId, Project};
     use stokesforge_plot::{AnnotationRef, AnnotationSpec, PanelSpec, PlotSpec, SeriesSpec};
     use stokesforge_session::Session;
+
+    /// La langue est globale : les tests de la pastille la fixent à l'anglais
+    /// sous ce verrou.
+    static LANGUE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn la_pastille_des_r2_faibles_n_existe_que_s_il_y_en_a() {
+        assert_eq!(low_r2_badge_content(0, false), None);
+        assert_eq!(low_r2_badge_content(0, true), None);
+    }
+
+    #[test]
+    fn la_pastille_des_r2_faibles_dit_le_compte() {
+        use stokesforge_app_state::i18n::{set_language, Language};
+        let _verrou = LANGUE.lock().unwrap_or_else(|e| e.into_inner());
+        set_language(Language::English);
+        for (total, attendu) in [(1, "1 low R²"), (2, "2 low R²"), (13, "13 low R²")] {
+            let (texte, _) = low_r2_badge_content(total, false).unwrap();
+            assert_eq!(texte, attendu);
+        }
+    }
+
+    #[test]
+    fn la_pastille_des_r2_faibles_prend_la_teinte_de_la_boite_et_contraste() {
+        use stokesforge_app_state::r_squared::RSquaredLevel::Dialog;
+        use stokesforge_render::color::contrast_ratio;
+        let rgb = |c: egui::Color32| (c.r(), c.g(), c.b());
+        let mut teintes = Vec::new();
+        for (dark, fond) in [(false, (255, 255, 255)), (true, (27, 27, 27))] {
+            let (_, couleur) = low_r2_badge_content(3, dark).unwrap();
+            assert_eq!(couleur, crate::theme::r_squared_color(Dialog, dark));
+            let ratio = contrast_ratio(rgb(couleur), fond);
+            assert!(ratio >= 3.0, "dark = {dark} : contraste {ratio:.2} < 3");
+            teintes.push(couleur);
+        }
+        assert_ne!(teintes[0], teintes[1]);
+    }
 
     /// Un classeur (une feuille, deux colonnes) et un graphe qui les trace,
     /// avec un texte libre. `StokesForgeApp::new` ouvre le classeur puis le
