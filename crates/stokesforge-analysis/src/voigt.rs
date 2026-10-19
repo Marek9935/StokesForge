@@ -97,10 +97,20 @@ pub fn faddeeva(x: f64, y: f64) -> (f64, f64) {
 /// Profil de Voigt **normalisé à l'unité d'aire** : convolution d'une
 /// gaussienne de largeur à mi-hauteur `fwhm_g` et d'une lorentzienne de
 /// largeur à mi-hauteur `fwhm_l`, centrée en 0.
+///
+/// Contrat NaN : une largeur négative (domaine invalide ; Weideman exige
+/// `Im z ≥ 0`) ou la double largeur nulle (Dirac, sans valeur finie) donnent
+/// NaN. Une largeur gaussienne nulle ou négligeable devant la lorentzienne
+/// (`σ·1e30 < γ`) donne la limite lorentzienne, une largeur lorentzienne nulle
+/// la limite gaussienne ; l'écart est alors < 1e-60 en relatif, et évite le
+/// débordement de `den²` dans `faddeeva`.
 pub fn profile(x: f64, fwhm_g: f64, fwhm_l: f64) -> f64 {
+    if fwhm_g < 0.0 || fwhm_l < 0.0 || (fwhm_g == 0.0 && fwhm_l == 0.0) {
+        return f64::NAN;
+    }
     let sigma = fwhm_g / (2.0 * (2.0 * std::f64::consts::LN_2).sqrt());
     let gamma = fwhm_l / 2.0;
-    if sigma <= 0.0 {
+    if sigma <= 0.0 || gamma > sigma * 1e30 {
         // Limite lorentzienne.
         return gamma / (std::f64::consts::PI * (x * x + gamma * gamma));
     }
@@ -162,6 +172,29 @@ mod tests {
             assert!((profile(x, 1e-6, g) - lor(x)).abs() < 1e-5, "x={x}");
             assert!((profile(x, 0.0, g) - lor(x)).abs() < 1e-14);
         }
+    }
+
+    #[test]
+    fn largeur_gaussienne_infime_donne_la_limite_lorentzienne() {
+        // Avant : den² débordait (inf/inf = NaN) dès fwhm_g ~ 1e-200.
+        for x in [0.0, 0.5] {
+            let lor = profile(x, 0.0, 1.0);
+            let v = profile(x, 1e-200, 1.0);
+            assert!((v - lor).abs() < 1e-12 && v.is_finite(), "x {x} : {v}");
+        }
+        // Valeur ordinaire inchangée.
+        assert!((profile(0.0, 1e-100, 1.0) - 0.636_619_772_367_581_3).abs() < 1e-12);
+    }
+
+    #[test]
+    fn largeur_totale_nulle_ou_negative_donne_nan() {
+        assert!(profile(0.0, 0.0, 0.0).is_nan());
+        assert!(profile(1.0, 0.0, 0.0).is_nan());
+        assert!(profile(0.5, 1.0, -1.0).is_nan());
+        assert!(profile(0.5, -1.0, 1.0).is_nan());
+        assert!(profile(0.5, -1.0, -1.0).is_nan());
+        // Une seule largeur nulle reste une limite valide.
+        assert!(profile(0.0, 0.0, 1.0).is_finite() && profile(0.0, 1.0, 0.0).is_finite());
     }
 
     #[test]
