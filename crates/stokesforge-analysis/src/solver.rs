@@ -7,10 +7,18 @@
 //! plusieurs termes, c'est un paramètre global (M13 b) ; une case lue par deux
 //! pics, c'est une largeur liée (#189). Le moteur ne connaît ni modèle ni pic.
 //!
-//! Dérivées par différences centrées (pas relatif au paramètre) : les modèles
-//! libres n'ont pas de dérivée analytique, et un seul chemin de calcul vaut
-//! mieux que deux (modèle intégré, modèle libre). Les bornes sont tenues par
-//! projection du pas.
+//! Dérivées par différences centrées (pas relatif au paramètre, **raffiné** tant
+//! que les dérivées à `h` et `h/4` divergent au-delà de l'arrondi, #294) : les
+//! modèles libres n'ont pas de dérivée analytique, et un seul chemin de calcul
+//! vaut mieux que deux (modèle intégré, modèle libre). Les bornes sont tenues
+//! par projection du pas.
+//!
+//! X décalé (#282, #293, #294) : trois garde-fous tiennent un X de grande
+//! valeur absolue. Le pas de Levenberg-Marquardt passe par les moindres carrés
+//! augmentés ; un pas minuscule ne conclut à la convergence qu'après un pas
+//! presque non amorti (l'amortissement de Marquardt bride la direction faible
+//! des colonnes quasi colinéaires) ; une colonne n'est indéterminée que sous
+//! `DETERMINED_MIN_SHARE` de sa norme.
 
 use crate::error::AnalysisError;
 use crate::linalg::{invert, least_squares, Matrix};
@@ -101,6 +109,11 @@ pub struct Solution {
     pub plateau: bool,
 }
 
+/// λ du pas de vérification (#293) : l'amortissement de Marquardt suit la
+/// diagonale de `JᵀJ`, qui vaut 1e15 et plus pour un X décalé de 1e7 ; sous ce
+/// plancher il bride encore la direction faible, donc on le coupe presque.
+const UNDAMPED_LAMBDA: f64 = 1e-30;
+
 /// Part de la variance de Y (`SStot`) que le résidu (`SSres`) doit dépasser,
 /// sur une courbe au moins, pour qu'un arrêt avec des cases sans effet soit un
 /// plateau et non un modèle surparamétré qui s'ajuste bien (R² < 0,5). Seuil
@@ -165,6 +178,10 @@ pub fn solve_problem(
     let mut lambda = 1e-3;
     let mut iterations = 0;
     let mut converged = false;
+    // Un pas minuscule n'est une preuve de convergence que s'il n'est pas
+    // minuscule à cause de l'amortissement (#293) : on le vérifie par un pas
+    // presque non amorti avant de conclure.
+    let mut undamped_tried = false;
     let mut jac = Matrix::zeros(m, free.len());
     while iterations < opts.max_iterations {
         iterations += 1;
@@ -234,7 +251,14 @@ pub fn solve_problem(
                 lambda = (lambda / 3.0).max(1e-20);
                 improved = true;
                 if drop <= 1e-14 * chi2.max(1e-300) || moved < 1e-11 {
-                    converged = true;
+                    if undamped_tried {
+                        converged = true;
+                    } else {
+                        undamped_tried = true;
+                        lambda = UNDAMPED_LAMBDA;
+                    }
+                } else {
+                    undamped_tried = false;
                 }
                 break;
             }
@@ -338,10 +362,18 @@ pub fn solve_problem(
     })
 }
 
+/// Part de la norme d'une colonne du jacobien qu'elle doit avoir de neuf (hors
+/// des colonnes précédentes) pour être déterminée. Le bruit d'une différence
+/// centrée au pas relatif de 1e-6 est de l'ordre de `ε / 1e-6 ≈ 2e-10` : un
+/// plancher à 1e-8 garde 50 fois de marge sur une vraie dépendance, et laisse
+/// passer une droite sur un X décalé de 1e6 (part neuve ≈ 4,5e-7, #293), que
+/// l'ancien millionième déclarait indéterminée à tort.
+const DETERMINED_MIN_SHARE: f64 = 1e-8;
+
 /// Pour chaque colonne du jacobien, `true` si les données la déterminent : sa
 /// part non portée par les colonnes précédentes (Gram-Schmidt modifié) dépasse
-/// un millionième de sa norme. Une colonne nulle (paramètre sans effet) ou
-/// combinaison des précédentes (X tous égaux pour une droite) est écartée.
+/// `DETERMINED_MIN_SHARE` de sa norme. Une colonne nulle (paramètre sans effet)
+/// ou combinaison des précédentes (X tous égaux pour une droite) est écartée.
 fn determined_columns(jac: &Matrix) -> Vec<bool> {
     let (m, n) = (jac.rows(), jac.cols());
     let mut basis: Vec<Vec<f64>> = Vec::new();
@@ -359,7 +391,7 @@ fn determined_columns(jac: &Matrix) -> Vec<bool> {
             }
         }
         let rest = col.iter().map(|v| v * v).sum::<f64>().sqrt();
-        if rest > 1e-6 * norm {
+        if rest > DETERMINED_MIN_SHARE * norm {
             for v in &mut col {
                 *v /= rest;
             }
@@ -371,6 +403,13 @@ fn determined_columns(jac: &Matrix) -> Vec<bool> {
 }
 
 /// `J[i][k] = ∂résidu_i/∂case_libre_k`, en différences centrées.
+///
+/// Le pas relatif à la valeur du paramètre (1e-6) est faux pour un paramètre
+/// de position à grande valeur : 1 pour un centre de pic à 1e6, plus que la
+/// largeur du pic, donc une dérivée fausse rendue comme convergée (#294). Le
+/// pas est donc **raffiné** : tant que la dérivée à `h` et celle à `h/4`
+/// divergent, on garde le pas plus fin. Un modèle lisse à l'échelle du pas
+/// garde son pas d'origine, à l'identique.
 fn jacobian(
     terms: &[Term<'_>],
     values: &[f64],
@@ -385,26 +424,94 @@ fn jacobian(
     for (k, &i) in free.iter().enumerate() {
         // Pas relatif à l'échelle des paramètres ; le repli absolu ne sert que si
         // tous sont nuls (jamais un plancher qui écraserait des valeurs en 1e-12).
-        let h = 1e-6
+        let mut h = 1e-6
             * values[i]
                 .abs()
                 .max(1e-2 * pmax)
                 .max(if pmax > 0.0 { 0.0 } else { 1e-9 });
-        // Le pas ne sort pas des bornes : à une borne, différence décentrée.
-        let hi = (values[i] + h).min(slots[i].max);
-        let lo = (values[i] - h).max(slots[i].min);
-        work[i] = hi;
-        residuals(terms, &work, buf, &mut plus);
-        work[i] = lo;
-        residuals(terms, &work, buf, &mut minus);
-        work[i] = values[i];
-        let den = hi - lo;
-        for (row, (p, mn)) in plus.iter().zip(&minus).enumerate() {
-            let d = if den > 0.0 { (p - mn) / den } else { 0.0 };
-            jac.set(row, k, if d.is_finite() { d } else { 0.0 });
+        let mut coarse = column(terms, &mut work, slots, i, h, buf, &mut plus, &mut minus);
+        for _ in 0..MAX_STEP_REFINEMENTS {
+            if !h.is_finite() {
+                break;
+            }
+            let fine_h = h / STEP_REFINEMENT_RATIO;
+            let fine = column(
+                terms, &mut work, slots, i, fine_h, buf, &mut plus, &mut minus,
+            );
+            // Un écart que l'arrondi explique n'est pas un désaccord : sans
+            // cela, un départ à zéro (pas de 1e-15) descendrait dans le bruit.
+            let gap = (coarse.values.iter().zip(&coarse.noise))
+                .zip(fine.values.iter().zip(&fine.noise))
+                .map(|((c, nc), (f, nf))| ((c - f).abs() - nc - nf).max(0.0).powi(2))
+                .sum::<f64>();
+            let scale = (coarse.values.iter().chain(&fine.values))
+                .map(|v| v * v)
+                .sum::<f64>();
+            if gap <= STEP_AGREEMENT * STEP_AGREEMENT * scale {
+                break;
+            }
+            (h, coarse) = (fine_h, fine);
+        }
+        for (row, d) in coarse.values.iter().enumerate() {
+            jac.set(row, k, *d);
         }
     }
 }
+
+/// Nombre maximal de divisions du pas de différence (`4^8` au plus).
+const MAX_STEP_REFINEMENTS: usize = 8;
+/// Rapport entre deux pas successifs de la comparaison des dérivées.
+const STEP_REFINEMENT_RATIO: f64 = 4.0;
+/// Écart relatif (norme de la colonne) toléré entre les dérivées à `h` et `h/4`.
+const STEP_AGREEMENT: f64 = 1e-3;
+
+/// Une colonne du jacobien et l'incertitude d'arrondi de chacune de ses lignes.
+struct Column {
+    values: Vec<f64>,
+    noise: Vec<f64>,
+}
+
+/// Colonne du jacobien de la case `i`, en différences centrées de pas `h`.
+#[allow(clippy::too_many_arguments)]
+fn column(
+    terms: &[Term<'_>],
+    work: &mut [f64],
+    slots: &[Slot],
+    i: usize,
+    h: f64,
+    buf: &mut Vec<f64>,
+    plus: &mut Vec<f64>,
+    minus: &mut Vec<f64>,
+) -> Column {
+    let value = work[i];
+    // Le pas ne sort pas des bornes : à une borne, différence décentrée.
+    let hi = (value + h).min(slots[i].max);
+    let lo = (value - h).max(slots[i].min);
+    work[i] = hi;
+    residuals(terms, work, buf, plus);
+    work[i] = lo;
+    residuals(terms, work, buf, minus);
+    work[i] = value;
+    let den = hi - lo;
+    let mut column = Column {
+        values: Vec::with_capacity(plus.len()),
+        noise: Vec::with_capacity(plus.len()),
+    };
+    for (p, mn) in plus.iter().zip(minus.iter()) {
+        let d = if den > 0.0 { (p - mn) / den } else { 0.0 };
+        column.values.push(if d.is_finite() { d } else { 0.0 });
+        // Un pas qui ne déplace plus la valeur n'apprend rien : bruit infini.
+        column.noise.push(if den > 0.0 {
+            ROUNDOFF_FACTOR * f64::EPSILON * p.abs().max(mn.abs()) / den
+        } else {
+            f64::INFINITY
+        });
+    }
+    column
+}
+
+/// Marge sur l'erreur d'arrondi d'une différence de deux résidus.
+const ROUNDOFF_FACTOR: f64 = 8.0;
 
 #[cfg(test)]
 mod tests {
@@ -738,6 +845,35 @@ mod tests {
                     *o = p[0] + p[1] * v;
                 }
             }),
+        }
+    }
+
+    /// Droite `y = 2 + 3t` sur `x = off + t` (60 points, `t ∈ [0, 1]`), départ
+    /// `(a, b) = (-off, 1)` : le X décalé rend les colonnes quasi colinéaires.
+    fn droite_decalee(off: f64) -> Solution {
+        let t: Vec<f64> = (0..60).map(|i| f64::from(i) / 59.0).collect();
+        let x: Vec<f64> = t.iter().map(|t| off + t).collect();
+        let y: Vec<f64> = t
+            .iter()
+            .enumerate()
+            .map(|(i, t)| 2.0 + 3.0 * t + 0.01 * (i as f64 * 1.7).sin())
+            .collect();
+        let slots = vec![Slot::new("a", -off), Slot::new("b", 1.0)];
+        let sol = solve_problem(&slots, &[droite_sur(&x, &y)], Options::default());
+        sol.unwrap()
+    }
+
+    #[test]
+    fn un_pas_amorti_minuscule_n_est_pas_une_convergence() {
+        // #293 : l'amortissement de Marquardt suit `JᵀJ` (≈ off²) et bride la
+        // direction faible ; le pas devenait minuscule, pris pour la
+        // convergence, alors que le χ² valait 7000 fois le minimum.
+        for off in [1e7, 1e8, 1e9] {
+            let sol = droite_decalee(off);
+            let (a, b) = (sol.values[0], sol.values[1]);
+            assert!((b - 3.0).abs() < 1e-2, "off = {off:e} : {:?}", sol.values);
+            assert!(sol.chi2 < 1e-2, "off = {off:e} : χ² = {:e}", sol.chi2);
+            assert!((a + b * off - 2.0).abs() < 1e-2, "off = {off:e} : a = {a}");
         }
     }
 

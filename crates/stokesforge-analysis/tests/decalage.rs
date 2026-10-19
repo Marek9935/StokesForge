@@ -65,7 +65,6 @@ fn le_cas_de_l_issue_donne_les_valeurs_du_modele_lineaire() {
 }
 
 #[test]
-#[ignore = "bug #293"]
 fn le_cas_de_l_issue_donne_les_incertitudes_du_modele_lineaire() {
     // Bruité, pour que les incertitudes aient un sens.
     let input = [droite(1e6, 0.01)];
@@ -167,7 +166,6 @@ fn au_dela_le_resultat_est_fini_et_jamais_un_faux_silencieux() {
 }
 
 #[test]
-#[ignore = "bug #293"]
 fn au_dela_le_resultat_est_celui_du_modele_lineaire() {
     for off in [1e7, 1e8, 1e10] {
         let input = [droite(off, 0.01)];
@@ -219,9 +217,44 @@ fn une_gaussienne_sur_un_x_decale_retrouve_ses_parametres() {
 }
 
 #[test]
-#[ignore = "bug #294"]
 fn une_gaussienne_decalee_de_un_million_retrouve_ses_parametres() {
     verifie_gaussienne(1e6);
+}
+
+/// Gaussienne bruitée (même bruit à tous les décalages), ajustée sur X décalé.
+fn gaussienne_bruitee(off: f64) -> stokesforge_analysis::fit::FittedSeries {
+    let x: Vec<f64> = (0..120).map(|i| off + f64::from(i) / 119.0).collect();
+    let y: Vec<f64> = x
+        .iter()
+        .enumerate()
+        .map(|(i, x)| {
+            let u = x - (off + 0.5);
+            1.0 + 5.0 * (-4.0 * 2f64.ln() * u * u / 0.09).exp() + bruit(i, 0.02)
+        })
+        .collect();
+    let input = FitInput {
+        series: Series::new(x, y),
+        sigma: None,
+    };
+    ajuste(&[input], Model::Gaussian).series.remove(0)
+}
+
+#[test]
+fn une_gaussienne_bruitee_decalee_de_un_million_a_les_incertitudes_du_repere_centre() {
+    // #294 : la dérivée en xc était fausse (pas de 1 > largeur 0,3), donc les
+    // incertitudes aussi (σ_xc = 22) ; elles ne dépendent pas du décalage.
+    let (ref0, loin) = (gaussienne_bruitee(0.0), gaussienne_bruitee(1e6));
+    assert!(!loin.plateau && loin.undetermined == 0, "{loin:?}");
+    for j in 0..4 {
+        let (e0, e1) = (ref0.errors[j].unwrap(), loin.errors[j].unwrap());
+        assert!(proche(e0, e1, 1e-2, 0.0), "param {j} : {e0} contre {e1}");
+        let (v0, v1) = (ref0.values[j], loin.values[j]);
+        let attendu = if j == 2 { v0 + 1e6 } else { v0 };
+        assert!(
+            proche(v1, attendu, 1e-6, 1e-6),
+            "param {j} : {v1} / {attendu}"
+        );
+    }
 }
 
 #[test]

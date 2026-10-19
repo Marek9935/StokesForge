@@ -208,6 +208,21 @@ autres gardent leur incertitude), X tous égaux (pente indéterminée), aucun
 paramètre déterminé (`SingularSystem`), ajustement bien posé (aucun
 avertissement), ligne à σ vide ou nul écartée et comptée.
 
+### Ajustements sur un X décalé (#282, #293, #294)
+
+`stokesforge-analysis/tests/decalage.rs` : droite libre `a + b*x` et gaussienne
+sur un X décalé de 1e3 à 1e10, comparées au modèle `Linear` et au repère centré
+(valeurs **et** incertitudes). Témoins par mutation : sans raffinement du pas
+de différence, `une_gaussienne_decalee_de_un_million_retrouve_ses_parametres` et
+`une_gaussienne_bruitee_decalee_de_un_million_a_les_incertitudes_du_repere_centre`
+échouent ; sans le pas de vérification non amorti,
+`un_pas_amorti_minuscule_n_est_pas_une_convergence` (`solver.rs`) et
+`au_dela_le_resultat_est_celui_du_modele_lineaire` échouent ; avec l'ancien seuil
+d'indétermination (1e-6), `le_cas_de_l_issue_donne_les_incertitudes_du_modele_lineaire`
+échoue. Au-delà de X ≈ 3e7, la pente d'une droite libre est déclarée indéterminée
+(incertitude omise, avertissement) : le bruit des différences finies (≈ 2e-10)
+n'y sépare plus la direction faible.
+
 ### Bornes, prérequis et réglages d'analyse (#260)
 
 `stokesforge-analysis/tests/limites.rs` : `Model::compile` refuse un degré hors
