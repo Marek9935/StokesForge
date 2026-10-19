@@ -50,6 +50,11 @@ pub enum FormulaError {
     /// l'orchestrateur ([`topological_order`]), jamais par une boucle qui
     /// tournerait indéfiniment.
     Cycle,
+    /// L'arbre de la formule dépasse [`MAX_DEPTH`] (parenthèses, signes ou
+    /// chaîne d'opérateurs trop longs) : refusée au parse plutôt que de
+    /// laisser parseur, évaluation et `Drop` récurser jusqu'à l'abandon du
+    /// processus (#289).
+    TooDeep,
 }
 
 impl std::fmt::Display for FormulaError {
@@ -63,6 +68,7 @@ impl std::fmt::Display for FormulaError {
                 write!(f, "the formula refers to its own column ({letter})")
             }
             FormulaError::Cycle => write!(f, "dependency cycle between formula columns"),
+            FormulaError::TooDeep => write!(f, "formula nested too deeply"),
         }
     }
 }
@@ -219,59 +225,101 @@ enum Expr {
     Div(Box<Expr>, Box<Expr>),
 }
 
+/// Plafond de profondeur de l'arbre, en « coût » : un niveau d'imbrication
+/// (parenthèse, signe) coûte [`NEST_COST`], un terme d'une chaîne `a+b+c…` ou
+/// `a*b*c…` coûte 1. Le parseur, `eval_expr`/`combine`, `referenced_columns` et
+/// le `Drop` de l'arbre récursent d'autant : borné ici, aucun ne peut dépasser
+/// la pile d'un thread de 2 MiB, même en debug (`docs/archive/rustrewrite/
+/// questions-ouvertes.md` §11, #289). Admet 100 imbrications ou 1 000 termes.
+pub const MAX_DEPTH: usize = 1000;
+const NEST_COST: usize = 10;
+
 struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
     fn new(tokens: &'a [Token]) -> Self {
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            depth: 0,
+        }
     }
 
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.pos)
     }
 
+    /// Ajoute `cost` à la profondeur courante ; au-delà du plafond, `TooDeep`.
+    fn charge(&mut self, cost: usize) -> Result<(), FormulaError> {
+        self.depth += cost;
+        if self.depth > MAX_DEPTH {
+            return Err(FormulaError::TooDeep);
+        }
+        Ok(())
+    }
+
+    /// Exécute `f` un niveau d'imbrication plus bas, puis rend la profondeur.
+    fn nested<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, FormulaError>,
+    ) -> Result<T, FormulaError> {
+        self.charge(NEST_COST)?;
+        let out = f(self)?;
+        self.depth -= NEST_COST;
+        Ok(out)
+    }
+
     /// `expr := term (('+' | '-') term)*`
     fn parse_expr(&mut self) -> Result<Expr, FormulaError> {
+        let base = self.depth;
         let mut node = self.parse_term()?;
         loop {
             match self.peek() {
                 Some(Token::Plus) => {
                     self.pos += 1;
+                    self.charge(1)?;
                     let rhs = self.parse_term()?;
                     node = Expr::Add(Box::new(node), Box::new(rhs));
                 }
                 Some(Token::Minus) => {
                     self.pos += 1;
+                    self.charge(1)?;
                     let rhs = self.parse_term()?;
                     node = Expr::Sub(Box::new(node), Box::new(rhs));
                 }
                 _ => break,
             }
         }
+        self.depth = base;
         Ok(node)
     }
 
     /// `term := factor (('*' | '/') factor)*`
     fn parse_term(&mut self) -> Result<Expr, FormulaError> {
+        let base = self.depth;
         let mut node = self.parse_factor()?;
         loop {
             match self.peek() {
                 Some(Token::Star) => {
                     self.pos += 1;
+                    self.charge(1)?;
                     let rhs = self.parse_factor()?;
                     node = Expr::Mul(Box::new(node), Box::new(rhs));
                 }
                 Some(Token::Slash) => {
                     self.pos += 1;
+                    self.charge(1)?;
                     let rhs = self.parse_factor()?;
                     node = Expr::Div(Box::new(node), Box::new(rhs));
                 }
                 _ => break,
             }
         }
+        self.depth = base;
         Ok(node)
     }
 
@@ -280,12 +328,12 @@ impl<'a> Parser<'a> {
         match self.peek() {
             Some(Token::Minus) => {
                 self.pos += 1;
-                let inner = self.parse_factor()?;
+                let inner = self.nested(Self::parse_factor)?;
                 Ok(Expr::Neg(Box::new(inner)))
             }
             Some(Token::Plus) => {
                 self.pos += 1;
-                self.parse_factor()
+                self.nested(Self::parse_factor)
             }
             _ => self.parse_primary(),
         }
@@ -304,7 +352,7 @@ impl<'a> Parser<'a> {
             }
             Some(Token::LParen) => {
                 self.pos += 1;
-                let inner = self.parse_expr()?;
+                let inner = self.nested(Self::parse_expr)?;
                 match self.tokens.get(self.pos) {
                     Some(Token::RParen) => {
                         self.pos += 1;
@@ -953,5 +1001,53 @@ mod tests {
         let (order, blocked) = topological_order(&edges);
         assert!(order.is_empty());
         assert_eq!(blocked, BTreeSet::from(["A"]));
+    }
+
+    // -- plafond de profondeur (#289) --
+
+    /// Exécute `f` sur un thread de 2 MiB (celui de l'acteur de session) ;
+    /// en debug, c'est le cas le plus serré.
+    fn sur_2_mib<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> R {
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(f)
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    fn trop_profonde(src: String) -> bool {
+        sur_2_mib(move || Formula::parse(&src) == Err(FormulaError::TooDeep))
+    }
+
+    #[test]
+    fn formule_profonde_refusee_sans_depasser_la_pile() {
+        // Formes qui avortaient le processus avant le plafond.
+        assert!(trop_profonde(format!(
+            "{}A{}",
+            "(".repeat(100_000),
+            ")".repeat(100_000)
+        )));
+        assert!(trop_profonde(format!("{}A", "A+".repeat(100_000))));
+        assert!(trop_profonde(format!("{}A", "A*".repeat(100_000))));
+        assert!(trop_profonde(format!("{}A", "-".repeat(100_000))));
+    }
+
+    #[test]
+    fn formule_juste_sous_le_plafond_acceptee_et_evaluee() {
+        let v = sur_2_mib(|| {
+            let columns = [float_column(&[2.0])];
+            let somme = Formula::parse(&format!("{}A", "A+".repeat(MAX_DEPTH - 2))).unwrap();
+            let n = MAX_DEPTH / NEST_COST - 1;
+            let parens = Formula::parse(&format!("{}A{}", "(".repeat(n), ")".repeat(n))).unwrap();
+            let neg = Formula::parse(&format!("{}A", "-".repeat(n))).unwrap();
+            let val = |f: &Formula| {
+                let r = evaluate(f, 5, &columns, 1);
+                assert_eq!(r.error, None);
+                r.values[0]
+            };
+            (val(&somme), val(&parens), val(&neg))
+        });
+        assert_eq!(v, (2.0 * (MAX_DEPTH - 1) as f64, 2.0, -2.0));
     }
 }

@@ -539,6 +539,7 @@ pub mod formula {
                 tr!("error-formula-self-reference", letter = letter.as_str())
             }
             FormulaError::Cycle => tr!("error-formula-cycle"),
+            FormulaError::TooDeep => tr!("error-formula-too-deep"),
         }
     }
 
@@ -552,14 +553,16 @@ pub mod formula {
                 FormulaError::UnknownColumn("C".into()),
                 FormulaError::SelfReference("A".into()),
                 FormulaError::Cycle,
+                FormulaError::TooDeep,
             ];
-            let mut seen = [false; 4];
+            let mut seen = [false; 5];
             for sample in &samples {
                 let index = match sample {
                     FormulaError::Parse(_) => 0,
                     FormulaError::UnknownColumn(_) => 1,
                     FormulaError::SelfReference(_) => 2,
                     FormulaError::Cycle => 3,
+                    FormulaError::TooDeep => 4,
                 };
                 seen[index] = true;
             }

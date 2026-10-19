@@ -558,6 +558,7 @@ plusieurs jours.)*
 | Longueur d'un nom (nœud, colonne…) | `MAX_NAME_CHARS` | 255 caractères | — | `plotyx-core::name` |
 | Position d'un panneau (ligne/colonne) | `MAX_PANEL_POSITION` | 10 000 | B2 | `plotyx-persistence::convert` |
 | Profondeur d'une formule de modèle `Custom` | `MAX_DEPTH` (`stokesforge-analysis::expr`) | 1 000 (imbrication ×10, terme de chaîne ×1 : 100 parenthèses/signes/exposants, ou 1 000 termes) | #279 | `Expr::parse`, erreur `TooDeep` ; borne parseur, `eval_node` et `Drop` (récursifs). Arbitré : passe avec ~2,7× de marge sur 2 MiB en debug (échoue à 512 Kio), aucune formule réaliste refusée |
+| Profondeur d'une formule de colonne | `MAX_DEPTH` (`stokesforge-core::formula`) | 1 000 (imbrication ×10, terme de chaîne ×1 : 100 parenthèses/signes, ou 1 000 termes) | #289 | `Formula::parse`, erreur `TooDeep` ; borne parseur, `eval_expr`/`combine`, `referenced_columns` et `Drop` (récursifs). Même barème que #279 ; `recalc` traite l'erreur comme tout échec de parse (bloc `NaN`) |
 
 Ces six-là n'« accumulent » rien : ils refusent une valeur hors bornes
 qu'un fichier prétend porter, qu'elle vienne d'un usage réel aberrant ou

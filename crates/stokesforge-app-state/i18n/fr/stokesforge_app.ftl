@@ -543,6 +543,7 @@ error-formula-invalid = Formule invalide : { $detail }
 error-formula-unknown-column = La colonne { $letter } n'existe pas dans cette feuille
 error-formula-self-reference = Une formule ne peut pas faire référence à sa propre colonne ({ $letter })
 error-formula-cycle = Des formules se renvoient l'une à l'autre en boucle. Retirer l'une des références
+error-formula-too-deep = La formule est trop imbriquée. La simplifier (moins de parenthèses imbriquées ou de termes enchaînés)
 
 # Affichage et export du graphique
 error-render-unknown-graph = Ce graphique n'existe plus

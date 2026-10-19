@@ -551,6 +551,7 @@ error-formula-invalid = Invalid formula: { $detail }
 error-formula-unknown-column = Column { $letter } does not exist in this sheet
 error-formula-self-reference = A formula cannot refer to its own column ({ $letter })
 error-formula-cycle = Formulas refer to each other in a loop. Remove one of the references
+error-formula-too-deep = The formula is nested too deeply. Simplify it (fewer nested parentheses or chained terms)
 
 # Graph display and export
 error-render-unknown-graph = This graph no longer exists
