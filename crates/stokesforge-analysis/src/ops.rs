@@ -693,7 +693,9 @@ pub fn run(
                     );
                 }
                 o.column("fit", None, fitted);
-                o.warnings = deconv_warnings(r.warnings);
+                // Étendre, pas écraser : `Undetermined` et `NotConverged` sont déjà posés
+                // plus haut ; `deconv_warnings` ne produit que les trois autres (#292).
+                o.warnings.extend(deconv_warnings(r.warnings));
             }
             Operation::DirectDeconvolution { method, shift } => {
                 let irf = aux_series(aux).map_err(|_| AnalysisError::EmptyResponse)?;

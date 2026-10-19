@@ -267,13 +267,59 @@ fn la_reconvolution_expose_le_plateau_du_solveur() {
 }
 
 #[test]
-#[ignore = "bug #292"]
 fn la_reconvolution_sur_un_plateau_avertit_non_converge_par_ops_run() {
     let (aux, sig) = signal_et_reponse();
     let o = run_one(&reconvolution_amplitude_nulle(), sig, Some(&aux));
     assert_eq!(
         o.warnings,
         vec![Warning::Undetermined(2), Warning::NotConverged]
+    );
+}
+
+/// Reconvolution à deux exponentielles (bkg, A1, tau1, A2, tau2, shift) dont
+/// seule l'amplitude A2 est clouée à 0 : `tau2` est indéterminé, mais le
+/// signal (une seule exponentielle) reste très bien ajusté.
+fn reconvolution_seconde_amplitude_nulle() -> Operation {
+    let mut params = vec![ParamSetting::default(); 6];
+    params[3] = ParamSetting {
+        initial: Some(0.0),
+        min: Some(0.0),
+        max: Some(0.0),
+        ..ParamSetting::default()
+    };
+    Operation::Reconvolution {
+        spec: ReconvSpec {
+            components: 2,
+            params,
+            shift_initial: 0.0,
+            fit_shift: false,
+            window: None,
+        },
+        residuals: false,
+    }
+}
+
+#[test]
+fn la_reconvolution_avertit_indetermine_seul_par_ops_run() {
+    let (aux, sig) = signal_et_reponse();
+    let o = run_one(&reconvolution_seconde_amplitude_nulle(), sig, Some(&aux));
+    assert_eq!(o.warnings, vec![Warning::Undetermined(2)]);
+}
+
+#[test]
+fn la_reconvolution_garde_l_ordre_et_n_a_pas_de_doublon() {
+    // Pas de l'IRF différent de celui du signal : `IrfStepMismatch` (déconvolution)
+    // s'ajoute après `Undetermined` et `NotConverged`, sans les dupliquer.
+    let (mut aux, sig) = signal_et_reponse();
+    aux.x.iter_mut().for_each(|x| *x *= 1.5);
+    let o = run_one(&reconvolution_amplitude_nulle(), sig, Some(&aux));
+    assert_eq!(
+        o.warnings,
+        vec![
+            Warning::Undetermined(2),
+            Warning::NotConverged,
+            Warning::IrfStepMismatch
+        ]
     );
 }
 
