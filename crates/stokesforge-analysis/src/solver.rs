@@ -13,7 +13,7 @@
 //! projection du pas.
 
 use crate::error::AnalysisError;
-use crate::linalg::{invert, solve, Matrix};
+use crate::linalg::{invert, least_squares, Matrix};
 
 /// Une case de paramètre.
 #[derive(Debug, Clone, PartialEq)]
@@ -190,16 +190,28 @@ pub fn solve_problem(
         }
         let mut improved = false;
         for _ in 0..40 {
-            let mut damped = a.clone();
-            for i in 0..free.len() {
-                // Marquardt : l'amortissement suit la diagonale de chaque paramètre,
-                // sans plancher absolu (les colonnes du jacobien peuvent différer de
-                // vingt ordres de grandeur) ; une colonne nulle prend 1.
-                let d = if a.get(i, i) > 0.0 { a.get(i, i) } else { 1.0 };
-                damped.add(i, i, lambda * d);
+            // Pas de Levenberg-Marquardt par moindres carrés **augmentés**
+            // (QR de [J; √(λD)] contre [−r; 0]) et non par les équations
+            // normales : JᵀJ élève le conditionnement au carré, et deux
+            // colonnes quasi colinéaires (X décalé de 1e6, #282) y perdaient
+            // toute précision. Marquardt : l'amortissement suit la diagonale
+            // de chaque paramètre, sans plancher absolu (les colonnes du
+            // jacobien peuvent différer de vingt ordres de grandeur) ; une
+            // colonne nulle prend 1.
+            let n = free.len();
+            let mut aug = Matrix::zeros(m + n, n);
+            let mut rhs = vec![0.0; m + n];
+            for row in 0..m {
+                for k in 0..n {
+                    aug.set(row, k, jac.get(row, k));
+                }
+                rhs[row] = -r[row];
             }
-            let rhs: Vec<f64> = g.iter().map(|v| -v).collect();
-            let Some(step) = solve(&damped, &rhs) else {
+            for i in 0..n {
+                let d = if a.get(i, i) > 0.0 { a.get(i, i) } else { 1.0 };
+                aug.set(m + i, i, (lambda * d).sqrt());
+            }
+            let Some(step) = least_squares(&aug, &rhs).map(|ls| ls.coefficients) else {
                 lambda *= 10.0;
                 continue;
             };
@@ -217,7 +229,9 @@ pub fn solve_problem(
                 values = trial;
                 r = rt;
                 chi2 = chi2_trial;
-                lambda = (lambda / 3.0).max(1e-12);
+                // Plancher très bas : à 1e-12, l'amortissement bridait le fond
+                // d'une vallée étroite (colonnes quasi colinéaires, #282).
+                lambda = (lambda / 3.0).max(1e-20);
                 improved = true;
                 if drop <= 1e-14 * chi2.max(1e-300) || moved < 1e-11 {
                     converged = true;

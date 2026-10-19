@@ -167,3 +167,20 @@ fn un_ajustement_sain_ou_bruite_ne_previent_pas() {
         assert!(o.warnings.is_empty(), "bruit {noise} : {:?}", o.warnings);
     }
 }
+
+#[test]
+fn un_modele_libre_converge_sur_un_x_decale() {
+    // X = 1e6 + t : la colonne « 1 » et la colonne « x » du jacobien sont
+    // quasi colinéaires (cosinus 1 − 1e-13) ; le modèle linéaire (moindres
+    // carrés directs) réussit, le modèle libre doit réussir aussi.
+    let t: Vec<f64> = (0..60).map(|i| f64::from(i) / 59.0).collect();
+    let x: Vec<f64> = t.iter().map(|v| 1e6 + v).collect();
+    let y: Vec<f64> = t.iter().map(|v| 2.0 + 3.0 * v).collect();
+    let op = fit_op(Model::Custom {
+        formula: "a + b*x".into(),
+    });
+    let o = run_one(&op, SeriesInput { x, y, sigma: None }).unwrap();
+    let b = o.values.iter().find(|v| v.key == "param.b").unwrap().value;
+    assert!((b - 3.0).abs() < 1e-3, "b = {b}");
+    assert!(!o.warnings.contains(&Warning::NotConverged));
+}
