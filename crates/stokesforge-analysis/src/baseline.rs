@@ -171,12 +171,12 @@ impl BaselineMethod {
     pub(crate) fn check_finite(&self) -> Result<(), AnalysisError> {
         let (name, finite) = match self {
             BaselineMethod::Constant { point } => ("point", pair_finite(*point)),
+            BaselineMethod::Line { p1, p2 } => ("points", pair_finite(*p1) && pair_finite(*p2)),
             BaselineMethod::ConstantZone { zone } => ("zone", pair_finite(*zone)),
             BaselineMethod::Zones { zones, .. } => ("zones", zones.iter().all(|z| pair_finite(*z))),
             BaselineMethod::Anchors { points, .. } => {
                 ("points", points.iter().all(|p| pair_finite(*p)))
             }
-            _ => return Ok(()),
         };
         if finite {
             Ok(())
@@ -483,6 +483,26 @@ mod tests {
                     build(&BaselineMethod::Zones { zones, degree: 0 }, &s).unwrap_err(),
                     AnalysisError::InvalidParameter {
                         name: "zones".into()
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn un_point_de_droite_non_fini_est_refuse() {
+        let s = line_series();
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for (p1, p2) in [
+                ((bad, 1.0), (4.0, 3.0)),
+                ((0.0, bad), (4.0, 3.0)),
+                ((0.0, 1.0), (bad, 3.0)),
+                ((0.0, 1.0), (4.0, bad)),
+            ] {
+                assert_eq!(
+                    build(&BaselineMethod::Line { p1, p2 }, &s).unwrap_err(),
+                    AnalysisError::InvalidParameter {
+                        name: "points".into()
                     }
                 );
             }

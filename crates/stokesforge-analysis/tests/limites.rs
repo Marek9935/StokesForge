@@ -161,6 +161,38 @@ fn validate_refuse_une_ancre_non_finie() {
 }
 
 #[test]
+fn validate_refuse_un_point_de_droite_non_fini() {
+    let line = |p1, p2| baseline(BaselineMethod::Line { p1, p2 });
+    assert_eq!(line((0.0, 1.0), (4.0, 3.0)).validate(), Ok(()));
+    assert_eq!(
+        line((f64::NAN, 1.0), (4.0, 3.0)).validate(),
+        invalid("points")
+    );
+    assert_eq!(
+        line((0.0, 1.0), (4.0, f64::INFINITY)).validate(),
+        invalid("points")
+    );
+}
+
+#[test]
+fn validate_refuse_un_decalage_initial_non_fini() {
+    let shifted = |shift_initial| Operation::Reconvolution {
+        spec: ReconvSpec {
+            components: 1,
+            params: Vec::new(),
+            shift_initial,
+            fit_shift: true,
+            window: None,
+        },
+        residuals: false,
+    };
+    assert_eq!(shifted(-0.3).validate(), Ok(()));
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(shifted(bad).validate(), invalid("shift_initial"));
+    }
+}
+
+#[test]
 fn validate_refuse_un_ajustement_sans_parametre_libre() {
     // Aucun paramètre : l'expression n'en contient pas.
     assert_eq!(

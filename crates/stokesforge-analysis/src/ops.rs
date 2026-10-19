@@ -536,6 +536,9 @@ impl Operation {
             {
                 bad("components")
             }
+            Operation::Reconvolution { spec, .. } if !spec.shift_initial.is_finite() => {
+                bad("shift_initial")
+            }
             _ => Ok(()),
         }
     }
