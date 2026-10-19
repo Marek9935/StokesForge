@@ -408,4 +408,36 @@ mod tests {
         let t = a.transpose_mul(&[1.0, 1.0, 1.0]);
         assert!(approx(t[0], 9.0, 1e-12) && approx(t[1], 12.0, 1e-12));
     }
+
+    #[test]
+    fn mul_vec_mul_et_transpose_sur_des_matrices_rectangulaires() {
+        // A (2x3) · B (3x2) : produit connu, formes non carrées.
+        let mut a = Matrix::zeros(2, 3);
+        for (i, v) in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0].iter().enumerate() {
+            a.set(i / 3, i % 3, *v);
+        }
+        let mut b = Matrix::zeros(3, 2);
+        for (i, v) in [7.0, 8.0, 9.0, 10.0, 11.0, 12.0].iter().enumerate() {
+            b.set(i / 2, i % 2, *v);
+        }
+        assert_eq!(a.mul_vec(&[1.0, 0.0, -1.0]), vec![-2.0, -2.0]);
+        let p = a.mul(&b);
+        assert_eq!((p.rows(), p.cols()), (2, 2));
+        assert_eq!(
+            [p.get(0, 0), p.get(0, 1), p.get(1, 0), p.get(1, 1)],
+            [58.0, 64.0, 139.0, 154.0]
+        );
+        let t = a.transpose();
+        assert_eq!((t.rows(), t.cols()), (3, 2));
+        for i in 0..2 {
+            for j in 0..3 {
+                assert_eq!(t.get(j, i), a.get(i, j));
+            }
+        }
+        assert_eq!(t.transpose(), a);
+        // (A·B)ᵀ = Bᵀ·Aᵀ.
+        assert_eq!(p.transpose(), b.transpose().mul(&a.transpose()));
+        // L'identité est neutre.
+        assert_eq!(a.mul(&Matrix::identity(3)), a);
+    }
 }

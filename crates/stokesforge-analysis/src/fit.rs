@@ -1031,4 +1031,523 @@ mod tests {
         let i = input(|x| x, vec![0.0, 1.0]);
         assert!(fit(&[i], &spec(Model::Polynomial { degree: 3 })).is_err());
     }
+
+    // ---- #283 : polynôme (QR) sur X décalé ----
+
+    /// Coefficients en puissances de `x` de `Σ cⱼ (x - s)ʲ`, par multiplications
+    /// successives : référence indépendante de `CompiledModel::unshift_matrix`.
+    fn developpe(c: &[f64], s: f64) -> Vec<f64> {
+        let mut out = vec![0.0; c.len()];
+        let mut pow = vec![1.0];
+        for cj in c {
+            for (i, p) in pow.iter().enumerate() {
+                out[i] += cj * p;
+            }
+            let mut next = vec![0.0; pow.len() + 1];
+            for (i, p) in pow.iter().enumerate() {
+                next[i + 1] += p;
+                next[i] -= s * p;
+            }
+            pow = next;
+        }
+        out
+    }
+
+    /// Valeur de `Σ cⱼ tʲ` (Horner), en axe centré.
+    fn horner(c: &[f64], t: f64) -> f64 {
+        c.iter().rev().fold(0.0, |a, cj| a * t + cj)
+    }
+
+    /// `(AᵀA)⁻¹` de la base `1, t, …, tᵈ`, par Gauss-Jordan (référence).
+    fn covariance_brute(t: &[f64], d: usize) -> Vec<Vec<f64>> {
+        let k = d + 1;
+        let mut m = vec![vec![0.0; 2 * k]; k];
+        for i in 0..k {
+            for j in 0..k {
+                m[i][j] = t.iter().map(|v| v.powi((i + j) as i32)).sum();
+            }
+            m[i][k + i] = 1.0;
+        }
+        for c in 0..k {
+            let p = (c..k)
+                .max_by(|&a, &b| m[a][c].abs().total_cmp(&m[b][c].abs()))
+                .unwrap();
+            m.swap(c, p);
+            let piv = m[c][c];
+            for v in m[c].iter_mut() {
+                *v /= piv;
+            }
+            for r in 0..k {
+                if r != c {
+                    let f = m[r][c];
+                    for j in 0..2 * k {
+                        let u = m[c][j];
+                        m[r][j] -= f * u;
+                    }
+                }
+            }
+        }
+        m.into_iter().map(|r| r[k..].to_vec()).collect()
+    }
+
+    /// Variances des coefficients en axe d'origine : diag(T·cov·Tᵀ), `T` étant
+    /// construite colonne par colonne par `developpe`.
+    fn variances_origine(cov: &[Vec<f64>], s: f64) -> Vec<f64> {
+        let k = cov.len();
+        let cols: Vec<Vec<f64>> = (0..k)
+            .map(|j| {
+                let mut e = vec![0.0; k];
+                e[j] = 1.0;
+                developpe(&e, s)
+            })
+            .collect();
+        (0..k)
+            .map(|i| {
+                let mut v = 0.0;
+                for j in 0..k {
+                    for l in 0..k {
+                        v += cols[j][i] * cols[l][i] * cov[j][l];
+                    }
+                }
+                v
+            })
+            .collect()
+    }
+
+    /// Série à X = off + t, où `t` est recalculé *exactement* à partir des X
+    /// arrondis (Sterbenz) : les données sont alors un polynôme exact de X - off.
+    fn serie_decalee(off: f64, t: &[f64], f: impl Fn(usize, f64) -> f64) -> (FitInput, Vec<f64>) {
+        let x: Vec<f64> = t.iter().map(|v| off + v).collect();
+        let tt: Vec<f64> = x.iter().map(|v| v - off).collect();
+        let y = tt.iter().enumerate().map(|(i, &v)| f(i, v)).collect();
+        (
+            FitInput {
+                series: Series::new(x, y),
+                sigma: None,
+            },
+            tt,
+        )
+    }
+
+    const COEFFS: [f64; 6] = [1.0, -2.0, 0.5, 1.5, -0.7, 0.3];
+
+    #[test]
+    fn polynome_exact_degres_1_a_5_sur_x_decale() {
+        // Résidu max < 1e-10 (chi2 < 1e-20), coefficients ré-exprimés dans
+        // l'axe d'origine à 1e-8 relatif, chemin exact (aucune itération LM).
+        let t = grid(21, -2.0, 2.0);
+        for d in 1..=5usize {
+            let c = &COEFFS[..=d];
+            for off in [0.0, 1e2, 1e5, 1e6] {
+                let (i, _) = serie_decalee(off, &t, |_, v| horner(c, v));
+                let r = fit(&[i], &spec(Model::Polynomial { degree: d as u32 })).unwrap();
+                let s = &r.series[0];
+                let ctx = format!("degré {d}, décalage {off:e}");
+                assert_eq!(r.iterations, 1, "{ctx} : chemin QR attendu");
+                assert_eq!(s.dof, 21 - d - 1, "{ctx}");
+                assert!(s.chi2 < 1e-20, "{ctx} : chi2 = {:e}", s.chi2);
+                assert!((s.r_squared - 1.0).abs() < 1e-13, "{ctx}");
+                let want = developpe(c, off);
+                for (j, (g, w)) in s.values.iter().zip(&want).enumerate() {
+                    assert!(
+                        (g - w).abs() <= 1e-8 * w.abs(),
+                        "{ctx} : a{j} = {g:e} contre {w:e}"
+                    );
+                }
+                assert!(
+                    s.errors.iter().all(|e| e.is_some_and(f64::is_finite)),
+                    "{ctx} : {:?}",
+                    s.errors
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn polynome_bruite_coefficients_et_erreurs_invariants_par_translation_de_x() {
+        // Référence : même jeu centré (X = t). Décalé de S, le polynôme est le
+        // même en X - S : coefficients = développement, erreurs = diag(T·cov·Tᵀ)
+        // calculée à la main (cov inversée par Gauss-Jordan sur la base de t).
+        let t = grid(25, -2.0, 2.0);
+        let noise = |i: usize| 0.05 * ((i as f64) * 1.7).sin();
+        for d in 1..=5usize {
+            let c = &COEFFS[..=d];
+            let model = Model::Polynomial { degree: d as u32 };
+            let (i0, t0) = serie_decalee(0.0, &t, |i, v| horner(c, v) + noise(i));
+            let r0 = fit(&[i0], &spec(model.clone())).unwrap();
+            let a = &r0.series[0];
+            let cov = covariance_brute(&t0, d);
+            for off in [1e2, 1e5, 1e6] {
+                let (i1, _) = serie_decalee(off, &t, |i, v| horner(c, v) + noise(i));
+                let r1 = fit(&[i1], &spec(model.clone())).unwrap();
+                let b = &r1.series[0];
+                let ctx = format!("degré {d}, décalage {off:e}");
+                // Statistiques de qualité inchangées.
+                assert!((b.chi2 - a.chi2).abs() <= 1e-6 * a.chi2, "{ctx}");
+                assert!((b.reduced_chi2 - a.reduced_chi2).abs() <= 1e-6 * a.reduced_chi2);
+                assert!((b.r_squared - a.r_squared).abs() < 1e-9, "{ctx}");
+                assert_eq!((b.dof, b.points), (a.dof, a.points), "{ctx}");
+                // Coefficients = ceux du jeu centré, ré-exprimés.
+                let want = developpe(&a.values, off);
+                for (j, (g, w)) in b.values.iter().zip(&want).enumerate() {
+                    assert!(
+                        (g - w).abs() <= 1e-6 * w.abs(),
+                        "{ctx} : a{j} = {g:e} contre {w:e}"
+                    );
+                }
+                // Erreurs = racine de scale · diag(T·cov·Tᵀ).
+                let var = variances_origine(&cov, off);
+                for (j, (e, v)) in b.errors.iter().zip(&var).enumerate() {
+                    let w = (v * a.reduced_chi2).sqrt();
+                    let g = e.unwrap();
+                    assert!(
+                        (g - w).abs() <= 1e-5 * w,
+                        "{ctx} : erreur a{j} = {g:e} contre {w:e}"
+                    );
+                }
+                // Le coefficient de tête ne bouge pas avec l'axe : même erreur.
+                let (ga, gb) = (a.errors[d].unwrap(), b.errors[d].unwrap());
+                assert!((ga - gb).abs() <= 1e-6 * ga, "{ctx} : tête");
+            }
+        }
+    }
+
+    /// Régression linéaire à la main : (pente, ordonnée à l'origine, erreurs
+    /// [ordonnée, pente]) pour des poids `w` (1 sans pondération).
+    fn droite_a_la_main(x: &[f64], y: &[f64], w: &[f64]) -> ([f64; 2], [f64; 2], f64) {
+        let sw: f64 = w.iter().sum();
+        let xb = x.iter().zip(w).map(|(x, w)| x * w).sum::<f64>() / sw;
+        let yb = y.iter().zip(w).map(|(y, w)| y * w).sum::<f64>() / sw;
+        let sxx: f64 = x.iter().zip(w).map(|(x, w)| w * (x - xb).powi(2)).sum();
+        let sxy: f64 = (0..x.len()).map(|i| w[i] * (x[i] - xb) * (y[i] - yb)).sum();
+        let b = sxy / sxx;
+        let a = yb - b * xb;
+        let chi2: f64 = (0..x.len())
+            .map(|i| w[i] * (y[i] - a - b * x[i]).powi(2))
+            .sum();
+        let scale = chi2 / (x.len() - 2) as f64;
+        (
+            [a, b],
+            [
+                (scale * (1.0 / sw + xb * xb / sxx)).sqrt(),
+                (scale / sxx).sqrt(),
+            ],
+            chi2,
+        )
+    }
+
+    #[test]
+    fn droite_bruitee_valeurs_et_erreurs_contre_la_regression_a_la_main() {
+        // Écart-type de l'ordonnée à l'origine = s·sqrt(1/n + x̄²/Sxx) : le terme
+        // x̄² est précisément ce que la propagation T·cov·Tᵀ doit restituer.
+        let t = grid(15, -3.0, 3.0);
+        let noise = |i: usize| 0.2 * ((i as f64) * 2.3).cos();
+        for off in [0.0, 5.0, 1e3, 1e5, 1e6] {
+            let (i, tt) = serie_decalee(off, &t, |k, v| 3.0 - 0.4 * v + noise(k));
+            let x = i.series.x.clone();
+            let y: Vec<f64> = tt
+                .iter()
+                .enumerate()
+                .map(|(k, v)| 3.0 - 0.4 * v + noise(k))
+                .collect();
+            let w = vec![1.0; x.len()];
+            // La référence à la main travaille en axe centré puis re-décale : on
+            // lui donne t pour la précision et on convertit l'ordonnée.
+            let (c, _, chi2) = droite_a_la_main(&tt, &y, &w);
+            let r = fit(&[i], &spec(Model::Linear)).unwrap();
+            let s = &r.series[0];
+            let ctx = format!("décalage {off:e}");
+            let (a0, a1) = (c[0] - off * c[1], c[1]);
+            assert!((s.values[1] - a1).abs() <= 1e-9 * a1.abs(), "{ctx}");
+            assert!(
+                (s.values[0] - a0).abs() <= 1e-9 * a0.abs().max(1.0),
+                "{ctx}"
+            );
+            assert!((s.chi2 - chi2).abs() <= 1e-9 * chi2, "{ctx}");
+            // Erreurs dans l'axe d'origine : x̄ = off + moyenne(t).
+            let (_, e_o, _) = droite_a_la_main(&x, &y, &w);
+            assert!(
+                (s.errors[1].unwrap() - e_o[1]).abs() <= 1e-6 * e_o[1],
+                "{ctx}"
+            );
+            assert!(
+                (s.errors[0].unwrap() - e_o[0]).abs() <= 1e-6 * e_o[0],
+                "{ctx}"
+            );
+        }
+    }
+
+    #[test]
+    fn droite_ponderee_par_sigma_sur_x_decale() {
+        let t = grid(12, -3.0, 3.0);
+        let sig: Vec<f64> = (0..12).map(|i| 0.1 + 0.05 * i as f64).collect();
+        let noise = |i: usize| 0.2 * ((i as f64) * 1.1).sin();
+        let w: Vec<f64> = sig.iter().map(|s| 1.0 / (s * s)).collect();
+        for off in [0.0, 1e4, 1e6] {
+            let (mut i, tt) = serie_decalee(off, &t, |k, v| 1.0 + 0.5 * v + noise(k));
+            i.sigma = Some(sig.clone());
+            let y = i.series.y.clone();
+            let (c, e_t, chi2) = droite_a_la_main(&tt, &y, &w);
+            let r = fit(&[i.clone()], &spec(Model::Linear)).unwrap();
+            let s = &r.series[0];
+            let ctx = format!("décalage {off:e}");
+            assert!((s.values[1] - c[1]).abs() <= 1e-9 * c[1].abs(), "{ctx}");
+            assert!((s.chi2 - chi2).abs() <= 1e-9 * chi2, "{ctx}");
+            // Erreur de pente indépendante de l'axe ; celle de l'ordonnée suit
+            // s·sqrt(1/Σw + x̄_w²/Sxx) avec x̄_w pondérée, en axe d'origine.
+            assert!(
+                (s.errors[1].unwrap() - e_t[1]).abs() <= 1e-6 * e_t[1],
+                "{ctx}"
+            );
+            let x = &i.series.x;
+            let (_, e_o, _) = droite_a_la_main(x, &y, &w);
+            assert!(
+                (s.errors[0].unwrap() - e_o[0]).abs() <= 1e-6 * e_o[0],
+                "{ctx}"
+            );
+            // Doubler tous les σ : mêmes coefficients et mêmes erreurs
+            // (variance résiduelle estimée), χ² divisé par 4.
+            let mut j = i.clone();
+            j.sigma = Some(sig.iter().map(|v| 2.0 * v).collect());
+            let r2 = fit(&[j], &spec(Model::Linear)).unwrap();
+            let s2 = &r2.series[0];
+            assert!((s2.chi2 - s.chi2 / 4.0).abs() <= 1e-9 * s.chi2, "{ctx}");
+            assert!((s2.values[1] - s.values[1]).abs() <= 1e-9 * s.values[1].abs());
+            assert!(
+                (s2.errors[0].unwrap() - s.errors[0].unwrap()).abs() <= 1e-6 * s.errors[0].unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn polynome_pondere_sur_x_decale_memes_coefficients_que_centre() {
+        let t = grid(14, -2.0, 2.0);
+        let sig: Vec<f64> = (0..14).map(|i| 0.05 + 0.02 * i as f64).collect();
+        let noise = |i: usize| 0.04 * ((i as f64) * 0.9).sin();
+        let c = &COEFFS[..=3];
+        let m = Model::Polynomial { degree: 3 };
+        let (mut i0, _) = serie_decalee(0.0, &t, |k, v| horner(c, v) + noise(k));
+        i0.sigma = Some(sig.clone());
+        let a = fit(&[i0], &spec(m.clone())).unwrap();
+        let (mut i1, _) = serie_decalee(1e5, &t, |k, v| horner(c, v) + noise(k));
+        i1.sigma = Some(sig);
+        let b = fit(&[i1], &spec(m)).unwrap();
+        let want = developpe(&a.series[0].values, 1e5);
+        for (g, w) in b.series[0].values.iter().zip(&want) {
+            assert!((g - w).abs() <= 1e-6 * w.abs(), "{g:e} contre {w:e}");
+        }
+        assert!((b.series[0].chi2 - a.series[0].chi2).abs() <= 1e-6 * a.series[0].chi2);
+    }
+
+    #[test]
+    fn courbes_independantes_a_x_differents_ont_chacune_leur_decalage() {
+        // Sans paramètre partagé, chaque courbe passe par fit_linear avec la
+        // moyenne de *ses* X : le résultat est celui de l'ajustement isolé.
+        let t = grid(15, -3.0, 3.0);
+        let mk = |off: f64, c0: f64| {
+            serie_decalee(off, &t, |k, v| {
+                c0 + 0.5 * v - 0.2 * v * v + 0.01 * (k as f64).sin()
+            })
+            .0
+        };
+        let (a, b) = (mk(0.0, 1.0), mk(1e5, 4.0));
+        let m = Model::Polynomial { degree: 2 };
+        let sa = fit(std::slice::from_ref(&a), &spec(m.clone())).unwrap();
+        let sb = fit(std::slice::from_ref(&b), &spec(m.clone())).unwrap();
+        let both = fit(&[a, b], &spec(m)).unwrap();
+        assert_eq!(both.series[0], sa.series[0]);
+        assert_eq!(both.series[1], sb.series[0]);
+        assert_eq!(both.dof, sa.dof + sb.dof);
+    }
+
+    #[test]
+    fn ajustement_global_de_droites_a_x_differents_garde_les_bons_coefficients() {
+        // Le global passe par Levenberg-Marquardt, sans centrage : on épingle
+        // que pente partagée et ordonnées restent exactes pour une droite.
+        let t = grid(21, -5.0, 5.0);
+        for off in [1e2, 1e5, 1e6] {
+            let (a, _) = serie_decalee(off, &t, |_, v| 1.0 + 2.0 * v);
+            let (b, _) = serie_decalee(2.0 * off, &t, |_, v| 5.0 + 2.0 * v);
+            let mut sp = spec(Model::Linear);
+            sp.params = vec![
+                ParamSetting::default(),
+                ParamSetting {
+                    shared: true,
+                    ..Default::default()
+                },
+            ];
+            let r = fit(&[a, b], &sp).unwrap();
+            let want = [(1.0 - 2.0 * off), (5.0 - 4.0 * off)];
+            for (s, w) in r.series.iter().zip(want) {
+                assert!((s.values[1] - 2.0).abs() < 1e-8, "pente {}", s.values[1]);
+                assert!((s.values[0] - w).abs() <= 1e-8 * w.abs(), "{off:e}");
+            }
+            assert_eq!(r.dof, 42 - 3);
+        }
+    }
+
+    #[test]
+    fn polynome_contraint_sur_x_decale_precis_si_modere_et_signale_quand_il_se_degrade() {
+        // Un polynôme contraint (fixé, valeur initiale) passe par LM, sans
+        // centrage : sa précision se dégrade quand X s'éloigne de 0. Épinglé :
+        // (1) décalage modéré, résultat juste ; (2) sinon, un résultat dont le
+        // χ² dépasse 100 fois celui du jeu centré porte toujours un
+        // avertissement (plateau ou paramètres indéterminés), jamais silencieux.
+        let t = grid(21, -5.0, 5.0);
+        let noise = |i: usize| 0.01 * ((i as f64) * 1.7).sin();
+        for d in 2..=4usize {
+            let c: Vec<f64> = (0..=d).map(|j| 1.0 / (1.0 + j as f64)).collect();
+            let top = c[d];
+            for fixed in [false, true] {
+                let mut sp = spec(Model::Polynomial { degree: d as u32 });
+                sp.params = vec![ParamSetting::default(); d];
+                sp.params.push(ParamSetting {
+                    fixed,
+                    initial: Some(top),
+                    ..Default::default()
+                });
+                let (i0, _) = serie_decalee(0.0, &t, |k, v| horner(&c, v) + noise(k));
+                let ref0 = fit(&[i0], &sp).unwrap().series.remove(0);
+                for off in [1e2, 1e3, 1e4, 1e5, 1e6] {
+                    let (i, _) = serie_decalee(off, &t, |k, v| horner(&c, v) + noise(k));
+                    let s = fit(&[i], &sp).unwrap().series.remove(0);
+                    let ctx = format!("degré {d}, fixé {fixed}, décalage {off:e}");
+                    assert!(s.values.iter().all(|v| v.is_finite()), "{ctx}");
+                    if s.chi2 > 100.0 * ref0.chi2 {
+                        assert!(
+                            s.plateau || s.undetermined > 0,
+                            "{ctx} : chi2 = {:e}",
+                            s.chi2
+                        );
+                    }
+                    if off <= 1e2 && d <= 3 {
+                        let want = developpe(&ref0.values, off);
+                        for (g, w) in s.values.iter().zip(&want) {
+                            assert!((g - w).abs() <= 1e-5 * w.abs(), "{ctx} : {g:e} / {w:e}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn x_tous_egaux_jamais_de_nan_silencieux() {
+        // Rang déficient : le QR refuse (colonne x - moyenne nulle), l'ajustement
+        // retombe sur Levenberg-Marquardt. Épinglé : pas d'erreur, valeurs
+        // finies, la droite passe par la moyenne des Y, et le défaut est signalé
+        // (plateau, paramètre indéterminé), sans NaN dans les incertitudes.
+        for x0 in [0.0, 1e5] {
+            let y = vec![0.0, 1.0, 2.0];
+            let i = FitInput {
+                series: Series::new(vec![x0; 3], y),
+                sigma: None,
+            };
+            let r = fit(&[i], &spec(Model::Linear)).unwrap();
+            let s = &r.series[0];
+            assert!(s.values.iter().all(|v| v.is_finite()), "x0 = {x0}");
+            assert!(s.plateau && s.undetermined >= 1, "x0 = {x0} : {s:?}");
+            assert!(
+                s.errors.iter().flatten().all(|e| e.is_finite()),
+                "x0 = {x0} : {:?}",
+                s.errors
+            );
+            let at = s.values[0] + s.values[1] * x0;
+            assert!((at - 1.0).abs() < 1e-6, "valeur ajustée en x0 : {at}");
+        }
+        // Polynôme degré 2, 3 points confondus : dof 0, aucune incertitude.
+        let i = FitInput {
+            series: Series::new(vec![1e5; 3], vec![0.0, 1.0, 2.0]),
+            sigma: None,
+        };
+        let r = fit(&[i], &spec(Model::Polynomial { degree: 2 })).unwrap();
+        let s = &r.series[0];
+        assert!(s.values.iter().all(|v| v.is_finite()));
+        assert_eq!(r.dof, 0);
+        assert!(s.errors.iter().all(Option::is_none));
+        assert!(s.plateau && s.undetermined >= 1);
+    }
+
+    #[test]
+    fn n_egal_degre_plus_un_sur_x_decale_interpole_sans_incertitude() {
+        // dof = 0 : interpolation exacte, aucune incertitude, χ² réduit NaN.
+        for off in [0.0, 1e5, 1e6] {
+            let x = vec![off - 1.0, off, off + 2.0];
+            let c = [2.0, -1.0, 0.5];
+            let y: Vec<f64> = x.iter().map(|v| horner(&c, v - off)).collect();
+            let i = FitInput {
+                series: Series::new(x, y),
+                sigma: None,
+            };
+            let r = fit(&[i], &spec(Model::Polynomial { degree: 2 })).unwrap();
+            let s = &r.series[0];
+            let want = developpe(&c, off);
+            for (g, w) in s.values.iter().zip(&want) {
+                assert!((g - w).abs() <= 1e-8 * w.abs(), "{off:e} : {g:e} / {w:e}");
+            }
+            assert_eq!((s.dof, r.dof, s.points), (0, 0, 3));
+            assert!(s.errors.iter().all(Option::is_none), "{:?}", s.errors);
+            assert!(s.reduced_chi2.is_nan() && r.reduced_chi2.is_nan());
+            assert!(s.chi2 < 1e-18);
+        }
+        // Droite par deux points à X = 1e6.
+        let i = FitInput {
+            series: Series::new(vec![1e6, 1e6 + 1.0], vec![1.0, 3.0]),
+            sigma: None,
+        };
+        let r = fit(&[i], &spec(Model::Linear)).unwrap();
+        let s = &r.series[0];
+        assert!((s.values[1] - 2.0).abs() < 1e-9);
+        assert!((s.values[0] - (1.0 - 2.0e6)).abs() < 1e-3);
+        assert!(s.errors.iter().all(Option::is_none) && s.dof == 0);
+    }
+
+    #[test]
+    fn un_seul_point_sur_x_decale_est_refuse() {
+        for (m, needed) in [(Model::Linear, 2), (Model::Polynomial { degree: 2 }, 3)] {
+            let i = FitInput {
+                series: Series::new(vec![1e5], vec![1.0]),
+                sigma: None,
+            };
+            assert!(matches!(
+                fit(&[i], &spec(m)),
+                Err(AnalysisError::NotEnoughPoints { found: 1, needed: n }) if n == needed
+            ));
+        }
+    }
+
+    #[test]
+    fn x_centre_en_zero_valeurs_de_reference_inchangees() {
+        // Non-régression : X symétrique (moyenne exactement 0, aucun décalage),
+        // valeurs calculées hors du dépôt (moindres carrés, numpy).
+        let x = vec![-2.0, -1.0, 0.0, 1.0, 2.0];
+        let y = vec![4.1, 1.9, 1.2, 1.8, 4.2];
+        let mk = || FitInput {
+            series: Series::new(x.clone(), y.clone()),
+            sigma: None,
+        };
+        let close = |g: f64, w: f64| (g - w).abs() <= 1e-12 * (1.0 + w.abs());
+        let r = fit(&[mk()], &spec(Model::Polynomial { degree: 2 })).unwrap();
+        let s = &r.series[0];
+        for (g, w) in s.values.iter().zip([1.14, 0.01, 0.75]) {
+            assert!(close(*g, w), "{g} contre {w}");
+        }
+        assert!(close(s.chi2, 0.016) && s.dof == 2);
+        let scale = 0.016 / 2.0;
+        let want = [
+            (scale * 34.0 / 70.0_f64).sqrt(),
+            (scale / 10.0_f64).sqrt(),
+            (scale * 5.0 / 70.0_f64).sqrt(),
+        ];
+        for (e, w) in s.errors.iter().zip(want) {
+            assert!(close(e.unwrap(), w), "{e:?} contre {w}");
+        }
+        let r = fit(&[mk()], &spec(Model::Linear)).unwrap();
+        let s = &r.series[0];
+        assert!(close(s.values[0], 2.64) && close(s.values[1], 0.01));
+        assert!(close(s.chi2, 7.891));
+        let scale = 7.891 / 3.0;
+        assert!(close(s.errors[0].unwrap(), (scale / 5.0_f64).sqrt()));
+        assert!(close(s.errors[1].unwrap(), (scale / 10.0_f64).sqrt()));
+    }
 }

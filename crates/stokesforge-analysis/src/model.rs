@@ -626,4 +626,228 @@ mod tests {
         let g = Model::Power.compile().unwrap().guess(&s);
         assert!((g[0] - 2.0).abs() < 1e-9 && (g[1] - 1.5).abs() < 1e-9);
     }
+
+    // ---- #283 : décalage de X et matrice de ré-expression des coefficients ----
+
+    fn poly(degree: u32) -> CompiledModel {
+        Model::Polynomial { degree }.compile().unwrap()
+    }
+
+    /// `Σ cⱼ (x - s)ʲ` développé par multiplications successives (indépendant
+    /// de `unshift_matrix`) : coefficients en puissances de `x`.
+    fn developpe(c: &[f64], s: f64) -> Vec<f64> {
+        let mut out = vec![0.0; c.len()];
+        // pow = (x - s)ʲ, coefficients en x.
+        let mut pow = vec![1.0];
+        for cj in c {
+            for (i, p) in pow.iter().enumerate() {
+                out[i] += cj * p;
+            }
+            let mut next = vec![0.0; pow.len() + 1];
+            for (i, p) in pow.iter().enumerate() {
+                next[i + 1] += p;
+                next[i] -= s * p;
+            }
+            pow = next;
+        }
+        out
+    }
+
+    #[test]
+    fn x_shift_est_la_moyenne_pour_la_droite_et_le_polynome() {
+        let x = [1.0, 2.0, 6.0];
+        assert_eq!(Model::Linear.compile().unwrap().x_shift(&x), 3.0);
+        for d in [0, 1, 2, 5] {
+            assert_eq!(poly(d).x_shift(&x), 3.0, "degré {d}");
+        }
+        // La moyenne, ni le minimum ni le milieu de plage (3,5).
+        let x = [10.0, 10.0, 10.0, 13.0];
+        assert_eq!(poly(2).x_shift(&x), 10.75);
+    }
+
+    #[test]
+    fn x_shift_est_nul_pour_les_autres_modeles() {
+        let x = [1e5, 1e5 + 1.0, 1e5 + 2.0];
+        for m in [
+            Model::Logarithm,
+            Model::Power,
+            Model::Exponential,
+            Model::ExponentialOffset,
+            Model::Exponential2,
+            Model::Gaussian,
+            Model::Lorentzian,
+            Model::Custom {
+                formula: "a*x+b".into(),
+            },
+        ] {
+            assert_eq!(m.compile().unwrap().x_shift(&x), 0.0, "{m:?}");
+        }
+    }
+
+    #[test]
+    fn x_shift_ignore_les_x_non_finis_et_se_replie_sur_zero() {
+        let p = poly(2);
+        assert_eq!(p.x_shift(&[2.0, f64::NAN, 4.0, f64::INFINITY]), 3.0);
+        assert_eq!(p.x_shift(&[]), 0.0);
+        assert_eq!(p.x_shift(&[f64::NAN, f64::NEG_INFINITY]), 0.0);
+        // Somme qui déborde : moyenne non finie, repli sur 0 (jamais inf).
+        assert_eq!(p.x_shift(&[f64::MAX, f64::MAX]), 0.0);
+    }
+
+    #[test]
+    fn unshift_matrix_absente_sans_decalage_ou_hors_polynome() {
+        assert!(poly(3).unshift_matrix(0.0).is_none());
+        assert!(poly(3).unshift_matrix(-0.0).is_none());
+        assert!(Model::Linear
+            .compile()
+            .unwrap()
+            .unshift_matrix(0.0)
+            .is_none());
+        for m in [Model::Logarithm, Model::Gaussian, Model::Exponential] {
+            assert!(m.compile().unwrap().unshift_matrix(2.0).is_none(), "{m:?}");
+        }
+    }
+
+    #[test]
+    fn unshift_matrix_degre_0_est_l_identite_1x1() {
+        let t = poly(0).unshift_matrix(7.5).unwrap();
+        assert_eq!((t.rows(), t.cols()), (1, 1));
+        assert_eq!(t.get(0, 0), 1.0);
+    }
+
+    #[test]
+    fn unshift_matrix_droite_et_degre_1_coincident() {
+        // y = c0 + c1 (x - s) = (c0 - s c1) + c1 x.
+        let want = [[1.0, -3.0], [0.0, 1.0]];
+        for m in [Model::Linear, Model::Polynomial { degree: 1 }] {
+            let t = m.compile().unwrap().unshift_matrix(3.0).unwrap();
+            assert_eq!((t.rows(), t.cols()), (2, 2));
+            for (i, row) in want.iter().enumerate() {
+                for (j, w) in row.iter().enumerate() {
+                    assert_eq!(t.get(i, j), *w, "{m:?} ({i},{j})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unshift_matrix_degre_2_developpe_le_carre() {
+        // (x-2)² = x² - 4x + 4 : colonne 2 = [4, -4, 1]. Colonne 1 : x-2.
+        let t = poly(2).unshift_matrix(2.0).unwrap();
+        let want = [[1.0, -2.0, 4.0], [0.0, 1.0, -4.0], [0.0, 0.0, 1.0]];
+        for (i, row) in want.iter().enumerate() {
+            for (j, w) in row.iter().enumerate() {
+                assert_eq!(t.get(i, j), *w, "({i},{j})");
+            }
+        }
+    }
+
+    #[test]
+    fn unshift_matrix_degre_3_developpe_le_cube() {
+        // (x-3)³ = x³ - 9x² + 27x - 27.
+        let t = poly(3).unshift_matrix(3.0).unwrap();
+        let col3 = [-27.0, 27.0, -9.0, 1.0];
+        for (i, w) in col3.iter().enumerate() {
+            assert_eq!(t.get(i, 3), *w, "ligne {i}");
+        }
+        // (x-3)² = x² - 6x + 9.
+        let col2 = [9.0, -6.0, 1.0, 0.0];
+        for (i, w) in col2.iter().enumerate() {
+            assert_eq!(t.get(i, 2), *w, "ligne {i}");
+        }
+    }
+
+    #[test]
+    fn unshift_matrix_degre_5_developpe_la_puissance_5() {
+        // (x-1)⁵ : coefficients binomiaux alternés.
+        let t = poly(5).unshift_matrix(1.0).unwrap();
+        let col5 = [-1.0, 5.0, -10.0, 10.0, -5.0, 1.0];
+        for (i, w) in col5.iter().enumerate() {
+            assert_eq!(t.get(i, 5), *w, "ligne {i}");
+        }
+        // (x-2)⁵ : 5·(-2)⁴ = 80 devant x, -32 en constante.
+        let t = poly(5).unshift_matrix(2.0).unwrap();
+        let col5 = [-32.0, 80.0, -80.0, 40.0, -10.0, 1.0];
+        for (i, w) in col5.iter().enumerate() {
+            assert_eq!(t.get(i, 5), *w, "ligne {i}");
+        }
+    }
+
+    #[test]
+    fn unshift_matrix_est_triangulaire_superieure_a_diagonale_unite() {
+        for d in 0..=6u32 {
+            let t = poly(d).unshift_matrix(-1.5).unwrap();
+            let k = (d + 1) as usize;
+            assert_eq!((t.rows(), t.cols()), (k, k));
+            for i in 0..k {
+                assert_eq!(t.get(i, i), 1.0, "degré {d} diagonale {i}");
+                for j in 0..i {
+                    assert_eq!(t.get(i, j), 0.0, "degré {d} ({i},{j})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unshift_matrix_applique_a_un_polynome_connu() {
+        // 1 + 2(x-2) + 3(x-2)² = 3x² - 10x + 9.
+        let t = poly(2).unshift_matrix(2.0).unwrap();
+        assert_eq!(t.mul_vec(&[1.0, 2.0, 3.0]), vec![9.0, -10.0, 3.0]);
+        // Contre un développement indépendant, pour tous les degrés.
+        for d in 0..=5u32 {
+            let c: Vec<f64> = (0..=d).map(|j| 1.0 + 0.5 * f64::from(j)).collect();
+            for s in [2.0, -3.0, 0.25] {
+                let t = poly(d).unshift_matrix(s).unwrap();
+                let got = t.mul_vec(&c);
+                let want = developpe(&c, s);
+                for (g, w) in got.iter().zip(&want) {
+                    assert!((g - w).abs() <= 1e-12 * (1.0 + w.abs()), "d={d} s={s}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unshift_matrix_conserve_la_valeur_du_polynome() {
+        // eval(T·c, x) == eval(c, x - s) : la matrice change d'axe, pas de courbe.
+        for d in 0..=5u32 {
+            let m = poly(d);
+            let c: Vec<f64> = (0..=d).map(|j| (f64::from(j) * 1.3).cos()).collect();
+            let s = 2.5;
+            let a = m.unshift_matrix(s).unwrap().mul_vec(&c);
+            for x in [-3.0, 0.0, 1.0, 4.5, 10.0] {
+                let (g, w) = (m.eval(&a, x), m.eval(&c, x - s));
+                assert!((g - w).abs() <= 1e-9 * (1.0 + w.abs()), "d={d} x={x}");
+            }
+        }
+    }
+
+    #[test]
+    fn unshift_matrix_aller_retour_avec_le_decalage_oppose() {
+        // Décaler de s puis de -s ramène les coefficients de départ.
+        let m = poly(4);
+        let c = [1.0, -2.0, 0.5, 3.0, -1.0];
+        let a = m.unshift_matrix(1.75).unwrap().mul_vec(&c);
+        let back = m.unshift_matrix(-1.75).unwrap().mul_vec(&a);
+        for (b, w) in back.iter().zip(c) {
+            assert!((b - w).abs() < 1e-12, "{b} vs {w}");
+        }
+    }
+
+    #[test]
+    fn la_covariance_de_la_droite_se_propage_par_t_cov_tt() {
+        // Droite centrée : colonnes orthogonales, cov = diag(1/n, 1/sxx). Après
+        // le décalage s : var(a0) = 1/n + s²/sxx, cov(a0,a1) = -s/sxx,
+        // var(a1) = 1/sxx (propagation à la main de T·cov·Tᵀ).
+        let (n, sxx, s) = (10.0_f64, 82.5_f64, 4.0_f64);
+        let mut cov = Matrix::zeros(2, 2);
+        cov.set(0, 0, 1.0 / n);
+        cov.set(1, 1, 1.0 / sxx);
+        let t = Model::Linear.compile().unwrap().unshift_matrix(s).unwrap();
+        let p = t.mul(&cov).mul(&t.transpose());
+        assert!((p.get(0, 0) - (1.0 / n + s * s / sxx)).abs() < 1e-15);
+        assert!((p.get(0, 1) + s / sxx).abs() < 1e-15);
+        assert!((p.get(1, 0) + s / sxx).abs() < 1e-15);
+        assert!((p.get(1, 1) - 1.0 / sxx).abs() < 1e-15);
+    }
 }
