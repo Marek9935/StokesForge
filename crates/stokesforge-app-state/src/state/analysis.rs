@@ -19,6 +19,7 @@ use super::{history_text, Action, AppState};
 use crate::analysis::{issue_message, AnalysisForm, Preset, RecentTarget};
 use crate::analysis_recent::{remember, RecentAnalysis};
 use crate::errors;
+use crate::r_squared;
 use crate::tr;
 
 /// La réponse à la confirmation de suppression d'un calcul (M8).
@@ -282,8 +283,8 @@ impl AppState {
                 return;
             }
         }
-        let draft = match form.draft(&self.snapshot.tree) {
-            Ok(draft) => draft,
+        let (draft, all_values) = match form.draft_with_values(&self.snapshot.tree) {
+            Ok(drafted) => drafted,
             Err(issue) => {
                 self.fail(issue_message(&issue));
                 return;
@@ -344,7 +345,92 @@ impl AppState {
                 .object_manager_preferences
                 .save_analysis_keep_results(form.keep_results);
             self.analysis = None;
+            // Un calcul « Show » ne garde pas ses valeurs : le recalcul ne les
+            // verra jamais, c'est donc ici qu'un R² très faible se dit (#288).
+            // Un calcul qui garde ses valeurs est vu par `watch_low_r2`.
+            if !form.keep_results && !form.replace_original && form.low_r2_dialog {
+                let kind = form.kind;
+                let lines: Vec<String> = all_values
+                    .iter()
+                    .zip(&form.series)
+                    .filter_map(|(result, series)| {
+                        low_r2_of(&result.values)
+                            .map(|r2| low_r2_line(&self.snapshot.tree, kind, series, r2))
+                    })
+                    .collect();
+                self.raise_low_r2(&lines);
+            }
         }
+    }
+
+    /// Ouvre la boîte « R² très faible » (#288) pour `lines` (une par série en
+    /// défaut), sauf si la préférence de l'application la coupe, s'il n'y a rien
+    /// à dire, ou si une alerte attend déjà d'être lue (une seule case : une
+    /// alerte d'enregistrement ou d'ouverture ne s'écrase pas).
+    fn raise_low_r2(&mut self, lines: &[String]) {
+        if lines.is_empty()
+            || self.alert.is_some()
+            || !self.object_manager_preferences.analysis_low_r2_dialog()
+        {
+            return;
+        }
+        let mut message = lines[0].clone();
+        if lines.len() > 1 {
+            message.push('\n');
+            message.push_str(&tr!(
+                "alert-low-r2-more",
+                count = i64::try_from(lines.len() - 1).unwrap_or(i64::MAX)
+            ));
+        }
+        self.alert = Some(super::Alert {
+            kind: super::AlertKind::LowRSquared,
+            message,
+        });
+    }
+
+    /// Prend l'empreinte des R² très faibles des calculs de `tree`, sans rien
+    /// dire : l'ouverture d'un projet n'est pas un recalcul.
+    pub(super) fn seed_low_r2(&mut self) {
+        self.low_r2_seen = self
+            .snapshot
+            .tree
+            .calculations()
+            .iter()
+            .filter_map(|(id, calc)| {
+                let print = r_squared::dialog_fingerprint(calc);
+                (!print.is_empty()).then_some((*id, print))
+            })
+            .collect();
+    }
+
+    /// Appelée à chaque instantané neuf : un calcul qui garde ses valeurs et
+    /// dont un R² très faible **vient de changer** (recalcul manuel ou
+    /// automatique, application, annulation) ouvre la boîte (#288). Un calcul
+    /// dont le résultat n'a pas bougé ne la rouvre pas à chaque image.
+    pub(super) fn watch_low_r2(&mut self) {
+        let tree = self.snapshot.tree.clone();
+        let mut lines = Vec::new();
+        let mut seen = std::mem::take(&mut self.low_r2_seen);
+        seen.retain(|id, _| tree.calculation(*id).is_some());
+        for (id, calc) in tree.calculations() {
+            let print = r_squared::dialog_fingerprint(calc);
+            if print.is_empty() {
+                seen.remove(id);
+            } else if seen.get(id) != Some(&print) {
+                if calc.low_r2_dialog {
+                    for (rank, result) in calc.results.iter().enumerate() {
+                        if let (Some(r2), Some(series)) =
+                            (low_r2_of(&result.values), calc.series.get(rank))
+                        {
+                            lines.push(low_r2_line(&tree, calc.operation.kind(), series, r2));
+                        }
+                    }
+                }
+                seen.insert(*id, print);
+            }
+        }
+        self.low_r2_seen = seen;
+        self.raise_low_r2(&lines);
     }
 
     /// Les graphiques qui tracent au moins une des colonnes `ys` : ceux où
@@ -694,4 +780,32 @@ impl AppState {
         }
         self.run_export(action);
     }
+}
+
+/// Le R² d'une série qui franchit le palier de la boîte, s'il y en a un (le plus
+/// bas si plusieurs : un ajustement global n'en a qu'un par série).
+fn low_r2_of(values: &[stokesforge_core::ResultValue]) -> Option<f64> {
+    values
+        .iter()
+        .filter(|v| r_squared::level_of_value(&v.key, v.value) == r_squared::RSquaredLevel::Dialog)
+        .map(|v| v.value)
+        .min_by(f64::total_cmp)
+}
+
+/// Une ligne de la boîte : l'opération, la série, et son R².
+fn low_r2_line(
+    tree: &stokesforge_core::Tree,
+    kind: stokesforge_analysis::ops::OperationKind,
+    series: &SeriesRef,
+    r_squared: f64,
+) -> String {
+    let kind = crate::analysis::kind_title(kind);
+    let series = crate::analysis::series_label(tree, series);
+    let value = stokesforge_core::number_format::format_with_uncertainty(r_squared, None);
+    tr!(
+        "alert-low-r2-line",
+        kind = kind.as_str(),
+        series = series.as_str(),
+        value = value.as_str()
+    )
 }

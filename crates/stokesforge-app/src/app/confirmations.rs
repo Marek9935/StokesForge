@@ -27,8 +27,8 @@ use stokesforge_app_state::state::{
 use stokesforge_app_state::tr;
 
 use super::dialogs::{
-    modal_alert, modal_confirm, modal_dialog_with, modal_save_changes, AlertOutcome,
-    ConfirmOutcome, DialogFooter, DialogOutcome, SaveChangesOutcome,
+    modal_alert, modal_confirm, modal_dialog_with, modal_read_only, modal_save_changes,
+    AlertOutcome, ConfirmOutcome, DialogFooter, DialogOutcome, SaveChangesOutcome,
 };
 
 /// Taille par défaut d'un dialogue bloquant.
@@ -39,7 +39,23 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
     if let Some(gesture) = state.unsaved_pending() {
         unsaved_dialog(ctx, gesture, actions);
     }
-    if let Some(alert) = state.alert() {
+    if let Some(alert) = state.alert().filter(|a| a.kind == AlertKind::LowRSquared) {
+        // Un avertissement, pas un échec (#288) : rien à réessayer, Close seul
+        // (Entrée, Échap, croix) le referme.
+        let outcome = modal_read_only(
+            ctx,
+            egui::Id::new("stokesforge_alert"),
+            &tr!("alert-low-r2-title"),
+            BLOCKING_DIALOG_SIZE,
+            |ui| {
+                ui.label(tr!("alert-low-r2"));
+                ui.label(egui::RichText::new(&alert.message).weak());
+            },
+        );
+        if outcome != DialogOutcome::Open {
+            actions.push(Action::DismissAlert);
+        }
+    } else if let Some(alert) = state.alert() {
         let (title, intro, action, retry) = match alert.kind {
             AlertKind::SaveFailed => (
                 tr!("alert-save-failed-title"),
@@ -51,6 +67,8 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
                     },
                 ),
             ),
+            // Traité plus haut : un avertissement n'a pas d'action.
+            AlertKind::LowRSquared => return,
             AlertKind::OpenFailed => (
                 tr!("alert-open-failed-title"),
                 tr!("alert-open-failed"),

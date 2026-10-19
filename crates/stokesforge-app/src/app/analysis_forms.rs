@@ -28,6 +28,7 @@ use stokesforge_app_state::analysis::{
     BaselineShape, Category, DirectAlgorithm, Preset,
 };
 use stokesforge_app_state::quantities;
+use stokesforge_app_state::r_squared::RSquaredLevel;
 use stokesforge_app_state::tr;
 
 /// Un nombre réel modifiable, sans bornes mais **fini** (la brique refuse
@@ -1037,6 +1038,7 @@ pub(super) fn value_row(
     label: &str,
     value: f64,
     error: Option<f64>,
+    level: RSquaredLevel,
     unit: &str,
 ) {
     ui.horizontal(|ui| {
@@ -1046,6 +1048,7 @@ pub(super) fn value_row(
             with_unit(format_value(value, error), unit),
             value,
             error,
+            level,
         );
     });
 }

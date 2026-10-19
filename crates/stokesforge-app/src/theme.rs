@@ -259,10 +259,38 @@ pub fn preview_peak_color(index: usize) -> Color32 {
 }
 
 /// Cadre d'un champ dont la saisie est **refusée** (#219) : texte illisible,
-/// contrainte entre champs, erreur Typst. Le rouge est réservé à ce cas
-/// (`docs/standard-interface.md`).
+/// contrainte entre champs, erreur Typst. Le rouge est réservé à ce cas, à une
+/// exception **explicite** près : [`r_squared_color`] (`docs/standard-interface.md`).
 pub fn field_refused_color() -> Color32 {
     Color32::from_rgb(200, 30, 30)
+}
+
+/// Teinte d'un R² faible (#288), selon son palier : orange sous 0,95, rouge
+/// dès 0,8 (la boîte de dialogue, sous 0,6, garde ce rouge). Seul rouge permis
+/// hors du refus de champ : jeton **dédié**, qui ne sert à rien d'autre. La
+/// couleur n'est jamais le seul signal (gras et bulle, `exact_result_label`).
+/// Sans palier d'alerte : la couleur du texte ordinaire.
+pub fn r_squared_color(
+    level: stokesforge_app_state::r_squared::RSquaredLevel,
+    dark: bool,
+) -> Color32 {
+    if level.is_red() {
+        if dark {
+            Color32::from_rgb(255, 110, 110)
+        } else {
+            Color32::from_rgb(190, 20, 40)
+        }
+    } else if level.is_warning() {
+        if dark {
+            Color32::from_rgb(255, 165, 50)
+        } else {
+            Color32::from_rgb(195, 95, 0)
+        }
+    } else if dark {
+        Color32::from_gray(220)
+    } else {
+        Color32::from_gray(30)
+    }
 }
 
 /// Cadre d'un champ dont la valeur a été **ramenée** à une borne (#219) : teinte
@@ -438,6 +466,26 @@ mod tests {
             !visuals().dark_mode,
             "le thème StokesForge doit rester clair"
         );
+    }
+
+    /// Le rouge de R² (#288) est un jeton à part : distinct de celui du refus de
+    /// champ, et chaque palier a sa teinte, en clair comme en sombre.
+    #[test]
+    fn la_teinte_de_r_carre_a_un_jeton_propre_par_palier() {
+        use stokesforge_app_state::r_squared::RSquaredLevel::{Dialog, Good, Orange, Red};
+        for dark in [false, true] {
+            let orange = r_squared_color(Orange, dark);
+            let red = r_squared_color(Red, dark);
+            assert_ne!(orange, red);
+            assert_eq!(
+                red,
+                r_squared_color(Dialog, dark),
+                "la boîte garde le rouge"
+            );
+            assert_ne!(red, field_refused_color());
+            assert_ne!(orange, r_squared_color(Good, dark));
+        }
+        assert_ne!(r_squared_color(Red, true), r_squared_color(Red, false));
     }
 
     #[test]

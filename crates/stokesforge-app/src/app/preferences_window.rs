@@ -68,7 +68,7 @@ pub(super) fn preferences_window(
                 || {},
             );
             match page {
-                Page::General => chosen = general_page(ui),
+                Page::General => chosen = general_page(ui, state, actions),
                 Page::Display => display_page(ui, state, actions),
                 Page::Export => export_page(ui, state, actions),
             }
@@ -90,8 +90,14 @@ fn format_name(format: CopyFormat) -> String {
     }
 }
 
-fn general_page(ui: &mut egui::Ui) -> Option<Language> {
+fn general_page(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    actions: &mut Vec<Action>,
+) -> Option<Language> {
     let mut chosen = None;
+    let mut low_r2 = state.analysis_low_r2_dialog();
+    let before = low_r2;
     form(ui, "preferences", |rows| {
         rows.section(tr!("preferences-general"));
         rows.row(tr!("menu-language"), |ui| {
@@ -102,7 +108,17 @@ fn general_page(ui: &mut egui::Ui) -> Option<Language> {
                 chosen = Some(language);
             }
         });
+        // Préférence de l'application (#288) ; chaque calcul a la sienne.
+        rows.section(tr!("preferences-analysis"));
+        rows.checkbox(
+            &mut low_r2,
+            tr!("preferences-low-r2-dialog"),
+            Some(tr!("preferences-low-r2-dialog", "hint")),
+        );
     });
+    if low_r2 != before {
+        actions.push(Action::SetAnalysisLowR2Dialog(low_r2));
+    }
     chosen
 }
 

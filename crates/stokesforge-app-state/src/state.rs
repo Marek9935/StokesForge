@@ -829,6 +829,10 @@ pub enum Action {
     /// classeurs. Préférence de l'application : ni commande, ni historique, ni
     /// `.stf` ; les classeurs ouverts gardent leur propre réglage.
     SetWorkbookHeaderDefaults { metadata: bool, x_prime: bool },
+    /// Permet ou coupe la boîte « R² très faible » (#288). Préférence de
+    /// l'application, comme [`Action::SetWorkbookHeaderDefaults`] ; le réglage
+    /// de chaque calcul (`Calculation::low_r2_dialog`) la coupe aussi.
+    SetAnalysisLowR2Dialog(bool),
     /// Pose un texte libre (issue #35) : remplace celui de `target`, ou
     /// l'ajoute si `target` est le rang qui suit le dernier
     /// ([`AnnotationRef::set`]). **Une** modification du modèle, donc une
@@ -1358,6 +1362,9 @@ pub enum AlertKind {
     SaveFailed,
     /// Le projet choisi n'a pas pu être lu : Open… est proposé.
     OpenFailed,
+    /// R² d'un calcul est très faible (#288) : un simple avertissement, que
+    /// Close seul referme. Le message nomme les calculs en défaut.
+    LowRSquared,
 }
 
 /// Dépôt de lignes qui attend la réponse au dialogue d'axe (#166).
@@ -2541,6 +2548,9 @@ pub struct AppState {
     /// « Keep in Results » : le dernier choix de la session (M5), repris à
     /// l'ouverture suivante.
     analysis_keep_results: bool,
+    /// Pour chaque calcul à R² très faible, l'empreinte de ce R² au dernier
+    /// instantané : la boîte (#288) ne s'ouvre que quand elle change.
+    low_r2_seen: std::collections::BTreeMap<NodeId, Vec<(usize, u64)>>,
     /// Les dernières analyses lancées, la plus récente en tête (#249).
     analysis_recent: Vec<crate::analysis_recent::RecentAnalysis>,
     /// Calcul dont la suppression attend confirmation (M8).
@@ -2621,7 +2631,7 @@ impl AppState {
         let saved_revision = std::path::Path::new(&path)
             .is_file()
             .then_some((snapshot.revision, snapshot.geometry_revision));
-        Ok(Self {
+        let mut state = Self {
             handle,
             snapshot,
             saved_revision,
@@ -2671,6 +2681,7 @@ impl AppState {
             metadata_view: None,
             analysis: None,
             analysis_keep_results: keep_results_default,
+            low_r2_seen: std::collections::BTreeMap::new(),
             analysis_recent,
             pending_calculation_delete: None,
             pending_analysis_replacement: false,
@@ -2687,7 +2698,9 @@ impl AppState {
             engine: None,
             #[cfg(feature = "python")]
             pending_script: None,
-        })
+        };
+        state.seed_low_r2();
+        Ok(state)
     }
 
     /// Donne à un viewport détaché (classeur ou note) son propre état
@@ -4857,6 +4870,17 @@ impl AppState {
                     ));
                 }
             }
+            Action::SetAnalysisLowR2Dialog(on) => {
+                if let Err(error) = self
+                    .object_manager_preferences
+                    .save_analysis_low_r2_dialog(on)
+                {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::SetWorkbookHeaderDefaults { metadata, x_prime } => {
                 if let Err(error) = self
                     .object_manager_preferences
@@ -4974,8 +4998,14 @@ impl AppState {
                     self.object_clipboard_output = None;
                     self.copied_objects.clear();
                 }
+                let reopened = self.snapshot.epoch != snapshot.epoch;
                 self.snapshot = snapshot;
                 self.revalidate_selection();
+                if reopened {
+                    self.seed_low_r2();
+                } else {
+                    self.watch_low_r2();
+                }
             }
             Err(err) => self.fail(errors::session::error_message(&err)),
         }
@@ -6187,8 +6217,13 @@ impl AppState {
     /// Le dernier geste a-t-il échoué ? Erreur dans le pied du dialogue ou
     /// dans la barre d'état.
     pub(crate) fn last_action_failed(&self) -> bool {
+        // L'avertissement de R² faible (#288) n'est pas un échec : le geste qui
+        // l'a ouvert a réussi.
         self.dialog_error.is_some()
-            || self.alert.is_some()
+            || self
+                .alert
+                .as_ref()
+                .is_some_and(|alert| alert.kind != AlertKind::LowRSquared)
             || self.status.as_ref().is_some_and(StatusMessage::is_error)
     }
 
@@ -6340,6 +6375,11 @@ impl AppState {
         if change(&mut spec) && spec != before {
             self.execute(Command::EditPlotSpec { graph, spec, kind });
         }
+    }
+
+    /// La boîte « R² très faible » est-elle permise par l'application (#288) ?
+    pub fn analysis_low_r2_dialog(&self) -> bool {
+        self.object_manager_preferences.analysis_low_r2_dialog()
     }
 
     /// Les rangées d'en-tête `(Metadata, x')` des nouveaux classeurs.

@@ -21,6 +21,7 @@ use crate::theme;
 use stokesforge_app_state::analysis::{
     kind_title, reference_label, series_label, value_label, value_unit, with_unit,
 };
+use stokesforge_app_state::r_squared::level_of_value;
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
@@ -326,6 +327,7 @@ fn detail(
                                         ),
                                         v.value,
                                         v.error,
+                                        level_of_value(&v.key, v.value),
                                     );
                                 }
                                 None => {

@@ -158,7 +158,9 @@ contrainte entre champs (N11) et l'erreur Typst des textes riches (T3).
   la valeur sans cadre.
 - **Hors bornes** : ramené à la borne, cadre **orange** (teinte
   d'avertissement) pendant 2 s, bulle « Set to the maximum, 20 ». Le rouge
-  est réservé à « refusé ».
+  est réservé à « refusé », à **une exception écrite** : R² faible (voir
+  « R² faible » ci-dessous), qui a son jeton dédié (`theme::r_squared_color`)
+  et ne sert jamais à un refus de champ.
 - **Texte refusé** (T2) : même règle, texte gardé ; un renommage refusé laisse
   le champ ouvert.
 - **Erreur Typst d'un texte riche** (T3, en place, #240) : titre, titres d'axe,
@@ -169,6 +171,31 @@ contrainte entre champs (N11) et l'erreur Typst des textes riches (T3).
   l'écran** (`EguiBackend::draw_text`) ; jamais dans un export ni une copie
   (backend SVG).
 - Jamais d'effacement ni de correction muette.
+
+## R² faible — en place (#288)
+
+- **Paliers** (`stokesforge_app_state::r_squared`, donnée neutre, bornes
+  strictes, cumulatifs) : R² < 0,95 **orange** ; < 0,8 **rouge** ; < 0,6 rouge
+  **et** boîte de dialogue. Un R² négatif relève du palier < 0,6 ; `NaN`
+  n'avertit de rien. Les couleurs valent pour toute valeur `stat.r_squared`
+  (ajustements et pics) : aperçu de la fenêtre d'analyse, volet Results,
+  réglages d'un calcul — `exact_result_label` les peint toutes.
+- **Pas seulement la couleur** : la valeur passe en **gras** et sa bulle ajoute
+  « Low R² … » ; la teinte est un jeton clair/sombre (`theme::r_squared_color`).
+  Ce rouge est le seul permis hors du refus de champ (`field_refused_color`) ;
+  il reste un jeton distinct.
+- **Boîte de dialogue** : avertissement, pas échec — `AlertKind::LowRSquared`,
+  pied « Close » seul (`modal_read_only`), Entrée et Échap ferment. Elle s'ouvre
+  **quand le R² d'un calcul enregistré change** : application, recalcul manuel
+  ou automatique (`AppState::watch_low_r2`, empreinte par calcul — un
+  instantané qui ne change pas le R² ne la rouvre pas), ou à l'application d'un
+  calcul « Show » (dont les valeurs ne sont pas gardées, vues au seul apply).
+  Jamais pour l'aperçu en direct ni à l'ouverture d'un projet. Une alerte
+  d'enregistrement ou d'ouverture déjà là n'est pas écrasée ; plusieurs calculs
+  au même instantané : une boîte, la première ligne et « … et N autre(s) ».
+- **Deux interrupteurs, en OU** : la préférence d'application (Préférences,
+  page General, `Action::SetAnalysisLowR2Dialog`) et le réglage du calcul
+  (`Calculation::low_r2_dialog`, section Output). Les couleurs, elles, restent.
 
 ## Virgule décimale — en place (#223)
 

@@ -538,6 +538,17 @@ passe vient désormais de `from_texts`.
 Les tests de l'app (`plot_columns_*`, `add_layer_*`, `plot_rows_*`) gardent le
 câblage : `compose` rend les séries, l'app les envoie en une commande.
 
+### R² faible (#288)
+
+`app-state/src/r_squared.rs` tient les paliers (0,95 / 0,8 / 0,6 pile,
+négatif, `NaN`). `app-state/tests/analysis_state.rs` (fin du fichier) tient la
+boîte : ouverte à l'application (valeurs gardées ou non) et au recalcul
+automatique, muette pour un bon R², préférence coupée, réglage du calcul coupé,
+aperçu, ouverture d'un projet, alerte déjà là, plusieurs calculs. Mutants
+éprouvés : garde d'alerte, préférence, réglage du calcul (deux endroits),
+empreinte, bornes strictes. La peinture egui (gras, teinte, bulle) n'a pas de
+test d'image : seul `theme::r_squared_color` est testé.
+
 ### Remplacement définitif d'une correction (#212)
 
 `commands/tests/calculations.rs` tient l'atomicité données/trace, undo/redo,

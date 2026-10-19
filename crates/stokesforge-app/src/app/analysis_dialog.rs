@@ -24,6 +24,7 @@ use crate::theme;
 use stokesforge_app_state::analysis::{
     issue_message, kind_title, value_label, value_unit, Category, PreviewTool,
 };
+use stokesforge_app_state::r_squared::{level_of_value, RSquaredLevel};
 use stokesforge_app_state::state::{Action, AppState, CalculationDelete};
 use stokesforge_app_state::tr;
 
@@ -57,8 +58,23 @@ pub(super) fn exact_result_label(
     shown: String,
     value: f64,
     error: Option<f64>,
+    level: RSquaredLevel,
 ) -> egui::Response {
-    let response = ui.label(shown).on_hover_text(exact_text(value, error));
+    // Un R² faible (#288) se lit à deux signaux, pas à la seule couleur : la
+    // teinte du palier, et le gras, avec une ligne de plus dans la bulle.
+    let (text, hover) = if level.is_warning() {
+        (
+            theme::bold(shown).color(theme::r_squared_color(level, ui.visuals().dark_mode)),
+            format!(
+                "{}\n{}",
+                exact_text(value, error),
+                tr!("analysis-r2-low-hint")
+            ),
+        )
+    } else {
+        (egui::RichText::new(shown), exact_text(value, error))
+    };
+    let response = ui.label(text).on_hover_text(hover);
     if response.hovered() {
         let copy = ui.input_mut(|input| {
             let before = input.events.len();
@@ -128,6 +144,7 @@ fn values_panel(
                     &value_label(&value.key, value.index),
                     value.value,
                     value.error,
+                    level_of_value(&value.key, value.value),
                     &series.map_or_else(String::new, |s| value_unit(tree, s, &value.key)),
                 );
             }

@@ -189,6 +189,10 @@ struct PreferencesFile {
     /// « Show » (#200, maquette M5).
     #[serde(default)]
     analysis_keep_results: Option<bool>,
+    /// Boîte de dialogue quand R² d'un calcul est très faible (#288) ; absent :
+    /// active.
+    #[serde(default)]
+    analysis_low_r2_dialog: Option<bool>,
     /// Rangées d'en-tête des **nouveaux** classeurs : Metadata (affichée par
     /// défaut) et x' (cachée par défaut).
     #[serde(default)]
@@ -217,6 +221,7 @@ pub struct Preferences {
     svg_text: SvgTextMode,
     toolbars: Option<serde_json::Value>,
     analysis_keep_results: bool,
+    analysis_low_r2_dialog: bool,
     workbook_show_metadata: bool,
     workbook_show_x_prime: bool,
     analysis_recent: Vec<crate::analysis_recent::RecentAnalysis>,
@@ -261,6 +266,7 @@ impl Preferences {
             },
             toolbars: file.toolbars,
             analysis_keep_results: file.analysis_keep_results.unwrap_or(false),
+            analysis_low_r2_dialog: file.analysis_low_r2_dialog.unwrap_or(true),
             workbook_show_metadata: file.workbook_show_metadata.unwrap_or(true),
             workbook_show_x_prime: file.workbook_show_x_prime.unwrap_or(false),
             analysis_recent: read_recent_analyses(file.analysis_recent),
@@ -353,6 +359,18 @@ impl Preferences {
     pub fn save_analysis_keep_results(&mut self, keep: bool) -> std::io::Result<()> {
         self.analysis_keep_results = keep;
         self.save_field("analysis_keep_results", keep.into())
+    }
+
+    /// La boîte de dialogue « R² très faible » (#288) est-elle permise ? Active
+    /// par défaut ; le réglage de chaque calcul la coupe aussi (OU).
+    pub fn analysis_low_r2_dialog(&self) -> bool {
+        self.analysis_low_r2_dialog
+    }
+
+    /// Mémorise le choix sans remplacer les autres préférences.
+    pub fn save_analysis_low_r2_dialog(&mut self, on: bool) -> std::io::Result<()> {
+        self.analysis_low_r2_dialog = on;
+        self.save_field("analysis_low_r2_dialog", on.into())
     }
 
     /// Les rangées d'en-tête que montre un classeur à son ouverture :
@@ -544,6 +562,17 @@ fn default_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn la_boite_r2_faible_est_active_par_defaut_ecrite_et_relue() {
+        let (_dir, path) = written(r#"{ "language": "fr" }"#);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        assert!(preferences.analysis_low_r2_dialog(), "active par défaut");
+        preferences.save_analysis_low_r2_dialog(false).unwrap();
+        let reloaded = Preferences::load_from(Some(path));
+        assert!(!reloaded.analysis_low_r2_dialog());
+        assert_eq!(reloaded.language(), Some("fr"), "la langue est gardée");
+    }
 
     #[test]
     fn la_sortie_par_defaut_des_analyses_est_ecrite_et_relue_sans_perdre_la_langue() {

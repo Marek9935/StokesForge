@@ -870,6 +870,15 @@ impl AnalysisForm {
     /// En modification, une colonne qui existe déjà garde ses métadonnées (nom
     /// long, unité, commentaire que l'utilisateur a pu retoucher).
     pub fn draft(&self, tree: &Tree) -> Result<CalculationDraft, Issue> {
+        self.draft_with_values(tree).map(|(draft, _)| draft)
+    }
+
+    /// [`Self::draft`], et en plus **toutes** les valeurs calculées, gardées ou
+    /// non : l'avertissement de R² faible (#288) juge aussi un calcul « Show ».
+    pub fn draft_with_values(
+        &self,
+        tree: &Tree,
+    ) -> Result<(CalculationDraft, Vec<stokesforge_core::SeriesResult>), Issue> {
         if let Some(issue) = self.issues().into_iter().next() {
             return Err(issue);
         }
@@ -911,7 +920,8 @@ impl AnalysisForm {
                 }
             })
             .collect();
-        Ok(CalculationDraft {
+        let all_values = computed.results.clone();
+        let draft = CalculationDraft {
             operation,
             series,
             aux: self.aux.clone(),
@@ -924,7 +934,8 @@ impl AnalysisForm {
             keep_results: self.keep_results,
             auto_recalc: self.auto_recalc,
             low_r2_dialog: self.low_r2_dialog,
-        })
+        };
+        Ok((draft, all_values))
     }
 }
 

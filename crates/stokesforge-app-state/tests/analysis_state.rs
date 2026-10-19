@@ -898,3 +898,165 @@ fn une_correction_garde_sa_reference_meme_si_la_colonne_d_origine_disparait() {
     assert_eq!(state.project_tree().len(), 1);
     session.shutdown().unwrap();
 }
+
+// ---- Avertissement de R² faible (#288) --------------------------------
+
+use stokesforge_app_state::state::AlertKind;
+
+/// Brouille la colonne Y : un ajustement linéaire y a un R² proche de 0.
+fn scramble(s: &mut Setup) {
+    for (row, text) in [
+        "0", "100", "0", "100", "0", "100", "0", "100", "0", "100", "0",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        s.state.dispatch(Action::CommitCell {
+            column: s.y,
+            row,
+            text: text.to_string(),
+        });
+    }
+}
+
+/// Lance un ajustement linéaire avec les réglages donnés.
+fn fit(s: &mut Setup, keep: bool, dialog: bool) {
+    open(s, Preset::Fit(Model::Linear));
+    let form = s.state.analysis_form_mut().unwrap();
+    form.keep_results = keep;
+    form.low_r2_dialog = dialog;
+    s.state.dispatch(Action::ApplyAnalysis);
+    // Un R² faible n'est pas un échec : la fenêtre se ferme (sauf si une autre
+    // alerte attendait déjà, ce que `last_action_failed` compte comme échec).
+    if !matches!(s.state.alert(), Some(a) if a.kind == AlertKind::SaveFailed) {
+        assert!(s.state.analysis_form().is_none(), "the fit was applied");
+    }
+}
+
+#[test]
+fn a_fit_with_a_very_low_r2_opens_the_dialog_whether_or_not_values_are_kept() {
+    for keep in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = setup(dir.path());
+        scramble(&mut s);
+        fit(&mut s, keep, true);
+        let alert = s.state.alert().expect("R² < 0.6 opens the dialog");
+        assert_eq!(alert.kind, AlertKind::LowRSquared, "keep = {keep}");
+        assert!(alert.message.contains("R² ="), "{}", alert.message);
+    }
+}
+
+#[test]
+fn a_good_fit_opens_no_dialog() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    fit(&mut s, true, true);
+    assert!(s.state.alert().is_none());
+}
+
+#[test]
+fn the_application_preference_turns_the_dialog_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    with_preferences(&mut s, dir.path());
+    s.state.dispatch(Action::SetAnalysisLowR2Dialog(false));
+    assert!(!s.state.analysis_low_r2_dialog());
+    scramble(&mut s);
+    fit(&mut s, true, true);
+    assert!(s.state.alert().is_none());
+    fit(&mut s, false, true);
+    assert!(s.state.alert().is_none());
+}
+
+#[test]
+fn the_calculation_setting_turns_the_dialog_off() {
+    for keep in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = setup(dir.path());
+        scramble(&mut s);
+        fit(&mut s, keep, false);
+        assert!(s.state.alert().is_none(), "keep = {keep}");
+    }
+}
+
+#[test]
+fn the_live_preview_never_opens_the_dialog() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    open(&mut s, Preset::Fit(Model::Linear));
+    let form = s.state.analysis_form().unwrap();
+    let _ = form.preview(s.state.tree());
+    s.state.refresh();
+    assert!(s.state.alert().is_none());
+}
+
+#[test]
+fn every_recalculation_with_a_new_low_r2_reopens_the_dialog() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    fit(&mut s, true, true);
+    assert!(s.state.alert().is_none());
+    // Recalcul automatique après une édition des données.
+    scramble(&mut s);
+    assert_eq!(
+        s.state.alert().map(|a| a.kind),
+        Some(AlertKind::LowRSquared)
+    );
+    s.state.dispatch(Action::DismissAlert);
+    // Rien n'a changé : pas de nouvelle boîte à chaque image.
+    s.state.refresh();
+    assert!(s.state.alert().is_none());
+    // Un résultat neuf, toujours très faible : la boîte revient.
+    s.state.dispatch(Action::CommitCell {
+        column: s.y,
+        row: 0,
+        text: "50".to_string(),
+    });
+    assert_eq!(
+        s.state.alert().map(|a| a.kind),
+        Some(AlertKind::LowRSquared)
+    );
+}
+
+#[test]
+fn a_low_r2_never_replaces_an_alert_already_waiting() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    s.state.set_path(dir.path().display().to_string()); // un dossier : l'enregistrement échoue
+    s.state.dispatch(Action::Save);
+    assert_eq!(s.state.alert().map(|a| a.kind), Some(AlertKind::SaveFailed));
+    fit(&mut s, true, true);
+    assert_eq!(s.state.alert().map(|a| a.kind), Some(AlertKind::SaveFailed));
+}
+
+#[test]
+fn several_failing_calculations_make_one_dialog_that_counts_the_others() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    fit(&mut s, true, true);
+    fit(&mut s, true, true);
+    assert!(s.state.alert().is_none());
+    scramble(&mut s);
+    // Un seul recalcul, deux calculs en défaut : une seule boîte.
+    let alert = s.state.alert().expect("one dialog");
+    assert_eq!(alert.kind, AlertKind::LowRSquared);
+    assert!(alert.message.contains("other"), "{}", alert.message);
+}
+
+#[test]
+fn opening_a_project_with_a_low_r2_is_not_a_recalculation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    fit(&mut s, true, true);
+    s.state.dispatch(Action::DismissAlert);
+    let again = AppState::new_with_preferences(
+        s._session.handle(),
+        dir.path().join("p.stf").display().to_string(),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
+    assert!(again.alert().is_none());
+}
