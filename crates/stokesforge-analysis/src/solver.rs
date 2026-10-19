@@ -581,6 +581,95 @@ mod tests {
         assert!((sol.values[0] - 3.0).abs() < 1e-9);
     }
 
+    /// Droite `a + b·x` sur `x`, deux paramètres libres.
+    fn droite_sur<'a>(x: &'a [f64], y: &'a [f64]) -> Term<'a> {
+        Term {
+            x,
+            y,
+            sigma: None,
+            eval: Box::new(move |p, out| {
+                for (o, v) in out.iter_mut().zip(x) {
+                    *o = p[0] + p[1] * v;
+                }
+            }),
+        }
+    }
+
+    #[test]
+    fn zero_ddl_avec_echelle_pas_d_incertitude() {
+        let (x, y) = (vec![0.0, 1.0], vec![1.0, 3.0]);
+        let slots = vec![Slot::new("a", 0.0), Slot::new("b", 0.0)];
+        let sol = solve_problem(&slots, &[droite_sur(&x, &y)], Options::default()).unwrap();
+        assert_eq!(sol.dof, 0);
+        assert!(sol.errors.iter().all(Option::is_none));
+        assert!(sol.reduced_chi2.is_nan());
+        assert!(sol.chi2.is_finite() && sol.chi2 < 1e-12);
+    }
+
+    #[test]
+    fn zero_ddl_sans_echelle_garde_les_incertitudes() {
+        // Choix documenté de #280 : `scale_errors == false` (σ absolus) n'a pas
+        // besoin du χ² réduit ; la covariance brute reste valable à 0 ddl.
+        // Pour x = {0, 1}, σ = 1 : var(a) = 1, var(b) = 2.
+        let (x, y) = (vec![0.0, 1.0], vec![1.0, 3.0]);
+        let slots = vec![Slot::new("a", 0.0), Slot::new("b", 0.0)];
+        let opts = Options {
+            scale_errors: false,
+            ..Options::default()
+        };
+        let sol = solve_problem(&slots, &[droite_sur(&x, &y)], opts).unwrap();
+        assert_eq!(sol.dof, 0);
+        assert!(sol.reduced_chi2.is_nan());
+        let (ea, eb) = (sol.errors[0].unwrap(), sol.errors[1].unwrap());
+        assert!((ea - 1.0).abs() < 1e-5, "{ea}");
+        assert!((eb - 2f64.sqrt()).abs() < 1e-5, "{eb}");
+    }
+
+    #[test]
+    fn un_ddl_avec_echelle_incertitudes_mises_a_l_echelle() {
+        // 3 points, 2 libres : dof 1, erreurs = covariance brute × χ² réduit.
+        let (x, y) = (vec![0.0, 1.0, 2.0], vec![1.0, 3.5, 4.0]);
+        let slots = vec![Slot::new("a", 0.0), Slot::new("b", 0.0)];
+        let mis = solve_problem(&slots, &[droite_sur(&x, &y)], Options::default()).unwrap();
+        let opts = Options {
+            scale_errors: false,
+            ..Options::default()
+        };
+        let brut = solve_problem(&slots, &[droite_sur(&x, &y)], opts).unwrap();
+        assert_eq!(mis.dof, 1);
+        assert!(mis.reduced_chi2.is_finite() && mis.reduced_chi2 > 0.0);
+        for k in 0..2 {
+            let (m, b) = (mis.errors[k].unwrap(), brut.errors[k].unwrap());
+            let attendu = b * mis.reduced_chi2.sqrt();
+            assert!((m - attendu).abs() < 1e-6 * attendu, "{m} vs {attendu}");
+        }
+    }
+
+    #[test]
+    fn moins_de_points_que_de_libres_refuse_avant_le_solveur() {
+        // m < libres : jamais de dof négatif, refus net avec les deux effectifs.
+        let (x, y) = (vec![0.0, 1.0], vec![1.0, 3.0]);
+        let slots = vec![
+            Slot::new("a", 0.0),
+            Slot::new("b", 0.0),
+            Slot::new("c", 0.0),
+        ];
+        let e = solve_problem(&slots, &[droite_sur(&x, &y)], Options::default()).unwrap_err();
+        assert_eq!(
+            e,
+            AnalysisError::NotEnoughPoints {
+                found: 2,
+                needed: 3
+            }
+        );
+        // Une case fixée ramène le besoin à 2 : accepté, dof 0.
+        let mut fixed = Slot::new("c", 0.0);
+        fixed.fixed = true;
+        let slots = vec![Slot::new("a", 0.0), Slot::new("b", 0.0), fixed];
+        let sol = solve_problem(&slots, &[droite_sur(&x, &y)], Options::default()).unwrap();
+        assert_eq!(sol.dof, 0);
+    }
+
     #[test]
     fn deux_termes_partagent_une_case_globale() {
         // y1 = k·x, y2 = k·x + 10 : k partagé, décalage propre à la 2e courbe.

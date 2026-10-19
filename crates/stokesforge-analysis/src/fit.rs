@@ -497,6 +497,342 @@ mod tests {
         assert!(rel(b.chi2, a.chi2));
     }
 
+    fn fixe(v: f64) -> ParamSetting {
+        ParamSetting {
+            fixed: true,
+            initial: Some(v),
+            ..Default::default()
+        }
+    }
+
+    /// Bruit déterministe d'amplitude ±1 (suite de Weyl).
+    fn bruit(i: usize) -> f64 {
+        ((i as f64 * 0.618_033_988_749_895).fract() - 0.5) * 2.0
+    }
+
+    fn assert_incertitudes_presentes(r: &FitReport, libres: &[usize]) {
+        for (j, e) in r.series[0].errors.iter().enumerate() {
+            if libres.contains(&j) {
+                let e = e.unwrap_or_else(|| panic!("incertitude absente en {j}"));
+                assert!(e.is_finite() && e > 0.0, "incertitude {j} = {e}");
+            } else {
+                assert!(e.is_none(), "paramètre fixé {j} avec incertitude");
+            }
+        }
+        assert!(r.reduced_chi2.is_finite() && r.series[0].reduced_chi2.is_finite());
+        assert!(r.series[0].chi2.is_finite());
+    }
+
+    #[test]
+    fn linaire_et_exponentielle_coherents_a_n_egal() {
+        // n = 2 → dof 0 (rien), n ≥ 3 → dof = n − 2 (incertitudes sur les deux).
+        for n in 2..=6usize {
+            let x = grid(n, 0.0, 4.0);
+            let mk = |f: &dyn Fn(f64) -> f64| {
+                let y: Vec<f64> = x
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &v)| f(v) + 1e-3 * bruit(i + 1))
+                    .collect();
+                FitInput {
+                    series: Series::new(x.clone(), y),
+                    sigma: None,
+                }
+            };
+            let lin = fit(&[mk(&|v| 3.0 - 0.5 * v)], &spec(Model::Linear)).unwrap();
+            let exp = fit(
+                &[mk(&|v| 3.0 * (-v / 2.0).exp())],
+                &spec(Model::Exponential),
+            )
+            .unwrap();
+            for r in [&lin, &exp] {
+                assert_eq!(r.dof, n - 2, "n = {n}");
+                assert_eq!(r.series[0].dof, n - 2);
+                if n == 2 {
+                    assert!(r.series[0].errors.iter().all(Option::is_none));
+                    assert!(r.reduced_chi2.is_nan());
+                    assert!(r.series[0].chi2.is_finite());
+                } else {
+                    assert_incertitudes_presentes(r, &[0, 1]);
+                    let attendu = r.series[0].chi2 / (n - 2) as f64;
+                    assert!((r.reduced_chi2 - attendu).abs() <= 1e-12 * attendu.abs().max(1e-300));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn un_degre_de_liberte_donne_des_incertitudes_finies_pour_plusieurs_modeles() {
+        // Exponentielle : 3 points, 2 libres.
+        let x = vec![0.0, 1.0, 2.5];
+        let y: Vec<f64> = x
+            .iter()
+            .enumerate()
+            .map(|(i, &v): (usize, &f64)| 3.0 * (-v / 2.0).exp() + 1e-2 * bruit(i + 1))
+            .collect();
+        let inp = FitInput {
+            series: Series::new(x, y),
+            sigma: None,
+        };
+        let r = fit(&[inp], &spec(Model::Exponential)).unwrap();
+        assert_eq!(r.dof, 1);
+        assert_incertitudes_presentes(&r, &[0, 1]);
+
+        // Gaussienne : 4 points, y0 fixé → 3 libres.
+        let x = vec![-1.0, 0.0, 0.7, 2.0];
+        let y: Vec<f64> = x
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                2.0 * (-4.0 * 2f64.ln() * (v - 0.3) * (v - 0.3) / 1.5f64.powi(2)).exp()
+                    + 1e-2 * bruit(i + 1)
+            })
+            .collect();
+        let mut sp = spec(Model::Gaussian);
+        sp.params = vec![
+            fixe(0.0),
+            ParamSetting {
+                initial: Some(2.0),
+                ..Default::default()
+            },
+            ParamSetting {
+                initial: Some(0.3),
+                ..Default::default()
+            },
+            ParamSetting {
+                initial: Some(1.5),
+                ..Default::default()
+            },
+        ];
+        let inp = FitInput {
+            series: Series::new(x, y),
+            sigma: None,
+        };
+        let r = fit(&[inp], &sp).unwrap();
+        assert_eq!(r.dof, 1);
+        assert_incertitudes_presentes(&r, &[1, 2, 3]);
+
+        // Expression libre : 3 points, 2 paramètres.
+        let x = vec![0.0, 1.0, 2.0];
+        let y: Vec<f64> = x
+            .iter()
+            .enumerate()
+            .map(|(i, &v): (usize, &f64)| 2.0 * (-0.7 * v).exp() + 1e-2 * bruit(i + 1))
+            .collect();
+        let mut sp = spec(Model::Custom {
+            formula: "a*exp(-b*x)".into(),
+        });
+        sp.params = vec![
+            ParamSetting {
+                initial: Some(1.5),
+                ..Default::default()
+            },
+            ParamSetting {
+                initial: Some(0.5),
+                ..Default::default()
+            },
+        ];
+        let inp = FitInput {
+            series: Series::new(x, y),
+            sigma: None,
+        };
+        let r = fit(&[inp], &sp).unwrap();
+        assert_eq!(r.dof, 1);
+        assert_incertitudes_presentes(&r, &[0, 1]);
+    }
+
+    #[test]
+    fn zero_ddl_avec_parametre_fixe_et_modele_personnalise() {
+        // Gaussienne, y0 fixé, 3 libres pour 3 points : dof 0.
+        let x = vec![-1.0, 0.0, 1.5];
+        let mut sp = spec(Model::Gaussian);
+        sp.params = vec![
+            fixe(0.0),
+            ParamSetting {
+                initial: Some(1.8),
+                ..Default::default()
+            },
+            ParamSetting {
+                initial: Some(0.2),
+                ..Default::default()
+            },
+            ParamSetting {
+                initial: Some(1.4),
+                ..Default::default()
+            },
+        ];
+        let r = fit(
+            &[input(
+                |v| 2.0 * (-4.0 * 2f64.ln() * (v - 0.3).powi(2) / 2.25).exp(),
+                x,
+            )],
+            &sp,
+        )
+        .unwrap();
+        assert_eq!(r.dof, 0);
+        assert!(r.series[0].errors.iter().all(Option::is_none));
+        assert!(r.reduced_chi2.is_nan() && r.series[0].reduced_chi2.is_nan());
+        assert!(r.series[0].chi2.is_finite() && r.series[0].chi2 >= 0.0);
+
+        // Personnalisé, 2 points, 2 paramètres.
+        let mut sp = spec(Model::Custom {
+            formula: "a*exp(-b*x)".into(),
+        });
+        sp.params = vec![
+            ParamSetting {
+                initial: Some(1.5),
+                ..Default::default()
+            },
+            ParamSetting {
+                initial: Some(0.5),
+                ..Default::default()
+            },
+        ];
+        let r = fit(&[input(|v| 2.0 * (-0.7 * v).exp(), vec![0.0, 1.0])], &sp).unwrap();
+        assert_eq!(r.dof, 0);
+        assert!(r.series[0].errors.iter().all(Option::is_none));
+        assert!(r.reduced_chi2.is_nan());
+    }
+
+    #[test]
+    fn zero_ddl_avec_ponderation_sigma_sans_incertitude() {
+        let mut i = input(|v| 3.0 * (-v / 2.0).exp(), vec![0.0, 1.0]);
+        i.sigma = Some(vec![0.1, 0.2]);
+        let r = fit(&[i], &spec(Model::Exponential)).unwrap();
+        assert_eq!(r.dof, 0);
+        assert!(r.series[0].errors.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn dof_negatif_refuse_en_amont_pas_de_solveur() {
+        // n < k : NotEnoughPoints, sur les deux chemins, jamais d'incertitude.
+        for m in [Model::Linear, Model::Exponential] {
+            let e = fit(&[input(|v| 1.0 + v, vec![1.0])], &spec(m)).unwrap_err();
+            assert_eq!(
+                e,
+                AnalysisError::NotEnoughPoints {
+                    found: 1,
+                    needed: 2
+                }
+            );
+        }
+        // Un paramètre fixé ramène le besoin à 1 libre : 1 point suffit (dof 0).
+        let mut sp = spec(Model::Exponential);
+        sp.params = vec![
+            fixe(3.0),
+            ParamSetting {
+                initial: Some(1.5),
+                ..Default::default()
+            },
+        ];
+        let r = fit(&[input(|v| 3.0 * (-v / 2.0).exp(), vec![1.0])], &sp).unwrap();
+        assert_eq!(r.dof, 0);
+        assert!(r.series[0].errors.iter().all(Option::is_none));
+        // Cubique sur 3 points : 4 libres > 3.
+        let e = fit(
+            &[input(|v| v, vec![0.0, 1.0, 2.0])],
+            &spec(Model::Polynomial { degree: 3 }),
+        )
+        .unwrap_err();
+        assert_eq!(
+            e,
+            AnalysisError::NotEnoughPoints {
+                found: 3,
+                needed: 4
+            }
+        );
+    }
+
+    #[test]
+    fn ajustement_global_dof_sur_le_total() {
+        // A par courbe, τ partagé : 3 libres. 2 courbes × 3 points = 6 → dof 3.
+        let x = vec![0.0, 1.0, 2.5];
+        let mk = |a: f64, s: usize| {
+            let y: Vec<f64> = x
+                .iter()
+                .enumerate()
+                .map(|(i, &v): (usize, &f64)| a * (-v / 3.0).exp() + 1e-2 * bruit(i + s))
+                .collect();
+            FitInput {
+                series: Series::new(x.clone(), y),
+                sigma: None,
+            }
+        };
+        let mut sp = spec(Model::Exponential);
+        sp.params = vec![
+            ParamSetting::default(),
+            ParamSetting {
+                shared: true,
+                ..Default::default()
+            },
+        ];
+        let r = fit(&[mk(3.0, 1), mk(4.0, 5)], &sp).unwrap();
+        assert_eq!(r.dof, 3);
+        assert!(r.series.iter().all(|s| s.dof == 3));
+        let chi2_total: f64 = r.series.iter().map(|s| s.chi2).sum();
+        assert!((r.reduced_chi2 - chi2_total / 3.0).abs() <= 1e-9 * r.reduced_chi2);
+        for s in &r.series {
+            assert!(s.errors.iter().all(|e| e.is_some_and(f64::is_finite)));
+        }
+
+        // Droite à pente partagée : 2 intercepts + 1 pente = 3 libres.
+        // Courbes de 2 et 1 points = 3 → dof 0, aucune incertitude.
+        let mut sp = spec(Model::Linear);
+        sp.params = vec![
+            ParamSetting::default(),
+            ParamSetting {
+                shared: true,
+                ..Default::default()
+            },
+        ];
+        let a = input(|v| 1.0 + 2.0 * v, vec![0.0, 1.0]);
+        let b = input(|v| 5.0 + 2.0 * v, vec![2.0]);
+        let r = fit(&[a.clone(), b.clone()], &sp).unwrap();
+        assert_eq!(r.dof, 0);
+        assert!(r.reduced_chi2.is_nan());
+        for s in &r.series {
+            assert_eq!(s.dof, 0);
+            assert!(s.errors.iter().all(Option::is_none));
+            assert!(s.chi2.is_finite());
+        }
+        // Un point de plus (dof 1) : incertitudes présentes.
+        let b2 = input(|v| 5.0 + 2.0 * v, vec![2.0, 3.0]);
+        let r = fit(&[a, b2], &sp).unwrap();
+        assert_eq!(r.dof, 1);
+        assert!(r
+            .series
+            .iter()
+            .all(|s| s.errors.iter().all(Option::is_some)));
+    }
+
+    #[test]
+    fn ajustement_global_moins_de_points_que_de_libres_refuse() {
+        // 3 libres (2 A + τ), 2 courbes d'un point : 2 < 3.
+        let mut sp = spec(Model::Exponential);
+        sp.params = vec![
+            ParamSetting::default(),
+            ParamSetting {
+                shared: true,
+                ..Default::default()
+            },
+        ];
+        let e = fit(
+            &[
+                input(|v| 3.0 * (-v).exp(), vec![0.0]),
+                input(|v| 4.0 * (-v).exp(), vec![1.0]),
+            ],
+            &sp,
+        )
+        .unwrap_err();
+        assert_eq!(
+            e,
+            AnalysisError::NotEnoughPoints {
+                found: 2,
+                needed: 3
+            }
+        );
+    }
+
     #[test]
     fn polynome_de_degre_3() {
         let i = input(
