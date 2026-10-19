@@ -1268,3 +1268,248 @@ fn a_calculation_with_two_failing_series_counts_two() {
     assert_eq!(s.state.tree().calculations().len(), 1, "one calculation");
     assert_eq!(groups(&s), vec![(OperationKind::Fit, 2)]);
 }
+
+// ---- Blindage de l'avertissement de R² faible (#288) ------------------
+
+fn kind_of_alert(s: &Setup) -> Option<AlertKind> {
+    s.state.alert().map(|a| a.kind)
+}
+
+/// Les deux coupures (préférence d'application, réglage du calcul) se
+/// combinent en ET : la boîte ne s'ouvre que si aucune ne l'a coupée. Tableau
+/// complet, pour un calcul qui garde ses valeurs et pour un calcul « Show ».
+#[test]
+fn la_boite_exige_preference_active_et_reglage_du_calcul_actif() {
+    for keep in [true, false] {
+        for (preference, reglage) in [(true, true), (true, false), (false, true), (false, false)] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut s = setup(dir.path());
+            with_preferences(&mut s, dir.path());
+            s.state.dispatch(Action::SetAnalysisLowR2Dialog(preference));
+            assert_eq!(s.state.analysis_low_r2_dialog(), preference);
+            scramble(&mut s);
+            fit(&mut s, keep, reglage);
+            let attendu = (preference && reglage).then_some(AlertKind::LowRSquared);
+            assert_eq!(
+                kind_of_alert(&s),
+                attendu,
+                "keep = {keep}, préférence = {preference}, calcul = {reglage}"
+            );
+        }
+    }
+}
+
+#[test]
+fn le_message_de_la_boite_est_celui_du_resume_groupe() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    fit(&mut s, true, true);
+    let message = s.state.alert().unwrap().message.clone();
+    assert_eq!(
+        message,
+        stokesforge_app_state::r_squared::summary_text(&[LowRSquaredGroup {
+            kind: OperationKind::Fit,
+            count: 1
+        }])
+    );
+}
+
+/// `DismissAlert` ferme la boîte ; l'ouverture n'est pas un échec du geste
+/// (le formulaire s'est fermé, aucune erreur dans le pied).
+#[test]
+fn la_boite_se_ferme_et_ne_compte_pas_comme_un_echec() {
+    for keep in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = setup(dir.path());
+        scramble(&mut s);
+        open(&mut s, Preset::Fit(Model::Linear));
+        s.state.analysis_form_mut().unwrap().keep_results = keep;
+        s.state.dispatch(Action::ApplyAnalysis);
+        assert_eq!(kind_of_alert(&s), Some(AlertKind::LowRSquared));
+        assert!(s.state.analysis_form().is_none(), "keep = {keep}");
+        assert!(s.state.dialog_error().is_none(), "keep = {keep}");
+        s.state.dispatch(Action::DismissAlert);
+        assert!(s.state.alert().is_none());
+    }
+}
+
+/// Pas de boîte au premier instantané d'un projet ouvert, ni à un instantané
+/// ultérieur qui ne change rien au résultat (amorçage de l'empreinte).
+#[test]
+fn un_projet_ouvert_avec_un_r2_faible_ne_rouvre_rien_aux_instantanes_suivants() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    fit(&mut s, true, true);
+    s.state.dispatch(Action::DismissAlert);
+    let mut again = AppState::new_with_preferences(
+        s._session.handle(),
+        dir.path().join("p.stf").display().to_string(),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
+    assert!(again.alert().is_none());
+    assert_eq!(again.low_r2_total(), 1, "la pastille, elle, le dit");
+    again.dispatch(Action::AddColumn { sheet: s.sheet });
+    assert!(
+        again.alert().is_none(),
+        "R² inchangé : amorcé à l'ouverture"
+    );
+    again.refresh();
+    assert!(again.alert().is_none());
+}
+
+/// Un instantané inchangé ne rouvre pas la boîte ; mais un R² qui repasse au-
+/// dessus du palier puis redescend (même valeur qu'avant) est un résultat neuf.
+#[test]
+fn la_boite_se_rouvre_quand_le_r2_remonte_puis_redescend() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    // Une seule édition suffit à faire chuter R² (aberrante au centre : la
+    // pente ne bouge pas) et une seule à le rétablir.
+    let edit = |s: &mut Setup, text: &str| {
+        s.state.dispatch(Action::CommitCell {
+            column: s.y,
+            row: 5,
+            text: text.to_string(),
+        });
+    };
+    fit(&mut s, true, true);
+    assert!(s.state.alert().is_none());
+    edit(&mut s, "1000000");
+    assert_eq!(kind_of_alert(&s), Some(AlertKind::LowRSquared));
+    s.state.dispatch(Action::DismissAlert);
+    s.state.refresh();
+    s.state.dispatch(Action::AddColumn { sheet: s.sheet });
+    assert!(s.state.alert().is_none(), "instantané inchangé");
+    edit(&mut s, "11");
+    assert!(s.state.alert().is_none());
+    assert_eq!(s.state.low_r2_total(), 0);
+    edit(&mut s, "1000000");
+    assert_eq!(
+        kind_of_alert(&s),
+        Some(AlertKind::LowRSquared),
+        "même R² qu'avant, mais l'empreinte avait été purgée"
+    );
+}
+
+/// Un calcul supprimé est purgé de la mémoire des R² vus : restauré par
+/// l'annulation, il compte comme neuf ; le refaire (redo) ne dit rien.
+#[test]
+fn un_calcul_supprime_est_purge_de_la_memoire_et_l_annulation_le_signale() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    fit(&mut s, true, true);
+    s.state.dispatch(Action::DismissAlert);
+    let id = only_calculation(&s);
+    s.state.dispatch(Action::RequestDeleteCalculation(id));
+    s.state.dispatch(Action::ConfirmDeleteCalculation(
+        CalculationDelete::WithColumns,
+    ));
+    assert!(s.state.alert().is_none());
+    s.state.dispatch(Action::Undo);
+    assert_eq!(kind_of_alert(&s), Some(AlertKind::LowRSquared));
+    s.state.dispatch(Action::DismissAlert);
+    s.state.dispatch(Action::Redo);
+    assert!(s.state.alert().is_none());
+    assert_eq!(s.state.low_r2_total(), 0);
+}
+
+/// Épingle le comportement actuel : une alerte déjà là n'est pas écrasée, et
+/// l'avertissement est perdu (l'empreinte est mise à jour sans boîte) ; seule
+/// la pastille le garde.
+#[test]
+fn une_alerte_presente_n_est_pas_ecrasee_et_l_avertissement_est_perdu() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    s.state.set_path(dir.path().display().to_string());
+    s.state.dispatch(Action::Save);
+    assert_eq!(kind_of_alert(&s), Some(AlertKind::SaveFailed));
+    fit(&mut s, true, true);
+    assert_eq!(kind_of_alert(&s), Some(AlertKind::SaveFailed));
+    s.state.dispatch(Action::DismissAlert);
+    s.state.dispatch(Action::AddColumn { sheet: s.sheet });
+    s.state.refresh();
+    assert!(s.state.alert().is_none(), "perdu : pas de rattrapage");
+    assert_eq!(s.state.low_r2_total(), 1, "la pastille le garde");
+}
+
+/// Un calcul « Show » ne passe que par `ApplyAnalysis` : seul son application
+/// parle, aucun recalcul ensuite ne rouvre la boîte.
+#[test]
+fn un_calcul_show_parle_a_l_application_seulement() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    fit(&mut s, false, true);
+    assert_eq!(kind_of_alert(&s), Some(AlertKind::LowRSquared));
+    s.state.dispatch(Action::DismissAlert);
+    s.state.dispatch(Action::CommitCell {
+        column: s.y,
+        row: 0,
+        text: "50".to_string(),
+    });
+    assert!(s.state.alert().is_none());
+}
+
+/// Un bon ajustement qui reste bon ne dit rien, même après des éditions.
+#[test]
+fn un_bon_ajustement_reste_silencieux_apres_edition() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    fit(&mut s, true, true);
+    s.state.dispatch(Action::CommitCell {
+        column: s.y,
+        row: 3,
+        text: "7.1".to_string(),
+    });
+    assert!(s.state.alert().is_none());
+    assert_eq!(s.state.low_r2_total(), 0);
+}
+
+#[test]
+fn la_preference_met_a_jour_l_etat_et_le_fichier() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    let file = with_preferences(&mut s, dir.path());
+    assert!(s.state.analysis_low_r2_dialog(), "actif par défaut");
+    s.state.dispatch(Action::SetAnalysisLowR2Dialog(false));
+    assert!(!s.state.analysis_low_r2_dialog());
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(json["analysis_low_r2_dialog"], serde_json::json!(false));
+    s.state.dispatch(Action::SetAnalysisLowR2Dialog(true));
+    assert!(s.state.analysis_low_r2_dialog());
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(json["analysis_low_r2_dialog"], serde_json::json!(true));
+}
+
+#[test]
+fn une_erreur_d_ecriture_de_la_preference_est_dite_et_l_etat_est_applique() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    // Le « dossier » parent du fichier est un fichier : l'écriture échoue.
+    let bloc = dir.path().join("bloc");
+    std::fs::write(&bloc, "x").unwrap();
+    s.state = AppState::new_with_preferences(
+        s._session.handle(),
+        dir.path().join("p.stf").display().to_string(),
+        stokesforge_app_state::preferences::Preferences::load_from(Some(
+            bloc.join("preferences.json"),
+        )),
+    )
+    .unwrap();
+    s.state.dispatch(Action::SetAnalysisLowR2Dialog(false));
+    let status = s.state.status().expect("un message d'erreur");
+    assert!(status.is_error());
+    assert!(
+        status.text.starts_with("Could not save the preferences:"),
+        "{}",
+        status.text
+    );
+    assert!(!s.state.analysis_low_r2_dialog(), "valable pour la session");
+}

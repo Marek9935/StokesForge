@@ -575,6 +575,63 @@ mod tests {
     }
 
     #[test]
+    fn la_boite_r2_faible_allume_ou_eteint_dans_le_fichier_aller_retour() {
+        let (_dir, path) = written("{}");
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        for on in [false, true, false] {
+            preferences.save_analysis_low_r2_dialog(on).unwrap();
+            assert_eq!(preferences.analysis_low_r2_dialog(), on);
+            assert_eq!(
+                Preferences::load_from(Some(path.clone())).analysis_low_r2_dialog(),
+                on
+            );
+        }
+    }
+
+    #[test]
+    fn la_boite_r2_faible_est_active_sans_le_champ_ou_sans_fichier() {
+        let (_dir, path) = written(r#"{ "language": "en", "analysis_keep_results": true }"#);
+        assert!(Preferences::load_from(Some(path)).analysis_low_r2_dialog());
+        assert!(Preferences::load_from(None).analysis_low_r2_dialog());
+        let (_dir, vide) = written("");
+        assert!(Preferences::load_from(Some(vide)).analysis_low_r2_dialog());
+        let (_dir, null) = written(r#"{ "analysis_low_r2_dialog": null }"#);
+        assert!(Preferences::load_from(Some(null)).analysis_low_r2_dialog());
+    }
+
+    #[test]
+    fn la_boite_r2_faible_lit_le_champ_et_ignore_les_champs_inconnus() {
+        let (_dir, path) =
+            written(r#"{ "analysis_low_r2_dialog": false, "champ_futur": { "a": 1 } }"#);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        assert!(!preferences.analysis_low_r2_dialog());
+        // L'écriture d'un autre champ garde le champ inconnu et le réglage.
+        preferences.save_analysis_keep_results(true).unwrap();
+        let texte = std::fs::read_to_string(&path).unwrap();
+        assert!(texte.contains("champ_futur"), "{texte}");
+        assert!(!Preferences::load_from(Some(path)).analysis_low_r2_dialog());
+    }
+
+    /// Épingle : une valeur non booléenne rend le fichier illisible en bloc
+    /// (serde) ; toutes les préférences retombent sur leur défaut, la langue
+    /// comprise, pas seulement ce champ.
+    #[test]
+    fn une_valeur_non_booleenne_retombe_sur_le_defaut() {
+        for brut in ["\"oui\"", "0", "1", "[]", "{}"] {
+            let (_dir, path) = written(&format!(
+                r#"{{ "language": "fr", "analysis_low_r2_dialog": {brut} }}"#
+            ));
+            let preferences = Preferences::load_from(Some(path));
+            assert!(preferences.analysis_low_r2_dialog(), "{brut}");
+            assert_eq!(
+                preferences.language(),
+                None,
+                "{brut}: fichier écarté en bloc"
+            );
+        }
+    }
+
+    #[test]
     fn la_sortie_par_defaut_des_analyses_est_ecrite_et_relue_sans_perdre_la_langue() {
         let (_dir, path) = written(r#"{ "language": "fr" }"#);
         let mut preferences = Preferences::load_from(Some(path.clone()));

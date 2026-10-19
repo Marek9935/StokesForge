@@ -811,3 +811,41 @@ fn low_r2_of(values: &[stokesforge_core::ResultValue]) -> Option<f64> {
         .map(|v| v.value)
         .min_by(f64::total_cmp)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::low_r2_of;
+    use stokesforge_core::ResultValue;
+
+    fn valeur(key: &str, value: f64) -> ResultValue {
+        ResultValue {
+            key: key.to_string(),
+            index: None,
+            value,
+            error: None,
+        }
+    }
+
+    #[test]
+    fn low_r2_of_rend_le_plus_bas_sous_le_palier_de_la_boite() {
+        let values = [
+            valeur("stat.r_squared", 0.4),
+            valeur("stat.r_squared", -2.0),
+            valeur("stat.r_squared", 0.5),
+            valeur("param.tau", -9.0),
+        ];
+        assert_eq!(low_r2_of(&values), Some(-2.0));
+    }
+
+    #[test]
+    fn low_r2_of_ne_rend_rien_hors_du_palier_ou_hors_de_la_cle() {
+        assert_eq!(low_r2_of(&[]), None);
+        assert_eq!(low_r2_of(&[valeur("stat.r_squared", 0.6)]), None);
+        assert_eq!(low_r2_of(&[valeur("stat.r_squared", f64::NAN)]), None);
+        assert_eq!(low_r2_of(&[valeur("param.tau", 0.1)]), None);
+        assert_eq!(
+            low_r2_of(&[valeur("stat.r_squared", f64::NEG_INFINITY)]),
+            Some(f64::NEG_INFINITY)
+        );
+    }
+}

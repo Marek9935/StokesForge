@@ -225,4 +225,184 @@ mod tests {
         assert_eq!(level_of_value("param.tau", 0.1), RSquaredLevel::Good);
         assert_eq!(level_of_value(R_SQUARED_KEY, 0.1), RSquaredLevel::Dialog);
     }
+
+    fn suivant(x: f64) -> f64 {
+        f64::from_bits(x.to_bits() + 1)
+    }
+
+    fn precedent(x: f64) -> f64 {
+        f64::from_bits(x.to_bits() - 1)
+    }
+
+    /// Les trois seuils, pile et à un ulp de chaque côté : la borne est stricte.
+    #[test]
+    fn chaque_palier_est_strict_a_l_ulp_pres() {
+        use RSquaredLevel::*;
+        let cas = [
+            (ORANGE_BELOW, Good),
+            (precedent(ORANGE_BELOW), Orange),
+            (suivant(ORANGE_BELOW), Good),
+            (ORANGE_BELOW - f64::EPSILON, Orange),
+            (ORANGE_BELOW + f64::EPSILON, Good),
+            (RED_BELOW, Orange),
+            (precedent(RED_BELOW), Red),
+            (suivant(RED_BELOW), Orange),
+            (RED_BELOW - f64::EPSILON, Red),
+            (RED_BELOW + f64::EPSILON, Orange),
+            (DIALOG_BELOW, Red),
+            (precedent(DIALOG_BELOW), Dialog),
+            (suivant(DIALOG_BELOW), Red),
+            (DIALOG_BELOW - f64::EPSILON, Dialog),
+            (DIALOG_BELOW + f64::EPSILON, Red),
+        ];
+        for (r2, attendu) in cas {
+            assert_eq!(RSquaredLevel::of(r2), attendu, "R² = {r2:e}");
+        }
+        // Les seuils eux-mêmes sont ceux de l'issue.
+        assert_eq!((ORANGE_BELOW, RED_BELOW, DIALOG_BELOW), (0.95, 0.8, 0.6));
+    }
+
+    #[test]
+    fn les_valeurs_extremes_et_speciales() {
+        use RSquaredLevel::*;
+        let cas = [
+            (1.0, Good),
+            (1.0 + f64::EPSILON, Good),
+            (0.0, Dialog),
+            (-0.0, Dialog),
+            (-1.0, Dialog),
+            (f64::MIN, Dialog),
+            (f64::NEG_INFINITY, Dialog),
+            (f64::INFINITY, Good),
+            (f64::MAX, Good),
+            (f64::NAN, Good),
+            (-f64::NAN, Good),
+            (f64::MIN_POSITIVE, Dialog),
+        ];
+        for (r2, attendu) in cas {
+            assert_eq!(RSquaredLevel::of(r2), attendu, "R² = {r2:e}");
+        }
+    }
+
+    /// Les paliers se cumulent, palier par palier : `is_warning` et `is_red`
+    /// pour chacun des quatre niveaux.
+    #[test]
+    fn le_cumul_des_paliers_est_exact() {
+        use RSquaredLevel::*;
+        let table = [
+            (Good, false, false),
+            (Orange, true, false),
+            (Red, true, true),
+            (Dialog, true, true),
+        ];
+        for (niveau, avertit, rouge) in table {
+            assert_eq!(niveau.is_warning(), avertit, "{niveau:?}");
+            assert_eq!(niveau.is_red(), rouge, "{niveau:?}");
+        }
+        assert!(Good < Orange && Orange < Red && Red < Dialog);
+    }
+
+    #[test]
+    fn les_autres_cles_sont_ignorees_meme_avec_une_valeur_tres_basse() {
+        for cle in ["param.tau", "area", "stat.r_squared_adj", "R_SQUARED", ""] {
+            for valeur in [-5.0, 0.0, 0.3, f64::NEG_INFINITY] {
+                assert_eq!(
+                    level_of_value(cle, valeur),
+                    RSquaredLevel::Good,
+                    "{cle:?} = {valeur}"
+                );
+            }
+        }
+        assert_eq!(level_of_value(R_SQUARED_KEY, 0.9), RSquaredLevel::Orange);
+        assert_eq!(level_of_value(R_SQUARED_KEY, 0.7), RSquaredLevel::Red);
+        assert_eq!(level_of_value(R_SQUARED_KEY, 0.99), RSquaredLevel::Good);
+        assert_eq!(R_SQUARED_KEY, "stat.r_squared");
+    }
+
+    fn valeur(key: &str, value: f64) -> stokesforge_core::ResultValue {
+        stokesforge_core::ResultValue {
+            key: key.to_string(),
+            index: None,
+            value,
+            error: None,
+        }
+    }
+
+    fn calcul(series: Vec<Vec<(&str, f64)>>) -> Calculation {
+        use stokesforge_analysis::correct::CorrectOp;
+        use stokesforge_analysis::ops::Operation;
+        Calculation {
+            operation: Operation::Correct {
+                op: CorrectOp::Subtract,
+            },
+            series: Vec::new(),
+            aux: None,
+            outputs: Vec::new(),
+            results: series
+                .into_iter()
+                .map(|values| stokesforge_core::SeriesResult {
+                    values: values.into_iter().map(|(k, v)| valeur(k, v)).collect(),
+                    ..Default::default()
+                })
+                .collect(),
+            keep_results: true,
+            auto_recalc: false,
+            low_r2_dialog: true,
+            stale: None,
+        }
+    }
+
+    #[test]
+    fn l_empreinte_est_vide_sans_r2_sous_le_palier_de_la_boite() {
+        let bon = calcul(vec![
+            vec![(R_SQUARED_KEY, 0.99), ("param.tau", 0.1)],
+            vec![(R_SQUARED_KEY, DIALOG_BELOW)],
+            vec![(R_SQUARED_KEY, f64::NAN)],
+            vec![("param.tau", -9.0)],
+            vec![(R_SQUARED_KEY, 0.7)],
+        ]);
+        assert!(dialog_fingerprint(&bon).is_empty());
+        assert_eq!(low_series_count(&bon), 0);
+        assert!(dialog_fingerprint(&calcul(Vec::new())).is_empty());
+        assert!(dialog_fingerprint(&calcul(vec![Vec::new()])).is_empty());
+    }
+
+    #[test]
+    fn l_empreinte_porte_le_rang_de_la_serie_et_les_bits_du_r2() {
+        let calc = calcul(vec![
+            vec![(R_SQUARED_KEY, 0.99)],
+            vec![(R_SQUARED_KEY, 0.2), ("param.tau", 0.1)],
+            vec![(R_SQUARED_KEY, -1.0)],
+        ]);
+        assert_eq!(
+            dialog_fingerprint(&calc),
+            vec![(1, 0.2f64.to_bits()), (2, (-1.0f64).to_bits())]
+        );
+        assert_eq!(low_series_count(&calc), 2);
+    }
+
+    #[test]
+    fn l_empreinte_est_stable_et_change_au_moindre_bit() {
+        let a = calcul(vec![vec![(R_SQUARED_KEY, 0.3)]]);
+        let b = calcul(vec![vec![(R_SQUARED_KEY, 0.3)]]);
+        assert_eq!(dialog_fingerprint(&a), dialog_fingerprint(&b));
+        // Épingle : l'empreinte est exacte, un écart de 1e-12 compte comme un
+        // résultat neuf (la boîte se rouvre).
+        let c = calcul(vec![vec![(R_SQUARED_KEY, 0.3 + 1e-12)]]);
+        assert_ne!(dialog_fingerprint(&a), dialog_fingerprint(&c));
+        // Même R² sur une autre série : autre empreinte.
+        let d = calcul(vec![Vec::new(), vec![(R_SQUARED_KEY, 0.3)]]);
+        assert_ne!(dialog_fingerprint(&a), dialog_fingerprint(&d));
+    }
+
+    #[test]
+    fn low_series_count_compte_les_series_pas_les_valeurs() {
+        let calc = calcul(vec![
+            vec![(R_SQUARED_KEY, 0.1), (R_SQUARED_KEY, 0.2)],
+            vec![(R_SQUARED_KEY, 0.9)],
+            vec![(R_SQUARED_KEY, 0.3)],
+        ]);
+        assert_eq!(low_series_count(&calc), 2);
+        assert_eq!(dialog_fingerprint(&calc).len(), 3, "une entrée par valeur");
+    }
 }

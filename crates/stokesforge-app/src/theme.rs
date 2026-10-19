@@ -488,6 +488,52 @@ mod tests {
         assert_ne!(r_squared_color(Red, true), r_squared_color(Red, false));
     }
 
+    /// Tous les paliers, toutes les teintes : `Good` garde la couleur du texte
+    /// ordinaire (ni orange ni rouge), et aucune teinte d'alerte ne vaut le
+    /// rouge de refus de champ.
+    #[test]
+    fn la_teinte_de_r_carre_distingue_tous_les_paliers() {
+        use stokesforge_app_state::r_squared::RSquaredLevel::{Dialog, Good, Orange, Red};
+        for dark in [false, true] {
+            let teintes = [
+                r_squared_color(Good, dark),
+                r_squared_color(Orange, dark),
+                r_squared_color(Red, dark),
+            ];
+            for (i, a) in teintes.iter().enumerate() {
+                for b in &teintes[i + 1..] {
+                    assert_ne!(a, b, "dark = {dark}");
+                }
+                assert_ne!(*a, field_refused_color(), "dark = {dark}");
+                assert_ne!(*a, field_clamped_color(), "dark = {dark}");
+            }
+            assert_eq!(r_squared_color(Dialog, dark), teintes[2]);
+        }
+        assert_ne!(
+            r_squared_color(Orange, true),
+            r_squared_color(Orange, false)
+        );
+        assert_ne!(r_squared_color(Good, true), r_squared_color(Good, false));
+    }
+
+    /// Contraste WCAG minimal 3:1 (texte en gras) des teintes d'alerte sur les
+    /// fonds clair (blanc) et sombre (gris 27, fond sombre d'egui).
+    #[test]
+    fn la_teinte_de_r_carre_contraste_sur_fond_clair_et_sombre() {
+        use stokesforge_app_state::r_squared::RSquaredLevel::{Good, Orange, Red};
+        use stokesforge_render::color::contrast_ratio;
+        let rgb = |c: Color32| (c.r(), c.g(), c.b());
+        for (dark, fond) in [(false, (255, 255, 255)), (true, (27, 27, 27))] {
+            for niveau in [Good, Orange, Red] {
+                let ratio = contrast_ratio(rgb(r_squared_color(niveau, dark)), fond);
+                assert!(
+                    ratio >= 3.0,
+                    "{niveau:?} dark = {dark} : contraste {ratio:.2} < 3"
+                );
+            }
+        }
+    }
+
     #[test]
     fn install_pose_le_standard_des_barres_de_defilement() {
         let ctx = Context::default();
