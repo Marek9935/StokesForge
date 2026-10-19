@@ -142,6 +142,25 @@ fn validate_refuse_une_borne_de_zone_non_finie() {
 }
 
 #[test]
+fn validate_refuse_une_ancre_non_finie() {
+    let anchors = |points| {
+        baseline(BaselineMethod::Anchors {
+            points,
+            interpolation: Interpolation::Segments,
+        })
+    };
+    assert_eq!(anchors(vec![(0.0, 1.0), (2.0, 3.0)]).validate(), Ok(()));
+    assert_eq!(
+        anchors(vec![(0.0, 1.0), (f64::NAN, 3.0)]).validate(),
+        invalid("points")
+    );
+    assert_eq!(
+        anchors(vec![(0.0, 1.0), (2.0, 3.0), (4.0, f64::INFINITY)]).validate(),
+        invalid("points")
+    );
+}
+
+#[test]
 fn validate_refuse_un_ajustement_sans_parametre_libre() {
     // Aucun paramètre : l'expression n'en contient pas.
     assert_eq!(
@@ -232,6 +251,12 @@ fn readiness_dit_ce_qui_manque_a_une_ligne_de_base() {
         Readiness::NeedsPoints { needed: 2, have: 1 }
     );
     assert_eq!(anchors(vec![(0.0, 1.0), (2.0, 3.0)]), Readiness::Ready);
+    // Une ancre non posée ne compte pas.
+    assert_eq!(
+        anchors(vec![(0.0, 1.0), nan]),
+        Readiness::NeedsPoints { needed: 2, have: 1 }
+    );
+    assert_eq!(anchors(vec![(0.0, 1.0), (2.0, 3.0), nan]), Readiness::Ready);
 }
 
 #[test]

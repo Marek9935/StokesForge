@@ -173,6 +173,9 @@ impl BaselineMethod {
             BaselineMethod::Constant { point } => ("point", pair_finite(*point)),
             BaselineMethod::ConstantZone { zone } => ("zone", pair_finite(*zone)),
             BaselineMethod::Zones { zones, .. } => ("zones", zones.iter().all(|z| pair_finite(*z))),
+            BaselineMethod::Anchors { points, .. } => {
+                ("points", points.iter().all(|p| pair_finite(*p)))
+            }
             _ => return Ok(()),
         };
         if finite {
@@ -482,6 +485,31 @@ mod tests {
                         name: "zones".into()
                     }
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn une_ancre_non_finie_est_refusee() {
+        let s = line_series();
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for points in [
+                vec![(0.0, 1.0), (bad, 2.0), (4.0, 3.0)],
+                vec![(0.0, 1.0), (2.0, bad), (4.0, 3.0)],
+                vec![(0.0, 1.0), (4.0, bad)],
+            ] {
+                for interpolation in [Interpolation::Segments, Interpolation::Spline] {
+                    let method = BaselineMethod::Anchors {
+                        points: points.clone(),
+                        interpolation,
+                    };
+                    assert_eq!(
+                        build(&method, &s).unwrap_err(),
+                        AnalysisError::InvalidParameter {
+                            name: "points".into()
+                        }
+                    );
+                }
             }
         }
     }

@@ -439,10 +439,13 @@ impl Operation {
                 {
                     Readiness::NeedsZone
                 }
-                BaselineMethod::Anchors { points, .. } if points.len() < 2 => {
-                    Readiness::NeedsPoints {
-                        needed: 2,
-                        have: points.len(),
+                BaselineMethod::Anchors { points, .. } => {
+                    // Une ancre non posée (non finie) ne compte pas.
+                    let have = points.iter().filter(|p| is_posed(**p)).count();
+                    if have < 2 {
+                        Readiness::NeedsPoints { needed: 2, have }
+                    } else {
+                        Readiness::Ready
                     }
                 }
                 _ => Readiness::Ready,
