@@ -49,7 +49,8 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             BLOCKING_DIALOG_SIZE,
             |ui| {
                 ui.label(tr!("alert-low-r2"));
-                ui.label(egui::RichText::new(&alert.message).weak());
+                // Texte normal : les compteurs sont le contenu de la boîte.
+                ui.label(&alert.message);
             },
         );
         if outcome != DialogOutcome::Open {

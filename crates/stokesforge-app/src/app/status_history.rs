@@ -75,7 +75,8 @@ pub(super) fn low_r2_list_window(ctx: &egui::Context, state: &AppState, actions:
         &tr!("alert-low-r2-title"),
         egui::vec2(480.0, 170.0),
         |ui| {
-            ui.label(egui::RichText::new(state.low_r2_list_text()).weak());
+            // Texte normal : les compteurs sont le contenu, pas un détail (#290).
+            ui.label(state.low_r2_list_text());
         },
     );
     if outcome != DialogOutcome::Open {

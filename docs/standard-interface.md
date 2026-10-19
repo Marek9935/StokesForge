@@ -348,6 +348,12 @@ Comment c'est tenu (`app/dialogs.rs`, tous par un même corps `modal_frame`) :
   d'import) ; **`modal_read_only`** : `[message] [Close]` (métadonnées d'une
   colonne). Un geste d'une fenêtre en lecture seule (« Use as x' ») reste un
   bouton de son contenu.
+- **Texte atténué (`.weak()`)** : réservé à ce qui est secondaire — détail
+  technique sous une phrase (l'erreur système d'un échec d'enregistrement), raison,
+  aide, état vide. Jamais le **contenu principal** d'un dialogue ou d'une
+  fenêtre en lecture seule : ce que l'utilisateur doit lire (les compteurs de
+  R² faible, un message d'état à retenir) est en texte normal. Le gris d'egui a
+  un contraste faible sur fond clair ; en cas de doute, texte normal.
 - **Raison du grisage** : `DialogFooter::accept_disabled` (#226) est la
   raison quand `accept_enabled` est faux (clés `disabled-*` : Finish sans
   fichier, Create d'une analyse incomplète — la raison est alors le premier
