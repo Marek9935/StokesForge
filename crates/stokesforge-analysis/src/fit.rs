@@ -217,7 +217,12 @@ fn fit_linear(input: &FitInput, model: &CompiledModel) -> Option<(FittedSeries, 
     if n < k || (matches!(model.model(), Model::Logarithm) && s.x.iter().any(|v| *v <= 0.0)) {
         return None;
     }
-    let mut a = model.design_matrix(&s.x)?;
+    // Polynôme : X centré avant le QR (#283), coefficients ramenés ensuite à
+    // l'axe d'origine ; le résidu se calcule dans l'axe centré (sans l'annulation
+    // catastrophique des grandes puissances de X).
+    let shift = model.x_shift(&s.x);
+    let xs: Vec<f64> = s.x.iter().map(|v| v - shift).collect();
+    let mut a = model.design_matrix(&xs)?;
     let mut y = s.y.clone();
     if let Some(sig) = &input.sigma {
         for i in 0..n {
@@ -229,10 +234,10 @@ fn fit_linear(input: &FitInput, model: &CompiledModel) -> Option<(FittedSeries, 
         }
     }
     let ls = least_squares(&a, &y)?;
-    let fitted: Vec<f64> =
-        s.x.iter()
-            .map(|&x| model.eval(&ls.coefficients, x))
-            .collect();
+    let fitted: Vec<f64> = xs
+        .iter()
+        .map(|&x| model.eval(&ls.coefficients, x))
+        .collect();
     let chi2: f64 = (0..n)
         .map(|i| {
             let w = input.sigma.as_ref().map_or(1.0, |sg| 1.0 / sg[i]);
@@ -241,9 +246,16 @@ fn fit_linear(input: &FitInput, model: &CompiledModel) -> Option<(FittedSeries, 
         .sum();
     let dof = n - k;
     let scale = if dof > 0 { chi2 / dof as f64 } else { f64::NAN };
+    let (values, cov) = match model.unshift_matrix(shift) {
+        Some(t) => (
+            t.mul_vec(&ls.coefficients),
+            t.mul(&ls.unscaled_covariance).mul(&t.transpose()),
+        ),
+        None => (ls.coefficients, ls.unscaled_covariance),
+    };
     let errors = (0..k)
         .map(|j| {
-            let v = ls.unscaled_covariance.get(j, j) * scale;
+            let v = cov.get(j, j) * scale;
             (v.is_finite() && v >= 0.0).then(|| v.sqrt())
         })
         .collect();
@@ -252,7 +264,7 @@ fn fit_linear(input: &FitInput, model: &CompiledModel) -> Option<(FittedSeries, 
     let ss_res: f64 = (0..n).map(|i| (s.y[i] - fitted[i]).powi(2)).sum();
     Some((
         FittedSeries {
-            values: ls.coefficients,
+            values,
             errors,
             points: n,
             r_squared: if ss_tot > 0.0 {
@@ -424,6 +436,65 @@ mod tests {
         let r = fit(&[input(|v| 3.0 * (-v / 2.0).exp(), x)], &sp).unwrap();
         assert_eq!(r.dof, 1);
         assert!(r.series[0].errors[0].is_none() && r.series[0].errors[1].is_some());
+    }
+
+    #[test]
+    fn polynome_sur_x_decale_garde_sa_precision() {
+        // #283 : X = 1e5 + t, y = 1 + 2t - 3t². Avant le centrage de X avant le
+        // QR, le résidu valait ~1e-5 ; il doit rester au niveau de l'arrondi.
+        let t = grid(21, -5.0, 5.0);
+        let x: Vec<f64> = t.iter().map(|v| 1e5 + v).collect();
+        let y: Vec<f64> = t.iter().map(|v| 1.0 + 2.0 * v - 3.0 * v * v).collect();
+        let i = FitInput {
+            series: Series::new(x, y),
+            sigma: None,
+        };
+        let r = fit(&[i], &spec(Model::Polynomial { degree: 2 })).unwrap();
+        let s = &r.series[0];
+        assert!(s.chi2 < 1e-18, "chi2 = {:e}", s.chi2);
+        assert!((s.r_squared - 1.0).abs() < 1e-14);
+        // Coefficients dans l'axe d'origine : y = 1 + 2(X-S) - 3(X-S)², S = 1e5.
+        let sh = 1e5;
+        let want = [1.0 - 2.0 * sh - 3.0 * sh * sh, 2.0 + 6.0 * sh, -3.0];
+        for (g, w) in s.values.iter().zip(want) {
+            assert!((g - w).abs() <= 1e-9 * w.abs(), "{g} vs {w}");
+        }
+    }
+
+    #[test]
+    fn droite_decalee_memes_coefficients_et_erreurs_que_la_droite_centree() {
+        // Données bruitées déterministes. Référence : X centré en 0 (aucun
+        // décalage) ; décalée de S, la droite se déduit par y = c0 + c1 (X-S) :
+        // a1 = c1 (même erreur), a0 = c0 - S c1, var(a0) = var(c0) + S² var(c1)
+        // (colonnes orthogonales, t de moyenne nulle).
+        let t = grid(11, -5.0, 5.0);
+        let noise = |i: usize| 0.3 * ((i as f64) * 1.7).sin();
+        let mk = |off: f64| {
+            let x: Vec<f64> = t.iter().map(|v| off + v).collect();
+            let y: Vec<f64> = t
+                .iter()
+                .enumerate()
+                .map(|(i, v)| 2.0 + 0.5 * v + noise(i))
+                .collect();
+            FitInput {
+                series: Series::new(x, y),
+                sigma: None,
+            }
+        };
+        let r0 = fit(&[mk(0.0)], &spec(Model::Linear)).unwrap();
+        let sh = 1000.0;
+        let r1 = fit(&[mk(sh)], &spec(Model::Linear)).unwrap();
+        let (a, b) = (&r0.series[0], &r1.series[0]);
+        let rel = |x: f64, y: f64| (x - y).abs() <= 1e-9 * (1.0 + y.abs());
+        assert!(rel(b.values[1], a.values[1]));
+        assert!(rel(b.values[0], a.values[0] - sh * a.values[1]));
+        let (e0, e1) = (a.errors[0].unwrap(), a.errors[1].unwrap());
+        assert!(rel(b.errors[1].unwrap(), e1));
+        assert!(rel(
+            b.errors[0].unwrap(),
+            (e0 * e0 + sh * sh * e1 * e1).sqrt()
+        ));
+        assert!(rel(b.chi2, a.chi2));
     }
 
     #[test]

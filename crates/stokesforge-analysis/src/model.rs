@@ -208,6 +208,45 @@ impl CompiledModel {
         Some(a)
     }
 
+    /// Décalage de l'axe X pour un ajustement linéaire (#283) : la moyenne des
+    /// X pour une droite ou un polynôme (une base de puissances de `x - c` reste
+    /// conditionnée quand X est loin de 0), 0 pour les autres modèles.
+    pub fn x_shift(&self, x: &[f64]) -> f64 {
+        if !matches!(self.model, Model::Linear | Model::Polynomial { .. }) {
+            return 0.0;
+        }
+        let finite: Vec<f64> = x.iter().copied().filter(|v| v.is_finite()).collect();
+        if finite.is_empty() {
+            return 0.0;
+        }
+        let m = finite.iter().sum::<f64>() / finite.len() as f64;
+        if m.is_finite() {
+            m
+        } else {
+            0.0
+        }
+    }
+
+    /// Matrice `T` telle que `coefficients dans l'axe d'origine = T · coefficients
+    /// dans l'axe décalé de s` (`x' = x - s`) : développement binomial de
+    /// `Σ cⱼ (x - s)ʲ`. `None` si le modèle n'est pas un polynôme ou si `s = 0`.
+    pub fn unshift_matrix(&self, s: f64) -> Option<Matrix> {
+        if s == 0.0 || !matches!(self.model, Model::Linear | Model::Polynomial { .. }) {
+            return None;
+        }
+        let k = self.params.len();
+        let mut t = Matrix::zeros(k, k);
+        for j in 0..k {
+            // C(j, i) (-s)^(j-i), construit de proche en proche.
+            let mut binom = 1.0;
+            for i in (0..=j).rev() {
+                t.set(i, j, binom * (-s).powi((j - i) as i32));
+                binom = binom * i as f64 / (j - i + 1) as f64;
+            }
+        }
+        Some(t)
+    }
+
     /// Valeurs initiales automatiques d'après les données (jamais `NaN`).
     pub fn guess(&self, s: &Series) -> Vec<f64> {
         let n = s.len();
@@ -224,10 +263,15 @@ impl CompiledModel {
         match &self.model {
             Model::Linear | Model::Polynomial { .. } | Model::Logarithm => {
                 // Linéaire en les paramètres : le point de départ importe peu.
-                if let Some(a) = self.design_matrix(x) {
+                let shift = self.x_shift(x);
+                let xs: Vec<f64> = x.iter().map(|v| v - shift).collect();
+                if let Some(a) = self.design_matrix(&xs) {
                     if x.iter().all(|v| self.model != Model::Logarithm || *v > 0.0) {
                         if let Some(ls) = least_squares(&a, y) {
-                            return ls.coefficients;
+                            return match self.unshift_matrix(shift) {
+                                Some(t) => t.mul_vec(&ls.coefficients),
+                                None => ls.coefficients,
+                            };
                         }
                     }
                 }

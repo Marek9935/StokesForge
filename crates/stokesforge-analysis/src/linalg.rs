@@ -4,7 +4,10 @@
 //! petits (quelques paramètres), et rester sans dépendance garde le crate hors
 //! de `cargo deny` et de la liste des notices. La stabilité numérique d'un
 //! polynôme de degré élevé passe par la décomposition QR de Householder, pas
-//! par les équations normales.
+//! par les équations normales. Le QR seul ne répare pas un X loin de 0 (les
+//! colonnes 1, x, x², … deviennent presque colinéaires) : l'ajustement
+//! polynomial centre X avant le QR et ré-exprime les coefficients dans l'axe
+//! d'origine (#283, `CompiledModel::x_shift`).
 
 /// Matrice dense stockée par lignes.
 #[derive(Debug, Clone, PartialEq)]
@@ -75,6 +78,37 @@ impl Matrix {
     }
 
     /// `selfᵀ · v`.
+    /// `self · v`.
+    pub fn mul_vec(&self, v: &[f64]) -> Vec<f64> {
+        (0..self.rows)
+            .map(|i| (0..self.cols).map(|j| self.get(i, j) * v[j]).sum())
+            .collect()
+    }
+
+    /// `self · other`.
+    pub fn mul(&self, other: &Matrix) -> Matrix {
+        let mut m = Matrix::zeros(self.rows, other.cols);
+        for i in 0..self.rows {
+            for j in 0..other.cols {
+                let s = (0..self.cols)
+                    .map(|k| self.get(i, k) * other.get(k, j))
+                    .sum();
+                m.set(i, j, s);
+            }
+        }
+        m
+    }
+
+    pub fn transpose(&self) -> Matrix {
+        let mut m = Matrix::zeros(self.cols, self.rows);
+        for i in 0..self.rows {
+            for j in 0..self.cols {
+                m.set(j, i, self.get(i, j));
+            }
+        }
+        m
+    }
+
     pub fn transpose_mul(&self, v: &[f64]) -> Vec<f64> {
         let mut out = vec![0.0; self.cols];
         for (r, &vr) in v.iter().enumerate().take(self.rows) {
