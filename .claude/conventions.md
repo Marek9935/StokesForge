@@ -109,7 +109,9 @@ de `window_detach.rs` ; le moteur Python reste dans l’AppState principal.
 - Corrections définitives (#212) : `ReplaceAnalysisData` écrit les Y et leur
   `CorrectionRecord` dans le même pas d'historique. La trace est séparée des
   calculs, persistée dans `correction_traces`, immuable et conservée après
-  saisie ; ne jamais créer un calcul dont la sortie est sa propre source.
+  saisie ; une colonne corrigée plusieurs fois garde **une seule** donnée
+  brute (celle d'avant la première correction, #308) et « Restore original
+  data » la rend quelle que soit la trace, en retirant la colonne de toutes ; ne jamais créer un calcul dont la sortie est sa propre source.
   Le choix de destination utilise `ChoiceOption::disabled` pour les sources
   en lecture seule ; les sources tracées plusieurs fois exigent `modal_confirm`.
 

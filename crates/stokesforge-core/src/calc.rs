@@ -383,7 +383,14 @@ impl Project {
             let aux = self.frozen_aux(&draft.operation, draft.aux.as_ref())?;
             let mut originals = Vec::with_capacity(writes.len());
             for &id in writes.keys() {
-                originals.push((id, self.keep_original(id)?));
+                // Une colonne déjà corrigée garde sa donnée brute d'origine
+                // (#308) : la copie du premier remplacement est réutilisée, on
+                // ne photographie pas l'état déjà corrigé.
+                let copy = match self.first_original_of(id) {
+                    Some(copy) => copy,
+                    None => self.keep_original(id)?,
+                };
+                originals.push((id, copy));
             }
             for (id, values) in writes {
                 self.set_values(id, 0, values)?;
@@ -410,9 +417,33 @@ impl Project {
         result
     }
 
+    /// La copie de la donnée brute de `column`, si une correction antérieure
+    /// l'a déjà gardée : celle de la trace au plus petit identifiant, donc la
+    /// plus ancienne. `None` pour une colonne jamais corrigée.
+    fn first_original_of(&self, column: NodeId) -> Option<NodeId> {
+        self.tree().correction_traces().values().find_map(|trace| {
+            trace
+                .originals
+                .iter()
+                .find(|(replaced, copy)| {
+                    *replaced == column
+                        && self
+                            .tree()
+                            .node(*copy)
+                            .and_then(|n| n.as_column())
+                            .is_some()
+                })
+                .map(|(_, copy)| *copy)
+        })
+    }
+
     /// « Restore original data » (#248) : rend à chaque colonne remplacée par
-    /// la correction `trace` son type et ses valeurs d'avant, **écrase** ce qui
-    /// y a été saisi depuis, retire la trace et les copies qui ne servent plus.
+    /// la correction `trace` son type et ses valeurs **brutes** (celles d'avant
+    /// la toute première correction, #308), **écrase** ce qui y a été saisi
+    /// depuis, retire la trace et les copies qui ne servent plus. Une colonne
+    /// restaurée sort aussi de toutes les autres traces qui la citaient (une
+    /// trace qui n'a plus aucune colonne disparaît) : restaurer B après A rend
+    /// la donnée brute, il n'y a plus de correction « A » à restaurer.
     /// Une colonne supprimée depuis est laissée de côté. Atomique.
     pub fn restore_original_data(&mut self, trace: NodeId) -> CoreResult<()> {
         let record = self
@@ -433,9 +464,31 @@ impl Project {
                     self.restore_from_copy(*column, *copy)?;
                 }
             }
-            Arc::make_mut(self.tree_arc_mut())
-                .correction_traces_mut()
-                .remove(&trace);
+            let restored: Vec<NodeId> = record.originals.iter().map(|(c, _)| *c).collect();
+            let traces = Arc::make_mut(self.tree_arc_mut()).correction_traces_mut();
+            traces.remove(&trace);
+            let others: Vec<NodeId> = traces.keys().copied().collect();
+            for other in others {
+                let Some(existing) = traces.get(&other).cloned() else {
+                    continue;
+                };
+                if !existing
+                    .originals
+                    .iter()
+                    .any(|(column, _)| restored.contains(column))
+                {
+                    continue;
+                }
+                let mut stripped = (*existing).clone();
+                stripped
+                    .originals
+                    .retain(|(column, _)| !restored.contains(column));
+                if stripped.originals.is_empty() {
+                    traces.remove(&other);
+                } else {
+                    traces.insert(other, Arc::new(stripped));
+                }
+            }
             self.gc_analysis_store();
             Ok(())
         })();

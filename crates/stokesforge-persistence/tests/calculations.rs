@@ -282,6 +282,15 @@ fn les_corrections_definitives_survivent_au_fichier_sans_lien_de_calcul() {
     let back = load(&path).unwrap();
     assert_eq!(back.tree(), project.tree());
     assert_eq!(back.tree().correction_traces().len(), 2);
+    // #308 : les deux corrections de Y partagent la même donnée brute, avant
+    // comme après le fichier.
+    let copies: Vec<_> = back
+        .tree()
+        .correction_traces()
+        .values()
+        .map(|t| t.originals[0].1)
+        .collect();
+    assert_eq!(copies[0], copies[1]);
     assert!(back.tree().calculations().is_empty());
     assert!(back.tree().calculation_of_column(y).is_none());
     let mut back = back;

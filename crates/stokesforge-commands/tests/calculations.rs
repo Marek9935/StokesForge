@@ -995,6 +995,87 @@ fn restaurer_rend_les_originaux_ecrase_les_saisies_et_s_annule() {
     assert_eq!(w.project.tree(), &restored);
 }
 
+/// Seconde correction de la même colonne Y, avec ses nouveaux résultats.
+fn replace_again(w: &mut World, rx: NodeId, ry: NodeId, results: Vec<f64>) {
+    let d = CalculationDraft {
+        aux: Some(AuxRef { x: Some(rx), y: ry }),
+        ..draft(w, results)
+    };
+    let versions = [w.x, w.y, rx, ry]
+        .map(|id| {
+            let version = w
+                .project
+                .tree()
+                .get(id)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .version();
+            (id, version)
+        })
+        .to_vec();
+    w.history
+        .execute(
+            &mut w.project,
+            Command::ReplaceAnalysisData {
+                draft: d,
+                expected_versions: versions,
+            },
+        )
+        .unwrap();
+}
+
+/// #308 : deux corrections successives de la même colonne gardent **la même**
+/// donnée brute. La copie de la seconde n'est pas une photo de l'état déjà
+/// corrigé par la première.
+#[test]
+fn deux_corrections_de_la_meme_colonne_partagent_la_donnee_brute() {
+    let (mut w, rx, ry) = reference_world();
+    replace_with_reference(&mut w, rx, ry);
+    replace_again(&mut w, rx, ry, vec![1.0, 2.0, 3.0]);
+    assert_eq!(values_of(&w.project, w.y), vec![1.0, 2.0, 3.0]);
+    let traces = w.project.tree().correction_traces().clone();
+    assert_eq!(traces.len(), 2);
+    let copies: Vec<NodeId> = traces.values().map(|t| t.originals[0].1).collect();
+    assert_eq!(copies[0], copies[1], "une seule copie de la donnée brute");
+    assert_eq!(values_of(&w.project, copies[0]), vec![10.0, 20.0, 30.0]);
+}
+
+/// #308 : « Restore original data » rend toujours la donnée brute, quelle que
+/// soit la correction restaurée, et retire toutes les corrections de la colonne.
+#[test]
+fn restaurer_n_importe_quelle_correction_rend_la_donnee_brute() {
+    for restore_first in [true, false] {
+        let (mut w, rx, ry) = reference_world();
+        replace_with_reference(&mut w, rx, ry);
+        replace_again(&mut w, rx, ry, vec![1.0, 2.0, 3.0]);
+        let before_restore = w.project.tree().clone();
+        let ids: Vec<NodeId> = w
+            .project
+            .tree()
+            .correction_traces()
+            .keys()
+            .copied()
+            .collect();
+        let trace = if restore_first { ids[0] } else { ids[1] };
+        w.history
+            .execute(&mut w.project, Command::RestoreOriginalData { trace })
+            .unwrap();
+        assert_eq!(
+            values_of(&w.project, w.y),
+            vec![10.0, 20.0, 30.0],
+            "donnée brute (première trace : {restore_first})"
+        );
+        assert!(
+            w.project.tree().correction_traces().is_empty(),
+            "plus aucune correction à restaurer sur cette colonne"
+        );
+        assert!(w.project.analysis_store_sheet().is_none());
+        w.history.undo(&mut w.project).unwrap();
+        assert_eq!(w.project.tree(), &before_restore, "Ctrl+Z rend tout");
+    }
+}
+
 #[test]
 fn supprimer_la_colonne_remplacee_emporte_la_trace_et_les_copies() {
     let (mut w, rx, ry) = reference_world();

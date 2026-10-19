@@ -287,7 +287,11 @@ sont exigées avant écriture. Une colonne à formule ou calculée est refusée.
 
 `RestoreOriginalData { trace }` (#248, structurelle) rend aux colonnes
 remplacées leur original, gardé dans le classeur caché des copies : il écrase
-les saisies faites depuis, et un Annuler le défait. Les copies (référence
+les saisies faites depuis, et un Annuler le défait. **Toujours la donnée
+brute** (#308) : une colonne corrigée plusieurs fois garde la copie du tout
+premier remplacement (`first_original_of`), partagée par toutes ses traces ;
+restaurer l'une quelconque rend cette donnée brute et sort la colonne de
+**toutes** les traces (une trace sans colonne restante disparaît). Les copies (référence
 figée d'une correction, originaux) vivent dans **un seul classeur caché par
 projet** (`stokesforge-core/src/analysis_store.rs`) ; une copie est retirée avec
 la dernière analyse ou trace qui la cite. Toutes ces écritures sont dans la
@@ -297,5 +301,6 @@ La longueur de Y reste identique. Les lignes dont X ou Y est non fini gardent
 leur cellule originale ; un NaN produit sur une ligne valide (division par zéro,
 référence hors plage) reste visible. Plusieurs séries partageant Y doivent
 produire des valeurs identiques : sinon rien n'est écrit. Chaque remplacement
-garde sa propre trace, y compris après une saisie ordinaire. Supprimer toutes
+garde sa propre trace (donc sa ligne de Results), y compris après une saisie
+ordinaire ; toutes partagent la donnée brute de la colonne. Supprimer toutes
 ses sources retire la trace ; annuler leur suppression la restaure.
