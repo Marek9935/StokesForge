@@ -85,6 +85,17 @@ pub fn integrate(series: &Series, spec: &IntegrateSpec) -> Result<Integrated, An
             needed: 2,
         });
     }
+    // Une borne non finie (plage pas encore posée, NaN) ferait `min/max`
+    // renvoyer l'autre argument : (NaN, NaN) intégrerait toute la courbe (#276).
+    if spec
+        .ranges
+        .iter()
+        .any(|&(a, b)| !(a.is_finite() && b.is_finite()))
+    {
+        return Err(AnalysisError::InvalidParameter {
+            name: "ranges".into(),
+        });
+    }
     let sorted = series.sorted();
     let (xmin, xmax) = (sorted.x[0], sorted.x[sorted.len() - 1]);
     let ranges: Vec<(f64, f64)> = if spec.ranges.is_empty() {

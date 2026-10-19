@@ -226,6 +226,32 @@ fn l_integrale_donne_aires_total_et_colonnes() {
     assert!((col(o, "normalized").data[0] - 0.125).abs() < 1e-12);
 }
 
+/// #276 : une plage non finie (pas encore posée) est refusée, au lieu d'intégrer
+/// toute la courbe (`min/max` ignorent le NaN) ; `readiness` la dit à poser.
+#[test]
+fn une_plage_d_integrale_non_finie_est_refusee() {
+    use stokesforge_analysis::integrate::integrate;
+    use stokesforge_analysis::ops::Readiness;
+    use stokesforge_analysis::series::Series;
+    for range in [(f64::NAN, f64::NAN), (f64::NAN, 5.0), (5.0, f64::INFINITY)] {
+        let spec = IntegrateSpec {
+            ranges: vec![(1.0, 2.0), range],
+            under: Under::Zero,
+            cumulative: false,
+            normalize: false,
+        };
+        let op = Operation::Integrate { spec: spec.clone() };
+        let invalid = |r: Result<_, AnalysisError>| matches!(r, Err(AnalysisError::InvalidParameter { ref name }) if name == "ranges");
+        assert!(invalid(run(&op, &[line(11, |_| 2.0)], None).map(|_| ())));
+        assert!(invalid(op.validate()));
+        let x: Vec<f64> = (0..11).map(f64::from).collect();
+        assert!(invalid(
+            integrate(&Series::new(x.clone(), x), &spec).map(|_| ())
+        ));
+        assert_eq!(op.readiness(), Readiness::NeedsZone);
+    }
+}
+
 #[test]
 fn les_pics_detectes_automatiquement_donnent_une_colonne_par_composante() {
     let x: Vec<f64> = (0..400).map(|i| i as f64 * 0.1).collect();

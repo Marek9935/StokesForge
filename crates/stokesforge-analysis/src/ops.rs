@@ -456,6 +456,11 @@ impl Operation {
                 Ok(compiled) if compiled.param_count() == 0 => Readiness::NoParameter,
                 Ok(_) => Readiness::Ready,
             },
+            // Une plage non posée (NaN) n'est pas « toute la courbe » : `run`
+            // la refuse (#276), elle reste donc à poser.
+            Operation::Integrate { spec } if !spec.ranges.iter().all(|r| is_posed(*r)) => {
+                Readiness::NeedsZone
+            }
             Operation::Correct { .. }
             | Operation::Integrate { .. }
             | Operation::Peaks { .. }
@@ -514,6 +519,9 @@ impl Operation {
                 _ if no_free_parameter(spec) => Err(AnalysisError::NoFreeParameter),
                 _ => Ok(()),
             },
+            Operation::Integrate { spec } if !spec.ranges.iter().all(|r| is_posed(*r)) => {
+                bad("ranges")
+            }
             Operation::Peaks { auto, .. } if auto.is_some_and(|a| a.max_peaks > MAX_PEAKS) => {
                 bad("max_peaks")
             }
