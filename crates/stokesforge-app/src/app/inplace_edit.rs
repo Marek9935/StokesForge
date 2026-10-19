@@ -1,5 +1,5 @@
 //! **Le** contrat de l'édition sur place (#224, `docs/standard-interface.md`,
-//! § Champs texte et édition sur place, T4) : grille, onglets de feuille,
+//! § Champs texte et édition sur place, S-T4) : grille, onglets de feuille,
 //! Project Manager, Object Manager et titres du graphe l'appellent tous.
 //!
 //! Le contrat, identique partout :

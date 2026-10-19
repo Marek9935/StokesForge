@@ -43,7 +43,7 @@ Toute modification du modèle passe par une commande annulable (Ctrl+Z).
 On ne demande confirmation que pour ce que Ctrl+Z ne rattrape pas. Un objet
 visible se règle en direct (OK garde, Cancel restaure) ; une action qui crée
 travaille sur un brouillon et son bouton porte son verbe.
-Détail : standard (F1, F3-F5) ; mécanique : [`commandes-et-historique.md`](commandes-et-historique.md).
+Détail : standard (S-F1, S-F3 à S-F5) ; mécanique : [`commandes-et-historique.md`](commandes-et-historique.md).
 
 ## 4. Rien n'est grisé ou refusé en silence
 

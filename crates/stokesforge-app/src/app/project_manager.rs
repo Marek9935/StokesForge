@@ -60,7 +60,7 @@ struct PmMemory {
     text: Option<String>,
     /// Dernier clic simple sur une fenêtre déjà seule sélectionnée : s'il n'est
     /// pas suivi d'un second clic avant [`SLOW_CLICK_SECONDS`], c'est un clic
-    /// lent, donc un renommage (K4, #224).
+    /// lent, donc un renommage (S-K4, #224).
     slow_click: Option<(Tab, f64)>,
     order: Vec<Tab>,
     next_order: Vec<Tab>,
@@ -222,7 +222,7 @@ pub(super) fn object_menu(
     });
 }
 
-/// Délai d'un clic lent (K4) : plus long que l'intervalle d'un double-clic
+/// Délai d'un clic lent (S-K4) : plus long que l'intervalle d'un double-clic
 /// d'egui, pour qu'un double-clic (ouvrir) n'ouvre jamais le champ.
 const SLOW_CLICK_SECONDS: f64 = 0.5;
 
@@ -349,7 +349,7 @@ fn is_renaming(ctx: &egui::Context, memory_key: egui::Id, id: NodeId) -> bool {
         .is_some_and(|m| m.rename.first() == Some(&id))
 }
 
-/// Pourquoi ce nom est refusé (T4, cadre rouge) : vide, ou déjà pris par un
+/// Pourquoi ce nom est refusé (S-T4, cadre rouge) : vide, ou déjà pris par un
 /// autre enfant du même dossier.
 fn rename_refusal(siblings: &[ProjectTreeNode], id: NodeId, name: &str) -> Option<String> {
     let name = name.trim();
@@ -603,7 +603,7 @@ fn project_tree_node_ui(
                         .slow_click = None;
                 });
             }
-            // K3 : un double-clic active ou restaure la fenêtre, il ne la
+            // S-K3 : un double-clic active ou restaure la fenêtre, il ne la
             // ferme jamais (fermer se fait par Masquer ou l'en-tête).
             if response.double_clicked() && ui.input(|input| input.modifiers.is_none()) {
                 interaction.open_requests.push(tab);
@@ -1268,7 +1268,7 @@ pub(super) mod tests {
             let open = banc.open_requests.borrow().clone();
             open
         };
-        // K3 : le double-clic active la fenêtre (le Project Manager n'a plus
+        // S-K3 : le double-clic active la fenêtre (le Project Manager n'a plus
         // aucun chemin de fermeture, voir `PmInteraction`).
         let open = double_click("Graph1", egui::Modifiers::NONE);
         assert!(open.contains(&graph_tab), "open_requests={open:?}");
@@ -1606,7 +1606,7 @@ pub(super) mod tests {
         );
     }
 
-    /// Un clic lent (K4) sur une fenêtre déjà seule sélectionnée ouvre son
+    /// Un clic lent (S-K4) sur une fenêtre déjà seule sélectionnée ouvre son
     /// renommage ; un double-clic, jamais ; le champ s'ouvre sur le nom
     /// sélectionné.
     #[test]

@@ -1,6 +1,6 @@
-//! Fenêtre d'historique de la barre d'état (#230, M6) : les 50 derniers
+//! Fenêtre d'historique de la barre d'état (#230, S-M6) : les 50 derniers
 //! messages, horodatés, du plus récent au plus ancien. Lecture seule, donc
-//! `modal_read_only` (Close seul, F2) ; un message d'échec reste dans la barre
+//! `modal_read_only` (Close seul, S-F2) ; un message d'échec reste dans la barre
 //! d'état, jamais ici seulement. L'heure est l'heure UTC : la bibliothèque
 //! standard ne connaît pas le fuseau local et le projet n'a pas de dépendance
 //! de calendrier.

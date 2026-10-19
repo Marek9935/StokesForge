@@ -1644,7 +1644,7 @@ disabled-gradient-min-colors = A gradient needs at least two colors
 disabled-mirror-off = Turn on the mirror axis first
 disabled-analysis-issues = Fix the problem shown in the form first
 
-## Help › Keyboard Shortcuts (#231, K5). The lists are generated from the key
+## Help › Keyboard Shortcuts (#231, S-K5). The lists are generated from the key
 ## registry (`app/shortcuts.rs`, `HELP`).
 
 menu-help = Help

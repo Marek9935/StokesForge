@@ -26,13 +26,13 @@
 //!   un `DragValue` ou un `Slider` d'egui, sans dérogation ;
 //! - `aucun_separateur_avant_un_titre_de_section` (#169) : un titre de
 //!   section (`theme::section_title`) sépare seul ses groupes ;
-//! - `aucun_add_space_litteral_hors_du_theme` (#227, L4) : un écart se pose par
+//! - `aucun_add_space_litteral_hors_du_theme` (#227, S-L4) : un écart se pose par
 //!   les deux constantes de `theme.rs` (`SPACE_ITEM`, `SPACE_SECTION`), jamais
 //!   par un nombre écrit sur place, sans dérogation ;
-//! - `aucun_consume_key_hors_du_registre` (#231, K1) : toute touche consommée
+//! - `aucun_consume_key_hors_du_registre` (#231, S-K1) : toute touche consommée
 //!   est une constante de `app/shortcuts.rs`, jamais un `consume_key` ni un
 //!   `KeyboardShortcut::new` écrit ailleurs, sans dérogation ;
-//! - `aucun_curseur_hors_du_module_des_curseurs` (#231, X2) : un
+//! - `aucun_curseur_hors_du_module_des_curseurs` (#231, S-X2) : un
 //!   `CursorIcon::…` ne s'écrit que dans `app/cursors.rs`, sans dérogation ;
 //! - `aucun_selecteur_rfd_hors_du_module` (#192) : un `rfd::…` ne s'écrit que
 //!   dans `file_picker.rs`, qui vit dans `stokesforge-app-state` (#263) ;
@@ -1027,7 +1027,7 @@ fn la_garde_des_champs_numeriques_voit_un_drag_value() {
 }
 
 // ---------------------------------------------------------------------------
-// Aucune bulle nue sur un champ de formulaire (#225, M2)
+// Aucune bulle nue sur un champ de formulaire (#225, S-M2)
 // ---------------------------------------------------------------------------
 
 /// Les constructions qui désignent un champ de formulaire dans la chaîne d'une
@@ -1064,7 +1064,7 @@ fn debut_d_instruction(masque: &[char], position: usize) -> usize {
 
 /// Les bulles (`on_hover_text`, `on_hover_ui`) posées sur un champ de
 /// formulaire hors d'un menu, `chemin:ligne`. Une bulle de bouton, d'icône,
-/// d'onglet ou de menu reste permise (M1) ; le rappel d'un champ passe par
+/// d'onglet ou de menu reste permise (S-M1) ; le rappel d'un champ passe par
 /// l'icône « ? » (`hover_help`).
 fn bulles_sur_un_champ(sources: &[Fichier]) -> Vec<String> {
     let mut trouvees = Vec::new();
@@ -1099,7 +1099,7 @@ fn bulles_sur_un_champ(sources: &[Fichier]) -> Vec<String> {
     trouvees
 }
 
-/// Règle #225 (`docs/standard-interface.md`, § Messages et aide, M2) : un
+/// Règle #225 (`docs/standard-interface.md`, § Messages et aide, S-M2) : un
 /// champ de formulaire n'a jamais de bulle nue ; son rappel est l'icône « ? »
 /// (`app/hover_help.rs`), son effet ou sa portée un texte en clair.
 #[test]
@@ -1152,7 +1152,7 @@ fn la_garde_des_bulles_voit_une_bulle_sur_un_champ() {
 }
 
 /// Les appels `.add_enabled(…)` dont la chaîne de méthodes ne porte pas
-/// `.on_disabled_hover_text(…)`, `chemin:ligne` (#226, G1/G2). Un
+/// `.on_disabled_hover_text(…)`, `chemin:ligne` (#226, S-G1/S-G2). Un
 /// `add_enabled_ui`, qui grise un groupe, n'est pas lu : la raison se pose sur
 /// l'élément, jamais sur le groupe.
 fn grises_sans_raison(sources: &[Fichier]) -> Vec<String> {
@@ -1199,7 +1199,7 @@ fn grises_sans_raison(sources: &[Fichier]) -> Vec<String> {
     trouvees
 }
 
-/// Règle #226 (`docs/standard-interface.md`, § Grisé, G1/G2) : un élément
+/// Règle #226 (`docs/standard-interface.md`, § Grisé, S-G1/S-G2) : un élément
 /// grisé par `add_enabled` dit pourquoi et quoi faire, dans la bulle
 /// `.on_disabled_hover_text` de l'élément lui-même.
 #[test]
@@ -1243,7 +1243,7 @@ fn la_garde_du_grisage_voit_un_add_enabled_sans_raison() {
 }
 
 // ---------------------------------------------------------------------------
-// Aucun `add_space` littéral hors de `theme.rs` (#227, L4)
+// Aucun `add_space` littéral hors de `theme.rs` (#227, S-L4)
 // ---------------------------------------------------------------------------
 
 /// Les `add_space(<nombre>)` du code de production hors de `theme.rs`,
@@ -1282,7 +1282,7 @@ fn add_space_litteraux(sources: &[Fichier]) -> Vec<String> {
 }
 
 /// Les `consume_key(` et `KeyboardShortcut::new(` du code de production hors
-/// de `app/shortcuts.rs`, `chemin:ligne` (K1, #231).
+/// de `app/shortcuts.rs`, `chemin:ligne` (S-K1, #231).
 fn touches_hors_du_registre(sources: &[Fichier]) -> Vec<String> {
     let mut trouvees = Vec::new();
     for fichier in sources {
@@ -1305,7 +1305,7 @@ fn touches_hors_du_registre(sources: &[Fichier]) -> Vec<String> {
     trouvees
 }
 
-/// Règle #231 (`docs/standard-interface.md`, § Clavier et souris, K1) : un
+/// Règle #231 (`docs/standard-interface.md`, § Clavier et souris, S-K1) : un
 /// registre unique des touches, `app/shortcuts.rs`.
 #[test]
 fn aucun_consume_key_hors_du_registre() {
@@ -1350,7 +1350,7 @@ fn la_garde_du_registre_des_touches_voit_une_touche_ecrite_sur_place() {
 }
 
 /// Les `CursorIcon::` du code de production hors de `app/cursors.rs`,
-/// `chemin:ligne` (X2, #231). Le type seul (`egui::CursorIcon,`) passe.
+/// `chemin:ligne` (S-X2, #231). Le type seul (`egui::CursorIcon,`) passe.
 fn curseurs_hors_du_module(sources: &[Fichier]) -> Vec<String> {
     let mut trouves = Vec::new();
     for fichier in sources {
@@ -1371,7 +1371,7 @@ fn curseurs_hors_du_module(sources: &[Fichier]) -> Vec<String> {
     trouves
 }
 
-/// Règle #231 (`docs/standard-interface.md`, § Clavier et souris, X2) : un
+/// Règle #231 (`docs/standard-interface.md`, § Clavier et souris, S-X2) : un
 /// seul module nomme les curseurs.
 #[test]
 fn aucun_curseur_hors_du_module_des_curseurs() {
@@ -1412,7 +1412,7 @@ fn la_garde_des_curseurs_voit_un_curseur_ecrit_sur_place() {
     .is_empty());
 }
 
-/// Règle #227 (`docs/standard-interface.md`, § Choix, disposition, L4) : deux
+/// Règle #227 (`docs/standard-interface.md`, § Choix, disposition, S-L4) : deux
 /// constantes d'espacement dans `theme.rs`, aucun `add_space` numérique
 /// ailleurs.
 #[test]

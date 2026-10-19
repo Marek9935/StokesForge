@@ -124,7 +124,7 @@ fn presse_papiers_fige_et_collage_entre_projets_avec_identifiants_de_destination
     assert_eq!(destination.tree(), &before);
 }
 
-/// F3 (#229) : une suppression annulable ne demande rien ; le message nomme
+/// S-F3 (#229) : une suppression annulable ne demande rien ; le message nomme
 /// les graphes **restants** qui en utilisaient les données, et un seul Undo
 /// rend tout.
 #[test]

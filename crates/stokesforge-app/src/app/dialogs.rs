@@ -7,28 +7,28 @@
 //! Sorti d'`app.rs` tel quel (#117), puis étendu par #228
 //! (`docs/standard-interface.md`, § Fenêtres et dialogues) :
 //!
-//! - **ordre des boutons** (F6) : un dialogue range ses boutons secondaires à
+//! - **ordre des boutons** (S-F6) : un dialogue range ses boutons secondaires à
 //!   gauche, puis Cancel, puis le principal à droite ; un assistant met Cancel
 //!   à gauche et groupe Back · Next · Finish à droite ; une fenêtre en lecture
-//!   seule n'a qu'un bouton Close (F2) ;
-//! - **zone de message** du pied, à gauche des boutons (M7) : l'erreur d'un
+//!   seule n'a qu'un bouton Close (S-F2) ;
+//! - **zone de message** du pied, à gauche des boutons (S-M7) : l'erreur d'un
 //!   geste du dialogue (jamais dans la barre d'état ; `AppState::dialog_error`,
 //!   publiée par [`sync_dialogs`]), sinon la **raison** du bouton principal
-//!   grisé (F10 → R14) — qui est aussi sa bulle. La raison vient de l'appelant :
+//!   grisé (S-F10 → S-R14) — qui est aussi sa bulle. La raison vient de l'appelant :
 //!   `DialogFooter::accept_disabled` (#226) quand `accept_enabled` est faux ;
-//! - **Échap** (F7) : celui qui sort d'un champ texte ne ferme pas le
+//! - **Échap** (S-F7) : celui qui sort d'un champ texte ne ferme pas le
 //!   dialogue, le suivant fait Cancel ;
-//! - **taille et position** mémorisées par sorte de dialogue (F8), dans les
+//! - **taille et position** mémorisées par sorte de dialogue (S-F8), dans les
 //!   préférences : reprises à l'ouverture, rendues à la fermeture par
 //!   [`sync_dialogs`] (`Action::RememberDialogGeometry`). La sorte est tirée
 //!   de l'identifiant du dialogue ;
-//! - **confirmations** (#229, F4, F5 → R4, R5) : [`modal_confirm`] — Cancel
+//! - **confirmations** (#229, S-F4, S-F5 → S-R4, S-R5) : [`modal_confirm`] — Cancel
 //!   est le bouton par défaut (encadré ; Entrée et Échap l'actionnent), le
 //!   verbe (Delete…) a le style normal et rougit au survol **et** au focus
 //!   clavier ; [`modal_save_changes`] — « Discard Changes · Cancel · Save »,
 //!   seule exception écrite : Entrée = Save ; [`modal_alert`] — l'échec grave
-//!   (M8), un bouton Close et une action possible ;
-//! - **focus initial** (F9) : le premier champ de saisie l'a à l'ouverture.
+//!   (S-M8), un bouton Close et une action possible ;
+//! - **focus initial** (S-F9) : le premier champ de saisie l'a à l'ouverture.
 //!   egui ne dit pas quels widgets sont des champs texte : à l'ouverture, une
 //!   ancre invisible prend le focus en tête du contenu, puis le focus avance
 //!   d'un widget par passe, toutes dans la même image (`request_discard` :
@@ -74,7 +74,7 @@ pub(super) const FOOTER_BUTTON_SIZE: egui::Vec2 = egui::vec2(84.0, 24.0);
 /// Durée d'une alerte de clic bloqué ([`modal_dialog`]) : deux impulsions.
 const MODAL_FLASH_SECONDS: f64 = 0.6;
 
-/// Nombre de widgets que le focus initial (F9) parcourt au plus avant de
+/// Nombre de widgets que le focus initial (S-F9) parcourt au plus avant de
 /// renoncer.
 const FOCUS_WALK_STEPS: u8 = 32;
 
@@ -86,20 +86,20 @@ struct DialogGeometry {
     size: egui::Vec2,
 }
 
-/// La disposition du pied (F2, F4, F6).
+/// La disposition du pied (S-F2, S-F4, S-F6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FooterLayout {
     /// `[secondaires] [message] [Cancel] [principal]`.
     Dialog,
     /// `[Cancel] [message] [Back · Next] [Finish]`.
     Wizard,
-    /// `[secondaires] [message] [Close]` : lecture seule (F2), échec grave
-    /// (M8, l'action possible en secondaire).
+    /// `[secondaires] [message] [Close]` : lecture seule (S-F2), échec grave
+    /// (S-M8, l'action possible en secondaire).
     ReadOnly,
-    /// `[message] [Cancel] [verbe]` : confirmation (F4, F5) ; Cancel est le
+    /// `[message] [Cancel] [verbe]` : confirmation (S-F4, S-F5) ; Cancel est le
     /// bouton par défaut, Entrée l'actionne ; le verbe est destructeur.
     Confirm,
-    /// `[Discard Changes] [message] [Cancel] [Save]` (F4) : Entrée = Save,
+    /// `[Discard Changes] [message] [Cancel] [Save]` (S-F4) : Entrée = Save,
     /// Discard Changes destructeur.
     SaveChanges,
 }
@@ -125,7 +125,7 @@ impl FrameOutcome {
     }
 }
 
-/// Le message du pied (M7, F10) : l'erreur passe devant la raison du bouton
+/// Le message du pied (S-M7, S-F10) : l'erreur passe devant la raison du bouton
 /// principal grisé.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FooterMessage<'a> {
@@ -194,13 +194,13 @@ pub(super) fn modal_dialog(
 /// défaut. [`modal_dialog`] y met « OK », toujours actif — ce que les propriétés
 /// du graphe emploient. `accept_hint` est la bulle du bouton actif ; quand
 /// `accept_enabled` est faux, `accept_disabled` est la **raison** du grisage,
-/// qui dit quoi faire (G1) : elle s'écrit dans la zone de message du pied et
-/// dans la bulle du bouton grisé (F10).
+/// qui dit quoi faire (S-G1) : elle s'écrit dans la zone de message du pied et
+/// dans la bulle du bouton grisé (S-F10).
 pub(super) struct DialogFooter<'a> {
     pub(super) accept_label: &'a str,
     pub(super) accept_hint: &'a str,
     pub(super) accept_enabled: bool,
-    /// Pourquoi le bouton principal est grisé et quoi faire (#226, G1) ;
+    /// Pourquoi le bouton principal est grisé et quoi faire (#226, S-G1) ;
     /// `None` quand il ne l'est jamais.
     pub(super) accept_disabled: Option<&'a str>,
 }
@@ -215,7 +215,7 @@ impl DialogFooter<'_> {
 /// [`modal_dialog`] avec un bouton par défaut personnalisé (`footer`) et des
 /// boutons **secondaires** (`extra_buttons`), posés à gauche du pied, de
 /// gauche à droite, avant la zone de message ; Cancel puis le bouton principal
-/// restent à droite (F6).
+/// restent à droite (S-F6).
 pub(super) fn modal_dialog_with(
     ctx: &egui::Context,
     id: egui::Id,
@@ -238,7 +238,7 @@ pub(super) fn modal_dialog_with(
     .dialog()
 }
 
-/// Un **assistant** (F6) : Cancel à gauche, les boutons d'étape
+/// Un **assistant** (S-F6) : Cancel à gauche, les boutons d'étape
 /// (`step_buttons`, ajoutés **de droite à gauche** : Next puis Back) groupés à
 /// droite contre le bouton final (`footer`, Finish). Même fenêtre que
 /// [`modal_dialog_with`] ; l'assistant d'import en est l'usage.
@@ -264,7 +264,7 @@ pub(super) fn modal_wizard(
     .dialog()
 }
 
-/// Une fenêtre modale en **lecture seule** (F2) : un seul bouton, Close
+/// Une fenêtre modale en **lecture seule** (S-F2) : un seul bouton, Close
 /// (Entrée), qui rend [`DialogOutcome::Accept`] ; Échap et la croix rendent
 /// [`DialogOutcome::Cancel`]. Les deux ferment sans rien changer.
 pub(super) fn modal_read_only(
@@ -305,7 +305,7 @@ pub(super) enum ConfirmOutcome {
     Cancel,
 }
 
-/// Une **confirmation** (F3–F5 → R4, R5) : seulement pour ce que Ctrl+Z ne
+/// Une **confirmation** (S-F3–S-F5 → S-R4, S-R5) : seulement pour ce que Ctrl+Z ne
 /// rattrape pas. Pied `[Cancel] [verbe]` : Cancel est le bouton par défaut,
 /// encadré, et Entrée comme Échap l'actionnent ; le verbe (`verb`, sa bulle
 /// `verb_hint`) a le style normal et rougit au survol et au focus clavier.
@@ -352,8 +352,8 @@ pub(super) enum SaveChangesOutcome {
     Save,
 }
 
-/// Le dialogue des changements non enregistrés (F4) : « Discard Changes ·
-/// Cancel · Save ». Exception écrite à R4 : Entrée = Save, Échap = Cancel ;
+/// Le dialogue des changements non enregistrés (S-F4) : « Discard Changes ·
+/// Cancel · Save ». Exception écrite à S-R4 : Entrée = Save, Échap = Cancel ;
 /// Discard Changes, à gauche, rougit au survol et au focus clavier.
 pub(super) fn modal_save_changes(
     ctx: &egui::Context,
@@ -397,7 +397,7 @@ pub(super) enum AlertOutcome {
     Action,
 }
 
-/// Un **échec grave** hors fenêtre (M8) : dialogue bloquant, le message dans
+/// Un **échec grave** hors fenêtre (S-M8) : dialogue bloquant, le message dans
 /// le contenu, un bouton Close (Entrée, Échap) et l'action possible
 /// (`action` : libellé et bulle), à gauche.
 pub(super) fn modal_alert(
@@ -438,7 +438,7 @@ pub(super) fn modal_alert(
     }
 }
 
-/// La sorte d'un dialogue, clé de sa géométrie dans les préférences (F8) :
+/// La sorte d'un dialogue, clé de sa géométrie dans les préférences (S-F8) :
 /// son identifiant egui, stable d'une session à l'autre.
 fn dialog_kind(id: egui::Id) -> String {
     format!("{:016x}", id.value())
@@ -460,14 +460,14 @@ fn closed_id() -> egui::Id {
     egui::Id::new("stokesforge_dialog_geometries_closed")
 }
 
-/// L'erreur du dialogue ouvert (M7), publiée par [`sync_dialogs`].
+/// L'erreur du dialogue ouvert (S-M7), publiée par [`sync_dialogs`].
 fn dialog_error_id() -> egui::Id {
     egui::Id::new("stokesforge_dialog_error")
 }
 
 /// Le lien entre les dialogues et l'état, une fois par image après les
-/// dialogues : publie l'erreur du dialogue ouvert pour son pied (M7), recopie
-/// une fois les géométries mémorisées (F8) et rend en actions celles des
+/// dialogues : publie l'erreur du dialogue ouvert pour son pied (S-M7), recopie
+/// une fois les géométries mémorisées (S-F8) et rend en actions celles des
 /// dialogues qui viennent de se fermer.
 pub(super) fn sync_dialogs(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
     let error = state.dialog_error().map(str::to_owned);
@@ -489,7 +489,7 @@ pub(super) fn sync_dialogs(ctx: &egui::Context, state: &AppState, actions: &mut 
     }
 }
 
-/// Le focus initial en cours (F9) : combien de widgets il a déjà passés, et
+/// Le focus initial en cours (S-F9) : combien de widgets il a déjà passés, et
 /// les boutons du pied de l'image précédente (il s'arrête sur eux).
 #[derive(Clone, Default)]
 struct FocusWalk {
@@ -567,14 +567,14 @@ fn modal_frame(
         .clamp(screen.min, (screen.max - geometry.size).max(screen.min));
     let layer = egui::LayerId::new(egui::Order::Foreground, id);
 
-    // F9 : un pas du focus initial, avant que les widgets se posent (egui
+    // S-F9 : un pas du focus initial, avant que les widgets se posent (egui
     // ne suit une direction de focus que pendant la passe où elle est donnée).
     if just_opened {
         ctx.data_mut(|data| data.insert_temp(walk_id, FocusWalk::default()));
     } else {
         advance_initial_focus(ctx, walk_id, anchor_id, layer);
     }
-    // F7 : l'Échap qui sort d'un champ texte du dialogue ne le ferme pas.
+    // S-F7 : l'Échap qui sort d'un champ texte du dialogue ne le ferme pas.
     // egui rend le focus sur Échap dès le début de la passe : on lit donc
     // celui de la fin de l'image précédente.
     let text_focus_id = id.with("text_focus");
@@ -643,7 +643,7 @@ fn modal_frame(
                         .layout(egui::Layout::top_down(egui::Align::Min)),
                 );
                 body.set_clip_rect(ui.clip_rect().intersect(body.max_rect()));
-                // L'ancre du focus initial (F9) : invisible, en tête du contenu.
+                // L'ancre du focus initial (S-F9) : invisible, en tête du contenu.
                 body.interact(
                     egui::Rect::from_min_size(body.max_rect().min, egui::Vec2::ZERO),
                     anchor_id,
@@ -719,9 +719,9 @@ fn modal_frame(
 
     // Échap : consommé par le sélecteur de couleur ou une liste ouverts (ils
     // le lisent avant), sinon il annule — sauf celui qui vient de sortir d'un
-    // champ texte (F7). Entrée actionne le bouton par défaut, sauf pendant
+    // champ texte (S-F7). Entrée actionne le bouton par défaut, sauf pendant
     // une saisie de texte (où elle termine la saisie) : le principal, ou
-    // Cancel d'une confirmation (R4). Un bouton du pied focalisé au clavier
+    // Cancel d'une confirmation (S-R4). Un bouton du pied focalisé au clavier
     // reçoit Entrée lui-même : son clic passe devant.
     let escape = !popup_open
         && ctx.input_mut(|input| input.consume_shortcut(&super::shortcuts::KEY_ESCAPE))
@@ -776,8 +776,8 @@ struct FooterClicks {
 }
 
 /// Le pied d'un dialogue, dans `footer` (disposition de droite à gauche) :
-/// boutons rangés selon `layout` (F2, F6) et zone de message à gauche des
-/// boutons (M7, F10).
+/// boutons rangés selon `layout` (S-F2, S-F6) et zone de message à gauche des
+/// boutons (S-M7, S-F10).
 fn paint_footer(
     footer: &mut egui::Ui,
     layout: FooterLayout,
@@ -788,7 +788,7 @@ fn paint_footer(
     let mut clicks = FooterClicks::default();
     let default_fill = footer.visuals().selection.bg_fill;
     // Premier ajouté = le plus à droite : le bouton principal — par défaut,
-    // sauf dans une confirmation, où il est destructeur et Cancel l'est (R4).
+    // sauf dans une confirmation, où il est destructeur et Cancel l'est (S-R4).
     let confirm = layout == FooterLayout::Confirm;
     let response = footer
         .scope(|ui| {
@@ -875,7 +875,7 @@ fn paint_footer_message(ui: &mut egui::Ui, message: Option<FooterMessage<'_>>) {
     ui.add(egui::Label::new(text).truncate());
 }
 
-/// Un pas du focus initial (F9), au début d'une image : voir la doc du
+/// Un pas du focus initial (S-F9), au début d'une image : voir la doc du
 /// module. Un geste l'interrompt avant que les widgets voient le focus ; un
 /// focus posé en route sur autre chose qu'un champ texte est alors rendu.
 fn advance_initial_focus(
@@ -994,7 +994,7 @@ mod tests {
         (issue, textes(&sortie.shapes))
     }
 
-    /// F6 : un dialogue range le secondaire à gauche, puis Cancel, puis le
+    /// S-F6 : un dialogue range le secondaire à gauche, puis Cancel, puis le
     /// principal à droite ; un assistant met Cancel tout à gauche et groupe ses
     /// boutons d'étape contre le principal. Lu dans les formes peintes.
     #[test]
@@ -1029,7 +1029,7 @@ mod tests {
         );
     }
 
-    /// F2 : une fenêtre en lecture seule n'a qu'un bouton, Close, qu'Entrée
+    /// S-F2 : une fenêtre en lecture seule n'a qu'un bouton, Close, qu'Entrée
     /// actionne ; pas de Cancel.
     #[test]
     fn une_fenetre_en_lecture_seule_n_a_que_close() {
@@ -1052,7 +1052,7 @@ mod tests {
         assert_eq!(issue, DialogOutcome::Accept, "Entrée ferme");
     }
 
-    /// M7, F10 (décision pure) : l'erreur passe devant la raison ; la raison
+    /// S-M7, S-F10 (décision pure) : l'erreur passe devant la raison ; la raison
     /// n'est dite que bouton grisé ; sans l'une ni l'autre, rien.
     #[test]
     fn l_erreur_passe_devant_la_raison_du_grisage() {
@@ -1068,7 +1068,7 @@ mod tests {
         assert_eq!(footer_message(Some(""), false, ""), None);
     }
 
-    /// F10, M7 peints : bouton principal grisé, sa raison est dans le pied ;
+    /// S-F10, S-M7 peints : bouton principal grisé, sa raison est dans le pied ;
     /// une erreur publiée la remplace, et la raison revient quand l'erreur
     /// disparaît. Témoin : bouton actif, la raison n'est pas peinte.
     #[test]
@@ -1115,8 +1115,8 @@ mod tests {
         (issue, champ)
     }
 
-    /// F9 : à l'ouverture, le premier champ de saisie prend le focus, même
-    /// derrière une case ; F7 : le premier Échap sort du champ sans fermer, le
+    /// S-F9 : à l'ouverture, le premier champ de saisie prend le focus, même
+    /// derrière une case ; S-F7 : le premier Échap sort du champ sans fermer, le
     /// second fait Cancel.
     #[test]
     fn le_premier_champ_a_le_focus_et_le_premier_echap_n_en_fait_que_sortir() {
@@ -1135,7 +1135,7 @@ mod tests {
         assert_eq!(issue, DialogOutcome::Cancel, "le second annule");
     }
 
-    /// F9 : les pas du focus s'enchaînent dans l'image (passes jetées), pas
+    /// S-F9 : les pas du focus s'enchaînent dans l'image (passes jetées), pas
     /// un widget par image — ici deux images suffisent derrière une case.
     #[test]
     fn le_focus_initial_ne_prend_pas_une_image_par_widget() {
@@ -1151,7 +1151,7 @@ mod tests {
         );
     }
 
-    /// F9, sans champ de saisie : le focus initial ne laisse rien de
+    /// S-F9, sans champ de saisie : le focus initial ne laisse rien de
     /// focalisé (Entrée valide toujours). Un geste pendant la recherche
     /// l'interrompt : la touche agit sans focus.
     #[test]
@@ -1180,7 +1180,7 @@ mod tests {
         );
     }
 
-    /// F8 : fermé, un dialogue rend sa géométrie (pour les préférences) et la
+    /// S-F8 : fermé, un dialogue rend sa géométrie (pour les préférences) et la
     /// reprend à sa réouverture, même avec une autre taille par défaut.
     #[test]
     fn un_dialogue_rouvert_reprend_sa_taille_et_sa_place() {
@@ -1303,7 +1303,7 @@ mod tests {
         .unwrap_or(ouvert)
     }
 
-    /// R4 (#229) : dans une confirmation, Entrée **et** Échap font Cancel —
+    /// S-R4 (#229) : dans une confirmation, Entrée **et** Échap font Cancel —
     /// le bouton par défaut ; le verbe ne s'obtient que par son bouton
     /// (témoin : le clic confirme).
     #[test]
@@ -1329,7 +1329,7 @@ mod tests {
         );
     }
 
-    /// F4, exception écrite à R4 : dans « Discard Changes · Cancel · Save »,
+    /// S-F4, exception écrite à S-R4 : dans « Discard Changes · Cancel · Save »,
     /// Entrée = Save, Échap = Cancel ; Discard Changes par son bouton, à
     /// gauche de Cancel et Save.
     #[test]
@@ -1375,7 +1375,7 @@ mod tests {
             .any(|peint| matches!(&peint.shape, egui::Shape::Rect(rect) if rect.fill == couleur))
     }
 
-    /// R5 (#229) : le verbe destructeur a le style normal au repos, et rougit
+    /// S-R5 (#229) : le verbe destructeur a le style normal au repos, et rougit
     /// au survol **et** au focus clavier (Tab), pointeur ailleurs.
     #[test]
     fn le_verbe_destructeur_rougit_au_survol_et_au_focus() {
@@ -1401,7 +1401,7 @@ mod tests {
         assert!(focus, "focus clavier");
     }
 
-    /// M8 : l'échec grave se ferme par Entrée (Close) ; son action est un
+    /// S-M8 : l'échec grave se ferme par Entrée (Close) ; son action est un
     /// bouton à part.
     #[test]
     fn un_echec_grave_se_ferme_par_entree_et_propose_son_action() {

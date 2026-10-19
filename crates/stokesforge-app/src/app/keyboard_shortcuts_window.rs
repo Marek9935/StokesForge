@@ -1,6 +1,6 @@
-//! Help › Keyboard Shortcuts (#231, K5) : la liste des raccourcis, générée de
+//! Help › Keyboard Shortcuts (#231, S-K5) : la liste des raccourcis, générée de
 //! [`HELP`](super::shortcuts::HELP) pour qu'elle ne puisse pas diverger du
-//! registre. Lecture seule, donc `modal_read_only` (Close seul, F2).
+//! registre. Lecture seule, donc `modal_read_only` (Close seul, S-F2).
 
 use eframe::egui;
 

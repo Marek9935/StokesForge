@@ -294,7 +294,7 @@ pub(super) fn reset_view(ui: &mut egui::Ui, id: egui::Id) {
     ui.data_mut(|d| d.remove::<StoredView>(id.with("view")));
 }
 
-/// La pause de frappe après laquelle un aperçu se recalcule (T1, #224), en
+/// La pause de frappe après laquelle un aperçu se recalcule (S-T1, #224), en
 /// secondes. Texte **et** nombres : chaque frappe d'un champ ne relance pas le
 /// calcul.
 pub(super) const PREVIEW_PAUSE: f64 = 0.3;
@@ -359,7 +359,7 @@ pub(super) fn preview(
     let up_to_date = jobs.latest().filter(|c| c.matches(form, revision));
     let cache = match (up_to_date, jobs.latest()) {
         (Some(cache), _) => cache,
-        // Un aperçu se recalcule après une pause de frappe (T1, #224) : tant
+        // Un aperçu se recalcule après une pause de frappe (S-T1, #224) : tant
         // que le formulaire bouge, on garde l'ancien résultat, marqué en cours.
         (None, Some(latest)) if !settled(ui, id, form) => latest,
         (None, _) => {
@@ -930,7 +930,7 @@ mod tests {
         assert_eq!(COMPUTED.load(Ordering::SeqCst), 2);
     }
 
-    /// L'aperçu se recalcule après une pause de 0,3 s sans changement (T1,
+    /// L'aperçu se recalcule après une pause de 0,3 s sans changement (S-T1,
     /// #224) : le premier calcul est immédiat, un changement relance le
     /// compte à rebours, la pause écoulée l'autorise.
     #[test]

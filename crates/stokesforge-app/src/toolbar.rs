@@ -812,7 +812,7 @@ fn object_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<To
         }
 
         // Épaisseur : un champ numérique éditable avec ses valeurs courantes
-        // (choisir 3 ou taper 2,5), N9.
+        // (choisir 3 ou taper 2,5), S-N9.
         let mut width = state.line_width;
         let field = number_field(
             ui,
@@ -958,8 +958,8 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             requests.push(ToolbarRequest::FormatText(TextFormat::Font(name)));
         }
 
-        // Corps : liste éditable avec « Auto » (choisir 12 ou taper 15, N9 ; vider
-        // le champ ou taper `auto` rend le corps automatique, C4).
+        // Corps : liste éditable avec « Auto » (choisir 12 ou taper 15, S-N9 ; vider
+        // le champ ou taper `auto` rend le corps automatique, S-C4).
         let mut size = if env.text_style.auto_size {
             None
         } else {

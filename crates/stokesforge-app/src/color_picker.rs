@@ -645,7 +645,7 @@ fn picker_contents(
     }
     // Le nuancier, l'opacité, RVB/TSL et l'enregistrement sont cachés : la
     // case « Custom color » en fin de palette les déplie (#10 ; une case
-    // à cocher depuis C5, #227).
+    // à cocher depuis S-C5, #227).
     let mut custom = ui
         .ctx()
         .data(|data| data.get_temp::<bool>(custom_id(popup_id)))
@@ -661,7 +661,7 @@ fn picker_contents(
                 close = true;
             }
         }
-        // Une bascule est une case à cocher, libellé à droite (C5, #227).
+        // Une bascule est une case à cocher, libellé à droite (S-C5, #227).
         crate::app::hover_help::help_beside(ui, tr!("color-custom", "hint"), |ui| {
             ui.checkbox(&mut custom, tr!("color-custom"))
         });

@@ -35,7 +35,7 @@ const POSITIONAL_MIN_EXP: i32 = -4;
 /// Exposant décimal maximal de la forme positionnelle (inclus : 9,99e5).
 const POSITIONAL_MAX_EXP: i32 = 5;
 
-/// Lit **un seul nombre fini** saisi à la main (#223, N4/N5 → R6) : « , » et
+/// Lit **un seul nombre fini** saisi à la main (#223, S-N4/S-N5 → S-R6) : « , » et
 /// « . » sont deux écritures du séparateur décimal. Le texte est rogné ; la
 /// virgule est lue comme un point quand elle est **seule** et sans point
 /// (`1,5` → 1.5, mais `1,000` → 1 : effet assumé ; `1,000.5` ou `1,2,3` sont
@@ -352,7 +352,7 @@ mod tests {
     #[test]
     fn le_point_reste_lu_comme_avant_et_mille_vaut_un() {
         assert_eq!(parse_input("1.5"), Some(1.5));
-        // Effet assumé (R6) : « 1,000 » est lu 1.
+        // Effet assumé (S-R6) : « 1,000 » est lu 1.
         assert_eq!(parse_input("1,000"), Some(1.0));
     }
 

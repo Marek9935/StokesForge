@@ -335,7 +335,7 @@ impl AppState {
             Some(graph) => self.add_calculation_to_graph(command, graph, &form),
             None => self.execute(command),
         }
-        // L'échec va dans le pied de la fenêtre (M7, #228) : elle reste
+        // L'échec va dans le pied de la fenêtre (S-M7, #228) : elle reste
         // ouverte.
         if !self.last_action_failed() {
             self.analysis_keep_results = form.keep_results;

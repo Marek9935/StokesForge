@@ -233,7 +233,7 @@ fn a_script_exception_is_a_short_error_with_its_trace_in_the_console() {
         output.error
     );
 
-    // M10 (#230) : l'exception est signalée dans la barre d'état, la trace
+    // S-M10 (#230) : l'exception est signalée dans la barre d'état, la trace
     // restant dans la console — un seul message court, jamais la trace.
     let status = state.status();
     assert!(

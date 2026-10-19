@@ -116,7 +116,7 @@ pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
 /// Fenêtre de consultation des métadonnées de fichier d'une colonne (issue
 /// #5) : les lignes clé / valeur, sections comprises, en lecture seule. Même
 /// brique modale que les propriétés du graphe, au pied d'une fenêtre en
-/// lecture seule : un seul bouton, Close (F2, #228). Seule écriture : le
+/// lecture seule : un seul bouton, Close (S-F2, #228). Seule écriture : le
 /// bouton « Utiliser comme x' » d'une valeur numérique, qui l'écrit dans la
 /// ligne x' de la colonne (#164).
 pub(super) fn column_metadata_window(
@@ -573,15 +573,15 @@ fn formula_memo_rows() -> [(&'static str, String); 7] {
 
 /// Une rangée de formulaire dont le champ texte accepte une formule (#197),
 /// validé à la perte de focus ; `hint` est son rappel, première ligne de
-/// l'icône d'aide à la syntaxe Typst ([`formula_help`]) posée tout à droite (T6
-/// : l'icône « ? » seule). Le champ prend la pleine largeur (L2), moins la
+/// l'icône d'aide à la syntaxe Typst ([`formula_help`]) posée tout à droite (S-T6
+/// : l'icône « ? » seule). Le champ prend la pleine largeur (S-L2), moins la
 /// place de l'icône. Rend `true` si le brouillon doit être validé — voir la
 /// doc de tête de [`plot_settings_window`].
 fn formula_field(form: &mut Form<'_>, label: &str, hint: &str, value: &mut String) -> bool {
     form.row(label, |ui| {
         let width = FieldWidth::Full.points(ui) - ICON_SIZE - ui.spacing().item_spacing.x;
         let response = ui.add(egui::TextEdit::singleline(value).desired_width(width));
-        // T3 : une fois le texte validé (champ quitté), l'erreur Typst se peint
+        // S-T3 : une fois le texte validé (champ quitté), l'erreur Typst se peint
         // sur le champ ; le graphe, lui, retombe sur le texte brut. Pas de rouge
         // pendant la frappe, où le markup est forcément inachevé.
         if !response.has_focus() {
@@ -670,7 +670,7 @@ fn axis_editor(
     );
     commit |= auto_changed;
     if auto_changed && !axis.auto_range {
-        // Décocher reprend les bornes calculées comme valeurs (G4).
+        // Décocher reprend les bornes calculées comme valeurs (S-G4).
         if let Some((low, high)) = computed {
             axis.range_min = Some(low);
             axis.range_max = Some(high);
@@ -690,7 +690,7 @@ fn axis_editor(
     let mut auto_asked = false;
     form.enabled(!auto, |form| {
         // « De … à … » sur une seule rangée ; l'ordre est libre (un axe peut
-        // être inversé), contrairement aux plages d'analyse (N11).
+        // être inversé), contrairement aux plages d'analyse (S-N11).
         let (first, second) = form.row(tr!("plot-axes-from"), |ui| {
             let first = number_field(ui, "axis_min", &mut min, &quantities::AXIS_BOUND);
             ui.label(tr!("analysis-field-to"));
@@ -1653,7 +1653,7 @@ mod tests {
         image(context, events, |ui| plot_settings_window(ui.ctx(), state));
     }
 
-    /// Un nombre tapé ne valide le brouillon qu'à Entrée (N3) — tant que le
+    /// Un nombre tapé ne valide le brouillon qu'à Entrée (S-N3) — tant que le
     /// champ est ouvert, ni le brouillon ni le modèle ne bougent ; à Entrée,
     /// le modèle reprend le brouillon. Épaisseur du trait (série) et borne
     /// minimale (axe).
@@ -1755,7 +1755,7 @@ mod tests {
         assert_eq!(banc.modele(), original, "un seul Annuler");
     }
 
-    /// F7 : le premier Échap rend au champ sa valeur (le dialogue reste ouvert),
+    /// S-F7 : le premier Échap rend au champ sa valeur (le dialogue reste ouvert),
     /// le suivant fait Annuler du dialogue.
     #[test]
     fn echap_rend_la_valeur_puis_annule_le_dialogue() {
@@ -1860,7 +1860,7 @@ mod tests {
             .count()
     }
 
-    /// T3 : un texte Typst qui ne compile pas, une fois le champ quitté, est
+    /// S-T3 : un texte Typst qui ne compile pas, une fois le champ quitté, est
     /// signalé par le cadre rouge d'un refus ; un texte valide ne l'est pas.
     #[test]
     fn une_erreur_typst_peint_le_cadre_rouge_du_champ() {
@@ -1881,7 +1881,7 @@ mod tests {
         assert_eq!(cadres_rouges(&peindre(&mut fautif)), 1);
     }
 
-    /// T3 en situation : on tape un markup fautif, Entrée quitte le champ, le
+    /// S-T3 en situation : on tape un markup fautif, Entrée quitte le champ, le
     /// cadre rouge apparaît.
     #[test]
     fn une_erreur_typst_tapee_puis_validee_devient_rouge() {

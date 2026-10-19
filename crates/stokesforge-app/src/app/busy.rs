@@ -1,11 +1,11 @@
-//! Brique « travail en cours » (#232, P1/P2) : le même indicateur partout où
+//! Brique « travail en cours » (#232, S-P1/S-P2) : le même indicateur partout où
 //! un travail dure.
 //!
-//! - **P1** : en dessous de [`SHOW_AFTER`] (≈ 0,5 s) rien ne s'affiche — un
+//! - **S-P1** : en dessous de [`SHOW_AFTER`] (≈ 0,5 s) rien ne s'affiche — un
 //!   travail bref ne doit pas clignoter ; au-delà, un indicateur tournant et
 //!   un mot (« Importing… »), avec une barre de progression quand le nombre
 //!   d'étapes est connu ;
-//! - **P2** : au-delà de [`STOP_AFTER`] (quelques secondes), un bouton Stop
+//! - **S-P2** : au-delà de [`STOP_AFTER`] (quelques secondes), un bouton Stop
 //!   qui pousse l'`Action` donnée. Le travail dit lui-même ce que Stop
 //!   défait (voir `AppState::stop_import`).
 //!
@@ -20,9 +20,9 @@ use eframe::egui;
 use stokesforge_app_state::state::Action;
 use stokesforge_app_state::tr;
 
-/// Durée avant laquelle un travail reste invisible (P1).
+/// Durée avant laquelle un travail reste invisible (S-P1).
 pub(super) const SHOW_AFTER: Duration = Duration::from_millis(500);
-/// Durée à partir de laquelle Stop est proposé (P2).
+/// Durée à partir de laquelle Stop est proposé (S-P2).
 pub(super) const STOP_AFTER: Duration = Duration::from_secs(3);
 
 /// Un travail en cours, tel que la brique le peint.
@@ -122,7 +122,7 @@ mod tests {
         }
     }
 
-    /// P1 : rien avant 0,5 s ; le mot ensuite. P2 : Stop seulement après
+    /// S-P1 : rien avant 0,5 s ; le mot ensuite. S-P2 : Stop seulement après
     /// quelques secondes, et seulement si le travail s'interrompt.
     #[test]
     fn l_indicateur_et_stop_arrivent_chacun_a_leur_heure() {

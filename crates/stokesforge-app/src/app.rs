@@ -256,7 +256,7 @@ pub struct StokesForgeApp {
     state: AppState,
     /// Sélecteur de fichiers natif en cours, sur un fil à part (#192).
     file_picker: FilePicker,
-    /// Dernier titre envoyé à la fenêtre (R15) : `Title` ne repart qu'au changement.
+    /// Dernier titre envoyé à la fenêtre (S-R15) : `Title` ne repart qu'au changement.
     window_title: String,
     /// Les barres d'outils : disposition, visibilité et glisser en cours
     /// (issue #60).
@@ -883,7 +883,7 @@ impl StokesForgeApp {
 
 impl eframe::App for StokesForgeApp {
     /// Une fermeture de la fenêtre (croix, Alt+F4, File › Quit) passe par la
-    /// question « Discard Changes · Cancel · Save » (F3, #229) : retenue ici
+    /// question « Discard Changes · Cancel · Save » (S-F3, #229) : retenue ici
     /// (aussi fenêtre réduite, où seul `logic` tourne), elle devient
     /// `Action::Quit`, et la fenêtre se ferme quand l'état la libère.
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -1151,8 +1151,8 @@ impl StokesForgeApp {
         }
     }
 
-    /// Titre de la fenêtre à jour (R15) et effacement des informations
-    /// échues (M5) : un seul redessin est programmé, à l'échéance, jamais de
+    /// Titre de la fenêtre à jour (S-R15) et effacement des informations
+    /// échues (S-M5) : un seul redessin est programmé, à l'échéance, jamais de
     /// réveil périodique au repos.
     fn sync_window_title_and_status(&mut self, ctx: &egui::Context) {
         let title = self.state.window_title();
@@ -2079,7 +2079,7 @@ mod tests {
         assert!(!app.detached_tabs.contains_key(&Tab::Graph(graph)));
         app.open_tab(Tab::Book(book));
         assert!(app.floating_tabs.contains(&Tab::Book(book)), "témoin");
-        // Une suppression annulable ne demande rien (F3, #229).
+        // Une suppression annulable ne demande rien (S-F3, #229).
         app.dispatch_actions(&context, vec![Action::DeleteObjects(vec![book])]);
         assert!(!app.state.tree().contains(book));
         assert!(!app.floating_tabs.contains(&Tab::Book(book)));
@@ -2212,7 +2212,7 @@ mod tests {
         assert!(app.floating_tabs.contains(&Tab::Book(opened)));
     }
 
-    /// F3 (#229) : fermer la fenêtre (croix, Alt+F4, File › Quit) est retenu
+    /// S-F3 (#229) : fermer la fenêtre (croix, Alt+F4, File › Quit) est retenu
     /// et devient `Action::Quit` ; avec du travail non enregistré, la question
     /// « Discard Changes · Cancel · Save » s'ouvre et la fenêtre reste ;
     /// Discard la libère, et la demande suivante n'est plus retenue.

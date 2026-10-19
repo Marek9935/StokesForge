@@ -8,7 +8,7 @@
 //!
 //! Les réglages s'appliquent **tout de suite** (comme le menu Language) : la
 //! fenêtre ne change donc rien à valider ou à annuler et passe par
-//! `modal_read_only` (Close seul, F2). Elle ne touche ni le projet ni
+//! `modal_read_only` (Close seul, S-F2). Elle ne touche ni le projet ni
 //! l'historique ; l'état ouvert/fermé est une décision d'interface de
 //! `AppState`, l'application de la langue reste à `StokesForgeApp`.
 

@@ -1,7 +1,7 @@
 //! Préférences de l'utilisateur, gardées sur cette machine : pour l'instant la
 //! langue de l'interface (issue #41) et la disposition des barres d'outils
 //! (issue #60), l’ouverture et les réglages de vue du gestionnaire d’objets
-//! (#82, #139), et la taille et la position de chaque sorte de dialogue (F8,
+//! (#82, #139), et la taille et la position de chaque sorte de dialogue (S-F8,
 //! #228).
 //!
 //! Même stockage que les couleurs de l'utilisateur ([`crate::user_colors`]) et
@@ -137,7 +137,7 @@ pub fn normalize_copy_formats(entries: &[CopyFormatEntry]) -> Vec<CopyFormatEntr
     list
 }
 
-/// Taille et position d'un dialogue modal (F8, #228), en points : coin haut
+/// Taille et position d'un dialogue modal (S-F8, #228), en points : coin haut
 /// gauche et taille. Mémorisée à sa fermeture, reprise à sa prochaine
 /// ouverture (ramenée dans l'écran par le dialogue).
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -431,7 +431,7 @@ impl Preferences {
         self.save_field("copy_formats", value)
     }
 
-    /// La taille et la position mémorisées de chaque sorte de dialogue (F8),
+    /// La taille et la position mémorisées de chaque sorte de dialogue (S-F8),
     /// par clé (`app/dialogs.rs` la tire de l'identifiant du dialogue).
     pub fn dialog_geometries(&self) -> &BTreeMap<String, DialogGeometry> {
         &self.dialogs
@@ -654,7 +654,7 @@ mod tests {
         assert_eq!(reloaded.language(), Some("fr"));
     }
 
-    /// F8 (#228) : la géométrie d'un dialogue s'écrit sans perdre les autres
+    /// S-F8 (#228) : la géométrie d'un dialogue s'écrit sans perdre les autres
     /// préférences et se relit ; une entrée illisible du fichier n'emporte pas
     /// les autres, une géométrie invalide n'est pas écrite.
     #[test]

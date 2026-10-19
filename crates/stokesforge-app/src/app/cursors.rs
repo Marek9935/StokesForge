@@ -1,4 +1,4 @@
-//! Curseurs de la souris (#231, X2) : le seul endroit qui nomme un
+//! Curseurs de la souris (#231, S-X2) : le seul endroit qui nomme un
 //! `egui::CursorIcon`. Trois sens, partout les mêmes :
 //!
 //! - **glisser** : main ouverte au survol d'une prise ([`grab`]), fermée

@@ -1,12 +1,12 @@
 //! La brique « formulaire » (#227, `docs/standard-interface.md`, § Choix,
 //! disposition) : une grille à **deux colonnes** — libellés à gauche, champs
 //! alignés sur une même verticale, cases à cocher et notes dans la colonne des
-//! champs (L1) — et le **choix exclusif** qui se peint en boutons radio pour
-//! 2 ou 3 options, en liste déroulante dès 4 (C1), radios côte à côte si
-//! chaque libellé tient en 3 mots, l'un sous l'autre sinon (C2).
+//! champs (S-L1) — et le **choix exclusif** qui se peint en boutons radio pour
+//! 2 ou 3 options, en liste déroulante dès 4 (S-C1), radios côte à côte si
+//! chaque libellé tient en 3 mots, l'un sous l'autre sinon (S-C2).
 //!
 //! Pourquoi pas `egui::Grid` : une grille d'egui n'a pas de cellule qui
-//! s'étend sur deux colonnes, donc un titre de section (L3) y élargirait la
+//! s'étend sur deux colonnes, donc un titre de section (S-L3) y élargirait la
 //! colonne des libellés, et `add_space` y est interdit (assertion d'egui) — or
 //! le titre de section pose son écart. La brique garde des rangées ordinaires
 //! (`ui.horizontal`), où l'icône « ? » de `hover_help` se pose comme ailleurs,
@@ -16,14 +16,14 @@
 //! largeur change (première image, autre page), l'image est refaite
 //! (`request_discard`) : on ne voit jamais un formulaire désaligné.
 //!
-//! L'ordre de Tab suit l'ordre de lecture (K6) parce que les rangées se
+//! L'ordre de Tab suit l'ordre de lecture (S-K6) parce que les rangées se
 //! peignent de haut en bas et, dans une rangée, de gauche à droite : un
 //! formulaire n'a pas à le régler.
 //!
-//! Pas de section repliable dans un formulaire (L5) : trop long, il passe en
+//! Pas de section repliable dans un formulaire (S-L5) : trop long, il passe en
 //! onglets (`tab_strip`). Les largeurs de champ sont celles de
-//! [`theme::FieldWidth`] (L2) ; les écarts, [`theme::SPACE_ITEM`] et
-//! [`theme::SPACE_SECTION`] (L4).
+//! [`theme::FieldWidth`] (S-L2) ; les écarts, [`theme::SPACE_ITEM`] et
+//! [`theme::SPACE_SECTION`] (S-L4).
 
 use std::hash::Hash;
 
@@ -44,7 +44,7 @@ pub(super) struct Form<'a> {
     widest: f32,
 }
 
-/// Peint un formulaire en grille à deux colonnes (L1) : `add` pose ses
+/// Peint un formulaire en grille à deux colonnes (S-L1) : `add` pose ses
 /// rangées par [`Form::row`], [`Form::field`], [`Form::note`] et
 /// [`Form::section`]. `id_salt` distingue deux formulaires d'un même `Ui`.
 pub(super) fn form<R>(
@@ -78,7 +78,7 @@ impl Form<'_> {
         self.ui
     }
 
-    /// Un titre de section (L3), sur toute la largeur : [`theme::section_title`].
+    /// Un titre de section (S-L3), sur toute la largeur : [`theme::section_title`].
     pub(super) fn section(&mut self, title: impl Into<String>) -> egui::Response {
         theme::section_title(self.ui, title)
     }
@@ -146,7 +146,7 @@ impl Form<'_> {
         })
     }
 
-    /// Un texte en clair estompé (effet de bord, portée : M1) dans la colonne
+    /// Un texte en clair estompé (effet de bord, portée : S-M1) dans la colonne
     /// des champs, qui revient à la ligne dans sa colonne.
     pub(super) fn note(&mut self, text: impl Into<String>) {
         let text = text.into();
@@ -159,7 +159,7 @@ impl Form<'_> {
         });
     }
 
-    /// Les rangées de `add`, grisées si `enabled` est faux (G4 : valeurs
+    /// Les rangées de `add`, grisées si `enabled` est faux (S-G4 : valeurs
     /// visibles et conservées). Rend la réponse du groupe, pour sa raison.
     pub(super) fn enabled<R>(
         &mut self,
@@ -193,7 +193,7 @@ impl Form<'_> {
     }
 }
 
-/// Comment se peint un choix exclusif (C1, C2).
+/// Comment se peint un choix exclusif (S-C1, S-C2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChoiceLayout {
     /// 2 ou 3 options aux libellés de 3 mots au plus : radios côte à côte.
@@ -205,13 +205,13 @@ pub(super) enum ChoiceLayout {
     List,
 }
 
-/// Le nombre d'options à partir duquel un choix passe en liste (C1).
+/// Le nombre d'options à partir duquel un choix passe en liste (S-C1).
 pub(super) const LIST_FROM: usize = 4;
 
-/// Le nombre de mots au-delà duquel les radios passent l'un sous l'autre (C2).
+/// Le nombre de mots au-delà duquel les radios passent l'un sous l'autre (S-C2).
 const RADIO_ROW_WORDS: usize = 3;
 
-/// La décision de C1 et C2, pure : la forme d'un choix d'après ses libellés.
+/// La décision de S-C1 et S-C2, pure : la forme d'un choix d'après ses libellés.
 pub(super) fn choice_layout<S: AsRef<str>>(labels: &[S]) -> ChoiceLayout {
     if labels.len() >= LIST_FROM {
         ChoiceLayout::List
@@ -356,7 +356,7 @@ mod tests {
     use super::super::test_support::{contexte, image, textes};
     use super::{choice, choice_layout, form, ChoiceLayout, ChoiceOption};
 
-    /// C1, C2 : 2–3 options en radios, côte à côte tant que chaque libellé
+    /// S-C1, S-C2 : 2–3 options en radios, côte à côte tant que chaque libellé
     /// tient en 3 mots ; 4 et plus en liste, quelle que soit leur longueur.
     #[test]
     fn la_forme_d_un_choix_suit_le_nombre_d_options_et_de_mots() {
@@ -383,7 +383,7 @@ mod tests {
         );
     }
 
-    /// L1 : la colonne des champs est une même verticale, quel que soit le
+    /// S-L1 : la colonne des champs est une même verticale, quel que soit le
     /// libellé de la rangée ; une case sans libellé s'y range aussi. Témoin :
     /// les libellés, eux, commencent tous à gauche, à des largeurs différentes.
     #[test]

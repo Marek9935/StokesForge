@@ -194,7 +194,7 @@ pub(super) fn analysis_window(
         .unwrap_or(false);
     let issues = form.issues();
     let accept_enabled = issues.is_empty() && !failed;
-    // Grisé, le bouton dit pourquoi (G1, F10) : dans le pied et dans sa
+    // Grisé, le bouton dit pourquoi (S-G1, S-F10) : dans le pied et dans sa
     // bulle — le premier manque du formulaire, sinon l'aperçu en échec.
     let accept_disabled = match issues.first() {
         Some(issue) => issue_message(issue),
@@ -232,7 +232,7 @@ pub(super) fn analysis_window(
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         // Les outils de l'aperçu : un choix exclusif de la brique
-                        // « formulaire » (C1, C2), le geste de l'outil actif en note.
+                        // « formulaire » (S-C1, S-C2), le geste de l'outil actif en note.
                         super::form::form(ui, id.with("tools"), |rows| {
                             rows.field(|ui| {
                                 // OUTIL-EN-FENETRE(#299): exception de D1/D2 pour les outils
@@ -268,7 +268,7 @@ pub(super) fn analysis_window(
                                     reset_view(ui, id);
                                 }
                             });
-                            // Le geste de l'outil actif, en clair sous la rangée (M1).
+                            // Le geste de l'outil actif, en clair sous la rangée (S-M1).
                             rows.note(match form.tool {
                                 PreviewTool::Points => tr!("analysis-tool-points", "hint"),
                                 PreviewTool::Zone => tr!("analysis-tool-zone", "hint"),

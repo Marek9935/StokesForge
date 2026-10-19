@@ -31,7 +31,7 @@ pub(crate) fn hover_help(
     .on_hover_ui(contents)
 }
 
-/// Le rappel d'un champ en une phrase (#225, M1) : l'icône « ? » dont la bulle
+/// Le rappel d'un champ en une phrase (#225, S-M1) : l'icône « ? » dont la bulle
 /// n'est que `text`.
 pub(crate) fn help_text(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
     let text = text.into();
@@ -41,7 +41,7 @@ pub(crate) fn help_text(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Res
 }
 
 /// Peint un champ (`add`) et pose l'icône « ? » de son rappel juste après, sur
-/// la même rangée (#225, M2 : jamais de bulle nue sur un champ). Rend ce que
+/// la même rangée (#225, S-M2 : jamais de bulle nue sur un champ). Rend ce que
 /// rend `add`, pour que `.changed()` reste lisible à l'appel.
 pub(crate) fn help_beside<R>(
     ui: &mut egui::Ui,

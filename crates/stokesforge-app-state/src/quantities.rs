@@ -1,4 +1,4 @@
-//! La table des grandeurs (#220, N8) : pour chaque grandeur numérique de
+//! La table des grandeurs (#220, S-N8) : pour chaque grandeur numérique de
 //! l'interface, une seule définition de ses bornes, de ses pas, de ses
 //! décimales et des valeurs qu'on propose.
 //!
@@ -8,7 +8,7 @@
 //! fichier, pour tous les champs d'épaisseur à la fois.
 //!
 //! L'**unité** n'est pas dans la table : elle se dit dans le libellé du champ
-//! (« Line width (pt) »), clé du catalogue (N10, `docs/textes-interface.md`).
+//! (« Line width (pt) »), clé du catalogue (S-N10, `docs/textes-interface.md`).
 //! Un `▼` n'apparaît que si la grandeur a des [`Quantity::presets`] ; une borne
 //! d'axe ou un paramètre d'ajustement n'en ont pas.
 //!
@@ -19,10 +19,10 @@
 
 use stokesforge_analysis::ops as limits;
 
-/// Ce qu'une grandeur fait du mot `auto` et d'un champ vidé (#221, C4/R10).
+/// Ce qu'une grandeur fait du mot `auto` et d'un champ vidé (#221, S-C4/S-R10).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutoKind {
-    /// Pas d'Auto : `auto` et un champ vidé sont refusés (N6).
+    /// Pas d'Auto : `auto` et un champ vidé sont refusés (S-N6).
     None,
     /// La valeur elle-même a un Auto : un champ vidé ou `auto` la rend
     /// automatique, et le champ affiche alors « Auto (…) » en gris.
@@ -83,7 +83,7 @@ impl Quantity {
     }
 
     /// Le nombre est entier, positif et tient en trois chiffres, sans liste de
-    /// valeurs : le champ prend la largeur « quelques chiffres » (L2, #237).
+    /// valeurs : le champ prend la largeur « quelques chiffres » (S-L2, #237).
     pub fn is_compact(&self) -> bool {
         self.integer && self.min >= 0.0 && self.max < 1000.0 && self.presets.is_empty()
     }
@@ -143,7 +143,7 @@ pub const TEXT_SIZE: Quantity = Quantity::real(0.5, 2.0, 1)
     .with_presets(&[8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 24.0, 36.0]);
 
 /// Corps proposé par la barre de format du texte : mêmes bornes que
-/// [`TEXT_SIZE`], liste plus longue et entrée « Auto » (C4, N9).
+/// [`TEXT_SIZE`], liste plus longue et entrée « Auto » (S-C4, S-N9).
 pub const TEXT_FORMAT_SIZE: Quantity = TEXT_SIZE
     .with_presets(&[
         6.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0,

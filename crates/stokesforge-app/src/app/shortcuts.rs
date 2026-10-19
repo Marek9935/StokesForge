@@ -6,7 +6,7 @@
 //! Sorti d'`app.rs` tel quel (#117). La consommation globale des raccourcis,
 //! `collect_shortcuts`, reste dans `app.rs` (#115).
 //!
-//! **Registre unique des touches** (#231, K1) : toute touche que l'application
+//! **Registre unique des touches** (#231, S-K1) : toute touche que l'application
 //! consomme est une constante de ce module (`SHORTCUT_*` pour les raccourcis,
 //! `KEY_*` pour les touches nues d'un champ ou d'une liste), lue par
 //! `input.consume_shortcut(&…)`. Aucun `consume_key` ailleurs (garde
@@ -28,7 +28,7 @@ pub(crate) const KEY_ENTER: egui::KeyboardShortcut =
 /// Tab — valide la saisie et passe au champ suivant.
 pub(crate) const KEY_TAB: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Tab);
-/// Suppr — supprime la sélection (la grille d'abord la vide, K2).
+/// Suppr — supprime la sélection (la grille d'abord la vide, S-K2).
 pub(crate) const KEY_DELETE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Delete);
 /// Retour arrière — vide la sélection de la grille.
@@ -283,7 +283,7 @@ macro_rules! entry {
 
 /// Les raccourcis que l'aide montre, dans l'ordre d'affichage de chaque
 /// rubrique. Un raccourci neuf du registre s'ajoute ici, sinon l'utilisateur
-/// ne le découvre pas (K5).
+/// ne le découvre pas (S-K5).
 pub(super) const HELP: &[HelpEntry] = &[
     entry!(General, "help-undo", shortcut SHORTCUT_UNDO),
     entry!(General, "help-redo", either SHORTCUT_REDO_Y, SHORTCUT_REDO_Z),

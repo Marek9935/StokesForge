@@ -19,6 +19,8 @@ l'interface, mais son mot est déjà fixé.
 
 ## 1. Règles
 
+> Ces `R1`–`R16` sont les règles de **rédaction des textes**. Elles n'ont rien à voir avec les codes `S-R1`–`S-R16` du standard de comportement ([`standard-interface.md`](standard-interface.md), index des règles), qui portent le préfixe `S-`.
+
 | # | Règle |
 |---|---|
 | R1 | **Anglais d'abord.** Le français traduit l'anglais, jamais l'inverse. |

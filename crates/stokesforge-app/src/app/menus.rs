@@ -709,9 +709,9 @@ impl StokesForgeApp {
         });
     }
 
-    /// Barre d'état : le dernier message, à trois niveaux (M4) ; un clic ouvre
-    /// l'historique des 50 derniers (M6). Ni révision ni « Reopen Last
-    /// Import… » (R15 : il reste dans File).
+    /// Barre d'état : le dernier message, à trois niveaux (S-M4) ; un clic ouvre
+    /// l'historique des 50 derniers (S-M6). Ni révision ni « Reopen Last
+    /// Import… » (S-R15 : il reste dans File).
     ///
     /// Les dimensions (lignes × colonnes) qu'elle affichait ont disparu avec
     /// « la » feuille sélectionnée globale : chaque onglet de classeur les
@@ -721,7 +721,7 @@ impl StokesForgeApp {
             .resizable(false)
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    // Un travail qui dure remplace le message (#232, P1/P2) ;
+                    // Un travail qui dure remplace le message (#232, S-P1/S-P2) ;
                     // sous 0,5 s la brique ne peint rien et le message
                     // « Importing… » reste la ligne d'état.
                     let line = ui.scope(|ui| {
@@ -843,7 +843,7 @@ pub(super) fn status_line(ui: &mut egui::Ui, status: &stokesforge_app_state::sta
     }
 }
 
-/// Menu Help (#231, K5) : l'aide qui se génère du code, aujourd'hui les
+/// Menu Help (#231, S-K5) : l'aide qui se génère du code, aujourd'hui les
 /// raccourcis clavier. Une seule entrée, directe.
 fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
     ui.menu_button(tr!("menu-help"), |ui| {
@@ -2116,7 +2116,7 @@ mod tests {
         session.shutdown().unwrap();
     }
 
-    /// Help › Keyboard Shortcuts (#231, K5) : l'entrée existe, s'active, et
+    /// Help › Keyboard Shortcuts (#231, S-K5) : l'entrée existe, s'active, et
     /// demande l'ouverture de la fenêtre des raccourcis.
     #[test]
     fn le_menu_aide_ouvre_les_raccourcis_clavier() {
@@ -2170,9 +2170,9 @@ mod tests {
             })
     }
 
-    /// « Prêt » sans message ; trois niveaux (M4) : l'information garde la
+    /// « Prêt » sans message ; trois niveaux (S-M4) : l'information garde la
     /// couleur courante, l'avertissement la teinte d'avertissement, l'erreur
-    /// la couleur d'erreur ; ni révision ni lien d'import (R15).
+    /// la couleur d'erreur ; ni révision ni lien d'import (S-R15).
     #[test]
     fn la_barre_d_etat_distingue_les_trois_niveaux() {
         let (session, mut app, _) = banc();
@@ -2198,7 +2198,7 @@ mod tests {
         assert_eq!(couleur_du_texte(&output, "Attention"), Some(avertissement));
 
         // Un geste refusé (la dernière feuille d'un classeur) ; un projet
-        // illisible, lui, est un échec grave dit par un dialogue (M8, #229).
+        // illisible, lui, est un échec grave dit par un dialogue (S-M8, #229).
         let book = app.state.books()[0].0;
         let sheet = app.state.selected_sheet_in(book).unwrap();
         app.state.dispatch(Action::DeleteSheet(sheet));
@@ -2210,7 +2210,7 @@ mod tests {
         session.shutdown().unwrap();
     }
 
-    /// Un clic sur la barre d'état demande l'historique des messages (M6).
+    /// Un clic sur la barre d'état demande l'historique des messages (S-M6).
     #[test]
     fn un_clic_sur_la_barre_d_etat_ouvre_l_historique() {
         let (session, mut app, _) = banc();

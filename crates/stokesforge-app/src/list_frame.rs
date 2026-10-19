@@ -1,4 +1,4 @@
-//! L'aspect commun d'un champ à liste (#234, N1/N9) : un cadre unique, une
+//! L'aspect commun d'un champ à liste (#234, S-N1/S-N9) : un cadre unique, une
 //! flèche **pleine à l'intérieur**, à droite — celle de la `ComboBox` d'egui.
 //!
 //! Une seule différence entre les deux familles, voulue : le **fond**.

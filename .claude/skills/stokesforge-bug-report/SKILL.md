@@ -49,7 +49,7 @@ Un champ qui efface une saisie fausse, un nombre corrigé sans rien dire, une
 erreur de dialogue dans la barre d'état, un bouton grisé muet, une
 confirmation pour un geste annulable, un double-clic qui ferme : **lire
 [`docs/standard-interface.md`](../../../docs/standard-interface.md)** (#217) et
-nommer la règle violée (son code, N6, F3…). Si la section est *à venir*, le
+nommer la règle violée (son code, S-N6, S-F3…). Si la section est *à venir*, le
 défaut appartient déjà à son issue (#219–#232) : la compléter plutôt qu'en
 ouvrir une autre.
 

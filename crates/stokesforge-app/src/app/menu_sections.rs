@@ -19,7 +19,7 @@
 //!
 //! Un choix exclusif dans un menu (Type ▸, Role ▸, langue, texte du SVG) se
 //! peint par [`menu_choice`] : une **coche seule** devant l'option courante,
-//! sans radio ni fond de sélection (C3, #227).
+//! sans radio ni fond de sélection (S-C3, #227).
 
 use eframe::egui;
 
@@ -61,7 +61,7 @@ fn section_separator(ui: &mut egui::Ui) {
     ui.add(egui::Separator::default().spacing(4.0));
 }
 
-/// Une option d'un choix exclusif dans un menu (C3, `docs/menus.md`) : une
+/// Une option d'un choix exclusif dans un menu (S-C3, `docs/menus.md`) : une
 /// coche dans la marge devant l'option courante, rien devant les autres —
 /// jamais un radio ni le fond d'un bouton sélectionné. La marge est réservée
 /// pour toutes les options, qui restent alignées. Au survol, le fond d'une
@@ -133,7 +133,7 @@ mod tests {
     use super::super::test_support::{contexte, image, image_de, textes};
     use super::*;
 
-    /// C3 : une coche (un trait de trois points) devant la seule option
+    /// S-C3 : une coche (un trait de trois points) devant la seule option
     /// courante, aucun cercle de radio ni fond de sélection, et les libellés
     /// des options alignés. Témoin : sans option courante, aucune coche.
     #[test]

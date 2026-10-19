@@ -84,19 +84,19 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/hover_help.rs` | brique commune de l'aide au survol d'un champ (#197) : `hover_help`, l'icône grisée à droite du champ dont la bulle montre le rappel |
 | `field_state.rs` (racine du crate, comme `color_picker.rs`) | brique commune de l'état d'un champ (#219) : `FieldIssue` (refusé rouge / ramené orange), `show_issue`, mémoire de 2 s (`flag`, `active`), cycle d'un champ texte validé (`edit_text`, `decide`, `Verdict`) |
 | `number_field.rs` (racine du crate) et `quantities.rs` (dans `stokesforge-app-state`) | brique « nombre » (#220) : `number_field` (champ texte, flèche pleine dans le cadre si la grandeur a des valeurs, flèches du clavier, molette au survol qui suit la liste, liste dans une `egui::Area`) et la table des grandeurs (`Quantity`) ; construite sur `field_state::edit_text_with_arrow` ; `list_frame.rs` : flèche et fonds partagés avec les listes déroulantes (#234) |
-| `app/confirmations.rs` | dialogues bloquants de l'application (#229) : « Discard Changes · Cancel · Save », échec grave (M8), écrasement d'un export, choix d'axe d'un dépôt de lignes ; classement confirmation / choix en tête du module |
-| `app/dialogs.rs` | brique commune des dialogues modaux : `modal_dialog`, `modal_dialog_with`, `modal_wizard` (assistant), `modal_read_only` (Close seul), `modal_confirm` (Cancel par défaut, verbe destructeur), `modal_save_changes` (trio, Entrée = Save), `modal_alert` (M8), corps commun `modal_frame` ; pied ordonné (F6), zone de message (erreur de `AppState::dialog_error`, sinon raison du principal grisé), Échap à deux niveaux, géométrie par sorte de dialogue dans les préférences et focus initial sur le premier champ (#228) ; `sync_dialogs`, appelé par `show_edit_dialogs`, relie pied, préférences et état |
+| `app/confirmations.rs` | dialogues bloquants de l'application (#229) : « Discard Changes · Cancel · Save », échec grave (S-M8), écrasement d'un export, choix d'axe d'un dépôt de lignes ; classement confirmation / choix en tête du module |
+| `app/dialogs.rs` | brique commune des dialogues modaux : `modal_dialog`, `modal_dialog_with`, `modal_wizard` (assistant), `modal_read_only` (Close seul), `modal_confirm` (Cancel par défaut, verbe destructeur), `modal_save_changes` (trio, Entrée = Save), `modal_alert` (S-M8), corps commun `modal_frame` ; pied ordonné (S-F6), zone de message (erreur de `AppState::dialog_error`, sinon raison du principal grisé), Échap à deux niveaux, géométrie par sorte de dialogue dans les préférences et focus initial sur le premier champ (#228) ; `sync_dialogs`, appelé par `show_edit_dialogs`, relie pied, préférences et état |
 | `app/form.rs` | brique commune du formulaire (#227) : `form` et `Form` (grille à deux colonnes : `row`, `field`, `checkbox`, `color`, `note`, `section`, `enabled`), choix exclusif fixe `choice` / `choice_by` (radios pour 2–3 options, liste dès 4, `choice_layout`) |
 | `app/tab_strip.rs` | brique commune de la bande d'onglets : `tab_strip`, `tab_strip_with` (`TabOps`, `TabEvent`) |
-| `app/menu_sections.rs` | brique commune des menus : `MenuSections::section` (seul trait de séparation, #155), `menu_choice` (coche seule d'un choix exclusif, C3, #227) |
+| `app/menu_sections.rs` | brique commune des menus : `MenuSections::section` (seul trait de séparation, #155), `menu_choice` (coche seule d'un choix exclusif, S-C3, #227) |
 | `app/list_row.rs` | brique commune de la ligne de liste sélectionnable (#169) : `list_row`, `ListRowBackground`, `list_row_label`, `list_row_text`, `LIST_ROW_MARK` ; Project Manager, Object Manager, liste des séries des propriétés |
 | `app/shortcuts.rs` | **registre unique des touches** (#231) : constantes `SHORTCUT_*` et `KEY_*`, leurs rappels, tableau `HELP` qui engendre Help › Keyboard Shortcuts, consommation d'annuler/rétablir dans le viewport actif (`collect_undo_redo_shortcuts`) |
 | `app/preferences_window.rs` | File › Preferences (#148) : rubriques General (langue), Display (rangées Metadata et x' des nouveaux classeurs, `Action::SetWorkbookHeaderDefaults`) et Export (formats de Copy Graph : ordre au glisser, cases, `Action::SetCopyFormats`, préférence `copy_formats`), appliquées tout de suite, `modal_read_only` |
 | `app/object_dnd.rs` | état du glisser des séries, groupes et objets libres, partagé par l'Object Manager (aperçu, une action au relâchement) et la fenêtre des séries (brouillon modifié en direct) ; décisions pures dans `stokesforge_app_state::object_drag` (`step`, `finish`) : entrer dans un groupe, en sortir, échanger des séries seules, déplacer un groupe en bloc, réordonner texte ou forme dans sa catégorie ; zone « fin de la liste » pendant le glisser |
 | `app/reorder_list.rs` | brique commune d'une liste réordonnée au glisser : poignée `Grip`, ligne qui suit le pointeur, lignes qui s'écartent en direct (`reorder_row`, `reorder_move`, `move_before`) ; seule la poignée se saisit, pour ne pas voler le clic des cases |
-| `app/keyboard_shortcuts_window.rs` | Help › Keyboard Shortcuts (#231, K5) : fenêtre en lecture seule, engendrée de `HELP` |
+| `app/keyboard_shortcuts_window.rs` | Help › Keyboard Shortcuts (#231, S-K5) : fenêtre en lecture seule, engendrée de `HELP` |
 | `app/busy.rs`, `app/empty_state.rs` | briques « travail en cours » (indicateur après 0,5 s, progression, Stop après 3 s ; #232 ; import en fond et recalcul de formules #239) et « état vide » (phrase grisée centrée qui dit le geste) |
-| `app/cursors.rs` | seul module qui nomme un `CursorIcon` (#231, X2) : main ouverte/fermée, flèches de redimensionnement, doigt des éléments cliquables qui ne sont pas des boutons |
+| `app/cursors.rs` | seul module qui nomme un `CursorIcon` (#231, S-X2) : main ouverte/fermée, flèches de redimensionnement, doigt des éléments cliquables qui ne sont pas des boutons |
 | `app/window_chrome.rs` | cadre commun des fenêtres et panneaux : `window_header`, `panel_header`, `floating_window_frame`, contour actif, poignées, `show_window_in_layer`, `show_window_contents_bounded` |
 | `app/window_placement.rs` | placement : tailles par défaut, cascade, espace de travail fixe (`WORKSPACE_SIZE`), `clamp_to_workspace`, conversion logique → écran |
 | `app/window_stack.rs` | pile des fenêtres flottantes : `open_tab` (seul endroit qui décide ouvrir ou focaliser), ordre et calques egui, masquage, repli, maximisation, `show_workspace` |
@@ -394,7 +394,7 @@ Cancel · Save » (#229 ; Entrée = Save, qui enregistre puis poursuit) ; Cancel
 Échap ou la croix conservent le projet. File › Open…, File › Quit et la
 fermeture de la fenêtre posent la même question (`Action::OpenProject`,
 `Action::Quit`, `app/confirmations.rs`) ; un projet illisible ou un
-enregistrement raté s'annonce par un dialogue bloquant (M8, `AppState::alert`)
+enregistrement raté s'annonce par un dialogue bloquant (S-M8, `AppState::alert`)
 et garde le projet et le chemin courants. Le repère est conservateur : toute
 révision depuis l'enregistrement, y compris une annulation, ou une géométrie
 modifiée demande confirmation. Une commande appliquée compte comme une
@@ -1812,7 +1812,7 @@ fenêtre se choisit par un bouton-échantillon (`color_field`/`color_button`)
 qui ouvre une fenêtre surgissante **repliée** : palette, « Auto »
 quand la couleur peut l'être, couleurs enregistrées et saisie hexadécimale
 (`#RRGGBB`, ou `#RRGGBBAA` avec l'opacité). La case **« Custom color »**
-(une case à cocher depuis C5, #227) déplie le reste — Save Color et sa destination, nuancier (carré saturation ×
+(une case à cocher depuis S-C5, #227) déplie le reste — Save Color et sa destination, nuancier (carré saturation ×
 luminosité avec barre de teinte, ou **roue chromatique** avec barre de
 valeur), **opacité**, saisie RGB et HSL. Le sélecteur se rouvre toujours
 replié (`color_picker::custom_id`). Cette fenêtre est une `egui::Area` gérée
@@ -2494,7 +2494,7 @@ aussi le panneau `object_manager_panel`) — le menu « Graph › Selection » p
 ## Barre d'état (#230)
 
 `AppState::notice` (information), `warn` (avertissement) et `fail` (erreur,
-sauf dans un dialogue modal : M7) posent un `StatusMessage` à niveau
+sauf dans un dialogue modal : S-M7) posent un `StatusMessage` à niveau
 (`StatusLevel`) et l'ajoutent à un historique de `STATUS_HISTORY_LEN` = 50
 messages. Une information s'efface après `INFO_LIFETIME` (8 s) :
 `AppState::expire_status`, appelée à chaque image par

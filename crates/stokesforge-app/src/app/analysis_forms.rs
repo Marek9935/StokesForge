@@ -39,7 +39,7 @@ fn number(ui: &mut egui::Ui, value: &mut f64) -> bool {
     number_response(ui, value).changed
 }
 
-/// [`number`], avec la réponse du champ (pour y peindre un refus, N11).
+/// [`number`], avec la réponse du champ (pour y peindre un refus, S-N11).
 fn number_response(ui: &mut egui::Ui, value: &mut f64) -> NumberResponse {
     let salt = ui.next_auto_id();
     ui.skip_ahead_auto_ids(1);
@@ -77,7 +77,7 @@ fn parse_optional(text: &str) -> Option<Option<f64>> {
     stokesforge_core::number_format::parse_input(trimmed).map(Some)
 }
 
-/// [`optional_number`], avec la réponse du champ (pour y peindre un refus, N11).
+/// [`optional_number`], avec la réponse du champ (pour y peindre un refus, S-N11).
 fn optional_number_response(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -753,7 +753,7 @@ fn params_table(
 fn peaks_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree: &Tree) {
     let extent = x_extent(form, tree);
     let p = &mut form.setup.peaks;
-    // Trois formes : des radios (C1), plus une liste déroulante.
+    // Trois formes : des radios (S-C1), plus une liste déroulante.
     rows.row(tr!("analysis-peaks-shape"), |ui| {
         choice(
             ui,

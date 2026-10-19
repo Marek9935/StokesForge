@@ -65,15 +65,15 @@ dit *comment* l'écrire. Points qui touchent les mots :
   question qui nomme l'objet et dit « This cannot be undone » si c'est le
   cas ; pas de confirmation pour un geste annulable (#229). Projet non
   enregistré : clés `unsaved-*` (« Discard Changes · Cancel · Save ») ; échec
-  grave (M8) : `alert-*` — ce qui a échoué, ce qui est conservé, puis le
+  grave (S-M8) : `alert-*` — ce qui a échoué, ce qui est conservé, puis le
   bouton d'action.
 
-Les codes R1–R16 de #217 ne sont pas les règles R1–R16 du guide des textes.
+Les règles S-R1 à S-R16 du standard (#217) n’ont rien à voir avec les règles R1–R16 du guide des textes.
 
 ## Icônes : l'info-bulle est le texte
 
 Une icône seule ne dit rien : son info-bulle est un texte visible comme un
-autre (clé `tr!`, anglais d'abord, verbe pour une commande, R4). `icon_button`
+autre (clé `tr!`, anglais d'abord, verbe pour une commande, S-R4). `icon_button`
 l'exige ; une icône sans info-bulle est un défaut. Voir `docs/icones.md`.
 
 ## Ce qu'on ne fait pas

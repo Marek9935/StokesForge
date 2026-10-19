@@ -518,7 +518,7 @@ fn import_template_controls(rows: &mut Form<'_>, state: &mut AppState, actions: 
         rows.note(tr!("import-files-unsaved"));
     }
     if let Some(name) = confirm {
-        // Ctrl+Z ne rend pas un modèle supprimé : confirmation modale (F3,
+        // Ctrl+Z ne rend pas un modèle supprimé : confirmation modale (S-F3,
         // #229), peinte dans le contenu de l'assistant pour lire Entrée et
         // Échap avant lui.
         match modal_confirm(
@@ -729,7 +729,7 @@ fn import_delimiter_controls(rows: &mut Form<'_>, recipe: &mut stokesforge_impor
 
 /// Décimale, milliers et valeurs manquantes, dans leur ordre de saisie.
 fn import_number_controls(rows: &mut Form<'_>, recipe: &mut stokesforge_import::ImportRecipe) {
-    // Trois choix : des radios (C1).
+    // Trois choix : des radios (S-C1).
     rows.row(tr!("import-format-decimal"), |ui| {
         choice(
             ui,
@@ -770,7 +770,7 @@ fn import_block_encoding_controls(
 ) {
     rows.row(tr!("import-format-blocks"), |ui| {
         use stokesforge_import::BlockSplit;
-        // Trois découpages : des radios (C1).
+        // Trois découpages : des radios (S-C1).
         choice_by(
             ui,
             "stokesforge_import_blocks_combo",
@@ -818,7 +818,7 @@ enum HeaderMode {
 }
 
 /// Étape 3 : en-tête (un seul réglage), fin des données et noms des colonnes,
-/// trois blocs sous leur titre (L3).
+/// trois blocs sous leur titre (S-L3).
 fn import_step_header(
     ui: &mut egui::Ui,
     state: &mut AppState,
@@ -1245,7 +1245,7 @@ fn import_step_destination(
         if matches!(import.destination, ImportDestination::ActiveBook(_)) {
             rows.section(tr!("import-destination-mode"));
             use stokesforge_import::ImportMode;
-            // Quatre modes : une liste déroulante (C1).
+            // Quatre modes : une liste déroulante (S-C1).
             rows.field(|ui| {
                 choice(
                     ui,
@@ -1331,7 +1331,7 @@ fn import_step_destination(
 /// ([`modal_dialog_with`], comme les propriétés du graphe), peint depuis
 /// [`StokesForgeApp::ui`](eframe::App::ui) tant que [`AppState::import_state`] est `Some` ; la croix
 /// et Échap valent « Annuler », Entrée « Terminer ». Pied d'assistant
-/// ([`modal_wizard`], F6) : Cancel à gauche, Back · Next · Finish à droite.
+/// ([`modal_wizard`], S-F6) : Cancel à gauche, Back · Next · Finish à droite.
 pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: &mut Vec<Action>) {
     let Some(step) = state.import_state().map(|import| import.step) else {
         return;
@@ -1342,7 +1342,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
     // Les deux fermetures de la brique (contenu, boutons du pied) écrivent
     // dans les mêmes demandes, l'une après l'autre : `RefCell`.
     let requests = std::cell::RefCell::new(ImportWizardRequests::default());
-    // Grisé, Finish dit pourquoi (G1, F10) : dans le pied et dans sa bulle
+    // Grisé, Finish dit pourquoi (S-G1, S-F10) : dans le pied et dans sa bulle
     // (`accept_disabled`).
     let (finish_label, finish_hint) = (
         tr!("import-button-finish"),
@@ -1362,7 +1362,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
         },
         |footer| {
             // Ajoutés de droite à gauche, contre Finish : « Next » puis
-            // « Back » (F6 : Back · Next · Finish groupés à droite).
+            // « Back » (S-F6 : Back · Next · Finish groupés à droite).
             if footer
                 .add_enabled(
                     step != ImportStep::Destination,
@@ -1425,7 +1425,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             });
         },
     );
-    // Les aperçus se recalculent après une pause de frappe (T1, #224).
+    // Les aperçus se recalculent après une pause de frappe (S-T1, #224).
     let now = ctx.input(|input| input.time);
     if let Some(wait) = state
         .import_state_mut()
@@ -2254,7 +2254,7 @@ mod tests {
         );
     }
 
-    /// F3–F5 (#229) : supprimer un modèle (Ctrl+Z ne le rend pas) passe par
+    /// S-F3–S-F5 (#229) : supprimer un modèle (Ctrl+Z ne le rend pas) passe par
     /// une confirmation modale par-dessus l'assistant, Cancel par défaut :
     /// Entrée l'annule sans valider l'assistant (qui reste ouvert) ; le verbe
     /// supprime. Plus de « Keep ».

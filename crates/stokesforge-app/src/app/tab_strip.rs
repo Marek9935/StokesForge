@@ -358,7 +358,7 @@ fn tab_strip_arrows(
     (step, arrows)
 }
 
-/// Pourquoi ce nom d'onglet est refusé (T4, cadre rouge) : vide, ou déjà pris
+/// Pourquoi ce nom d'onglet est refusé (S-T4, cadre rouge) : vide, ou déjà pris
 /// par un autre onglet de la bande.
 fn tab_name_refusal<K: PartialEq>(tabs: &[(K, String)], id: &K, name: &str) -> Option<String> {
     let name = name.trim();
@@ -1354,7 +1354,7 @@ mod tests {
 
     /// Un nom déjà pris ou vide garde le champ ouvert (Entrée ne valide pas) ;
     /// Tab sur un nom valide l'écrit et ouvre le renommage de l'onglet suivant,
-    /// Maj+Tab celui du précédent (T4, #224).
+    /// Maj+Tab celui du précédent (S-T4, #224).
     #[test]
     fn le_renommage_refuse_un_nom_pris_et_tab_passe_a_l_onglet_voisin() {
         let ops = TabOps {

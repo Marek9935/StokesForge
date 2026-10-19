@@ -212,7 +212,7 @@ fn nouveau_projet_apres_enregistrement_et_apres_echec() {
     state.dispatch(Action::AddGraph);
     state.set_path(dir.path().display().to_string()); // une destination qui est un dossier
     state.dispatch(Action::Save);
-    // M8 (#229) : un enregistrement raté est un échec grave, dit par un
+    // S-M8 (#229) : un enregistrement raté est un échec grave, dit par un
     // dialogue bloquant qui propose Save As….
     let alert = state.alert().expect("échec grave");
     assert_eq!(alert.kind, AlertKind::SaveFailed);
@@ -227,8 +227,8 @@ fn nouveau_projet_apres_enregistrement_et_apres_echec() {
     session.shutdown().unwrap();
 }
 
-/// F4 (#229) : la réponse Save enregistre, **puis** poursuit le geste ; un
-/// enregistrement raté l'abandonne (le travail reste) et le dit (M8).
+/// S-F4 (#229) : la réponse Save enregistre, **puis** poursuit le geste ; un
+/// enregistrement raté l'abandonne (le travail reste) et le dit (S-M8).
 #[test]
 fn la_reponse_save_enregistre_puis_poursuit_le_geste() {
     let dir = tempfile::tempdir().unwrap();
@@ -290,9 +290,9 @@ fn la_reponse_save_enregistre_puis_poursuit_le_geste() {
     session.shutdown().unwrap();
 }
 
-/// F3 (#229) : Quit et Open… demandent seulement s'il y a du travail à
+/// S-F3 (#229) : Quit et Open… demandent seulement s'il y a du travail à
 /// perdre ; Discard poursuit. Un projet illisible garde le projet **et** le
-/// chemin courants (M8).
+/// chemin courants (S-M8).
 #[test]
 fn quitter_et_ouvrir_ne_demandent_que_si_du_travail_serait_perdu() {
     let dir = tempfile::tempdir().unwrap();
@@ -585,7 +585,7 @@ fn a_datetime_cell_shows_iso_and_reads_day_first_dates() {
 }
 
 /// #223 : la virgule est lue comme un point décimal dans une cellule Numeric ;
-/// l'interface réécrit toujours avec le point. « 1,000 » est lu 1 (R6).
+/// l'interface réécrit toujours avec le point. « 1,000 » est lu 1 (S-R6).
 #[test]
 fn a_decimal_comma_is_read_in_a_numeric_cell_and_shown_with_a_point() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");
@@ -952,7 +952,7 @@ fn a_failing_load_leaves_the_model_and_history_untouched() {
     state.set_path(dir.path().join("inexistant.stf").display().to_string());
     state.dispatch(Action::Load);
 
-    // M8 (#229) : un projet illisible est un échec grave, dit par un dialogue.
+    // S-M8 (#229) : un projet illisible est un échec grave, dit par un dialogue.
     assert_eq!(
         state.alert().map(|alert| alert.kind),
         Some(AlertKind::OpenFailed)
@@ -1044,7 +1044,7 @@ fn a_stf_read_error_is_shown_through_the_catalogue() {
     std::fs::write(&truncated, b"STKF\x01").expect("écriture du fichier de test");
     state.set_path(truncated.display().to_string());
     state.dispatch(Action::Load);
-    let alert = state.alert().expect("un échec grave (M8)");
+    let alert = state.alert().expect("un échec grave (S-M8)");
     assert_eq!(
         alert.message,
         format!(
@@ -1058,7 +1058,7 @@ fn a_stf_read_error_is_shown_through_the_catalogue() {
     state.set_path(foreign.display().to_string());
     state.dispatch(Action::DismissAlert);
     state.dispatch(Action::Load);
-    let alert = state.alert().expect("un échec grave (M8)");
+    let alert = state.alert().expect("un échec grave (S-M8)");
     assert_eq!(
         alert.message,
         format!("{} is not a StokesForge file", foreign.display())
@@ -1077,7 +1077,7 @@ fn a_failing_save_reports_an_error_and_writes_nothing() {
     assert_eq!(
         state.alert().map(|alert| alert.kind),
         Some(AlertKind::SaveFailed),
-        "M8 : dialogue bloquant"
+        "S-M8 : dialogue bloquant"
     );
     assert!(!target.exists(), "rien n'a été écrit");
     assert!(!target.parent().is_some_and(Path::exists));
@@ -3148,7 +3148,7 @@ fn script_source_lives_in_state_and_is_not_lost_by_other_actions() {
     );
 }
 
-/// Phase R4 : le banc doit savoir où sont les graphes, puisqu'il en affiche
+/// Phase S-R4 : le banc doit savoir où sont les graphes, puisqu'il en affiche
 /// un. Le pendant de `sheets()`, et la seule partie du panneau de rendu qui
 /// se teste sans fenêtre — le reste, c'est `stokesforge-render-egui` qui le
 /// couvre (`tests/cache_session.rs`).
@@ -3655,7 +3655,7 @@ fn opening_import_starts_from_the_first_saved_recipe_or_a_permissive_default() {
     assert_eq!(import.recipe.decimal, DecimalStyle::Comma);
 }
 
-/// T1 (#224) : pendant une frappe, les aperçus de l'import gardent la recette
+/// S-T1 (#224) : pendant une frappe, les aperçus de l'import gardent la recette
 /// d'avant jusqu'à 0,3 s sans changement ; hors frappe, un changement est
 /// immédiat.
 #[test]
@@ -3790,7 +3790,7 @@ fn save_import_recipe_requires_a_non_empty_name() {
     state.import_state_mut().unwrap().save_as_name = "   ".to_string();
     state.save_import_recipe();
 
-    // M7 (#228) : l'erreur d'un geste de l'assistant va dans son pied.
+    // S-M7 (#228) : l'erreur d'un geste de l'assistant va dans son pied.
     assert!(
         state.dialog_error().is_some(),
         "un nom blanc doit être refusé"
@@ -6750,7 +6750,7 @@ fn begin_plot_edit_resets_the_draft_when_switching_graphs() {
     );
 }
 
-/// Une série dont le type de tracé est [`PlotType::Unknown`] (C5, variante
+/// Une série dont le type de tracé est [`PlotType::Unknown`] (S-C5, variante
 /// d'une version plus récente de StokesForge que ce lecteur ne connaît pas) doit
 /// pouvoir être ouverte dans le brouillon d'édition et affichée dans la
 /// liste des séries sans jamais paniquer — invariant 10 (« un défaut de
@@ -6994,7 +6994,7 @@ fn dropping_files_during_plot_settings_is_refused_without_touching_the_macro() {
     assert_eq!(*after.tree, *before.tree);
     assert_eq!(after.revision, before.revision);
     assert!(after.history.in_macro, "le dialogue conserve sa macro");
-    // M7 (#228) : le refus s'écrit dans le pied du dialogue ouvert.
+    // S-M7 (#228) : le refus s'écrit dans le pied du dialogue ouvert.
     assert!(state.dialog_error().is_some());
     assert!(!state.can_reopen_last_import());
     state.cancel_plot_settings();
@@ -7403,7 +7403,7 @@ fn un_echec_d_enregistrement_garde_le_modele_d_import_modifie() {
 
     assert!(
         state.dialog_error().is_some(),
-        "M7 : dans le pied de l'assistant"
+        "S-M7 : dans le pied de l'assistant"
     );
     assert!(state.import_recipe_modified());
     state.import_state_mut().unwrap().recipe.skip_chars = 2;
@@ -8071,7 +8071,10 @@ fn dropping_a_big_csv_returns_immediately_and_applies_later() {
         target_book: Some(book),
     });
 
-    assert!(state.import_work().is_some(), "travail en cours (P1/P2)");
+    assert!(
+        state.import_work().is_some(),
+        "travail en cours (S-P1/S-P2)"
+    );
     assert_eq!(
         state.worksheets_of(book).len(),
         sheets_before,
@@ -8239,7 +8242,7 @@ fn a_background_drop_waits_for_the_plot_settings_to_close() {
     assert_eq!(state.worksheets_of(book).len(), sheets_before + 1);
 }
 
-/// Stop (#232, P2) : l'import en fond s'arrête, rien n'est créé, ni
+/// Stop (#232, S-P2) : l'import en fond s'arrête, rien n'est créé, ni
 /// historique, et un nouvel import peut repartir aussitôt.
 #[test]
 fn stopping_a_background_import_creates_nothing() {
@@ -8456,7 +8459,7 @@ fn a_model_can_be_exported_and_imported_from_a_file() {
     state.import_import_recipe(&bad);
     assert!(
         state.dialog_error().is_some(),
-        "M7 : dans le pied de l'assistant"
+        "S-M7 : dans le pied de l'assistant"
     );
     assert_eq!(state.import_state().unwrap().recipe.skip_chars, 4);
 }
@@ -8884,7 +8887,7 @@ fn exporter_un_graphe_zoome_ne_touche_pas_le_modele() {
     );
 }
 
-/// F3 (#229) : le sélecteur natif demande avant d'écraser le nom saisi ;
+/// S-F3 (#229) : le sélecteur natif demande avant d'écraser le nom saisi ;
 /// l'extension `.svg` ajoutée ensuite vise un autre fichier, qu'il n'a pas
 /// vu. S'il existe, l'export attend la confirmation : Cancel le laisse
 /// intact, Replace l'écrase. Témoin : un nom avec extension n'attend rien.
@@ -10398,7 +10401,7 @@ fn duplicating_a_sheet_copies_its_columns_and_keeps_graphs_on_the_original() {
     assert_eq!(**state.tree(), *before);
 }
 
-/// Supprimer une feuille ne demande rien (F3, #229) : le message nomme les
+/// Supprimer une feuille ne demande rien (S-F3, #229) : le message nomme les
 /// graphes qui la traçaient, Undo la rend ; la dernière feuille d'un classeur
 /// est refusée.
 #[test]
@@ -10957,7 +10960,7 @@ fn changing_type_and_role_of_several_columns_is_one_undo_step() {
     );
 }
 
-/// F8 (#228) : la géométrie d'un dialogue fermé s'écrit dans les préférences,
+/// S-F8 (#228) : la géométrie d'un dialogue fermé s'écrit dans les préférences,
 /// hors historique et hors projet, et se relit à la session suivante.
 #[test]
 fn la_geometrie_d_un_dialogue_ferme_va_dans_les_preferences() {
@@ -10994,7 +10997,7 @@ fn la_geometrie_d_un_dialogue_ferme_va_dans_les_preferences() {
     session.shutdown().unwrap();
 }
 
-/// M7 (#228) : hors de tout dialogue, une erreur reste dans la barre d'état ;
+/// S-M7 (#228) : hors de tout dialogue, une erreur reste dans la barre d'état ;
 /// un dialogue ouvert la prend dans son pied, et elle ne lui survit pas.
 #[test]
 fn une_erreur_va_dans_le_pied_du_dialogue_ouvert_seulement() {

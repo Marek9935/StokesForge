@@ -1640,7 +1640,7 @@ disabled-gradient-min-colors = Un dégradé a besoin d'au moins deux couleurs
 disabled-mirror-off = Activez d'abord l'axe miroir
 disabled-analysis-issues = Corrigez d'abord le problème signalé dans le formulaire
 
-## Aide › Raccourcis clavier (#231, K5). Les listes sont générées du registre
+## Aide › Raccourcis clavier (#231, S-K5). Les listes sont générées du registre
 ## des touches (`app/shortcuts.rs`, `HELP`).
 
 menu-help = Aide

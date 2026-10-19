@@ -3,7 +3,7 @@
 //! réponse, il est seul à agir dans l'image (`StokesForgeApp::
 //! blocking_confirmations` vide les autres actions).
 //!
-//! Classement des dialogues qui demandent quelque chose (F3) :
+//! Classement des dialogues qui demandent quelque chose (S-F3) :
 //!
 //! - **confirmations** — seulement ce que Ctrl+Z ne rattrape pas : projet non
 //!   enregistré (New Project, Open…, Quit, fermeture de la fenêtre :
@@ -16,7 +16,7 @@
 //!   colonnes (`analysis_dialog`), l'export de séries périmées
 //!   (`stale_export`). Ils gardent la forme des dialogues
 //!   (`modal_dialog_with`) ;
-//! - **échec grave** (M8) — enregistrement raté, projet illisible : message,
+//! - **échec grave** (S-M8) — enregistrement raté, projet illisible : message,
 //!   Close et une action possible.
 
 use eframe::egui;
@@ -140,7 +140,7 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
     }
 }
 
-/// « Discard Changes · Cancel · Save » (F4) ; Entrée = Save.
+/// « Discard Changes · Cancel · Save » (S-F4) ; Entrée = Save.
 fn unsaved_dialog(ctx: &egui::Context, gesture: &UnsavedGesture, actions: &mut Vec<Action>) {
     let question = match gesture {
         UnsavedGesture::NewProject => tr!("unsaved-new"),

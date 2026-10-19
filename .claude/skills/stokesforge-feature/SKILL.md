@@ -254,8 +254,8 @@ Quatre rôles, quatre aspects, chacun par sa brique (tableau complet dans
   grille à deux colonnes — `rows.row(libellé, |ui| champ)`, cases et notes
   dans la colonne des champs (`rows.checkbox`, `rows.note`, `rows.field`),
   couleur par `rows.color`, titre par `rows.section` (jamais un trait seul
-  entre deux blocs, L3), rangées grisées par `rows.enabled` ; pas de section
-  repliable (L5 : onglets). Largeurs : `theme::FieldWidth` (`Short` ~80,
+  entre deux blocs, S-L3), rangées grisées par `rows.enabled` ; pas de section
+  repliable (S-L5 : onglets). Largeurs : `theme::FieldWidth` (`Short` ~80,
   `Medium` ~160, `Full`) ; écarts : `theme::SPACE_ITEM` / `SPACE_SECTION`,
   jamais `add_space(<nombre>)` (`aucun_add_space_litteral_hors_du_theme`) ;
 - **choix exclusif fixe** dans un formulaire : `choice` / `choice_by`
@@ -263,8 +263,8 @@ Quatre rôles, quatre aspects, chacun par sa brique (tableau complet dans
   côte à côte si chaque libellé tient en 3 mots) ou liste déroulante (dès 4) ;
   une liste de **données** (colonnes, graphiques, modèles) reste une
   `ComboBox`. Dans un **menu** : `menu_sections::menu_choice`, coche seule,
-  jamais un radio (C3) ; une **bascule** est une case à cocher, libellé à
-  droite (C5).
+  jamais un radio (S-C3) ; une **bascule** est une case à cocher, libellé à
+  droite (S-C5).
 
 Gras : `theme::bold` seulement ; `RichText::strong` / `ui.strong` ne
 changent que la couleur et sont interdits (`aucun_strong_d_egui_hors_du_theme`).
@@ -359,7 +359,7 @@ parente (issue #9). `color_button` tient l'état ouvert/fermé lui-même et
 ferme sur Échap ou clic extérieur ; s'en inspirer.
 
 **Le sélecteur s'ouvre replié** (issue #10) : palette, couleurs enregistrées
-et hexadécimal seulement ; la case « Custom color » (C5, #227) déplie nuancier, opacité,
+et hexadécimal seulement ; la case « Custom color » (S-C5, #227) déplie nuancier, opacité,
 RGB/HSL et Save Color. Tout nouvel élément lourd du sélecteur va dans la
 partie dépliée (`if custom`), et l'état se remet à zéro à la fermeture
 (`set_picker_open`).
@@ -410,24 +410,24 @@ moteur de script reste dans l’AppState principal.
 Trois formes, un seul corps (`modal_frame`, #228) :
 `modal_dialog_with(ctx, id, titre, taille, DialogFooter { accept_label,
 accept_hint, accept_enabled, accept_disabled }, secondaires, contenu)` — pied `[secondaires]
-[message] [Cancel] [principal]` (F6) ; `modal_wizard(…, boutons_d_étape, …)` —
+[message] [Cancel] [principal]` (S-F6) ; `modal_wizard(…, boutons_d_étape, …)` —
 `[Cancel] [message] [Back · Next] [Finish]`, l'assistant d'import (boutons
 d'étape ajoutés de droite à gauche) ; `modal_read_only(ctx, id, titre, taille,
-contenu)` — un seul bouton Close (F2), pour une fenêtre qui ne change rien.
-Entrée valide, Échap annule — sauf l'Échap qui sort d'un champ texte (F7).
+contenu)` — un seul bouton Close (S-F2), pour une fenêtre qui ne change rien.
+Entrée valide, Échap annule — sauf l'Échap qui sort d'un champ texte (S-F7).
 **Bouton principal grisé** : `accept_disabled` est sa **raison** (clé
 `disabled-*`, ce qu'il faut faire, #226), écrite dans le pied et en bulle
-(F10) ; `accept_hint` reste la bulle du bouton actif.
+(S-F10) ; `accept_hint` reste la bulle du bouton actif.
 **Erreur d'un geste du dialogue** : `AppState::fail` l'écrit d'office dans le
-pied tant qu'un dialogue de contenu est ouvert (`dialog_error`, M7) — jamais
+pied tant qu'un dialogue de contenu est ouvert (`dialog_error`, S-M7) — jamais
 `status` ; un test d'état lit `state.dialog_error()`, et une décision « le
 geste a-t-il échoué ? » lit `last_action_failed`, jamais `status().is_error`.
 Confirmations (#229) : `modal_confirm` (Cancel par défaut ; le verbe
 seulement par son bouton), `modal_save_changes` (« Discard Changes · Cancel ·
-Save », Entrée = Save), `modal_alert` (M8) — voir la liste des réflexes plus
+Save », Entrée = Save), `modal_alert` (S-M8) — voir la liste des réflexes plus
 bas ; un **choix** (axe d'un dépôt, calcul avec ou sans colonnes) reste un
 `modal_dialog_with`.
-Taille et position (F8) et premier champ focalisé (F9) sont faits par la
+Taille et position (S-F8) et premier champ focalisé (S-F9) sont faits par la
 brique : rien à écrire, mais un premier champ de saisie doit être un vrai
 `TextEdit` du dialogue (c'est ce que le focus initial cherche). **Avant d'écrire une fenêtre, dialogue ou assistant : partir de
 `modal_dialog_with` (dialogue) ou `show_window_in_layer` (fenêtre de contenu).**
@@ -471,7 +471,7 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   `theme::field_refused_color` / `field_clamped_color` ; jamais un cadre peint à
   la main ;
 - un champ qui **s'ouvre sur place** (renommer, éditer une cellule, un titre)
-  passe par `app/inplace_edit.rs` (#224, T4) : `show` (ou `begin` + `finish`
+  passe par `app/inplace_edit.rs` (#224, S-T4) : `show` (ou `begin` + `finish`
   quand la mise en page est posée par l'appelant), `resolve` pour la décision
   pure ; tout le texte sélectionné à l'ouverture, Entrée / clic ailleurs
   valident, Échap annule, Tab valide et passe au suivant, nom refusé = champ
@@ -489,7 +489,7 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   molette (#233, #235) : seulement sur un champ à liste, au survol, un cran =
   valeur proposée voisine ; aspect (#234) : `list_frame`, flèche pleine dans le
   cadre, fond blanc si éditable, gris si liste seule (fonds du thème) ;
-- **deux champs liés** (« de » ≤ « à », #240, N11) : la paire inversée est
+- **deux champs liés** (« de » ≤ « à », #240, S-N11) : la paire inversée est
   refusée (ancienne valeur rendue, `field_state::flag` sur le **second** champ),
   jamais permutée ni ramenée ; **pas pour Min/Max d'un axe**, qui peut être
   inversé. Un texte Typst fautif est signalé par `formula_field`
@@ -509,7 +509,7 @@ une confirmation, un grisage ou un geste clavier/souris. Réflexes :
   ne rattrape pas passe par `modal_confirm` (Cancel par défaut : Entrée et
   Échap l'actionnent, verbe destructeur rouge au survol/focus), un projet non
   enregistré par `modal_save_changes` (Entrée = Save), un échec grave hors
-  fenêtre par `modal_alert` (M8 : Close + action) — peints depuis
+  fenêtre par `modal_alert` (S-M8 : Close + action) — peints depuis
   `app/confirmations.rs`, ou dans le contenu du dialogue qu'ils recouvrent ;
 - un **travail qui dure** passe par `app/busy.rs` (`work_in_progress` : indicateur et mot après 0,5 s, barre si le total est connu, Stop après 3 s si le travail s'interrompt ; #232), jamais un `ui.spinner()` seul ; un travail qui passe par la session s'écrit `execute_interruptible` (recalcul de formules, #239 : Stop = annuler la commande), jamais un second chemin ; un **panneau vide** par `app/empty_state.rs` (`empty_state` : phrase grisée centrée qui dit ce qui manque et le geste pour le créer), jamais un `ui.weak(…)` nu ;
 - **texte atténué** (`.weak()`) : seulement pour le secondaire (détail technique, raison, aide, état vide), jamais pour le contenu principal d'un dialogue ou d'une fenêtre en lecture seule — ne pas copier le `.weak()` d'un dialogue voisin sans vérifier que le texte y est lui aussi secondaire (`docs/standard-interface.md`, « Texte atténué ») ;
@@ -536,13 +536,13 @@ ne garantit leur cohérence sinon la relecture. C'est le premier point à
 vérifier quand une action est ajoutée :
 
 1. **le raccourci** — une constante `SHORTCUT_*` (ou `KEY_*` pour une touche
-   nue) dans `app/shortcuts.rs`, **registre unique** (#231, K1 : jamais de
+   nue) dans `app/shortcuts.rs`, **registre unique** (#231, S-K1 : jamais de
    `consume_key` ni de `KeyboardShortcut::new` ailleurs, garde
    `aucun_consume_key_hors_du_registre`), consommée par `input.consume_shortcut`
    (`collect_shortcuts` dans `app.rs` pour un raccourci global), **et** une
    ligne de `HELP` pour Help › Keyboard Shortcuts, avec ses clés `help-*`
    en/fr. Curseur : `app/cursors.rs` (`grab`, `clickable`, `RESIZE_*`), jamais
-   un `CursorIcon::` écrit sur place ; double-clic (K3) : texte ou nom → édition
+   un `CursorIcon::` écrit sur place ; double-clic (S-K3) : texte ou nom → édition
    sur place, objet → Properties, fond d'un graphe → vue réinitialisée,
    Project Manager → active, ne ferme jamais ;
 2. **l'entrée de menu** (barre de menus et/ou menu contextuel), avec son

@@ -1,4 +1,4 @@
-//! Brique « état vide » (#232, P3) : une phrase grisée, centrée, qui dit ce
+//! Brique « état vide » (#232, S-P3) : une phrase grisée, centrée, qui dit ce
 //! qui manque **et** le geste pour le créer (« No columns in this sheet. Use
 //! Workbook › Add Column »). Une surface vide ne reste jamais muette ni ne
 //! pose son propre `ui.weak`.

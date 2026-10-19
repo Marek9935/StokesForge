@@ -1,4 +1,4 @@
-//! La brique « nombre » (#220, N1–N3, N8, F7) : **le seul** champ numérique de
+//! La brique « nombre » (#220, S-N1–S-N3, S-N8, S-F7) : **le seul** champ numérique de
 //! l'interface. Plus de `DragValue` ni de `Slider` (garde
 //! `aucun_champ_numerique_hors_de_la_brique`, `tests/gardes.rs`).
 //!
@@ -53,7 +53,7 @@ use crate::list_frame;
 use stokesforge_app_state::quantities::{AutoKind, Quantity};
 use stokesforge_app_state::tr;
 
-/// Largeur d'un champ numérique, en points (la « courte » de L2, #227).
+/// Largeur d'un champ numérique, en points (la « courte » de S-L2, #227).
 pub const FIELD_WIDTH: f32 = crate::theme::FIELD_WIDTH_SHORT;
 
 /// Une valeur que la brique sait lire et écrire. Les entiers arrondissent.
@@ -178,7 +178,7 @@ fn number_field_core<T: Number>(
     let focused = ctx.memory(|memory| memory.has_focus(id));
 
     // — Clavier, avant le champ : le `TextEdit` prendrait ↑/↓ et Entrée. —
-    // Échap ferme la liste sans rendre la valeur (F7). egui retire lui-même le
+    // Échap ferme la liste sans rendre la valeur (S-F7). egui retire lui-même le
     // focus au début de l'image où Échap est pressée : la liste ouverte, pas le
     // focus, dit que l'Échap est pour elle, et le champ le reprend.
     let close_list = presets.open && key(ui, &shortcuts::KEY_ESCAPE);
@@ -372,7 +372,7 @@ fn select_all(ctx: &egui::Context, id: egui::Id, len: usize) {
 
 /// Les crans de molette de cette image (positifs vers le haut), et la molette
 /// consommée : la fenêtre sous le champ ne défile pas. Ctrl+molette est le zoom
-/// (X1) et n'est pas pris.
+/// (S-X1) et n'est pas pris.
 fn wheel_notches(ui: &mut egui::Ui) -> i32 {
     let total: f32 = ui.input(|input| {
         input

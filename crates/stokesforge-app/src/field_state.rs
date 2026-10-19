@@ -1,5 +1,5 @@
 //! État d'un champ de saisie : **refusé** (cadre rouge) ou **ramené** (cadre
-//! orange), une seule brique pour tous les champs (#219, #217 N6/N7/N11, T2, T3).
+//! orange), une seule brique pour tous les champs (#219, #217 S-N6/S-N7/S-N11, S-T2, S-T3).
 //!
 //! Règles (`docs/standard-interface.md`, § Saisie refusée ou ramenée) :
 //!
@@ -14,7 +14,7 @@
 //!
 //! 1. [`show_issue`] — peint cadre et bulle d'un [`FieldIssue`] sur la réponse
 //!    d'un champ **déjà posé**. Sans mémoire : c'est l'étage d'un champ dont
-//!    l'erreur vient d'ailleurs (message Typst d'un titre, T3).
+//!    l'erreur vient d'ailleurs (message Typst d'un titre, S-T3).
 //! 2. [`flag`] / [`active`] / [`clear`] — la mémoire d'egui (par identifiant de
 //!    champ) d'un état qui doit survivre à la saisie : le cadre orange de 2 s,
 //!    le cadre rouge d'une saisie abandonnée.
@@ -609,7 +609,7 @@ mod tests {
     }
 
     /// Entrée sur un texte illisible : le champ reste ouvert, le texte gardé,
-    /// le cadre rouge peint (T2) ; rien ne sort.
+    /// le cadre rouge peint (S-T2) ; rien ne sort.
     #[test]
     fn entree_sur_un_texte_illisible_garde_le_champ_ouvert() {
         let ctx = contexte();

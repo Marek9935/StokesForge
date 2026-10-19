@@ -1,4 +1,4 @@
-//! **Le** lecteur et **le** formateur des dates (#218, #217 D1/D4) : une colonne
+//! **Le** lecteur et **le** formateur des dates (#218, #217 S-D1/S-D4) : une colonne
 //! `ColumnType::DateTime` stocke un timestamp POSIX (secondes, UTC) ; la
 //! grille l'affiche en ISO 8601 (`2026-10-10 14:30`) et l'édite sous cette
 //! forme. Aucune dépendance de calendrier ni de locale.

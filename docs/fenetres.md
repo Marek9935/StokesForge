@@ -20,20 +20,20 @@ Règles de tenue :
 
 Le code fait foi : les tailles ci-dessous sont les tailles **par défaut**
 passées à la brique ; la taille et la position utilisées sont ensuite celles
-que l'utilisateur a laissées (F8, voir plus bas).
+que l'utilisateur a laissées (S-F8, voir plus bas).
 
 ## Les types
 
 | Type | Brique (`app/dialogs.rs`) | Pied (`FooterLayout`) | Quand |
 |---|---|---|---|
-| **Réglages en direct** (F1) | `modal_dialog` | `[Cancel] [OK]` | un objet visible se règle, OK garde, Cancel restaure |
-| **Création sur brouillon** (F1) | `modal_dialog_with` | `[secondaires] [message] [Cancel] [verbe]` | une action qui crée ; le bouton porte son verbe (Create, Import) |
+| **Réglages en direct** (S-F1) | `modal_dialog` | `[Cancel] [OK]` | un objet visible se règle, OK garde, Cancel restaure |
+| **Création sur brouillon** (S-F1) | `modal_dialog_with` | `[secondaires] [message] [Cancel] [verbe]` | une action qui crée ; le bouton porte son verbe (Create, Import) |
 | **Choix** | `modal_dialog_with` | idem, secondaires = autres réponses | une question sans réponse « oui » |
 | **Assistant** | `modal_wizard` | `[Cancel] [message] [Back · Next] [Finish]` | plusieurs étapes ordonnées |
-| **Lecture seule** (F2) | `modal_read_only` | `[secondaires] [message] [Close]` | consulter, ou régler sans rien à valider |
-| **Confirmation** (F3-F5) | `modal_confirm` | `[message] [Cancel] [verbe]` | seulement ce que Ctrl+Z ne rattrape pas |
+| **Lecture seule** (S-F2) | `modal_read_only` | `[secondaires] [message] [Close]` | consulter, ou régler sans rien à valider |
+| **Confirmation** (S-F3 à S-F5) | `modal_confirm` | `[message] [Cancel] [verbe]` | seulement ce que Ctrl+Z ne rattrape pas |
 | **Enregistrer ?** | `modal_save_changes` | `[Discard Changes] [message] [Cancel] [Save]` | projet non enregistré |
-| **Échec grave** (M8) | `modal_alert` | `[action] [message] [Close]` | échec avec une action possible |
+| **Échec grave** (S-M8) | `modal_alert` | `[action] [message] [Close]` | échec avec une action possible |
 | **Fenêtre de contenu** (non modale) | `window_chrome::show_floating_window` | aucun | classeur, graphe, matrice, note |
 
 Les cinq premières lignes de brique passent toutes par le même corps
@@ -97,7 +97,7 @@ dupliquer. Chaque nouvelle fenêtre est décalée en cascade.
 ## Hors catalogue
 
 - **Éditions sur place** (titre, légende, texte d'un graphe, cellule de la
-  grille, renommage) : pas de fenêtre, voir le standard (T4) et
+  grille, renommage) : pas de fenêtre, voir le standard (S-T4) et
   `inplace_edit.rs`.
 - **Fenêtres natives de l'OS** : sélecteur de fichiers (`file_picker.rs`),
   jamais une fenêtre egui.
@@ -111,7 +111,7 @@ dupliquer. Chaque nouvelle fenêtre est décalée en cascade.
 
 ## Taille, position, Échap, focus : ce que la brique fait seule
 
-Rien de cela ne se réécrit dans une fenêtre neuve (F7-F9, détail dans le
+Rien de cela ne se réécrit dans une fenêtre neuve (S-F7 à S-F9, détail dans le
 standard) :
 
 - la taille et la position sont mémorisées **par identifiant** de dialogue
@@ -128,7 +128,7 @@ standard) :
 
 1. **Type.** Choisir dans la table des types. En cas de doute entre
    confirmation et choix : une confirmation n'existe que pour ce que Ctrl+Z ne
-   rattrape pas (standard F3).
+   rattrape pas (standard S-F3).
 2. **Maquette (E2).** La faire valider avant tout code : taille, pages ou
    sections, contenu de chaque page, pied, point d'ouverture. Joindre, quand
    c'est utile, une capture du jumeau (voir ci-dessous).

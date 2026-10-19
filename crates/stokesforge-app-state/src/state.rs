@@ -103,14 +103,14 @@ pub enum Action {
     /// Recharge le projet depuis le fichier courant.
     Load,
     /// Demande un projet vide ; attend la réponse « Discard Changes · Cancel ·
-    /// Save » si du travail serait perdu (F3, #229).
+    /// Save » si du travail serait perdu (S-F3, #229).
     NewProject {
         /// Saisie encore locale à une vue, notamment une fenêtre détachée.
         pending_edits: bool,
     },
     /// Demande d'ouvrir le projet `path` (File › Open…) ; même attente que
     /// [`Action::NewProject`]. Un échec de lecture garde le projet et le
-    /// chemin courants et se dit par un dialogue bloquant (M8).
+    /// chemin courants et se dit par un dialogue bloquant (S-M8).
     OpenProject {
         /// Fichier choisi.
         path: String,
@@ -124,11 +124,11 @@ pub enum Action {
         /// Saisie encore locale à une vue.
         pending_edits: bool,
     },
-    /// Réponse au dialogue « Discard Changes · Cancel · Save » (F4).
+    /// Réponse au dialogue « Discard Changes · Cancel · Save » (S-F4).
     ConfirmUnsaved(UnsavedChoice),
-    /// Ferme le dialogue d'un échec grave (M8).
+    /// Ferme le dialogue d'un échec grave (S-M8).
     DismissAlert,
-    /// Réponse à la confirmation d'écrasement d'un fichier exporté (F3).
+    /// Réponse à la confirmation d'écrasement d'un fichier exporté (S-F3).
     ConfirmOverwrite(bool),
     /// Ajoute un graphique vide à la racine, annulable comme un tracé.
     AddGraph,
@@ -160,7 +160,7 @@ pub enum Action {
     /// Duplique `sheet` (colonnes comprises) juste après elle, et affiche la
     /// copie.
     DuplicateSheet(NodeId),
-    /// Supprime `sheet`, sans confirmation : Ctrl+Z la rend (F3, #229) ; le
+    /// Supprime `sheet`, sans confirmation : Ctrl+Z la rend (S-F3, #229) ; le
     /// message nomme les graphes qui en traçaient des colonnes. Refusée pour
     /// la dernière feuille d'un classeur.
     DeleteSheet(NodeId),
@@ -183,7 +183,7 @@ pub enum Action {
         series: stokesforge_plot::SeriesRef,
     },
     /// Supprime la sélection, sans confirmation : un seul Ctrl+Z la rend
-    /// (F3, #229) ; le message nomme les graphes qui en utilisaient les
+    /// (S-F3, #229) ; le message nomme les graphes qui en utilisaient les
     /// données.
     DeleteObjects(Vec<NodeId>),
     /// Déplace la sélection en un seul geste annulable.
@@ -477,7 +477,7 @@ pub enum Action {
     },
     /// Ferme la fenêtre des métadonnées.
     CloseColumnMetadata,
-    /// Ouvre la fenêtre des 50 derniers messages de la barre d'état (M6).
+    /// Ouvre la fenêtre des 50 derniers messages de la barre d'état (S-M6).
     OpenStatusHistory,
     /// Ferme la fenêtre d'historique des messages.
     CloseStatusHistory,
@@ -485,13 +485,13 @@ pub enum Action {
     OpenLowR2List,
     /// Ferme cette liste.
     CloseLowR2List,
-    /// Arrête l'import en fond après le fichier en cours (#232, P2) : rien
+    /// Arrête l'import en fond après le fichier en cours (#232, S-P2) : rien
     /// n'est créé.
     StopImport,
-    /// Arrête le recalcul de formules en cours (#239, P2) : la commande qui
+    /// Arrête le recalcul de formules en cours (#239, S-P2) : la commande qui
     /// l'a déclenché est annulée, comme par Ctrl+Z.
     StopRecalc,
-    /// Ouvre Help › Keyboard Shortcuts (#231, K5).
+    /// Ouvre Help › Keyboard Shortcuts (#231, S-K5).
     OpenKeyboardShortcuts,
     /// Ferme la fenêtre des raccourcis clavier.
     CloseKeyboardShortcuts,
@@ -815,7 +815,7 @@ pub enum Action {
     /// Règle l'agrandissement des exports PNG ([`PNG_EXPORT_SCALES`]).
     SetPngExportScale(f32),
     /// Mémorise la taille et la position d'une sorte de dialogue à sa
-    /// fermeture (F8, #228). Préférence de l'application : ni commande, ni
+    /// fermeture (S-F8, #228). Préférence de l'application : ni commande, ni
     /// historique, ni `.stf`.
     RememberDialogGeometry {
         /// La sorte de dialogue (clé tirée de son identifiant).
@@ -870,7 +870,7 @@ pub enum Action {
         shape: Box<ShapeSpec>,
     },
     /// Ouvre la macro d'historique de la fenêtre des propriétés d'un objet
-    /// (F1) : les réglages sont appliqués en direct, un seul Ctrl+Z les défait.
+    /// (S-F1) : les réglages sont appliqués en direct, un seul Ctrl+Z les défait.
     BeginShapeEdit,
     /// Referme la macro de [`Action::BeginShapeEdit`] : `keep` (OK) la garde
     /// comme une entrée d'historique, sinon (Cancel) elle est avortée et
@@ -997,10 +997,10 @@ impl SaveTarget {
     }
 }
 
-/// Gravité d'un message de la barre d'état (M4).
+/// Gravité d'un message de la barre d'état (S-M4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusLevel {
-    /// Information normale : s'efface d'elle-même après [`INFO_LIFETIME`] (M5).
+    /// Information normale : s'efface d'elle-même après [`INFO_LIFETIME`] (S-M5).
     Info,
     /// Avertissement : « impossible pour l'instant » (annuler à vide), pas un
     /// échec. Reste jusqu'au message suivant.
@@ -1010,10 +1010,10 @@ pub enum StatusLevel {
     Error,
 }
 
-/// Durée d'affichage d'une information avant qu'elle s'efface (M5).
+/// Durée d'affichage d'une information avant qu'elle s'efface (S-M5).
 pub const INFO_LIFETIME: std::time::Duration = std::time::Duration::from_secs(8);
 
-/// Nombre de messages gardés pour l'historique de la barre d'état (M6).
+/// Nombre de messages gardés pour l'historique de la barre d'état (S-M6).
 pub const STATUS_HISTORY_LEN: usize = 50;
 
 /// Une forme de la figure copiée (#149) : ses octets et le format d'export qui
@@ -1067,7 +1067,7 @@ pub struct ScriptOutput {
     pub stderr: String,
     /// Message d'erreur **avec sa trace d'appels Python complète**, si le
     /// script a levé une exception. La barre d'état la marque comme erreur
-    /// (M10) et renvoie ici, à la console, pour le détail.
+    /// (S-M10) et renvoie ici, à la console, pour le détail.
     pub error: Option<String>,
     /// Vrai si l'exécution s'est arrêtée sur une interruption demandée
     /// ([`Action::InterruptScript`]).
@@ -1325,8 +1325,8 @@ pub enum RowAxis {
     Present,
 }
 
-/// Le geste qui remplacerait ou fermerait un projet non enregistré (F3,
-/// #229) : il attend la réponse « Discard Changes · Cancel · Save » (F4).
+/// Le geste qui remplacerait ou fermerait un projet non enregistré (S-F3,
+/// #229) : il attend la réponse « Discard Changes · Cancel · Save » (S-F4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnsavedGesture {
     /// File › New Project.
@@ -1337,7 +1337,7 @@ pub enum UnsavedGesture {
     Quit,
 }
 
-/// La réponse au dialogue « Discard Changes · Cancel · Save » (F4).
+/// La réponse au dialogue « Discard Changes · Cancel · Save » (S-F4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnsavedChoice {
     /// Abandonner les changements et poursuivre le geste.
@@ -1349,7 +1349,7 @@ pub enum UnsavedChoice {
     Save,
 }
 
-/// Un échec grave hors fenêtre (M8, #229) : dit par un dialogue bloquant,
+/// Un échec grave hors fenêtre (S-M8, #229) : dit par un dialogue bloquant,
 /// avec une action possible, jamais par la seule barre d'état.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alert {
@@ -1359,7 +1359,7 @@ pub struct Alert {
     pub message: String,
 }
 
-/// Les échecs graves (M8).
+/// Les échecs graves (S-M8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlertKind {
     /// L'enregistrement du projet a échoué : Save As… est proposé.
@@ -1467,7 +1467,7 @@ pub struct CellEdit {
     pub buffer: String,
     /// L'édition s'est ouverte sur une frappe (le tampon est ce qui vient d'être
     /// tapé) : le champ garde alors son curseur au lieu de tout sélectionner à
-    /// l'ouverture (T4, #224).
+    /// l'ouverture (S-T4, #224).
     pub typed: bool,
 }
 
@@ -2234,7 +2234,7 @@ pub struct ImportState {
     /// Recette telle qu'elle était au chargement du modèle : sert à dire
     /// qu'elle a été modifiée sans être enregistrée.
     baseline: stokesforge_import::ImportRecipe,
-    /// Aperçu retenu pendant une frappe (T1, #224) : la recette telle qu'elle
+    /// Aperçu retenu pendant une frappe (S-T1, #224) : la recette telle qu'elle
     /// était avant la frappe et l'instant du dernier changement ; tant qu'il
     /// est là, les aperçus se calculent sur cette recette, pas sur `recipe`.
     held_preview: Option<(stokesforge_import::ImportRecipe, f64)>,
@@ -2245,7 +2245,7 @@ pub struct ImportState {
     bytes: std::cell::RefCell<ImportBytesCache>,
 }
 
-/// Pause de frappe avant qu'un aperçu se recalcule (T1, #224), en secondes.
+/// Pause de frappe avant qu'un aperçu se recalcule (S-T1, #224), en secondes.
 pub const PREVIEW_PAUSE_SECONDS: f64 = 0.3;
 
 impl ImportState {
@@ -2450,15 +2450,15 @@ pub struct AppState {
     /// Repère conservateur de l'enregistrement, sans épingler les buffers
     /// d'un ancien arbre. Une annulation demande aussi confirmation.
     saved_revision: Option<(u64, u64)>,
-    /// Geste qui attend la réponse « Discard Changes · Cancel · Save » (F4).
+    /// Geste qui attend la réponse « Discard Changes · Cancel · Save » (S-F4).
     unsaved_pending: Option<UnsavedGesture>,
     /// Geste à poursuivre une fois le projet enregistré (réponse Save).
     after_save: Option<UnsavedGesture>,
     /// Plus rien ne retient l'application : la fenêtre peut se fermer.
     quit_ready: bool,
-    /// Échec grave en attente de lecture (M8).
+    /// Échec grave en attente de lecture (S-M8).
     alert: Option<Alert>,
-    /// Export qui écraserait un fichier que le sélecteur n'a pas vu (F3).
+    /// Export qui écraserait un fichier que le sélecteur n'a pas vu (S-F3).
     pending_overwrite: Option<(PathBuf, Box<PlotSpec>)>,
     /// Feuille dont l'onglet est en édition de nom.
     renaming_sheet: Option<NodeId>,
@@ -2477,7 +2477,7 @@ pub struct AppState {
     object_manager_preferences: Preferences,
     /// Dernier message destiné à l'utilisateur.
     status: Option<StatusMessage>,
-    /// Les 50 derniers messages de la barre d'état (M6).
+    /// Les 50 derniers messages de la barre d'état (S-M6).
     status_log: std::collections::VecDeque<StatusMessage>,
     /// La fenêtre d'historique des messages est ouverte.
     status_history_open: bool,
@@ -2489,7 +2489,7 @@ pub struct AppState {
     keyboard_shortcuts_open: bool,
     /// La fenêtre des préférences est ouverte (#148).
     preferences_open: bool,
-    /// Erreur survenue pendant qu'un dialogue modal est ouvert (M7, #228) :
+    /// Erreur survenue pendant qu'un dialogue modal est ouvert (S-M7, #228) :
     /// elle s'affiche dans le pied du dialogue, jamais dans la barre d'état.
     dialog_error: Option<String>,
     /// Saisie de cellule en cours, s'il y en a une.
@@ -2858,7 +2858,7 @@ impl AppState {
         self.status.as_ref()
     }
 
-    /// L'erreur à montrer dans le pied du dialogue modal ouvert (M7, #228) ;
+    /// L'erreur à montrer dans le pied du dialogue modal ouvert (S-M7, #228) ;
     /// aucune quand aucun dialogue de contenu n'est ouvert.
     pub fn dialog_error(&self) -> Option<&str> {
         if self.modal_dialog_open() {
@@ -2869,12 +2869,12 @@ impl AppState {
     }
 
     /// Un dialogue modal de contenu est-il ouvert (import, propriétés du
-    /// graphe, analyse) ? Ses erreurs vont alors dans son pied (M7).
+    /// graphe, analyse) ? Ses erreurs vont alors dans son pied (S-M7).
     fn modal_dialog_open(&self) -> bool {
         self.import_state.is_some() || self.plot_settings.is_some() || self.analysis.is_some()
     }
 
-    /// La taille et la position mémorisées de chaque sorte de dialogue (F8).
+    /// La taille et la position mémorisées de chaque sorte de dialogue (S-F8).
     pub fn dialog_geometries(
         &self,
     ) -> &std::collections::BTreeMap<String, crate::preferences::DialogGeometry> {
@@ -5322,7 +5322,7 @@ impl AppState {
         ))
     }
 
-    /// Stop de l'import en fond (#232, P2) : le fil s'arrête après le fichier
+    /// Stop de l'import en fond (#232, S-P2) : le fil s'arrête après le fichier
     /// en cours, rien n'est créé ni annulable, et le résultat partiel est
     /// ignoré.
     pub fn stop_import(&mut self) {
@@ -6184,14 +6184,14 @@ impl AppState {
         self.record(text, StatusLevel::Info);
     }
 
-    /// Enregistre un avertissement (M4) : visible jusqu'au message suivant.
+    /// Enregistre un avertissement (S-M4) : visible jusqu'au message suivant.
     pub fn warn(&mut self, text: String) {
         self.dialog_error = None;
         self.record(text, StatusLevel::Warning);
     }
 
     /// Enregistre un message d'échec : dans le pied du dialogue modal ouvert
-    /// (M7, #228), dans la barre d'état sinon.
+    /// (S-M7, #228), dans la barre d'état sinon.
     fn fail(&mut self, text: String) {
         if self.modal_dialog_open() {
             self.dialog_error = Some(text);
@@ -6200,7 +6200,7 @@ impl AppState {
         self.record(text, StatusLevel::Error);
     }
 
-    /// Pose le message courant et l'ajoute à l'historique (M6, 50 derniers).
+    /// Pose le message courant et l'ajoute à l'historique (S-M6, 50 derniers).
     fn record(&mut self, text: String, level: StatusLevel) {
         let message = StatusMessage {
             text,
@@ -6215,7 +6215,7 @@ impl AppState {
         self.status = Some(message);
     }
 
-    /// Efface l'information trop ancienne (M5) et rend le délai restant avant
+    /// Efface l'information trop ancienne (S-M5) et rend le délai restant avant
     /// la prochaine échéance, pour programmer **ce seul** redessin : aucun
     /// réveil périodique au repos. Avertissements et erreurs restent.
     pub fn expire_status(&mut self, now: std::time::Instant) -> Option<std::time::Duration> {
@@ -6232,7 +6232,7 @@ impl AppState {
         }
     }
 
-    /// Les derniers messages, du plus ancien au plus récent (M6).
+    /// Les derniers messages, du plus ancien au plus récent (S-M6).
     pub fn status_history(&self) -> impl Iterator<Item = &StatusMessage> {
         self.status_log.iter()
     }
@@ -6253,7 +6253,7 @@ impl AppState {
     }
 
     /// Titre de la fenêtre : nom du projet, « • » tant qu'il n'est pas
-    /// enregistré (R15) : « essai.stf • — StokesForge ».
+    /// enregistré (S-R15) : « essai.stf • — StokesForge ».
     pub fn window_title(&self) -> String {
         let name = std::path::Path::new(&self.path)
             .file_name()
@@ -6387,7 +6387,7 @@ impl AppState {
         Some(since.elapsed())
     }
 
-    /// Stop du recalcul (#239, P2) : il s'arrête entre deux colonnes, la
+    /// Stop du recalcul (#239, S-P2) : il s'arrête entre deux colonnes, la
     /// commande qui l'a déclenché est annulée, ce qui avait changé est
     /// recalculé. Le message vient à la fin ([`AppState::finish_recalc`]).
     pub fn stop_recalc(&mut self) {
@@ -6429,7 +6429,7 @@ impl AppState {
     }
 
     /// Enregistre ; puis poursuit le geste qui attendait l'enregistrement
-    /// (réponse Save, F4). Un échec est un échec grave (M8) : dialogue
+    /// (réponse Save, S-F4). Un échec est un échec grave (S-M8) : dialogue
     /// bloquant, et le geste en attente est abandonné.
     fn save(&mut self) {
         let path = PathBuf::from(&self.path);
@@ -6512,7 +6512,7 @@ impl AppState {
     ///
     /// Le sélecteur natif demande avant d'écraser le nom saisi ; l'extension
     /// ajoutée ici donne un autre fichier, qu'il n'a pas vu : s'il existe,
-    /// l'export attend la confirmation (F3, [`Action::ConfirmOverwrite`]).
+    /// l'export attend la confirmation (S-F3, [`Action::ConfirmOverwrite`]).
     fn export_graph(&mut self, mut path: PathBuf, spec: &PlotSpec) {
         if path.extension().is_none() {
             path.set_extension("svg");
@@ -6655,7 +6655,7 @@ impl AppState {
     }
 
     /// Recharge le fichier courant. Un échec de lecture est un échec grave
-    /// (M8) : dialogue bloquant ; rend `false`.
+    /// (S-M8) : dialogue bloquant ; rend `false`.
     fn load(&mut self) -> bool {
         let path = PathBuf::from(&self.path);
         match self.handle.load_with_report(&path) {
@@ -6703,17 +6703,17 @@ impl AppState {
     }
 
     /// Le geste qui attend la réponse « Discard Changes · Cancel · Save »
-    /// (F4, #229).
+    /// (S-F4, #229).
     pub fn unsaved_pending(&self) -> Option<&UnsavedGesture> {
         self.unsaved_pending.as_ref()
     }
 
-    /// L'échec grave à dire (M8, #229).
+    /// L'échec grave à dire (S-M8, #229).
     pub fn alert(&self) -> Option<&Alert> {
         self.alert.as_ref()
     }
 
-    /// Le fichier qu'un export écraserait, en attente de confirmation (F3).
+    /// Le fichier qu'un export écraserait, en attente de confirmation (S-F3).
     pub fn pending_overwrite(&self) -> Option<&std::path::Path> {
         self.pending_overwrite
             .as_ref()
@@ -6734,7 +6734,7 @@ impl AppState {
         std::mem::take(&mut self.quit_ready)
     }
 
-    /// Un geste qui remplacerait ou fermerait le projet (F3) : sans travail à
+    /// Un geste qui remplacerait ou fermerait le projet (S-F3) : sans travail à
     /// perdre il s'applique, sinon il attend la réponse « Discard Changes ·
     /// Cancel · Save ».
     fn request_unsaved(&mut self, gesture: UnsavedGesture, pending_edits: bool) {
@@ -7098,7 +7098,7 @@ impl AppState {
         self.refresh();
     }
 
-    /// Supprime sans confirmation (F3, #229) : un seul Ctrl+Z rend tout. Le
+    /// Supprime sans confirmation (S-F3, #229) : un seul Ctrl+Z rend tout. Le
     /// message nomme les graphes restants qui en utilisaient les données.
     fn delete_objects(&mut self, ids: &[NodeId]) {
         let targets = self.object_targets(ids);
@@ -8908,7 +8908,7 @@ impl AppState {
     }
 
     /// Applique le résultat d'un script terminé : mémorise sa sortie, pose un
-    /// message de statut — court, en erreur pour une exception (M10, #230) ;
+    /// message de statut — court, en erreur pour une exception (S-M10, #230) ;
     /// sa trace se lit dans la sortie, jamais dans la barre d'état — puis rafraîchit l'instantané (c'est le piège de
     /// cette tâche : sans ce geste, la grille resterait figée alors que le
     /// modèle a changé).
@@ -8923,8 +8923,8 @@ impl AppState {
         let failed = outcome.error.is_some();
         self.script_output = Some(ScriptOutput::from(outcome));
         if failed && !interrupted {
-            // M10 : une exception de script est une erreur, la trace est dans
-            // la console (seule exception écrite à « un seul canal », R13).
+            // S-M10 : une exception de script est une erreur, la trace est dans
+            // la console (seule exception écrite à « un seul canal », S-R13).
             self.fail(tr!("status-script-exception"));
         } else {
             self.notice(if interrupted {
@@ -9045,7 +9045,7 @@ mod tests {
         );
     }
 
-    /// C4 — la reproduction du banc (`b15_une_mesure_scientifique_tient_dans_une_cellule`)
+    /// S-C4 — la reproduction du banc (`b15_une_mesure_scientifique_tient_dans_une_cellule`)
     /// fixe la spécification ; ce test fige les mêmes trois valeurs au niveau
     /// de la fonction de formatage elle-même, sans passer par une session.
     #[test]
@@ -9087,7 +9087,7 @@ mod tests {
         }
     }
 
-    /// C4 — zéro ne bascule jamais en notation scientifique (`"0e0"` serait
+    /// S-C4 — zéro ne bascule jamais en notation scientifique (`"0e0"` serait
     /// correct mais illisible pour un cas aussi courant).
     #[test]
     fn c4_zero_reste_decimal() {
@@ -9095,7 +9095,7 @@ mod tests {
         assert_eq!(format_f64_for_display(-0.0), "-0");
     }
 
-    /// C4 — une valeur ordinaire (celle que la grille affiche le plus
+    /// S-C4 — une valeur ordinaire (celle que la grille affiche le plus
     /// souvent) n'est pas touchée par le seuil.
     #[test]
     fn c4_une_valeur_ordinaire_reste_decimale() {

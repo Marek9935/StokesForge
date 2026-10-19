@@ -169,7 +169,7 @@ pub struct PlotSpec {
     /// confirmation à l'export en propose une copie sans avertissement.
     pub stale_warning: bool,
     /// Séparateur décimal des graduations : `false` = point, `true` = virgule
-    /// (#223, N4 → R9). Réglage **du graphe**, indépendant de la langue de
+    /// (#223, S-N4 → S-R9). Réglage **du graphe**, indépendant de la langue de
     /// l'interface ; vaut pour l'écran et les exports.
     pub decimal_comma: bool,
     /// Version du format de ce spec.

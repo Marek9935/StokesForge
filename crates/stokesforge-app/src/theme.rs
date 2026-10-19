@@ -74,7 +74,7 @@ pub fn bold(text: impl Into<String>) -> egui::RichText {
     egui::RichText::new(text).variation("wght", BOLD_WEIGHT)
 }
 
-/// Les **deux** espacements de l'interface (L4, #227) : aucun
+/// Les **deux** espacements de l'interface (S-L4, #227) : aucun
 /// `ui.add_space(<nombre>)` ne s'écrit hors de ce module
 /// (`aucun_add_space_litteral_hors_du_theme`, `tests/gardes.rs`). Le petit
 /// écart sépare deux éléments d'un même bloc (une note de son champ, deux
@@ -85,7 +85,7 @@ pub const SPACE_ITEM: f32 = 4.0;
 /// L'écart de section : voir [`SPACE_ITEM`].
 pub const SPACE_SECTION: f32 = 6.0;
 
-/// Largeur d'un champ **à quelques chiffres** (L2, #237) : un nombre entier
+/// Largeur d'un champ **à quelques chiffres** (S-L2, #237) : un nombre entier
 /// dont la borne est connue et tient en trois chiffres (canal de couleur,
 /// pour cent, degré…), sans liste de valeurs (~38 px).
 pub const FIELD_WIDTH_DIGITS: f32 = 38.0;
@@ -94,15 +94,15 @@ pub const FIELD_WIDTH_DIGITS: f32 = 38.0;
 /// (rotation, « -180.5 », #246).
 pub const FIELD_WIDTH_SIGNED_DIGITS: f32 = 54.0;
 
-/// Largeur d'un champ **court** (L2, #227) : un nombre, une borne, un
+/// Largeur d'un champ **court** (S-L2, #227) : un nombre, une borne, un
 /// caractère (~80 px). C'est la largeur de la brique « nombre ».
 pub const FIELD_WIDTH_SHORT: f32 = 80.0;
 
-/// Largeur d'un champ **moyen** (L2) : un nom, une liste de valeurs courte
+/// Largeur d'un champ **moyen** (S-L2) : un nom, une liste de valeurs courte
 /// (~160 px).
 pub const FIELD_WIDTH_MEDIUM: f32 = 160.0;
 
-/// Les quatre largeurs nommées d'un champ de formulaire (L2) ; la pleine prend
+/// Les quatre largeurs nommées d'un champ de formulaire (S-L2) ; la pleine prend
 /// toute la place qui reste dans la colonne des champs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldWidth {
@@ -132,7 +132,7 @@ impl FieldWidth {
 /// d'import…) : un espace, puis le libellé en [`bold`]. Le titre suffit à
 /// séparer les groupes : jamais de `ui.separator()` juste avant
 /// (`aucun_separateur_avant_un_titre_de_section`), jamais un trait seul entre
-/// deux blocs (L3), et jamais un libellé ordinaire qui ferait office de titre.
+/// deux blocs (S-L3), et jamais un libellé ordinaire qui ferait office de titre.
 pub fn section_title(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
     ui.add_space(SPACE_SECTION);
     ui.label(bold(text))
@@ -305,7 +305,7 @@ pub fn blocked_flash_color() -> Color32 {
     Color32::from_rgb(150, 28, 28)
 }
 
-/// Le bouton d'un geste destructeur (Delete, Discard Changes ; R5, #229) :
+/// Le bouton d'un geste destructeur (Delete, Discard Changes ; S-R5, #229) :
 /// style normal au repos, **rouge** au survol et au focus clavier (egui peint
 /// un widget focalisé avec le style `active`). À poser dans un `scope` qui ne
 /// contient que ce bouton.
