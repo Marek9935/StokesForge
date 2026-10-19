@@ -117,10 +117,22 @@ impl FilePicker {
     /// la réponse est prête.
     pub fn start(&mut self, request: PickRequest, wake: impl Fn() + Send + 'static) {
         let dialog = request.dialog();
-        let (sender, receiver) = channel();
         let worker = request.clone();
+        self.start_with(request, wake, move || worker.run(dialog));
+    }
+
+    /// [`Self::start`] avec l'exécution du sélecteur injectée : les tests y
+    /// passent un faux, sans quoi `rfd` ouvrirait un vrai sélecteur du portail
+    /// (une fenêtre qui resterait ouverte après le test).
+    fn start_with(
+        &mut self,
+        request: PickRequest,
+        wake: impl Fn() + Send + 'static,
+        run: impl FnOnce() -> Picked + Send + 'static,
+    ) {
+        let (sender, receiver) = channel();
         std::thread::spawn(move || {
-            let _ = sender.send(worker.run(dialog));
+            let _ = sender.send(run());
             wake();
         });
         self.pending = Some(Pending { request, receiver });
@@ -155,7 +167,8 @@ mod tests {
                 receiver,
             }),
         };
-        picker.start(PickRequest::ImportImportRecipe, || {});
+        // Faux sélecteur : jamais de vrai `rfd` dans un test.
+        picker.start_with(PickRequest::ImportImportRecipe, || {}, || None);
         let pending = picker.pending.as_ref().expect("suivi");
         assert_eq!(pending.request, PickRequest::ImportImportRecipe);
     }
