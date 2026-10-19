@@ -572,6 +572,77 @@ mod tests {
     }
 
     #[test]
+    fn toute_borne_non_finie_est_refusee_sur_lo_comme_sur_hi() {
+        let x: Vec<f64> = (0..10).map(f64::from).collect();
+        let s = Series::new(x.clone(), x.iter().map(|v| 2.0 * v + 1.0).collect());
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for zone in [(bad, 2.0), (0.0, bad), (bad, bad)] {
+                // Seule, première ou seconde zone : l'ordre ne change rien.
+                for zones in [vec![zone], vec![zone, (6.0, 9.0)], vec![(0.0, 3.0), zone]] {
+                    for degree in [0, 1, 9] {
+                        let method = BaselineMethod::Zones {
+                            zones: zones.clone(),
+                            degree,
+                        };
+                        assert_eq!(
+                            build(&method, &s).unwrap_err(),
+                            AnalysisError::InvalidParameter {
+                                name: "zones".into()
+                            },
+                            "{method:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn zones_finies_valeurs_de_reference_inchangees() {
+        // y = 2x + 1 sur 0..=9 ; deux zones : la droite est retrouvée.
+        let x: Vec<f64> = (0..10).map(f64::from).collect();
+        let s = Series::new(x.clone(), x.iter().map(|v| 2.0 * v + 1.0).collect());
+        let b = build(
+            &BaselineMethod::Zones {
+                zones: vec![(0.0, 2.0), (7.0, 9.0)],
+                degree: 1,
+            },
+            &s,
+        )
+        .unwrap();
+        assert_eq!(b.points_used, 6);
+        for v in [0.0, 3.5, 5.0, 9.0] {
+            assert!((b.eval(v) - (2.0 * v + 1.0)).abs() < 1e-9, "x = {v}");
+        }
+        // Degré 0 : la moyenne de y sur [1, 3] = (3 + 5 + 7) / 3 = 5.
+        let s = Series::new(
+            (0..6).map(f64::from).collect(),
+            vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0],
+        );
+        let mean = |zone| {
+            build(
+                &BaselineMethod::Zones {
+                    zones: vec![zone],
+                    degree: 0,
+                },
+                &s,
+            )
+            .unwrap()
+        };
+        let b = mean((1.0, 3.0));
+        assert_eq!(b.points_used, 3);
+        assert!((b.eval(0.0) - 5.0).abs() < 1e-12);
+        // Zone inversée : normalisée, même ligne de base.
+        let inv = mean((3.0, 1.0));
+        assert_eq!(inv.points_used, 3);
+        assert!((inv.eval(4.0) - 5.0).abs() < 1e-12);
+        // Zone dégénérée lo == hi : un point, accepté (degré 0).
+        let d = mean((2.0, 2.0));
+        assert_eq!(d.points_used, 1);
+        assert!((d.eval(0.0) - 5.0).abs() < 1e-12);
+    }
+
+    #[test]
     fn zones_trop_petites() {
         let s = line_series();
         let err = build(

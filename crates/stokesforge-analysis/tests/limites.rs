@@ -655,3 +655,83 @@ fn auto_initial_ignore_les_parametres_fixes_et_les_modeles_illisibles() {
     bad.auto_initial(&series, None);
     assert_eq!(bad.params, vec![ParamSetting::default()]);
 }
+
+#[test]
+fn validate_refuse_toute_borne_de_zone_non_finie_lo_et_hi() {
+    let zones = |zones| baseline(BaselineMethod::Zones { zones, degree: 1 });
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for z in [(bad, 1.0), (0.0, bad), (bad, bad)] {
+            assert_eq!(zones(vec![z]).validate(), invalid("zones"), "{z:?}");
+            // Zone valide à côté : avant ou après, le refus tient.
+            assert_eq!(zones(vec![(0.0, 1.0), z]).validate(), invalid("zones"));
+            assert_eq!(zones(vec![z, (0.0, 1.0)]).validate(), invalid("zones"));
+            assert_eq!(zones(vec![z]).readiness(), Readiness::NeedsZone);
+            assert_eq!(zones(vec![(0.0, 1.0), z]).readiness(), Readiness::NeedsZone);
+            assert_eq!(zones(vec![z, (0.0, 1.0)]).readiness(), Readiness::NeedsZone);
+        }
+    }
+}
+
+#[test]
+fn validate_accepte_zone_degeneree_inversee_et_degres_extremes() {
+    let with = |zones: Vec<(f64, f64)>, degree| {
+        baseline(BaselineMethod::Zones { zones, degree }).validate()
+    };
+    assert_eq!(with(vec![(2.0, 2.0)], 1), Ok(()));
+    assert_eq!(with(vec![(3.0, 1.0)], 1), Ok(()));
+    assert_eq!(with(vec![(0.0, 1.0)], MAX_DEGREE), Ok(()));
+    assert_eq!(with(vec![(0.0, 1.0)], MAX_DEGREE + 1), invalid("degree"));
+    assert_eq!(with(vec![(0.0, 1.0)], 0), invalid("degree"));
+    // Une zone non finie l'emporte sur le degré (erreur de zone d'abord).
+    assert_eq!(with(vec![(f64::NAN, 1.0)], 0), invalid("zones"));
+    assert_eq!(
+        with(vec![(f64::NAN, 1.0)], MAX_DEGREE + 1),
+        invalid("zones")
+    );
+    // Les zones valides et inversées sont prêtes.
+    let ready = |zones| baseline(BaselineMethod::Zones { zones, degree: 1 }).readiness();
+    assert_eq!(ready(vec![(2.0, 2.0)]), Readiness::Ready);
+    assert_eq!(ready(vec![(3.0, 1.0)]), Readiness::Ready);
+}
+
+#[test]
+fn run_refuse_une_borne_de_zone_non_finie_et_calcule_sinon() {
+    let input = SeriesInput {
+        x: (0..6).map(f64::from).collect(),
+        y: vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0],
+        sigma: None,
+    };
+    let zones = |zones| baseline(BaselineMethod::Zones { zones, degree: 1 });
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for z in [(bad, 3.0), (1.0, bad)] {
+            assert_eq!(
+                run(
+                    &zones(vec![(0.0, 1.0), z]),
+                    std::slice::from_ref(&input),
+                    None
+                )
+                .unwrap_err(),
+                AnalysisError::InvalidParameter {
+                    name: "zones".into()
+                }
+            );
+        }
+    }
+    // Chemin sans NaN : y = 2x + 1 est sa propre ligne de base, corrigé = 0
+    // (zone inversée comprise).
+    for z in [(0.0, 2.0), (2.0, 0.0), (2.0, 2.0)] {
+        let zs = if z.0 == z.1 {
+            vec![(0.0, 1.0), z]
+        } else {
+            vec![z]
+        };
+        let out = run(&zones(zs), std::slice::from_ref(&input), None).unwrap();
+        let corrected = out[0]
+            .columns
+            .iter()
+            .find(|c| c.key == "corrected")
+            .expect("colonne corrigée");
+        assert_eq!(corrected.data.len(), 6);
+        assert!(corrected.data.iter().all(|v| v.abs() < 1e-9), "{z:?}");
+    }
+}
