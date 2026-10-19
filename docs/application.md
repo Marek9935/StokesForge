@@ -403,6 +403,14 @@ relu (`AppState::applied_revision`, #239) : fermer ou ouvrir pose la question.
 Il ne conserve aucun ancien arbre en mémoire.
 Un nouveau projet encore vide ne demande pas de confirmation.
 
+Si l'acteur de session meurt (panic, #310), `AppState::check_session` (appelé
+à chaque image par `poll_recalc` et par `refresh`) le détecte une seule fois :
+l'indicateur de recalcul est abandonné, une copie de secours du dernier
+instantané est écrite dans `recovery/` du dossier de données (jamais sur le
+`.stf` de l'utilisateur, et elle peut précéder sa dernière commande), et un
+dialogue bloquant (`AlertKind::SessionLost`) ne laisse que Close, qui ferme
+l'application. Quit ne demande alors rien.
+
 Le remplacement passe par `SessionHandle::new_project`, vide l'historique et
 les géométries et change l'époque pour invalider les anciennes références
 Python. Les fenêtres de contenu, caches et sélections du projet précédent

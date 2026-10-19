@@ -63,6 +63,11 @@ alert-open-failed-title = Project Not Opened
 alert-open-failed = The project could not be opened. The current project is unchanged.
 alert-open-another = Open Another…
     .hint = Chooses another project file
+alert-session-lost-title = Session Stopped
+alert-session-lost = The project engine stopped unexpectedly. Changes made since your last save are lost. StokesForge will close.
+alert-session-lost-recovered = A recovery copy of the last displayed state was saved to { $path }. It may lack your latest change.
+alert-session-lost-no-recovery = No recovery copy could be written: { $detail }
+
 alert-low-r2-title = Low R²
 alert-low-r2 = Some results follow the data poorly (R² below 0.6). Check the model and the starting values.
 low-r2-summary-head = R² < 0.6 for:

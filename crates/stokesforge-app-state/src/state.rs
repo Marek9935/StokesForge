@@ -1369,6 +1369,9 @@ pub enum AlertKind {
     /// R² d'un calcul est très faible (#288) : un simple avertissement, que
     /// Close seul referme. Le message nomme les calculs en défaut.
     LowRSquared,
+    /// L'acteur de session est mort (#310) : le modèle est perdu. Close ferme
+    /// l'application ; le message dit où la copie de secours a été écrite.
+    SessionLost,
 }
 
 /// Dépôt de lignes qui attend la réponse au dialogue d'axe (#166).
@@ -2581,6 +2584,12 @@ pub struct AppState {
     /// verrait pas la commande déjà appliquée et fermer la fenêtre perdrait
     /// la modification sans poser la question.
     applied_revision: u64,
+    /// L'acteur de session est mort (panic, #310) : le modèle est perdu, plus
+    /// rien ne s'enregistre ni ne s'ouvre ; on ne peut que fermer.
+    session_lost: bool,
+    /// Où écrire la copie de secours quand l'acteur meurt ; `None` : aucune
+    /// (tests). Voir [`crate::recovery`].
+    recovery_dir: Option<PathBuf>,
     /// Dernier import réussi, pour le reprendre dans l'assistant.
     last_import: Option<LastImport>,
     /// Fichiers importés avec succès, à inscrire aux fichiers récents par la
@@ -2706,6 +2715,8 @@ impl AppState {
             import_job: None,
             recalc_since: None,
             applied_revision: 0,
+            session_lost: false,
+            recovery_dir: crate::recovery::default_dir(),
             last_import: None,
             recent_to_record: Vec::new(),
             script_source: String::new(),
@@ -4394,10 +4405,24 @@ impl AppState {
                 pending_edits,
             } => self.request_unsaved(UnsavedGesture::Open(path), pending_edits),
             Action::Quit { pending_edits } => {
-                self.request_unsaved(UnsavedGesture::Quit, pending_edits);
+                if self.session_lost {
+                    // Rien à enregistrer ni à demander : le modèle n'existe plus.
+                    self.quit_ready = true;
+                } else {
+                    self.request_unsaved(UnsavedGesture::Quit, pending_edits);
+                }
             }
             Action::ConfirmUnsaved(choice) => self.confirm_unsaved(choice),
-            Action::DismissAlert => self.alert = None,
+            Action::DismissAlert => {
+                if self
+                    .alert
+                    .as_ref()
+                    .is_some_and(|a| a.kind == AlertKind::SessionLost)
+                {
+                    self.quit_ready = true;
+                }
+                self.alert = None;
+            }
             Action::ConfirmOverwrite(accept) => {
                 if let Some((path, spec)) = self.pending_overwrite.take() {
                     if accept {
@@ -5001,6 +5026,10 @@ impl AppState {
     /// l'acteur). Un échec de rafraîchissement écrase le message courant —
     /// l'acteur injoignable est plus grave que ce qu'on allait dire.
     pub fn refresh(&mut self) {
+        self.check_session();
+        if self.session_lost {
+            return;
+        }
         // Un recalcul qui court (#239) : l'acteur ne répondrait qu'à sa fin et
         // l'interface resterait figée. L'ancien instantané reste peint ;
         // `poll_recalc` rafraîchit dès que c'est fini.
@@ -6292,9 +6321,62 @@ impl AppState {
     /// À appeler à chaque image : reprend la main quand un recalcul que
     /// l'interface n'a pas attendu vient de finir. Ne bloque jamais.
     pub fn poll_recalc(&mut self) {
+        self.check_session();
         if self.recalc_since.is_some() && self.handle.recalc_running().is_none() {
             self.finish_recalc();
         }
+    }
+
+    /// L'acteur de session a-t-il disparu (panic, #310) ? Dans ce cas, **une
+    /// seule fois** : le recalcul « en cours » est abandonné, une copie de
+    /// secours du dernier instantané est écrite (si un dossier est connu) et un
+    /// dialogue bloquant l'annonce. Plus rien ne passe ensuite par l'acteur :
+    /// fermer est la seule issue.
+    fn check_session(&mut self) {
+        if self.session_lost || self.handle.actor_alive() {
+            return;
+        }
+        self.session_lost = true;
+        self.recalc_since = None;
+        self.unsaved_pending = None;
+        self.after_save = None;
+        let detail = match self.recovery_dir.clone() {
+            None => String::new(),
+            Some(dir) => match crate::recovery::write_copy(&dir, &self.path, &self.snapshot) {
+                Ok(path) => tr!(
+                    "alert-session-lost-recovered",
+                    path = path.display().to_string()
+                ),
+                Err(err) => tr!(
+                    "alert-session-lost-no-recovery",
+                    detail = match &err {
+                        crate::recovery::RecoveryError::CreateDir(io) => {
+                            errors::io::error_message(io)
+                        }
+                        crate::recovery::RecoveryError::Save(save) => {
+                            errors::file::error_message(save)
+                        }
+                    }
+                ),
+            },
+        };
+        self.alert = Some(Alert {
+            kind: AlertKind::SessionLost,
+            message: detail,
+        });
+    }
+
+    /// Fixe le dossier des copies de secours (`None` : aucune). Par défaut le
+    /// dossier de données de l'application ; un test ou un intégrateur le
+    /// remplace pour ne rien écrire hors de son dossier temporaire.
+    pub fn set_recovery_dir(&mut self, dir: Option<PathBuf>) {
+        self.recovery_dir = dir;
+    }
+
+    /// L'acteur de session est-il mort (#310) ? La fenêtre n'a alors plus qu'à
+    /// se fermer.
+    pub fn session_lost(&self) -> bool {
+        self.session_lost
     }
 
     /// Le recalcul en cours vu comme un travail à montrer (#239) : depuis

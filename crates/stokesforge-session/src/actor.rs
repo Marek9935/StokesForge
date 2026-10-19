@@ -139,6 +139,20 @@ pub(crate) enum Request {
     },
     /// Demande l'arrêt de l'acteur.
     Shutdown,
+    /// Test seulement : fait paniquer l'acteur, pour éprouver la mort visible.
+    #[cfg(test)]
+    PanicForTest,
+}
+
+/// Signale à la jauge que l'acteur a quitté sa boucle. Son `Drop` joue aussi
+/// pendant un déroulement de panic : c'est ce qui rend la mort visible
+/// (`SessionHandle::actor_alive`) et libère un recalcul interrompu en plein vol.
+struct ActorExit(Arc<RecalcGauge>);
+
+impl Drop for ActorExit {
+    fn drop(&mut self) {
+        self.0.abandon();
+    }
 }
 
 /// Boucle de l'acteur : sert les requêtes dans l'ordre FIFO où elles arrivent
@@ -152,6 +166,7 @@ pub(crate) fn run(
     gauge: Arc<RecalcGauge>,
     rx: Receiver<Request>,
 ) -> Project {
+    let _exit = ActorExit(Arc::clone(&gauge));
     let mut history = match history_limit {
         Some(limit) => History::with_limit(limit),
         None => History::new(),
@@ -464,6 +479,8 @@ pub(crate) fn run(
                 };
                 let _ = reply.send(outcome);
             }
+            #[cfg(test)]
+            Request::PanicForTest => panic!("panic de test de l'acteur"),
             Request::Shutdown => {
                 // Constat non reproductible (guide-de-correction-robustesse.md
                 // §7.3, table de tête de `stokesforge-session`) : une macro encore

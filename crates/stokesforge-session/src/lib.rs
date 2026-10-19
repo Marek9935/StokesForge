@@ -275,6 +275,13 @@ impl SessionHandle {
         .map_err(SessionError::from)
     }
 
+    /// Le fil de l'acteur tourne-t-il encore ? Faux après un arrêt, et surtout
+    /// après un panic : le modèle est alors perdu et toute requête rendrait
+    /// `Disconnected`. Ne passe pas par l'acteur : ne bloque jamais.
+    pub fn actor_alive(&self) -> bool {
+        self.gauge.actor_alive()
+    }
+
     /// Numéro du recalcul interruptible en cours, s'il y en a un. Ne passe
     /// pas par l'acteur : ne bloque jamais.
     pub fn recalc_running(&self) -> Option<u64> {
@@ -624,6 +631,50 @@ mod tests {
             assert!(snapshot.history.can_undo, "l'entrée précédente reste");
             assert!(!snapshot.history.can_redo, "rien n'a été défait");
         }
+    }
+
+    /// Un panic de l'acteur est visible : `actor_alive` devient faux, et toute
+    /// requête rend `Disconnected` (le modèle est perdu).
+    #[test]
+    fn un_panic_de_l_acteur_est_visible() {
+        let (session, _, _) = feuille();
+        let handle = session.handle();
+        assert!(handle.actor_alive());
+        handle.tx.send(actor::Request::PanicForTest).expect("envoi");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while handle.actor_alive() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "acteur toujours vivant"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(matches!(handle.snapshot(), Err(SessionError::Disconnected)));
+    }
+
+    /// Un panic **pendant un recalcul** ne laisse pas l'indicateur « en cours »
+    /// pour toujours : la jauge est libérée, `wait_recalc` rend vrai tout de
+    /// suite et `actor_alive` dit pourquoi.
+    #[test]
+    fn un_panic_en_plein_recalcul_libere_la_jauge() {
+        let (session, _, c) = feuille();
+        let handle = session.handle();
+        handle.gauge.panic_in_next_recalc_for_test();
+        handle
+            .execute_interruptible(formule_c(c))
+            .expect("la commande est appliquée avant le recalcul");
+        assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
+        assert_eq!(handle.recalc_running(), None);
+        assert!(!handle.actor_alive());
+    }
+
+    /// Un arrêt normal compte aussi comme « parti » : plus rien à attendre.
+    #[test]
+    fn apres_l_arret_l_acteur_n_est_plus_vivant() {
+        let (session, _, _) = feuille();
+        let handle = session.handle();
+        session.shutdown().expect("arrêt");
+        assert!(!handle.actor_alive());
     }
 
     /// Un Stop tardif (le recalcul visé est fini) ne fait rien — et surtout

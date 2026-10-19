@@ -56,6 +56,23 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
         if outcome != DialogOutcome::Open {
             actions.push(Action::DismissAlert);
         }
+    } else if let Some(alert) = state.alert().filter(|a| a.kind == AlertKind::SessionLost) {
+        // La session est morte (#310) : le modèle est perdu, Close ferme
+        // l'application (`Action::DismissAlert`). Le message dit où est la copie
+        // de secours.
+        let outcome = modal_read_only(
+            ctx,
+            egui::Id::new("stokesforge_alert"),
+            &tr!("alert-session-lost-title"),
+            BLOCKING_DIALOG_SIZE,
+            |ui| {
+                ui.label(tr!("alert-session-lost"));
+                ui.label(egui::RichText::new(&alert.message).weak());
+            },
+        );
+        if outcome != DialogOutcome::Open {
+            actions.push(Action::DismissAlert);
+        }
     } else if let Some(alert) = state.alert() {
         let (title, intro, action, retry) = match alert.kind {
             AlertKind::SaveFailed => (
@@ -68,8 +85,9 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
                     },
                 ),
             ),
-            // Traité plus haut : un avertissement n'a pas d'action.
-            AlertKind::LowRSquared => return,
+            // Traités plus haut : ni l'avertissement ni la session perdue
+            // n'ont d'action à relancer.
+            AlertKind::LowRSquared | AlertKind::SessionLost => return,
             AlertKind::OpenFailed => (
                 tr!("alert-open-failed-title"),
                 tr!("alert-open-failed"),

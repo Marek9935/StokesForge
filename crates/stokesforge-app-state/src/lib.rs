@@ -42,6 +42,7 @@ pub mod object_manager;
 pub mod preferences;
 pub mod quantities;
 pub mod r_squared;
+pub mod recovery;
 pub mod selection;
 pub mod state;
 pub mod text_format;

@@ -7918,6 +7918,75 @@ fn saving_during_a_heavy_recalculation_clears_the_unsaved_mark() {
     assert!(state.take_quit_ready());
 }
 
+// -- Mort de l'acteur de session (#310) --
+
+/// L'acteur meurt : une seule alerte bloquante, une copie de secours relisible
+/// du dernier état affiché, jamais écrite sur le fichier de l'utilisateur.
+#[test]
+fn a_dead_session_raises_one_blocking_alert_with_a_recovery_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("travail.stf");
+    let (session, mut state) = start(heavy_formula_project(), &file);
+    state.dispatch(Action::AddGraph);
+    finish_recalculation(&mut state);
+    let tree = state.tree().clone();
+    let recovery = dir.path().join("secours");
+    state.set_recovery_dir(Some(recovery.clone()));
+    assert!(!state.session_lost());
+    assert!(state.alert().is_none());
+
+    session.shutdown().unwrap();
+    state.poll_recalc();
+
+    assert!(state.session_lost());
+    let alert = state.alert().expect("alerte bloquante");
+    assert_eq!(
+        alert.kind,
+        stokesforge_app_state::state::AlertKind::SessionLost
+    );
+    let copies: Vec<_> = std::fs::read_dir(&recovery)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(copies.len(), 1, "une copie de secours");
+    assert!(alert.message.contains(&copies[0].display().to_string()));
+    let back = stokesforge_persistence::load(&copies[0]).expect("la copie se relit");
+    assert_eq!(back.tree(), &tree, "le dernier état affiché");
+    assert!(
+        !file.exists(),
+        "le fichier de l'utilisateur n'est pas touché"
+    );
+
+    // Une seule fois : ni deuxième copie, ni deuxième alerte.
+    state.dispatch(Action::DismissAlert);
+    assert!(state.take_quit_ready(), "Close ferme l'application");
+    state.poll_recalc();
+    state.refresh();
+    assert!(state.alert().is_none());
+    assert_eq!(std::fs::read_dir(&recovery).unwrap().count(), 1);
+}
+
+/// Session morte : fermer la fenêtre n'ouvre pas « enregistrer ? » (il n'y a
+/// plus rien à enregistrer) et sans dossier de secours le message reste vide.
+#[test]
+fn quitting_a_dead_session_asks_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start(heavy_formula_project(), &dir.path().join("a.stf"));
+    state.set_recovery_dir(None);
+    state.dispatch(Action::AddGraph);
+    finish_recalculation(&mut state);
+    session.shutdown().unwrap();
+    state.poll_recalc();
+    assert!(state.session_lost());
+    assert_eq!(state.alert().unwrap().message, "");
+
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    assert!(state.unsaved_pending().is_none());
+    assert!(state.take_quit_ready());
+}
+
 // -- Import en fond, reprise du dernier import, fichiers récents (issue #6) --
 
 /// L'analyse tourne sur un fil de fond : `start_import` rend la main, la

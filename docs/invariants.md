@@ -228,6 +228,12 @@ et jamais une série silencieusement vide. Renommer ou déplacer une colonne
 référencée ne casse d'ailleurs rien du tout — une référence est un `NodeId`,
 pas un nom.
 
+Si un panic échappe malgré tout au fil de l'acteur, on ne promet pas de
+l'éviter mais de le **rendre visible** (#310) : `SessionHandle::actor_alive`
+est faux, le recalcul « en cours » est abandonné, une copie de secours est
+écrite et un dialogue bloquant l'annonce — jamais un indicateur qui tourne sans
+fin.
+
 Corollaire côté UI : `AppState::dispatch` (`stokesforge-app-state`) ne rend **jamais** d'erreur ; toute
 erreur devient un message de statut affiché.
 

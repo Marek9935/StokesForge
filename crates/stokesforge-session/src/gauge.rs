@@ -33,6 +33,8 @@ struct State {
     running: Option<u64>,
     /// La fin du dernier recalcul, tant que personne ne l'a relevée.
     finished: Option<RecalcEnd>,
+    /// Le fil de l'acteur est sorti de sa boucle (arrêt normal **ou** panic).
+    gone: bool,
 }
 
 /// Voir la doc du module.
@@ -41,6 +43,9 @@ pub(crate) struct RecalcGauge {
     state: Mutex<State>,
     idle: Condvar,
     stop: AtomicU64,
+    /// Test seulement : le prochain point d'arrêt du recalcul panique.
+    #[cfg(test)]
+    panic_in_recalc: std::sync::atomic::AtomicBool,
 }
 
 impl RecalcGauge {
@@ -71,6 +76,21 @@ impl RecalcGauge {
         self.lock().running
     }
 
+    /// L'acteur est parti : plus aucun recalcul ne peut finir, ni être attendu.
+    /// Remet `running` à `None` (sinon un panic en plein recalcul laisserait un
+    /// indicateur « en cours » pour toujours) et réveille ceux qui attendent.
+    pub(crate) fn abandon(&self) {
+        let mut state = self.lock();
+        state.gone = true;
+        state.running = None;
+        self.idle.notify_all();
+    }
+
+    /// Le fil de l'acteur est-il encore là ? Ne passe pas par l'acteur.
+    pub(crate) fn actor_alive(&self) -> bool {
+        !self.lock().gone
+    }
+
     /// Demande l'arrêt du recalcul `id` ; faux s'il n'est plus en cours.
     pub(crate) fn request_stop(&self, id: u64) -> bool {
         let state = self.lock();
@@ -84,6 +104,11 @@ impl RecalcGauge {
 
     /// Lu par le recalcul entre deux colonnes.
     pub(crate) fn stop_requested(&self, id: u64) -> bool {
+        #[cfg(test)]
+        assert!(
+            !self.panic_in_recalc.load(Ordering::Acquire),
+            "panic de test pendant un recalcul"
+        );
         self.stop.load(Ordering::Acquire) == id
     }
 
@@ -109,6 +134,10 @@ impl RecalcGauge {
     /// Pose l'arrêt sur le prochain recalcul : son premier point d'arrêt le
     /// voit, ce qui rend déterministe un test qui, sinon, devrait battre le
     /// recalcul de vitesse.
+    pub(crate) fn panic_in_next_recalc_for_test(&self) {
+        self.panic_in_recalc.store(true, Ordering::Release);
+    }
+
     pub(crate) fn stop_next_for_test(&self) {
         let next = self.lock().last + 1;
         self.stop.store(next, Ordering::Release);
