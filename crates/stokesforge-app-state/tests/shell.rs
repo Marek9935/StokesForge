@@ -7576,6 +7576,8 @@ fn import_preview_line_actions_adjust_the_recipe() {
         recipe.separator = Separator::Semicolon;
         recipe.header = HeaderSkip::None;
         recipe.header_layout = Default::default();
+        // La coupure automatique n'est plus le défaut : ce test l'éprouve.
+        recipe.data_end = stokesforge_import::DataEnd::Auto;
     }
 
     // Les données commencent à la ligne 4 : trois lignes d'en-tête.

@@ -196,6 +196,7 @@ fn proprietary_binary_rend_not_text_sans_paniquer() {
 fn jasco_uvvis_windows_1252_avec_pied_etendu() {
     let bytes = fixture("JascoUV_vis.csv");
     let mut recipe = ImportRecipe::new("Jasco UV-Vis");
+    recipe.data_end = stokesforge_import::DataEnd::Auto;
     recipe.separator = Separator::Semicolon;
     recipe.decimal = DecimalStyle::Comma;
     recipe.header = HeaderSkip::UntilMarker("XYDATA".into());
@@ -247,6 +248,7 @@ fn jasco_uvvis_sans_coupure_garde_le_pied_dans_les_donnees() {
 fn jasco_uvvis_conserve_les_metadonnees() {
     let bytes = fixture("JascoUV_vis.csv");
     let mut recipe = ImportRecipe::new("Jasco UV-Vis");
+    recipe.data_end = stokesforge_import::DataEnd::Auto;
     recipe.separator = Separator::Semicolon;
     recipe.decimal = DecimalStyle::Comma;
     recipe.header = HeaderSkip::UntilMarker("XYDATA".into());

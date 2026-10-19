@@ -287,6 +287,7 @@ fn fin_automatique_apres_prefixe_et_avant_pied() {
         ),
     ] {
         let mut recipe = ImportRecipe::new("Préfixe d'instrument");
+        recipe.data_end = stokesforge_import::DataEnd::Auto;
         recipe.separator = separator;
         recipe.header = HeaderSkip::Lines(1);
         recipe.skip_chars = 2;
@@ -328,4 +329,41 @@ fn fin_automatique_apres_prefixe_et_avant_pied() {
         assert_eq!(shown.total_data_lines, 6);
         assert!(!shown.lines.iter().any(|line| line.role == LineRole::Footer));
     }
+}
+
+/// Une mesure manquante en X (« n/a », « - », « NaN ») ne coupe plus le
+/// fichier : par défaut aucune coupure, toutes les lignes sont importées et
+/// l'aperçu en montre autant. La coupure automatique perdait sans
+/// avertissement tout ce qui suivait.
+#[test]
+fn par_defaut_une_mesure_manquante_en_x_ne_coupe_pas_le_fichier() {
+    let text = "1;10\nn/a;20\n3;30\n-;40\n5;50\n";
+    let mut recipe = ImportRecipe::new("Défaut");
+    recipe.separator = Separator::Semicolon;
+    let table = parse(text.as_bytes(), &recipe).expect("import");
+    assert_eq!(table.row_count(), 5, "aucune ligne perdue");
+    assert_eq!(table.columns[1].values, [10.0, 20.0, 30.0, 40.0, 50.0]);
+    let shown = preview(text.as_bytes(), &recipe).expect("aperçu");
+    assert_eq!(shown.total_data_lines, 5, "l'aperçu suit l'import");
+
+    // Témoin : la coupure automatique, demandée en clair, coupe bien.
+    recipe.data_end = stokesforge_import::DataEnd::Auto;
+    let cut = parse(text.as_bytes(), &recipe).expect("import");
+    assert_eq!(cut.row_count(), 1);
+}
+
+/// Une recette déjà enregistrée garde sa coupure (`"Auto"` écrit en clair) ;
+/// seule une recette sans le champ prend le nouveau défaut.
+#[test]
+fn les_recettes_enregistrees_gardent_leur_fin_de_donnees() {
+    let mut recipe = ImportRecipe::new("Ancienne");
+    recipe.data_end = stokesforge_import::DataEnd::Auto;
+    let json = serde_json::to_string(&recipe).expect("sérialisation");
+    let back: ImportRecipe = serde_json::from_str(&json).expect("relecture");
+    assert_eq!(back.data_end, stokesforge_import::DataEnd::Auto);
+
+    let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    value.as_object_mut().unwrap().remove("data_end");
+    let without: ImportRecipe = serde_json::from_value(value).expect("sans le champ");
+    assert_eq!(without.data_end, stokesforge_import::DataEnd::None);
 }

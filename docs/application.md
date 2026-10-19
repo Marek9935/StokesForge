@@ -499,7 +499,10 @@ calculé puis exécuté dans la même macro « Importer ». Par défaut, la prem
 colonne de chaque fichier reçoit le rôle X et les suivantes le rôle Y ; ces
 rôles sont conservés lors du rétablissement de l'import après annulation.
 
-**Fin des données.** La coupure automatique s'arme au premier X numérique,
+**Fin des données.** Par défaut aucune coupure (les données vont jusqu'à la fin
+du fichier) : la coupure automatique perdait sans avertissement les lignes qui
+suivaient une mesure manquante (« n/a ») en X. Elle reste un choix de l'assistant,
+et les modèles Jasco la demandent. Elle s'arme au premier X numérique,
 puis coupe au premier X non numérique (ligne vide comprise). Le texte et les
 lignes vides qui précèdent ce premier nombre sont conservés ; un texte dans Y
 ne coupe pas. Le préfixe `skip_chars` est retiré avant ce test ; avec le

@@ -250,9 +250,15 @@ pub enum DataEnd {
     /// colonne est un nombre ; une fois armée, elle coupe à la première ligne
     /// dont la première colonne (le X) n'est pas un nombre — une ligne vide
     /// coupe aussi. Une case texte dans une autre colonne ne coupe pas.
-    #[default]
+    ///
+    /// **Pas le défaut** : une mesure manquante (« n/a », « - », « NaN ») en X
+    /// arrête la lecture et fait perdre sans avertissement toutes les lignes
+    /// qui suivent. À choisir pour un appareil dont on sait qu'il écrit un
+    /// pied de page (les modèles Jasco) ; les recettes déjà enregistrées avec
+    /// `"data_end":"Auto"` continuent de couper.
     Auto,
-    /// Aucune coupure : les données vont jusqu'à la fin du fichier.
+    /// Aucune coupure : les données vont jusqu'à la fin du fichier. Défaut.
+    #[default]
     None,
     /// Coupe à la première ligne vide (ou blanche).
     FirstBlankLine,
@@ -470,7 +476,7 @@ mod tests {
         assert_eq!(recipe.subheader_roles, SubheaderRoles::default());
         assert_eq!(recipe.skip_chars, 0);
         assert_eq!(recipe.preview_lines, 20);
-        assert_eq!(recipe.data_end, DataEnd::Auto);
+        assert_eq!(recipe.data_end, DataEnd::None);
         assert!(recipe.keep_header_metadata);
         assert!(!recipe.keep_footer_metadata);
         assert!(recipe.excluded_metadata.is_empty());
@@ -577,7 +583,7 @@ mod tests {
         assert_eq!(recipe.subheader_roles, SubheaderRoles::default());
         assert_eq!(recipe.skip_chars, 0);
         assert_eq!(recipe.preview_lines, 20);
-        assert_eq!(recipe.data_end, DataEnd::Auto);
+        assert_eq!(recipe.data_end, DataEnd::None);
         assert!(recipe.keep_header_metadata, "tout est conservé par défaut");
     }
 }

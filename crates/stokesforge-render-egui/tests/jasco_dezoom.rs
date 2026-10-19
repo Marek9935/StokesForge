@@ -12,6 +12,7 @@ use stokesforge_render::{PanelTransform, TextMeasurer};
 fn jasco_garde_les_variations_sous_pixel_aux_deux_cadrages() {
     let bytes = include_bytes!("../../../test/import/JascoUV_vis.csv");
     let mut recipe = ImportRecipe::new("Jasco UV-Vis");
+    recipe.data_end = stokesforge_import::DataEnd::Auto;
     recipe.separator = Separator::Semicolon;
     recipe.decimal = DecimalStyle::Comma;
     recipe.header = HeaderSkip::UntilMarker("XYDATA".into());

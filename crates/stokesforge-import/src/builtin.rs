@@ -2,7 +2,9 @@
 //! `test/import/` : au premier lancement, la liste des modèles n'est pas vide.
 //! Chacun est vérifié contre sa fixture (`tests/builtin.rs`).
 
-use crate::recipe::{AutoMatch, DecimalStyle, HeaderSkip, ImportRecipe, NameSource, Separator};
+use crate::recipe::{
+    AutoMatch, DataEnd, DecimalStyle, HeaderSkip, ImportRecipe, NameSource, Separator,
+};
 
 /// Les modèles fournis. L'utilisateur peut en enregistrer une version
 /// modifiée sous le même nom : la sienne prend le dessus.
@@ -12,6 +14,9 @@ pub fn builtin_recipes() -> Vec<ImportRecipe> {
     jasco_semicolon.decimal = DecimalStyle::Auto;
     jasco_semicolon.header = HeaderSkip::UntilMarker("XYDATA".into());
     jasco_semicolon.name_source = NameSource::HeaderKey("TITLE".into());
+    // Le pied « Extended Information » doit être coupé : la coupure n'est plus
+    // le défaut, on la demande ici.
+    jasco_semicolon.data_end = DataEnd::Auto;
     jasco_semicolon.auto_match = AutoMatch {
         extensions: vec!["csv".into()],
         name_contains: String::new(),
@@ -23,6 +28,7 @@ pub fn builtin_recipes() -> Vec<ImportRecipe> {
     jasco_tab.decimal = DecimalStyle::Auto;
     jasco_tab.header = HeaderSkip::UntilMarker("XYDATA".into());
     jasco_tab.name_source = NameSource::HeaderKey("TITLE".into());
+    jasco_tab.data_end = DataEnd::Auto;
     jasco_tab.auto_match = AutoMatch {
         extensions: vec!["txt".into()],
         name_contains: String::new(),

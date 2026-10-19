@@ -196,7 +196,9 @@ défaut plutôt que de faire échouer le chargement.
 
 ## Fin des données (issue #4)
 
-`ImportRecipe::data_end` (`DataEnd`, `#[serde(default)]` = `Auto`) décide où
+`ImportRecipe::data_end` (`DataEnd`, `#[serde(default)]` = `None` depuis la
+correction « n/a » en X ; `Auto` reste choisissable, les modèles Jasco le
+demandent) décide où
 s'arrêtent les données ; le reste est le pied de page (`LineRole::Footer`,
 `ParsedTable::footer_lines`). `Auto` s'arme à la première ligne dont la
 première colonne est un nombre, puis coupe à la première dont le X n'en est
