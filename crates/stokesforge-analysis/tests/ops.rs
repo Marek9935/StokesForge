@@ -252,6 +252,54 @@ fn une_plage_d_integrale_non_finie_est_refusee() {
     }
 }
 
+/// #276 : chaque chemin (`validate`, `readiness`, `run`) voit les bornes non
+/// finies seul, sans l'aide des autres ; les plages posées et la liste vide
+/// restent acceptées.
+#[test]
+fn validate_et_readiness_de_l_integrale_se_tiennent_independamment() {
+    use stokesforge_analysis::ops::Readiness;
+    let (nan, inf) = (f64::NAN, f64::INFINITY);
+    let op = |ranges: Vec<(f64, f64)>| Operation::Integrate {
+        spec: IntegrateSpec {
+            ranges,
+            under: Under::Zero,
+            cumulative: false,
+            normalize: false,
+        },
+    };
+    for r in [
+        (nan, nan),
+        (nan, 5.0),
+        (5.0, nan),
+        (inf, 5.0),
+        (-inf, 5.0),
+        (2.0, inf),
+        (2.0, -inf),
+    ] {
+        let o = op(vec![r]);
+        assert_eq!(
+            o.validate(),
+            Err(AnalysisError::InvalidParameter {
+                name: "ranges".into()
+            }),
+            "{r:?}"
+        );
+        assert_eq!(o.readiness(), Readiness::NeedsZone, "{r:?}");
+        // Mauvaise plage en seconde position : même verdict.
+        let o = op(vec![(1.0, 2.0), r]);
+        assert!(o.validate().is_err(), "{r:?}");
+        assert_eq!(o.readiness(), Readiness::NeedsZone, "{r:?}");
+    }
+    for ok in [vec![], vec![(1.0, 2.0)], vec![(8.0, 2.0), (0.0, 1.0)]] {
+        let o = op(ok.clone());
+        assert_eq!(o.validate(), Ok(()), "{ok:?}");
+        assert_eq!(o.readiness(), Readiness::Ready, "{ok:?}");
+    }
+    // Liste vide = toute la courbe, y = x sur [0, 10] : 50.
+    let out = run(&op(vec![]), &[line(11, |x| x)], None).unwrap();
+    assert_eq!(val(&out[0], "area.total").value, 50.0);
+}
+
 #[test]
 fn les_pics_detectes_automatiquement_donnent_une_colonne_par_composante() {
     let x: Vec<f64> = (0..400).map(|i| i as f64 * 0.1).collect();

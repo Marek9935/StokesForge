@@ -292,4 +292,182 @@ mod tests {
         assert_eq!(r.areas[0].from, 0.0);
         assert!((r.total - 1.0 / 24.0).abs() < 1e-6);
     }
+
+    fn rampe() -> Series {
+        let x: Vec<f64> = (0..=10).map(f64::from).collect();
+        Series::new(x.clone(), x)
+    }
+
+    fn avec_plages(ranges: Vec<(f64, f64)>) -> IntegrateSpec {
+        let mut sp = spec();
+        sp.ranges = ranges;
+        sp
+    }
+
+    fn plages_invalides() -> Result<Integrated, AnalysisError> {
+        Err(AnalysisError::InvalidParameter {
+            name: "ranges".into(),
+        })
+    }
+
+    #[test]
+    fn toute_borne_non_finie_est_refusee_quelle_que_soit_la_position() {
+        let (nan, inf) = (f64::NAN, f64::INFINITY);
+        let fautives = [
+            (nan, nan),
+            (nan, 5.0),
+            (5.0, nan),
+            (inf, 5.0),
+            (-inf, 5.0),
+            (2.0, inf),
+            (2.0, -inf),
+            (-inf, inf),
+        ];
+        for f in fautives {
+            // Seule, ou après / avant une plage valide : l'ordre ne compte pas.
+            for ranges in [vec![f], vec![(1.0, 2.0), f], vec![f, (1.0, 2.0)]] {
+                assert_eq!(
+                    integrate(&rampe(), &avec_plages(ranges.clone())),
+                    plages_invalides(),
+                    "{ranges:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn la_garde_de_plage_passe_avant_le_calcul_du_cumul_et_de_la_normalisation() {
+        let mut sp = avec_plages(vec![(f64::NAN, f64::NAN)]);
+        sp.cumulative = true;
+        sp.normalize = true;
+        assert_eq!(integrate(&rampe(), &sp), plages_invalides());
+    }
+
+    #[test]
+    fn une_serie_trop_courte_est_signalee_avant_une_plage_non_finie() {
+        let s = Series::new(vec![1.0], vec![1.0]);
+        assert_eq!(
+            integrate(&s, &avec_plages(vec![(f64::NAN, f64::NAN)])),
+            Err(AnalysisError::NotEnoughPoints {
+                found: 1,
+                needed: 2
+            })
+        );
+    }
+
+    #[test]
+    fn plage_inversee_acceptee_et_normalisee() {
+        let r = integrate(&rampe(), &avec_plages(vec![(8.0, 2.0)])).unwrap();
+        // Aire de y = x sur [2, 8] : (64 - 4) / 2 = 30.
+        assert_eq!(r.areas[0].from, 2.0);
+        assert_eq!(r.areas[0].to, 8.0);
+        assert_eq!(r.areas[0].area, 30.0);
+        assert_eq!(r.total, 30.0);
+    }
+
+    #[test]
+    fn plage_degeneree_est_une_plage_vide() {
+        assert_eq!(
+            integrate(&rampe(), &avec_plages(vec![(5.0, 5.0)])),
+            Err(AnalysisError::EmptyRange)
+        );
+        // Une plage vide après une valide fait échouer le tout.
+        assert_eq!(
+            integrate(&rampe(), &avec_plages(vec![(1.0, 2.0), (5.0, 5.0)])),
+            Err(AnalysisError::EmptyRange)
+        );
+    }
+
+    #[test]
+    fn plage_hors_donnees_de_l_autre_cote_est_vide() {
+        assert_eq!(
+            integrate(&rampe(), &avec_plages(vec![(-6.0, -5.0)])),
+            Err(AnalysisError::EmptyRange)
+        );
+        // Plage qui ne touche les données qu'en un point : dégénérée.
+        assert_eq!(
+            integrate(&rampe(), &avec_plages(vec![(10.0, 12.0)])),
+            Err(AnalysisError::EmptyRange)
+        );
+    }
+
+    #[test]
+    fn liste_de_plages_vide_integre_toute_la_courbe() {
+        let r = integrate(&rampe(), &spec()).unwrap();
+        assert_eq!(r.total, 50.0);
+        assert_eq!(r.areas.len(), 1);
+        assert_eq!((r.areas[0].from, r.areas[0].to), (0.0, 10.0));
+        assert_eq!(r.areas[0].points, 11);
+    }
+
+    #[test]
+    fn plages_chevauchantes_comptees_chacune_et_additionnees() {
+        // Comportement actuel : le recouvrement [4, 6] est compté deux fois.
+        let r = integrate(&rampe(), &avec_plages(vec![(2.0, 6.0), (4.0, 8.0)])).unwrap();
+        assert_eq!(r.areas[0].area, 16.0);
+        assert_eq!(r.areas[1].area, 24.0);
+        assert_eq!(r.total, 40.0);
+    }
+
+    #[test]
+    fn cumul_et_normalisation_ordinaires_sur_une_rampe() {
+        let mut sp = spec();
+        sp.cumulative = true;
+        sp.normalize = true;
+        let s = Series::new(vec![0.0, 1.0, 2.0, 3.0], vec![0.0, 1.0, 2.0, 3.0]);
+        let r = integrate(&s, &sp).unwrap();
+        assert_eq!(r.total, 4.5);
+        assert_eq!(r.cumulative.unwrap(), vec![0.0, 0.5, 2.0, 4.5]);
+        assert_eq!(
+            r.normalized.unwrap(),
+            vec![0.0, 1.0 / 4.5, 2.0 / 4.5, 3.0 / 4.5]
+        );
+    }
+
+    #[test]
+    fn debordement_total_infini_negatif_donne_aussi_nan() {
+        let s = Series::new(vec![0.0, 10.0], vec![-1e308, -1e308]);
+        let mut sp = spec();
+        sp.normalize = true;
+        let r = integrate(&s, &sp).unwrap();
+        assert!(r.total.is_nan());
+        assert!(r.normalized.unwrap().iter().all(|v| v.is_nan()));
+    }
+
+    #[test]
+    fn juste_sous_le_debordement_le_resultat_reste_fini_et_exact() {
+        let s = Series::new(vec![0.0, 10.0], vec![1e307, 1e307]);
+        let mut sp = spec();
+        sp.cumulative = true;
+        sp.normalize = true;
+        let r = integrate(&s, &sp).unwrap();
+        assert_eq!(r.total, 1e308);
+        assert_eq!(r.areas[0].area, 1e308);
+        assert_eq!(r.cumulative.unwrap(), vec![0.0, 1e308]);
+        assert!(r
+            .normalized
+            .unwrap()
+            .iter()
+            .all(|v| (v - 0.1).abs() < 1e-15));
+    }
+
+    #[test]
+    fn debordement_d_une_plage_parmi_deux_rend_le_total_nan_mais_garde_l_autre_aire() {
+        let s = Series::new(vec![0.0, 1.0, 2.0, 12.0], vec![1.0, 1.0, 1e308, 1e308]);
+        let r = integrate(&s, &avec_plages(vec![(0.0, 1.0), (2.0, 12.0)])).unwrap();
+        assert_eq!(r.areas[0].area, 1.0);
+        assert!(r.areas[1].area.is_infinite());
+        assert!(r.total.is_nan());
+    }
+
+    #[test]
+    fn normalisation_par_une_aire_nulle_avec_y_non_nul_donne_nan_et_non_infini() {
+        // Aire nulle (+1 puis -1) mais Y non nul : `y / 0` = ±inf → NaN.
+        let s = Series::new(vec![0.0, 1.0, 2.0], vec![1.0, 0.0, -1.0]);
+        let mut sp = spec();
+        sp.normalize = true;
+        let r = integrate(&s, &sp).unwrap();
+        assert_eq!(r.total, 0.0);
+        assert!(r.normalized.unwrap().iter().all(|v| v.is_nan()));
+    }
 }
