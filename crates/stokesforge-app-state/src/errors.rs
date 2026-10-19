@@ -764,6 +764,31 @@ pub mod analysis {
             }
             assert_eq!(samples.len(), 17);
         }
+
+        #[test]
+        fn l_erreur_de_profondeur_d_expression_est_mise_en_phrase_avec_sa_position() {
+            use stokesforge_analysis::expr::{Expr, ExprErrorKind};
+            let formule = "(".repeat(101) + "1" + &")".repeat(101);
+            let erreur = Expr::parse(&formule).unwrap_err();
+            assert_eq!(erreur.kind, ExprErrorKind::TooDeep);
+            assert_eq!(erreur.position, 101);
+            // Comparée en anglais : la langue ne dépend pas de l'environnement.
+            crate::i18n::set_language(crate::i18n::Language::English);
+            assert_eq!(
+                expr_message(&erreur),
+                "Expression nested too deeply (position 101)"
+            );
+            // Enveloppée dans l'erreur d'analyse, la phrase garde le détail.
+            assert_eq!(
+                error_message(&AnalysisError::BadExpression(erreur)),
+                "The model expression is invalid: Expression nested too deeply (position 101)"
+            );
+            // Le catalogue français porte la même clé et le même champ.
+            let fr = include_str!("../i18n/fr/stokesforge_app.ftl");
+            assert!(fr.contains(
+                "error-analysis-expr-too-deep = Expression trop imbriquée (position { $position })"
+            ));
+        }
     }
 }
 

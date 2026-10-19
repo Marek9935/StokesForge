@@ -718,6 +718,39 @@ mod tests {
     }
 
     #[test]
+    fn le_texte_d_un_modele_libre_avec_logarithmes_est_conserve_tel_quel() {
+        for formule in [
+            "a*log(x)+b",
+            "a * ln( x ) + b",
+            "logx(x, 3) - log10(x)/log2(x)",
+            "LOG(x)",
+        ] {
+            let op = Operation::Fit {
+                spec: FitSpec {
+                    model: Model::Custom {
+                        formula: formule.into(),
+                    },
+                    params: vec![],
+                },
+                range: Some((1.0, 50.0)),
+                residuals: true,
+            };
+            let tree = op.to_tree();
+            let relu = Operation::from_tree(&tree).unwrap();
+            assert_eq!(relu, op, "{formule}");
+            let Operation::Fit { spec, .. } = relu else {
+                panic!("Fit attendu");
+            };
+            assert_eq!(
+                spec.model,
+                Model::Custom {
+                    formula: formule.into()
+                }
+            );
+        }
+    }
+
+    #[test]
     fn chaque_operation_fait_l_aller_retour() {
         for op in all_operations() {
             let tree = op.to_tree();

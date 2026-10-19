@@ -396,6 +396,64 @@ mod tests {
     }
 
     #[test]
+    fn modele_libre_trop_profond_est_refuse_a_l_ajustement() {
+        // Le plafond de l'analyseur remonte jusqu'à l'ajustement, avec la
+        // position d'erreur, sans parcourir la formule entière.
+        let formule = format!("a*{}x{}", "(".repeat(100), ")".repeat(100));
+        let e = fit(
+            &[input(|v| v, vec![1.0, 2.0, 3.0])],
+            &spec(Model::Custom { formula: formule }),
+        )
+        .unwrap_err();
+        assert_eq!(
+            e,
+            AnalysisError::BadExpression(crate::expr::ExprError {
+                kind: crate::expr::ExprErrorKind::TooDeep,
+                position: 102 // `*` coûte 1 : la 100e parenthèse dépasse déjà
+            })
+        );
+    }
+
+    #[test]
+    fn modele_libre_log_est_en_base_10_de_bout_en_bout() {
+        // y = 2 log10(x) + 1 : avec `log` (base 10), a = 2 ; avec `ln`
+        // (naturel), a = 2 / ln 10 ; avec `logx(x, 10)`, a = 2. Si `log`
+        // redevenait naturel (#287), a vaudrait 2 ln 10 ≈ 4,6.
+        let x = grid(30, 0.5, 200.0);
+        let vrai = |v: f64| 2.0 * v.log10() + 1.0;
+        for (formule, a_attendu) in [
+            ("a*log(x)+b", 2.0),
+            ("a*log10(x)+b", 2.0),
+            ("a*logx(x, 10)+b", 2.0),
+            ("a*ln(x)+b", 2.0 / 10f64.ln()),
+            ("a*log2(x)+b", 2.0 * 2f64.ln() / 10f64.ln()),
+        ] {
+            let r = fit(
+                &[input(vrai, x.clone())],
+                &spec(Model::Custom {
+                    formula: formule.into(),
+                }),
+            )
+            .unwrap();
+            assert_eq!(r.param_names, ["a", "b"], "{formule}");
+            let v = &r.series[0].values;
+            assert!((v[0] - a_attendu).abs() < 1e-8, "{formule} : a = {}", v[0]);
+            assert!((v[1] - 1.0).abs() < 1e-8, "{formule} : b = {}", v[1]);
+            assert!((r.series[0].r_squared - 1.0).abs() < 1e-12, "{formule}");
+        }
+        // Base libre : y = 2 ln(x) / ln(b) ne dépend que de a et b ensemble ;
+        // fixer la base à 10 retrouve a.
+        let r = fit(
+            &[input(vrai, x)],
+            &spec(Model::Custom {
+                formula: "a*logx(x, 10)+b".into(),
+            }),
+        )
+        .unwrap();
+        assert!((r.series[0].values[0] - 2.0).abs() < 1e-8);
+    }
+
+    #[test]
     fn droite_exacte_par_moindres_carres_lineaires() {
         let i = input(|x| 1.5 - 0.25 * x, grid(20, 0.0, 10.0));
         let r = fit(&[i], &spec(Model::Linear)).unwrap();

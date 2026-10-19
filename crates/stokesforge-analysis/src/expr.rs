@@ -878,6 +878,418 @@ mod tests {
         assert_eq!(v, ((MAX_DEPTH - 1) as f64, 2.0, -3.0));
     }
 
+    // ---- Plafond de profondeur à la limite (#279) ----------------------------
+    //
+    // Les tailles sont écrites en dur (100 imbrications, 1 001 termes) et non
+    // dérivées de `MAX_DEPTH` / `NEST_COST` : un test qui recalcule la limite
+    // avec les constantes ne verrait pas une constante changée.
+
+    /// Lit, évalue (x = 1) et libère `src` sur un thread de 2 MiB.
+    fn lire_evaluer(src: String) -> Result<f64, ExprError> {
+        sur_2_mib(move || Expr::parse(&src).map(|e| e.eval(1.0, &[])))
+    }
+
+    fn position_trop_profonde(src: String) -> usize {
+        match lire_evaluer(src) {
+            Err(ExprError {
+                kind: ExprErrorKind::TooDeep,
+                position,
+            }) => position,
+            autre => panic!("TooDeep attendu, obtenu {autre:?}"),
+        }
+    }
+
+    /// `n` niveaux d'imbrication de `ouvre` autour de `x`, fermés par `ferme`.
+    fn imbrique(ouvre: &str, ferme: &str, n: usize) -> String {
+        format!("{}x{}", ouvre.repeat(n), ferme.repeat(n))
+    }
+
+    #[test]
+    fn chaine_de_termes_pile_a_la_limite() {
+        // Un terme de chaîne coûte 1 : 1 001 termes (1 000 opérateurs) passent,
+        // 1 002 non ; l'erreur désigne le jeton qui suit le 1 001e opérateur.
+        for op in ["+", "-", "*", "/"] {
+            for n in [999, 1000, 1001] {
+                let src = format!("1{}", format!("{op}1").repeat(n - 1));
+                assert!(lire_evaluer(src).is_ok(), "{n} termes {op}");
+            }
+            let src = format!("1{}", format!("{op}1").repeat(1001));
+            assert_eq!(position_trop_profonde(src), 2002, "1002 termes {op}");
+        }
+        // Valeurs : 1 001 uns additionnés.
+        let somme = format!("1{}", "+1".repeat(1000));
+        assert_eq!(lire_evaluer(somme).unwrap(), 1001.0);
+        let produit = format!("2{}", "*1".repeat(1000));
+        assert_eq!(lire_evaluer(produit).unwrap(), 2.0);
+    }
+
+    #[test]
+    fn imbrication_pile_a_la_limite_pour_chaque_forme() {
+        // Un niveau d'imbrication coûte 10 : 100 passent, 101 non.
+        let formes: [(&str, &str, &str); 6] = [
+            ("(", ")", "parentheses"),
+            ("-", "", "negations"),
+            ("+", "", "plus unaires"),
+            ("sin(", ")", "appels sin"),
+            ("1^", "", "exposants"),
+            ("pow(1,", ")", "appels pow imbriques"),
+        ];
+        for (ouvre, ferme, nom) in formes {
+            for n in [99, 100] {
+                assert!(lire_evaluer(imbrique(ouvre, ferme, n)).is_ok(), "{n} {nom}");
+            }
+            // Position : jeton qui suit l'ouverture du 101e niveau.
+            let attendue = match ouvre {
+                "(" | "-" | "+" => 101,
+                "sin(" => 404,
+                "1^" => 202,
+                _ => 6 * 101 - 2,
+            };
+            assert_eq!(
+                position_trop_profonde(imbrique(ouvre, ferme, 101)),
+                attendue,
+                "101 {nom}"
+            );
+        }
+    }
+
+    #[test]
+    fn valeurs_a_la_limite_d_imbrication() {
+        assert_eq!(lire_evaluer(imbrique("(", ")", 100)).unwrap(), 1.0);
+        // 100 négations : paire, donc x ; 99 : -x.
+        assert_eq!(lire_evaluer(imbrique("-", "", 100)).unwrap(), 1.0);
+        assert_eq!(lire_evaluer(imbrique("-", "", 99)).unwrap(), -1.0);
+        assert_eq!(lire_evaluer(imbrique("+", "", 100)).unwrap(), 1.0);
+        // sin(sin(…sin(1)…)) : le point fixe 0 est approché, la valeur finie.
+        let v = lire_evaluer(imbrique("sin(", ")", 100)).unwrap();
+        let mut attendu = 1.0_f64;
+        for _ in 0..100 {
+            attendu = attendu.sin();
+        }
+        assert_eq!(v, attendu);
+        // x^x^…^x à 1 : toujours 1.
+        assert_eq!(lire_evaluer(imbrique("x^", "", 100)).unwrap(), 1.0);
+        // pow(1, pow(1, …(1))) = 1.
+        assert_eq!(lire_evaluer(imbrique("pow(1,", ")", 100)).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn formes_melangees_a_la_limite() {
+        // 50 parenthèses (500) + chaîne de 500 opérateurs : total 1 000.
+        let formule =
+            |ops: usize| format!("{}1{}{}", "(".repeat(50), "+1".repeat(ops), ")".repeat(50));
+        assert_eq!(lire_evaluer(formule(500)).unwrap(), 501.0);
+        // Le 501e opérateur : jeton qui suit, 50 + 1 + 2*500 + 1 = 1052.
+        assert_eq!(position_trop_profonde(formule(501)), 1052);
+
+        // Chaîne de 495 opérateurs, plus celui qui introduit le dernier terme
+        // (496), puis ce terme entre parenthèses (10) portant 494 opérateurs :
+        // 496 + 10 + 494 = 1 000.
+        let imbriquee =
+            |interieur: usize| format!("1{}+(1{})", "+1".repeat(495), "+1".repeat(interieur));
+        assert_eq!(lire_evaluer(imbriquee(494)).unwrap(), 991.0);
+        let _ = position_trop_profonde(imbriquee(495));
+
+        // Deux chaînes de 900 en séquence : la profondeur est rendue entre
+        // les deux parenthèses, ce n'est pas une somme.
+        let deux = format!("(1{})*(1{})", "+1".repeat(900), "+1".repeat(900));
+        assert_eq!(lire_evaluer(deux).unwrap(), 901.0 * 901.0);
+
+        // Niveaux mêlés : 25 × ( - sin( 1^ ) ) = 100 niveaux acceptés, 101 non.
+        let melange = |tours: usize, extra: &str| {
+            format!(
+                "{}{}x{}",
+                "(-sin(1^".repeat(tours),
+                extra,
+                "))".repeat(tours)
+            )
+        };
+        // 4 niveaux par tour : `(`, `-`, `sin(`, `1^`.
+        assert!(lire_evaluer(melange(25, "")).is_ok());
+        position_trop_profonde(melange(25, "-"));
+        position_trop_profonde(melange(26, ""));
+    }
+
+    #[test]
+    fn la_profondeur_est_rendue_apres_chaque_sous_expression() {
+        // 20 blocs de 90 parenthèses côte à côte : 19 opérateurs + 900, la
+        // profondeur de chaque bloc est rendue avant le suivant.
+        let un = imbrique("(", ")", 90);
+        let src = vec![un; 20].join("+");
+        assert!(lire_evaluer(src).is_ok());
+        // 900 appels successifs : 899 opérateurs + 10 pour l'appel.
+        let src = vec!["sin(x)"; 900].join("*");
+        assert!(lire_evaluer(src).is_ok());
+        // Arguments multiples : chacun repart de la même profondeur.
+        let arg = imbrique("(", ")", 98); // max( + 98 = 990
+        let src = format!("max({arg}, {arg})");
+        assert!(lire_evaluer(src).is_ok());
+    }
+
+    #[test]
+    fn refus_rapide_sans_parcourir_un_million_d_elements() {
+        let debut = std::time::Instant::now();
+        let n = 1_000_000;
+        assert!(trop_profonde(format!("{}1", "1+".repeat(n))));
+        assert!(trop_profonde(format!(
+            "{}1{}",
+            "(".repeat(n),
+            ")".repeat(n)
+        )));
+        assert!(trop_profonde(format!("{}x", "-".repeat(n))));
+        assert!(
+            debut.elapsed() < std::time::Duration::from_secs(10),
+            "refus trop lent : {:?}",
+            debut.elapsed()
+        );
+    }
+
+    #[test]
+    fn formes_sans_cout_declare_a_l_origine_toutes_bornees() {
+        // Chacune de ces formes récursait sans compter : 10 000 niveaux
+        // suffisent à prouver qu'aucune n'échappe au plafond.
+        let n = 10_000;
+        for src in [
+            format!("{}1", "1^".repeat(n)),
+            format!("{}1", "-".repeat(n)),
+            format!("{}1", "+".repeat(n)),
+            format!("{}1{}", "(".repeat(n), ")".repeat(n)),
+            format!("{}1{}", "f(".repeat(n), ")".repeat(n)).replace("f(", "sin("),
+            format!("{}1{}", "pow(1,".repeat(n), ")".repeat(n)),
+            format!("{}x", "x^-".repeat(n)),
+            format!("{}1", "-(".repeat(n)),
+        ] {
+            assert!(trop_profonde(src.clone()), "{}", &src[..src.len().min(24)]);
+        }
+    }
+
+    #[test]
+    fn formule_limite_tient_dans_une_pile_reduite() {
+        // Parse + eval + Drop de la formule la plus coûteuse de chaque forme,
+        // sur 1 MiB (la moitié de la pile de l'acteur). Mesuré en debug : la pire
+        // forme (imbrications de 100) passe à 768 KiB et avorte à 512 KiB, soit
+        // une marge de 2,7 sur les 2 MiB réels et de 1,3 sur ce test.
+        let formules = [
+            format!("1{}", "+1".repeat(1000)),
+            format!("1{}", "*x".repeat(1000)),
+            imbrique("(", ")", 100),
+            imbrique("-", "", 100),
+            imbrique("sin(", ")", 100),
+            imbrique("x^", "", 100),
+            imbrique("pow(1,", ")", 100),
+            format!("{}1{}{}", "(".repeat(50), "+1".repeat(500), ")".repeat(50)),
+            format!("1{}+(1{})", "+1".repeat(495), "+1".repeat(494)),
+            format!("{}x{}", "(-sin(1^".repeat(25), "))".repeat(25)),
+        ];
+        for src in formules {
+            let nom = src[..src.len().min(20)].to_string();
+            let ok = std::thread::Builder::new()
+                .stack_size(1 << 20)
+                .spawn(move || {
+                    let e = Expr::parse(&src).unwrap();
+                    let v = e.eval(1.0, &[]);
+                    drop(e);
+                    v.is_finite()
+                })
+                .unwrap()
+                .join()
+                .unwrap();
+            assert!(ok, "{nom}");
+        }
+    }
+
+    #[test]
+    fn formules_ordinaires_inchangees() {
+        let (x, a, b) = (0.7_f64, 2.0_f64, 0.3_f64);
+        let cas: [(&str, f64); 6] = [
+            ("a*exp(-x/b) + 1", a * (-x / b).exp() + 1.0),
+            ("a + b*x + x^2", a + b * x + x * x),
+            (
+                "a*sin(2*pi*x)^2",
+                a * (2.0 * std::f64::consts::PI * x).sin().powi(2),
+            ),
+            ("-(x - a)^2 / (2*b^2)", -((x - a).powi(2)) / (2.0 * b * b)),
+            ("a / (1 + exp(-(x - b)))", a / (1.0 + (-(x - b)).exp())),
+            ("2^3^2 - -x", 512.0 + x),
+        ];
+        for (src, attendu) in cas {
+            let e = Expr::parse(src).unwrap();
+            let p: Vec<f64> = e
+                .params()
+                .iter()
+                .map(|n| if n == "a" { a } else { b })
+                .collect();
+            assert!((e.eval(x, &p) - attendu).abs() < 1e-12, "{src}");
+        }
+    }
+
+    #[test]
+    fn aucune_formule_realiste_de_cent_termes_n_est_refusee() {
+        let somme_de_gaussiennes = (1..=100)
+            .map(|i| format!("a{i}*exp(-((x - c{i})/w{i})^2)"))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let polynome = (0..100)
+            .map(|i| format!("a{i}*x^{i}"))
+            .collect::<Vec<_>>()
+            .join(" + ");
+        let produit = (1..=100)
+            .map(|i| format!("(1 + x/t{i})"))
+            .collect::<Vec<_>>()
+            .join(" * ");
+        let alterne = (1..=100)
+            .map(|i| format!("{}(a{i}*sin(x*{i}))", if i % 2 == 0 { "-" } else { "+" }))
+            .collect::<Vec<_>>()
+            .join(" ");
+        for src in [somme_de_gaussiennes, polynome, produit, alterne] {
+            let e = lire_evaluer_compile(src.clone());
+            assert!(e.is_ok(), "{:?}", &src[..40]);
+        }
+    }
+
+    fn lire_evaluer_compile(src: String) -> Result<usize, ExprError> {
+        sur_2_mib(move || Expr::parse(&src).map(|e| e.params().len()))
+    }
+
+    // ---- Logarithmes (#287) --------------------------------------------------
+
+    fn proche(a: f64, b: f64) -> bool {
+        (a - b).abs() <= 1e-12 * b.abs().max(1.0)
+    }
+
+    #[test]
+    fn logarithmes_table_de_valeurs() {
+        let e = std::f64::consts::E;
+        let table: [(&str, f64); 14] = [
+            ("log(1)", 0.0),
+            ("log(10)", 1.0),
+            ("log(100)", 2.0),
+            ("log(0.001)", -3.0),
+            ("log(1e6)", 6.0),
+            ("ln(1)", 0.0),
+            ("ln(e)", 1.0),
+            ("ln(e^2)", 2.0),
+            ("logx(8, 2)", 3.0),
+            ("logx(81, 3)", 4.0),
+            ("logx(0.5, 2)", -1.0),
+            ("logx(1, 7)", 0.0),
+            ("logx(e, e)", 1.0),
+            ("logx(100, 10)", 2.0),
+        ];
+        for (src, attendu) in table {
+            let v = ev(src, 0.0, &[]);
+            assert!(proche(v, attendu), "{src} = {v}, attendu {attendu}");
+        }
+        // `log` n'est pas le logarithme naturel : log(e) = 1/ln 10.
+        assert!(proche(ev("log(e)", 0.0, &[]), 1.0 / 10f64.ln()));
+        assert!((ev("log(e)", 0.0, &[]) - 1.0).abs() > 0.5);
+        // logx(x, b) = ln x / ln b sur une grille de bases et de x.
+        for b in [0.1, 0.5, 2.0, e, 3.0, 10.0, 1e3] {
+            for x in [1e-9, 0.01, 0.5, 1.0, 2.0, 7.5, 1e4, 1e12] {
+                let v = ev(&format!("logx(x, {b:e})"), x, &[]);
+                let attendu = x.ln() / b.ln();
+                // La base peut aussi être un paramètre libre.
+                assert_eq!(ev("logx(x, b)", x, &[b]), v);
+                assert!(proche(v, attendu), "logx({x}, {b}) = {v} vs {attendu}");
+            }
+        }
+    }
+
+    #[test]
+    fn logarithmes_domaine_et_valeurs_speciales() {
+        let (inf, ninf) = (f64::INFINITY, f64::NEG_INFINITY);
+        // x < 0 : NaN pour toutes les formes.
+        for f in ["log(x)", "ln(x)", "log2(x)", "log10(x)", "logx(x, 2)"] {
+            assert!(ev(f, -1.0, &[]).is_nan(), "{f}");
+            assert!(ev(f, ninf, &[]).is_nan(), "{f}(-inf)");
+            assert!(ev(f, f64::NAN, &[]).is_nan(), "{f}(NaN)");
+            assert_eq!(ev(f, 0.0, &[]), ninf, "{f}(0) = -inf (choix existant)");
+            assert_eq!(ev(f, -0.0, &[]), ninf, "{f}(-0) = -inf");
+        }
+        // x = +inf : l'infini.
+        for f in ["log(x)", "ln(x)", "log2(x)", "log10(x)", "logx(x, 2)"] {
+            assert_eq!(ev(f, inf, &[]), inf, "{f}(inf)");
+        }
+        // logx(inf, b) : +inf pour b > 1, -inf pour 0 < b < 1.
+        assert_eq!(ev("logx(x, 0.5)", inf, &[]), ninf);
+        assert_eq!(ev("logx(0, 0.5)", 0.0, &[]), inf);
+        // Base ≤ 0, = 1 ou NaN : NaN, quel que soit x (même valide, même NaN).
+        for b in ["0", "-0", "-2", "1", "(0/0)", "-1/0"] {
+            for x in [0.5, 1.0, 8.0] {
+                let v = ev(&format!("logx({x}, {b})"), 0.0, &[]);
+                assert!(v.is_nan(), "logx({x}, {b}) = {v}");
+            }
+        }
+        // x NaN avec une base valide : NaN.
+        assert!(ev("logx(0/0, 2)", 0.0, &[]).is_nan());
+        // Base infinie : x/inf -> 0 (b = +inf n'est pas rejetée, ln b = inf).
+        assert_eq!(ev("logx(8, 1/0)", 0.0, &[]), 0.0);
+    }
+
+    #[test]
+    fn logarithmes_arite_exacte_et_casse() {
+        let arite = |src: &str| match Expr::parse(src).unwrap_err() {
+            ExprError {
+                kind:
+                    ExprErrorKind::WrongArgumentCount {
+                        name,
+                        expected,
+                        found,
+                    },
+                position,
+            } => (name, expected, found, position),
+            autre => panic!("{src} : {autre:?}"),
+        };
+        assert_eq!(arite("logx(8)"), ("logx".into(), 2, 1, 0));
+        assert_eq!(arite("logx()"), ("logx".into(), 2, 0, 0));
+        assert_eq!(arite("logx(1, 2, 3)"), ("logx".into(), 2, 3, 0));
+        assert_eq!(arite("log(8, 2)"), ("log".into(), 1, 2, 0));
+        assert_eq!(arite("log()"), ("log".into(), 1, 0, 0));
+        assert_eq!(arite("ln(8, 2)"), ("ln".into(), 1, 2, 0));
+        assert_eq!(arite("ln()"), ("ln".into(), 1, 0, 0));
+        assert_eq!(arite("log2(1, 2)"), ("log2".into(), 1, 2, 0));
+        assert_eq!(arite("log10()"), ("log10".into(), 1, 0, 0));
+        // La position est celle du nom, pas de la parenthèse.
+        assert_eq!(arite("1 + logx(8)"), ("logx".into(), 2, 1, 4));
+        // Les noms sont sensibles à la casse : `LOG`, `Ln`, `LogX` sont inconnus.
+        for nom in ["LOG", "Ln", "LN", "LogX", "Log10", "LOG2"] {
+            assert_eq!(
+                Expr::parse(&format!("{nom}(2)")).unwrap_err(),
+                ExprError {
+                    kind: ExprErrorKind::UnknownFunction(nom.into()),
+                    position: 0
+                },
+                "{nom}"
+            );
+        }
+        // Sans parenthèse, `log` / `ln` sont des paramètres ordinaires.
+        assert_eq!(Expr::parse("log + ln").unwrap().params(), ["log", "ln"]);
+    }
+
+    #[test]
+    fn log2_log10_et_log_coherents_avec_logx() {
+        for x in [1e-6, 0.3, 1.0, 2.0, 5.0, 123.456, 1e9] {
+            let (log, log10, log2, ln) = (
+                ev("log(x)", x, &[]),
+                ev("log10(x)", x, &[]),
+                ev("log2(x)", x, &[]),
+                ev("ln(x)", x, &[]),
+            );
+            assert_eq!(log, log10, "log et log10 sont le même logarithme (x = {x})");
+            assert!(proche(log10, ev("logx(x, 10)", x, &[])), "x = {x}");
+            assert!(proche(log2, ev("logx(x, 2)", x, &[])), "x = {x}");
+            assert!(proche(ln, ev("logx(x, e)", x, &[])), "x = {x}");
+            // Relations entre bases.
+            assert!(proche(ln, log * 10f64.ln()), "x = {x}");
+            assert!(proche(log2, ln / 2f64.ln()), "x = {x}");
+        }
+        // logx est antisymétrique en échangeant x et la base : logx(x,b)*logx(b,x) = 1.
+        for (x, b) in [(8.0, 2.0), (5.0, 3.0), (0.2, 7.0)] {
+            let p = ev(&format!("logx({x},{b})*logx({b},{x})"), 0.0, &[]);
+            assert!(proche(p, 1.0), "{x} {b}");
+        }
+    }
+
     #[test]
     fn erf_valeurs_de_reference() {
         // Valeurs tabulées (Abramowitz & Stegun 7.1).
