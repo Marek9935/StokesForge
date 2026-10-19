@@ -401,6 +401,47 @@ mod tests {
     use stokesforge_session::Session;
 
     #[test]
+    fn chaque_avertissement_a_sa_propre_phrase_dans_la_langue_courante() {
+        use stokesforge_app_state::i18n::{build_loader, language};
+        let loader = build_loader(language());
+        let attendu = [
+            (
+                Warning::SignalStepNotUniform,
+                tr!(in &loader; "analysis-warning-step-not-uniform"),
+            ),
+            (
+                Warning::IrfStepMismatch,
+                tr!(in &loader; "analysis-warning-irf-step"),
+            ),
+            (
+                Warning::NegativeClipped(4),
+                tr!(in &loader; "analysis-warning-negative-clipped", count = 4_i64),
+            ),
+            (
+                Warning::NotConverged,
+                tr!(in &loader; "analysis-warning-not-converged"),
+            ),
+            (
+                Warning::Undetermined(3),
+                tr!(in &loader; "analysis-warning-undetermined", count = 3_i64),
+            ),
+        ];
+        for (warning, text) in &attendu {
+            assert_eq!(&warning_text(warning), text, "{warning:?}");
+            assert!(!text.is_empty());
+        }
+        // Le nombre est bien celui de l'avertissement.
+        assert_ne!(
+            warning_text(&Warning::Undetermined(3)),
+            warning_text(&Warning::Undetermined(4))
+        );
+        assert_ne!(
+            warning_text(&Warning::NegativeClipped(3)),
+            warning_text(&Warning::NegativeClipped(4))
+        );
+    }
+
+    #[test]
     fn les_resultats_ont_trois_chiffres_et_l_incertitude_deux() {
         assert_eq!(format_value(12.3456, None), "12.3");
         assert_eq!(format_value(12.3456, Some(0.0523)), "12.346 ± 0.052");

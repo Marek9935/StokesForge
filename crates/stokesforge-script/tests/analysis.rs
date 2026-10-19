@@ -20,6 +20,12 @@ struct Banc {
 
 /// Une feuille `[Book1]Sheet1` : X = 0..20, Y = 2x + 1, Ref = 2.
 fn banc() -> Banc {
+    banc_avec(false)
+}
+
+/// Comme [`banc`], avec en plus (si `pic`) une colonne `G` : une gaussienne
+/// xc = 8, A = 5, fwhm = 3 (#281).
+fn banc_avec(pic: bool) -> Banc {
     let mut project = Project::new("Analyse").unwrap();
     project.add_workbook(project.root(), Some("Book1")).unwrap();
     let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
@@ -34,6 +40,15 @@ fn banc() -> Banc {
     project
         .add_column(sheet, None, Some("Ref"), Column::from_f64(&[2.0; 21]))
         .unwrap();
+    if pic {
+        let g: Vec<f64> = xs
+            .iter()
+            .map(|v| 5.0 * (-0.5 * ((v - 8.0) / (3.0 / 2.354_820_045)).powi(2)).exp())
+            .collect();
+        project
+            .add_column(sheet, None, Some("G"), Column::from_f64(&g))
+            .unwrap();
+    }
     project
         .set_column_meta(
             x,
@@ -569,4 +584,23 @@ assert abs(pyst.column(y)[3] - 3.0) < 1e-10
     assert_eq!(b.session.snapshot().unwrap().tree, before.tree);
     b.session.redo().unwrap();
     assert_eq!(b.session.snapshot().unwrap().tree, after.tree);
+}
+
+#[test]
+fn un_ajustement_arrete_sur_un_plateau_dit_qu_il_n_a_pas_converge() {
+    // #281 : xc = 1000, loin du pic. Les messages `warnings` sont de l'anglais.
+    let b = banc_avec(true);
+    run(
+        &b,
+        r#"
+g = pyst.resolve('[Book1]Sheet1!G')
+r = pyst.analysis.fit(g, x, model='gaussian', initial={'xc': 1000.0, 'fwhm': 1.0})
+assert r['warnings'] == [
+    '3 parameter(s) are not determined by the data (no uncertainty)',
+    'the fit did not converge: the model does not reach the data',
+], r['warnings']
+ok = pyst.analysis.fit(g, x, model='gaussian', initial={'xc': 7.0, 'fwhm': 2.0})
+assert ok['warnings'] == [], ok['warnings']
+"#,
+    );
 }

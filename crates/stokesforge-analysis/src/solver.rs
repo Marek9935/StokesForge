@@ -512,6 +512,152 @@ mod tests {
         }
     }
 
+    /// Huit points X = 0..7 et un vecteur orthogonal à `1` et à `x` : un
+    /// ajustement affine laisse exactement `k · ORTHO` de résidu.
+    const ORTHO: [f64; 8] = [1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0];
+    /// `Σ (x − x̄)²` pour X = 0..7.
+    const SS_X: f64 = 42.0;
+
+    /// Les données `y = x + k·ORTHO` dont SSres/SStot vaut `fraction` après un
+    /// ajustement affine : SSres = 8k², SStot = 42 + 8k².
+    fn affine_with_residual(fraction: f64) -> (Vec<f64>, Vec<f64>) {
+        let k = (SS_X * fraction / (8.0 * (1.0 - fraction))).sqrt();
+        let x: Vec<f64> = (0..8).map(f64::from).collect();
+        let y = x.iter().zip(ORTHO).map(|(x, r)| x + k * r).collect();
+        (x, y)
+    }
+
+    /// `p0 + p1·x`, plus (si `dead`) une case libre `p2` sans aucun effet.
+    fn affine_term<'a>(x: &'a [f64], y: &'a [f64]) -> Term<'a> {
+        Term {
+            x,
+            y,
+            sigma: None,
+            eval: Box::new(move |p, out| {
+                for (o, v) in out.iter_mut().zip(x) {
+                    *o = p[0] + p[1] * v + 0.0 * p[2];
+                }
+            }),
+        }
+    }
+
+    fn affine_slots(dead: bool) -> Vec<Slot> {
+        let mut slots = vec![Slot::new("a", 0.0), Slot::new("b", 1.0)];
+        let mut c = Slot::new("c", 1.0);
+        c.fixed = !dead;
+        slots.push(c);
+        slots
+    }
+
+    fn solve_affine(fraction: f64, dead: bool) -> Solution {
+        let (x, y) = affine_with_residual(fraction);
+        #[allow(clippy::let_and_return)] // `x` et `y` doivent survivre à l'appel.
+        let sol = solve_problem(
+            &affine_slots(dead),
+            &[affine_term(&x, &y)],
+            Options::default(),
+        )
+        .unwrap();
+        sol
+    }
+
+    #[test]
+    fn le_jeu_de_donnees_construit_donne_le_residu_voulu() {
+        for f in [0.2, 0.49, 0.51, 0.9] {
+            let sol = solve_affine(f, true);
+            let (x, y) = affine_with_residual(f);
+            let mean = y.iter().sum::<f64>() / 8.0;
+            let ss_tot: f64 = y.iter().map(|v| (v - mean) * (v - mean)).sum();
+            assert!((sol.terms[0].ss_res / ss_tot - f).abs() < 1e-9, "{f}");
+            assert_eq!(x.len(), 8);
+        }
+    }
+
+    #[test]
+    fn le_seuil_du_plateau_sur_la_part_de_residu_est_a_une_demie() {
+        // Case sans effet dans les deux cas : seule la part de résidu change.
+        let sous = solve_affine(0.49, true);
+        let dessus = solve_affine(0.51, true);
+        assert_eq!(sous.undetermined, vec![false, false, true]);
+        assert_eq!(dessus.undetermined, vec![false, false, true]);
+        assert!(!sous.plateau, "0,49 : sous le seuil");
+        assert!(dessus.plateau, "0,51 : au-dessus du seuil");
+        const { assert!(PLATEAU_RESIDUAL_FRACTION > 0.49 && PLATEAU_RESIDUAL_FRACTION < 0.51) };
+    }
+
+    #[test]
+    fn un_gros_residu_sans_case_sans_effet_est_un_minimum_pas_un_plateau() {
+        for f in [0.51, 0.9, 0.99] {
+            let sol = solve_affine(f, false);
+            assert!(sol.undetermined.iter().all(|u| !u), "{f}");
+            assert!(!sol.plateau, "{f}");
+        }
+    }
+
+    #[test]
+    fn un_modele_surparametre_qui_s_ajuste_bien_est_indetermine_sans_plateau() {
+        for f in [0.0, 1e-6, 0.1] {
+            let sol = solve_affine(f, true);
+            assert_eq!(sol.undetermined, vec![false, false, true], "{f}");
+            assert!(!sol.plateau, "{f}");
+        }
+    }
+
+    #[test]
+    fn une_courbe_constante_n_est_jamais_un_plateau() {
+        // SStot = 0 : la part de résidu n'a pas de sens (SSres/0 = +inf si le
+        // modèle ne peut pas l'atteindre : `a` fixé à 0, y = 3).
+        let x: Vec<f64> = (0..8).map(f64::from).collect();
+        let y = vec![3.0; 8];
+        let mut slots = affine_slots(true);
+        slots[0].fixed = true;
+        slots[0].initial = 0.0;
+        let sol = solve_problem(&slots, &[affine_term(&x, &y)], Options::default()).unwrap();
+        assert!(sol.terms[0].ss_res > 1.0, "{}", sol.terms[0].ss_res);
+        assert!(sol.undetermined[2]);
+        assert!(!sol.plateau);
+    }
+
+    #[test]
+    fn un_ajustement_global_est_sur_un_plateau_si_une_seule_courbe_l_est() {
+        let (xa, ya) = affine_with_residual(0.01);
+        let (xb, yb) = affine_with_residual(0.9);
+        let slots = affine_slots(true);
+        for ordre in [[0, 1], [1, 0]] {
+            let courbes = [(&xa, &ya), (&xb, &yb)];
+            let terms: Vec<Term> = ordre
+                .iter()
+                .map(|&i| affine_term(courbes[i].0, courbes[i].1))
+                .collect();
+            let sol = solve_problem(&slots, &terms, Options::default()).unwrap();
+            assert!(sol.plateau, "ordre {ordre:?}");
+        }
+        // Deux courbes bien ajustées : pas de plateau.
+        let sol = solve_problem(
+            &slots,
+            &[affine_term(&xa, &ya), affine_term(&xa, &ya)],
+            Options::default(),
+        )
+        .unwrap();
+        assert!(!sol.plateau);
+    }
+
+    #[test]
+    fn l_exemple_de_l_issue_281_est_un_plateau_et_garde_ses_valeurs() {
+        let (x, y) = gaussian_data(0.0);
+        let sol = solve_problem(
+            &gaussian_slots(1000.0, 1.0),
+            &[gaussian_problem(&x, &y)],
+            Options::default(),
+        )
+        .unwrap();
+        assert!(sol.plateau);
+        // La solution est rendue (pas d'erreur dure) : xc et fwhm n'ont pas bougé.
+        assert!((sol.values[1] - 1000.0).abs() < 1e-6, "{:?}", sol.values);
+        assert!((sol.values[3] - 1.0).abs() < 1e-6, "{:?}", sol.values);
+        assert_eq!(sol.undetermined, vec![false, true, true, true]);
+    }
+
     #[test]
     fn les_incertitudes_suivent_le_bruit() {
         let x = xs(400, 0.0, 10.0);

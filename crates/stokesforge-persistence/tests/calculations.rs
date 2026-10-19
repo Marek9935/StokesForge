@@ -62,6 +62,8 @@ fn project_with_calculation() -> Project {
                     Warning::IrfStepMismatch,
                     Warning::Undetermined(2),
                     Warning::NotConverged,
+                    Warning::SignalStepNotUniform,
+                    Warning::Undetermined(17),
                 ],
             }],
             keep_results: true,

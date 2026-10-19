@@ -597,4 +597,83 @@ mod tests {
         let calc = kept.values().next().unwrap();
         assert_eq!(calc.results[0].warnings, vec![Warning::IrfStepMismatch]);
     }
+
+    /// Chaque variante de `Warning`, `match` exhaustif sans `_` : une variante
+    /// ajoutée ne compile pas ici tant qu'elle n'a pas sa ligne de transport.
+    fn rang(w: &Warning) -> usize {
+        match w {
+            Warning::SignalStepNotUniform => 0,
+            Warning::IrfStepMismatch => 1,
+            Warning::NegativeClipped(_) => 2,
+            Warning::NotConverged => 3,
+            Warning::Undetermined(_) => 4,
+        }
+    }
+
+    fn tous_les_avertissements() -> Vec<Warning> {
+        let mut all = vec![
+            Warning::SignalStepNotUniform,
+            Warning::IrfStepMismatch,
+            Warning::NotConverged,
+        ];
+        for n in [0, 1, 2, 3, 17, u32::MAX as usize, usize::MAX] {
+            all.push(Warning::NegativeClipped(n));
+            all.push(Warning::Undetermined(n));
+        }
+        all
+    }
+
+    #[test]
+    fn tout_avertissement_fait_l_aller_retour_des_enregistrements() {
+        let all = tous_les_avertissements();
+        let rangs: std::collections::BTreeSet<usize> = all.iter().map(rang).collect();
+        assert_eq!(rangs.len(), 5, "toutes les variantes sont éprouvées");
+        for w in &all {
+            assert_eq!(record_to_warning(&warning_to_record(w)).as_ref(), Some(w));
+        }
+    }
+
+    #[test]
+    fn les_noms_de_fichier_des_avertissements_sont_figes() {
+        // Ces chaînes sont le format `.stf` : les renommer casse les fichiers.
+        let attendu = [
+            (Warning::SignalStepNotUniform, "signal_step_not_uniform", 0),
+            (Warning::IrfStepMismatch, "irf_step_mismatch", 0),
+            (Warning::NegativeClipped(4), "negative_clipped", 4),
+            (Warning::NotConverged, "not_converged", 0),
+            (Warning::Undetermined(2), "undetermined", 2),
+        ];
+        for (w, kind, count) in attendu {
+            let r = warning_to_record(&w);
+            assert_eq!((r.kind.as_str(), r.count), (kind, count), "{w:?}");
+        }
+    }
+
+    #[test]
+    fn un_avertissement_inconnu_n_en_prend_pas_un_connu_et_l_ordre_est_garde() {
+        let rec = |kind: &str, count| WarningRecord {
+            kind: kind.into(),
+            count,
+        };
+        let mut r = record(good_operation(), 7);
+        r.results = vec![SeriesResultRecord {
+            warnings: vec![
+                rec("future_first", 9),
+                rec("not_converged", 5),
+                rec("Not_Converged", 0),
+                rec("", 0),
+                rec("undetermined", 3),
+                rec("not_converged ", 0),
+                rec("future_last", 1),
+            ],
+            ..Default::default()
+        }];
+        let (kept, discarded) = records_to_calculations(vec![r], 1000);
+        assert!(discarded.is_empty(), "le calcul n'est pas écarté");
+        let calc = kept.values().next().unwrap();
+        assert_eq!(
+            calc.results[0].warnings,
+            vec![Warning::NotConverged, Warning::Undetermined(3)]
+        );
+    }
 }
