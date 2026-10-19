@@ -31,6 +31,9 @@ pub enum ExprErrorKind {
     UnexpectedToken,
     UnbalancedParenthesis,
     BadNumber,
+    /// Profondeur de l'arbre au-delà de [`MAX_DEPTH`] (parenthèses, signes,
+    /// exposants ou chaîne d'opérateurs trop longs).
+    TooDeep,
     UnknownFunction(String),
     WrongArgumentCount {
         name: String,
@@ -48,6 +51,7 @@ impl fmt::Display for ExprErrorKind {
             Self::UnexpectedToken => write!(f, "unexpected token"),
             Self::UnbalancedParenthesis => write!(f, "unbalanced parenthesis"),
             Self::BadNumber => write!(f, "malformed number"),
+            Self::TooDeep => write!(f, "expression nested too deeply"),
             Self::UnknownFunction(n) => write!(f, "unknown function '{n}'"),
             Self::WrongArgumentCount {
                 name,
@@ -317,8 +321,18 @@ fn tokenize(src: &str) -> Result<Vec<(Tok, usize)>, ExprError> {
     Ok(out)
 }
 
+/// Plafond de profondeur de l'arbre, en « coût » : un niveau d'imbrication
+/// (parenthèse, appel, signe, exposant) coûte [`NEST_COST`], un terme d'une
+/// chaîne `a+b+c…` ou `a*b*c…` coûte 1. Le parseur, `eval_node` et le `Drop`
+/// de l'arbre récursent d'autant : borné ici, aucun ne peut dépasser la pile
+/// d'un thread de 2 MiB, même en debug (`docs/archive/rustrewrite/
+/// questions-ouvertes.md` §11, #279). Ouvre 100 imbrications ou 1 000 termes.
+pub const MAX_DEPTH: usize = 1000;
+const NEST_COST: usize = 10;
+
 struct Parser {
     toks: Vec<(Tok, usize)>,
+    depth: usize,
     pos: usize,
     end: usize,
     params: Vec<String>,
@@ -330,27 +344,53 @@ impl Parser {
         ExprError { kind, position }
     }
 
+    /// Ajoute `cost` à la profondeur courante ; au-delà du plafond, `TooDeep`.
+    fn charge(&mut self, cost: usize) -> Result<(), ExprError> {
+        self.depth += cost;
+        if self.depth > MAX_DEPTH {
+            return Err(self.err(ExprErrorKind::TooDeep));
+        }
+        Ok(())
+    }
+
+    /// Exécute `f` un niveau d'imbrication plus bas, puis rend la profondeur.
+    fn nested<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, ExprError>,
+    ) -> Result<T, ExprError> {
+        self.charge(NEST_COST)?;
+        let out = f(self)?;
+        self.depth -= NEST_COST;
+        Ok(out)
+    }
+
     fn peek(&self) -> Option<&Tok> {
         self.toks.get(self.pos).map(|t| &t.0)
     }
 
     fn expr(&mut self) -> Result<Node, ExprError> {
+        let base = self.depth;
         let mut left = self.term()?;
         while let Some(Tok::Op(op @ ('+' | '-'))) = self.peek().cloned() {
             self.pos += 1;
+            self.charge(1)?;
             let right = self.term()?;
             left = Node::Bin(op, Box::new(left), Box::new(right));
         }
+        self.depth = base;
         Ok(left)
     }
 
     fn term(&mut self) -> Result<Node, ExprError> {
+        let base = self.depth;
         let mut left = self.unary()?;
         while let Some(Tok::Op(op @ ('*' | '/'))) = self.peek().cloned() {
             self.pos += 1;
+            self.charge(1)?;
             let right = self.unary()?;
             left = Node::Bin(op, Box::new(left), Box::new(right));
         }
+        self.depth = base;
         Ok(left)
     }
 
@@ -358,11 +398,11 @@ impl Parser {
         match self.peek() {
             Some(Tok::Op('-')) => {
                 self.pos += 1;
-                Ok(Node::Neg(Box::new(self.unary()?)))
+                Ok(Node::Neg(Box::new(self.nested(Self::unary)?)))
             }
             Some(Tok::Op('+')) => {
                 self.pos += 1;
-                self.unary()
+                self.nested(Self::unary)
             }
             _ => self.power(),
         }
@@ -373,7 +413,7 @@ impl Parser {
         if let Some(Tok::Op('^')) = self.peek() {
             self.pos += 1;
             // Associatif à droite ; l'exposant peut porter un signe (`2^-3`).
-            let exp = self.unary()?;
+            let exp = self.nested(Self::unary)?;
             return Ok(Node::Bin('^', Box::new(base), Box::new(exp)));
         }
         Ok(base)
@@ -390,7 +430,7 @@ impl Parser {
             }
             Tok::LParen => {
                 self.pos += 1;
-                let inner = self.expr()?;
+                let inner = self.nested(Self::expr)?;
                 match self.peek() {
                     Some(Tok::RParen) => {
                         self.pos += 1;
@@ -415,7 +455,7 @@ impl Parser {
                         self.pos += 1;
                     } else {
                         loop {
-                            args.push(self.expr()?);
+                            args.push(self.nested(Self::expr)?);
                             match self.peek() {
                                 Some(Tok::Comma) => self.pos += 1,
                                 Some(Tok::RParen) => {
@@ -472,6 +512,7 @@ impl Expr {
         }
         let mut parser = Parser {
             toks,
+            depth: 0,
             pos: 0,
             end: src.chars().count(),
             params: Vec::new(),
@@ -634,6 +675,64 @@ mod tests {
             Expr::parse("1 2").unwrap_err().kind,
             ExprErrorKind::UnexpectedToken
         );
+    }
+
+    /// Exécute `f` sur un thread de 2 MiB (celui de l'acteur de session) ;
+    /// en debug, c'est le cas le plus serré.
+    fn sur_2_mib<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> R {
+        std::thread::Builder::new()
+            .stack_size(2 << 20)
+            .spawn(f)
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    fn trop_profonde(src: String) -> bool {
+        sur_2_mib(move || {
+            matches!(
+                Expr::parse(&src),
+                Err(ExprError {
+                    kind: ExprErrorKind::TooDeep,
+                    ..
+                })
+            )
+        })
+    }
+
+    #[test]
+    fn formule_profonde_refusee_sans_depasser_la_pile() {
+        // Formes qui avortaient le processus avant le plafond (#279).
+        assert!(trop_profonde(format!(
+            "{}1{}",
+            "(".repeat(100_000),
+            ")".repeat(100_000)
+        )));
+        assert!(trop_profonde(format!("{}1", "1+".repeat(100_000))));
+        assert!(trop_profonde(format!("{}1", "1*".repeat(100_000))));
+        assert!(trop_profonde(format!("{}1", "-".repeat(100_000))));
+        assert!(trop_profonde(format!("{}1", "1^".repeat(100_000))));
+        assert!(trop_profonde(format!(
+            "{}1{}",
+            "sin(".repeat(100_000),
+            ")".repeat(100_000)
+        )));
+    }
+
+    #[test]
+    fn formule_juste_sous_le_plafond_acceptee_et_evaluee() {
+        let v = sur_2_mib(|| {
+            let somme = Expr::parse(&format!("{}1", "1+".repeat(MAX_DEPTH - 2))).unwrap();
+            let n = MAX_DEPTH / NEST_COST - 1;
+            let parens = Expr::parse(&format!("{}x{}", "(".repeat(n), ")".repeat(n))).unwrap();
+            let neg = Expr::parse(&format!("{}x", "-".repeat(n))).unwrap();
+            (
+                somme.eval(0.0, &[]),
+                parens.eval(2.0, &[]),
+                neg.eval(3.0, &[]),
+            )
+        });
+        assert_eq!(v, ((MAX_DEPTH - 1) as f64, 2.0, -3.0));
     }
 
     #[test]

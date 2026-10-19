@@ -673,6 +673,7 @@ pub mod analysis {
                 tr!("error-analysis-expr-unbalanced", position = position)
             }
             ExprErrorKind::BadNumber => tr!("error-analysis-expr-bad-number", position = position),
+            ExprErrorKind::TooDeep => tr!("error-analysis-expr-too-deep", position = position),
             ExprErrorKind::UnknownFunction(name) => tr!(
                 "error-analysis-expr-unknown-function",
                 name = name.as_str(),

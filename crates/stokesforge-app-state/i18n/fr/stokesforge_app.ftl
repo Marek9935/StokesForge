@@ -1149,6 +1149,7 @@ error-analysis-expr-unexpected-end = L'expression se termine trop tôt (position
 error-analysis-expr-unexpected-token = Symbole inattendu en position { $position }
 error-analysis-expr-unbalanced = Parenthèses non appariées (position { $position })
 error-analysis-expr-bad-number = Nombre mal formé en position { $position }
+error-analysis-expr-too-deep = Expression trop imbriquée (position { $position })
 error-analysis-expr-unknown-function = Fonction inconnue { $name } en position { $position }
 error-analysis-expr-wrong-arguments = { $name } prend { $expected } argument(s), { $found } donné(s) (position { $position })
 
