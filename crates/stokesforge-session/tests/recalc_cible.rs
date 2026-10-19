@@ -884,3 +884,105 @@ fn une_colonne_ajoutee_avec_sa_version_ne_fait_pas_resservir_ce_numero() {
     assert!(version_a > 40, "A ne retombe pas sur 40 : {version_a}");
     assert_eq!(cible, complet, "le ciblé rend le complet");
 }
+
+// -- formule trop profonde (#289) ---------------------------------------------
+
+/// Chaîne de `termes` fois `A`, jointe par `+`. Tailles codées en dur dans
+/// les tests : 1001 termes passent, 1002 sont refusées (`MAX_DEPTH = 1000`).
+fn somme_de_a(termes: usize) -> String {
+    vec!["A"; termes].join("+")
+}
+
+/// Une formule refusée au parse par `FormulaError::TooDeep` n'est pas une
+/// panne de l'acteur : la colonne est un bloc non calculé de la longueur de
+/// la feuille (issue `Unparsable`), l'acteur répond encore, et la formule
+/// corrigée est recalculée aussitôt (invariant 11) — dans les deux modes.
+#[test]
+fn une_formule_trop_profonde_est_un_bloc_non_calcule_puis_se_corrige() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = demarrer(mode);
+
+        // Juste sous le plafond : calculée, sur le fil de l'acteur (2 Mio).
+        handle
+            .execute(formule(f.c, &somme_de_a(1001)))
+            .expect("1001 termes");
+        assert_eq!(
+            nombres(&instantane(&handle), f.c),
+            some(&[1001.0, 2002.0, 3003.0]),
+            "{mode:?}"
+        );
+
+        // Un terme de trop : refusée, bloc non calculé de 3 lignes.
+        handle
+            .execute(formule(f.c, &somme_de_a(1002)))
+            .expect("1002 termes");
+        let s = instantane(&handle);
+        assert_eq!(nombres(&s, f.c), vec![None, None, None], "{mode:?}");
+        assert!(tout_non_calcule(&s, f.c), "{mode:?}");
+
+        // Corrigée : recalculée, bien que la colonne soit déjà « à jour ».
+        handle.execute(formule(f.c, "A+B")).expect("corrigée");
+        assert_eq!(
+            nombres(&instantane(&handle), f.c),
+            some(&[11.0, 22.0, 33.0]),
+            "{mode:?}"
+        );
+
+        // Trop profonde par les parenthèses, puis par les signes, sans que
+        // l'acteur ne tombe : à chaque fois un bloc non calculé.
+        for trop_profonde in [
+            format!("{}A{}", "(".repeat(101), ")".repeat(101)),
+            format!("{}A", "-".repeat(101)),
+            format!("{}A", "-".repeat(100_000)),
+        ] {
+            handle
+                .execute(formule(f.c, &trop_profonde))
+                .expect("trop profonde");
+            let s = instantane(&handle);
+            assert!(tout_non_calcule(&s, f.c), "{mode:?}");
+            assert_eq!(nombres(&s, f.c).len(), 3, "{mode:?}");
+        }
+
+        // L'annulation rend la dernière formule valide et ses valeurs.
+        handle.undo().expect("annuler");
+        handle.undo().expect("annuler");
+        handle.undo().expect("annuler");
+        assert_eq!(
+            nombres(&instantane(&handle), f.c),
+            some(&[11.0, 22.0, 33.0]),
+            "{mode:?}"
+        );
+    }
+}
+
+/// Un bloc non calculé par `TooDeep` suit la longueur de la feuille comme
+/// toute formule illisible, et une formule qui le lit est elle-même non
+/// calculée tant qu'il l'est (le parse refusé n'entre pas dans le graphe),
+/// puis se rattrape quand la source est corrigée.
+#[test]
+fn une_formule_trop_profonde_suit_la_feuille_et_rattrape_ses_lecteurs() {
+    for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
+        let (_session, handle, f) = demarrer(mode);
+        handle
+            .execute(formule(f.c, &somme_de_a(1002)))
+            .expect("C trop profonde");
+        handle.execute(formule(f.d, "C+1")).expect("D = C+1");
+        let s = instantane(&handle);
+        assert!(tout_non_calcule(&s, f.c), "{mode:?}");
+        assert!(tout_non_calcule(&s, f.d), "{mode:?}");
+
+        // La feuille grandit (B passe à 5 lignes) : le bloc suit.
+        handle
+            .execute(saisir(f.b, 4, &[1.0]))
+            .expect("B descend à 5 lignes");
+        let s = instantane(&handle);
+        assert_eq!(nombres(&s, f.c).len(), 5, "{mode:?}");
+        assert!(tout_non_calcule(&s, f.c), "{mode:?}");
+
+        // C corrigée : D, qui la lit, suit dans la même passe.
+        handle.execute(formule(f.c, "A*2")).expect("C corrigée");
+        let s = instantane(&handle);
+        assert_eq!(nombres(&s, f.c)[..3], some(&[2.0, 4.0, 6.0]), "{mode:?}");
+        assert_eq!(nombres(&s, f.d)[..3], some(&[3.0, 5.0, 7.0]), "{mode:?}");
+    }
+}

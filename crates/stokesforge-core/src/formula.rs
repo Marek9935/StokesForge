@@ -1050,4 +1050,323 @@ mod tests {
         });
         assert_eq!(v, (2.0 * (MAX_DEPTH - 1) as f64, 2.0, -2.0));
     }
+
+    // -- blindage du plafond (#289) : tailles limites codées en dur, jamais
+    // dérivées de `MAX_DEPTH`, pour qu'un changement du plafond ou des coûts
+    // casse ces tests au lieu de les suivre. `FormulaError::TooDeep` est une
+    // variante sans champ : il n'y a pas de position à vérifier (contrairement
+    // à `ExprErrorKind::TooDeep` de `analysis::expr`).
+
+    /// Exécute `f` sur un thread dont la pile fait `octets` ; en cas de
+    /// débordement le processus entier avorte (pas de panic récupérable).
+    fn sur_pile<R: Send + 'static>(octets: usize, f: impl FnOnce() -> R + Send + 'static) -> R {
+        std::thread::Builder::new()
+            .stack_size(octets)
+            .spawn(f)
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    const UN_MIB: usize = 1 << 20;
+    const DEUX_MIB: usize = 2 << 20;
+
+    /// `n` termes `A` joints par `op` (donc `n - 1` opérateurs).
+    fn chaine(op: &str, termes: usize) -> String {
+        vec!["A"; termes].join(op)
+    }
+
+    fn parens(n: usize, milieu: &str) -> String {
+        format!("{}{milieu}{}", "(".repeat(n), ")".repeat(n))
+    }
+
+    fn parse_ok(src: &str) -> bool {
+        match Formula::parse(src) {
+            Ok(_) => true,
+            Err(FormulaError::TooDeep) => false,
+            Err(autre) => panic!("erreur inattendue : {autre:?}"),
+        }
+    }
+
+    #[test]
+    fn plafond_exact_d_une_chaine_d_operateurs() {
+        // 1001 termes = 1000 opérateurs = coût 1000 : accepté ; 1002 : refusé.
+        for op in ["+", "-", "*", "/"] {
+            for (termes, attendu) in [(999, true), (1000, true), (1001, true), (1002, false)] {
+                assert_eq!(
+                    parse_ok(&chaine(op, termes)),
+                    attendu,
+                    "{termes} termes `{op}`"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn plafond_exact_des_parentheses_imbriquees() {
+        for (n, attendu) in [(99, true), (100, true), (101, false)] {
+            assert_eq!(parse_ok(&parens(n, "A")), attendu, "{n} parenthèses");
+        }
+    }
+
+    #[test]
+    fn plafond_exact_des_signes_empiles() {
+        for signe in ["-", "+"] {
+            for (n, attendu) in [(99, true), (100, true), (101, false)] {
+                let src = format!("{}A", signe.repeat(n));
+                assert_eq!(parse_ok(&src), attendu, "{n} signes `{signe}`");
+            }
+        }
+        // Signes mêlés : 100 signes acceptés, 101 refusés.
+        assert!(parse_ok(&format!("{}A", "-+".repeat(50))));
+        assert!(!parse_ok(&format!("{}A", "-+".repeat(50) + "-")));
+        assert!(!parse_ok(&format!("{}A", "-+".repeat(51))));
+    }
+
+    #[test]
+    fn les_couts_se_cumulent_entre_parentheses_et_chaine() {
+        // 99 parenthèses (990) + 10 opérateurs (10) = 1000 : accepté ; 11 : refusé.
+        assert!(parse_ok(&parens(99, &chaine("+", 11))));
+        assert!(!parse_ok(&parens(99, &chaine("+", 12))));
+        // 98 parenthèses (980) + 20 opérateurs.
+        assert!(parse_ok(&parens(98, &chaine("*", 21))));
+        assert!(!parse_ok(&parens(98, &chaine("*", 22))));
+        // Un signe en tête de chaîne coûte 10 pendant la lecture de `A`
+        // seulement, puis est restitué : la chaîne garde ses 1000.
+        assert!(parse_ok(&format!("-{}", chaine("+", 1001))));
+        assert!(!parse_ok(&format!("-{}", chaine("+", 1002))));
+        // Signe appliqué au dernier terme : `A+A+…+-A` -> 990 opérateurs + 10.
+        assert!(parse_ok(&format!("{}-A", "A+".repeat(990))));
+        assert!(!parse_ok(&format!("{}-A", "A+".repeat(991))));
+        // Idem multiplicatif : `A*-A*-…*-A`.
+        assert!(parse_ok(&format!("{}A", "A*-".repeat(990))));
+        assert!(!parse_ok(&format!("{}A", "A*-".repeat(991))));
+    }
+
+    #[test]
+    fn la_profondeur_est_rendue_apres_chaque_groupe_et_chaque_terme() {
+        // Groupes séquentiels : 991 groupes = 990 opérateurs + 10 du dernier.
+        // Sans la restitution des 10 par `nested`, 101 groupes seraient déjà
+        // refusés.
+        let groupes = |n: usize| vec!["(A)"; n].join("+");
+        assert!(parse_ok(&groupes(991)));
+        assert!(!parse_ok(&groupes(992)));
+        // Une somme entre parenthèses rend ses `+` en sortant : 120 groupes de
+        // 10 termes (9 `+` chacun) ne laissent aucun reste, sinon 120 * 9 > 1000.
+        let groupe = format!("({})", chaine("+", 10));
+        assert!(parse_ok(&vec![groupe.as_str(); 120].join("+")));
+        // Les termes d'un produit se remettent à zéro à chaque `+` : 600
+        // produits `A*A` enchaînés = 599 `+` + 1 `*` = 600, pas 1199.
+        let produits = vec!["A*A"; 600].join("+");
+        assert!(parse_ok(&produits));
+        // 500 `+` puis un produit de 500 `*` = 1000 : pile à la limite.
+        let somme_puis_produit =
+            |etoiles: usize| format!("{}+{}", chaine("+", 500), chaine("*", etoiles));
+        assert!(parse_ok(&somme_puis_produit(501)));
+        assert!(!parse_ok(&somme_puis_produit(502)));
+        // Un produit de 1000 `*` suivi de sommes : il ne s'ajoute pas aux `+`.
+        assert!(parse_ok(&format!(
+            "{}+{}",
+            chaine("*", 1001),
+            chaine("+", 500)
+        )));
+    }
+
+    #[test]
+    fn toute_forme_sans_cout_declare_est_refusee_a_10_000() {
+        let n = 10_000;
+        let formes = [
+            ("parenthèses fermées", parens(n, "A")),
+            ("parenthèses jamais refermées", "(".repeat(n)),
+            ("moins empilés", format!("{}A", "-".repeat(n))),
+            ("plus empilés", format!("{}A", "+".repeat(n))),
+            ("signes alternés", format!("{}A", "-+".repeat(n / 2))),
+            ("somme", chaine("+", n)),
+            ("différence", chaine("-", n)),
+            ("produit", chaine("*", n)),
+            ("quotient", chaine("/", n)),
+            ("somme/produit alternés", chaine("+A*", n / 2) + "A"),
+            (
+                "imbrication à droite",
+                format!("{}A{}", "A+(".repeat(n), ")".repeat(n)),
+            ),
+            (
+                "signe puis parenthèse",
+                format!("{}A{}", "-(".repeat(n), ")".repeat(n)),
+            ),
+            ("produit de signes", format!("{}A", "A*-".repeat(n))),
+        ];
+        for (nom, src) in formes {
+            sur_pile(UN_MIB, move || {
+                assert_eq!(Formula::parse(&src), Err(FormulaError::TooDeep), "{nom}");
+            });
+        }
+    }
+
+    #[test]
+    fn un_million_d_elements_est_refuse_vite() {
+        let debut = std::time::Instant::now();
+        sur_pile(UN_MIB, || {
+            for src in [
+                "(".repeat(1_000_000),
+                "-".repeat(1_000_000),
+                "A+".repeat(500_000),
+                parens(500_000, "A"),
+            ] {
+                assert_eq!(Formula::parse(&src), Err(FormulaError::TooDeep));
+            }
+        });
+        // Linéaire (quelques dizaines de ms en debug) ; la marge n'est là que
+        // pour attraper un parcours quadratique ou un balayage complet.
+        assert!(debut.elapsed().as_secs() < 10, "{:?}", debut.elapsed());
+    }
+
+    /// Les pires formules acceptées, une par forme de récursion : chaîne
+    /// d'opérateurs (arbre profond de 1000), parenthèses (parseur), signes
+    /// (arbre `Neg` et parseur), mélanges au coût exact du plafond.
+    fn pires_formules() -> Vec<(&'static str, String)> {
+        vec![
+            ("somme", chaine("+", 1001)),
+            ("différence", chaine("-", 1001)),
+            ("produit", chaine("*", 1001)),
+            ("quotient", chaine("/", 1001)),
+            ("parenthèses", parens(100, "A")),
+            ("moins empilés", format!("{}A", "-".repeat(100))),
+            ("plus empilés", format!("{}A", "+".repeat(100))),
+            ("parenthèses et somme", parens(99, &chaine("+", 11))),
+            (
+                "imbrication à droite",
+                format!("{}A{}", "A+(".repeat(90), ")".repeat(90)),
+            ),
+            (
+                "signe puis parenthèse",
+                format!("{}A{}", "-(".repeat(50), ")".repeat(50)),
+            ),
+            (
+                "somme finie par un signe",
+                format!("{}-A", "A+".repeat(990)),
+            ),
+            ("produit de signes", format!("{}A", "A*-".repeat(990))),
+            ("groupes séquentiels", vec!["(A)"; 991].join("+")),
+        ]
+    }
+
+    /// Parse, lit les références, évalue, clone, compare et lâche la formule.
+    fn parcours_complet(src: &str) -> f64 {
+        let formule = Formula::parse(src).expect("pire formule acceptée");
+        let colonnes = [float_column(&[2.0, 3.0])];
+        let copie = formule.clone();
+        assert_eq!(formule, copie);
+        assert_eq!(formule.referenced_columns(), BTreeSet::from([0]));
+        let r = evaluate(&formule, 5, &colonnes, 2);
+        assert_eq!(r.error, None);
+        r.values[0]
+    }
+
+    #[test]
+    fn les_pires_formules_acceptees_tiennent_sur_1_mib_et_2_mib() {
+        // Un débordement de pile avorte le processus : ce test n'« échoue »
+        // pas, il tue le binaire de test, ce qui le rend impossible à rater.
+        // Marge mesurée en debug (pile réduite jusqu'à l'avortement, pire
+        // forme = chaîne `+`/`-`/`*`/`/` de 1001 termes) : il faut environ
+        // 560 Kio ; 1 Mio donne un facteur 1,8, 2 Mio (l'acteur) un facteur 3,6.
+        // Les parenthèses seules demandent ~425 Kio (parseur), les signes
+        // empilés ~95 Kio.
+        for octets in [DEUX_MIB, UN_MIB] {
+            for (nom, src) in pires_formules() {
+                let valeur = sur_pile(octets, move || parcours_complet(&src));
+                assert!(!valeur.is_nan(), "{nom} sur {octets} octets");
+            }
+        }
+    }
+
+    #[test]
+    fn les_formules_limites_ont_la_bonne_valeur() {
+        // A = 2.0 sur la première ligne.
+        let attendu = [
+            ("somme", 2.0 * 1001.0),
+            ("différence", 2.0 - 2.0 * 1000.0),
+            ("produit", 2f64.powi(1001)),
+            ("quotient", 2.0 / 2f64.powi(1000)),
+            ("parenthèses", 2.0),
+            ("moins empilés", 2.0), // 100 négations
+            ("plus empilés", 2.0),
+            ("parenthèses et somme", 22.0),
+            ("imbrication à droite", 2.0 * 91.0),
+            ("signe puis parenthèse", 2.0), // 50 négations
+            ("somme finie par un signe", 2.0 * 990.0 - 2.0),
+            ("produit de signes", 2f64.powi(991)),
+            ("groupes séquentiels", 2.0 * 991.0),
+        ];
+        let pires = pires_formules();
+        assert_eq!(pires.len(), attendu.len());
+        for ((nom, src), (nom_attendu, valeur)) in pires.into_iter().zip(attendu) {
+            assert_eq!(nom, nom_attendu);
+            let obtenu = sur_pile(DEUX_MIB, move || parcours_complet(&src));
+            assert_eq!(obtenu, valeur, "{nom}");
+        }
+        // Une négation de moins : signe inversé.
+        let impair = sur_pile(DEUX_MIB, || {
+            parcours_complet(&format!("{}A", "-".repeat(99)))
+        });
+        assert_eq!(impair, -2.0);
+    }
+
+    #[test]
+    fn les_formules_ordinaires_sont_inchangees() {
+        let colonnes = [float_column(&[2.0, 8.0]), float_column(&[4.0, 2.0])];
+        let valeurs = |src: &str| {
+            let f = Formula::parse(src).unwrap();
+            let r = evaluate(&f, 9, &colonnes, 2);
+            assert_eq!(r.error, None, "{src}");
+            r.values
+        };
+        assert_eq!(valeurs("A+B"), [6.0, 10.0]);
+        assert_eq!(valeurs("(A+B)*2-1"), [11.0, 19.0]);
+        // Associativité à gauche : (10-4)-3, (100/10)/5, pas 10-(4-3).
+        assert_eq!(valeurs("10-4-3"), [3.0, 3.0]);
+        assert_eq!(valeurs("100/10/5"), [2.0, 2.0]);
+        assert_eq!(valeurs("2+3*4"), [14.0, 14.0]);
+        assert_eq!(valeurs("-A"), [-2.0, -8.0]);
+        assert_eq!(valeurs("--A"), [2.0, 8.0]);
+        assert_eq!(valeurs("+A"), [2.0, 8.0]);
+        assert_eq!(valeurs("A*-B"), [-8.0, -16.0]);
+        assert_eq!(valeurs("((((A))))"), [2.0, 8.0]);
+        assert_eq!(valeurs(" A / B "), [0.5, 4.0]);
+        assert_eq!(valeurs("1e1+.5"), [10.5, 10.5]);
+    }
+
+    #[test]
+    fn les_colonnes_referencees_d_une_formule_limite_sont_exactes() {
+        // Chaîne de 1001 termes tournant sur A, B, C et AA.
+        let lettres = ["A", "B", "C", "AA"];
+        let termes: Vec<&str> = (0..1001).map(|i| lettres[i % 4]).collect();
+        let src = termes.join("+");
+        let refs = sur_pile(UN_MIB, move || {
+            Formula::parse(&src).unwrap().referenced_columns()
+        });
+        assert_eq!(refs, BTreeSet::from([0, 1, 2, 26]));
+        // Une référence unique tout au fond d'un empilement limite.
+        let profond = format!("{}C{}", "(-".repeat(50), ")".repeat(50));
+        let refs = sur_pile(UN_MIB, move || {
+            Formula::parse(&profond).unwrap().referenced_columns()
+        });
+        assert_eq!(refs, BTreeSet::from([2]));
+        // Rien à référencer : ensemble vide.
+        let refs = sur_pile(UN_MIB, || {
+            Formula::parse(&vec!["1"; 1001].join("+"))
+                .unwrap()
+                .referenced_columns()
+        });
+        assert!(refs.is_empty());
+    }
+
+    #[test]
+    fn une_formule_trop_profonde_degrade_evaluate_apres_un_parse_refuse() {
+        // `evaluate` ne reçoit une `Formula` qu'après `parse` : un refus ne
+        // laisse donc aucune formule à évaluer ; l'erreur est celle du parse.
+        let erreur = Formula::parse(&chaine("+", 1002)).unwrap_err();
+        assert_eq!(erreur, FormulaError::TooDeep);
+        assert_eq!(erreur.to_string(), "formula nested too deeply");
+    }
 }

@@ -576,6 +576,27 @@ pub mod formula {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
         }
+
+        #[test]
+        fn l_erreur_de_formule_trop_profonde_est_mise_en_phrase() {
+            use stokesforge_core::Formula;
+            let formule = "(".repeat(101) + "A" + &")".repeat(101);
+            let erreur = Formula::parse(&formule).unwrap_err();
+            assert_eq!(erreur, FormulaError::TooDeep);
+            // Comparée en anglais : la langue ne dépend pas de l'environnement.
+            crate::i18n::set_language(crate::i18n::Language::English);
+            assert_eq!(
+                error_message(&erreur),
+                "The formula is nested too deeply. Simplify it (fewer nested parentheses or chained terms)"
+            );
+            // Le `Display` du crate du dessous reste de l'anglais brut.
+            assert_eq!(erreur.to_string(), "formula nested too deeply");
+            // Le catalogue français porte la même clé.
+            let fr = include_str!("../i18n/fr/stokesforge_app.ftl");
+            assert!(fr.contains(
+                "error-formula-too-deep = La formule est trop imbriquée. La simplifier (moins de parenthèses imbriquées ou de termes enchaînés)"
+            ));
+        }
     }
 }
 
