@@ -136,8 +136,12 @@ impl Func {
             Func::Tanh => a.tanh(),
             Func::Erf => erf(a),
             Func::Erfc => erfc(a),
+            // `f64::min`/`max` ignorent un NaN et `sign` le lirait comme 0 :
+            // un opérande NaN doit rester NaN (contrat « domaine invalide »).
             Func::Sign => {
-                if a > 0.0 {
+                if a.is_nan() {
+                    f64::NAN
+                } else if a > 0.0 {
                     1.0
                 } else if a < 0.0 {
                     -1.0
@@ -148,6 +152,8 @@ impl Func {
             Func::Floor => a.floor(),
             Func::Ceil => a.ceil(),
             Func::Pow => a.powf(b),
+            Func::Min if a.is_nan() || b.is_nan() => f64::NAN,
+            Func::Max if a.is_nan() || b.is_nan() => f64::NAN,
             Func::Min => a.min(b),
             Func::Max => a.max(b),
             Func::Atan2 => a.atan2(b),
@@ -572,6 +578,25 @@ mod tests {
         assert!(ev("sqrt(x)", -1.0, &[]).is_nan());
         assert!(ev("ln(x)", -1.0, &[]).is_nan());
         assert!(ev("1 / x", 0.0, &[]).is_infinite());
+    }
+
+    #[test]
+    fn sign_min_max_propagent_le_nan() {
+        for f in [
+            "sign(sqrt(x))",
+            "max(sqrt(x), 0)",
+            "min(sqrt(x), 0)",
+            "max(0, sqrt(x))",
+            "min(0, sqrt(x))",
+        ] {
+            assert!(ev(f, -1.0, &[]).is_nan(), "{f}");
+        }
+        // Les infinis restent corrects.
+        assert_eq!(ev("sign(1 / x)", 0.0, &[]), 1.0);
+        assert_eq!(ev("sign(-1 / x)", 0.0, &[]), -1.0);
+        assert_eq!(ev("max(1 / x, 3)", 0.0, &[]), f64::INFINITY);
+        assert_eq!(ev("min(-1 / x, 3)", 0.0, &[]), f64::NEG_INFINITY);
+        assert_eq!(ev("min(1 / x, 3)", 0.0, &[]), 3.0);
     }
 
     #[test]
