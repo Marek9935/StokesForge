@@ -198,10 +198,13 @@ pub(crate) fn run(
                     let _ = reply.send(Err(CommandError::ForeignMacro("execute")));
                     continue;
                 }
-                if let Err(err) = history.execute(&mut project, command) {
-                    let _ = reply.send(Err(err));
-                    continue;
-                }
+                let recorded = match history.execute_recorded(&mut project, command) {
+                    Ok(recorded) => recorded,
+                    Err(err) => {
+                        let _ = reply.send(Err(err));
+                        continue;
+                    }
+                };
                 revision += 1;
                 if interruptible {
                     // #239 — la commande est appliquée : on répond sans
@@ -217,7 +220,10 @@ pub(crate) fn run(
                         // recalculer ce qui a changé (la passe interrompue a
                         // pu réécrire des colonnes). Dans une macro l'annulation
                         // est refusée : la commande reste, le recalcul s'achève.
-                        if matches!(history.undo(&mut project), Ok(true)) {
+                        // Une commande sans effet n'a rangé aucune entrée : un
+                        // `undo` défairait alors l'action précédente, sans
+                        // rapport — on n'annule que ce qu'on vient de ranger.
+                        if recorded && matches!(history.undo(&mut project), Ok(true)) {
                             end = RecalcEnd::Stopped;
                         }
                         formulas.run(&mut project);

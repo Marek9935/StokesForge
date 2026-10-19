@@ -591,6 +591,41 @@ mod tests {
         assert!(snapshot.revision > first.revision);
     }
 
+    /// Stop après une commande acceptée mais **sans effet** (B5 : aucune entrée
+    /// rangée) ne défait rien : sans cela, l'`undo` de l'acteur retirait la
+    /// formule posée juste avant, sans rapport avec le geste interrompu.
+    #[test]
+    fn stop_apres_une_commande_sans_effet_ne_defait_pas_l_action_precedente() {
+        for structurelle in [true, false] {
+            let (session, sheet, c) = feuille();
+            let handle = session.handle();
+            handle.execute(formule_c(c)).expect("formule");
+            let command = if structurelle {
+                // « Renommer M en M ».
+                Command::Rename {
+                    id: sheet,
+                    name: "Sheet1".into(),
+                }
+            } else {
+                // Insertion de zéro ligne : aucune colonne cible.
+                Command::InsertRows {
+                    sheet,
+                    at: 0,
+                    count: 0,
+                }
+            };
+            handle.gauge.stop_next_for_test();
+            handle.execute_interruptible(command).expect("commande");
+            assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
+            assert_eq!(handle.take_recalc_end(), Some(RecalcEnd::Done));
+            let snapshot = handle.snapshot().expect("instantané");
+            let column = snapshot.tree.node(c).and_then(|n| n.as_column()).unwrap();
+            assert!(column.meta().formula.is_some(), "la formule reste posée");
+            assert!(snapshot.history.can_undo, "l'entrée précédente reste");
+            assert!(!snapshot.history.can_redo, "rien n'a été défait");
+        }
+    }
+
     /// Un Stop tardif (le recalcul visé est fini) ne fait rien — et surtout
     /// n'arrête pas le suivant.
     #[test]

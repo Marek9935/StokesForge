@@ -548,6 +548,58 @@ fn renaming_to_the_current_name_is_not_an_entry() {
 }
 
 #[test]
+fn execute_recorded_says_whether_an_entry_was_stored() {
+    // L'acteur n'annule sur Stop que ce que la commande vient de ranger : le
+    // booléen vient de `execute` lui-même, pas d'une différence de `len()`.
+    let mut f = fixture();
+    let mut history = History::new();
+    let rename = |id, name: &str| Command::Rename {
+        id,
+        name: name.to_string(),
+    };
+
+    // Sans effet (« Renommer A en A ») : acceptée, aucune entrée.
+    assert!(!history
+        .execute_recorded(&mut f.project, rename(f.a, "A"))
+        .expect("sans effet"));
+    assert!(history.is_empty());
+
+    // Avec effet : une entrée rangée.
+    assert!(history
+        .execute_recorded(&mut f.project, rename(f.a, "A2"))
+        .expect("avec effet"));
+    assert_eq!(history.len(), 1);
+
+    // Dans une macro ouverte, l'entrée est rangée dans la macro : vrai, sans
+    // que `len()` ne bouge forcément.
+    history.begin_macro(MacroKind::Import).unwrap();
+    assert!(history
+        .execute_recorded(&mut f.project, rename(f.a, "A3"))
+        .expect("dans la macro"));
+    history.end_macro(&mut f.project).unwrap();
+}
+
+#[test]
+fn execute_recorded_is_true_even_when_the_limit_evicts_an_older_entry() {
+    // Piège : avec une limite de 1, ranger une entrée en évince une autre et
+    // `len()` ne change pas. Déduire le booléen de `len()` dirait « rien rangé ».
+    let mut f = fixture();
+    let mut history = History::with_limit(1);
+    for name in ["A2", "A3"] {
+        assert!(history
+            .execute_recorded(
+                &mut f.project,
+                Command::Rename {
+                    id: f.a,
+                    name: name.to_string(),
+                },
+            )
+            .expect("renommage"));
+        assert_eq!(history.len(), 1);
+    }
+}
+
+#[test]
 fn renaming_the_root_is_accepted() {
     let mut f = fixture();
     let mut history = History::new();

@@ -475,6 +475,23 @@ impl History {
     /// macro** : dès qu'une nouvelle mutation est appliquée, ce qui avait été
     /// annulé n'a plus de branche où revenir.
     pub fn execute(&mut self, project: &mut Project, command: Command) -> CommandResult<()> {
+        self.execute_recorded(project, command).map(|_| ())
+    }
+
+    /// Comme [`execute`](Self::execute), mais dit si la commande a **rangé une
+    /// entrée** (en pile, ou dans la macro ouverte) : `Ok(false)` pour une
+    /// commande acceptée mais sans effet (B5), qui n'occupe aucun cran.
+    ///
+    /// L'acteur s'en sert pour que Stop n'annule que la commande qu'il vient
+    /// d'exécuter : sans ce booléen, un `undo` défaisait l'action *précédente*.
+    /// On ne le déduit pas de `len()` avant/après — l'éviction (limite
+    /// d'entrées ou d'octets) laisse la longueur inchangée, et une entrée rangée
+    /// dans une macro ne la change pas non plus.
+    pub fn execute_recorded(
+        &mut self,
+        project: &mut Project,
+        command: Command,
+    ) -> CommandResult<bool> {
         if command.is_structural() {
             let before = Arc::clone(project.tree());
             let label = command.label(&before);
@@ -489,10 +506,10 @@ impl History {
                     // nommer un par un. Rien n'est à défaire : on rend
                     // simplement `Ok` sans empiler.
                     if entry_has_no_effect(&entry) {
-                        return Ok(());
+                        return Ok(false);
                     }
                     self.push(entry, &PriorColumns::new(), project);
-                    Ok(())
+                    Ok(true)
                 }
                 Err(err) => {
                     // Les primitives de `Project` promettent de ne rien changer en
@@ -515,10 +532,10 @@ impl History {
                     // `Project::row_targets`) n'occupent pas de cran
                     // d'annulation.
                     if entry_has_no_effect(&entry) {
-                        return Ok(());
+                        return Ok(false);
                     }
                     self.push(entry, &prior, project);
-                    Ok(())
+                    Ok(true)
                 }
                 // Aucun `replace_tree` à faire ici : voir la doc ci-dessus —
                 // une primitive de donnée qui échoue n'a rien muté.

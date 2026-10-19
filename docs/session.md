@@ -174,7 +174,7 @@ bout bloquant (scripts, CLI, tests). Seul `AppState::execute` l'emploie.
 | `gauge.rs` (`RecalcGauge`) | seul état partagé **hors du canal FIFO** : numéro du recalcul en cours, drapeau Stop, condition « fini ». Pendant un recalcul l'acteur ne lit plus ses requêtes : un Stop ou un instantané passés par le canal attendraient la fin |
 | `SessionHandle::recalc_running`, `wait_recalc`, `stop_recalc(id)`, `take_recalc_end` | lecture et écriture de la jauge, sans l'acteur, donc sans jamais bloquer |
 | `Recalculator::run_interruptible` | contrôle l'arrêt entre deux feuilles, deux colonnes, deux calculs, deux tours — jamais au milieu d'une colonne. Une passe interrompue laisse un état cohérent : les colonnes écrites sont dans le mémo, les autres seront vues périmées |
-| Stop | `history.undo` (comme Ctrl+Z : la commande reste rétablissable) puis un recalcul complet normal ; `RecalcEnd::Stopped`. Dans une macro l'annulation est refusée : la commande reste, le recalcul s'achève (`Done`) |
+| Stop | `history.undo` (comme Ctrl+Z : la commande reste rétablissable) puis un recalcul complet normal ; `RecalcEnd::Stopped`. Seulement si la commande a rangé une entrée (`History::execute_recorded`) : une commande sans effet n'en range pas, Stop ne défait alors **rien** (jamais l'action précédente) et le recalcul s'achève (`Done`). Dans une macro l'annulation est refusée : la commande reste, le recalcul s'achève (`Done`) |
 
 Le numéro évite qu'un Stop tardif arrête le recalcul suivant. La révision
 rendue par `execute_interruptible` est celle d'avant recalcul ; **la fin du

@@ -207,6 +207,11 @@ propres à la pile : macro ouverte, pas de macro, pile non vide, macro
   `b18` (ce qui reste possible pendant qu'une macro est ouverte), `b21`
   (coût et identité sur le chemin d'écriture).
 
+`History::execute_recorded` est `execute` qui dit si une entrée a été rangée
+(`false` pour une commande acceptée mais sans effet, règle B5) : l'acteur s'en
+sert pour que Stop (#239) n'annule que la commande qu'il vient d'exécuter. On
+ne le déduit pas de `len()` avant/après (éviction, macro).
+
 **À lire** : `stokesforge-commands/src/lib.rs` et `src/history.rs` (têtes).
 
 Object Manager (#81–85) réutilise le delta de `SetPlotSpec` par
