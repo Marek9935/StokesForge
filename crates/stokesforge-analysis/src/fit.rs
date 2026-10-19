@@ -389,6 +389,38 @@ mod tests {
     }
 
     #[test]
+    fn zero_degre_de_liberte_aucune_incertitude_sur_les_deux_chemins() {
+        // Témoin : 2 points, 2 paramètres libres. Le chemin non linéaire
+        // donnait des incertitudes (non mises à l'échelle) là où le linéaire
+        // n'en donne pas.
+        let x = vec![0.0, 1.0];
+        let lin = fit(&[input(|v| 3.0 - 0.5 * v, x.clone())], &spec(Model::Linear)).unwrap();
+        let exp = fit(
+            &[input(|v| 3.0 * (-v / 2.0).exp(), x.clone())],
+            &spec(Model::Exponential),
+        )
+        .unwrap();
+        for r in [&lin, &exp] {
+            assert_eq!(r.dof, 0);
+            assert!(r.series[0].errors.iter().all(Option::is_none));
+            assert!(r.series[0].reduced_chi2.is_nan() && r.reduced_chi2.is_nan());
+        }
+        // Un paramètre fixé : 1 libre pour 2 points, dof = 1, incertitude.
+        let mut sp = spec(Model::Exponential);
+        sp.params = vec![
+            ParamSetting {
+                fixed: true,
+                initial: Some(3.0),
+                ..Default::default()
+            },
+            ParamSetting::default(),
+        ];
+        let r = fit(&[input(|v| 3.0 * (-v / 2.0).exp(), x)], &sp).unwrap();
+        assert_eq!(r.dof, 1);
+        assert!(r.series[0].errors[0].is_none() && r.series[0].errors[1].is_some());
+    }
+
+    #[test]
     fn polynome_de_degre_3() {
         let i = input(
             |x| 1.0 - 2.0 * x + 0.5 * x * x + 0.1 * x * x * x,

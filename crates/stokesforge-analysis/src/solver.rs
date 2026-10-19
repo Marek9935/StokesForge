@@ -252,7 +252,10 @@ pub fn solve_problem(
             sub.set(row, c, jac.get(row, k));
         }
     }
-    if let Some(cov) = invert(&sub.gram()) {
+    // À 0 degré de liberté (ajustement exact), la mise à l'échelle par le χ²
+    // réduit n'a pas de base : pas d'incertitude, comme le chemin linéaire.
+    let no_basis = opts.scale_errors && dof == 0;
+    if let Some(cov) = invert(&sub.gram()).filter(|_| !no_basis) {
         let scale = if opts.scale_errors && dof > 0 {
             reduced_chi2
         } else {
