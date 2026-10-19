@@ -828,4 +828,305 @@ mod tests {
             r.err()
         );
     }
+
+    // ── #284 : la grille non uniforme couvre le dernier X ──────────────
+
+    fn warns() -> DeconvWarnings {
+        DeconvWarnings::default()
+    }
+
+    /// Nombre de nœuds de la grille d'un signal non uniforme `x`.
+    fn noeuds(x: &[f64]) -> usize {
+        grid_of(x, &mut warns()).unwrap().n
+    }
+
+    /// `[0, 1, 2, 3, 4 + f]` : pas médian 1, dernier pas `1 + f`.
+    fn x_fraction(f: f64) -> Vec<f64> {
+        vec![0.0, 1.0, 2.0, 3.0, 4.0 + f]
+    }
+
+    /// Pas de 0,1 sur [0 ; `fin`] avec un trou (le point 5 est écarté) : pas médian 0,1.
+    fn pas_dixieme_avec_trou(fin: f64) -> Vec<f64> {
+        let mut x: Vec<f64> = (0..40)
+            .filter(|&i| i != 5)
+            .map(|i| i as f64 * 0.1)
+            .collect();
+        x.push(fin);
+        x
+    }
+
+    #[test]
+    fn grille_etendue_pile_entiere_ne_gagne_pas_de_noeud() {
+        // 4,0 / 0,1 = 40 pas : 41 nœuds, pas 42, malgré l'erreur de flottant.
+        let x = pas_dixieme_avec_trou(4.0);
+        let mut w = warns();
+        let g = grid_of(&x, &mut w).unwrap();
+        assert!(w.non_uniform_signal && !g.identity);
+        assert!((g.step - 0.1).abs() < 1e-12, "{}", g.step);
+        assert_eq!(g.n, 41);
+        // Pas de 1 et dernier X entier.
+        assert_eq!(noeuds(&[0.0, 1.0, 2.0, 4.0, 6.0, 7.0, 8.0]), 9);
+    }
+
+    #[test]
+    fn grille_tolerance_relative_autour_du_pile() {
+        // Juste au-dessus, sous la tolérance 1e-9 : toujours 41 nœuds.
+        assert_eq!(noeuds(&pas_dixieme_avec_trou(4.0 * (1.0 + 1e-12))), 41);
+        // Juste au-dessus, au-delà de la tolérance : le dernier X n'est plus couvert par 41.
+        assert_eq!(noeuds(&pas_dixieme_avec_trou(4.0 * (1.0 + 1e-6))), 42);
+        // Juste au-dessous : 41 (le dernier nœud 4,0 couvre 4,0·(1 − 1e-6)).
+        assert_eq!(noeuds(&pas_dixieme_avec_trou(4.0 * (1.0 - 1e-6))), 41);
+        assert_eq!(noeuds(&pas_dixieme_avec_trou(4.0 * (1.0 - 1e-12))), 41);
+        // Une tolérance trop large (1e-3) donnerait 41 ici : le pas du dessus tranche.
+        assert_eq!(noeuds(&pas_dixieme_avec_trou(4.0 * (1.0 + 1e-4))), 42);
+    }
+
+    #[test]
+    fn grille_fraction_sous_a_et_au_dessus_de_la_demie() {
+        // Le dernier nœud est toujours le premier ≥ dernier X : 6 nœuds (0…5).
+        for f in [0.1, 0.4, 0.5, 0.6, 0.999] {
+            assert_eq!(noeuds(&x_fraction(f)), 6, "fraction {f}");
+        }
+        // Pile entier (dernier X = 5) : 6 nœuds, pas 7.
+        assert_eq!(noeuds(&x_fraction(1.0)), 6);
+        // Dernier pas plus court que le pas médian : arrondi aussi vers le haut.
+        for (last, n) in [(3.4, 5), (3.5, 5), (3.6, 5), (3.01, 5)] {
+            assert_eq!(noeuds(&[0.0, 1.0, 2.0, 3.0, last]), n, "dernier X {last}");
+        }
+        // Le dernier nœud ≥ dernier X et < dernier X + 1 pas, sur toute la plage.
+        for k in 1..=99 {
+            let x = x_fraction(k as f64 / 100.0);
+            let g = grid_of(&x, &mut warns()).unwrap();
+            let last_node = g.start + (g.n - 1) as f64 * g.step;
+            assert!(last_node >= x[4] - 1e-12, "fraction {k}%");
+            assert!(last_node < x[4] + g.step, "fraction {k}%");
+        }
+    }
+
+    #[test]
+    fn grille_de_trois_points_non_uniformes() {
+        // Pas 1 et 1,5 : le médian est le plus grand (indice 1 sur 2) ; 2,5 / 1,5 → 2 pas.
+        let g = grid_of(&[0.0, 1.0, 2.5], &mut warns()).unwrap();
+        assert!(!g.identity);
+        assert_eq!((g.step, g.n), (1.5, 3));
+        // Deux points : refus.
+        assert_eq!(
+            grid_of(&[0.0, 1.0], &mut warns()).err().unwrap(),
+            AnalysisError::NotEnoughPoints {
+                found: 2,
+                needed: 3
+            }
+        );
+        // Des signaux de trois points se déconvoluent sans NaN.
+        let irf = irf_series(40, 0.1, 1.0, 0.3);
+        let signal = Series::new(vec![0.0, 1.0, 2.5], vec![1.0, 3.0, 1.0]);
+        for method in [
+            DirectMethod::RichardsonLucy { iterations: 5 },
+            DirectMethod::Wiener { noise: Some(0.01) },
+        ] {
+            let d = deconvolve(&signal, &irf, 0.0, method).unwrap();
+            assert_eq!(d.values.len(), 3);
+            assert!(d.values.iter().all(|v| v.is_finite()), "{:?}", d.values);
+        }
+    }
+
+    #[test]
+    fn grille_premier_et_dernier_x_relus_sans_nan() {
+        // read_back d'une fonction affine des nœuds rend exactement l'affine aux X,
+        // dernier X (4,4) compris ; le premier X est le nœud 0.
+        let x = x_fraction(0.4);
+        let g = grid_of(&x, &mut warns()).unwrap();
+        let on_grid: Vec<f64> = (0..g.n)
+            .map(|j| 2.0 * (g.start + j as f64 * g.step) + 1.0)
+            .collect();
+        let back = g.read_back(&x, &on_grid);
+        for (b, v) in back.iter().zip(&x) {
+            assert!((b - (2.0 * v + 1.0)).abs() < 1e-12, "x={v} : {b}");
+        }
+        assert_eq!(back[0], 1.0);
+        assert!((back[4] - 9.8).abs() < 1e-12);
+    }
+
+    #[test]
+    fn grille_sample_plafonne_au_dernier_x() {
+        // Nœuds 0…5, dernier X 4,4 : le nœud 5 est lu à 4,4 (pas d'extrapolation, pas de NaN).
+        let x = x_fraction(0.4);
+        let y: Vec<f64> = x.iter().map(|v| 3.0 * v + 2.0).collect();
+        let g = grid_of(&x, &mut warns()).unwrap();
+        let s = g.sample(&x, &y);
+        assert_eq!(s.len(), 6);
+        for (j, v) in s.iter().enumerate().take(5) {
+            assert!((v - (3.0 * j as f64 + 2.0)).abs() < 1e-12, "nœud {j}");
+        }
+        assert!((s[5] - (3.0 * 4.4 + 2.0)).abs() < 1e-12, "{}", s[5]);
+        // Régulier (identity) : copie telle quelle.
+        let xr = grid(6, 0.5);
+        let yr = vec![1.0, 2.0, 4.0, 8.0, 16.0, 32.0];
+        let gr = grid_of(&xr, &mut warns()).unwrap();
+        assert!(gr.identity);
+        assert_eq!(gr.sample(&xr, &yr), yr);
+        assert_eq!(gr.read_back(&xr, &yr), yr);
+    }
+
+    #[test]
+    fn deconvolution_au_dernier_x_egale_la_grille_reguliere_equivalente() {
+        // Signal non uniforme [0,1,2,3,4,4] → dernier X 4,4 ; son équivalent régulier
+        // porte le signal rééchantillonné sur les nœuds 0…5 (le nœud 5 plafonné
+        // à 4,4). Les valeurs relues doivent en être l'interpolation linéaire.
+        let irf = irf_series(40, 0.1, 1.0, 0.3);
+        let x = x_fraction(0.4);
+        let y = vec![1.0, 2.0, 3.0, 2.0, 1.0];
+        let signal = Series::new(x.clone(), y.clone());
+        let interp = |t: f64| interpolate(&x, &y, t.min(4.4)).unwrap();
+        let reg_y: Vec<f64> = (0..6).map(|j| interp(j as f64)).collect();
+        let regulier = Series::new((0..6).map(|j| j as f64).collect(), reg_y);
+        for method in [
+            DirectMethod::RichardsonLucy { iterations: 30 },
+            DirectMethod::Wiener { noise: Some(0.01) },
+        ] {
+            let d = deconvolve(&signal, &irf, 0.0, method).unwrap();
+            let r = deconvolve(&regulier, &irf, 0.0, method).unwrap();
+            assert!(!r.warnings.non_uniform_signal);
+            let u = &r.values;
+            let attendu = [u[0], u[1], u[2], u[3], u[4] + 0.4 * (u[5] - u[4])];
+            for (i, (a, e)) in d.values.iter().zip(&attendu).enumerate() {
+                assert!(a.is_finite(), "{method:?} point {i}");
+                assert!(
+                    (a - e).abs() <= 1e-9 * e.abs().max(1.0),
+                    "{method:?} point {i} : {a} contre {e}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reconvolution_non_uniforme_relit_le_dernier_x() {
+        // Signal exponentiel, dernier X entre deux nœuds : le modèle relu aux X du
+        // signal est fini partout, dernier point compris.
+        let irf = irf_series(40, 0.1, 1.0, 0.3);
+        let mut x: Vec<f64> = (0..=40)
+            .filter(|i| i % 7 != 3)
+            .map(|i| i as f64 * 0.1)
+            .collect();
+        x.push(4.04);
+        let y: Vec<f64> = x.iter().map(|t| 0.2 + 3.0 * (-t / 1.2).exp()).collect();
+        let signal = Series::new(x.clone(), y);
+        let spec = ReconvSpec {
+            components: 1,
+            params: vec![],
+            shift_initial: 0.0,
+            fit_shift: false,
+            window: None,
+        };
+        let r = reconvolve(&signal, &irf, &spec).unwrap();
+        assert!(r.warnings.non_uniform_signal);
+        assert_eq!(r.fitted.len(), x.len());
+        assert!(r.fitted.iter().all(|v| v.is_finite()), "{:?}", r.fitted);
+        // Régulier : pas d'avertissement.
+        let reg = synth(&irf_series(400, 0.05, 2.0, 0.15), 0.05, &[(10.0, 2.0)], 0.0);
+        let r = reconvolve(&reg, &irf, &spec).unwrap();
+        assert!(!r.warnings.non_uniform_signal);
+    }
+
+    #[test]
+    fn grille_reguliere_identity_est_inchangee() {
+        // Un pas régulier (à 1 % près) ne rééchantillonne rien : mêmes valeurs bit à
+        // bit qu'un signal exactement régulier de mêmes extrémités.
+        let irf = irf_series(40, 0.1, 1.0, 0.3);
+        let n = 30;
+        let exact: Vec<f64> = (0..n).map(|i| i as f64 * 0.1).collect();
+        let mut jitter = exact.clone();
+        for (i, v) in jitter.iter_mut().enumerate().take(n - 1).skip(1) {
+            *v += if i % 2 == 0 { 0.004 } else { -0.004 } * 0.1;
+        }
+        let y: Vec<f64> = (0..n).map(|i| 1.0 + ((i * 7) % 5) as f64).collect();
+        let a = Series::new(exact.clone(), y.clone());
+        let b = Series::new(jitter.clone(), y);
+        let g = grid_of(&jitter, &mut warns()).unwrap();
+        assert!(g.identity);
+        assert_eq!(g.n, n);
+        for method in [
+            DirectMethod::RichardsonLucy { iterations: 15 },
+            DirectMethod::Wiener { noise: None },
+        ] {
+            let da = deconvolve(&a, &irf, 0.0, method).unwrap();
+            let db = deconvolve(&b, &irf, 0.0, method).unwrap();
+            assert!(!da.warnings.non_uniform_signal && !db.warnings.non_uniform_signal);
+            assert_eq!(da.values, db.values, "{method:?}");
+            assert_eq!(da.noise_ratio, db.noise_ratio);
+        }
+    }
+
+    #[test]
+    fn avertissement_pas_uniforme_seulement_en_non_uniforme() {
+        let irf = irf_series(40, 0.1, 1.0, 0.3);
+        let m = DirectMethod::Wiener { noise: Some(0.01) };
+        let y = vec![1.0, 2.0, 3.0, 2.0, 1.0];
+        let nu = deconvolve(&Series::new(x_fraction(0.4), y.clone()), &irf, 0.0, m).unwrap();
+        assert!(nu.warnings.non_uniform_signal);
+        let reg = deconvolve(&Series::new(grid(5, 1.0), y), &irf, 0.0, m).unwrap();
+        assert!(!reg.warnings.non_uniform_signal);
+    }
+
+    #[test]
+    fn pas_de_l_irf_plus_grand_que_l_etendue_du_signal() {
+        // IRF à pas 10 sur 20 unités, signal sur 4,4 : refus propre ou valeurs finies,
+        // jamais NaN ; l'écart de pas est signalé.
+        let irf = Series::new(vec![0.0, 10.0, 20.0], vec![1.0, 0.5, 0.1]);
+        let signal = Series::new(x_fraction(0.4), vec![1.0, 2.0, 3.0, 2.0, 1.0]);
+        for method in [
+            DirectMethod::RichardsonLucy { iterations: 10 },
+            DirectMethod::Wiener { noise: Some(0.01) },
+        ] {
+            let d = deconvolve(&signal, &irf, 0.0, method).unwrap();
+            assert!(d.warnings.irf_step_mismatch && d.warnings.non_uniform_signal);
+            assert!(d.values.iter().all(|v| v.is_finite()), "{:?}", d.values);
+        }
+    }
+
+    #[test]
+    fn grilles_non_uniformes_aleatoires_toutes_finies() {
+        // Générateur congruentiel figé : mêmes grilles à chaque exécution.
+        let mut etat: u64 = 0x2545_F491_4F6C_DD1D;
+        let mut alea = move || {
+            etat = etat
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (etat >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let irf = irf_series(40, 0.1, 1.0, 0.3);
+        let mut non_uniformes = 0;
+        for cas in 0..25 {
+            let n = 4 + (alea() * 30.0) as usize;
+            let mut t = 0.0;
+            let mut x = vec![t];
+            for _ in 1..n {
+                t += 0.03 + 0.17 * alea();
+                x.push(t);
+            }
+            let y: Vec<f64> = x
+                .iter()
+                .map(|t| 0.5 + (-t / 1.5).exp() + 0.1 * alea())
+                .collect();
+            let signal = Series::new(x.clone(), y);
+            let g = grid_of(&x, &mut warns()).unwrap();
+            let dernier = g.start + (g.n - 1) as f64 * g.step;
+            assert!(dernier >= x[n - 1] - 1e-9, "cas {cas}");
+            assert!(dernier < x[n - 1] + g.step, "cas {cas}");
+            non_uniformes += usize::from(!g.identity);
+            for method in [
+                DirectMethod::RichardsonLucy { iterations: 10 },
+                DirectMethod::Wiener { noise: Some(0.01) },
+            ] {
+                let d = deconvolve(&signal, &irf, 0.0, method).unwrap();
+                assert_eq!(d.values.len(), n);
+                assert!(
+                    d.values.iter().all(|v| v.is_finite()),
+                    "cas {cas} {method:?} : {:?}",
+                    d.values
+                );
+            }
+        }
+        assert!(non_uniformes >= 20, "{non_uniformes} grilles non uniformes");
+    }
 }

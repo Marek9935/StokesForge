@@ -8,7 +8,7 @@ use stokesforge_analysis::fit::{FitSpec, ParamSetting};
 use stokesforge_analysis::integrate::{IntegrateSpec, Under};
 use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::{
-    run, AutoDetect, AuxInput, Operation, OutColumn, Outcome, SeriesInput, Value,
+    run, AutoDetect, AuxInput, Operation, OutColumn, Outcome, SeriesInput, Value, Warning,
 };
 use stokesforge_analysis::peaks::{PeakBackground, PeakShape, PeaksSpec};
 use stokesforge_analysis::AnalysisError;
@@ -508,4 +508,35 @@ fn constante_et_moyenne_de_zone_corrigent_sans_pente_et_gardent_les_lignes() {
             assert_eq!(col(&out[0], "corrected").data[0], 4.5);
         }
     }
+}
+
+#[test]
+fn deconvolution_signal_non_uniforme_leve_l_avertissement_et_couvre_le_dernier_x() {
+    let aux = AuxInput {
+        x: (0..40).map(|i| i as f64 * 0.1).collect(),
+        y: (0..40)
+            .map(|i| (-(i as f64 * 0.1 - 1.0).powi(2) / 0.18).exp())
+            .collect(),
+    };
+    let dir = Operation::DirectDeconvolution {
+        method: DirectMethod::Wiener { noise: Some(0.01) },
+        shift: 0.0,
+    };
+    let irregulier = SeriesInput {
+        x: vec![0.0, 1.0, 2.0, 3.0, 4.4],
+        y: vec![1.0, 2.0, 3.0, 2.0, 1.0],
+        sigma: None,
+    };
+    let o = &run(&dir, &[irregulier], Some(&aux)).unwrap()[0];
+    assert!(o.warnings.contains(&Warning::SignalStepNotUniform));
+    let d = &col(o, "deconvolved").data;
+    assert_eq!(d.len(), 5);
+    assert!(d.iter().all(|v| v.is_finite()), "{d:?}");
+    let regulier = SeriesInput {
+        x: vec![0.0, 1.0, 2.0, 3.0, 4.0],
+        y: vec![1.0, 2.0, 3.0, 2.0, 1.0],
+        sigma: None,
+    };
+    let o = &run(&dir, &[regulier], Some(&aux)).unwrap()[0];
+    assert!(!o.warnings.contains(&Warning::SignalStepNotUniform));
 }
