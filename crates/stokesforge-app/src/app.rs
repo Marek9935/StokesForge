@@ -210,7 +210,7 @@ use shortcuts::{
     SHORTCUT_REDO_Y, SHORTCUT_RUN_SCRIPT, SHORTCUT_SAVE, SHORTCUT_SAVE_AS, SHORTCUT_UNDO,
 };
 use stale_export::stale_export_window;
-use status_history::status_history_window;
+use status_history::{low_r2_list_window, status_history_window};
 use stokesforge_app_state::file_picker::{FilePicker, PickRequest};
 use tab::{active_tab_kind, tab_for_window, tab_node, Tab};
 use window_detach::{
@@ -1181,6 +1181,7 @@ impl StokesForgeApp {
         plot_settings_window(ctx, &mut self.state);
         column_metadata_window(ctx, &self.state, actions);
         status_history_window(ctx, &self.state, actions);
+        low_r2_list_window(ctx, &self.state, actions);
         keyboard_shortcuts_window(ctx, &self.state, actions);
         if let Some(language) = preferences_window(ctx, &self.state, actions) {
             self.choose_language(language);

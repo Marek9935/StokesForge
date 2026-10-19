@@ -192,7 +192,26 @@ contrainte entre champs (N11) et l'erreur Typst des textes riches (T3).
   calcul « Show » (dont les valeurs ne sont pas gardées, vues au seul apply).
   Jamais pour l'aperçu en direct ni à l'ouverture d'un projet. Une alerte
   d'enregistrement ou d'ouverture déjà là n'est pas écrasée ; plusieurs calculs
-  au même instantané : une boîte, la première ligne et « … et N autre(s) ».
+  au même instantané : **une seule boîte**, au texte groupé par type (#290) :
+  « R² < 0,6 pour : • 12 reconvolutions • 1 ajustement », puis un renvoi vers le
+  volet Résultats. L'unité de compte est la **série** (un ajustement de 5
+  colonnes dont 2 en défaut compte 2) ; les types suivent l'ordre fixe de
+  `OperationKind::ALL`, leurs noms viennent du glossaire (clés
+  `low-r2-count-*`, pluriels fr+en). Pas de noms de séries ni de liste défilante.
+- **Pastille de la barre d'état** (#290) : « ⚠ 13 R² faibles », à droite de la
+  barre, en rouge R² (`theme::r_squared_color`), avec infobulle. C'est un
+  **état** recalculé à chaque instantané (`AppState::low_r2_groups`,
+  `low_r2_total`), pas un évènement : elle reste après la fermeture de la
+  boîte, même quand la boîte s'est ouverte, elle n'existe que tant qu'il reste
+  des R² < 0,6 (recalcul ou annulation qui les remonte, calcul supprimé : elle
+  disparaît). Elle compte **tout le projet**, calculs dont le réglage
+  `low_r2_dialog` est coupé compris (le réglage coupe la boîte, pas
+  l'information), et les cas où une alerte attendait déjà. Les calculs « Show »
+  ne gardent pas leurs valeurs : ils n'y comptent pas (la boîte les dit au seul
+  apply). Un clic ouvre la **même liste groupée** en fenêtre en lecture seule
+  (`Action::OpenLowR2List`/`CloseLowR2List`, état `low_r2_list_open` séparé de
+  `alert` : une alerte d'enregistrement n'est jamais écrasée) ; la fenêtre se
+  referme d'elle-même quand plus rien n'est faible.
 - **Deux interrupteurs, en OU** : la préférence d'application (Préférences,
   page General, `Action::SetAnalysisLowR2Dialog`) et le réglage du calcul
   (`Calculation::low_r2_dialog`, section Output). Les couleurs, elles, restent.

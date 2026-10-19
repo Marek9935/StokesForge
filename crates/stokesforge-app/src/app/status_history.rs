@@ -62,6 +62,27 @@ pub(super) fn status_history_window(
     }
 }
 
+/// Peint la liste des R² faibles du projet par type (#290), ouverte par la
+/// pastille de la barre d'état. Lecture seule : Close seul. Les mêmes
+/// compteurs que la boîte (`AppState::low_r2_list_text`).
+pub(super) fn low_r2_list_window(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
+    if !state.low_r2_list_open() {
+        return;
+    }
+    let outcome = modal_read_only(
+        ctx,
+        egui::Id::new("stokesforge_low_r2_list"),
+        &tr!("alert-low-r2-title"),
+        egui::vec2(480.0, 170.0),
+        |ui| {
+            ui.label(egui::RichText::new(state.low_r2_list_text()).weak());
+        },
+    );
+    if outcome != DialogOutcome::Open {
+        actions.push(Action::CloseLowR2List);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

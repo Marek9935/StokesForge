@@ -20,11 +20,16 @@ struct Setup {
 
 /// Une feuille `A` (X), `B` (Y) : `y = 2x + 1` sur 11 points.
 fn setup(dir: &std::path::Path) -> Setup {
+    setup_points(dir, 11)
+}
+
+/// Comme [`setup`], avec `n` points (la décomposition en pics en veut 16).
+fn setup_points(dir: &std::path::Path, n: u32) -> Setup {
     i18n::set_language(Language::English);
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
     let sheet = project.tree().children(book).unwrap()[0];
-    let xs: Vec<f64> = (0..11).map(f64::from).collect();
+    let xs: Vec<f64> = (0..n).map(f64::from).collect();
     let ys: Vec<f64> = xs.iter().map(|x| 2.0 * x + 1.0).collect();
     let x = project
         .add_column(sheet, None, Some("A"), Column::from_f64(&xs))
@@ -942,7 +947,8 @@ fn a_fit_with_a_very_low_r2_opens_the_dialog_whether_or_not_values_are_kept() {
         fit(&mut s, keep, true);
         let alert = s.state.alert().expect("R² < 0.6 opens the dialog");
         assert_eq!(alert.kind, AlertKind::LowRSquared, "keep = {keep}");
-        assert!(alert.message.contains("R² ="), "{}", alert.message);
+        assert!(alert.message.contains("R² < 0.6"), "{}", alert.message);
+        assert!(alert.message.contains("1 fit"), "{}", alert.message);
     }
 }
 
@@ -1032,7 +1038,7 @@ fn a_low_r2_never_replaces_an_alert_already_waiting() {
 }
 
 #[test]
-fn several_failing_calculations_make_one_dialog_that_counts_the_others() {
+fn several_failing_calculations_make_one_dialog_that_counts_them_by_type() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     fit(&mut s, true, true);
@@ -1042,7 +1048,9 @@ fn several_failing_calculations_make_one_dialog_that_counts_the_others() {
     // Un seul recalcul, deux calculs en défaut : une seule boîte.
     let alert = s.state.alert().expect("one dialog");
     assert_eq!(alert.kind, AlertKind::LowRSquared);
-    assert!(alert.message.contains("other"), "{}", alert.message);
+    // Un compteur par type (#290), plus « première ligne et N autres ».
+    assert!(alert.message.contains("2 fits"), "{}", alert.message);
+    assert!(!alert.message.contains("other"), "{}", alert.message);
 }
 
 #[test]
@@ -1059,4 +1067,204 @@ fn opening_a_project_with_a_low_r2_is_not_a_recalculation() {
     )
     .unwrap();
     assert!(again.alert().is_none());
+}
+
+// ---- Pastille des R² faibles du projet et boîte groupée (#290) --------
+
+use stokesforge_app_state::r_squared::LowRSquaredGroup;
+
+/// Remet Y sur `y = 2x + 1` (bon R² à tout ajustement linéaire).
+fn restore(s: &mut Setup) {
+    for row in 0..11 {
+        s.state.dispatch(Action::CommitCell {
+            column: s.y,
+            row,
+            text: (2 * row + 1).to_string(),
+        });
+    }
+}
+
+fn groups(s: &Setup) -> Vec<(OperationKind, usize)> {
+    s.state
+        .low_r2_groups()
+        .iter()
+        .map(|g: &LowRSquaredGroup| (g.kind, g.count))
+        .collect()
+}
+
+#[test]
+fn the_badge_counts_low_r2_even_when_the_dialog_is_off_by_the_calculation_setting() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    fit(&mut s, true, false);
+    assert!(s.state.alert().is_none());
+    assert_eq!(s.state.low_r2_total(), 1);
+    assert_eq!(groups(&s), vec![(OperationKind::Fit, 1)]);
+}
+
+#[test]
+fn the_badge_counts_low_r2_even_when_the_dialog_is_off_by_the_preference() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    with_preferences(&mut s, dir.path());
+    s.state.dispatch(Action::SetAnalysisLowR2Dialog(false));
+    scramble(&mut s);
+    fit(&mut s, true, true);
+    assert!(s.state.alert().is_none());
+    assert_eq!(s.state.low_r2_total(), 1);
+}
+
+#[test]
+fn the_badge_counts_what_an_alert_already_waiting_kept_the_dialog_from_saying() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    s.state.set_path(dir.path().display().to_string());
+    s.state.dispatch(Action::Save);
+    fit(&mut s, true, true);
+    assert_eq!(s.state.alert().map(|a| a.kind), Some(AlertKind::SaveFailed));
+    assert_eq!(s.state.low_r2_total(), 1);
+}
+
+#[test]
+fn the_badge_stays_when_the_dialog_opens_and_after_it_closes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    fit(&mut s, true, true);
+    assert_eq!(
+        s.state.alert().map(|a| a.kind),
+        Some(AlertKind::LowRSquared)
+    );
+    assert_eq!(s.state.low_r2_total(), 1);
+    s.state.dispatch(Action::DismissAlert);
+    assert_eq!(s.state.low_r2_total(), 1, "un état, pas un évènement");
+}
+
+#[test]
+fn a_show_calculation_keeps_nothing_so_the_badge_ignores_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    fit(&mut s, false, true);
+    assert_eq!(
+        s.state.alert().map(|a| a.kind),
+        Some(AlertKind::LowRSquared)
+    );
+    assert_eq!(s.state.low_r2_total(), 0);
+}
+
+#[test]
+fn the_badge_ignores_good_fits() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    fit(&mut s, true, true);
+    assert_eq!(s.state.low_r2_total(), 0);
+    assert!(s.state.low_r2_groups().is_empty());
+}
+
+#[test]
+fn the_badge_goes_when_the_r2_rises_again_or_the_calculation_is_undone() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    scramble(&mut s);
+    fit(&mut s, true, false);
+    assert_eq!(s.state.low_r2_total(), 1);
+    // Les données redeviennent bonnes : le recalcul automatique remonte R².
+    restore(&mut s);
+    assert_eq!(s.state.low_r2_total(), 0);
+    // Les brouiller encore, puis annuler le calcul.
+    scramble(&mut s);
+    assert_eq!(s.state.low_r2_total(), 1);
+    let id = only_calculation(&s);
+    s.state.dispatch(Action::RequestDeleteCalculation(id));
+    s.state.dispatch(Action::ConfirmDeleteCalculation(
+        CalculationDelete::WithColumns,
+    ));
+    assert_eq!(s.state.low_r2_total(), 0);
+    s.state.dispatch(Action::Undo);
+    assert_eq!(s.state.low_r2_total(), 1, "l'annulation le ramène");
+}
+
+#[test]
+fn the_badge_list_opens_closes_and_never_touches_the_alert() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    s.state.dispatch(Action::OpenLowR2List);
+    assert!(!s.state.low_r2_list_open(), "rien à lister");
+    scramble(&mut s);
+    s.state.set_path(dir.path().display().to_string());
+    s.state.dispatch(Action::Save);
+    fit(&mut s, true, true);
+    s.state.dispatch(Action::OpenLowR2List);
+    assert!(s.state.low_r2_list_open());
+    assert_eq!(s.state.alert().map(|a| a.kind), Some(AlertKind::SaveFailed));
+    assert!(s.state.low_r2_list_text().contains("1 fit"));
+    s.state.dispatch(Action::CloseLowR2List);
+    assert!(!s.state.low_r2_list_open());
+    // La liste se referme d'elle-même quand plus rien n'est faible.
+    s.state.dispatch(Action::OpenLowR2List);
+    restore(&mut s);
+    assert!(!s.state.low_r2_list_open());
+}
+
+#[test]
+fn the_badge_groups_two_types_in_the_fixed_order_of_the_types() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup_points(dir.path(), 40);
+    for row in 0..40 {
+        s.state.dispatch(Action::CommitCell {
+            column: s.y,
+            row,
+            text: if row % 2 == 0 { "0" } else { "100" }.to_string(),
+        });
+    }
+    // Les pics d'abord, l'ajustement ensuite : l'ordre d'apparition ne compte pas.
+    open(&mut s, Preset::Peaks);
+    let form = s.state.analysis_form_mut().unwrap();
+    form.keep_results = true;
+    form.low_r2_dialog = false;
+    s.state.dispatch(Action::ApplyAnalysis);
+    fit(&mut s, true, false);
+    fit(&mut s, true, false);
+    assert_eq!(
+        groups(&s),
+        vec![(OperationKind::Fit, 2), (OperationKind::Peaks, 1)]
+    );
+    assert_eq!(s.state.low_r2_total(), 3);
+    let text = s.state.low_r2_list_text();
+    let (fit_at, peaks_at) = (
+        text.find("2 fits").unwrap(),
+        text.find("1 peak decomposition"),
+    );
+    assert!(peaks_at.is_some_and(|at| fit_at < at), "{text}");
+}
+
+#[test]
+fn a_calculation_with_two_failing_series_counts_two() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    s.state.dispatch(Action::AddColumn { sheet: s.sheet });
+    let y2 = *s.state.tree().children(s.sheet).unwrap().last().unwrap();
+    for row in 0..11 {
+        s.state.dispatch(Action::CommitCell {
+            column: y2,
+            row,
+            text: if row % 2 == 0 { "0" } else { "100" }.to_string(),
+        });
+    }
+    scramble(&mut s);
+    s.state.dispatch(Action::OpenAnalysis {
+        preset: Preset::Fit(Model::Linear),
+        sheet: s.sheet,
+        columns: vec![s.x, s.y, y2],
+    });
+    let form = s.state.analysis_form_mut().unwrap();
+    assert_eq!(form.series.len(), 2);
+    form.keep_results = true;
+    form.low_r2_dialog = false;
+    s.state.dispatch(Action::ApplyAnalysis);
+    assert_eq!(s.state.tree().calculations().len(), 1, "one calculation");
+    assert_eq!(groups(&s), vec![(OperationKind::Fit, 2)]);
 }

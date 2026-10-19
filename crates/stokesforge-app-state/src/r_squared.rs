@@ -8,7 +8,10 @@
 //! plus bas. `NaN` (pas de valeur) n'avertit de rien : on n'alerte pas sur ce
 //! qu'on ne sait pas mesurer.
 
-use stokesforge_core::Calculation;
+use stokesforge_analysis::ops::OperationKind;
+use stokesforge_core::{Calculation, Tree};
+
+use crate::tr;
 
 /// La clé des résultats qui porte R² (ajustements et pics).
 pub const R_SQUARED_KEY: &str = "stat.r_squared";
@@ -84,6 +87,103 @@ pub fn dialog_fingerprint(calc: &Calculation) -> Vec<(usize, u64)> {
         }
     }
     out
+}
+
+/// Le nombre de **séries** du calcul dont le R² franchit le palier de la boîte
+/// (#290) : l'unité de compte est la série, une courbe = un R².
+pub fn low_series_count(calc: &Calculation) -> usize {
+    calc.results
+        .iter()
+        .filter(|result| {
+            result
+                .values
+                .iter()
+                .any(|v| level_of_value(&v.key, v.value) == RSquaredLevel::Dialog)
+        })
+        .count()
+}
+
+/// Les séries en défaut d'un type de calcul.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LowRSquaredGroup {
+    pub kind: OperationKind,
+    /// Toujours au moins 1.
+    pub count: usize,
+}
+
+/// Regroupe des `(type, nombre de séries)` par type, dans l'ordre fixe de
+/// [`OperationKind::ALL`] (stable d'un instantané à l'autre) ; les types sans
+/// série en défaut disparaissent.
+pub fn group_by_kind(
+    items: impl IntoIterator<Item = (OperationKind, usize)>,
+) -> Vec<LowRSquaredGroup> {
+    let mut totals = [0usize; OperationKind::ALL.len()];
+    for (kind, count) in items {
+        if let Some(rank) = OperationKind::ALL.iter().position(|k| *k == kind) {
+            totals[rank] += count;
+        }
+    }
+    OperationKind::ALL
+        .iter()
+        .zip(totals)
+        .filter(|(_, count)| *count > 0)
+        .map(|(kind, count)| LowRSquaredGroup { kind: *kind, count })
+        .collect()
+}
+
+/// Les R² faibles de tout le projet (#290), regroupés par type : tous les
+/// calculs qui gardent leurs valeurs, quel que soit leur réglage
+/// `low_r2_dialog` (le réglage coupe la boîte, pas l'information). Un calcul
+/// « Show » ne garde rien : il n'y compte pas.
+pub fn project_groups(tree: &Tree) -> Vec<LowRSquaredGroup> {
+    group_by_kind(
+        tree.calculations()
+            .values()
+            .map(|calc| (calc.operation.kind(), low_series_count(calc))),
+    )
+}
+
+/// Le total de séries des groupes.
+pub fn total(groups: &[LowRSquaredGroup]) -> usize {
+    groups.iter().map(|g| g.count).sum()
+}
+
+fn count_i64(count: usize) -> i64 {
+    i64::try_from(count).unwrap_or(i64::MAX)
+}
+
+/// « 12 reconvolutions » : le compteur d'un type, avec son pluriel.
+pub fn group_line(group: &LowRSquaredGroup) -> String {
+    let count = count_i64(group.count);
+    match group.kind {
+        OperationKind::Baseline => tr!("low-r2-count-baseline", count = count),
+        OperationKind::Correct => tr!("low-r2-count-correct", count = count),
+        OperationKind::Integrate => tr!("low-r2-count-integrate", count = count),
+        OperationKind::Fit => tr!("low-r2-count-fit", count = count),
+        OperationKind::Peaks => tr!("low-r2-count-peaks", count = count),
+        OperationKind::Reconvolution => tr!("low-r2-count-reconvolution", count = count),
+        OperationKind::DirectDeconvolution => {
+            tr!("low-r2-count-direct-deconvolution", count = count)
+        }
+    }
+}
+
+/// Le texte de la boîte et de la liste de la pastille : « R² < 0,6 pour : »,
+/// une ligne « • N type » par groupe, puis le renvoi vers les Résultats.
+pub fn summary_text(groups: &[LowRSquaredGroup]) -> String {
+    let mut text = tr!("low-r2-summary-head");
+    for group in groups {
+        text.push_str("\n• ");
+        text.push_str(&group_line(group));
+    }
+    text.push('\n');
+    text.push_str(&tr!("low-r2-summary-see-results"));
+    text
+}
+
+/// Le libellé de la pastille de la barre d'état : « ⚠ 13 R² faibles ».
+pub fn badge_text(total: usize) -> String {
+    tr!("status-low-r2-badge", count = count_i64(total))
 }
 
 #[cfg(test)]

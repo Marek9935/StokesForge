@@ -481,6 +481,10 @@ pub enum Action {
     OpenStatusHistory,
     /// Ferme la fenêtre d'historique des messages.
     CloseStatusHistory,
+    /// Ouvre la liste des R² faibles du projet par type (pastille, #290).
+    OpenLowR2List,
+    /// Ferme cette liste.
+    CloseLowR2List,
     /// Arrête l'import en fond après le fichier en cours (#232, P2) : rien
     /// n'est créé.
     StopImport,
@@ -2474,6 +2478,11 @@ pub struct AppState {
     status_log: std::collections::VecDeque<StatusMessage>,
     /// La fenêtre d'historique des messages est ouverte.
     status_history_open: bool,
+    /// Les R² faibles du projet par type (#290), recalculés à chaque instantané.
+    low_r2_groups: Vec<crate::r_squared::LowRSquaredGroup>,
+    /// La liste de la pastille « R² faibles » est ouverte (#290) : un état à
+    /// part, qui n'écrase pas `alert`.
+    low_r2_list_open: bool,
     keyboard_shortcuts_open: bool,
     /// La fenêtre des préférences est ouverte (#148).
     preferences_open: bool,
@@ -2661,6 +2670,8 @@ impl AppState {
             status: None,
             status_log: std::collections::VecDeque::new(),
             status_history_open: false,
+            low_r2_groups: Vec::new(),
+            low_r2_list_open: false,
             keyboard_shortcuts_open: false,
             preferences_open: false,
             dialog_error: None,
@@ -2700,6 +2711,7 @@ impl AppState {
             pending_script: None,
         };
         state.seed_low_r2();
+        state.refresh_low_r2_groups();
         Ok(state)
     }
 
@@ -4495,6 +4507,8 @@ impl AppState {
             Action::CloseColumnMetadata => self.metadata_view = None,
             Action::OpenStatusHistory => self.status_history_open = true,
             Action::CloseStatusHistory => self.status_history_open = false,
+            Action::OpenLowR2List => self.low_r2_list_open = self.low_r2_total() > 0,
+            Action::CloseLowR2List => self.low_r2_list_open = false,
             Action::StopImport => self.stop_import(),
             Action::StopRecalc => self.stop_recalc(),
             Action::OpenKeyboardShortcuts => self.keyboard_shortcuts_open = true,
@@ -5001,6 +5015,7 @@ impl AppState {
                 let reopened = self.snapshot.epoch != snapshot.epoch;
                 self.snapshot = snapshot;
                 self.revalidate_selection();
+                self.refresh_low_r2_groups();
                 if reopened {
                     self.seed_low_r2();
                 } else {

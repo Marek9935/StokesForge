@@ -60,9 +60,50 @@ alert-open-failed = Le projet n'a pas pu être ouvert. Le projet courant n'a pas
 alert-open-another = Ouvrir un autre…
     .hint = Choisit un autre fichier de projet
 alert-low-r2-title = R² faible
-alert-low-r2 = L'ajustement suit mal les données (R² inférieur à 0,6). Vérifiez le modèle et les valeurs de départ.
-alert-low-r2-line = { $kind } — { $series } : R² = { $value }
-alert-low-r2-more = … et { $count } autre(s) calcul(s)
+alert-low-r2 = Des résultats suivent mal les données (R² inférieur à 0,6). Vérifiez le modèle et les valeurs de départ.
+low-r2-summary-head = R² < 0,6 pour :
+low-r2-summary-see-results = Les valeurs sont dans le volet Résultats.
+low-r2-count-baseline =
+    { $count ->
+        [one] { $count } ligne de base
+       *[other] { $count } lignes de base
+    }
+low-r2-count-correct =
+    { $count ->
+        [one] { $count } correction
+       *[other] { $count } corrections
+    }
+low-r2-count-integrate =
+    { $count ->
+        [one] { $count } intégration
+       *[other] { $count } intégrations
+    }
+low-r2-count-fit =
+    { $count ->
+        [one] { $count } ajustement
+       *[other] { $count } ajustements
+    }
+low-r2-count-peaks =
+    { $count ->
+        [one] { $count } décomposition en pics
+       *[other] { $count } décompositions en pics
+    }
+low-r2-count-reconvolution =
+    { $count ->
+        [one] { $count } reconvolution
+       *[other] { $count } reconvolutions
+    }
+low-r2-count-direct-deconvolution =
+    { $count ->
+        [one] { $count } déconvolution directe
+       *[other] { $count } déconvolutions directes
+    }
+status-low-r2-badge =
+    { $count ->
+        [one] { $count } R² faible
+       *[other] { $count } R² faibles
+    }
+status-low-r2-badge-hint = Des calculs suivent mal les données (R² inférieur à 0,6). Cliquer pour les lister par type.
 overwrite-title = Remplacer le fichier
 overwrite-confirm = « { $name } » existe déjà. Le remplacer ?
 overwrite-replace = Remplacer

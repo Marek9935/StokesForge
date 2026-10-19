@@ -8,6 +8,7 @@
 //! recalcul des formules. Le formulaire lui-même est un état d'interface :
 //! jamais dans l'historique tant que l'utilisateur n'a pas validé.
 
+use stokesforge_analysis::ops::OperationKind;
 use stokesforge_commands::HistoryLabel;
 use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{Node, NodeId, NodeKind, SeriesRef};
@@ -350,42 +351,67 @@ impl AppState {
             // Un calcul qui garde ses valeurs est vu par `watch_low_r2`.
             if !form.keep_results && !form.replace_original && form.low_r2_dialog {
                 let kind = form.kind;
-                let lines: Vec<String> = all_values
+                let count = all_values
                     .iter()
-                    .zip(&form.series)
-                    .filter_map(|(result, series)| {
-                        low_r2_of(&result.values)
-                            .map(|r2| low_r2_line(&self.snapshot.tree, kind, series, r2))
-                    })
-                    .collect();
-                self.raise_low_r2(&lines);
+                    .filter(|result| low_r2_of(&result.values).is_some())
+                    .count();
+                self.raise_low_r2(&[(kind, count)]);
             }
         }
     }
 
-    /// Ouvre la boîte « R² très faible » (#288) pour `lines` (une par série en
-    /// défaut), sauf si la préférence de l'application la coupe, s'il n'y a rien
-    /// à dire, ou si une alerte attend déjà d'être lue (une seule case : une
-    /// alerte d'enregistrement ou d'ouverture ne s'écrase pas).
-    fn raise_low_r2(&mut self, lines: &[String]) {
-        if lines.is_empty()
+    /// Ouvre la boîte « R² très faible » (#288) pour `found` (par calcul, son
+    /// type et son nombre de séries en défaut), sauf si la préférence de
+    /// l'application la coupe, s'il n'y a rien à dire, ou si une alerte attend
+    /// déjà d'être lue (une seule case : une alerte d'enregistrement ou
+    /// d'ouverture ne s'écrase pas). Le texte est un compteur par type (#290).
+    /// Ce qui n'a pas pu s'ouvrir n'est pas perdu : la pastille de la barre
+    /// d'état (`low_r2_groups`) le dit tant que les R² restent faibles.
+    fn raise_low_r2(&mut self, found: &[(OperationKind, usize)]) {
+        let groups = r_squared::group_by_kind(found.iter().copied());
+        if groups.is_empty()
             || self.alert.is_some()
             || !self.object_manager_preferences.analysis_low_r2_dialog()
         {
             return;
         }
-        let mut message = lines[0].clone();
-        if lines.len() > 1 {
-            message.push('\n');
-            message.push_str(&tr!(
-                "alert-low-r2-more",
-                count = i64::try_from(lines.len() - 1).unwrap_or(i64::MAX)
-            ));
-        }
         self.alert = Some(super::Alert {
             kind: super::AlertKind::LowRSquared,
-            message,
+            message: r_squared::summary_text(&groups),
         });
+    }
+
+    /// Recalcule les R² faibles du projet (#290) à partir de l'instantané
+    /// courant : un **état**, pas un évènement. Appelée à chaque instantané
+    /// neuf, avant `watch_low_r2` ; le groupe disparaît dès que les R² remontent.
+    pub(super) fn refresh_low_r2_groups(&mut self) {
+        self.low_r2_groups = r_squared::project_groups(&self.snapshot.tree);
+        if self.low_r2_groups.is_empty() {
+            self.low_r2_list_open = false;
+        }
+    }
+
+    /// Les séries à R² < 0,6 de tout le projet, par type de calcul, dans
+    /// l'ordre fixe des types (#290). Compte aussi les calculs dont la boîte
+    /// est coupée ; pas les calculs « Show », qui ne gardent pas leurs valeurs.
+    pub fn low_r2_groups(&self) -> &[r_squared::LowRSquaredGroup] {
+        &self.low_r2_groups
+    }
+
+    /// Le nombre de séries à R² < 0,6 du projet : la pastille de la barre
+    /// d'état n'existe que s'il est positif.
+    pub fn low_r2_total(&self) -> usize {
+        r_squared::total(&self.low_r2_groups)
+    }
+
+    /// La liste de la pastille est-elle ouverte ?
+    pub fn low_r2_list_open(&self) -> bool {
+        self.low_r2_list_open
+    }
+
+    /// Le texte de la liste de la pastille : les mêmes compteurs que la boîte.
+    pub fn low_r2_list_text(&self) -> String {
+        r_squared::summary_text(&self.low_r2_groups)
     }
 
     /// Prend l'empreinte des R² très faibles des calculs de `tree`, sans rien
@@ -409,7 +435,7 @@ impl AppState {
     /// dont le résultat n'a pas bougé ne la rouvre pas à chaque image.
     pub(super) fn watch_low_r2(&mut self) {
         let tree = self.snapshot.tree.clone();
-        let mut lines = Vec::new();
+        let mut found = Vec::new();
         let mut seen = std::mem::take(&mut self.low_r2_seen);
         seen.retain(|id, _| tree.calculation(*id).is_some());
         for (id, calc) in tree.calculations() {
@@ -418,19 +444,13 @@ impl AppState {
                 seen.remove(id);
             } else if seen.get(id) != Some(&print) {
                 if calc.low_r2_dialog {
-                    for (rank, result) in calc.results.iter().enumerate() {
-                        if let (Some(r2), Some(series)) =
-                            (low_r2_of(&result.values), calc.series.get(rank))
-                        {
-                            lines.push(low_r2_line(&tree, calc.operation.kind(), series, r2));
-                        }
-                    }
+                    found.push((calc.operation.kind(), r_squared::low_series_count(calc)));
                 }
                 seen.insert(*id, print);
             }
         }
         self.low_r2_seen = seen;
-        self.raise_low_r2(&lines);
+        self.raise_low_r2(&found);
     }
 
     /// Les graphiques qui tracent au moins une des colonnes `ys` : ceux où
@@ -790,22 +810,4 @@ fn low_r2_of(values: &[stokesforge_core::ResultValue]) -> Option<f64> {
         .filter(|v| r_squared::level_of_value(&v.key, v.value) == r_squared::RSquaredLevel::Dialog)
         .map(|v| v.value)
         .min_by(f64::total_cmp)
-}
-
-/// Une ligne de la boîte : l'opération, la série, et son R².
-fn low_r2_line(
-    tree: &stokesforge_core::Tree,
-    kind: stokesforge_analysis::ops::OperationKind,
-    series: &SeriesRef,
-    r_squared: f64,
-) -> String {
-    let kind = crate::analysis::kind_title(kind);
-    let series = crate::analysis::series_label(tree, series);
-    let value = stokesforge_core::number_format::format_with_uncertainty(r_squared, None);
-    tr!(
-        "alert-low-r2-line",
-        kind = kind.as_str(),
-        series = series.as_str(),
-        value = value.as_str()
-    )
 }

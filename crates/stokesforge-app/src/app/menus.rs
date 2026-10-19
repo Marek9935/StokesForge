@@ -767,8 +767,46 @@ impl StokesForgeApp {
                     if response.clicked() {
                         actions.push(Action::OpenStatusHistory);
                     }
+                    // La pastille des R² faibles du projet (#290) : un état,
+                    // visible tant qu'il en reste, même si la boîte s'est
+                    // ouverte ou n'a pas pu s'ouvrir.
+                    let total = self.state.low_r2_total();
+                    if total > 0 {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            low_r2_badge(ui, total, actions);
+                        });
+                    }
                 });
             });
+    }
+}
+
+/// La pastille « ⚠ 13 R² faibles » (#290) : icône d'avertissement et texte dans
+/// la teinte rouge de R² (`theme::r_squared_color`) ; un clic ouvre la liste par
+/// type, l'infobulle le dit.
+fn low_r2_badge(ui: &mut egui::Ui, total: usize, actions: &mut Vec<Action>) {
+    use crate::icons::{icon_image, Icon, IconRole};
+    use stokesforge_app_state::r_squared::RSquaredLevel;
+    let color = crate::theme::r_squared_color(RSquaredLevel::Dialog, ui.visuals().dark_mode);
+    let response = ui
+        .scope(|ui| {
+            ui.add(icon_image(Icon::Stale, IconRole::Neutral));
+            ui.label(
+                crate::theme::bold(stokesforge_app_state::r_squared::badge_text(total))
+                    .color(color),
+            );
+        })
+        .response;
+    let response = super::cursors::clickable(
+        ui.interact(
+            response.rect,
+            egui::Id::new("stokesforge_low_r2_badge"),
+            egui::Sense::click(),
+        )
+        .on_hover_text(tr!("status-low-r2-badge-hint")),
+    );
+    if response.clicked() {
+        actions.push(Action::OpenLowR2List);
     }
 }
 

@@ -546,7 +546,21 @@ boîte : ouverte à l'application (valeurs gardées ou non) et au recalcul
 automatique, muette pour un bon R², préférence coupée, réglage du calcul coupé,
 aperçu, ouverture d'un projet, alerte déjà là, plusieurs calculs. Mutants
 éprouvés : garde d'alerte, préférence, réglage du calcul (deux endroits),
-empreinte, bornes strictes. La peinture egui (gras, teinte, bulle) n'a pas de
+empreinte, bornes strictes.
+
+Boîte groupée et pastille (#290) : `app-state/tests/analysis_state.rs` (fin du
+fichier) tient l'état « R² faibles du projet » — compté malgré le réglage du
+calcul coupé, la préférence coupée, une alerte déjà ouverte ; resté après la
+boîte ; absent pour un calcul « Show » et pour un bon R² ; revenu à 0 après un
+recalcul qui remonte R² ou la suppression du calcul (et rétabli par l'annulation) ;
+compté par série ; deux types dans l'ordre fixe ; liste ouverte/fermée sans
+toucher `alert`. `app-state/tests/low_r2_text.rs` tient le texte (fusion et
+ordre des groupes, singulier/pluriel fr+en, chaque type nommé). Mutants
+éprouvés : réglage du calcul qui filtre la pastille, compte par calcul au lieu
+de par série, absence de rafraîchissement à l'instantané, ordre des types,
+fermeture automatique de la liste. La peinture de la pastille (position à droite,
+teinte, clic) n'a pas de test : seule l'action qu'elle pousse est gardée par
+l'état. La peinture egui (gras, teinte, bulle) n'a pas de
 test d'image : seul `theme::r_squared_color` est testé.
 
 ### Remplacement définitif d'une correction (#212)

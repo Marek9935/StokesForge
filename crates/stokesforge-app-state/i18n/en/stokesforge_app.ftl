@@ -64,9 +64,46 @@ alert-open-failed = The project could not be opened. The current project is unch
 alert-open-another = Open Another…
     .hint = Chooses another project file
 alert-low-r2-title = Low R²
-alert-low-r2 = The fit follows the data poorly (R² below 0.6). Check the model and the starting values.
-alert-low-r2-line = { $kind } — { $series }: R² = { $value }
-alert-low-r2-more = … and { $count } other calculation(s)
+alert-low-r2 = Some results follow the data poorly (R² below 0.6). Check the model and the starting values.
+low-r2-summary-head = R² < 0.6 for:
+low-r2-summary-see-results = See the Results pane for the values.
+low-r2-count-baseline =
+    { $count ->
+        [one] { $count } baseline
+       *[other] { $count } baselines
+    }
+low-r2-count-correct =
+    { $count ->
+        [one] { $count } correction
+       *[other] { $count } corrections
+    }
+low-r2-count-integrate =
+    { $count ->
+        [one] { $count } integration
+       *[other] { $count } integrations
+    }
+low-r2-count-fit =
+    { $count ->
+        [one] { $count } fit
+       *[other] { $count } fits
+    }
+low-r2-count-peaks =
+    { $count ->
+        [one] { $count } peak decomposition
+       *[other] { $count } peak decompositions
+    }
+low-r2-count-reconvolution =
+    { $count ->
+        [one] { $count } reconvolution
+       *[other] { $count } reconvolutions
+    }
+low-r2-count-direct-deconvolution =
+    { $count ->
+        [one] { $count } direct deconvolution
+       *[other] { $count } direct deconvolutions
+    }
+status-low-r2-badge = { $count } low R²
+status-low-r2-badge-hint = Some calculations fit the data poorly (R² below 0.6). Click to list them by type.
 overwrite-title = Replace File
 overwrite-confirm = “{ $name }” already exists. Replace it?
 overwrite-replace = Replace
