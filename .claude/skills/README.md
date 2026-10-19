@@ -48,6 +48,14 @@ disent *quoi faire*, dans quel ordre, et ce qu'on oublie systématiquement.
   — faire trancher **six choix ou plus** par une page de décisions (une carte
   par décision : contexte, avant, après, avantage et défaut de chaque option).
   Utilisée par tous les skills qui posent des questions.
+- [`stokesforge-feature/references/`](stokesforge-feature/references/) — onze
+  fiches par thème (F1, #301), lues à la demande depuis le `SKILL.md`. **Règle
+  F1 : une fiche ne contient aucune règle recopiée**, seulement des renvois
+  précis (`fichier` § « section » vers `docs/` ou `.claude/conventions.md`) et
+  une liste de points à vérifier ; une règle qui n'existe qu'au skill est
+  d'abord déplacée à sa place. Le test
+  `crates/stokesforge-arch-guard/tests/renvois_fiches.rs` vérifie que chaque
+  renvoi pointe une section existante.
 
 ## Règles transversales, apprises à l'usage
 
@@ -72,7 +80,7 @@ confirmations, grisage, clavier et souris suivent
 page marque chaque section *en place* ou *à venir* (issues #219–#232) : une
 règle *à venir* vaut déjà pour tout code neuf, mais une brique ou une garde
 *à venir* n'existe pas et ne s'appelle pas. Les skills `stokesforge-feature`
-(§2 novies), `stokesforge-textes-interface` (les mots),
+(fiche `standard-comportement`), `stokesforge-textes-interface` (les mots),
 `stokesforge-verification` (gardes à venir) et `stokesforge-bug-report`
 (signaler contre la règle) s'y réfèrent.
 

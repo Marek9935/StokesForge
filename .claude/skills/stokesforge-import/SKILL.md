@@ -5,7 +5,7 @@ description: Travailler sur l'import de fichiers d'instruments dans StokesForge 
 
 # Import de fichiers d'instruments
 
-`stokesforge-import` reproduit l'assistant d'import ASCII d'OriginLab — et sa fenêtre côté application est un **dialogue modal de la brique commune** (`modal_dialog_with`, voir `stokesforge-feature` § 2 sexies), jamais une `egui::Window` brute :
+`stokesforge-import` reproduit l'assistant d'import ASCII d'OriginLab — et sa fenêtre côté application est un **dialogue modal de la brique commune** (`modal_dialog_with`, voir `stokesforge-feature`, fiche `references/fenetres-dialogues.md`), jamais une `egui::Window` brute :
 l'utilisateur choisit une **recette** décrivant comment un appareil écrit ses
 fichiers, l'applique, et peut l'enregistrer pour la réutiliser.
 
