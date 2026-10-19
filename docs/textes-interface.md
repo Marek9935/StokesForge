@@ -271,6 +271,7 @@ grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
 | Prominence | Proéminence | Hauteur d'un pic au-dessus de son entourage | Saillance | D |
 | Shift | Décalage | Translation en abscisse de la réponse (≠ *chemical shift*) | Shift | D |
 | Plateau | Palier | Niveau constant vers lequel une exponentielle se stabilise (≠ *Offset* de l'empilement) | Décalage, Offset | D |
+| Not converged | N'a pas convergé | Le solveur d'ajustement s'est arrêté sans atteindre un minimum (#281) ; jamais « plateau » (réservé à l'asymptote) | Échec, Plateau | D |
 | Analysis type | Type d'analyse | Famille de calcul choisie dans la fenêtre d'analyse | Opération | D |
 
 ## 3. Exemples avant / après

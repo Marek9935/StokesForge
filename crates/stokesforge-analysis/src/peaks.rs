@@ -241,6 +241,8 @@ pub struct PeaksFit {
     pub dof: usize,
     /// Nombre de paramètres libres que les données ne déterminent pas (#203).
     pub undetermined: usize,
+    /// Arrêt sur un plateau, pas sur un minimum (#281).
+    pub plateau: bool,
 }
 
 /// Décompose `series` en pics selon `spec`.
@@ -416,6 +418,7 @@ pub fn decompose(series: &Series, spec: &PeaksSpec) -> Result<PeaksFit, Analysis
         reduced_chi2: sol.reduced_chi2,
         dof: sol.dof,
         undetermined: sol.undetermined.iter().filter(|u| **u).count(),
+        plateau: sol.plateau,
     })
 }
 

@@ -57,7 +57,12 @@ fn project_with_calculation() -> Project {
                     },
                 ],
                 skipped: 3,
-                warnings: vec![Warning::NegativeClipped(4), Warning::IrfStepMismatch],
+                warnings: vec![
+                    Warning::NegativeClipped(4),
+                    Warning::IrfStepMismatch,
+                    Warning::Undetermined(2),
+                    Warning::NotConverged,
+                ],
             }],
             keep_results: true,
             auto_recalc: false,

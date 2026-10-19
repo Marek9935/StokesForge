@@ -93,7 +93,19 @@ pub struct Solution {
     pub reduced_chi2: f64,
     pub iterations: usize,
     pub terms: Vec<TermStats>,
+    /// Le solveur s'est arrêté sur un **plateau**, pas sur un minimum (#281) :
+    /// des cases libres sans effet sur le modèle (gradient nul) alors que le
+    /// résidu reste grand, ex. un pic parti hors des données. La solution est
+    /// rendue (jamais d'erreur dure : elle ferait perdre le résultat) mais ne
+    /// doit pas être lue comme un ajustement convergé.
+    pub plateau: bool,
 }
+
+/// Part de la variance de Y (`SStot`) que le résidu (`SSres`) doit dépasser,
+/// sur une courbe au moins, pour qu'un arrêt avec des cases sans effet soit un
+/// plateau et non un modèle surparamétré qui s'ajuste bien (R² < 0,5). Seuil
+/// conservateur : un minimum local de données bruitées reste loin de lui.
+const PLATEAU_RESIDUAL_FRACTION: f64 = 0.5;
 
 fn residuals(terms: &[Term<'_>], values: &[f64], buf: &mut Vec<f64>, out: &mut Vec<f64>) {
     out.clear();
@@ -289,6 +301,16 @@ pub fn solve_problem(
             },
         });
     }
+    // Plateau (#281) : une case libre sans effet (colonne du jacobien nulle)
+    // ET un résidu qui reste grand. Des cases sans effet sur un bon ajustement
+    // restent un simple `undetermined` ; un résidu grand sans case sans effet
+    // est un vrai minimum local, pas un plateau.
+    let plateau = undetermined.iter().any(|u| *u)
+        && stats.iter().zip(terms).any(|(st, t)| {
+            let mean = t.y.iter().sum::<f64>() / t.y.len().max(1) as f64;
+            let ss_tot: f64 = t.y.iter().map(|y| (y - mean) * (y - mean)).sum();
+            ss_tot > 0.0 && st.ss_res / ss_tot > PLATEAU_RESIDUAL_FRACTION
+        });
     Ok(Solution {
         values,
         errors,
@@ -298,6 +320,7 @@ pub fn solve_problem(
         reduced_chi2,
         iterations,
         terms: stats,
+        plateau,
     })
 }
 
@@ -408,6 +431,71 @@ mod tests {
         assert!((sol.values[1] - 4.0).abs() < 1e-6);
         assert!((sol.values[2] - 2.5).abs() < 1e-6);
         assert!(sol.terms[0].r_squared > 1.0 - 1e-12);
+    }
+
+    /// Gaussienne + décalage : le départ de l'issue #281.
+    fn gaussian_problem<'a>(x: &'a [f64], y: &'a [f64]) -> Term<'a> {
+        Term {
+            x,
+            y,
+            sigma: None,
+            eval: Box::new(move |p, out| {
+                for (o, v) in out.iter_mut().zip(x) {
+                    let z = (v - p[1]) / (p[3] / 2.354_820_045);
+                    *o = p[0] + p[2] * (-0.5 * z * z).exp();
+                }
+            }),
+        }
+    }
+
+    fn gaussian_data(noise_amp: f64) -> (Vec<f64>, Vec<f64>) {
+        let x = xs(200, 0.0, 20.0);
+        let y = x
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let z = (v - 8.0) / (3.0 / 2.354_820_045);
+                5.0 * (-0.5 * z * z).exp() + noise_amp * noise(i)
+            })
+            .collect();
+        (x, y)
+    }
+
+    fn gaussian_slots(xc: f64, fwhm: f64) -> Vec<Slot> {
+        vec![
+            Slot::new("y0", 0.0),
+            Slot::new("xc", xc),
+            Slot::new("A", 1.0),
+            Slot::new("fwhm", fwhm),
+        ]
+    }
+
+    #[test]
+    fn un_depart_hors_des_donnees_s_arrete_sur_un_plateau() {
+        // #281 : xc = 1000, loin du pic -> jacobien nul sauf y0.
+        let (x, y) = gaussian_data(0.0);
+        let sol = solve_problem(
+            &gaussian_slots(1000.0, 1.0),
+            &[gaussian_problem(&x, &y)],
+            Options::default(),
+        )
+        .unwrap();
+        assert!(sol.terms[0].r_squared < 0.1, "{}", sol.terms[0].r_squared);
+        assert!(sol.plateau);
+    }
+
+    #[test]
+    fn un_ajustement_sain_ou_bruite_n_est_pas_un_plateau() {
+        for amp in [0.0, 0.3] {
+            let (x, y) = gaussian_data(amp);
+            let sol = solve_problem(
+                &gaussian_slots(7.0, 2.0),
+                &[gaussian_problem(&x, &y)],
+                Options::default(),
+            )
+            .unwrap();
+            assert!(sol.terms[0].r_squared > 0.9 && !sol.plateau, "bruit {amp}");
+        }
     }
 
     #[test]

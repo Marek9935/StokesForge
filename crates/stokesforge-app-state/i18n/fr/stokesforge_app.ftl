@@ -1396,6 +1396,7 @@ analysis-tool-reset = Réinitialiser la vue
 analysis-warning-step-not-uniform = Le pas de X n'est pas constant : le résultat peut être imprécis
 analysis-warning-irf-step = La réponse a un autre pas de X que les données
 analysis-warning-negative-clipped = { $count } points négatifs ont été ramenés à zéro
+analysis-warning-not-converged = L'ajustement n'a pas convergé : le modèle n'atteint pas les données, vérifier les valeurs de départ
 analysis-warning-undetermined = { $count } paramètre(s) ne sont pas déterminés par les données : aucune incertitude n'est donnée
 stale-series-hint = Pas à jour : son calcul doit être refait
 stale-export-title = Données pas à jour

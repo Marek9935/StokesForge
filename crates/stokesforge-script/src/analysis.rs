@@ -261,6 +261,9 @@ fn series_dict<'py>(
             Warning::SignalStepNotUniform => "the X step is not constant".to_string(),
             Warning::IrfStepMismatch => "the response has a different X step".to_string(),
             Warning::NegativeClipped(n) => format!("{n} negative points were set to zero"),
+            Warning::NotConverged => {
+                "the fit did not converge: the model does not reach the data".to_string()
+            }
             Warning::Undetermined(n) => {
                 format!("{n} parameter(s) are not determined by the data (no uncertainty)")
             }

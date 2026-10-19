@@ -42,6 +42,8 @@ fn un_modele_dont_un_parametre_est_sans_effet_avertit_sans_taire_les_autres() {
         "{:?}",
         o.warnings
     );
+    // Bien ajusté : une case sans effet n'est pas un plateau (#281).
+    assert!(!o.warnings.contains(&Warning::NotConverged));
     assert!(error_of(&o, "param.c").is_none());
     assert!(error_of(&o, "param.a").is_some() && error_of(&o, "param.b").is_some());
 }
@@ -113,4 +115,55 @@ fn une_ligne_a_sigma_vide_ou_nul_est_ecartee_et_comptee() {
         .unwrap()
         .value;
     assert!((slope - 2.0).abs() < 1e-9);
+}
+
+/// #281 : un départ hors des données ne « converge » pas en silence.
+fn gaussian_input(noise: f64) -> SeriesInput {
+    let x: Vec<f64> = (0..200).map(|i| 20.0 * f64::from(i) / 199.0).collect();
+    let y = x
+        .iter()
+        .enumerate()
+        .map(|(i, v)| {
+            let z = (v - 8.0) / (3.0 / 2.354_820_045);
+            5.0 * (-0.5 * z * z).exp()
+                + noise * (((i as f64 * 0.618_033_988_7).fract() - 0.5) * 2.0)
+        })
+        .collect();
+    SeriesInput { x, y, sigma: None }
+}
+
+fn gaussian_fit(initial: &[(usize, f64)]) -> Operation {
+    use stokesforge_analysis::fit::ParamSetting;
+    let mut params = vec![ParamSetting::default(); 4];
+    for &(j, v) in initial {
+        params[j].initial = Some(v);
+    }
+    Operation::Fit {
+        spec: FitSpec {
+            model: Model::Gaussian,
+            params,
+        },
+        range: None,
+        residuals: false,
+    }
+}
+
+#[test]
+fn un_depart_hors_des_donnees_avertit_non_converge() {
+    // xc = 1000, fwhm = 1 : le pic est hors de la plage, R² ≈ 0.
+    let op = gaussian_fit(&[(2, 1000.0), (3, 1.0)]);
+    let o = run_one(&op, gaussian_input(0.0)).unwrap();
+    assert!(
+        o.warnings.contains(&Warning::NotConverged),
+        "{:?}",
+        o.warnings
+    );
+}
+
+#[test]
+fn un_ajustement_sain_ou_bruite_ne_previent_pas() {
+    for noise in [0.0, 0.3] {
+        let o = run_one(&gaussian_fit(&[]), gaussian_input(noise)).unwrap();
+        assert!(o.warnings.is_empty(), "bruit {noise} : {:?}", o.warnings);
+    }
 }

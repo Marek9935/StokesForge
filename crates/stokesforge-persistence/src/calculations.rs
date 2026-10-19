@@ -151,6 +151,10 @@ fn warning_to_record(w: &Warning) -> WarningRecord {
             kind: "negative_clipped".into(),
             count: *n as u64,
         },
+        Warning::NotConverged => WarningRecord {
+            kind: "not_converged".into(),
+            count: 0,
+        },
         Warning::Undetermined(n) => WarningRecord {
             kind: "undetermined".into(),
             count: *n as u64,
@@ -163,6 +167,7 @@ fn record_to_warning(r: &WarningRecord) -> Option<Warning> {
         "signal_step_not_uniform" => Some(Warning::SignalStepNotUniform),
         "irf_step_mismatch" => Some(Warning::IrfStepMismatch),
         "negative_clipped" => Some(Warning::NegativeClipped(r.count as usize)),
+        "not_converged" => Some(Warning::NotConverged),
         "undetermined" => Some(Warning::Undetermined(r.count as usize)),
         _ => None,
     }

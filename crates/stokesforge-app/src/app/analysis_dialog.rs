@@ -83,6 +83,7 @@ pub(super) fn warning_text(warning: &Warning) -> String {
             "analysis-warning-negative-clipped",
             count = i64::try_from(*count).unwrap_or(i64::MAX)
         ),
+        Warning::NotConverged => tr!("analysis-warning-not-converged"),
         Warning::Undetermined(count) => tr!(
             "analysis-warning-undetermined",
             count = i64::try_from(*count).unwrap_or(i64::MAX)

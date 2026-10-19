@@ -76,6 +76,9 @@ pub struct FittedSeries {
     pub reduced_chi2: f64,
     /// Nombre de paramètres libres que les données ne déterminent pas (#203).
     pub undetermined: usize,
+    /// Arrêt sur un plateau, pas sur un minimum (#281) : à ne pas lire comme
+    /// un ajustement convergé.
+    pub plateau: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -199,6 +202,7 @@ fn fit_one(
             dof: sol.dof,
             reduced_chi2: sol.reduced_chi2,
             undetermined: sol.undetermined.iter().filter(|u| **u).count(),
+            plateau: sol.plateau,
         },
         sol.dof,
         sol.iterations,
@@ -260,6 +264,7 @@ fn fit_linear(input: &FitInput, model: &CompiledModel) -> Option<(FittedSeries, 
             dof,
             reduced_chi2: scale,
             undetermined: 0,
+            plateau: false,
         },
         dof,
     ))
@@ -332,6 +337,7 @@ fn fit_together(
             dof: sol.dof,
             reduced_chi2: sol.reduced_chi2,
             undetermined: map[i].iter().filter(|&&s| sol.undetermined[s]).count(),
+            plateau: sol.plateau,
             chi2: {
                 // χ² de la courbe seule.
                 let t = &terms[i];

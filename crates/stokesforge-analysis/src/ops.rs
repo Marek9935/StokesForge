@@ -202,6 +202,9 @@ pub enum Warning {
     /// Paramètres libres que les données ne déterminent pas : leur incertitude
     /// est omise (#203).
     Undetermined(usize),
+    /// Le solveur s'est arrêté sur un plateau, non sur un minimum (#281) : le
+    /// résultat est rendu mais n'est pas un ajustement convergé.
+    NotConverged,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -236,6 +239,12 @@ impl Outcome {
     fn warn_undetermined(&mut self, count: usize) {
         if count > 0 {
             self.warnings.push(Warning::Undetermined(count));
+        }
+    }
+
+    fn warn_plateau(&mut self, plateau: bool) {
+        if plateau {
+            self.warnings.push(Warning::NotConverged);
         }
     }
 
@@ -669,6 +678,7 @@ pub fn run(
                 o.value("stat.tau_intensity", None, r.tau_intensity_weighted, None);
                 o.stats(r.points, r.r_squared, r.reduced_chi2, r.dof);
                 o.warn_undetermined(r.undetermined);
+                o.warn_plateau(r.plateau);
                 // `fitted` est aligné sur le signal trié : on le relit à chaque X de
                 // l'entrée (interpolation linéaire, exacte aux nœuds), y compris
                 // aux lignes dont Y est vide.
@@ -766,6 +776,7 @@ fn run_fit(
         }
         o.stats(fs.points, fs.r_squared, fs.reduced_chi2, fs.dof);
         o.warn_undetermined(fs.undetermined);
+        o.warn_plateau(fs.plateau);
         let fitted = a.eval_in(range, |x| model.eval(&fs.values, x));
         if residuals {
             let y = a.y_rows(&inputs[k]);
@@ -829,6 +840,7 @@ fn run_peaks(
     }
     o.stats(r.points, r.r_squared, r.reduced_chi2, r.dof);
     o.warn_undetermined(r.undetermined);
+    o.warn_plateau(r.plateau);
     for i in 0..r.model.peak_count() {
         o.column(
             "peak",

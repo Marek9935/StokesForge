@@ -1404,6 +1404,7 @@ analysis-tool-reset = Reset View
 analysis-warning-step-not-uniform = The X step is not constant: the result may be inaccurate
 analysis-warning-irf-step = The response has a different X step than the data
 analysis-warning-negative-clipped = { $count } negative points were set to zero
+analysis-warning-not-converged = The fit did not converge: the model does not reach the data, check the starting values
 analysis-warning-undetermined = { $count } parameter(s) are not determined by the data: no uncertainty is given
 stale-series-hint = Out of date: its calculation needs to be recalculated
 stale-export-title = Out-of-date data
