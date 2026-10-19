@@ -452,4 +452,96 @@ mod tests {
         );
         assert_eq!(RecentAnalysis::from_json(&serde_json::json!(42)), None);
     }
+
+    /// Une entrée dont l'opération porte un nombre non fini (#278) : écrite en
+    /// JSON (`null`), elle ne se relit jamais en opération non finie — soit
+    /// illisible (`None`, la paire perdue), soit relue valide (le champ
+    /// facultatif devient absent). Les valeurs finies, elles, font l'aller-retour.
+    #[test]
+    fn une_entree_a_nombre_non_fini_ne_se_relit_jamais_non_finie() {
+        use stokesforge_analysis::baseline::BaselineMethod;
+        use stokesforge_analysis::deconv::DirectMethod;
+        use stokesforge_analysis::model::Model;
+        use stokesforge_analysis::ops::AutoDetect;
+        use stokesforge_analysis::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec};
+        let fit = |range| Operation::Fit {
+            spec: FitSpec {
+                model: Model::Linear,
+                params: Vec::new(),
+            },
+            range,
+            residuals: false,
+        };
+        let peaks = |seeds, prominence| Operation::Peaks {
+            spec: PeaksSpec {
+                shape: PeakShape::Gaussian,
+                background: PeakBackground::Constant,
+                seeds,
+                link_widths: false,
+                center_window: None,
+            },
+            auto: Some(AutoDetect {
+                min_prominence: prominence,
+                max_peaks: 3,
+            }),
+            range: None,
+            residuals: false,
+        };
+        let seed = |center, height| PeakSeed {
+            center,
+            height,
+            fwhm: None,
+        };
+        let baseline = |method| Operation::Baseline {
+            method,
+            op: BaselineOp::Subtract,
+            keep_baseline: false,
+        };
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            // Paires : la lecture échoue, l'entrée est écartée.
+            for operation in [
+                baseline(BaselineMethod::Constant { point: (bad, 1.0) }),
+                baseline(BaselineMethod::Line {
+                    p1: (0.0, 1.0),
+                    p2: (2.0, bad),
+                }),
+                fit(Some((0.0, bad))),
+                peaks(vec![seed(bad, None)], 0.1),
+            ] {
+                let json = recent(operation.clone()).to_json();
+                assert_eq!(
+                    RecentAnalysis::from_json(&json),
+                    None,
+                    "{operation:?} → {json}"
+                );
+            }
+            // Réglages facultatifs : relus absents, mais jamais non finis.
+            for operation in [
+                peaks(vec![seed(1.0, Some(bad))], 0.1),
+                peaks(Vec::new(), bad),
+                Operation::DirectDeconvolution {
+                    method: DirectMethod::RichardsonLucy { iterations: 5 },
+                    shift: bad,
+                },
+            ] {
+                let back = RecentAnalysis::from_json(&recent(operation.clone()).to_json());
+                if let Some(entry) = back {
+                    assert_eq!(entry.operation.validate(), Ok(()), "{operation:?}");
+                }
+            }
+        }
+        // Le fini fait l'aller-retour exact.
+        for operation in [
+            baseline(BaselineMethod::Constant { point: (0.5, -1.0) }),
+            fit(Some((0.0, 2.0))),
+            peaks(vec![seed(1.0, Some(2.0))], 0.1),
+        ] {
+            let entry = recent(operation);
+            assert_eq!(
+                RecentAnalysis::from_json(&entry.to_json()),
+                Some(entry.clone()),
+                "{entry:?}"
+            );
+        }
+    }
 }

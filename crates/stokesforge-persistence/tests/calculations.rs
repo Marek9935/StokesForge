@@ -420,3 +420,187 @@ fn un_calcul_illisible_est_nomme_par_le_rapport_et_le_reste_se_charge() {
         .2
         .is_clean());
 }
+
+// ── Calculs écartés au chargement (#278) ───────────────────────────────────
+
+/// Un projet à trois calculs de correction sur trois colonnes Y distinctes :
+/// `(projet, [(identifiant du calcul, mot d'opération écrit dans le fichier)])`
+/// dans l'ordre croissant des identifiants.
+fn project_with_three_calculations() -> (Project, Vec<(u64, &'static str)>) {
+    let mut project = Project::new("P").unwrap();
+    let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+    let sheet = project.tree().children(book).unwrap()[0];
+    let mut made = Vec::new();
+    for (name, op, word) in [
+        ("Y1", CorrectOp::Subtract, "subtract"),
+        ("Y2", CorrectOp::Divide, "divide"),
+        ("Y3", CorrectOp::Multiply, "multiply"),
+    ] {
+        let y = project
+            .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0]))
+            .unwrap();
+        let id = project
+            .add_calculation(CalculationDraft {
+                operation: Operation::Correct { op },
+                series: vec![SeriesRef {
+                    x: None,
+                    y,
+                    sigma: None,
+                }],
+                aux: None,
+                outputs: vec![OutputDraft {
+                    series: 0,
+                    key: "corrected".into(),
+                    index: None,
+                    meta: ColumnMeta::default(),
+                    data: vec![3.0, 4.0],
+                }],
+                results: vec![SeriesResult::default()],
+                keep_results: true,
+                auto_recalc: false,
+                low_r2_dialog: false,
+            })
+            .unwrap();
+        made.push((id.raw(), word));
+    }
+    (project, made)
+}
+
+/// Remplace, dans les octets du fichier, `from` par `to` (même longueur).
+fn patch(path: &std::path::Path, from: &[u8], to: &[u8]) {
+    assert_eq!(from.len(), to.len());
+    let mut bytes = std::fs::read(path).unwrap();
+    let at = bytes
+        .windows(from.len())
+        .position(|w| w == from)
+        .expect("le motif est dans le fichier");
+    bytes[at..at + to.len()].copy_from_slice(to);
+    std::fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn plusieurs_calculs_ecartes_sont_tous_listes_dans_l_ordre_et_les_sains_se_chargent() {
+    let (project, made) = project_with_three_calculations();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("p.stf");
+    save(&project, &path).unwrap();
+    patch(&path, b"subtract", b"subtraXX");
+    patch(&path, b"multiply", b"multipXX");
+
+    let expected = vec![
+        stokesforge_persistence::DiscardedCalculation {
+            id: made[0].0,
+            kind: Some("correct".into()),
+        },
+        stokesforge_persistence::DiscardedCalculation {
+            id: made[2].0,
+            kind: Some("correct".into()),
+        },
+    ];
+    // Même rapport à chaque lecture : l'ordre ne dépend de rien d'aléatoire.
+    for _ in 0..3 {
+        let (loaded, _, report) = stokesforge_persistence::load_with_report(&path).unwrap();
+        assert_eq!(report.discarded_calculations, expected);
+        assert!(!report.is_clean());
+        let kept: Vec<u64> = loaded
+            .tree()
+            .calculations()
+            .keys()
+            .map(|k| k.raw())
+            .collect();
+        assert_eq!(kept, vec![made[1].0], "seul le sain est gardé");
+    }
+    // `load` et `load_with_geometries` gardent leur comportement : ils
+    // chargent le même projet, sans rapport et sans échec.
+    let by_load = load(&path).unwrap();
+    let (by_geometries, _) = stokesforge_persistence::load_with_geometries(&path).unwrap();
+    let (by_report, _, _) = stokesforge_persistence::load_with_report(&path).unwrap();
+    assert_eq!(by_load.tree(), by_report.tree());
+    assert_eq!(by_geometries.tree(), by_report.tree());
+    // Les colonnes de sortie d'un calcul écarté restent des colonnes ordinaires.
+    assert_eq!(by_report.tree().len(), project.tree().len());
+}
+
+#[test]
+fn un_fichier_sans_calcul_ecarte_rend_un_rapport_vide() {
+    let (project, made) = project_with_three_calculations();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("p.stf");
+    save(&project, &path).unwrap();
+    let (loaded, _, report) = stokesforge_persistence::load_with_report(&path).unwrap();
+    assert!(report.is_clean());
+    assert_eq!(report, stokesforge_persistence::LoadReport::default());
+    assert_eq!(loaded.tree().calculations().len(), made.len());
+    // Un projet sans aucun calcul aussi.
+    let empty = Project::new("Vide").unwrap();
+    save(&empty, &path).unwrap();
+    assert!(stokesforge_persistence::load_with_report(&path)
+        .unwrap()
+        .2
+        .is_clean());
+}
+
+/// Un NaN écrit à la main dans un point de ligne de base ne doit pas entrer
+/// dans le modèle (il serait perdu à la resauvegarde) : le calcul est écarté
+/// **et** signalé, comme n'importe quel enregistrement illisible.
+#[test]
+#[ignore = "bug #291"]
+fn un_nan_edite_a_la_main_dans_le_fichier_ecarte_et_signale_le_calcul() {
+    use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
+    let mut project = Project::new("P").unwrap();
+    let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+    let sheet = project.tree().children(book).unwrap()[0];
+    let y = project
+        .add_column(sheet, None, Some("Y"), Column::from_f64(&[1.0, 2.0]))
+        .unwrap();
+    let id = project
+        .add_calculation(CalculationDraft {
+            operation: Operation::Baseline {
+                method: BaselineMethod::Constant {
+                    point: (1234.5, 6.25),
+                },
+                op: BaselineOp::Subtract,
+                keep_baseline: false,
+            },
+            series: vec![SeriesRef {
+                x: None,
+                y,
+                sigma: None,
+            }],
+            aux: None,
+            outputs: vec![OutputDraft {
+                series: 0,
+                key: "corrected".into(),
+                index: None,
+                meta: ColumnMeta::default(),
+                data: vec![0.0, 1.0],
+            }],
+            results: vec![SeriesResult::default()],
+            keep_results: true,
+            auto_recalc: false,
+            low_r2_dialog: false,
+        })
+        .unwrap()
+        .raw();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("p.stf");
+    save(&project, &path).unwrap();
+    let mut from = vec![0xcb];
+    from.extend_from_slice(&1234.5_f64.to_be_bytes());
+    let mut to = vec![0xcb];
+    to.extend_from_slice(&f64::NAN.to_be_bytes());
+    patch(&path, &from, &to);
+
+    let (loaded, _, report) = stokesforge_persistence::load_with_report(&path).unwrap();
+    assert!(
+        loaded.tree().calculations().is_empty(),
+        "un NaN ne doit pas entrer dans le modèle"
+    );
+    assert_eq!(
+        report.discarded_calculations,
+        vec![stokesforge_persistence::DiscardedCalculation {
+            id,
+            kind: Some("baseline".into())
+        }]
+    );
+}

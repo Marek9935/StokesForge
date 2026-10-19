@@ -489,7 +489,92 @@ mod tests {
     fn un_identifiant_hors_borne_ecarte_le_calcul() {
         let (kept, discarded) = records_to_calculations(vec![record(good_operation(), 5000)], 1000);
         assert!(kept.is_empty());
-        assert_eq!(discarded.len(), 1);
+        assert_eq!(
+            discarded,
+            vec![DiscardedCalculation {
+                id: 50,
+                kind: Some("correct".into())
+            }],
+            "l'identifiant hors borne est signalé, famille lue"
+        );
+        // Pile sur la borne : gardé, rien à signaler.
+        let (kept, discarded) = records_to_calculations(vec![record(good_operation(), 1000)], 1000);
+        assert_eq!(kept.len(), 1);
+        assert!(discarded.is_empty());
+        // Chaque identifiant de l'enregistrement est borné : le sien, ceux d'une
+        // sortie, d'un x, d'un sigma, d'une référence ; la borne ne fait pas
+        // écarter la voisine saine.
+        let mut own = record(good_operation(), 7);
+        own.id = 1001;
+        let mut output = record(good_operation(), 7);
+        output.id = 51;
+        output.outputs = vec![OutputRefRecord {
+            series: 0,
+            key: "corrected".into(),
+            index: None,
+            column: Some(1001),
+        }];
+        let mut healthy = record(good_operation(), 7);
+        healthy.id = 52;
+        let mut x = record(good_operation(), 7);
+        x.id = 53;
+        x.series[0].x = Some(1001);
+        let mut sigma = record(good_operation(), 7);
+        sigma.id = 54;
+        sigma.series[0].sigma = Some(1001);
+        let mut aux = record(good_operation(), 7);
+        aux.id = 55;
+        aux.aux = Some(AuxRefRecord { x: None, y: 1001 });
+        let mut aux_x = record(good_operation(), 7);
+        aux_x.id = 56;
+        aux_x.aux = Some(AuxRefRecord {
+            x: Some(1001),
+            y: 7,
+        });
+        let (kept, discarded) =
+            records_to_calculations(vec![own, output, healthy, x, sigma, aux, aux_x], 1000);
+        assert_eq!(kept.keys().map(|k| k.raw()).collect::<Vec<_>>(), vec![52]);
+        assert_eq!(
+            discarded.iter().map(|d| d.id).collect::<Vec<_>>(),
+            vec![1001, 51, 53, 54, 55, 56],
+            "dans l'ordre des enregistrements"
+        );
+    }
+
+    #[test]
+    fn plusieurs_calculs_ecartes_sont_tous_listes_et_les_sains_gardes_dans_l_ordre() {
+        let junk = || Value::Map(vec![(Value::from("kind"), Value::from("teleportation"))]);
+        let mut records = Vec::new();
+        for (id, operation) in [
+            (10, junk()),
+            (11, good_operation()),
+            (12, Value::Nil),
+            (13, good_operation()),
+            (14, junk()),
+        ] {
+            let mut r = record(operation, 7);
+            r.id = id;
+            records.push(r);
+        }
+        let (kept, discarded) = records_to_calculations(records, 1000);
+        assert_eq!(
+            kept.keys().map(|k| k.raw()).collect::<Vec<_>>(),
+            vec![11, 13]
+        );
+        assert_eq!(
+            discarded,
+            vec![
+                DiscardedCalculation {
+                    id: 10,
+                    kind: Some("teleportation".into())
+                },
+                DiscardedCalculation { id: 12, kind: None },
+                DiscardedCalculation {
+                    id: 14,
+                    kind: Some("teleportation".into())
+                },
+            ]
+        );
     }
 
     #[test]

@@ -185,6 +185,201 @@ fn une_operation_non_finie_est_refusee_a_l_ajout_et_a_la_mise_a_jour() {
     assert_eq!(f.project.tree(), &before);
 }
 
+/// Une opération non finie par famille et par champ : `(nom attendu dans
+/// l'erreur, opération)`.
+fn operations_non_finies() -> Vec<(&'static str, Operation)> {
+    use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp, Interpolation};
+    use stokesforge_analysis::deconv::{DirectMethod, ReconvSpec};
+    use stokesforge_analysis::fit::FitSpec;
+    use stokesforge_analysis::integrate::{IntegrateSpec, Under};
+    use stokesforge_analysis::model::Model;
+    use stokesforge_analysis::ops::AutoDetect;
+    use stokesforge_analysis::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec};
+    let base = |method| Operation::Baseline {
+        method,
+        op: BaselineOp::Subtract,
+        keep_baseline: false,
+    };
+    let peaks = |seeds: Vec<PeakSeed>, range, prominence| Operation::Peaks {
+        spec: PeaksSpec {
+            shape: PeakShape::Gaussian,
+            background: PeakBackground::Constant,
+            seeds,
+            link_widths: false,
+            center_window: None,
+        },
+        auto: Some(AutoDetect {
+            min_prominence: prominence,
+            max_peaks: 3,
+        }),
+        range,
+        residuals: false,
+    };
+    let nan = f64::NAN;
+    let inf = f64::INFINITY;
+    vec![
+        (
+            "point",
+            base(BaselineMethod::Constant { point: (nan, 1.0) }),
+        ),
+        (
+            "zone",
+            base(BaselineMethod::ConstantZone { zone: (1.0, inf) }),
+        ),
+        (
+            "points",
+            base(BaselineMethod::Line {
+                p1: (0.0, 1.0),
+                p2: (nan, 2.0),
+            }),
+        ),
+        (
+            "points",
+            base(BaselineMethod::Anchors {
+                points: vec![(0.0, 1.0), (1.0, f64::NEG_INFINITY)],
+                interpolation: Interpolation::Segments,
+            }),
+        ),
+        (
+            "zones",
+            base(BaselineMethod::Zones {
+                zones: vec![(0.0, 1.0), (nan, 3.0)],
+                degree: 1,
+            }),
+        ),
+        (
+            "range",
+            Operation::Fit {
+                spec: FitSpec {
+                    model: Model::Linear,
+                    params: Vec::new(),
+                },
+                range: Some((0.0, nan)),
+                residuals: false,
+            },
+        ),
+        (
+            "ranges",
+            Operation::Integrate {
+                spec: IntegrateSpec {
+                    ranges: vec![(nan, 1.0)],
+                    under: Under::Zero,
+                    cumulative: false,
+                    normalize: false,
+                },
+            },
+        ),
+        (
+            "seeds",
+            peaks(
+                vec![PeakSeed {
+                    center: nan,
+                    height: None,
+                    fwhm: None,
+                }],
+                None,
+                0.1,
+            ),
+        ),
+        ("range", peaks(Vec::new(), Some((inf, 1.0)), 0.1)),
+        ("min_prominence", peaks(Vec::new(), None, nan)),
+        (
+            "window",
+            Operation::Reconvolution {
+                spec: ReconvSpec {
+                    components: 1,
+                    params: Vec::new(),
+                    shift_initial: 0.0,
+                    fit_shift: false,
+                    window: Some((nan, 1.0)),
+                },
+                residuals: false,
+            },
+        ),
+        (
+            "shift",
+            Operation::DirectDeconvolution {
+                method: DirectMethod::RichardsonLucy { iterations: 5 },
+                shift: nan,
+            },
+        ),
+    ]
+}
+
+/// Chaque famille et chaque champ non fini (#278) : `add_calculation`,
+/// `update_calculation` et `replace_analysis_data` refusent par une
+/// `Structure` qui nomme le champ, sans toucher l'arbre ni consommer
+/// d'identifiant.
+#[test]
+fn toute_operation_non_finie_est_refusee_sans_toucher_l_arbre() {
+    let mut f = fixture();
+    let id = f
+        .project
+        .add_calculation(draft(&f, vec![out(0, "corrected", vec![1.0], "a")]))
+        .unwrap();
+    let versions: Vec<(NodeId, u64)> = [f.x, f.y1, f.y2]
+        .into_iter()
+        .map(|c| {
+            let v = f
+                .project
+                .tree()
+                .get(c)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .version();
+            (c, v)
+        })
+        .collect();
+    let refuse = |e: CoreError, nom: &str| match e {
+        CoreError::Structure(message) => {
+            assert!(message.contains(&format!("'{nom}'")), "{message}")
+        }
+        other => panic!("attendu Structure, reçu {other:?}"),
+    };
+    for (nom, operation) in operations_non_finies() {
+        let before = f.project.tree().clone();
+        let next = f.project.next_id_hint();
+        let mut d = draft(&f, vec![out(0, "corrected", vec![1.0], "a")]);
+        d.operation = operation.clone();
+        refuse(f.project.add_calculation(d.clone()).unwrap_err(), nom);
+        refuse(
+            f.project.update_calculation(id, d.clone()).unwrap_err(),
+            nom,
+        );
+        // La remise à la place des données valide d'abord l'opération : même
+        // refus, avant toute vérification de version ou d'entrée.
+        refuse(
+            f.project.replace_analysis_data(d, &versions).unwrap_err(),
+            nom,
+        );
+        assert_eq!(f.project.tree(), &before, "{nom}");
+        assert_eq!(f.project.next_id_hint(), next, "{nom} : aucun id consommé");
+    }
+}
+
+/// Le contrôle de finitude n'écarte pas l'ordinaire : une opération finie
+/// s'ajoute, se met à jour, et la valeur extrême finie passe.
+#[test]
+fn une_operation_finie_s_ajoute_et_se_met_a_jour() {
+    use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
+    let mut f = fixture();
+    let constant = |v: f64| Operation::Baseline {
+        method: BaselineMethod::Constant { point: (v, -v) },
+        op: BaselineOp::Subtract,
+        keep_baseline: false,
+    };
+    let mut d = draft(&f, vec![out(0, "corrected", vec![1.0], "a")]);
+    d.operation = constant(f64::MAX);
+    let id = f.project.add_calculation(d.clone()).unwrap();
+    d.operation = constant(0.5);
+    f.project.update_calculation(id, d).unwrap();
+    assert_eq!(
+        f.project.tree().calculation(id).unwrap().operation,
+        constant(0.5)
+    );
+}
+
 #[test]
 fn les_identifiants_de_calcul_ne_sont_jamais_reutilises() {
     let mut f = fixture();

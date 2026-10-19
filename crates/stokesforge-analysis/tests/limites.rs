@@ -304,6 +304,175 @@ fn validate_refuse_un_decalage_ou_une_fenetre_non_finis() {
     );
 }
 
+/// Chaque champ numérique de position ou de réglage (#278) : `(nom du champ,
+/// erreur attendue, opération qui place la valeur dans ce champ)`. Les paires
+/// (plages, fenêtre) sont posées à leurs deux bouts.
+type Champ = (&'static str, &'static str, Box<dyn Fn(f64) -> Operation>);
+
+/// Retouche d'une opération de pics : spec, détection automatique, plage.
+type Retouche = Box<dyn Fn(&mut PeaksSpec, &mut Option<AutoDetect>, &mut Option<(f64, f64)>)>;
+
+fn champs_numeriques() -> Vec<Champ> {
+    let fit_range = |range| match fit(Model::Linear, Vec::new()) {
+        Operation::Fit {
+            spec, residuals, ..
+        } => Operation::Fit {
+            spec,
+            range,
+            residuals,
+        },
+        _ => unreachable!(),
+    };
+    let peaks_with = |f: Retouche| {
+        move |_: ()| match peaks(3) {
+            Operation::Peaks {
+                mut spec,
+                mut auto,
+                mut range,
+                residuals,
+            } => {
+                f(&mut spec, &mut auto, &mut range);
+                Operation::Peaks {
+                    spec,
+                    auto,
+                    range,
+                    residuals,
+                }
+            }
+            _ => unreachable!(),
+        }
+    };
+    let seed = |c: f64, h: Option<f64>, w: Option<f64>| PeakSeed {
+        center: c,
+        height: h,
+        fwhm: w,
+    };
+    let window = |window, shift_initial| Operation::Reconvolution {
+        spec: ReconvSpec {
+            components: 1,
+            params: Vec::new(),
+            shift_initial,
+            fit_shift: true,
+            window,
+        },
+        residuals: false,
+    };
+    let mut v: Vec<Champ> = Vec::new();
+    v.push((
+        "Fit.range.0",
+        "range",
+        Box::new(move |x| fit_range(Some((x, 1.0)))),
+    ));
+    v.push((
+        "Fit.range.1",
+        "range",
+        Box::new(move |x| fit_range(Some((0.0, x)))),
+    ));
+    for (nom, premier) in [("Peaks.range.0", true), ("Peaks.range.1", false)] {
+        v.push((
+            nom,
+            "range",
+            Box::new(move |x| {
+                peaks_with(Box::new(move |_, _, r| {
+                    *r = Some(if premier { (x, 1.0) } else { (0.0, x) });
+                }))(())
+            }),
+        ));
+    }
+    v.push((
+        "seed.center",
+        "seeds",
+        Box::new(move |x| {
+            peaks_with(Box::new(move |s, _, _| s.seeds = vec![seed(x, None, None)]))(())
+        }),
+    ));
+    v.push((
+        "seed.height",
+        "seeds",
+        Box::new(move |x| {
+            peaks_with(Box::new(move |s, _, _| {
+                s.seeds = vec![seed(1.0, Some(x), None)]
+            }))(())
+        }),
+    ));
+    v.push((
+        "seed.fwhm",
+        "seeds",
+        Box::new(move |x| {
+            peaks_with(Box::new(move |s, _, _| {
+                s.seeds = vec![seed(1.0, None, Some(x))]
+            }))(())
+        }),
+    ));
+    v.push((
+        "seed.center (deuxième graine)",
+        "seeds",
+        Box::new(move |x| {
+            peaks_with(Box::new(move |s, _, _| {
+                s.seeds = vec![seed(1.0, None, None), seed(x, None, None)]
+            }))(())
+        }),
+    ));
+    v.push((
+        "min_prominence",
+        "min_prominence",
+        Box::new(move |x| {
+            peaks_with(Box::new(move |_, a, _| {
+                *a = Some(AutoDetect {
+                    min_prominence: x,
+                    max_peaks: 3,
+                })
+            }))(())
+        }),
+    ));
+    v.push((
+        "Reconvolution.window.0",
+        "window",
+        Box::new(move |x| window(Some((x, 1.0)), 0.0)),
+    ));
+    v.push((
+        "Reconvolution.window.1",
+        "window",
+        Box::new(move |x| window(Some((0.0, x)), 0.0)),
+    ));
+    v.push((
+        "Reconvolution.shift_initial",
+        "shift_initial",
+        Box::new(move |x| window(None, x)),
+    ));
+    v.push((
+        "DirectDeconvolution.shift",
+        "shift",
+        Box::new(|x| Operation::DirectDeconvolution {
+            method: DirectMethod::RichardsonLucy { iterations: 5 },
+            shift: x,
+        }),
+    ));
+    v
+}
+
+/// Champ par champ : NaN, +inf et -inf sont refusés sous le nom du champ ; une
+/// valeur finie (y compris aux extrêmes positifs de `f64` : une largeur imposée est > 0, #285) passe, et l'opération fait
+/// alors l'aller-retour exact de l'arbre — c'est la promesse que `validate`
+/// tient pour le `.stf` (#278).
+#[test]
+fn validate_refuse_chaque_champ_non_fini_et_accepte_le_fini_qui_fait_l_aller_retour() {
+    for (champ, nom, op) in champs_numeriques() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(op(bad).validate(), invalid(nom), "{champ} = {bad}");
+        }
+        for ok in [0.5, f64::MAX, f64::MIN_POSITIVE] {
+            let operation = op(ok);
+            assert_eq!(operation.validate(), Ok(()), "{champ} = {ok}");
+            assert_eq!(
+                Operation::from_tree(&operation.to_tree()),
+                Ok(operation),
+                "{champ} = {ok}"
+            );
+        }
+    }
+}
+
 #[test]
 fn validate_refuse_toute_ancre_non_finie_et_l_accepte_finie() {
     for interpolation in [Interpolation::Segments, Interpolation::Spline] {

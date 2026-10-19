@@ -15,7 +15,9 @@ use stokesforge_core::{
     compute, CalculationDraft, Column, ColumnMeta, NodeId, OutputDraft, Project, SeriesRef,
     Staleness, ValueBlock,
 };
-use stokesforge_session::{FormulaRecalc, Session, SessionHandle, Snapshot};
+use stokesforge_session::{
+    DiscardedCalculation, FormulaRecalc, LoadReport, Session, SessionError, SessionHandle, Snapshot,
+};
 
 struct Montage {
     sheet: NodeId,
@@ -613,4 +615,122 @@ fn le_recalcul_garde_le_reglage_de_boite_r2_faible() {
         "le calcul a bien été refait"
     );
     assert!(!after.tree.calculation(id).unwrap().low_r2_dialog);
+}
+
+/// Une opération non finie (#278) est refusée par la session pour les trois
+/// commandes qui écrivent un calcul : erreur du modèle, et ni l'arbre, ni la
+/// révision, ni l'historique ne bougent (un refus n'est pas un geste annulable).
+#[test]
+fn la_session_refuse_une_operation_non_finie_sans_rien_changer() {
+    use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
+    use stokesforge_commands::CommandError;
+    use stokesforge_core::CoreError;
+    let (_session, handle, m) = demarrer(FormulaRecalc::Targeted);
+    let id = ajouter(&handle, &m, false);
+    let avant = handle.snapshot().unwrap();
+    let calcul = avant.tree.calculation(id).unwrap().clone();
+    let nan = Operation::Baseline {
+        method: BaselineMethod::Constant {
+            point: (f64::NAN, 1.0),
+        },
+        op: BaselineOp::Subtract,
+        keep_baseline: false,
+    };
+    let brouillon = CalculationDraft {
+        operation: nan,
+        series: calcul.series.clone(),
+        aux: None,
+        outputs: vec![OutputDraft {
+            series: 0,
+            key: "corrected".into(),
+            index: None,
+            meta: ColumnMeta::default(),
+            data: vec![0.0; 4],
+        }],
+        results: calcul.results.clone(),
+        keep_results: true,
+        auto_recalc: false,
+        low_r2_dialog: true,
+    };
+    let versions: Vec<(NodeId, u64)> = [m.x, m.y]
+        .into_iter()
+        .map(|c| {
+            let v = avant.tree.node(c).unwrap().as_column().unwrap().version();
+            (c, v)
+        })
+        .collect();
+    for commande in [
+        Command::AddCalculation {
+            draft: brouillon.clone(),
+        },
+        Command::UpdateCalculation {
+            id,
+            draft: brouillon.clone(),
+        },
+        Command::ReplaceAnalysisData {
+            draft: brouillon,
+            expected_versions: versions,
+        },
+    ] {
+        let erreur = handle.execute(commande).unwrap_err();
+        assert!(
+            matches!(
+                erreur,
+                SessionError::Command(CommandError::Core(CoreError::Structure(_)))
+            ),
+            "{erreur:?}"
+        );
+        let apres = handle.snapshot().unwrap();
+        assert_eq!(apres.revision, avant.revision, "révision inchangée");
+        assert!(std::sync::Arc::ptr_eq(&apres.tree, &avant.tree));
+        assert_eq!(apres.history, avant.history, "historique inchangé");
+    }
+}
+
+/// `load_with_report` relaie le rapport du fichier (#278) ; `load` charge le
+/// même projet sans rien dire ; un fichier sain rend un rapport vide.
+#[test]
+fn le_chargement_relaie_les_calculs_ecartes_de_la_persistance() {
+    let (_session, handle, m) = demarrer(FormulaRecalc::Targeted);
+    let id = ajouter(&handle, &m, false);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("p.stf");
+    handle.save(&path).unwrap();
+
+    let (revision, rapport) = handle.load_with_report(&path).unwrap();
+    assert_eq!(
+        rapport,
+        LoadReport::default(),
+        "fichier sain : rapport vide"
+    );
+    assert!(rapport.is_clean());
+    assert_eq!(handle.snapshot().unwrap().revision, revision);
+
+    // Même longueur : le modèle « linear » devient illisible.
+    let mut octets = std::fs::read(&path).unwrap();
+    let at = octets
+        .windows(6)
+        .position(|w| w == b"linear")
+        .expect("le modèle est dans le fichier");
+    octets[at..at + 6].copy_from_slice(b"linexx");
+    std::fs::write(&path, &octets).unwrap();
+
+    let (revision2, rapport) = handle.load_with_report(&path).unwrap();
+    assert!(revision2 > revision, "un chargement avance la révision");
+    assert_eq!(
+        rapport.discarded_calculations,
+        vec![DiscardedCalculation {
+            id: id.raw(),
+            kind: Some("fit".into())
+        }]
+    );
+    assert!(handle.snapshot().unwrap().tree.calculations().is_empty());
+    // `load` : même chargement, la révision avance, rien ne casse.
+    let revision3 = handle.load(&path).unwrap();
+    assert!(revision3 > revision2);
+    assert!(handle.snapshot().unwrap().tree.calculations().is_empty());
+    // Un échec de lecture ne rapporte rien : rien n'a changé.
+    let absent = dir.path().join("absent.stf");
+    assert!(handle.load_with_report(&absent).is_err());
+    assert_eq!(handle.snapshot().unwrap().revision, revision3);
 }
