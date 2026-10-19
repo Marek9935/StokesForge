@@ -677,6 +677,113 @@ mod tests {
     }
 
     #[test]
+    fn sign_min_max_nan_en_premiere_et_seconde_position() {
+        let nan = f64::NAN;
+        assert!(Func::Sign.apply(nan, 0.0).is_nan());
+        for f in [Func::Min, Func::Max] {
+            assert!(f.apply(nan, 1.0).is_nan());
+            assert!(f.apply(1.0, nan).is_nan());
+            assert!(f.apply(nan, nan).is_nan());
+            assert!(f.apply(nan, f64::INFINITY).is_nan());
+            assert!(f.apply(f64::NEG_INFINITY, nan).is_nan());
+        }
+    }
+
+    #[test]
+    fn sign_min_max_infinis_zeros_et_egaux() {
+        let (inf, ninf) = (f64::INFINITY, f64::NEG_INFINITY);
+        assert_eq!(Func::Sign.apply(inf, 0.0), 1.0);
+        assert_eq!(Func::Sign.apply(ninf, 0.0), -1.0);
+        assert_eq!(Func::Sign.apply(0.0, 0.0), 0.0);
+        assert_eq!(Func::Sign.apply(-0.0, 0.0), 0.0);
+        assert_eq!(Func::Sign.apply(1e-300, 0.0), 1.0);
+        assert_eq!(Func::Sign.apply(-1e-300, 0.0), -1.0);
+        assert_eq!(Func::Max.apply(inf, 3.0), inf);
+        assert_eq!(Func::Max.apply(3.0, inf), inf);
+        assert_eq!(Func::Max.apply(ninf, 3.0), 3.0);
+        assert_eq!(Func::Max.apply(ninf, ninf), ninf);
+        assert_eq!(Func::Min.apply(ninf, 3.0), ninf);
+        assert_eq!(Func::Min.apply(3.0, ninf), ninf);
+        assert_eq!(Func::Min.apply(inf, 3.0), 3.0);
+        assert_eq!(Func::Min.apply(inf, inf), inf);
+        assert_eq!(Func::Min.apply(2.0, 2.0), 2.0);
+        assert_eq!(Func::Max.apply(2.0, 2.0), 2.0);
+        assert_eq!(Func::Min.apply(0.0, -0.0), 0.0);
+        assert_eq!(Func::Max.apply(-0.0, 0.0), 0.0);
+        // Via le parseur.
+        assert_eq!(ev("max(1/x, 3)", 0.0, &[]), inf);
+        assert_eq!(ev("sign(-1/x)", 0.0, &[]), -1.0);
+        assert_eq!(ev("min(-1/x, 3)", 0.0, &[]), ninf);
+    }
+
+    #[test]
+    fn sign_min_max_imbriques() {
+        // max(min(x,1), sqrt(x)) : x = 4 -> max(1,2) = 2 ; x = 0.25 -> max(0.25,0.5) = 0.5.
+        assert_eq!(ev("max(min(x,1),sqrt(x))", 4.0, &[]), 2.0);
+        assert_eq!(ev("max(min(x,1),sqrt(x))", 0.25, &[]), 0.5);
+        // Le NaN de sqrt(-1) traverse min puis max.
+        assert!(ev("max(min(x,1),sqrt(x))", -1.0, &[]).is_nan());
+        assert!(ev("min(max(0,sqrt(x)),5)", -1.0, &[]).is_nan());
+        assert!(ev("sign(max(sqrt(x),1))", -1.0, &[]).is_nan());
+        assert_eq!(ev("sign(min(x,1)-1)", 3.0, &[]), 0.0);
+        // Un paramètre manquant vaut NaN et se propage aussi.
+        assert!(ev("max(a, 1)", 0.0, &[]).is_nan());
+    }
+
+    #[test]
+    fn domaine_invalide_donne_nan_pour_toutes_les_fonctions() {
+        for f in [
+            "sqrt(-1)",
+            "ln(-1)",
+            "log(-1)",
+            "log10(-1)",
+            "log2(-1)",
+            "logx(-1, 2)",
+            "logx(2, -1)",
+            "logx(2, 1)",
+            "logx(2, 0)",
+            "asin(2)",
+            "asin(-2)",
+            "acos(2)",
+            "acos(-2)",
+            "pow(-8, 0.5)",
+            "pow(-1, 0.5)",
+            "erf(0/0)",
+            "erfc(0/0)",
+            "0/0",
+            "atan2(0/0, 1)",
+            "exp(0/0)",
+            "abs(0/0)",
+            "sin(1/0 - 1/0)",
+            "cos(1/0 - 1/0)",
+            "tan(1/0 - 1/0)",
+            "floor(0/0)",
+            "ceil(0/0)",
+            "tanh(0/0)",
+            "sinh(0/0)",
+            "cosh(0/0)",
+            "atan(0/0)",
+        ] {
+            assert!(ev(f, 0.0, &[]).is_nan(), "{f}");
+        }
+        // Valeurs actuelles épinglées : ln(0) = -inf (choix existant), log(0)
+        // idem, logx(0, 2) = -inf, sin(inf) = NaN, exp(inf) = inf.
+        assert_eq!(ev("ln(0)", 0.0, &[]), f64::NEG_INFINITY);
+        assert_eq!(ev("log(0)", 0.0, &[]), f64::NEG_INFINITY);
+        assert_eq!(ev("log2(0)", 0.0, &[]), f64::NEG_INFINITY);
+        assert_eq!(ev("logx(0, 2)", 0.0, &[]), f64::NEG_INFINITY);
+        assert_eq!(ev("sqrt(0)", 0.0, &[]), 0.0);
+        assert_eq!(ev("asin(1)", 0.0, &[]), std::f64::consts::FRAC_PI_2);
+        assert_eq!(ev("acos(1)", 0.0, &[]), 0.0);
+        assert_eq!(ev("exp(1/0)", 0.0, &[]), f64::INFINITY);
+        assert_eq!(ev("exp(-1/0)", 0.0, &[]), 0.0);
+        assert_eq!(ev("tanh(1/0)", 0.0, &[]), 1.0);
+        assert_eq!(ev("atan(1/0)", 0.0, &[]), std::f64::consts::FRAC_PI_2);
+        assert!(ev("sin(1/0)", 0.0, &[]).is_nan());
+        assert_eq!(ev("pow(0, 0)", 0.0, &[]), 1.0);
+    }
+
+    #[test]
     fn erreurs_de_syntaxe_avec_position() {
         assert_eq!(Expr::parse("").unwrap_err().kind, ExprErrorKind::Empty);
         assert_eq!(Expr::parse("   ").unwrap_err().kind, ExprErrorKind::Empty);

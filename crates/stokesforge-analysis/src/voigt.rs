@@ -215,4 +215,164 @@ mod tests {
         let half = fwhm(fg, fl) / 2.0;
         assert!((profile(half, fg, fl) / peak - 0.5).abs() < 5e-3);
     }
+
+    const FG_UNITE: f64 = 2.354_820_045_030_949_3; // σ = 1
+    fn gauss_ref(x: f64, fg: f64) -> f64 {
+        let s = fg / (2.0 * (2.0 * std::f64::consts::LN_2).sqrt());
+        (-x * x / (2.0 * s * s)).exp() / (s * (2.0 * std::f64::consts::PI).sqrt())
+    }
+    fn lorentz_ref(x: f64, fl: f64) -> f64 {
+        let g = fl / 2.0;
+        g / (std::f64::consts::PI * (x * x + g * g))
+    }
+
+    #[test]
+    fn voigt_pic_de_reference_sigma_et_gamma_unite() {
+        // V(0; σ=1, γ=1) = erfcx(1/√2)/√(2π) = 0.523126 / 2.506628 = 0.208709.
+        let v = profile(0.0, FG_UNITE, 2.0);
+        assert!((v - 0.208_709).abs() < 1e-6, "{v}");
+    }
+
+    #[test]
+    fn voigt_egale_la_convolution_numerique() {
+        // Référence indépendante : ∫ G(t)·L(x−t) dt par trapèzes.
+        let (fg, fl) = (1.2, 0.8);
+        for x in [0.0, 0.7, 2.5] {
+            let (n, lo, hi) = (200_000, -12.0, 12.0);
+            let h = (hi - lo) / n as f64;
+            let mut acc = 0.0;
+            for i in 0..=n {
+                let t = lo + i as f64 * h;
+                let w = if i == 0 || i == n { 0.5 } else { 1.0 };
+                acc += w * gauss_ref(t, fg) * lorentz_ref(x - t, fl) * h;
+            }
+            let v = profile(x, fg, fl);
+            // Queue gaussienne coupée à ±12 : négligeable (> 10 σ).
+            assert!((v - acc).abs() < 1e-5, "x={x} {v} vs {acc}");
+        }
+    }
+
+    #[test]
+    fn limites_pures_contre_formules_fermees() {
+        for x in [0.0, 0.3, 1.0, 7.0, -2.0] {
+            for fl in [0.1, 1.0, 5.0] {
+                let v = profile(x, 0.0, fl);
+                assert!((v - lorentz_ref(x, fl)).abs() < 1e-15, "L x={x} fl={fl}");
+            }
+            for fg in [0.1, 1.0, 5.0] {
+                let v = profile(x, fg, 0.0);
+                assert!((v - gauss_ref(x, fg)).abs() < 1e-15, "G x={x} fg={fg}");
+            }
+        }
+    }
+
+    #[test]
+    fn symetrie_positivite_et_decroissance() {
+        for (fg, fl) in [(1.2, 0.8), (0.5, 3.0), (4.0, 0.05)] {
+            let mut prev = f64::INFINITY;
+            for i in 0..=400 {
+                let x = i as f64 * 0.05;
+                let v = profile(x, fg, fl);
+                assert!(v > 0.0 && v.is_finite(), "({fg},{fl}) x={x} {v}");
+                let m = profile(-x, fg, fl);
+                assert!((v - m).abs() <= 1e-15 * v.max(1.0), "symétrie x={x}");
+                assert!(v <= prev + 1e-15, "({fg},{fl}) croît en x={x}");
+                prev = v;
+            }
+        }
+    }
+
+    #[test]
+    fn continuite_autour_du_seuil_1e30() {
+        // σ = 1 (fwhm_g = FG_UNITE) ; le seuil est γ = σ·1e30, soit fwhm_l = 2e30.
+        for x in [0.0, 1.0, 1e30] {
+            for fl in [2e29, 2e30 * (1.0 - 1e-9), 2e30, 2e30 * (1.0 + 1e-9), 2e31] {
+                let v = profile(x, FG_UNITE, fl);
+                assert!(v.is_finite() && v > 0.0, "x={x} fl={fl} {v}");
+                let ref_l = lorentz_ref(x, fl);
+                assert!(
+                    (v - ref_l).abs() <= 1e-9 * ref_l,
+                    "x={x} fl={fl}: {v} vs {ref_l}"
+                );
+            }
+        }
+        let a = profile(0.0, FG_UNITE, 2e30 * (1.0 - 1e-12));
+        let b = profile(0.0, FG_UNITE, 2e30 * (1.0 + 1e-12));
+        assert!((a - b).abs() <= 1e-9 * a, "saut au seuil {a} vs {b}");
+    }
+
+    #[test]
+    fn largeurs_nulles_ou_negatives_combinaisons() {
+        for x in [0.0, 1.0, -3.0] {
+            assert!(profile(x, 0.0, 0.0).is_nan());
+            assert!(profile(x, -1.0, 0.0).is_nan());
+            assert!(profile(x, 0.0, -1.0).is_nan());
+            assert!(profile(x, -1.0, -1.0).is_nan());
+            assert!(profile(x, -1e-300, 1.0).is_nan());
+            assert!(profile(x, 1.0, -1e-300).is_nan());
+            // -0.0 == 0.0 : la double largeur nulle reste NaN.
+            assert!(profile(x, -0.0, -0.0).is_nan());
+        }
+        assert!(profile(0.0, f64::NEG_INFINITY, 1.0).is_nan());
+        assert!(profile(0.0, 1.0, f64::NEG_INFINITY).is_nan());
+    }
+
+    #[test]
+    fn x_non_fini_donne_nan_ou_zero() {
+        for (fg, fl) in [(1.0, 1.0), (0.0, 1.0), (1.0, 0.0)] {
+            assert!(profile(f64::NAN, fg, fl).is_nan(), "NaN ({fg},{fl})");
+            for x in [f64::INFINITY, f64::NEG_INFINITY] {
+                let v = profile(x, fg, fl);
+                assert!(v == 0.0 || v.is_nan(), "x={x} ({fg},{fl}) {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn largeurs_extremes_sans_nan() {
+        for (fg, fl) in [
+            (1e150, 1.0),
+            (1.0, 1e150),
+            (1e150, 1e150),
+            (1e-150, 1.0),
+            (1.0, 1e-150),
+            (1e-200, 1.0),
+            (1e-300, 1.0),
+            (1.0, 1e-300),
+            (1e-12, 1.0),
+            (1.0, 1e-12),
+        ] {
+            for x in [0.0, 0.5] {
+                let v = profile(x, fg, fl);
+                assert!(!v.is_nan() && v >= 0.0, "({fg},{fl}) x={x} {v}");
+            }
+        }
+        // Largeur très différente : l'ordre de grandeur suit la plus large.
+        for x in [0.0, 0.5, 2.0] {
+            let v = profile(x, 1e-12, 1.0);
+            assert!((v - lorentz_ref(x, 1.0)).abs() < 1e-9, "x={x} {v}");
+            let w = profile(x, 1.0, 1e-12);
+            assert!((w - gauss_ref(x, 1.0)).abs() < 1e-9, "x={x} {w}");
+        }
+        // Largeurs géantes : pic ≈ 1/(π·γ) / 1/(σ√2π) selon la dominante.
+        let p = profile(0.0, 1.0, 1e150);
+        assert!((p / lorentz_ref(0.0, 1e150) - 1.0).abs() < 1e-9, "{p}");
+        let q = profile(0.0, 1e150, 1.0);
+        assert!((q / gauss_ref(0.0, 1e150) - 1.0).abs() < 1e-9, "{q}");
+    }
+
+    #[test]
+    #[ignore = "bug #295"]
+    fn largeurs_toutes_deux_infimes_loin_du_centre() {
+        for (fg, fl) in [(1e-160, 1e-160), (1e-300, 1e-300)] {
+            let v = profile(0.5, fg, fl);
+            assert!(v.is_finite() && v >= 0.0, "({fg},{fl}) {v}");
+        }
+    }
+
+    #[test]
+    fn valeurs_minuscules_de_gaussienne_ordinaires_inchangees() {
+        assert!((profile(0.0, 1e-100, 1.0) - 0.636_619_772_367_581_3).abs() < 1e-12);
+        assert!((profile(0.0, 1e-200, 1.0) - 0.636_619_772_367_581_3).abs() < 1e-12);
+    }
 }
