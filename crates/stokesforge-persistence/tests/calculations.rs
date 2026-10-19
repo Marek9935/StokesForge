@@ -546,7 +546,6 @@ fn un_fichier_sans_calcul_ecarte_rend_un_rapport_vide() {
 /// dans le modèle (il serait perdu à la resauvegarde) : le calcul est écarté
 /// **et** signalé, comme n'importe quel enregistrement illisible.
 #[test]
-#[ignore = "bug #291"]
 fn un_nan_edite_a_la_main_dans_le_fichier_ecarte_et_signale_le_calcul() {
     use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
     let mut project = Project::new("P").unwrap();

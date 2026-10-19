@@ -331,8 +331,9 @@ textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
 - Péremption : `manual` et `input_missing` sont gardées ; un `Failed(_)` s'écrit
   `manual` (l'erreur n'est pas persistée : à l'ouverture un calcul automatique est
   recalculé et retrouve son erreur, un calcul manuel reste périmé sans message).
-- Lecture tolérante (invariant 10) : un calcul dont l'opération est illisible, ou
-  dont un identifiant dépasse `MAX_NODE_ID`, est **écarté** sans échec — ses
+- Lecture tolérante (invariant 10) : un calcul dont l'opération est illisible
+  (forme, ou `Operation::validate` en échec : un `NaN` écrit à la main, #291),
+  ou dont un identifiant dépasse `MAX_NODE_ID`, est **écarté** sans échec — ses
   colonnes restent des colonnes ordinaires. Un avertissement inconnu est ignoré.
   L'écart n'est plus silencieux (#278) : `load_with_report` rend un `LoadReport`
   (`discarded_calculations` : id du fichier, famille d'opération si elle se lit),

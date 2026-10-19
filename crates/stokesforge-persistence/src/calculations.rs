@@ -329,7 +329,7 @@ pub(crate) fn records_to_corrections(
 // ── Enregistrement → modèle ─────────────────────────────────────────────
 
 /// Un identifiant au-delà de `max` écarte le calcul entier (même borne que
-/// les nœuds, B1) ; l'opération illisible aussi. Rend les calculs gardés et la
+/// les nœuds, B1) ; l'opération illisible, ou hors plafond (`validate`), aussi. Rend les calculs gardés et la
 /// liste de ceux qui sont écartés (#278) : un enregistrement illisible n'est
 /// pas conservé, mais il n'est plus perdu sans bruit.
 pub(crate) fn records_to_calculations(
@@ -354,7 +354,14 @@ pub(crate) fn records_to_calculations(
             discarded.push(discarded_calculation(&r));
             continue;
         }
-        let Ok(operation) = Operation::from_tree(&value_to_tree(&r.operation)) else {
+        // `from_tree` ne juge que la forme : un `NaN` lu tel quel s'y glisse.
+        // `validate` est le même filtre que celui de `add_calculation` (core) :
+        // un calcul qui l'échoue n'a jamais pu être enregistré par
+        // l'application, c'est un fichier modifié à la main (#291).
+        let Some(operation) = Operation::from_tree(&value_to_tree(&r.operation))
+            .ok()
+            .filter(|op| op.validate().is_ok())
+        else {
             discarded.push(discarded_calculation(&r));
             continue;
         };
