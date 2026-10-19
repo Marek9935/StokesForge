@@ -91,6 +91,7 @@ fn ajouter(handle: &SessionHandle, m: &Montage, auto: bool) -> NodeId {
                 results: computed.results,
                 keep_results: true,
                 auto_recalc: auto,
+                low_r2_dialog: true,
             },
         })
         .unwrap();
@@ -416,6 +417,7 @@ fn modifier_un_calcul_manuel_perime_le_met_a_jour_sans_le_reperimer() {
                 results: computed.results,
                 keep_results: true,
                 auto_recalc: false,
+                low_r2_dialog: true,
             },
         })
         .unwrap();
@@ -466,6 +468,7 @@ fn une_sortie_qui_refuse_le_resultat_marque_le_calcul_en_echec() {
                 results: computed.results,
                 keep_results: true,
                 auto_recalc: true,
+                low_r2_dialog: true,
             })
             .unwrap();
         let out = project.tree().calculation(id).unwrap().outputs[0]
@@ -542,6 +545,7 @@ fn remplacer_actualise_les_dependants_et_annuler_retrouve_leurs_valeurs() {
                 results: computed.results,
                 keep_results: true,
                 auto_recalc: false,
+                low_r2_dialog: true,
             },
             expected_versions,
         })
@@ -563,4 +567,50 @@ fn remplacer_actualise_les_dependants_et_annuler_retrouve_leurs_valeurs() {
         assert!((a - b).abs() < 1e-8);
     }
     session.shutdown().unwrap();
+}
+
+#[test]
+fn le_recalcul_garde_le_reglage_de_boite_r2_faible() {
+    let (_session, handle, m) = demarrer(FormulaRecalc::Targeted);
+    let id = ajouter(&handle, &m, true);
+    let before = handle.snapshot().unwrap();
+    let calc = before.tree.calculation(id).unwrap();
+    let series = calc.series.clone();
+    let op = calc.operation.clone();
+    let computed = compute(&before.tree, &op, &series, None).unwrap();
+    let outputs = computed
+        .columns
+        .iter()
+        .map(|c| OutputDraft {
+            series: c.series,
+            key: c.key.clone(),
+            index: c.index,
+            meta: ColumnMeta::default(),
+            data: c.data.clone(),
+        })
+        .collect();
+    handle
+        .execute(Command::UpdateCalculation {
+            id,
+            draft: CalculationDraft {
+                operation: op,
+                series,
+                aux: None,
+                outputs,
+                results: computed.results,
+                keep_results: true,
+                auto_recalc: true,
+                low_r2_dialog: false,
+            },
+        })
+        .unwrap();
+    let slope_before = pente(&handle.snapshot().unwrap(), id);
+    handle.execute(saisir(m.y, &[3.0, 1.0, 7.0])).unwrap();
+    let after = handle.snapshot().unwrap();
+    assert_ne!(
+        pente(&after, id),
+        slope_before,
+        "le calcul a bien été refait"
+    );
+    assert!(!after.tree.calculation(id).unwrap().low_r2_dialog);
 }

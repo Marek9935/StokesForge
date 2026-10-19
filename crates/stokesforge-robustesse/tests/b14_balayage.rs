@@ -158,6 +158,7 @@ fn commande_correction(tree: &Tree, colonnes: &[NodeId], rang: usize) -> Option<
             results: result.results,
             keep_results: true,
             auto_recalc: false,
+            low_r2_dialog: true,
         },
         expected_versions: vec![(y, version)],
     })

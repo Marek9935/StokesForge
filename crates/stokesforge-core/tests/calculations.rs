@@ -89,6 +89,7 @@ fn draft(f: &Fixture, outputs: Vec<OutputDraft>) -> CalculationDraft {
         results: vec![SeriesResult::default(), SeriesResult::default()],
         keep_results: true,
         auto_recalc: true,
+        low_r2_dialog: true,
     }
 }
 

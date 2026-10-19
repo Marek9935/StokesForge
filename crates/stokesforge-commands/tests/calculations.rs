@@ -62,6 +62,7 @@ fn draft(w: &World, data: Vec<f64>) -> CalculationDraft {
         results: vec![SeriesResult::default()],
         keep_results: true,
         auto_recalc: true,
+        low_r2_dialog: true,
     }
 }
 
@@ -125,6 +126,30 @@ fn la_modification_se_defait_par_un_seul_undo() {
     w.history.undo(&mut w.project).unwrap();
     assert_eq!(w.project.tree(), &created);
     assert_eq!(values(&w), vec![1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn le_reglage_de_boite_r2_faible_se_modifie_et_s_annule() {
+    let mut w = world();
+    add(&mut w, vec![1.0, 2.0, 3.0]);
+    let id = calc_id(&w);
+    assert!(w.project.tree().calculation(id).unwrap().low_r2_dialog);
+    let created = w.project.tree().clone();
+    let mut update = draft(&w, vec![1.0, 2.0, 3.0]);
+    update.low_r2_dialog = false;
+    w.history
+        .execute(
+            &mut w.project,
+            Command::UpdateCalculation { id, draft: update },
+        )
+        .unwrap();
+    let edited = w.project.tree().clone();
+    assert!(!edited.calculation(id).unwrap().low_r2_dialog);
+    w.history.undo(&mut w.project).unwrap();
+    assert_eq!(w.project.tree(), &created);
+    assert!(w.project.tree().calculation(id).unwrap().low_r2_dialog);
+    w.history.redo(&mut w.project).unwrap();
+    assert_eq!(w.project.tree(), &edited);
 }
 
 #[test]

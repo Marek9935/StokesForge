@@ -1002,6 +1002,7 @@ fn loading_a_file_with_an_unreadable_calculation_warns() {
             results: vec![SeriesResult::default()],
             keep_results: true,
             auto_recalc: true,
+            low_r2_dialog: true,
         })
         .unwrap();
     stokesforge_persistence::save(&project, &path).expect("écriture");

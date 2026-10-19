@@ -21,6 +21,11 @@ use stokesforge_core::{
 
 use crate::DiscardedCalculation;
 
+/// Valeur par défaut d'un booléen actif quand le champ manque au fichier.
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct CalculationRecord {
     pub(crate) id: u64,
@@ -37,6 +42,9 @@ pub(crate) struct CalculationRecord {
     pub(crate) keep_results: bool,
     #[serde(default)]
     pub(crate) auto_recalc: bool,
+    /// Boîte de dialogue quand R² est faible (#288) ; active par défaut.
+    #[serde(default = "default_true")]
+    pub(crate) low_r2_dialog: bool,
     /// `"manual"` ou `"input_missing"` ; un échec de recalcul s'écrit
     /// `"manual"` (le prochain recalcul retrouve l'erreur).
     #[serde(default)]
@@ -226,6 +234,7 @@ fn map_to_records(calculations: &BTreeMap<NodeId, Arc<Calculation>>) -> Vec<Calc
                 .collect(),
             keep_results: calc.keep_results,
             auto_recalc: calc.auto_recalc,
+            low_r2_dialog: calc.low_r2_dialog,
             stale: calc.stale.as_ref().map(|s| {
                 match s {
                     Staleness::InputMissing => "input_missing",
@@ -273,6 +282,7 @@ pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CalculationRecord>
                     results: trace.results.clone(),
                     keep_results: true,
                     auto_recalc: false,
+                    low_r2_dialog: true,
                     stale: None,
                 }),
             )
@@ -395,6 +405,7 @@ pub(crate) fn records_to_calculations(
                 .collect(),
             keep_results: r.keep_results,
             auto_recalc: r.auto_recalc,
+            low_r2_dialog: r.low_r2_dialog,
             stale: match r.stale.as_deref() {
                 Some("input_missing") => Some(Staleness::InputMissing),
                 Some(_) => Some(Staleness::Manual),
@@ -439,6 +450,7 @@ mod tests {
             results: vec![],
             keep_results: false,
             auto_recalc: true,
+            low_r2_dialog: true,
             stale: None,
         }
     }

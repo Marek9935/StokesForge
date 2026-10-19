@@ -66,6 +66,7 @@ fn project_with_calculation() -> Project {
             }],
             keep_results: true,
             auto_recalc: false,
+            low_r2_dialog: false,
         })
         .unwrap();
     project
@@ -80,6 +81,18 @@ fn un_calcul_survit_a_un_aller_retour() {
     let back = load(&path).unwrap();
     assert_eq!(back.tree().calculations().len(), 1);
     assert_eq!(back.tree(), project.tree());
+}
+
+#[test]
+fn le_reglage_de_boite_r2_faible_d_un_calcul_survit_au_fichier() {
+    // La fixture l'éteint (#288) : le défaut `true` ne doit pas le rallumer.
+    let project = project_with_calculation();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("r2.stf");
+    save(&project, &path).unwrap();
+    let back = load(&path).unwrap();
+    let calc = back.tree().calculations().values().next().unwrap();
+    assert!(!calc.low_r2_dialog);
 }
 
 #[test]
@@ -191,6 +204,7 @@ fn les_deux_lignes_de_base_constantes_traversent_le_fichier_stf() {
                 results: Vec::new(),
                 keep_results: false,
                 auto_recalc: true,
+                low_r2_dialog: true,
             })
             .unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -253,6 +267,7 @@ fn les_corrections_definitives_survivent_au_fichier_sans_lien_de_calcul() {
                     results: calc.results.clone(),
                     keep_results: false,
                     auto_recalc: false,
+                    low_r2_dialog: true,
                 },
                 &versions,
             )
@@ -329,6 +344,7 @@ fn les_copies_figees_et_les_originaux_survivent_au_fichier() {
                 results: vec![SeriesResult::default()],
                 keep_results: false,
                 auto_recalc: false,
+                low_r2_dialog: true,
             },
             &versions,
         )

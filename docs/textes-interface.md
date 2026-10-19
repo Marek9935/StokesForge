@@ -258,6 +258,7 @@ grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
 | Calculation | Calcul | Un traitement enregistré, avec ses colonnes de sortie | Opération | D |
 | Out of date | Pas à jour | Calcul dont une entrée a changé ou disparu | Périmé, Obsolète | D |
 | Recalculate | Recalculer | Refaire un calcul sur les données actuelles | Rafraîchir | D |
+| Low R² warning | Avertir quand R² est faible | Case du calcul : boîte de dialogue quand le R² d'un ajustement est très faible (#288) | Alerte | D |
 | Constant (baseline) | Constante (ligne de base) | Fond plat par un point ou la moyenne d’une zone | Décalage | D (#211) |
 | Anchor point | Point d'ancrage | Point posé sur l'aperçu pour tracer une ligne de base | Ancre | D |
 | Zone | Zone | Intervalle d'abscisses choisi sur l'aperçu | Région, Plage | D |

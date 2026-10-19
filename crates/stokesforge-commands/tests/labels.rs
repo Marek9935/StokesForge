@@ -359,6 +359,7 @@ fn calc_draft(w: &World) -> CalculationDraft {
         results: vec![],
         keep_results: false,
         auto_recalc: true,
+        low_r2_dialog: true,
     }
 }
 

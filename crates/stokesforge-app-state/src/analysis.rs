@@ -538,6 +538,8 @@ pub struct AnalysisForm {
     /// L'utilisateur a touché la case : un changement de famille ne la remet
     /// plus au défaut de l'opération.
     pub auto_recalc_chosen: bool,
+    /// Boîte de dialogue quand R² est faible (#288), par calcul.
+    pub low_r2_dialog: bool,
     /// Le calcul qu'on modifie (« Edit Calculation… »).
     pub editing: Option<NodeId>,
     /// Le graphe d'où l'on vient : « Add to graph » y range les colonnes.
@@ -579,6 +581,7 @@ impl AnalysisForm {
             keep_results,
             auto_recalc: true,
             auto_recalc_chosen: false,
+            low_r2_dialog: true,
             editing: None,
             graph: None,
             add_to_graph: false,
@@ -614,6 +617,7 @@ impl AnalysisForm {
         form.editing = Some(id);
         form.aux = calc.aux.clone();
         form.auto_recalc = calc.auto_recalc;
+        form.low_r2_dialog = calc.low_r2_dialog;
         form.auto_recalc_chosen = true;
         form.setup.load(&calc.operation);
         // La pondération n'est pas dans l'opération : elle se lit dans les séries.
@@ -919,6 +923,7 @@ impl AnalysisForm {
             },
             keep_results: self.keep_results,
             auto_recalc: self.auto_recalc,
+            low_r2_dialog: self.low_r2_dialog,
         })
     }
 }

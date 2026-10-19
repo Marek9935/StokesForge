@@ -163,6 +163,34 @@ fn editing_a_calculation_updates_it_in_place() {
 }
 
 #[test]
+fn the_low_r2_dialog_setting_goes_from_the_form_to_the_calculation_and_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    open(&mut s, Preset::Integrate);
+    assert!(
+        s.state.analysis_form().unwrap().low_r2_dialog,
+        "on by default"
+    );
+    s.state.dispatch(Action::ApplyAnalysis);
+    let id = only_calculation(&s);
+    assert!(s.state.tree().calculation(id).unwrap().low_r2_dialog);
+
+    s.state.dispatch(Action::EditCalculation(id));
+    assert!(s.state.analysis_form().unwrap().low_r2_dialog);
+    s.state.analysis_form_mut().unwrap().low_r2_dialog = false;
+    s.state.dispatch(Action::ApplyAnalysis);
+    assert!(!s.state.tree().calculation(id).unwrap().low_r2_dialog);
+
+    s.state.dispatch(Action::EditCalculation(id));
+    assert!(
+        !s.state.analysis_form().unwrap().low_r2_dialog,
+        "the form reads the setting back from the calculation"
+    );
+    s.state.dispatch(Action::Undo);
+    assert!(s.state.tree().calculation(id).unwrap().low_r2_dialog);
+}
+
+#[test]
 fn detaching_keeps_the_columns_and_deleting_can_remove_them() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());

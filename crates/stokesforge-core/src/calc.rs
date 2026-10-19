@@ -154,6 +154,9 @@ pub struct Calculation {
     pub keep_results: bool,
     /// Relancé automatiquement quand une source change (M9 b).
     pub auto_recalc: bool,
+    /// Ouvre une boîte de dialogue quand R² d'un ajustement est très faible
+    /// (#288) ; propre au calcul, annulable et sauvegardé. Actif par défaut.
+    pub low_r2_dialog: bool,
     pub stale: Option<Staleness>,
 }
 
@@ -206,6 +209,8 @@ pub struct CalculationDraft {
     pub results: Vec<SeriesResult>,
     pub keep_results: bool,
     pub auto_recalc: bool,
+    /// Voir [`Calculation::low_r2_dialog`].
+    pub low_r2_dialog: bool,
 }
 
 /// Trace immuable d'une correction qui a remplacé ses données sources (#212).
@@ -493,6 +498,7 @@ impl Project {
             },
             keep_results: draft.keep_results,
             auto_recalc: draft.auto_recalc,
+            low_r2_dialog: draft.low_r2_dialog,
             stale: None,
         };
         Arc::make_mut(self.tree_arc_mut())
@@ -602,6 +608,7 @@ impl Project {
             },
             keep_results: draft.keep_results,
             auto_recalc: draft.auto_recalc,
+            low_r2_dialog: draft.low_r2_dialog,
             stale: None,
         };
         Arc::make_mut(self.tree_arc_mut())

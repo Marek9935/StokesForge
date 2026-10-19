@@ -982,6 +982,11 @@ fn output_block(
     ) {
         form.auto_recalc_chosen = true;
     }
+    rows.checkbox(
+        &mut form.low_r2_dialog,
+        tr!("analysis-output-low-r2"),
+        Some(tr!("analysis-output-low-r2", "hint")),
+    );
     if !form.auto_recalc && form.series.len() > stokesforge_analysis::ops::HEAVY_BATCH {
         rows.note(tr!("analysis-output-heavy"));
     }

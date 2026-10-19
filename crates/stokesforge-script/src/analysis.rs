@@ -127,6 +127,7 @@ fn draft(
         },
         keep_results,
         auto_recalc,
+        low_r2_dialog: true,
     }
 }
 
@@ -383,6 +384,7 @@ fn run(
                     results: values.clone(),
                     keep_results: true,
                     auto_recalc: false,
+                    low_r2_dialog: true,
                     stale: None,
                 };
                 return Ok((std::sync::Arc::new(calc), values, after.epoch));

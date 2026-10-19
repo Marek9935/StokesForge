@@ -531,6 +531,7 @@ fn commande_correction(tree: &Tree, colonnes: &[NodeId], rang: usize) -> Option<
             results: result.results,
             keep_results: true,
             auto_recalc: false,
+            low_r2_dialog: true,
         },
         expected_versions: vec![(y, version)],
     })
@@ -769,6 +770,7 @@ fn commande(pas: &Pas, tree: &Tree, rang: usize) -> Option<Command> {
                     results: calcule.results,
                     keep_results: true,
                     auto_recalc: automatique,
+                    low_r2_dialog: true,
                 },
             })
         }
