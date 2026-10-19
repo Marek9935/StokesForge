@@ -104,6 +104,8 @@ mécanique.
 | S-K4 | `renommer-f2-ou-clic-lent` | Renommer dans le Project Manager : F2, ou un clic lent sur un nom déjà sélectionné. |
 | S-K5 | `aide-raccourcis-generee` | Help › Keyboard Shortcuts est générée depuis le registre des touches. |
 | S-K6 | `tab-suit-la-lecture` | Tab suit l'ordre de lecture : haut-bas, gauche-droite. |
+| S-K7 | `outils-dans-la-barre-tools` | Pas de sélecteur d'outil dans une fenêtre : les outils restent dans la barre Tools, l'objet d'abord ; sortie admise (outils d'analyse), toujours justifiée dans le code et la doc. |
+| S-K8 | `gestes-dans-la-matrice` | Tout geste de molette ou de double-clic est rangé dans la matrice `gestes.md`, où l'on voit si le même geste fait ailleurs autre chose. |
 | S-X1 | `ctrl-molette-zoom` | Ctrl+molette zoome, partout. |
 | S-X2 | `curseurs` | Main ouverte puis fermée pour glisser, flèche de redimensionnement sur une poignée, doigt sur un élément cliquable qui n'est pas un bouton. |
 | S-X3 | `fenetre-preferences` | **À venir (#148).** Les réglages d'application vont dans Edit › Preferences… ; les menus gardent les bascules d'affichage fréquentes. |
@@ -154,6 +156,8 @@ deux règles ci-dessus :
 | registre des touches de `app/shortcuts.rs`, `HELP`, Help › Keyboard Shortcuts | S-K1, S-K5 | **en place** (#231) |
 | garde : aucun `consume_key` hors de `app/shortcuts.rs` (`aucun_consume_key_hors_du_registre`) | | **en place** (#231) |
 | curseurs (`app/cursors.rs`) et garde `aucun_curseur_hors_du_module_des_curseurs` | S-X2 | **en place** (#231) |
+| garde : aucun sélecteur d'outil hors de la barre Tools (`aucun_selecteur_d_outil_hors_de_la_barre_tools`, témoin `la_garde_des_outils_voit_un_selecteur_d_outil_nu`) | choix exclusif dont les arguments nomment un outil, refusé hors de `toolbar.rs` sans le marqueur `// OUTIL-EN-FENETRE(#299): <justification>` (S-K7) | **en place** (#299) |
+| garde : aucun geste hors de la matrice (`aucun_geste_hors_de_la_matrice`, témoin `la_garde_des_gestes_voit_un_geste_hors_de_la_matrice`) | tout fichier qui lit une molette ou un double-clic est cité par [`gestes.md`](gestes.md) (S-K8) | **en place** (#299) |
 | brique « travail en cours » (`app/busy.rs` : `work_in_progress`, `indicator`) | S-P1, S-P2 | **en place** (#232) ; branchée sur l'import en fond et la console de script |
 | brique « état vide » (`app/empty_state.rs` : `empty_state`) | S-P3 | **en place** (#232) |
 
@@ -640,8 +644,64 @@ Historique : #227, #237 (largeur « quelques chiffres »), #241 (volet Results).
 - **Curseurs** (S-X2) : main ouverte puis fermée pour glisser, flèche de
   redimensionnement sur une poignée, doigt sur un élément cliquable qui n'est
   pas un bouton.
+- **Pas de sélecteur d'outil dans une fenêtre** (S-K7, #299). L'objet d'abord :
+  on clique ou on glisse l'objet lui-même (une courbe, une poignée, une
+  cellule) ; les outils (Pointeur, Texte, Zoom, formes) vivent dans la barre
+  Tools et nulle part ailleurs. C'est une *guideline* : on peut en sortir, mais
+  **toute sortie est justifiée deux fois**, dans le code et ici.
+- **Les gestes sont dans une matrice** (S-K8, #299) : [`gestes.md`](gestes.md)
+  dit ce que font clic, glisser, double-clic, molette, Ctrl + molette, Ctrl +
+  glisser et clic droit sur chaque surface (graphe, aperçu d'analyse, grille,
+  arbres, onglets, fenêtres, champs). Une surface nouvelle, ou un geste nouveau
+  sur une surface existante, s'y range ; un geste qui diffère de la même action
+  ailleurs se signale contre cette page. La matrice n'est pas recopiée ici.
 
-Historique : #231.
+Comment c'est tenu (S-K7, S-K8) :
+
+- **`aucun_selecteur_d_outil_hors_de_la_barre_tools`**
+  (`stokesforge-app/tests/gardes.rs`) : un choix exclusif (brique `choice` /
+  `choice_by`, `selectable_label`, `selectable_value`, `Button::selectable`,
+  `RadioButton::new`, `radio`, `radio_value`, `toggle_value`) dont les
+  arguments nomment un outil (« tool », hors « toolbar » et « tooltip ») est
+  refusé dans tout fichier sauf `toolbar.rs`, à moins que l'une des **12 lignes
+  qui précèdent** (ou la ligne même) porte le marqueur exact
+  `// OUTIL-EN-FENETRE(#299): <justification>`, justification d'au moins 15
+  caractères. Témoin : `la_garde_des_outils_voit_un_selecteur_d_outil_nu`
+  (chaque forme de choix, exception vide, trop courte, d'un autre marqueur ou
+  trop loin). Limite : elle repose sur le mot « tool » dans les arguments ; un
+  sélecteur d'outil sans ce mot lui échappe.
+- **`aucun_geste_hors_de_la_matrice`** : tout fichier de production de
+  `stokesforge-app` ou de `stokesforge-render-egui` qui lit une molette
+  (`scroll_delta`, `zoom_delta`, `MouseWheel`) ou un double-clic
+  (`double_clicked`) doit être cité (chemin `….rs` entre apostrophes inverses)
+  dans `gestes.md` ; un fichier cité qui n'existe plus fait aussi échouer la
+  garde. Témoin : `la_garde_des_gestes_voit_un_geste_hors_de_la_matrice`.
+  **Limites réelles** : elle travaille au niveau du **fichier** (un geste de
+  molette nouveau dans un fichier déjà cité passe, et elle ne lit pas ce que
+  fait le geste) ; elle ne voit que la **molette et le double-clic**, ni le
+  clic, le glisser, le clic droit ni les modificateurs. Elle empêche qu'une
+  surface naisse hors de la page, pas qu'un geste y soit faux.
+
+**Exception : les outils d'analyse** (S-K7). La fenêtre d'analyse garde un
+sélecteur d'outil dans son aperçu (Points / Zone / Zoom,
+`app/analysis_dialog.rs`, marqueur `OUTIL-EN-FENETRE(#299)`). Justification :
+ces outils demandent beaucoup d'actions spécifiques (ajouter un point, tracer
+une zone, aimanter à la courbe) et la barre d'outils doit changer selon
+l'analyse (#270) ; les mettre dans la barre Tools du graphe mélangerait ces
+gestes à ceux de la figure. Aujourd'hui l'aperçu les offre par la brique
+`choice` ; la décision de #270 (D2 de #299) les remplace par un **texte entouré
+faisant office de bouton à bascule**, ce qui reste une exception justifiée de
+la même guideline, non un conflit. **À venir (#270)** : cette forme, et le
+marqueur qui la suivra.
+
+**À venir (#270).** Le zoom de l'aperçu s'aligne sur le graphe (D3 de #299) :
+Ctrl + molette zoome, Ctrl + glisser déplace la vue, double-clic recadre,
+Maj + molette (moyenne de l'aimant) inchangé ; le bouton Zoom et l'icône ⤢
+disparaissent et la molette seule ne zoome plus. Tant que #270 n'est pas
+livré, l'aperçu garde son comportement actuel, décrit dans `gestes.md`
+(colonne « Cible D3 »).
+
+Historique : #231, #299 (S-K7, S-K8 : guideline des outils et matrice des gestes).
 
 ## Travaux longs et états vides
 
