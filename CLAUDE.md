@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Branche `dev` : portage de StokesForge (analyse/tracé de données scientifiques, façon OriginLab) de Python/Qt vers Rust. Tout le code vit dans le workspace Cargo à la racine — l'ancienne implémentation Python/Qt (`legacy-python/`, qui servait de spec de comportement) a été supprimée de cette branche ; elle continue d'exister sous le tag `legacy-python`.
 
-Documentation du code : `docs/` — [`docs/README.md`](docs/README.md) est le point d'entrée et route par tâche. `docs/invariants.md` liste les règles à ne pas casser ; les lire avant de toucher au rendu, à l'historique ou à l'acteur.
+Documentation du code : `docs/` — [`docs/README.md`](docs/README.md) est le point d'entrée et route par tâche. `docs/invariants.md` liste les règles à ne pas casser ; les lire avant de toucher au rendu, à l'historique ou à l'acteur. `docs/principes-ui.md` pose les principes d'interface (E3) ; `docs/fenetres.md` catalogue les fenêtres existantes, à consulter avant toute fenêtre neuve.
 
 `docs/archive/` conserve les documents de conception antérieurs (cahier des charges technique, roadmaps 0-5 et R0-R8, rapports de robustesse, options explorées). Ils ne sont plus maintenus, mais **les commentaires du code les citent par leur nom de fichier** (`architecture-choisie.md` §4.3, `guide-de-correction-robustesse.md` §F6…) : toute citation de ce genre se résout dans `docs/archive/`. Là où ils divergent du code, c'est le code qui a raison. Ils datent d'avant le renommage (#87) : ils parlent encore de PlotYx, `plotyx-*`, `.plx` et `pyx`, qui se lisent aujourd'hui StokesForge, `stokesforge-*`, `.stf` et `pyst` (le fichier `format-fichier-plx.md` garde son nom).
 
@@ -46,6 +46,8 @@ Règles de chargement par domaine (quel crate/doc charger selon la tâche) : `.c
 | copier/coller d'objets, copie de figure | « Copie d'objets et de figures » |
 | analyse (`stokesforge-analysis`, calculs) | « Analyse » |
 | `pyst` (écritures, navigation) | « Script `pyst` » |
+| erreurs (`Display`, `error_message`, clés `error-*`, messages d'état) | « Erreurs » |
+| fenêtre ou dialogue neuf | `docs/fenetres.md` (catalogue : ouvrir une fenêtre jumelle de référence, #300), `docs/principes-ui.md` (E3) |
 | rendu (`stokesforge-render*`) | « Rendu : pièges silencieux » (+ skill `stokesforge-rendu`) |
 
 Skills de projet : `.claude/skills/` — douze compétences par type de tâche

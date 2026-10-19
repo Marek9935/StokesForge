@@ -39,7 +39,16 @@ Dans cet ordre, sans sauter d'étape :
    le geste voulu, pas son comportement aux bords. Poser les questions
    ouvertes **avant** d'écrire (voir « Demander plutôt que supposer »), en une
    seule fois.
-6. Annoncer brièvement : ce qui sera réutilisé, la zone modifiée, les
+6. **Jumeaux (#300, #299) — pour toute fenêtre, dialogue ou geste neuf.**
+   Lister les équivalents existants (`docs/fenetres.md`), dire lequel on
+   imite, et comparer une capture (`run-stokesforge`) de la fenêtre neuve avec
+   celle de référence. Une fenêtre neuve a sa **maquette validée par
+   l'utilisateur avant le code** (E2 : toujours ; formulaire de décisions,
+   cf. `stokesforge-bug-report/references/formulaire-de-decisions.md`). Poser
+   aussi la question #299 : « ce geste existe-t-il déjà ailleurs, et sous quel
+   modèle ? » (`docs/gestes.md` ; règles S-K7 et S-K8 de
+   `docs/standard-interface.md`).
+7. Annoncer brièvement : ce qui sera réutilisé, la zone modifiée, les
    vérifications prévues. Puis coder sans redemander confirmation pour les
    choix courants.
 
