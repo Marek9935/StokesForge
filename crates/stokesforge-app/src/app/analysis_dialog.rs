@@ -235,6 +235,9 @@ pub(super) fn analysis_window(
                         // « formulaire » (C1, C2), le geste de l'outil actif en note.
                         super::form::form(ui, id.with("tools"), |rows| {
                             rows.field(|ui| {
+                                // OUTIL-EN-FENETRE(#299): exception de D1/D2 pour les outils
+                                // d'analyse, qui demandent des gestes propres (points, zones,
+                                // zoom) et dont la barre change selon l'analyse (#270).
                                 choice(
                                     ui,
                                     id.with("tool"),

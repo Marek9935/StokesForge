@@ -35,7 +35,12 @@
 //! - `aucun_curseur_hors_du_module_des_curseurs` (#231, X2) : un
 //!   `CursorIcon::…` ne s'écrit que dans `app/cursors.rs`, sans dérogation ;
 //! - `aucun_selecteur_rfd_hors_du_module` (#192) : un `rfd::…` ne s'écrit que
-//!   dans `file_picker.rs`, qui vit dans `stokesforge-app-state` (#263).
+//!   dans `file_picker.rs`, qui vit dans `stokesforge-app-state` (#263) ;
+//! - `aucun_selecteur_d_outil_hors_de_la_barre_tools` (#299, D1, D5) : un choix
+//!   dont les arguments nomment un outil n'est pas dans une fenêtre ; exception
+//!   par `// OUTIL-EN-FENETRE(#299): <justification>` écrit juste avant ;
+//! - `aucun_geste_hors_de_la_matrice` (#299, D4) : tout fichier qui lit une
+//!   molette ou un double-clic est cité par `docs/gestes.md`.
 //!
 //! L'ancienne garde « les modules d'état ne nomment pas egui » (#255) n'est
 //! plus : depuis #263 ces modules vivent dans `stokesforge-app-state`, qui ne
@@ -1556,4 +1561,320 @@ fn la_garde_du_selecteur_voit_un_rfd_hors_du_module() {
         "fn f() {} // rfd::FileDialog"
     )])
     .is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Pas de sélecteur d'outil hors de la barre Tools (#299, D1, D5)
+// ---------------------------------------------------------------------------
+
+/// Le marqueur d'exception d'un sélecteur d'outil posé dans une fenêtre :
+/// `// OUTIL-EN-FENETRE(#299): <pourquoi cette fenêtre déroge>`.
+const MARQUEUR_OUTIL: &str = "OUTIL-EN-FENETRE(#299):";
+
+/// Les lignes qui précèdent l'appel où le marqueur est cherché.
+const PORTEE_DU_MARQUEUR: usize = 12;
+
+/// Longueur minimale (en caractères) d'une justification : « ok » n'en est pas
+/// une.
+const JUSTIFICATION_MINIMALE: usize = 15;
+
+/// Les formes qui peignent un choix exclusif ou une bascule : les boutons
+/// sélectionnables et radios d'egui (la brique `choice` est vue à part).
+const FORMES_DE_CHOIX: [&str; 7] = [
+    ".selectable_label(",
+    ".selectable_value(",
+    "Button::selectable(",
+    "RadioButton::new(",
+    ".radio(",
+    ".radio_value(",
+    ".toggle_value(",
+];
+
+/// La position de la parenthèse ouvrante d'un choix écrit en `i`, s'il y en a
+/// un : la brique `choice` / `choice_by` du formulaire ou une forme d'egui.
+fn ouvrante_d_un_choix(masque: &[char], i: usize) -> Option<usize> {
+    for brique in ["choice", "choice_by"] {
+        if mot_en(masque, i, brique) && masque.get(i + brique.len()) == Some(&'(') {
+            return Some(i + brique.len());
+        }
+    }
+    FORMES_DE_CHOIX
+        .iter()
+        .find(|forme| commence_par(masque, i, forme))
+        .map(|forme| i + forme.len() - 1)
+}
+
+/// Les arguments d'un choix nomment-ils un outil (`form.tool`, `PreviewTool`,
+/// `tr!("analysis-tool-…")`) ? « toolbar » et « tooltip » n'en sont pas.
+fn nomme_un_outil(arguments: &str) -> bool {
+    arguments
+        .to_lowercase()
+        .replace("toolbar", "")
+        .replace("tooltip", "")
+        .contains("tool")
+}
+
+/// La justification du marqueur [`MARQUEUR_OUTIL`] dans les
+/// [`PORTEE_DU_MARQUEUR`] lignes qui précèdent la ligne `ligne` (1-based) ou
+/// sur elle, `None` si aucun marqueur.
+fn justification_du_marqueur(original: &[char], ligne: usize) -> Option<String> {
+    let texte: String = original.iter().collect();
+    let lignes: Vec<&str> = texte.lines().collect();
+    let fin = ligne.min(lignes.len());
+    let debut = fin.saturating_sub(PORTEE_DU_MARQUEUR + 1);
+    lignes[debut..fin].iter().rev().find_map(|ligne| {
+        let (_, reste) = ligne.split_once(MARQUEUR_OUTIL)?;
+        Some(reste.trim().to_string())
+    })
+}
+
+/// Les sélecteurs d'outil du code de production hors de `toolbar.rs` (la barre
+/// Tools, seule patrie des outils) qui n'ont pas leur exception justifiée,
+/// `chemin:ligne : raison`.
+fn selecteurs_d_outil_sans_exception(sources: &[Fichier]) -> Vec<String> {
+    let mut trouves = Vec::new();
+    for fichier in sources {
+        if fichier.chemin == "toolbar.rs" {
+            continue;
+        }
+        let source = fichier.production();
+        for i in 0..source.masque.len() {
+            let Some(ouvrante) = ouvrante_d_un_choix(&source.masque, i) else {
+                continue;
+            };
+            let Some(fin) = fermante(&source.masque, ouvrante) else {
+                continue;
+            };
+            let arguments: String = source.code[ouvrante..=fin].iter().collect();
+            if !nomme_un_outil(&arguments) {
+                continue;
+            }
+            let ligne = ligne_de(&source.original, i);
+            let endroit = format!("src/{}:{ligne}", fichier.chemin);
+            match justification_du_marqueur(&source.original, ligne) {
+                None => trouves.push(format!("{endroit} : aucun marqueur")),
+                Some(texte) if texte.chars().count() < JUSTIFICATION_MINIMALE => {
+                    trouves.push(format!("{endroit} : justification vide ou trop courte"));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    trouves
+}
+
+/// Règle #299 (D1, D5) : un sélecteur d'outil (choix exclusif dont les
+/// arguments nomment un outil) n'est pas dans une fenêtre ; les outils restent
+/// dans la barre Tools. On peut en sortir — les outils d'analyse, par exemple —
+/// à condition de l'écrire dans le code : `// OUTIL-EN-FENETRE(#299): <pourquoi>`
+/// dans les douze lignes qui précèdent, justification non vide. Matrice des
+/// gestes : `docs/gestes.md`.
+#[test]
+fn aucun_selecteur_d_outil_hors_de_la_barre_tools() {
+    let sources = sources::sources();
+    assert!(
+        sources.iter().any(|f| f.chemin == "toolbar.rs"),
+        "toolbar.rs non lu : la garde ne verrait plus la barre Tools"
+    );
+    let fautifs = selecteurs_d_outil_sans_exception(&sources);
+    assert!(
+        fautifs.is_empty(),
+        "sélecteur d'outil hors de la barre Tools — le placer dans la barre, ou \
+         écrire `// {MARQUEUR_OUTIL} <justification>` juste avant (docs/gestes.md) : \
+         {fautifs:?}"
+    );
+}
+
+/// Le témoin : un sélecteur d'outil nu est vu, sous chaque forme de choix ; une
+/// exception sans justification ou sans le bon marqueur l'est aussi ; une
+/// exception justifiée, la barre Tools, un choix d'autre nature, un commentaire
+/// et le code de test passent.
+#[test]
+fn la_garde_des_outils_voit_un_selecteur_d_outil_nu() {
+    for code in [
+        "fn f(ui: &mut Ui, form: &mut F) { choice(ui, id, &mut form.tool, &[]); }",
+        "fn f(ui: &mut Ui) { choice_by(ui, id, &mut t, &[Opt::new(Tool::Zoom, tr!(\"x\"))]); }",
+        "fn f(ui: &mut Ui) { ui.selectable_value(&mut tool, Tool::Zone, t); }",
+        "fn f(ui: &mut Ui) { ui.radio_value(&mut mode, 1, tr!(\"analysis-tool-zone\")); }",
+        "fn f(ui: &mut Ui) { ui.add(egui::RadioButton::new(tool == Pointer, \"outil\")); }",
+        "fn f(ui: &mut Ui) { ui.selectable_label(tool == Tool::Zoom, t); }",
+    ] {
+        assert_eq!(
+            selecteurs_d_outil_sans_exception(&[fichier("app/w.rs", code)]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    // Exception mal écrite : vide, trop courte, autre marqueur, trop loin.
+    let loin = "\n".repeat(PORTEE_DU_MARQUEUR + 2);
+    for avant in [
+        "// OUTIL-EN-FENETRE(#299):\n".to_string(),
+        "// OUTIL-EN-FENETRE(#299): ok\n".to_string(),
+        "// OUTIL-EN-FENETRE: les outils d'analyse sont nombreux\n".to_string(),
+        "// OUTIL-EN-FENETRE(#298): les outils d'analyse sont nombreux\n".to_string(),
+        format!("// OUTIL-EN-FENETRE(#299): les outils d'analyse sont nombreux{loin}"),
+    ] {
+        let code = format!("fn f(ui: &mut Ui) {{\n{avant}choice(ui, id, &mut form.tool, &[]);\n}}");
+        assert_eq!(
+            selecteurs_d_outil_sans_exception(&[fichier("app/w.rs", &code)]).len(),
+            1,
+            "exception acceptée à tort : {code}"
+        );
+    }
+    for code in [
+        "fn f(ui: &mut Ui) {\n// OUTIL-EN-FENETRE(#299): les outils d'analyse demandent des gestes propres\nchoice(ui, id, &mut form.tool, &[]);\n}",
+        "fn f(ui: &mut Ui) {\n// OUTIL-EN-FENETRE(#299): les outils d'analyse demandent des gestes propres\n// (suite de la justification)\nui.radio_value(&mut tool, 1, t);\n}",
+        "fn f(ui: &mut Ui) { choice(ui, id, &mut form.layout, &[]); }",
+        "fn f(ui: &mut Ui) { ui.selectable_label(a, tr!(\"toolbar-text\")); }",
+        "fn f(ui: &mut Ui) { ui.selectable_label(a, t).on_hover_text(tooltip); }",
+        "fn f(ui: &mut Ui) { // choice(ui, id, &mut form.tool, &[]);\n let _ = \"ui.radio_value(tool)\"; }",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g(ui: &mut Ui) { choice(ui, id, &mut tool, &[]); } }",
+    ] {
+        assert!(
+            selecteurs_d_outil_sans_exception(&[fichier("app/w.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+    let barre = "fn f(ui: &mut Ui) { ui.selectable_value(&mut tool, Tool::Zone, t); }";
+    assert!(selecteurs_d_outil_sans_exception(&[fichier("toolbar.rs", barre)]).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Tout geste de molette ou de double-clic est dans la matrice (#299, D4)
+// ---------------------------------------------------------------------------
+
+/// Le préfixe des chemins de `stokesforge-render-egui` dans la liste des
+/// sources lues par la garde des gestes : `render-egui/lib.rs`.
+const PREFIXE_RENDU_EGUI: &str = "render-egui/";
+
+/// Ce qui lit une molette ou un double-clic : les gestes dont la signification
+/// doit être la même d'une surface à l'autre (Ctrl + molette, double-clic).
+const LECTURES_DE_GESTE: [&str; 4] = ["scroll_delta", "zoom_delta", "MouseWheel", "double_clicked"];
+
+/// La matrice des gestes.
+fn matrice_des_gestes() -> String {
+    let chemin = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("docs")
+        .join("gestes.md");
+    std::fs::read_to_string(&chemin)
+        .unwrap_or_else(|e| panic!("{} illisible : {e}", chemin.display()))
+}
+
+/// Les sources de l'application **et** du rendu egui (le graphe y vit).
+fn sources_des_gestes() -> Vec<Fichier> {
+    let rendu = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("stokesforge-render-egui")
+        .join("src");
+    let mut tout = sources::sources();
+    tout.extend(sources::lire_dossiers(&[(
+        rendu.as_path(),
+        PREFIXE_RENDU_EGUI,
+    )]));
+    tout
+}
+
+/// Les chemins `….rs` cités entre apostrophes inverses dans `matrice`.
+fn fichiers_cites(matrice: &str) -> Vec<String> {
+    matrice
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|jeton| {
+            jeton.ends_with(".rs") && !jeton.contains(' ') && !jeton.starts_with("crates/")
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+/// Écarts entre le code et la matrice : un fichier de production qui lit une
+/// molette ou un double-clic sans être cité, un fichier cité qui n'existe plus.
+fn ecarts_de_la_matrice(sources: &[Fichier], matrice: &str) -> Vec<String> {
+    let cites = fichiers_cites(matrice);
+    let mut ecarts = Vec::new();
+    for fichier in sources {
+        let source = fichier.production();
+        let lit = (0..source.masque.len()).find(|&i| {
+            LECTURES_DE_GESTE
+                .iter()
+                .any(|motif| commence_par(&source.masque, i, motif))
+        });
+        if let Some(i) = lit {
+            if !cites.contains(&fichier.chemin) {
+                ecarts.push(format!(
+                    "src/{}:{} lit un geste absent de docs/gestes.md",
+                    fichier.chemin,
+                    ligne_de(&source.original, i)
+                ));
+            }
+        }
+    }
+    for cite in cites {
+        if !sources.iter().any(|f| f.chemin == cite) {
+            ecarts.push(format!("`{cite}` cité par docs/gestes.md n'existe pas"));
+        }
+    }
+    ecarts
+}
+
+/// Règle #299 (D4) : la matrice `docs/gestes.md` nomme chaque surface qui lit
+/// une molette ou un double-clic. Une surface nouvelle, ou un geste de molette
+/// nouveau dans un fichier qui n'en lisait pas, se range dans la matrice — où
+/// l'on voit si le même geste fait ailleurs autre chose. La garde ne juge pas le
+/// geste ; elle empêche qu'il naisse hors de la page.
+#[test]
+fn aucun_geste_hors_de_la_matrice() {
+    let sources = sources_des_gestes();
+    assert!(
+        sources.iter().any(|f| f.chemin == "render-egui/lib.rs"),
+        "render-egui/lib.rs non lu : la garde ne verrait plus le graphe"
+    );
+    let ecarts = ecarts_de_la_matrice(&sources, &matrice_des_gestes());
+    assert!(ecarts.is_empty(), "{ecarts:?}");
+}
+
+/// Le témoin : une molette ou un double-clic dans un fichier non cité est vu,
+/// sous chaque forme ; un fichier cité, un commentaire, une chaîne et le code
+/// de test passent ; une citation périmée est vue.
+#[test]
+fn la_garde_des_gestes_voit_un_geste_hors_de_la_matrice() {
+    let matrice = "Surfaces : `app/grid.rs`, `app/vieux.rs`.";
+    let existants = |code: &str, chemin: &str| {
+        let mut tous = vec![fichier(chemin, code), fichier("app/vieux.rs", "fn v() {}")];
+        if chemin != "app/grid.rs" {
+            tous.push(fichier("app/grid.rs", "fn g() {}"));
+        }
+        tous
+    };
+    for code in [
+        "fn f(ui: &mut Ui) { let s = ui.input(|i| i.smooth_scroll_delta.y); }",
+        "fn f(c: &Context) { let z = c.input(|i| i.zoom_delta()); }",
+        "fn f(e: Event) { if let Event::MouseWheel { .. } = e {} }",
+        "fn f(r: Response) { if r.double_clicked() {} }",
+    ] {
+        assert_eq!(
+            ecarts_de_la_matrice(&existants(code, "app/nouveau.rs"), matrice).len(),
+            1,
+            "non vu : {code}"
+        );
+        // Cité dans la matrice : passe.
+        assert!(
+            ecarts_de_la_matrice(&existants(code, "app/grid.rs"), matrice).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+    for code in [
+        "fn f() { // r.double_clicked()\n let _ = \"scroll_delta\"; }",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g(r: Response) { r.double_clicked(); } }",
+    ] {
+        assert!(
+            ecarts_de_la_matrice(&existants(code, "app/nouveau.rs"), matrice).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+    // Une citation périmée : `app/vieux.rs` n'existe plus.
+    let ecarts = ecarts_de_la_matrice(&[fichier("app/grid.rs", "fn g() {}")], matrice);
+    assert_eq!(ecarts.len(), 1, "{ecarts:?}");
 }
