@@ -1593,7 +1593,7 @@ const FORMES_DE_CHOIX: [&str; 7] = [
 /// La position de la parenthèse ouvrante d'un choix écrit en `i`, s'il y en a
 /// un : la brique `choice` / `choice_by` du formulaire ou une forme d'egui.
 fn ouvrante_d_un_choix(masque: &[char], i: usize) -> Option<usize> {
-    for brique in ["choice", "choice_by"] {
+    for brique in ["choice", "choice_by", "toggle_texts"] {
         if mot_en(masque, i, brique) && masque.get(i + brique.len()) == Some(&'(') {
             return Some(i + brique.len());
         }
@@ -1698,6 +1698,7 @@ fn la_garde_des_outils_voit_un_selecteur_d_outil_nu() {
         "fn f(ui: &mut Ui) { ui.radio_value(&mut mode, 1, tr!(\"analysis-tool-zone\")); }",
         "fn f(ui: &mut Ui) { ui.add(egui::RadioButton::new(tool == Pointer, \"outil\")); }",
         "fn f(ui: &mut Ui) { ui.selectable_label(tool == Tool::Zoom, t); }",
+        "fn f(ui: &mut Ui, form: &mut F) { toggle_texts(ui, id, &mut form.tool, &[]); }",
     ] {
         assert_eq!(
             selecteurs_d_outil_sans_exception(&[fichier("app/w.rs", code)]).len(),

@@ -14,12 +14,11 @@ use stokesforge_analysis::ops::Warning;
 use stokesforge_core::number_format::{format_exact, format_with_uncertainty};
 
 use super::analysis_forms::{form_body, value_row};
-use super::analysis_preview::{preview, reset_view, PreviewOutcome};
+use super::analysis_preview::{preview, PreviewOutcome};
 use super::dialogs::{
     modal_confirm, modal_dialog_with, ConfirmOutcome, DialogFooter, DialogOutcome,
 };
-use super::form::{choice, ChoiceOption};
-use crate::icons::{icon_button, Icon, IconRole};
+use super::form::{toggle_texts, ChoiceOption};
 use crate::theme;
 use stokesforge_app_state::analysis::{
     issue_message, kind_title, value_label, value_unit, Category, PreviewTool,
@@ -231,49 +230,39 @@ pub(super) fn analysis_window(
                     egui::vec2((full.x - FORM_WIDTH - 24.0).max(200.0), full.y),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        // Les outils de l'aperçu : un choix exclusif de la brique
-                        // « formulaire » (S-C1, S-C2), le geste de l'outil actif en note.
+                        // Les gestes de l'aperçu : l'analyse décide du sien ; seule la
+                        // détection de pics en offre deux, à bascule (#270, #299).
                         super::form::form(ui, id.with("tools"), |rows| {
-                            rows.field(|ui| {
-                                // OUTIL-EN-FENETRE(#299): exception de D1/D2 pour les outils
-                                // d'analyse, qui demandent des gestes propres (points, zones,
-                                // zoom) et dont la barre change selon l'analyse (#270).
-                                choice(
-                                    ui,
-                                    id.with("tool"),
-                                    &mut form.tool,
-                                    &[
-                                        ChoiceOption::new(
-                                            PreviewTool::Points,
-                                            tr!("analysis-tool-points"),
-                                        ),
-                                        ChoiceOption::new(
-                                            PreviewTool::Zone,
-                                            tr!("analysis-tool-zone"),
-                                        ),
-                                        ChoiceOption::new(
-                                            PreviewTool::Zoom,
-                                            tr!("analysis-tool-zoom"),
-                                        ),
-                                    ],
-                                );
-                                if icon_button(
-                                    ui,
-                                    Icon::ResetZoom,
-                                    IconRole::Neutral,
-                                    tr!("analysis-tool-reset"),
-                                )
-                                .clicked()
-                                {
-                                    reset_view(ui, id);
-                                }
-                            });
-                            // Le geste de l'outil actif, en clair sous la rangée (S-M1).
+                            if form.tool_choices().len() > 1 {
+                                rows.field(|ui| {
+                                    // OUTIL-EN-FENETRE(#299): exception de D1/D2 pour les outils
+                                    // d'analyse ; les pics demandent un clic (position) et un
+                                    // glisser (plage), propres à l'aperçu, hors de la barre Tools.
+                                    toggle_texts(
+                                        ui,
+                                        id.with("tool"),
+                                        &mut form.tool,
+                                        &[
+                                            ChoiceOption::new(
+                                                PreviewTool::Points,
+                                                tr!("analysis-tool-points"),
+                                            )
+                                            .hint(tr!("analysis-tool-points", "hint")),
+                                            ChoiceOption::new(
+                                                PreviewTool::Zone,
+                                                tr!("analysis-tool-zone"),
+                                            )
+                                            .hint(tr!("analysis-tool-zone", "hint")),
+                                        ],
+                                    );
+                                });
+                            }
+                            // Le geste de l'analyse, puis la navigation, en clair (S-M1).
                             rows.note(match form.tool {
                                 PreviewTool::Points => tr!("analysis-tool-points", "hint"),
                                 PreviewTool::Zone => tr!("analysis-tool-zone", "hint"),
-                                PreviewTool::Zoom => tr!("analysis-tool-zoom", "hint"),
                             });
+                            rows.note(tr!("analysis-preview-navigation"));
                         });
                         let plot_height = (ui.available_height() - VALUES_HEIGHT - 8.0).max(160.0);
                         let result = ui

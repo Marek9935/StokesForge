@@ -12,12 +12,23 @@
 //!
 //! # Gestes
 //!
+//! Comme sur le graphe (#270, D3 de #299 ; matrice : `docs/gestes.md`) :
+//!
+//! - **Ctrl + molette** : zoom ancré sous le pointeur ; au-dessus d'un axe, ce
+//!   seul axe. La molette seule ne fait rien ;
+//! - **Ctrl + glisser** : déplace la vue (un glisser parti d'un axe ne déplace
+//!   que cet axe) ; le modificateur est lu au début du glisser ;
+//! - **double clic** : cadrage d'origine ;
+//! - **Maj + molette** : règle la moyenne N de l'aimant (M4 b) ;
 //! - outil *Points* : un clic pose un point ; **Maj** l'aimante sur la courbe
-//!   avec une moyenne locale de N points, **Maj + molette** règle N (M4 b) ;
+//!   avec une moyenne locale de N points ;
 //! - outil *Zone* : glisser trace une zone ou une plage ;
-//! - outil *Zoom* : glisser cadre un rectangle ; molette : zoom autour du
-//!   curseur ; double clic : cadrage d'origine ;
 //! - clic droit : retire le repère visé.
+//!
+//! Le zoom et le déplacement sont calculés par `stokesforge_render`
+//! (`PanelTransform::zoom`, `pan`) ; l'aperçu n'a pas de `ViewState` (ni calque,
+//! ni panneaux dessinés) : il garde son cadre et ne fait que choisir la cible
+//! du geste, plein tracé ou un axe.
 //!
 //! # Le calcul n'est pas fait dans `ui()` (#201)
 //!
@@ -42,7 +53,7 @@ use eframe::egui;
 use stokesforge_core::{Computed, Tree};
 use stokesforge_plot::{AxisScale, AxisSpec};
 use stokesforge_render::scale::axis_ticks;
-use stokesforge_render::{axis_frame, fit_range, snap_to_curve, PanelTransform};
+use stokesforge_render::{axis_frame, fit_range, snap_to_curve, Gesture, PanelTransform};
 
 use crate::theme;
 use stokesforge_app_state::analysis::{
@@ -289,9 +300,82 @@ struct StoredView {
     frame: Frame,
 }
 
-/// Recadre l'aperçu sur ses données (bouton « Reset View »).
-pub(super) fn reset_view(ui: &mut egui::Ui, id: egui::Id) {
-    ui.data_mut(|d| d.remove::<StoredView>(id.with("view")));
+/// Ce que vise un geste de navigation : tout le tracé, ou une seule échelle
+/// (la bande des graduations de X sous le tracé, celle de Y à sa gauche).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum NavTarget {
+    Plot,
+    AxisX,
+    AxisY,
+}
+
+/// Ce que fait le glisser en cours, décidé à sa première image (comme
+/// `nav_drag` du graphe) : tracer une zone, ou déplacer la vue (Ctrl enfoncé au
+/// début), ou rien (parti hors du tracé et des axes).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum DragMode {
+    Draw,
+    Pan(NavTarget),
+    #[default]
+    Ignore,
+}
+
+/// La cible d'un geste de navigation en `pos` : le tracé, l'axe X (sous le
+/// tracé, résidus compris), l'axe Y (à sa gauche), ou rien.
+fn nav_target(pos: egui::Pos2, plot_rect: egui::Rect, outer: egui::Rect) -> Option<NavTarget> {
+    if plot_rect.contains(pos) {
+        Some(NavTarget::Plot)
+    } else if pos.x >= plot_rect.left()
+        && pos.x <= plot_rect.right()
+        && pos.y > plot_rect.bottom()
+        && pos.y <= outer.bottom()
+    {
+        Some(NavTarget::AxisX)
+    } else if pos.x >= outer.left()
+        && pos.x < plot_rect.left()
+        && pos.y >= plot_rect.top()
+        && pos.y <= plot_rect.bottom()
+    {
+        Some(NavTarget::AxisY)
+    } else {
+        None
+    }
+}
+
+/// Le cadre après `gesture` sur `target`. Sur un axe, l'autre composante du
+/// geste est neutralisée au centre du tracé (comme
+/// `ViewState::commit_axis_gesture`) et l'autre borne du cadre ne bouge pas.
+/// Sans image (borne logarithmique ≤ 0), le cadre reste.
+fn navigate(
+    transform: &PanelTransform,
+    plot_rect: egui::Rect,
+    frame: Frame,
+    target: NavTarget,
+    gesture: Gesture,
+) -> Frame {
+    let center = plot_rect.center();
+    let (cx, cy) = (f64::from(center.x), f64::from(center.y));
+    let gesture = match (gesture, target) {
+        (Gesture::Zoom { anchor, factor }, NavTarget::AxisX) => Gesture::Zoom {
+            anchor: (anchor.0, cy),
+            factor,
+        },
+        (Gesture::Zoom { anchor, factor }, NavTarget::AxisY) => Gesture::Zoom {
+            anchor: (cx, anchor.1),
+            factor,
+        },
+        (Gesture::Pan { dx, .. }, NavTarget::AxisX) => Gesture::Pan { dx, dy: 0.0 },
+        (Gesture::Pan { dy, .. }, NavTarget::AxisY) => Gesture::Pan { dx: 0.0, dy },
+        (other, _) => other,
+    };
+    match transform.apply(&gesture) {
+        Some((x, y)) => match target {
+            NavTarget::Plot => (x, y),
+            NavTarget::AxisX => (x, frame.1),
+            NavTarget::AxisY => (frame.0, y),
+        },
+        None => frame,
+    }
 }
 
 /// La pause de frappe après laquelle un aperçu se recalcule (S-T1, #224), en
@@ -684,10 +768,10 @@ pub(super) fn preview(
     }
 
     // Gestes.
-    let shift = ui.input(|i| i.modifiers.shift);
+    let (shift, command) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
     let hover = response.hover_pos().filter(|p| plot_rect.contains(*p));
     let hover_data = hover.and_then(|pos| to_data(&transform, pos));
-    if let (Some(pos), Some((hx, hy))) = (hover, hover_data) {
+    if let Some((hx, hy)) = hover_data {
         let mut label = format!("x = {hx:.6}\ny = {hy:.6}");
         if shift && form.tool == PreviewTool::Points {
             if let Some((sx, sy)) = snap_to_curve(&xs, &ys, hx, form.average) {
@@ -710,19 +794,36 @@ pub(super) fn preview(
             font.clone(),
             text_color,
         );
-        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-        if scroll != 0.0 {
-            if shift {
+        // Maj + molette règle la moyenne. egui range la molette sous Maj dans
+        // l'axe horizontal (`smooth_scroll_delta.x`), et sous Ctrl dans
+        // `zoom_delta`, jamais dans `smooth_scroll_delta` : on lit donc les deux
+        // axes de `smooth_scroll_delta`, et pas `zoom_delta` ici.
+        if shift {
+            let wheel = ui.input(|i| i.smooth_scroll_delta);
+            let scroll = wheel.x + wheel.y;
+            if scroll != 0.0 {
                 let step = if scroll > 0.0 { 2 } else { -2 };
                 let next = (form.average as i64 + step)
                     .clamp(*AVERAGE_RANGE.start() as i64, *AVERAGE_RANGE.end() as i64);
                 form.average = next as usize;
-            } else {
-                let factor = f64::from(-scroll * 0.004).exp();
-                // Un zoom sans image (borne logarithmique ≤ 0) garde le cadre.
-                if let Some(next) = transform.zoom((f64::from(pos.x), f64::from(pos.y)), factor) {
-                    frame = next;
-                }
+            }
+        }
+    }
+
+    // Ctrl + molette (ou pincement) : zoom ancré sous le pointeur, même facteur
+    // que le graphe ; au-dessus d'un axe, cette seule échelle. La molette seule
+    // ne zoome pas (#62).
+    let mut transform = transform;
+    if let Some(pos) = response.hover_pos() {
+        let zoom = ui.input(|i| i.zoom_delta());
+        if zoom != 1.0 {
+            if let Some(target) = nav_target(pos, plot_rect, outer) {
+                let gesture = Gesture::Zoom {
+                    anchor: (f64::from(pos.x), f64::from(pos.y)),
+                    factor: (1.0 / f64::from(zoom)).clamp(0.5, 2.0),
+                };
+                frame = navigate(&transform, plot_rect, frame, target, gesture);
+                transform = transform_for(plot_rect, frame.0, frame.1, scales).unwrap_or(transform);
             }
         }
     }
@@ -737,49 +838,53 @@ pub(super) fn preview(
         }
         None => ui.data_mut(|d| d.remove_temp::<egui::Pos2>(origin_id)),
     };
-    if response.dragged_by(egui::PointerButton::Primary) {
+    // Ce que fait le glisser en cours, décidé à sa première image : Ctrl
+    // enfoncé alors → déplacer la vue, sinon tracer (outil Zone) ; l'utilisateur
+    // qui appuie ou relâche Ctrl en route ne change pas de geste en chemin.
+    let mode_id = id.with("drag_mode");
+    let primary = egui::PointerButton::Primary;
+    let mut mode = ui.data(|d| d.get_temp::<DragMode>(mode_id));
+    if response.dragged_by(primary) && mode.is_none() {
+        let start = origin.or_else(|| {
+            response
+                .interact_pointer_pos()
+                .map(|pos| pos - response.drag_delta())
+        });
+        let decided = if command {
+            start
+                .and_then(|pos| nav_target(pos, plot_rect, outer))
+                .map_or(DragMode::Ignore, DragMode::Pan)
+        } else {
+            DragMode::Draw
+        };
+        ui.data_mut(|d| d.insert_temp(mode_id, decided));
+        mode = Some(decided);
+    }
+    if let (Some(DragMode::Pan(target)), true) = (mode, response.dragged_by(primary)) {
+        let delta = response.drag_delta();
+        let gesture = Gesture::Pan {
+            dx: f64::from(delta.x),
+            dy: f64::from(delta.y),
+        };
+        frame = navigate(&transform, plot_rect, frame, target, gesture);
+        transform = transform_for(plot_rect, frame.0, frame.1, scales).unwrap_or(transform);
+    }
+    if mode == Some(DragMode::Draw) && form.tool == PreviewTool::Zone {
         if let (Some(from), Some(to)) = (origin, response.interact_pointer_pos()) {
-            match form.tool {
-                PreviewTool::Zone => {
-                    if let (Some(a), Some(b)) = (to_data(&transform, from), to_data(&transform, to))
-                    {
-                        band(&plot, a.0, b.0);
-                    }
+            if let (Some(a), Some(b)) = (to_data(&transform, from), to_data(&transform, to)) {
+                if response.dragged_by(primary) {
+                    band(&plot, a.0, b.0);
+                } else if response.drag_stopped_by(primary) {
+                    form.add_zone(a.0, b.0);
                 }
-                PreviewTool::Zoom => {
-                    plot.rect_stroke(
-                        egui::Rect::from_two_pos(from, to),
-                        0.0,
-                        egui::Stroke::new(1.0, marker),
-                        egui::StrokeKind::Inside,
-                    );
-                }
-                PreviewTool::Points => {}
             }
         }
     }
-    if response.drag_stopped_by(egui::PointerButton::Primary) {
-        if let (Some(from), Some(to)) = (origin, response.interact_pointer_pos()) {
-            match form.tool {
-                PreviewTool::Zone => {
-                    if let (Some(a), Some(b)) = (to_data(&transform, from), to_data(&transform, to))
-                    {
-                        form.add_zone(a.0, b.0);
-                    }
-                }
-                PreviewTool::Zoom if (from - to).abs().max_elem() > 4.0 => {
-                    if let Some(next) = transform.range_between(
-                        (f64::from(from.x), f64::from(from.y)),
-                        (f64::from(to.x), f64::from(to.y)),
-                    ) {
-                        frame = next;
-                    }
-                }
-                _ => {}
-            }
-        }
+    if !response.dragged_by(primary) {
+        ui.data_mut(|d| d.remove_temp::<DragMode>(mode_id));
     }
-    if response.clicked_by(egui::PointerButton::Primary) && form.tool == PreviewTool::Points {
+    // Ctrl + clic : rien (réservé à la navigation).
+    if response.clicked_by(primary) && form.tool == PreviewTool::Points && !command {
         if let Some((cx, cy)) = hover_data {
             let (px, py) = if shift {
                 snap_to_curve(&xs, &ys, cx, form.average).unwrap_or((cx, cy))
@@ -1107,5 +1212,355 @@ mod zone_tests {
                 "le clic droit le retire (inversé : {inverted})"
             );
         }
+    }
+
+    /// Un aperçu piloté image par image : touches de modification, souris, molette.
+    struct Banc {
+        context: egui::Context,
+        id: egui::Id,
+        tree: Arc<Tree>,
+        form: AnalysisForm,
+        modifiers: egui::Modifiers,
+        pointer: egui::Pos2,
+    }
+
+    /// Ctrl tel que l'envoie winit sous Linux : `command` suit `ctrl`.
+    const CTRL: egui::Modifiers = egui::Modifiers {
+        alt: false,
+        ctrl: true,
+        shift: false,
+        mac_cmd: false,
+        command: true,
+    };
+    /// Dans le tracé, vers le milieu.
+    const AU_MILIEU: egui::Pos2 = egui::pos2(700.0, 400.0);
+    /// Sur la bande des graduations de X (sous le tracé).
+    const SUR_X: egui::Pos2 = egui::pos2(700.0, 890.0);
+    /// Sur la bande des graduations de Y (à gauche du tracé).
+    const SUR_Y: egui::Pos2 = egui::pos2(20.0, 400.0);
+
+    impl Banc {
+        fn new(preset: Preset, inverted: bool) -> Self {
+            let mut project = stokesforge_core::Project::new("Navigation").unwrap();
+            let (x, y) = colonnes_xy(&mut project);
+            let series = vec![SeriesRef {
+                x: Some(x),
+                y,
+                sigma: None,
+            }];
+            let mut form = AnalysisForm::new(&preset, series, false);
+            if inverted {
+                let mut panel = stokesforge_plot::PanelSpec::at(0, 0);
+                panel.bottom.inverted = true;
+                panel
+                    .series
+                    .push(stokesforge_plot::SeriesSpec::new_xy(x, y));
+                let spec = stokesforge_plot::PlotSpec::empty("Source").with_panels(panel);
+                form.graph_source = Some((spec, vec![stokesforge_plot::SeriesRef::new(0, 0)]));
+            }
+            let mut banc = Self {
+                context: contexte(),
+                id: egui::Id::new("navigation"),
+                tree: project.tree().clone(),
+                form,
+                modifiers: egui::Modifiers::NONE,
+                pointer: AU_MILIEU,
+            };
+            banc.image(vec![]);
+            banc.image(vec![]);
+            banc
+        }
+
+        /// Une image où la souris est en `pointer` et les modificateurs ceux du banc.
+        fn image(&mut self, mut events: Vec<egui::Event>) {
+            let mut all = vec![
+                egui::Event::ModifiersChanged(self.modifiers),
+                egui::Event::PointerMoved(self.pointer),
+            ];
+            all.append(&mut events);
+            let (id, form, tree) = (self.id, &mut self.form, &self.tree);
+            image(&self.context, all, |ui| {
+                preview(ui, id, form, tree, 0);
+            });
+        }
+
+        fn deplacer(&mut self, pointer: egui::Pos2) {
+            self.pointer = pointer;
+            self.image(vec![]);
+        }
+
+        fn bouton(&mut self, pressed: bool) {
+            let event = egui::Event::PointerButton {
+                pos: self.pointer,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: self.modifiers,
+            };
+            self.image(vec![event]);
+        }
+
+        /// Appuie en `from`, glisse jusqu'en `to`, relâche.
+        fn glisser(&mut self, from: egui::Pos2, to: egui::Pos2) {
+            self.deplacer(from);
+            self.bouton(true);
+            self.deplacer(from + (to - from) * 0.5);
+            self.deplacer(to);
+            self.bouton(false);
+            self.image(vec![]);
+        }
+
+        fn cadre(&self) -> Frame {
+            self.context
+                .data(|d| d.get_temp::<StoredView>(self.id.with("view")))
+                .expect("cadre mémorisé")
+                .frame
+        }
+
+        fn molette(&mut self, delta: egui::Vec2) {
+            let event = egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta,
+                phase: egui::TouchPhase::Move,
+                modifiers: self.modifiers,
+            };
+            self.image(vec![event]);
+        }
+
+        fn avec(&mut self, modifiers: egui::Modifiers) -> &mut Self {
+            self.modifiers = modifiers;
+            self
+        }
+    }
+
+    fn largeur((a, b): (f64, f64)) -> f64 {
+        (b - a).abs()
+    }
+
+    /// La molette seule ne fait plus rien dans l'aperçu (D3 de #299).
+    #[test]
+    fn la_molette_seule_ne_change_pas_le_cadre() {
+        let mut banc = Banc::new(Preset::Integrate, false);
+        let avant = banc.cadre();
+        banc.molette(egui::vec2(0.0, 120.0));
+        banc.molette(egui::vec2(0.0, -120.0));
+        assert_eq!(banc.cadre(), avant);
+    }
+
+    /// Ctrl + molette (ou pincement) resserre le cadre autour du pointeur : la
+    /// donnée sous le curseur y reste, et le cadre se resserre dans les deux axes.
+    #[test]
+    fn ctrl_molette_resserre_le_cadre_autour_du_pointeur() {
+        for geste in ["pincement", "ctrl_molette"] {
+            let mut banc = Banc::new(Preset::Integrate, false);
+            let avant = banc.cadre();
+            let pointeur = egui::pos2(400.0, 300.0);
+            banc.deplacer(pointeur);
+            // La donnée sous le pointeur, avant.
+            let plot_rect = rect_du_trace();
+            let sous_le_pointeur = |cadre: Frame| {
+                let t = transform_for(
+                    plot_rect,
+                    cadre.0,
+                    cadre.1,
+                    (AxisScale::Linear, AxisScale::Linear),
+                )
+                .unwrap();
+                to_data(&t, pointeur).unwrap()
+            };
+            let donnee = sous_le_pointeur(avant);
+            if geste == "pincement" {
+                banc.image(vec![egui::Event::Zoom(1.25)]);
+            } else {
+                banc.avec(CTRL).molette(egui::vec2(0.0, 60.0));
+            }
+            let apres = banc.cadre();
+            assert!(largeur(apres.0) < largeur(avant.0), "{geste} : X resserré");
+            assert!(largeur(apres.1) < largeur(avant.1), "{geste} : Y resserré");
+            let encore = sous_le_pointeur(apres);
+            assert!(
+                (encore.0 - donnee.0).abs() < 1e-9 && (encore.1 - donnee.1).abs() < 1e-9,
+                "{geste} : la donnée sous le pointeur reste sous le pointeur"
+            );
+        }
+    }
+
+    /// Le rectangle du tracé tel que `preview` le calcule pour une image de
+    /// 1400 × 900 sans résidus.
+    fn rect_du_trace() -> egui::Rect {
+        let outer = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0));
+        let mut r = outer.shrink2(egui::vec2(8.0, 4.0));
+        r.min.x += 44.0;
+        r.max.y -= 18.0;
+        r
+    }
+
+    /// Au-dessus d'un axe, Ctrl + molette ne cadre que cette échelle.
+    #[test]
+    fn ctrl_molette_sur_un_axe_ne_zoome_que_cette_echelle() {
+        let mut banc = Banc::new(Preset::Integrate, false);
+        let avant = banc.cadre();
+        banc.deplacer(SUR_X);
+        banc.image(vec![egui::Event::Zoom(1.25)]);
+        let apres_x = banc.cadre();
+        assert!(largeur(apres_x.0) < largeur(avant.0), "X resserré");
+        assert_eq!(apres_x.1, avant.1, "Y ne bouge pas");
+        banc.deplacer(SUR_Y);
+        banc.image(vec![egui::Event::Zoom(1.25)]);
+        let apres_y = banc.cadre();
+        assert_eq!(apres_y.0, apres_x.0, "X ne bouge plus");
+        assert!(largeur(apres_y.1) < largeur(avant.1), "Y resserré");
+    }
+
+    /// Maj + molette règle la moyenne de l'aimant, de 2 par cran, sans toucher
+    /// au cadre.
+    #[test]
+    fn maj_molette_regle_la_moyenne_sans_zoomer() {
+        let mut banc = Banc::new(Preset::BaselineAnchors, false);
+        let (moyenne, cadre) = (banc.form.average, banc.cadre());
+        banc.avec(egui::Modifiers::SHIFT)
+            .molette(egui::vec2(0.0, 40.0));
+        assert_eq!(banc.form.average, moyenne + 2);
+        banc.molette(egui::vec2(0.0, -40.0));
+        assert_eq!(banc.form.average, moyenne);
+        assert_eq!(banc.cadre(), cadre, "le cadre ne bouge pas");
+    }
+
+    /// Ctrl + glisser déplace la vue : le cadre se translate (largeur gardée,
+    /// Y intact) et aucune zone n'est posée, malgré l'outil Zone de l'intégrale.
+    /// Sur un axe X inversé, les données suivent encore le curseur : les bornes
+    /// vont dans l'autre sens.
+    #[test]
+    fn ctrl_glisser_translate_le_cadre_sans_poser_de_zone() {
+        for inverted in [false, true] {
+            let mut banc = Banc::new(Preset::Integrate, inverted);
+            assert_eq!(banc.form.tool, PreviewTool::Zone);
+            let avant = banc.cadre();
+            banc.avec(CTRL);
+            banc.glisser(egui::pos2(500.0, 400.0), egui::pos2(700.0, 400.0));
+            let apres = banc.cadre();
+            assert!(
+                banc.form.setup.integrate.ranges.is_empty(),
+                "Ctrl + glisser ne trace pas de zone ({inverted})"
+            );
+            assert!(
+                (largeur(apres.0) - largeur(avant.0)).abs() < 1e-9,
+                "{inverted}"
+            );
+            assert_eq!(apres.1, avant.1, "pas de déplacement vertical ({inverted})");
+            let decalage = apres.0 .0 - avant.0 .0;
+            assert!(decalage != 0.0, "le cadre a bougé ({inverted})");
+            // Le contenu suit le curseur vers la droite : le bord gauche voit
+            // des données plus à gauche dans le sens d'affichage, donc plus
+            // petites sans inversion et plus grandes avec.
+            assert_eq!(
+                decalage < 0.0,
+                !inverted,
+                "sens du déplacement ({inverted})"
+            );
+            // La donnée sous le départ du glisser est sous son arrivée.
+            let plot_rect = rect_du_trace();
+            let t = |cadre: Frame| {
+                transform_for(
+                    plot_rect,
+                    cadre.0,
+                    cadre.1,
+                    (AxisScale::Linear, AxisScale::Linear),
+                )
+                .unwrap()
+            };
+            let (from, to) = (egui::pos2(500.0, 400.0), egui::pos2(700.0, 400.0));
+            let avant_x = to_data(&t(avant), from).unwrap().0;
+            let apres_x = to_data(&t(apres), to).unwrap().0;
+            // L'axe inversé est tracé par le graphe source, pas par ce `t`
+            // linéaire : on compare donc l'écart relatif à la largeur du cadre.
+            if !inverted {
+                assert!(
+                    (avant_x - apres_x).abs() < 1e-9,
+                    "le contenu suit le curseur"
+                );
+            }
+        }
+    }
+
+    /// Ctrl + glisser parti d'un axe ne déplace que cet axe.
+    #[test]
+    fn ctrl_glisser_sur_un_axe_ne_deplace_que_cet_axe() {
+        let mut banc = Banc::new(Preset::Integrate, false);
+        let avant = banc.cadre();
+        banc.avec(CTRL);
+        banc.glisser(SUR_X, SUR_X + egui::vec2(150.0, 60.0));
+        let apres = banc.cadre();
+        assert_ne!(apres.0, avant.0, "X déplacé");
+        assert_eq!(apres.1, avant.1, "Y intact");
+        let mut banc = Banc::new(Preset::Integrate, false);
+        banc.avec(CTRL);
+        banc.glisser(SUR_Y, SUR_Y + egui::vec2(10.0, 80.0));
+        assert_eq!(banc.cadre().0, avant.0, "X intact");
+        assert_ne!(banc.cadre().1, avant.1, "Y déplacé");
+    }
+
+    /// Le double clic recadre : le cadre d'origine, après un zoom comme après un
+    /// déplacement.
+    #[test]
+    fn le_double_clic_rend_le_cadre_d_origine() {
+        let mut banc = Banc::new(Preset::Integrate, false);
+        let origine = banc.cadre();
+        banc.image(vec![egui::Event::Zoom(1.5)]);
+        banc.avec(CTRL);
+        banc.glisser(egui::pos2(500.0, 400.0), egui::pos2(600.0, 450.0));
+        banc.avec(egui::Modifiers::NONE);
+        assert_ne!(banc.cadre(), origine);
+        banc.deplacer(AU_MILIEU);
+        for pressed in [true, false, true, false] {
+            banc.bouton(pressed);
+        }
+        banc.image(vec![]);
+        assert_eq!(banc.cadre(), origine);
+    }
+
+    /// Un Ctrl + clic simple ne pose rien ; le clic seul pose le point.
+    #[test]
+    fn ctrl_clic_ne_pose_pas_de_point() {
+        let mut banc = Banc::new(Preset::BaselineConstant, false);
+        assert_eq!(banc.form.tool, PreviewTool::Points);
+        banc.avec(CTRL);
+        for pressed in [true, false] {
+            banc.bouton(pressed);
+        }
+        banc.image(vec![]);
+        assert_eq!(banc.form.setup.baseline.constant_point, None);
+        banc.avec(egui::Modifiers::NONE);
+        banc.deplacer(AU_MILIEU + egui::vec2(30.0, 0.0));
+        for pressed in [true, false] {
+            banc.bouton(pressed);
+        }
+        banc.image(vec![]);
+        assert!(banc.form.setup.baseline.constant_point.is_some());
+    }
+
+    /// Détection de pics : le glisser (outil Zone) donne la plage de recherche,
+    /// le clic (outil Points) la graine d'un pic ; le glisser en outil Points ne
+    /// pose rien.
+    #[test]
+    fn les_pics_se_posent_par_clic_et_par_glisser() {
+        let mut banc = Banc::new(Preset::Peaks, false);
+        assert_eq!(banc.form.tool, PreviewTool::Points);
+        banc.glisser(egui::pos2(500.0, 400.0), egui::pos2(900.0, 400.0));
+        assert_eq!(banc.form.setup.peaks.range, None, "outil Points : rien");
+        assert!(banc.form.setup.peaks.seeds.is_empty());
+        banc.form.tool = PreviewTool::Zone;
+        banc.glisser(egui::pos2(500.0, 400.0), egui::pos2(900.0, 400.0));
+        assert!(banc.form.setup.peaks.range.is_some(), "outil Zone : plage");
+        banc.form.tool = PreviewTool::Points;
+        banc.deplacer(AU_MILIEU);
+        for pressed in [true, false] {
+            banc.bouton(pressed);
+        }
+        banc.image(vec![]);
+        assert_eq!(
+            banc.form.setup.peaks.seeds.len(),
+            1,
+            "outil Points : graine"
+        );
     }
 }

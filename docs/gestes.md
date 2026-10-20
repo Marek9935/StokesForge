@@ -7,10 +7,8 @@ ailleurs se signale contre cette page. Les raccourcis clavier sont dans
 `app/shortcuts.rs` (registre) et `docs/application/README.md`, pas ici.
 
 Cette page décrit l'**état réel du code** (relevé le 2026-10-20, puis rejoué
-dans l'application réelle : voir « Vérification »). Ce qui est
-décidé mais pas encore écrit est marqué **À VENIR** et ne doit pas être lu
-comme en place : la décision D3 de #299 (aperçu d'analyse aligné sur le
-graphe) en est l'unique source aujourd'hui.
+dans l'application réelle : voir « Vérification »). L'aperçu d'analyse est
+aligné sur le graphe depuis #270 (D3 de #299).
 
 ## Le modèle
 
@@ -26,7 +24,7 @@ graphe) en est l'unique source aujourd'hui.
 ## Légende
 
 `Ctrl` s'entend comme `Command` sous macOS (`modifiers.command`). « — » : le
-geste ne fait rien sur cette surface. **À VENIR** : décidé, pas en place.
+geste ne fait rien sur cette surface.
 
 ## Le graphe (figure)
 
@@ -56,21 +54,26 @@ de l'**outil actif** de la barre Tools.
 ## L'aperçu de la fenêtre d'analyse
 
 Source : `app/analysis_preview.rs` (aperçu), `app/analysis_handles.rs`
-(poignées sur le graphe). Le glisser simple dépend de l'outil choisi dans le
-sélecteur de la fenêtre (Points / Zone / Zoom, exception justifiée de #299).
+(poignées sur le graphe). Le geste du clic et du glisser simples vient de
+l'analyse : la fenêtre ne montre un sélecteur **Point / Zone** (deux textes
+entourés à bascule, exception justifiée de #299) que pour la détection de
+pics ; les autres analyses ont un seul geste, sans rien à choisir. Il n'y a
+plus d'outil Zoom ni de bouton de recadrage.
 
-| Geste | Sur | Effet aujourd'hui | Cible D3 |
-|---|---|---|---|
-| Clic | aperçu, outil Points | ajoute un point (Maj : aimanté à la courbe) | inchangé (D2) |
-| Glisser | aperçu, outil Zone | trace une zone | inchangé (D2) |
-| Glisser | aperçu, outil Zoom | rectangle de zoom | **À VENIR** : disparaît avec le bouton Zoom |
-| Double-clic | aperçu | recadre | inchangé |
-| Molette | aperçu | zoom ancré sous le pointeur | **À VENIR** : ne zoome plus |
-| Ctrl + molette | aperçu | — (sans effet) | **À VENIR** : zoom |
-| Ctrl + glisser | aperçu, outil Zone | trace une zone, comme le glisser simple (le modificateur n'est pas lu ; pas de pan) | **À VENIR** : pan |
-| Maj + molette | aperçu, outil Points | change la moyenne de l'aimant (2 points par cran) | inchangé |
-| Clic droit | aperçu | retire le point ou la zone le plus proche | inchangé |
-| Glisser | une poignée sur le graphe (`app/analysis_handles.rs`) | déplace la poignée du calcul ; aperçu immédiat | inchangé |
+| Geste | Sur | Effet |
+|---|---|---|
+| Clic | aperçu, geste Point | ajoute un point, une graine de pic ou une borne selon l'analyse (Maj : aimanté à la courbe) |
+| Glisser | aperçu, geste Zone | trace une zone ou une plage |
+| Double-clic | aperçu | recadre (cadre d'origine) |
+| Molette | — | — (la molette seule ne zoome plus) |
+| Ctrl + molette (ou pincement) | tracé | zoom ancré sous le pointeur, même facteur que le graphe |
+| Ctrl + molette | un axe (graduations de X sous le tracé, de Y à gauche) | zoom de cette seule échelle |
+| Ctrl + glisser | tracé | déplace la vue (le contenu suit le curseur, axe inversé compris) ; ne trace pas de zone ; le modificateur est lu au début du glisser |
+| Ctrl + glisser | un axe | ne déplace que cette échelle |
+| Ctrl + clic | — | — (rien) |
+| Maj + molette | tracé, quel que soit le geste | change la moyenne de l'aimant (2 points par cran) ; le cadre ne bouge pas |
+| Clic droit | aperçu | retire le point ou la zone le plus proche |
+| Glisser | une poignée sur le graphe (`app/analysis_handles.rs`) | déplace la poignée du calcul ; aperçu immédiat |
 
 ## La grille (classeur)
 
@@ -179,6 +182,14 @@ Surfaces lues (chemins relatifs à `src/` ; `render-egui/` pour
 Rejoué dans l'application réelle (pilote `run-stokesforge`, X11 sous
 Xwayland, souris et molette injectées par XTEST). Une ligne par geste de la
 matrice ; « lu dans le code » = non rejoué.
+
+**Aperçu d'analyse** : les lignes ci-dessous qui le concernent (molette = zoom,
+outil Zoom, Ctrl + glisser = zone) décrivent le comportement **d'avant #270** ;
+le tableau de l'aperçu plus haut est celui d'aujourd'hui, couvert par les tests
+de `app/analysis_preview.rs` (`zone_tests`) et vérifié dans l'application après
+#270. Maj + molette : egui range la molette sous Maj dans l'axe horizontal
+(`smooth_scroll_delta.x`) ; l'aperçu lit les deux axes, sinon la moyenne ne
+changeait jamais en vrai.
 
 - **Confirmés** : clic sur une fenêtre derrière ; graphe : Molette seule sans
   zoom, Ctrl + molette (zone, ancré), Ctrl + molette sur un axe (cette échelle

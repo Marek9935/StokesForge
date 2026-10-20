@@ -349,12 +349,90 @@ pub(super) fn choice<T: Clone + PartialEq>(
     choice_by(ui, id_salt, value, options, |a, b| a == b)
 }
 
+/// Le rayon des coins d'un texte entouré de [`toggle_texts`].
+const TOGGLE_TEXT_RADIUS: u8 = 6;
+
+/// Des **textes entourés** qui font office de boutons à bascule (#270) : un
+/// cadre arrondi autour de chaque libellé, l'option courante en fond plein de
+/// la couleur d'accent, les autres en contour seul. Un clic sur une autre
+/// option la rend courante (rend `true`) ; un clic sur la courante ne change
+/// rien. C'est un choix exclusif, mais pour la rangée d'outils de l'aperçu
+/// d'analyse, où des radios alourdiraient une barre qui change selon l'analyse ;
+/// partout ailleurs, [`choice`]. Peint à la main : le fond sélectionné d'egui
+/// est réservé aux menus (`aucun_bouton_selectionnable_hors_d_un_menu`).
+pub(super) fn toggle_texts<T: Clone + PartialEq>(
+    ui: &mut egui::Ui,
+    id_salt: impl Hash + std::fmt::Debug,
+    value: &mut T,
+    options: &[ChoiceOption<T>],
+) -> bool {
+    let mut picked = None;
+    ui.push_id(id_salt, |ui| {
+        ui.horizontal(|ui| {
+            for (index, option) in options.iter().enumerate() {
+                let active = *value == option.value;
+                let font = egui::TextStyle::Button.resolve(ui.style());
+                // Couleur choisie à la peinture (`galley` la prend en repli).
+                let galley = ui.painter().layout_no_wrap(
+                    option.label.clone(),
+                    font,
+                    egui::Color32::PLACEHOLDER,
+                );
+                let size = galley.size() + egui::vec2(16.0, 6.0);
+                let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::WidgetType::Button,
+                        ui.is_enabled(),
+                        active,
+                        option.label.as_str(),
+                    )
+                });
+                let radius = egui::CornerRadius::same(TOGGLE_TEXT_RADIUS);
+                let (text_color, outline) = if active {
+                    ui.painter().rect_filled(rect, radius, theme::accent());
+                    (theme::text_on_accent(), theme::accent())
+                } else {
+                    let line = if response.hovered() {
+                        ui.visuals().widgets.hovered.bg_stroke
+                    } else {
+                        ui.visuals().widgets.inactive.bg_stroke
+                    };
+                    (ui.visuals().text_color(), line.color)
+                };
+                ui.painter().rect_stroke(
+                    rect,
+                    radius,
+                    egui::Stroke::new(1.0, outline),
+                    egui::StrokeKind::Inside,
+                );
+                ui.painter()
+                    .galley(rect.center() - galley.size() / 2.0, galley, text_color);
+                if response.clicked() {
+                    picked = Some(index);
+                }
+                if let Some(hint) = &option.hint {
+                    response.on_hover_text(hint);
+                }
+            }
+        });
+    });
+    match picked {
+        Some(index) if options[index].value != *value => {
+            *value = options[index].value.clone();
+            true
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use eframe::egui;
 
-    use super::super::test_support::{contexte, image, textes};
-    use super::{choice, choice_layout, form, ChoiceLayout, ChoiceOption};
+    use super::super::test_support::{cliquer, contexte, image, textes};
+    use super::{choice, choice_layout, form, toggle_texts, ChoiceLayout, ChoiceOption};
+    use crate::theme;
 
     /// S-C1, S-C2 : 2–3 options en radios, côte à côte tant que chaque libellé
     /// tient en 3 mots ; 4 et plus en liste, quelle que soit leur longueur.
@@ -501,5 +579,58 @@ mod tests {
             );
             assert_eq!(value, 1);
         }
+    }
+
+    /// #270 : les textes entourés sont un choix exclusif à bascule. L'option
+    /// courante a le fond plein de l'accent et son texte clair ; un clic sur
+    /// l'autre la rend courante ; un clic sur la courante ne change rien.
+    #[test]
+    fn les_textes_entoures_basculent_et_marquent_l_option_courante() {
+        let context = contexte();
+        let value = std::cell::Cell::new(1);
+        let changes = std::cell::Cell::new(0);
+        let options = vec![ChoiceOption::new(1, "Point"), ChoiceOption::new(2, "Zone")];
+        let mut peindre = |ui: &mut egui::Ui| {
+            let mut courante = value.get();
+            if toggle_texts(ui, "bascule", &mut courante, &options) {
+                changes.set(changes.get() + 1);
+            }
+            value.set(courante);
+        };
+        let painted = image(&context, vec![], &mut peindre);
+        let remplis = |painted: &[egui::epaint::ClippedShape]| {
+            painted
+                .iter()
+                .filter(|p| matches!(&p.shape, egui::Shape::Rect(r) if r.fill == theme::accent()))
+                .count()
+        };
+        assert_eq!(remplis(&painted), 1, "une seule option est pleine");
+        let texte = |painted: &[egui::epaint::ClippedShape], cherche: &str| {
+            textes(painted)
+                .into_iter()
+                .find(|t| t.texte == cherche)
+                .unwrap()
+        };
+        assert_eq!(texte(&painted, "Point").couleur, theme::text_on_accent());
+        assert_ne!(texte(&painted, "Zone").couleur, theme::text_on_accent());
+        let (point, zone) = (
+            texte(&painted, "Point").centre,
+            texte(&painted, "Zone").centre,
+        );
+        cliquer(&context, point, egui::PointerButton::Primary, &mut peindre);
+        assert_eq!(
+            (value.get(), changes.get()),
+            (1, 0),
+            "la courante : rien ne change"
+        );
+        cliquer(&context, zone, egui::PointerButton::Primary, &mut peindre);
+        assert_eq!((value.get(), changes.get()), (2, 1));
+        let painted = image(&context, vec![], &mut peindre);
+        assert_eq!(remplis(&painted), 1);
+        assert_eq!(
+            texte(&painted, "Zone").couleur,
+            theme::text_on_accent(),
+            "Zone est pleine"
+        );
     }
 }

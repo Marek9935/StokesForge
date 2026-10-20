@@ -497,8 +497,6 @@ pub enum PreviewTool {
     Points,
     /// Glisser pose une zone ou une plage.
     Zone,
-    /// Glisser trace un rectangle de zoom.
-    Zoom,
 }
 
 /// Ce qui manque pour valider ou pour montrer l'aperçu.
@@ -1266,6 +1264,17 @@ impl AnalysisForm {
                 PreviewTool::Zone
             }
             _ => PreviewTool::Points,
+        }
+    }
+
+    /// Les gestes parmi lesquels l'utilisateur choisit dans l'aperçu (#270,
+    /// #299) : les deux de la détection de pics (un clic pose la position d'un
+    /// pic, un glisser sa plage de recherche), aucun pour les autres analyses,
+    /// dont le geste est celui de [`Self::natural_tool`] sans rien à montrer.
+    pub fn tool_choices(&self) -> &'static [PreviewTool] {
+        match self.kind {
+            OperationKind::Peaks => &[PreviewTool::Points, PreviewTool::Zone],
+            _ => &[],
         }
     }
 

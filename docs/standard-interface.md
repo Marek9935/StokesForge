@@ -150,6 +150,7 @@ deux règles ci-dessus :
 | garde : aucun `add_enabled` sans raison (`aucun_element_grise_sans_sa_raison`) | chaîne de l'appel lue jusqu'à `.on_disabled_hover_text` ; `add_enabled_ui` (groupe) exempté | **en place** (#226) |
 | brique « formulaire » (`app/form.rs` : `form`, `Form`, `choice`), largeurs et espacements de `theme.rs` | grille à deux colonnes, choix radio/liste (S-C1, S-C2) | **en place** (#227) |
 | choix exclusif dans un menu (`menu_sections::menu_choice`) | coche seule (S-C3) | **en place** (#227) |
+| brique « textes entourés » (`app/form.rs` : `toggle_texts`) | choix exclusif à bascule, cadre arrondi autour de chaque libellé (actif : fond plein de l'accent ; inactif : contour seul) ; réservée à la rangée de gestes de l'aperçu d'analyse (exception S-K7) | **en place** (#270) |
 | garde : aucun `add_space` littéral hors de `theme.rs` (`aucun_add_space_litteral_hors_du_theme`) | | **en place** (#227) |
 | zone de message du pied de `modal_dialog_with`, focus initial, taille mémorisée, `modal_wizard`, `modal_read_only` | ordre des boutons, erreur et raison dans le pied, Échap, S-F8, S-F9 | **en place** (#228) |
 | confirmations et échec grave (`modal_confirm`, `modal_save_changes`, `modal_alert` ; `app/confirmations.rs`) | Cancel par défaut, trio Discard Changes · Cancel · Save, S-M8 | **en place** (#229) |
@@ -622,7 +623,7 @@ Comment c'est tenu :
   (fichiers, format, en-tête, métadonnées, destination ; les traits entre
   blocs sont devenus des titres). La fenêtre des séries (groupe, portée,
   nuancier — `curve_settings.rs`) est migrée, ainsi que les outils de
-  l'aperçu d'analyse (`choice` + note) et la portée du volet Results (#241 ;
+  la portée du volet Results (#241 ;
   son tableau série × valeur et les listes « de / à » restent des
   tableaux/listes de données). Reste à migrer : les préférences futures (#148).
 
@@ -683,24 +684,28 @@ Comment c'est tenu (S-K7, S-K8) :
   clic, le glisser, le clic droit ni les modificateurs. Elle empêche qu'une
   surface naisse hors de la page, pas qu'un geste y soit faux.
 
-**Exception : les outils d'analyse** (S-K7). La fenêtre d'analyse garde un
-sélecteur d'outil dans son aperçu (Points / Zone / Zoom,
-`app/analysis_dialog.rs`, marqueur `OUTIL-EN-FENETRE(#299)`). Justification :
-ces outils demandent beaucoup d'actions spécifiques (ajouter un point, tracer
-une zone, aimanter à la courbe) et la barre d'outils doit changer selon
-l'analyse (#270) ; les mettre dans la barre Tools du graphe mélangerait ces
-gestes à ceux de la figure. Aujourd'hui l'aperçu les offre par la brique
-`choice` ; la décision de #270 (D2 de #299) les remplace par un **texte entouré
-faisant office de bouton à bascule**, ce qui reste une exception justifiée de
-la même guideline, non un conflit. **À venir (#270)** : cette forme, et le
-marqueur qui la suivra.
+**Exception : les gestes d'analyse** (S-K7). La fenêtre d'analyse garde, dans
+son aperçu, un sélecteur de geste : **Point** (un clic pose un point d'ancrage,
+une graine de pic, une borne) et **Zone** (un glisser trace une zone ou une
+plage), en deux **textes entourés** à bascule (`toggle_texts`, `app/form.rs` :
+cadre arrondi, actif en fond plein de l'accent, inactif en contour seul),
+marqueur `OUTIL-EN-FENETRE(#299)` dans `app/analysis_dialog.rs`. Justification :
+ces gestes demandent des actions propres à l'aperçu (ajouter un point, tracer
+une zone, aimanter à la courbe) ; les mettre dans la barre Tools du graphe
+mélangerait ces gestes à ceux de la figure. L'exception est la plus étroite
+possible : **seule la détection de pics** a besoin des deux (position d'un pic
+par un clic, plage de recherche par un glisser). Toute autre analyse n'a aucun
+geste à choisir : celui de son opération (`AnalysisForm::natural_tool`,
+`tool_choices`) est actif d'emblée, et la rangée n'est pas peinte. Le Zoom
+n'est plus un outil de l'aperçu (D2, D3 de #299, #270).
 
-**À venir (#270).** Le zoom de l'aperçu s'aligne sur le graphe (D3 de #299) :
-Ctrl + molette zoome, Ctrl + glisser déplace la vue, double-clic recadre,
-Maj + molette (moyenne de l'aimant) inchangé ; le bouton Zoom et l'icône ⤢
-disparaissent et la molette seule ne zoome plus. Tant que #270 n'est pas
-livré, l'aperçu garde son comportement actuel, décrit dans `gestes.md`
-(colonne « Cible D3 »).
+**Navigation de l'aperçu** (D3 de #299, #270) : comme sur le graphe. Ctrl +
+molette zoome, ancré sous le pointeur (au-dessus d'un axe : cette échelle
+seule) ; Ctrl + glisser déplace la vue (parti d'un axe : cet axe seul) ;
+double-clic recadre ; Maj + molette règle la moyenne de l'aimant. La molette
+seule ne fait rien. Le calcul du zoom et du déplacement est celui de
+`stokesforge-render` (`PanelTransform`) ; le détail par geste est dans
+[`gestes.md`](gestes.md).
 
 Historique : #231, #299 (S-K7, S-K8 : guideline des outils et matrice des gestes).
 

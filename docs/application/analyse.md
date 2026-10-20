@@ -34,15 +34,22 @@ L'interface du traitement mathématique est répartie ainsi :
   si la poignée n'a pas bougé. Le nœud de l'Object Manager n'existe pas (un
   calcul n'est pas un nœud).
 - L'aperçu est peint à la main (pas de graphe du projet) mais **sa géométrie ne
-  lui appartient pas** (#261) : pixel ↔ données, zoom molette, rectangle de
-  zoom, cadre initial (marge de 5 %, bornes mémorisées, inversion), aimantation
+  lui appartient pas** (#261) : pixel ↔ données, zoom, déplacement, cadre
+  initial (marge de 5 %, bornes mémorisées, inversion), aimantation
   sur la courbe et graduations viennent de `stokesforge-render`
-  (`PanelTransform::new`, `axis_frame`, `snap_to_curve`, `scale::axis_ticks`) ;
+  (`PanelTransform::new`, `zoom`, `pan`, `axis_frame`, `snap_to_curve`,
+  `scale::axis_ticks`) ;
   l'application construit une transformation par image (une seconde pour la
   bande des résidus) et convertit en `Pos2`. Les graduations ont donc le pas et
   le format de celles du graphe (point décimal, sans virgule), et suivent
   l'échelle logarithmique et l'inversion de l'axe du graphe source. Un zoom ou
-  un rectangle sans image (borne logarithmique ≤ 0) garde le cadre. Il est
+  un déplacement sans image (borne logarithmique ≤ 0) garde le cadre. La
+  **navigation est celle du graphe** (#270, D3 de #299) : Ctrl + molette zoome
+  (au-dessus d'un axe, cette échelle seule), Ctrl + glisser déplace la vue,
+  double-clic recadre, la molette seule ne fait rien ; il n'y a plus d'outil Zoom.
+  Le **geste** (point ou zone) est celui de l'analyse (`natural_tool`) ; seule la
+  détection de pics offre le choix (`tool_choices`), en deux textes entourés à
+  bascule (`form::toggle_texts`). Matrice : `docs/gestes.md`. Il est
   **calculé sur un fil
   de travail** (#201, `analysis_preview.rs`, `PreviewJobs`) : un seul fil à la
   fois, la demande la plus récente remplace celle qui attend, l'image attend

@@ -150,6 +150,12 @@ pub fn accent() -> Color32 {
     ACCENT
 }
 
+/// Texte posé sur le fond plein d'[`ACCENT`] : celui d'un texte entouré actif
+/// (`form::toggle_texts`, #270).
+pub fn text_on_accent() -> Color32 {
+    Color32::WHITE
+}
+
 /// Filet qui sépare une bande d'onglets de son contenu (#169).
 pub fn tab_rule_color() -> Color32 {
     Color32::from_gray(0xD6)

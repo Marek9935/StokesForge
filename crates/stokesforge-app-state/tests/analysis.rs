@@ -370,6 +370,33 @@ fn the_natural_tool_follows_the_family() {
     assert_eq!(tool(Preset::Peaks), PreviewTool::Points);
 }
 
+/// #270, #299 : seule la détection de pics offre le choix entre un clic (la
+/// position d'un pic) et un glisser (sa plage) ; les autres analyses n'ont
+/// aucun geste à choisir, le leur est `natural_tool`.
+#[test]
+fn only_peaks_offer_a_choice_of_gesture() {
+    use stokesforge_app_state::analysis::PreviewTool;
+    let f = fixture();
+    let choices = |preset: Preset| AnalysisForm::new(&preset, series(&f), false).tool_choices();
+    assert_eq!(
+        choices(Preset::Peaks),
+        &[PreviewTool::Points, PreviewTool::Zone]
+    );
+    for preset in [
+        Preset::BaselineAnchors,
+        Preset::BaselinePolynomial,
+        Preset::BaselineConstant,
+        Preset::Integrate,
+        Preset::Fit(Model::Linear),
+    ] {
+        assert!(choices(preset.clone()).is_empty(), "{preset:?}");
+    }
+    let mut form = AnalysisForm::new(&Preset::Peaks, series(&f), false);
+    assert!(form.tool_choices().contains(&form.natural_tool()));
+    form.set_kind(stokesforge_analysis::ops::OperationKind::Integrate);
+    assert!(form.tool_choices().is_empty(), "le choix suit la famille");
+}
+
 #[test]
 fn reference_candidates_exclude_the_processed_series_and_pair_their_x() {
     use stokesforge_app_state::analysis::{aux_candidates, aux_for, series_points};
@@ -457,7 +484,7 @@ fn the_preview_is_not_recomputed_for_the_tool_or_the_average() {
     let f = fixture();
     let form = AnalysisForm::new(&Preset::BaselineLine, series(&f), false);
     let mut other = form.clone();
-    other.tool = PreviewTool::Zoom;
+    other.tool = PreviewTool::Zone;
     other.average = form.average + 3;
     other.keep_results = !form.keep_results;
     assert!(
