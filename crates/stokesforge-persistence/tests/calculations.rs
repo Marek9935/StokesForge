@@ -680,3 +680,48 @@ fn une_trace_de_correction_illisible_est_comptee_par_le_rapport() {
     );
     assert!(!report.is_clean());
 }
+
+/// A1 (#316) : l'empreinte du contenu des entrées, écrite à l'enregistrement,
+/// est comparée à la lecture sans rien recalculer.
+#[test]
+fn des_entrees_modifiees_dans_le_fichier_perimment_le_calcul_sans_le_recalculer() {
+    let (project, id) = {
+        let project = project_with_calculation();
+        let id = *project.tree().calculations().keys().next().unwrap();
+        (project, id)
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("p.stf");
+    save(&project, &path).unwrap();
+
+    // Intact : rien de périmé.
+    let loaded = load(&path).unwrap();
+    assert_eq!(loaded.tree().calculation(id).unwrap().stale, None);
+
+    // Y devient [10, 20, 31] hors StokesForge (même longueur, aucun décalage).
+    let octets = |v: &[f64]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let (avant, apres) = (octets(&[10.0, 20.0, 30.0]), octets(&[10.0, 20.0, 31.0]));
+    let mut bytes = std::fs::read(&path).unwrap();
+    let at = bytes
+        .windows(avant.len())
+        .position(|w| w == avant.as_slice())
+        .expect("Y est dans le fichier");
+    bytes[at..at + avant.len()].copy_from_slice(&apres);
+    std::fs::write(&path, &bytes).unwrap();
+
+    let loaded = load(&path).unwrap();
+    let calc = loaded.tree().calculation(id).unwrap();
+    assert_eq!(calc.stale, Some(Staleness::Manual));
+    // Les valeurs de sortie sont celles du fichier : rien n'a été recalculé.
+    let out = calc.outputs[0].column.unwrap();
+    let values = loaded
+        .tree()
+        .node(out)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .numeric_view()
+        .unwrap()
+        .to_vec();
+    assert_eq!(values[..2], [9.0, 18.0]);
+}

@@ -165,6 +165,15 @@ impl DialogGeometry {
 /// fichier.
 pub const MAX_DIALOG_GEOMETRIES: usize = 32;
 
+/// Plafond de taille d'un `.stf` à l'ouverture (A2, #316), en Mo : valeur par
+/// défaut (512, celle de `stokesforge_persistence::DEFAULT_MAX_FILE_BYTES`) et
+/// bornes du réglage. Pas d'option « sans limite » : le plafond protège de
+/// l'ouverture d'un fichier reçu d'un tiers.
+pub const DEFAULT_MAX_FILE_MB: u32 = (stokesforge_persistence::DEFAULT_MAX_FILE_BYTES >> 20) as u32;
+pub const DEFAULT_MAX_FILE_BYTES: u64 = stokesforge_persistence::DEFAULT_MAX_FILE_BYTES;
+pub const MIN_MAX_FILE_MB: u32 = 16;
+pub const MAX_MAX_FILE_MB: u32 = 16384;
+
 /// Forme du fichier sur disque. Un champ inconnu est ignoré, un champ absent
 /// prend sa valeur par défaut : un fichier écrit par une version plus récente
 /// reste lisible.
@@ -181,6 +190,10 @@ struct PreferencesFile {
     /// `"text"` ou `"outlines"` (#162) ; toute autre valeur : le défaut.
     #[serde(default, deserialize_with = "lenient")]
     svg_text: Option<String>,
+    /// Plafond de taille d'un `.stf` à l'ouverture, en Mo (A2, #316). Hors
+    /// bornes : ramené dans les bornes ; absent ou illisible : le défaut.
+    #[serde(default, deserialize_with = "lenient")]
+    max_file_mb: Option<u32>,
     /// Gardée brute : c'est `toolbar::ToolbarLayout::from_json` qui la lit, en
     /// tolérant ce qu'une autre version y a écrit.
     #[serde(default)]
@@ -212,6 +225,10 @@ struct PreferencesFile {
     copy_formats: Option<serde_json::Value>,
 }
 
+fn clamp_max_file_mb(megabytes: u32) -> u32 {
+    megabytes.clamp(MIN_MAX_FILE_MB, MAX_MAX_FILE_MB)
+}
+
 /// Lit un champ en tolérant une valeur du mauvais type : il retombe sur son
 /// défaut (`None`) sans invalider les autres champs du fichier (#297).
 fn lenient<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -230,6 +247,7 @@ pub struct Preferences {
     object_manager_open: bool,
     object_manager_settings: ObjectManagerSettings,
     svg_text: SvgTextMode,
+    max_file_mb: u32,
     toolbars: Option<serde_json::Value>,
     analysis_keep_results: bool,
     analysis_low_r2_dialog: bool,
@@ -275,6 +293,9 @@ impl Preferences {
                 Some("outlines") => SvgTextMode::Outlines,
                 _ => SvgTextMode::Text,
             },
+            max_file_mb: file
+                .max_file_mb
+                .map_or(DEFAULT_MAX_FILE_MB, clamp_max_file_mb),
             toolbars: file.toolbars,
             analysis_keep_results: file.analysis_keep_results.unwrap_or(false),
             analysis_low_r2_dialog: file.analysis_low_r2_dialog.unwrap_or(true),
@@ -358,6 +379,25 @@ impl Preferences {
             SvgTextMode::Outlines => "outlines",
         };
         self.save_field("svg_text", name.into())
+    }
+
+    /// Plafond de taille d'un `.stf` à l'ouverture, en Mo (A2, #316) ; 512 par
+    /// défaut, toujours dans `[MIN_MAX_FILE_MB, MAX_MAX_FILE_MB]`.
+    pub fn max_file_mb(&self) -> u32 {
+        self.max_file_mb
+    }
+
+    /// Le même plafond en octets, tel que le passent la session et la
+    /// persistance.
+    pub fn max_file_bytes(&self) -> u64 {
+        u64::from(self.max_file_mb) << 20
+    }
+
+    /// Mémorise le plafond (ramené dans les bornes) sans remplacer les autres
+    /// préférences.
+    pub fn save_max_file_mb(&mut self, megabytes: u32) -> std::io::Result<()> {
+        self.max_file_mb = clamp_max_file_mb(megabytes);
+        self.save_field("max_file_mb", self.max_file_mb.into())
     }
 
     /// La sortie par défaut des analyses : garder les valeurs dans Results
@@ -926,6 +966,33 @@ mod object_manager_tests {
             Preferences::load_from(Some(path)).svg_text_mode(),
             SvgTextMode::Text
         );
+    }
+
+    /// A2 (#316) : 512 Mo sans préférence, aller-retour, bornes.
+    #[test]
+    fn le_plafond_de_taille_vaut_512_mo_par_defaut_et_se_retient() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        std::fs::write(&path, r#"{"language":"fr"}"#).unwrap();
+        let mut prefs = Preferences::load_from(Some(path.clone()));
+        assert_eq!(prefs.max_file_mb(), 512);
+        assert_eq!(prefs.max_file_bytes(), 512 * 1024 * 1024);
+        prefs.save_max_file_mb(64).unwrap();
+        let relues = Preferences::load_from(Some(path.clone()));
+        assert_eq!(relues.max_file_mb(), 64);
+        assert_eq!(relues.language(), Some("fr"));
+        // Hors bornes : ramené dedans, à l'écriture comme à la lecture.
+        prefs.save_max_file_mb(1).unwrap();
+        assert_eq!(prefs.max_file_mb(), MIN_MAX_FILE_MB);
+        prefs.save_max_file_mb(u32::MAX).unwrap();
+        assert_eq!(prefs.max_file_mb(), MAX_MAX_FILE_MB);
+        std::fs::write(&path, r#"{"max_file_mb":0}"#).unwrap();
+        assert_eq!(
+            Preferences::load_from(Some(path.clone())).max_file_mb(),
+            MIN_MAX_FILE_MB
+        );
+        std::fs::write(&path, r#"{"max_file_mb":"beaucoup"}"#).unwrap();
+        assert_eq!(Preferences::load_from(Some(path)).max_file_mb(), 512);
     }
 
     #[test]

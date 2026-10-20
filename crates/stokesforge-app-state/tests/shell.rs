@@ -962,6 +962,99 @@ fn a_failing_load_leaves_the_model_and_history_untouched() {
     assert!(state.can_undo(), "l'historique est préservé");
 }
 
+/// Un état dont le plafond d'ouverture est réglé par le fichier de préférences
+/// de `dir` (`max_file_mb` en Mo, A2 #316).
+fn start_with_max_file_mb(
+    project: Project,
+    path: &Path,
+    dir: &Path,
+    mb: u32,
+) -> (Session, AppState) {
+    let preferences_file = dir.join("preferences.json");
+    std::fs::write(&preferences_file, format!(r#"{{"max_file_mb":{mb}}}"#)).unwrap();
+    let session = Session::spawn(project, None).expect("thread de session");
+    let state = AppState::new_with_preferences(
+        session.handle(),
+        path.display().to_string(),
+        stokesforge_app_state::preferences::Preferences::load_from(Some(preferences_file)),
+    )
+    .expect("état applicatif initial");
+    (session, state)
+}
+
+/// A2 (#316) : un fichier au-dessus du plafond d'ouverture est refusé par un
+/// dialogue, le projet et le chemin courants sont gardés.
+#[test]
+fn opening_a_file_over_the_limit_is_refused_and_keeps_the_project_and_path() {
+    stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let current = dir.path().join("projet.stf");
+    let (_session, mut state) = start_with_max_file_mb(demo_project(), &current, dir.path(), 16);
+    state.dispatch(Action::Save);
+    let len = state.tree().len();
+    // 16 Mo + 1 octet : le contenu n'a pas à être un projet, la taille suffit.
+    let big = dir.path().join("gros.stf");
+    std::fs::write(&big, vec![0u8; (16 << 20) + 1]).unwrap();
+    state.dispatch(Action::OpenProject {
+        path: big.display().to_string(),
+        pending_edits: false,
+    });
+    let alert = state.alert().expect("un dialogue d'échec");
+    assert_eq!(alert.kind, AlertKind::OpenFailed);
+    assert!(
+        alert.message.contains("too large") && alert.message.contains("Preferences"),
+        "message inattendu : {}",
+        alert.message
+    );
+    assert_eq!(state.path(), current.display().to_string(), "chemin gardé");
+    assert_eq!(state.tree().len(), len, "projet gardé");
+}
+
+/// A2 (#316) : un enregistrement au-dessus du plafond réussit, mais l'avertit
+/// (à la place de « Enregistré »), en disant comment relever la limite.
+#[test]
+fn saving_over_the_opening_limit_succeeds_with_a_warning() {
+    stokesforge_app_state::i18n::set_language(stokesforge_app_state::i18n::Language::English);
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let file = dir.path().join("gros.stf");
+    let mut project = demo_project();
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Gros")).unwrap();
+    let sheet = project.tree().children(book).unwrap()[0];
+    // 2,3 millions de réels : plus de 16 Mo une fois écrits.
+    project
+        .add_column(
+            sheet,
+            None,
+            Some("N"),
+            Column::from_f64(&vec![1.5; 2_300_000]),
+        )
+        .unwrap();
+    let (_session, mut state) = start_with_max_file_mb(project, &file, dir.path(), 16);
+    state.dispatch(Action::Save);
+    assert!(file.exists(), "l'enregistrement a réussi");
+    assert!(state.alert().is_none());
+    let status = state.status().expect("un message");
+    assert_eq!(status.level, StatusLevel::Warning);
+    assert!(
+        status.text.contains("Preferences") && status.text.contains("16 MB"),
+        "avertissement inattendu : {}",
+        status.text
+    );
+
+    // Sous le plafond : le message habituel, sans avertissement.
+    let (_session, mut small) = start_with_max_file_mb(
+        demo_project(),
+        &dir.path().join("petit.stf"),
+        dir.path(),
+        16,
+    );
+    small.dispatch(Action::Save);
+    let status = small.status().expect("un message");
+    assert_ne!(status.level, StatusLevel::Warning);
+    assert!(status.text.starts_with("Saved to"), "{}", status.text);
+}
+
 /// Un calcul illisible dans le fichier est écarté (le projet se charge) mais
 /// dit par un avertissement de la barre d'état, plus en silence (#278).
 #[test]

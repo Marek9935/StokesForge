@@ -112,6 +112,11 @@ use schema::{FileBody, NodeRecord, FORMAT_VERSION, MAGIC};
 
 pub use error::{PersistenceError, PersistenceResult};
 
+/// Taille maximale d'un `.stf` à l'ouverture quand l'appelant n'en fixe pas
+/// (A2, #316) : 512 Mo. Le fichier n'étant pas compressé, c'est aussi la
+/// taille décompressée. L'application la rend réglable (préférences).
+pub const DEFAULT_MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
+
 /// Un calcul que la lecture n'a pas pu garder : son enregistrement est
 /// illisible (opération inconnue ou invalide, identifiant hors borne). Donnée
 /// neutre : la mise en phrase est l'affaire de l'application.
@@ -380,10 +385,41 @@ pub fn load_with_geometries(
 pub fn load_with_report(
     path: &Path,
 ) -> PersistenceResult<(Project, HashMap<NodeId, WindowGeometry>, LoadReport)> {
-    let bytes = std::fs::read(path).map_err(|source| PersistenceError::Io {
+    load_with_limit(path, DEFAULT_MAX_FILE_BYTES)
+}
+
+/// Comme [`load_with_report`], avec un plafond de taille de fichier explicite
+/// (A2, #316) : un fichier de plus de `max_bytes` octets est refusé par
+/// [`PersistenceError::TooLarge`] avant tout décodage. Exactement `max_bytes`
+/// octets passe. Le `.stf` n'étant pas compressé, la taille décompressée est la
+/// taille du fichier. La lecture est bornée (`take(limite + 1)`) : un fichier
+/// qui grossit entre la mesure et la lecture ne contourne pas le plafond.
+pub fn load_with_limit(
+    path: &Path,
+    max_bytes: u64,
+) -> PersistenceResult<(Project, HashMap<NodeId, WindowGeometry>, LoadReport)> {
+    use std::io::Read;
+    let io = |source| PersistenceError::Io {
         path: path.to_path_buf(),
         source,
-    })?;
+    };
+    let file = std::fs::File::open(path).map_err(io)?;
+    let size = file.metadata().map_err(io)?.len();
+    let too_large = |size| PersistenceError::TooLarge {
+        path: path.to_path_buf(),
+        size,
+        limit: max_bytes,
+    };
+    if size > max_bytes {
+        return Err(too_large(size));
+    }
+    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+    file.take(max_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .map_err(io)?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(too_large(bytes.len() as u64));
+    }
 
     if bytes.len() < MAGIC.len() || &bytes[..MAGIC.len()] != MAGIC.as_slice() {
         return Err(PersistenceError::NotAStokesForgeFile {
@@ -503,8 +539,8 @@ fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Pro
         nodes.push(node);
     }
 
-    let (kept, discarded_calculations) =
-        calculations::records_to_calculations(body.calculations, MAX_NODE_ID);
+    let (mut kept, discarded_calculations, digests) =
+        calculations::records_to_calculations_with_digests(body.calculations, MAX_NODE_ID);
     let (traces, discarded_corrections) =
         calculations::records_to_corrections(body.correction_traces, MAX_NODE_ID);
     let tree = Tree::from_nodes(NodeId::from_raw(body.root), nodes)
@@ -513,8 +549,11 @@ fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Pro
             source,
         })?
         .with_saved_colors(convert::record_to_saved_colors(body.saved_colors))
-        .with_correction_traces(traces)
-        .with_calculations(kept);
+        .with_correction_traces(traces);
+    // A1 (#316) : les entrées d'un calcul ont-elles changé depuis
+    // l'enregistrement ? Comparé sur les valeurs du fichier, sans recalcul.
+    calculations::mark_changed_inputs(&mut kept, &digests, &tree);
+    let tree = tree.with_calculations(kept);
     Ok((
         Project::from_tree(Arc::new(tree), body.next_id_hint),
         LoadReport {

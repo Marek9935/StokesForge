@@ -27,7 +27,10 @@ print(\"longueur :\", len(v), \"premier :\", v[0])\n";
 
 fn main() -> anyhow::Result<()> {
     let requested = std::env::args().nth(1).map(PathBuf::from);
-    let (session, path, report) = session_for_project(requested)?;
+    let (session, path, report) = session_for_project(
+        requested,
+        stokesforge_app_state::preferences::Preferences::load().max_file_bytes(),
+    )?;
     let mut state = AppState::new(session.handle(), path.display().to_string())
         .context("premier instantané du projet")?;
     if let Some(report) = &report {
@@ -109,6 +112,7 @@ fn configure_window_backend(_builder: &mut eframe::EventLoopBuilder<eframe::User
 /// chemin, donc un `demo.stf` du dossier courant n'est ni lu ni écrasé (#315).
 fn session_for_project(
     requested: Option<PathBuf>,
+    max_file_bytes: u64,
 ) -> anyhow::Result<(Session, PathBuf, Option<LoadReport>)> {
     let load_existing = requested.as_ref().is_some_and(|path| path.exists());
     let path = requested.unwrap_or_default();
@@ -121,7 +125,7 @@ fn session_for_project(
     let report = if load_existing {
         let (_, report) = session
             .handle()
-            .load_with_report(&path)
+            .load_with_limit(&path, max_file_bytes)
             .with_context(|| format!("chargement de {}", path.display()))?;
         Some(report)
     } else {
@@ -414,7 +418,11 @@ mod startup_tests {
         original.handle().save(&path).unwrap();
         original.shutdown().unwrap();
 
-        let (loaded, actual_path, report) = session_for_project(Some(path.clone())).unwrap();
+        let (loaded, actual_path, report) = session_for_project(
+            Some(path.clone()),
+            stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+        )
+        .unwrap();
         assert!(
             report.is_some_and(|r| r.is_clean()),
             "un fichier existant est chargé"
@@ -431,7 +439,11 @@ mod startup_tests {
     /// le projet ni écrasé sans contrôle.
     #[test]
     fn sans_argument_la_demo_n_a_ni_chemin_ni_repere_charge() {
-        let (session, path, report) = session_for_project(None).unwrap();
+        let (session, path, report) = session_for_project(
+            None,
+            stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+        )
+        .unwrap();
         assert!(path.as_os_str().is_empty());
         assert!(report.is_none());
         session.shutdown().unwrap();
@@ -442,7 +454,11 @@ mod startup_tests {
     fn un_chemin_absent_n_est_pas_un_chargement() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("absent.stf");
-        let (session, actual, report) = session_for_project(Some(path.clone())).unwrap();
+        let (session, actual, report) = session_for_project(
+            Some(path.clone()),
+            stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+        )
+        .unwrap();
         assert_eq!(actual, path);
         assert!(report.is_none());
         session.shutdown().unwrap();
@@ -500,7 +516,11 @@ mod startup_tests {
         bytes[at..at + 8].copy_from_slice(b"subtraXX");
         std::fs::write(&path, bytes).unwrap();
 
-        let (session, _, report) = session_for_project(Some(path)).unwrap();
+        let (session, _, report) = session_for_project(
+            Some(path),
+            stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+        )
+        .unwrap();
         let report = report.expect("fichier chargé");
         assert!(!report.is_clean());
         assert_eq!(report.discarded_calculations.len(), 1);

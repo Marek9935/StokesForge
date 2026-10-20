@@ -305,6 +305,18 @@ pub mod file {
                 path = path.display().to_string(),
                 detail = source.to_string()
             ),
+            PersistenceError::TooLarge { path, size, limit } => {
+                // En Mo, arrondi au supérieur pour la taille : « 513 Mo »
+                // pour une limite de 512, jamais « 512 Mo, limite 512 Mo ».
+                let size_mb = i64::try_from(size.div_ceil(1 << 20)).unwrap_or(i64::MAX);
+                let limit_mb = i64::try_from(*limit >> 20).unwrap_or(i64::MAX);
+                tr!(
+                    "error-file-too-large",
+                    path = path.display().to_string(),
+                    size = size_mb,
+                    limit = limit_mb
+                )
+            }
             PersistenceError::NotAStokesForgeFile { path } => {
                 tr!(
                     "error-file-not-stokesforge",
@@ -386,8 +398,13 @@ pub mod file {
                     path: path(),
                     detail: "header truncated".into(),
                 },
+                PersistenceError::TooLarge {
+                    path: path(),
+                    size: 600 << 20,
+                    limit: 512 << 20,
+                },
             ];
-            let mut seen = [false; 8];
+            let mut seen = [false; 9];
             for sample in &samples {
                 let index = match sample {
                     PersistenceError::Io { .. } => 0,
@@ -398,6 +415,7 @@ pub mod file {
                     PersistenceError::UnknownVariant { .. } => 5,
                     PersistenceError::ConcurrentModification { .. } => 6,
                     PersistenceError::UnreadableTarget { .. } => 7,
+                    PersistenceError::TooLarge { .. } => 8,
                 };
                 seen[index] = true;
             }

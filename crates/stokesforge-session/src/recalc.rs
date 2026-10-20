@@ -81,8 +81,13 @@
 //!   chaque passe, ce qui ferait changer les versions sans changer le contenu ;
 //!   un changement de *définition* (`UpdateCalculation`, annulation) est un geste
 //!   de l'utilisateur : le résultat est à jour par construction (`Trust`) ;
-//! - au chargement le mémo est vidé : les automatiques sont recalculés, les manuels
-//!   crus (leur marqueur de péremption vient du fichier) ;
+//! - au chargement le mémo est vidé et **aucun calcul n'est relancé** (A1, #316) :
+//!   automatiques comme manuels sont crus, valeurs du fichier gardées
+//!   (`Recalculator::run_after_load`, drapeau ponctuel `trust_loaded`, dans les
+//!   deux modes). Leur marqueur de péremption vient du fichier, complété par la
+//!   persistance : elle marque `Manual` un calcul dont l'empreinte du contenu
+//!   des entrées (`Calculation::inputs_digest`) ne correspond plus. Les
+//!   colonnes-formule, elles, restent recalculées au chargement ;
 //! - formules et calculs se nourrissent mutuellement : `run` alterne les deux
 //!   jusqu'à ce qu'un calcul n'écrive plus rien (au plus [`MAX_ROUNDS`] tours). Une
 //!   boucle qui traverse un calcul (sa sortie nourrit une formule qui nourrit son
@@ -131,6 +136,11 @@ pub(crate) struct Recalculator {
     stop: Option<Box<dyn Fn() -> bool + Send>>,
     /// Vrai dès que `stop` a répondu oui pendant la passe en cours.
     interrupted: bool,
+    /// Drapeau **ponctuel** armé par `Load` (A1, #316) : pendant la passe qui
+    /// suit, un calcul sans mémo est cru tel quel (`CalcAction::Trust`), même
+    /// automatique. Désarmé dès la fin de cette passe : un calcul sans mémo
+    /// après `AddCalculation` ou une annulation reste recalculé.
+    trust_loaded: bool,
 }
 
 /// Nombre maximal de tours « formules → calculs » d'une passe : une chaîne
@@ -148,6 +158,7 @@ impl Recalculator {
             calc_memo: HashMap::new(),
             stop: None,
             interrupted: false,
+            trust_loaded: false,
         }
     }
 
@@ -182,9 +193,26 @@ impl Recalculator {
     /// `NewProject`) : un `.stf` porte des valeurs de formule qu'on ne croit
     /// pas sur parole (voir `actor::run`, branche `Load`), et ses versions de
     /// colonne n'ont aucun rapport avec celles du projet précédent.
+    ///
+    /// Ne vide que le mémo : les **colonnes-formule** sont recalculées par la
+    /// passe suivante, mais les **calculs d'analyse** (A1, #316) ne le sont plus
+    /// à l'ouverture — voir [`Recalculator::run_after_load`].
     pub(crate) fn forget(&mut self) {
         self.memo.clear();
         self.calc_memo.clear();
+    }
+
+    /// La passe qui suit un `Load` (A1, #316) : les colonnes-formule sont
+    /// recalculées comme toujours, mais **aucun calcul d'analyse** ne l'est —
+    /// ses valeurs sont celles du fichier, recalcul à la demande (« Recalculate
+    /// »). Un calcul dont les entrées ont changé hors de StokesForge a déjà été
+    /// marqué périmé par la persistance (empreinte du contenu des entrées,
+    /// `stokesforge_persistence`), sans calcul non plus. Le drapeau est à usage
+    /// unique : rendu à `false` avant de revenir.
+    pub(crate) fn run_after_load(&mut self, project: &mut Project) {
+        self.trust_loaded = true;
+        self.run(project);
+        self.trust_loaded = false;
     }
 
     /// Recalcule les colonnes-formule du projet qui en ont besoin — accès
@@ -887,6 +915,10 @@ impl Recalculator {
         let previous = self.calc_memo.get(&id);
         let action = if force {
             CalcAction::Recompute
+        } else if self.trust_loaded && previous.is_none() {
+            // Premier passage après un `Load`, dans les deux modes (sinon
+            // l'oracle `Full` divergerait) : les valeurs du fichier font foi.
+            CalcAction::Trust
         } else if calc.auto_recalc {
             match (self.mode, previous) {
                 (FormulaRecalc::Targeted, Some(p)) if p.fingerprint == fingerprint => {

@@ -19,6 +19,19 @@ pub enum PersistenceError {
         #[source]
         source: std::io::Error,
     },
+    /// Le fichier dépasse la taille maximale acceptée à l'ouverture (A2,
+    /// #316). Le `.stf` n'est pas compressé : sa taille sur disque est sa
+    /// taille décompressée, donc ce plafond borne aussi la mémoire du
+    /// décodage. Rien n'a été lu au-delà de `limit` octets.
+    #[error("{path} is too large to open ({size} bytes, limit {limit} bytes)")]
+    TooLarge {
+        /// Chemin du fichier lu.
+        path: PathBuf,
+        /// Taille du fichier, en octets.
+        size: u64,
+        /// Plafond en vigueur, en octets.
+        limit: u64,
+    },
     /// Le fichier ne commence pas par la signature `STKF` : ce n'est pas un
     /// fichier StokesForge (ou il est vide / tronqué avant la signature).
     #[error("{path} is not a StokesForge file")]

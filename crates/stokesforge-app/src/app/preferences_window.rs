@@ -18,8 +18,10 @@ use super::dialogs::{modal_read_only, DialogOutcome, PlainSize, SizeClass};
 use super::form::{choice, form, ChoiceOption};
 use super::reorder_list::{move_before, reorder_move, reorder_row};
 use super::tab_strip::{tab_strip, TabStripSide};
+use crate::number_field::number_field;
 use stokesforge_app_state::i18n::{self, Language};
 use stokesforge_app_state::preferences::{CopyFormat, CopyFormatEntry};
+use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_app_state::tr;
 
@@ -98,6 +100,8 @@ fn general_page(
     let mut chosen = None;
     let mut low_r2 = state.analysis_low_r2_dialog();
     let before = low_r2;
+    let mut max_file_mb = state.max_file_mb();
+    let max_file_before = max_file_mb;
     form(ui, "preferences", |rows| {
         rows.section(tr!("preferences-general"));
         rows.row(tr!("menu-language"), |ui| {
@@ -108,6 +112,17 @@ fn general_page(
                 chosen = Some(language);
             }
         });
+        // Plafond de taille d'un fichier à l'ouverture (A2, #316).
+        rows.section(tr!("preferences-files"));
+        rows.row(tr!("preferences-max-file-size"), |ui| {
+            number_field(
+                ui,
+                "preferences_max_file_mb",
+                &mut max_file_mb,
+                &quantities::MAX_FILE_MB,
+            );
+        });
+        rows.note(tr!("preferences-max-file-size-note"));
         // Préférence de l'application (#288) ; chaque calcul a la sienne.
         rows.section(tr!("preferences-analysis"));
         rows.checkbox(
@@ -118,6 +133,9 @@ fn general_page(
     });
     if low_r2 != before {
         actions.push(Action::SetAnalysisLowR2Dialog(low_r2));
+    }
+    if max_file_mb != max_file_before {
+        actions.push(Action::SetMaxFileMb(max_file_mb));
     }
     chosen
 }

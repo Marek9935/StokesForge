@@ -121,6 +121,8 @@ pub(crate) enum Request {
     Load {
         /// Chemin source.
         path: PathBuf,
+        /// Taille maximale du fichier, en octets (A2, #316).
+        max_bytes: u64,
         /// Réponse : nouvelle révision, ou erreur (persistance, ou
         /// `Command(MacroOpen)` si une macro est ouverte).
         reply: Sender<SessionResult<(Revision, LoadReport)>>,
@@ -418,41 +420,56 @@ pub(crate) fn run(
                 };
                 let _ = reply.send(outcome);
             }
-            Request::Load { path, reply } => {
-                let outcome = load_project(&mut project, &mut history, &mut geometries, &path).map(
-                    |report| {
-                        revision += 1;
-                        // Les valeurs d'une colonne-formule sont écrites sur
-                        // le disque (`stokesforge-persistence`, voir sa doc) mais
-                        // traitées comme un cache qu'on ne fait pas confiance
-                        // à l'aveugle : un fichier a pu être modifié par un
-                        // autre processus, une version antérieure de StokesForge,
-                        // ou porter des colonnes dont l'ordre (donc les
-                        // lettres) a changé sans que les valeurs suivent.
-                        // Recalculer systématiquement ici est le choix
-                        // retenu (peu coûteux — voir `recalc_formulas` — et
-                        // toujours correct) plutôt que de faire confiance au
-                        // contenu chargé. Le mémo est vidé : il décrit un
-                        // projet qui n'existe plus.
-                        formulas.forget();
-                        formulas.run(&mut project);
-                        // A3 — l'identité du projet change : une poignée
-                        // (`stokesforge_script::surface::Handle`) qui a mémorisé
-                        // l'ancienne époque ne doit plus pouvoir désigner un
-                        // `NodeId` du projet neuf sans être détectée. Un `Load`
-                        // vide aussi l'historique (`load_project`), donc il n'y a
-                        // plus de macro ouverte à ce point : pas besoin de
-                        // remettre `macro_owner` à `None` ici, `load_project`
-                        // l'a déjà refusé si une macro était ouverte.
-                        epoch += 1;
-                        // La table de géométries est entièrement remplacée par
-                        // celle du fichier chargé (`load_project`, ci-dessous) :
-                        // un client de rendu doit le savoir même si son contenu,
-                        // par coïncidence, ressemblait à l'ancien.
-                        geometry_revision += 1;
-                        (revision, report)
-                    },
-                );
+            Request::Load {
+                path,
+                max_bytes,
+                reply,
+            } => {
+                let outcome = load_project(
+                    &mut project,
+                    &mut history,
+                    &mut geometries,
+                    &path,
+                    max_bytes,
+                )
+                .map(|report| {
+                    revision += 1;
+                    // Les valeurs d'une colonne-formule sont écrites sur
+                    // le disque (`stokesforge-persistence`, voir sa doc) mais
+                    // traitées comme un cache qu'on ne fait pas confiance
+                    // à l'aveugle : un fichier a pu être modifié par un
+                    // autre processus, une version antérieure de StokesForge,
+                    // ou porter des colonnes dont l'ordre (donc les
+                    // lettres) a changé sans que les valeurs suivent.
+                    // Recalculer les formules ici est le choix retenu (peu
+                    // coûteux — voir `recalc_formulas`). Le mémo est vidé :
+                    // il décrit un projet qui n'existe plus.
+                    //
+                    // A1 (#316) : les **calculs d'analyse** (ajustement,
+                    // déconvolution…) ne sont PAS relancés — un fichier
+                    // d'un tiers peut imposer des milliers d'itérations,
+                    // non interruptibles. Les valeurs du fichier sont
+                    // gardées ; un calcul dont les entrées ont changé hors
+                    // de StokesForge est déjà marqué périmé par la
+                    // persistance, et se relance à la demande.
+                    formulas.forget();
+                    formulas.run_after_load(&mut project);
+                    // A3 — l'identité du projet change : une poignée
+                    // (`stokesforge_script::surface::Handle`) qui a mémorisé
+                    // l'ancienne époque ne doit plus pouvoir désigner un
+                    // `NodeId` du projet neuf sans être détectée. Un `Load`
+                    // vide aussi l'historique (`load_project`), donc il n'y a
+                    // plus de macro ouverte à ce point : pas besoin de
+                    // remettre `macro_owner` à `None` ici, `load_project`
+                    // l'a déjà refusé si une macro était ouverte.
+                    epoch += 1;
+                    // La table de géométries est entièrement remplacée par
+                    // celle du fichier chargé (`load_project`, ci-dessous) :
+                    // un client de rendu doit le savoir même si son contenu,
+                    // par coïncidence, ressemblait à l'ancien.
+                    geometry_revision += 1;
+                    (revision, report)
+                });
                 let _ = reply.send(outcome);
             }
             Request::NewProject { reply } => {
@@ -522,11 +539,13 @@ fn load_project(
     history: &mut History,
     geometries: &mut HashMap<NodeId, WindowGeometry>,
     path: &Path,
+    max_bytes: u64,
 ) -> SessionResult<LoadReport> {
     if history.in_macro() {
         return Err(SessionError::Command(CommandError::MacroOpen("load")));
     }
-    let (loaded, loaded_geometries, report) = stokesforge_persistence::load_with_report(path)?;
+    let (loaded, loaded_geometries, report) =
+        stokesforge_persistence::load_with_limit(path, max_bytes)?;
     *project = loaded;
     *geometries = loaded_geometries;
     // L'acteur est mono-thread et rien n'a pu rouvrir de macro entre la

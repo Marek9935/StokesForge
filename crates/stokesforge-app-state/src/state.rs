@@ -836,6 +836,9 @@ pub enum Action {
     /// Règle l'écriture du texte des exports SVG, texte ou contours (#162).
     /// Préférence de l'application : ni commande, ni historique, ni `.stf`.
     SetSvgTextMode(stokesforge_render_svg::SvgTextMode),
+    /// Règle le plafond de taille d'un `.stf` à l'ouverture, en Mo (A2, #316).
+    /// Préférence de l'application : ni commande, ni historique, ni `.stf`.
+    SetMaxFileMb(u32),
     /// Règle l'ordre et l'état des formats offerts par Copy Graph (#148,
     /// #149). Préférence de l'application : ni commande, ni historique, ni
     /// `.stf`.
@@ -5045,6 +5048,14 @@ impl AppState {
                     .map(|series| series.name = name)
                     .is_some()
             }),
+            Action::SetMaxFileMb(megabytes) => {
+                if let Err(error) = self.object_manager_preferences.save_max_file_mb(megabytes) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::SetSvgTextMode(mode) => {
                 if let Err(error) = self.object_manager_preferences.save_svg_text_mode(mode) {
                     self.fail(tr!(
@@ -6619,8 +6630,25 @@ impl AppState {
                 {
                     self.discarded_source = None;
                 }
-                let text = crate::tr!("status-saved", path = self.path.as_str());
-                self.notice(text);
+                // A2 (#316) : un fichier plus gros que le plafond d'ouverture
+                // s'enregistre, mais ne se rouvrira pas tel quel : le dire,
+                // et comment relever la limite.
+                let limit = self.object_manager_preferences.max_file_bytes();
+                let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                if size > limit {
+                    let size_mb = i64::try_from(size.div_ceil(1 << 20)).unwrap_or(i64::MAX);
+                    let limit_mb = i64::from(self.object_manager_preferences.max_file_mb());
+                    let text = crate::tr!(
+                        "status-saved-over-limit",
+                        path = self.path.as_str(),
+                        size = size_mb,
+                        limit = limit_mb
+                    );
+                    self.warn(text);
+                } else {
+                    let text = crate::tr!("status-saved", path = self.path.as_str());
+                    self.notice(text);
+                }
                 if let Some(gesture) = self.after_save.take() {
                     self.perform_unsaved(gesture);
                 }
@@ -6710,6 +6738,11 @@ impl AppState {
         if change(&mut spec) && spec != before {
             self.execute(Command::EditPlotSpec { graph, spec, kind });
         }
+    }
+
+    /// Plafond de taille d'un `.stf` à l'ouverture, en Mo (A2, #316).
+    pub fn max_file_mb(&self) -> u32 {
+        self.object_manager_preferences.max_file_mb()
     }
 
     /// La boîte « R² très faible » est-elle permise par l'application (#288) ?
@@ -6888,7 +6921,8 @@ impl AppState {
     /// (S-M8) : dialogue bloquant ; rend `false`.
     fn load(&mut self) -> bool {
         let path = PathBuf::from(&self.path);
-        match self.handle.load_with_report(&path) {
+        let limit = self.object_manager_preferences.max_file_bytes();
+        match self.handle.load_with_limit(&path, limit) {
             Ok((_, report)) => {
                 // Les identifiants du fichier n'ont aucun rapport avec ceux de
                 // l'arbre précédent : la sélection doit être revalidée, ce que

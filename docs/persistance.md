@@ -236,8 +236,23 @@ puisse pas amener en mémoire un projet inutilisable (batterie `b4`).
 annonce plus de lignes (`tags.len()` pour `Mixed`, `octets / 8` pour `Float`,
 `values.len()` pour l'ancien `Text`) est refusée en `Corrupt`
 (`ConvertError::TooManyRows`, aide `check_rows`) **avant** toute allocation
-(#316). Il n'y a pas de plafond de taille de fichier ni de budget global de
-cellules : décisions encore ouvertes.
+(#316). Il n'y a pas de budget global de cellules : décision encore ouverte.
+
+**Plafond de taille de fichier à l'ouverture (A2, #316).** `load_with_limit`
+(et `load_with_report`, qui prend `DEFAULT_MAX_FILE_BYTES` = 512 Mo) lit la
+taille par `metadata().len()` et refuse au-delà de la limite par
+`PersistenceError::TooLarge { path, size, limit }`, **avant** toute lecture ;
+exactement la limite passe. La lecture elle-même est bornée (`take(limite + 1)`)
+si le fichier grossit entre la mesure et la lecture. Le `.stf` **n'est pas
+compressé** : sa taille sur disque est sa taille décompressée, il n'y a donc pas
+de second contrôle à faire sur un « petit fichier qui se dilate » (la dilatation
+mémoire, elle, est bornée par `MAX_COLUMN_ROWS`). La limite est réglable dans les
+préférences (File › Preferences › General, 512 Mo par défaut, de 16 Mo à
+16 Go, pas de « sans limite ») ; l'application la lit **avant** de démarrer la
+session (`main.rs`, `session_for_project`). Un refus à l'ouverture laisse projet
+et chemin courants (`open_project`). À l'enregistrement, un fichier qui dépasse
+la limite s'écrit quand même, mais un avertissement (`status-saved-over-limit`)
+remplace « Enregistré » et dit comment la relever.
 
 ## Ce qu'il faut savoir avant de modifier
 
@@ -344,6 +359,21 @@ textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
 - Péremption : `manual` et `input_missing` sont gardées ; un `Failed(_)` s'écrit
   `manual` (l'erreur n'est pas persistée : à l'ouverture un calcul automatique est
   recalculé et retrouve son erreur, un calcul manuel reste périmé sans message).
+  **Depuis A1 (#316), l'ouverture ne recalcule plus aucun calcul** (voir
+  « Empreinte des entrées » ci-dessous) : il reste périmé (`manual`) avec les
+  valeurs du fichier jusqu'à « Recalculate ».
+- Empreinte des entrées (A1, #316) : chaque calcul écrit `inputs_digest`, une
+  empreinte **du contenu** de ses colonnes d'entrée (`Calculation::inputs_digest`,
+  `stokesforge-core/src/calc.rs` : type + valeurs, `f64::to_bits` petit-boutiste,
+  textes précédés de leur longueur, FNV-1a écrit à la main — l'algorithme est
+  gelé, il est dans des fichiers —, jamais de version de colonne ni de `NodeId`).
+  À la lecture, **sur les valeurs du fichier, avant tout recalcul de formule**,
+  `mark_changed_inputs` la confronte au contenu relu : différente, le calcul est
+  marqué `Manual` (périmé, bouton « Recalculate »), ses valeurs restent celles
+  du fichier. Champ absent (fichier ancien), ou entrée manquante à l'écriture :
+  rien n'est comparé, le calcul est cru tel quel (invariant 10 : dégrader en
+  « périmé », jamais en échec). Un fichier modifié à la main dans une colonne
+  qu'aucun calcul ne lit n'est, lui, pas revérifié.
 - Lecture tolérante (invariant 10) : un calcul dont l'opération est illisible
   (forme, ou `Operation::validate` en échec : un `NaN` écrit à la main, #291),
   ou dont un identifiant dépasse `MAX_NODE_ID`, est **écarté** sans échec — ses
@@ -365,7 +395,8 @@ textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
   refusent par `Operation::validate` toute opération qui ne se relirait pas (nombre
   non fini), pour qu'un tel enregistrement ne soit pas écrit.
 - Les colonnes de sortie sont des colonnes normales du classeur : le fichier garde
-  leurs valeurs, aucun recalcul n'est nécessaire à l'ouverture pour un calcul manuel.
+  leurs valeurs, aucun recalcul n'est fait à l'ouverture, pour un calcul manuel comme
+  automatique (A1, #316) ; seules les colonnes-formule sont recalculées.
 - Une copie d'objets (#105) n'emporte pas les calculs : les colonnes copiées
   deviennent ordinaires.
 

@@ -165,6 +165,15 @@ pub const HUE_DEGREES: Quantity = Quantity::whole(15.0).between(0.0, 360.0);
 /// Saturation ou luminosité, en pour cent.
 pub const PERCENT: Quantity = Quantity::whole(10.0).between(0.0, 100.0);
 
+/// Taille maximale d'un fichier `.stf` à l'ouverture, en Mo (A2, #316) ;
+/// bornes de `preferences::{MIN,MAX}_MAX_FILE_MB`.
+pub const MAX_FILE_MB: Quantity = Quantity::whole(64.0)
+    .between(
+        crate::preferences::MIN_MAX_FILE_MB as f64,
+        crate::preferences::MAX_MAX_FILE_MB as f64,
+    )
+    .with_presets(&[64.0, 128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0]);
+
 /// Degré d'un polynôme.
 pub const POLYNOMIAL_DEGREE: Quantity =
     Quantity::whole(1.0).between(1.0, limits::MAX_DEGREE as f64);

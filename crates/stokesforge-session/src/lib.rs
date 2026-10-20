@@ -418,8 +418,20 @@ impl SessionHandle {
     /// lecture a écarté sans échouer (calculs illisibles, #278), pour que
     /// l'appelant le signale.
     pub fn load_with_report(&self, path: &Path) -> SessionResult<(Revision, LoadReport)> {
+        self.load_with_limit(path, stokesforge_persistence::DEFAULT_MAX_FILE_BYTES)
+    }
+
+    /// Comme [`Self::load_with_report`], avec un plafond de taille de fichier
+    /// (octets, A2 #316) : au-delà, `Err(Persistence(TooLarge))` et rien n'est
+    /// touché.
+    pub fn load_with_limit(
+        &self,
+        path: &Path,
+        max_bytes: u64,
+    ) -> SessionResult<(Revision, LoadReport)> {
         self.request(|reply| Request::Load {
             path: path.to_path_buf(),
+            max_bytes,
             reply,
         })?
     }

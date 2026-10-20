@@ -176,6 +176,58 @@ impl Calculation {
         out
     }
 
+    /// Empreinte **stable du contenu** des colonnes d'entrée (A1, #316) : type
+    /// et valeurs de chacune, dans l'ordre de [`Calculation::input_columns`].
+    /// `None` si une colonne manque ou n'est pas une colonne.
+    ///
+    /// Écrite dans le fichier à l'enregistrement et comparée à la lecture,
+    /// sans recalcul, pour marquer périmé un calcul dont l'entrée a changé
+    /// hors de StokesForge. Elle ne contient **jamais** de version de colonne
+    /// (non persistante) ni d'identifiant : le même contenu sous deux
+    /// `NodeId` donne la même valeur. FNV-1a écrit à la main, parce que
+    /// `DefaultHasher` ne garantit aucune stabilité d'une version à l'autre.
+    pub fn inputs_digest(&self, tree: &Tree) -> Option<u64> {
+        let mut hash = Fnv1a::new();
+        let inputs = self.input_columns();
+        hash.write(&(inputs.len() as u64).to_le_bytes());
+        for id in inputs {
+            let column = tree.node(id)?.as_column()?;
+            hash.write(&[match column.column_type() {
+                ColumnType::Numeric => 0,
+                ColumnType::DateTime => 1,
+                ColumnType::Mixed => 2,
+            }]);
+            match column.values() {
+                crate::column::ColumnValues::Float(values) => {
+                    hash.write(&[0]);
+                    hash.write(&(values.len() as u64).to_le_bytes());
+                    for v in values.iter() {
+                        hash.write(&v.to_bits().to_le_bytes());
+                    }
+                }
+                crate::column::ColumnValues::Mixed(cells) => {
+                    hash.write(&[1]);
+                    hash.write(&(cells.len() as u64).to_le_bytes());
+                    for cell in cells.iter() {
+                        match cell {
+                            MixedCell::Empty => hash.write(&[0]),
+                            MixedCell::Number(v) => {
+                                hash.write(&[1]);
+                                hash.write(&v.to_bits().to_le_bytes());
+                            }
+                            MixedCell::Text(t) => {
+                                hash.write(&[2]);
+                                hash.write(&(t.len() as u64).to_le_bytes());
+                                hash.write(t.as_bytes());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Some(hash.finish())
+    }
+
     /// Les colonnes de sortie qui existent encore dans `tree`.
     pub fn live_outputs<'a>(
         &'a self,
@@ -184,6 +236,27 @@ impl Calculation {
         self.outputs
             .iter()
             .filter(move |o| o.column.is_some_and(|c| tree.node(c).is_some()))
+    }
+}
+
+/// FNV-1a 64 bits : l'empreinte de [`Calculation::inputs_digest`] est écrite
+/// dans un fichier, son algorithme ne doit donc jamais changer sous nos pieds.
+struct Fnv1a(u64);
+
+impl Fnv1a {
+    fn new() -> Self {
+        Self(0xcbf2_9ce4_8422_2325)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 ^= u64::from(b);
+            self.0 = self.0.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
     }
 }
 
@@ -1371,5 +1444,106 @@ mod output_name_tests {
         let op = integrate(true, false);
         assert!(wants_output(&op, "cumulative", options));
         assert!(!wants_output(&op, "normalized", options));
+    }
+}
+
+#[cfg(test)]
+mod inputs_digest_tests {
+    use super::*;
+    use stokesforge_analysis::integrate::{IntegrateSpec, Under};
+
+    fn calc_on(y: NodeId) -> Calculation {
+        Calculation {
+            operation: Operation::Integrate {
+                spec: IntegrateSpec {
+                    ranges: Vec::new(),
+                    under: Under::Zero,
+                    cumulative: false,
+                    normalize: false,
+                },
+            },
+            series: vec![SeriesRef {
+                x: None,
+                y,
+                sigma: None,
+            }],
+            aux: None,
+            outputs: Vec::new(),
+            results: Vec::new(),
+            keep_results: false,
+            auto_recalc: false,
+            low_r2_dialog: true,
+            stale: None,
+        }
+    }
+
+    fn sheet_with(columns: &[Column]) -> (Project, Vec<NodeId>) {
+        let mut project = Project::new("P").unwrap();
+        let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+        let sheet = project.tree().children(book).unwrap()[0];
+        let ids = columns
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                project
+                    .add_column(sheet, None, Some(&format!("C{i}")), c.clone())
+                    .unwrap()
+            })
+            .collect();
+        (project, ids)
+    }
+
+    fn digest(columns: &[Column]) -> Option<u64> {
+        let (project, ids) = sheet_with(columns);
+        calc_on(ids[0]).inputs_digest(project.tree())
+    }
+
+    #[test]
+    fn the_same_content_under_two_ids_gives_the_same_digest() {
+        let c = Column::from_f64(&[1.0, 2.0, f64::NAN]);
+        // Deux feuilles, donc deux jeux d'identifiants : seul le contenu compte.
+        let (mut project, ids) = sheet_with(std::slice::from_ref(&c));
+        let extra = project.tree().children(project.root()).unwrap()[0];
+        let sheet = project.tree().children(extra).unwrap()[0];
+        let other = project
+            .add_column(sheet, None, Some("Z"), c.clone())
+            .unwrap();
+        let a = calc_on(ids[0]).inputs_digest(project.tree());
+        let b = calc_on(other).inputs_digest(project.tree());
+        assert!(a.is_some());
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn a_changed_cell_or_type_changes_the_digest() {
+        let base = digest(&[Column::from_f64(&[1.0, 2.0, 3.0])]);
+        assert_ne!(base, digest(&[Column::from_f64(&[1.0, 2.5, 3.0])]));
+        assert_ne!(base, digest(&[Column::from_f64(&[1.0, 2.0])]));
+        let mixed = Column::from_mixed(&[
+            MixedCell::Number(1.0),
+            MixedCell::Number(2.0),
+            MixedCell::Number(3.0),
+        ]);
+        assert_ne!(base, digest(std::slice::from_ref(&mixed)));
+        let text = Column::from_mixed(&[
+            MixedCell::Number(1.0),
+            MixedCell::Number(2.0),
+            MixedCell::Text("3".into()),
+        ]);
+        assert_ne!(digest(&[mixed]), digest(&[text]));
+        // Le motif binaire compte : -0.0 n'est pas 0.0.
+        assert_ne!(
+            digest(&[Column::from_f64(&[0.0])]),
+            digest(&[Column::from_f64(&[-0.0])])
+        );
+    }
+
+    #[test]
+    fn a_missing_column_gives_no_digest() {
+        let (project, _) = sheet_with(&[Column::from_f64(&[1.0])]);
+        assert_eq!(
+            calc_on(NodeId::from_raw(9999)).inputs_digest(project.tree()),
+            None
+        );
     }
 }

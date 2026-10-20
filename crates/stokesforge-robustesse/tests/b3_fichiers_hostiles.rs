@@ -702,3 +702,34 @@ fn b3_nom_invalide_est_refuse() {
         assert!(r.is_err(), "le nom {mauvais:?} a été accepté au chargement");
     }
 }
+
+/// A2 (#316) : un fichier plus gros que le plafond est refusé avant d'être lu
+/// (la taille du fichier est sa taille décompressée : le `.stf` n'est pas
+/// compressé), sans même regarder s'il est bien formé.
+#[test]
+fn b3_fichier_plus_gros_que_le_plafond_est_refuse_avant_lecture() {
+    use stokesforge_persistence::{load_with_limit, PersistenceError};
+    let dir = TempDir::new().unwrap();
+    let body = FileBody {
+        root: 1,
+        next_id_hint: 2,
+        nodes: vec![dossier(1, "R", None, vec![])],
+    };
+    let path = ecrire(&dir, "limite.stf", &body);
+    let taille = std::fs::metadata(&path).unwrap().len();
+    assert!(load_with_limit(&path, taille).is_ok());
+    assert!(
+        matches!(
+            load_with_limit(&path, taille - 1),
+            Err(PersistenceError::TooLarge { .. })
+        ),
+        "un fichier au-dessus du plafond doit être refusé"
+    );
+    // Du bruit plus gros que le plafond : refusé pour sa taille, pas décodé.
+    let bruit = dir.path().join("bruit.stf");
+    std::fs::write(&bruit, vec![0xC1u8; 4096]).unwrap();
+    assert!(matches!(
+        load_with_limit(&bruit, 1024),
+        Err(PersistenceError::TooLarge { size: 4096, .. })
+    ));
+}

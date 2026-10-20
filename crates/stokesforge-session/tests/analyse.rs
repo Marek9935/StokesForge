@@ -344,22 +344,97 @@ fn une_formule_nourrit_un_calcul_et_un_calcul_nourrit_une_formule() {
     }
 }
 
-#[test]
-fn au_chargement_l_automatique_est_recalcule_et_le_manuel_est_cru() {
-    let (_session, handle, m) = demarrer(FormulaRecalc::Targeted);
-    let auto = ajouter(&handle, &m, true);
-    // Un second calcul, manuel, sur les mêmes colonnes.
-    let _ = auto;
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("p.stf");
-    handle.save(&path).unwrap();
-    handle.load(&path).unwrap();
-    let snapshot = handle.snapshot().unwrap();
-    let id = *snapshot.tree.calculations().keys().next().unwrap();
-    assert_eq!(snapshot.tree.calculation(id).unwrap().stale, None);
-    assert!((pente(&snapshot, id) - 10.0).abs() < 1e-9);
+/// Remplace, dans le fichier, la première occurrence des octets de `avant` par
+/// ceux de `apres` : une modification « hors StokesForge » des valeurs d'une
+/// colonne (un tampon `Float` s'écrit en `f64` petit-boutiste, sans enveloppe).
+fn alterer_fichier(path: &std::path::Path, avant: &[f64], apres: &[f64]) {
+    let octets = |v: &[f64]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let (avant, apres) = (octets(avant), octets(apres));
+    assert_eq!(avant.len(), apres.len());
+    let mut contenu = std::fs::read(path).unwrap();
+    let position = contenu
+        .windows(avant.len())
+        .position(|fenetre| fenetre == avant.as_slice())
+        .expect("les valeurs à altérer sont dans le fichier");
+    contenu[position..position + avant.len()].copy_from_slice(&apres);
+    std::fs::write(path, contenu).unwrap();
+}
 
-    // Même chose pour un manuel périmé avant la sauvegarde : le marqueur survit.
+/// A1 (#316) : à l'ouverture, aucun calcul d'analyse n'est relancé, automatique
+/// ou manuel. Les valeurs du fichier sont gardées ; l'empreinte du contenu des
+/// entrées, écrite à l'enregistrement, dit si elles ont changé depuis.
+#[test]
+fn au_chargement_aucun_calcul_n_est_relance_et_l_empreinte_dit_s_il_est_perime() {
+    for auto in [true, false] {
+        for mode in modes() {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("p.stf");
+
+            // Fichier intact : rien de périmé (témoin : comparaison toujours fausse).
+            let (_session, handle, m) = demarrer(mode);
+            let id = ajouter(&handle, &m, auto);
+            handle.save(&path).unwrap();
+            handle.load(&path).unwrap();
+            let intact = handle.snapshot().unwrap();
+            assert_eq!(
+                intact.tree.calculation(id).unwrap().stale,
+                None,
+                "auto={auto} {mode:?}"
+            );
+            assert!((pente(&intact, id) - 10.0).abs() < 1e-9);
+
+            // Entrée modifiée hors StokesForge : périmé, valeurs du fichier
+            // gardées, rien n'a été relancé (témoin : retirer le drapeau
+            // `trust_loaded` ; comparaison toujours vraie).
+            alterer_fichier(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
+            handle.load(&path).unwrap();
+            let altere = handle.snapshot().unwrap();
+            assert_eq!(
+                altere.tree.calculation(id).unwrap().stale,
+                Some(Staleness::Manual),
+                "auto={auto} {mode:?}"
+            );
+            assert!(
+                (pente(&altere, id) - 10.0).abs() < 1e-9,
+                "valeurs du fichier gardées, auto={auto} {mode:?}"
+            );
+
+            // Recalcul à la demande : les valeurs deviennent justes.
+            handle.recalculate(&[id]).unwrap();
+            let apres = handle.snapshot().unwrap();
+            assert_eq!(apres.tree.calculation(id).unwrap().stale, None);
+            assert!(
+                (pente(&apres, id) - 2.0).abs() < 1e-9,
+                "auto={auto} {mode:?}"
+            );
+        }
+    }
+}
+
+/// Le drapeau de confiance est à usage unique : un calcul automatique sans
+/// mémo après le chargement (ajout, annulation) est recalculé comme avant.
+#[test]
+fn la_confiance_au_chargement_ne_vaut_que_pour_le_chargement() {
+    for mode in modes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.stf");
+        let (_session, handle, m) = demarrer(mode);
+        handle.save(&path).unwrap();
+        handle.load(&path).unwrap();
+        // Après le chargement : un calcul automatique ajouté suit ses entrées.
+        let id = ajouter(&handle, &m, true);
+        handle.execute(saisir(m.y, &[2.0, 4.0, 6.0, 8.0])).unwrap();
+        let snapshot = handle.snapshot().unwrap();
+        assert_eq!(snapshot.tree.calculation(id).unwrap().stale, None);
+        assert!((pente(&snapshot, id) - 2.0).abs() < 1e-9, "{mode:?}");
+    }
+}
+
+/// Le marqueur de péremption écrit dans le fichier survit au chargement, et les
+/// valeurs du fichier sont crues telles quelles.
+#[test]
+fn un_manuel_perime_avant_la_sauvegarde_garde_son_marqueur() {
+    let dir = tempfile::tempdir().unwrap();
     let (_session2, handle2, m2) = demarrer(FormulaRecalc::Targeted);
     let manuel = ajouter(&handle2, &m2, false);
     handle2

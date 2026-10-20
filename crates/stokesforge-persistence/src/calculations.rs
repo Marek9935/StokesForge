@@ -49,6 +49,11 @@ pub(crate) struct CalculationRecord {
     /// `"manual"` (le prochain recalcul retrouve l'erreur).
     #[serde(default)]
     pub(crate) stale: Option<String>,
+    /// Empreinte du contenu des colonnes d'entrée à l'enregistrement
+    /// (A1, #316 : `Calculation::inputs_digest`). Absente d'un fichier plus
+    /// ancien, ou quand une entrée manquait : le calcul est alors cru tel quel.
+    #[serde(default)]
+    pub(crate) inputs_digest: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -182,10 +187,15 @@ fn record_to_warning(r: &WarningRecord) -> Option<Warning> {
 }
 
 pub(crate) fn calculations_to_records(tree: &ModelTree) -> Vec<CalculationRecord> {
-    map_to_records(tree.calculations())
+    map_to_records(tree.calculations(), Some(tree))
 }
 
-fn map_to_records(calculations: &BTreeMap<NodeId, Arc<Calculation>>) -> Vec<CalculationRecord> {
+/// `digest_in` : l'arbre où lire les entrées pour en écrire l'empreinte
+/// (`None` pour les traces de correction, qui ne se périment pas).
+fn map_to_records(
+    calculations: &BTreeMap<NodeId, Arc<Calculation>>,
+    digest_in: Option<&ModelTree>,
+) -> Vec<CalculationRecord> {
     calculations
         .iter()
         .map(|(id, calc)| CalculationRecord {
@@ -242,6 +252,7 @@ fn map_to_records(calculations: &BTreeMap<NodeId, Arc<Calculation>>) -> Vec<Calc
                 }
                 .to_string()
             }),
+            inputs_digest: digest_in.and_then(|tree| calc.inputs_digest(tree)),
         })
         .collect()
 }
@@ -288,7 +299,7 @@ pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CalculationRecord>
             )
         })
         .collect();
-    map_to_records(&traces)
+    map_to_records(&traces, None)
 }
 
 /// Rend les traces gardées et celles écartées : une trace illisible (ou qui
@@ -352,7 +363,25 @@ pub(crate) fn records_to_calculations(
     BTreeMap<NodeId, Arc<Calculation>>,
     Vec<DiscardedCalculation>,
 ) {
+    let (out, discarded, _digests) = records_to_calculations_with_digests(records, max_id);
+    (out, discarded)
+}
+
+/// Calculs gardés, calculs écartés, empreintes d'entrées écrites dans le fichier.
+type ConvertedCalculations = (
+    BTreeMap<NodeId, Arc<Calculation>>,
+    Vec<DiscardedCalculation>,
+    BTreeMap<NodeId, u64>,
+);
+
+/// Comme [`records_to_calculations`], avec en plus l'empreinte d'entrées
+/// écrite dans le fichier pour chaque calcul **gardé** qui en portait une.
+pub(crate) fn records_to_calculations_with_digests(
+    records: Vec<CalculationRecord>,
+    max_id: u64,
+) -> ConvertedCalculations {
     let mut out = BTreeMap::new();
+    let mut digests = BTreeMap::new();
     let mut discarded = Vec::new();
     for r in records {
         let mut all_ids = std::iter::once(r.id)
@@ -443,9 +472,39 @@ pub(crate) fn records_to_calculations(
             discarded.push(discarded_calculation(&r));
             continue;
         }
+        if let Some(digest) = r.inputs_digest {
+            digests.insert(id, digest);
+        }
         out.insert(id, Arc::new(calc));
     }
-    (out, discarded)
+    (out, discarded, digests)
+}
+
+/// A1 (#316) : confronte, **sans rien recalculer**, l'empreinte écrite dans le
+/// fichier au contenu des entrées tel que le fichier le porte. Un calcul dont
+/// l'empreinte diffère est marqué périmé (`Manual`) ; ses valeurs restent
+/// celles du fichier. Un calcul sans empreinte (fichier ancien, entrée
+/// absente à l'écriture) ou dont une entrée manque aujourd'hui est laissé tel
+/// quel : l'invariant 10 veut une dégradation, jamais un échec.
+pub(crate) fn mark_changed_inputs(
+    calculations: &mut BTreeMap<NodeId, Arc<Calculation>>,
+    digests: &BTreeMap<NodeId, u64>,
+    tree: &ModelTree,
+) {
+    for (id, calc) in calculations.iter_mut() {
+        let Some(&written) = digests.get(id) else {
+            continue;
+        };
+        if calc.stale.is_some() {
+            continue;
+        }
+        if calc
+            .inputs_digest(tree)
+            .is_some_and(|current| current != written)
+        {
+            Arc::make_mut(calc).stale = Some(Staleness::Manual);
+        }
+    }
 }
 
 /// Ce qu'on sait d'un calcul qu'on écarte : son identifiant, et la famille
@@ -483,6 +542,7 @@ mod tests {
             auto_recalc: true,
             low_r2_dialog: true,
             stale: None,
+            inputs_digest: None,
         }
     }
 
