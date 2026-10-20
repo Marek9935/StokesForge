@@ -1,5 +1,6 @@
 //! Dialogues **modaux** : [`modal_dialog`], [`modal_dialog_with`],
-//! [`modal_wizard`] et [`modal_read_only`], la brique de toute boîte de
+//! [`modal_wizard`], [`modal_read_only`], [`modal_confirm`],
+//! [`modal_save_changes`] et [`modal_alert`], la brique de toute boîte de
 //! dialogue et de tout assistant — même cadre, même barre de titre, même
 //! blocage du reste de l'interface. Elle pose la fenêtre par la brique des
 //! fenêtres de contenu (`window_chrome::show_window_in_layer`).
@@ -7,6 +8,15 @@
 //! Sorti d'`app.rs` tel quel (#117), puis étendu par #228
 //! (`docs/standard-interface.md`, § Fenêtres et dialogues) :
 //!
+//! - **nature** (#300, S-F11) : [`DialogNature`] dit ce qu'est la fenêtre —
+//!   réglages, brouillon, choix, assistant, lecture seule, confirmation,
+//!   enregistrement, alerte — et en tire, par des `match` exhaustifs sans `_`,
+//!   le pied, la taille par défaut (une [`SizeClass`] : Petite 480 x 170,
+//!   Moyenne 480 x 420, Grande 640 x 500), le focus initial et le bouton par
+//!   défaut. La taille est un champ de la variante : une fenêtre interactive
+//!   ([`InteractiveSize`]) prend une classe ou une taille libre justifiée par
+//!   `// TAILLE-LIBRE(#300):` ; une fenêtre sans interaction riche
+//!   ([`PlainSize`]) peut prendre la taille de son contenu sans justification ;
 //! - **ordre des boutons** (S-F6) : un dialogue range ses boutons secondaires à
 //!   gauche, puis Cancel, puis le principal à droite ; un assistant met Cancel
 //!   à gauche et groupe Back · Next · Finish à droite ; une fenêtre en lecture
@@ -15,7 +25,8 @@
 //!   geste du dialogue (jamais dans la barre d'état ; `AppState::dialog_error`,
 //!   publiée par [`sync_dialogs`]), sinon la **raison** du bouton principal
 //!   grisé (S-F10 → S-R14) — qui est aussi sa bulle. La raison vient de l'appelant :
-//!   `DialogFooter::accept_disabled` (#226) quand `accept_enabled` est faux ;
+//!   `AcceptButton::Gated` (#226, `DialogFooter::gated`) quand le bouton est
+//!   grisé ; un bouton qui ne l'est jamais est `AcceptButton::Always` ;
 //! - **Échap** (S-F7) : celui qui sort d'un champ texte ne ferme pas le
 //!   dialogue, le suivant fait Cancel ;
 //! - **taille et position** mémorisées par sorte de dialogue (S-F8), dans les
@@ -28,7 +39,9 @@
 //!   clavier ; [`modal_save_changes`] — « Discard Changes · Cancel · Save »,
 //!   seule exception écrite : Entrée = Save ; [`modal_alert`] — l'échec grave
 //!   (S-M8), un bouton Close et une action possible ;
-//! - **focus initial** (S-F9) : le premier champ de saisie l'a à l'ouverture.
+//! - **focus initial** (S-F9, S-F11) : selon la nature ([`InitialFocus`]), le
+//!   premier champ de saisie, le bouton par défaut (confirmation, enregistrement,
+//!   alerte) ou rien (lecture seule). Pour le premier champ de saisie :
 //!   egui ne dit pas quels widgets sont des champs texte : à l'ouverture, une
 //!   ancre invisible prend le focus en tête du contenu, puis le focus avance
 //!   d'un widget par passe, toutes dans la même image (`request_discard` :
@@ -86,22 +99,191 @@ struct DialogGeometry {
     size: egui::Vec2,
 }
 
-/// La disposition du pied (S-F2, S-F4, S-F6).
+/// Les trois **classes de taille** d'un dialogue (S-F11) : la taille par défaut
+/// ne s'invente pas, elle se range dans l'une d'elles. La taille que
+/// l'utilisateur a laissée (S-F8) l'emporte ensuite.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FooterLayout {
+pub(super) enum SizeClass {
+    /// 480 x 170 : une question, un message, quelques boutons.
+    Small,
+    /// 480 x 420 : un formulaire ou des réglages à quelques pages.
+    Medium,
+    /// 640 x 500 : une liste et son éditeur côte à côte.
+    Large,
+}
+
+impl SizeClass {
+    pub(super) const fn size(self) -> egui::Vec2 {
+        match self {
+            Self::Small => egui::vec2(480.0, 170.0),
+            Self::Medium => egui::vec2(480.0, 420.0),
+            Self::Large => egui::vec2(640.0, 500.0),
+        }
+    }
+}
+
+/// La taille d'une fenêtre **interactive** (réglages, brouillon, assistant) :
+/// la classe par défaut de sa nature, une autre classe, ou une taille libre
+/// que la garde `aucune_taille_libre_sans_justification` ne laisse passer qu'avec
+/// un `// TAILLE-LIBRE(#300): <justification>` juste avant.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum InteractiveSize {
+    /// La classe par défaut de la nature ([`DialogNature::default_class`]).
+    Default,
+    Class(SizeClass),
+    /// Hors classes, justifiée dans le code (S-F11).
+    Free(egui::Vec2),
+}
+
+impl InteractiveSize {
+    /// La taille, `default` étant la classe de la nature.
+    fn resolve(self, default: SizeClass) -> egui::Vec2 {
+        match self {
+            Self::Default => default.size(),
+            Self::Class(class) => class.size(),
+            Self::Free(size) => size,
+        }
+    }
+}
+
+/// La taille d'une fenêtre **sans interaction riche** (choix, lecture seule,
+/// confirmation, enregistrement, alerte) : pas de formulaire à ranger, une
+/// taille mal choisie y coûte peu. Elle peut donc prendre la taille de son
+/// contenu **sans justification** (S-F11) — ce que la fenêtre interactive ne
+/// peut pas : le type ne l'offre pas.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum PlainSize {
+    /// La classe par défaut de la nature ([`DialogNature::default_class`]).
+    Default,
+    Class(SizeClass),
+    /// La taille que demande le contenu.
+    Content(egui::Vec2),
+}
+
+impl PlainSize {
+    /// La taille, `default` étant la classe de la nature.
+    fn resolve(self, default: SizeClass) -> egui::Vec2 {
+        match self {
+            Self::Default => default.size(),
+            Self::Class(class) => class.size(),
+            Self::Content(size) => size,
+        }
+    }
+}
+
+/// La **nature** d'une fenêtre modale (S-F11) : ce qu'elle est fixe son pied
+/// (ordre des boutons, S-F2, S-F4, S-F6), sa taille par défaut, son focus
+/// initial (S-F9) et le bouton par défaut. Chaque `match` sur la nature est
+/// exhaustif, sans `_` : une nature nouvelle ne compile pas avant d'avoir dit
+/// tout cela.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum DialogNature {
+    /// Réglages en direct d'un objet visible : `[Cancel] [OK]`.
+    Settings(InteractiveSize),
+    /// Création sur brouillon : `[secondaires] [message] [Cancel] [verbe]`.
+    Draft(InteractiveSize),
+    /// Choix sans réponse « oui » : même pied, secondaires = autres réponses.
+    Choice(PlainSize),
+    /// Assistant : `[Cancel] [message] [Back · Next] [Finish]`.
+    Wizard(InteractiveSize),
+    /// Lecture seule : `[secondaires] [message] [Close]`.
+    ReadOnly(PlainSize),
+    /// Confirmation : `[message] [Cancel] [verbe]`, Cancel par défaut.
+    Confirm(PlainSize),
+    /// Enregistrer ? : `[Discard Changes] [message] [Cancel] [Save]`.
+    SaveChanges(PlainSize),
+    /// Échec grave : `[action] [message] [Close]`.
+    Alert(PlainSize),
+}
+
+/// Où le focus va à l'ouverture (S-F9, S-F11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum InitialFocus {
+    /// Le premier champ de saisie, trouvé par la brique.
+    FirstField,
+    /// Le bouton par défaut du pied : Cancel d'une confirmation, Save, Close.
+    DefaultButton,
+    /// Rien : la fenêtre se lit, Entrée ferme.
+    Nothing,
+}
+
+/// La disposition des boutons du pied d'une nature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FooterShape {
     /// `[secondaires] [message] [Cancel] [principal]`.
     Dialog,
     /// `[Cancel] [message] [Back · Next] [Finish]`.
     Wizard,
-    /// `[secondaires] [message] [Close]` : lecture seule (S-F2), échec grave
-    /// (S-M8, l'action possible en secondaire).
+    /// `[secondaires] [message] [Close]`.
     ReadOnly,
-    /// `[message] [Cancel] [verbe]` : confirmation (S-F4, S-F5) ; Cancel est le
-    /// bouton par défaut, Entrée l'actionne ; le verbe est destructeur.
+    /// `[message] [Cancel] [verbe]`.
     Confirm,
-    /// `[Discard Changes] [message] [Cancel] [Save]` (S-F4) : Entrée = Save,
-    /// Discard Changes destructeur.
+    /// `[Discard Changes] [message] [Cancel] [Save]`.
     SaveChanges,
+}
+
+impl DialogNature {
+    /// La disposition du pied (S-F2, S-F4, S-F6).
+    pub(super) fn footer(self) -> FooterShape {
+        match self {
+            Self::Settings(_) | Self::Draft(_) | Self::Choice(_) => FooterShape::Dialog,
+            Self::Wizard(_) => FooterShape::Wizard,
+            Self::ReadOnly(_) | Self::Alert(_) => FooterShape::ReadOnly,
+            Self::Confirm(_) => FooterShape::Confirm,
+            Self::SaveChanges(_) => FooterShape::SaveChanges,
+        }
+    }
+
+    /// La classe de taille quand l'appelant n'en dit pas.
+    pub(super) fn default_class(self) -> SizeClass {
+        match self {
+            Self::Settings(_) | Self::Draft(_) | Self::ReadOnly(_) => SizeClass::Medium,
+            Self::Wizard(_) => SizeClass::Large,
+            Self::Choice(_) | Self::Confirm(_) | Self::SaveChanges(_) | Self::Alert(_) => {
+                SizeClass::Small
+            }
+        }
+    }
+
+    /// La taille par défaut de la fenêtre.
+    pub(super) fn size(self) -> egui::Vec2 {
+        let default = self.default_class();
+        match self {
+            Self::Settings(size) | Self::Draft(size) | Self::Wizard(size) => size.resolve(default),
+            Self::Choice(size)
+            | Self::ReadOnly(size)
+            | Self::Confirm(size)
+            | Self::SaveChanges(size)
+            | Self::Alert(size) => size.resolve(default),
+        }
+    }
+
+    /// Le focus initial (S-F9) : un brouillon, des réglages, un assistant ou un
+    /// choix ont des champs à remplir ; une confirmation, un enregistrement ou
+    /// une alerte attendent un bouton ; une lecture seule n'a rien à saisir.
+    pub(super) fn initial_focus(self) -> InitialFocus {
+        match self {
+            Self::Settings(_) | Self::Draft(_) | Self::Wizard(_) | Self::Choice(_) => {
+                InitialFocus::FirstField
+            }
+            Self::Confirm(_) | Self::SaveChanges(_) | Self::Alert(_) => InitialFocus::DefaultButton,
+            Self::ReadOnly(_) => InitialFocus::Nothing,
+        }
+    }
+
+    /// Cancel est-il le bouton par défaut (S-F5) ? Sinon c'est le principal.
+    fn cancel_is_default(self) -> bool {
+        match self {
+            Self::Confirm(_) => true,
+            Self::Settings(_)
+            | Self::Draft(_)
+            | Self::Choice(_)
+            | Self::Wizard(_)
+            | Self::ReadOnly(_)
+            | Self::SaveChanges(_)
+            | Self::Alert(_) => false,
+        }
+    }
 }
 
 /// Issue d'une image du corps commun : celle d'un [`DialogOutcome`], plus le
@@ -167,7 +349,7 @@ pub(super) fn modal_dialog(
     ctx: &egui::Context,
     id: egui::Id,
     title: &str,
-    default_size: egui::Vec2,
+    size: InteractiveSize,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> DialogOutcome {
     // Le pied par défaut : « OK », toujours actif — ce que les propriétés du
@@ -178,49 +360,96 @@ pub(super) fn modal_dialog(
         ctx,
         id,
         title,
-        default_size,
-        DialogFooter {
-            accept_label: &accept_label,
-            accept_hint: &accept_hint,
-            accept_enabled: true,
-            accept_disabled: None,
-        },
+        DialogNature::Settings(size),
+        DialogFooter::always(&accept_label, &accept_hint),
         |_| {},
         add_contents,
     )
 }
 
-/// Le pied de page d'un [`modal_dialog_with`] : libellé et grisage du bouton par
-/// défaut. [`modal_dialog`] y met « OK », toujours actif — ce que les propriétés
-/// du graphe emploient. `accept_hint` est la bulle du bouton actif ; quand
-/// `accept_enabled` est faux, `accept_disabled` est la **raison** du grisage,
-/// qui dit quoi faire (S-G1) : elle s'écrit dans la zone de message du pied et
-/// dans la bulle du bouton grisé (S-F10).
-pub(super) struct DialogFooter<'a> {
-    pub(super) accept_label: &'a str,
-    pub(super) accept_hint: &'a str,
-    pub(super) accept_enabled: bool,
-    /// Pourquoi le bouton principal est grisé et quoi faire (#226, S-G1) ;
-    /// `None` quand il ne l'est jamais.
-    pub(super) accept_disabled: Option<&'a str>,
+/// Le bouton principal d'un pied : ou bien **toujours actif** (il n'a qu'une
+/// bulle), ou bien **peut être grisé** — et alors la bulle du bouton actif et
+/// la raison du grisage sont toutes deux obligatoires (S-F10, S-G1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AcceptButton<'a> {
+    /// Jamais grisé.
+    Always { hint: &'a str },
+    /// Grisé quand `enabled` est faux. `reason` dit pourquoi et quoi faire ; elle
+    /// s'écrit dans la zone de message du pied **et** en bulle du bouton grisé.
+    Gated {
+        enabled: bool,
+        hint: &'a str,
+        reason: &'a str,
+    },
 }
 
-impl DialogFooter<'_> {
-    /// La raison du grisage ; à défaut, la bulle du bouton (#226).
+/// Le pied de page d'un [`modal_dialog_with`] : libellé et état du bouton par
+/// défaut. [`modal_dialog`] y met « OK », toujours actif — ce que les propriétés
+/// du graphe emploient.
+pub(super) struct DialogFooter<'a> {
+    pub(super) accept_label: &'a str,
+    pub(super) accept: AcceptButton<'a>,
+}
+
+impl<'a> DialogFooter<'a> {
+    /// Un bouton principal qui n'est jamais grisé.
+    pub(super) fn always(label: &'a str, hint: &'a str) -> Self {
+        Self {
+            accept_label: label,
+            accept: AcceptButton::Always { hint },
+        }
+    }
+
+    /// Un bouton principal qui peut être grisé, avec sa raison (#226).
+    pub(super) fn gated(label: &'a str, hint: &'a str, enabled: bool, reason: &'a str) -> Self {
+        debug_assert!(
+            enabled || !reason.is_empty(),
+            "un bouton grisé sans raison (S-G1)"
+        );
+        Self {
+            accept_label: label,
+            accept: AcceptButton::Gated {
+                enabled,
+                hint,
+                reason,
+            },
+        }
+    }
+
+    fn enabled(&self) -> bool {
+        match self.accept {
+            AcceptButton::Always { .. } => true,
+            AcceptButton::Gated { enabled, .. } => enabled,
+        }
+    }
+
+    /// La bulle du bouton actif.
+    fn hint(&self) -> &str {
+        match self.accept {
+            AcceptButton::Always { hint } | AcceptButton::Gated { hint, .. } => hint,
+        }
+    }
+
+    /// La raison du grisage, qui est aussi la bulle du bouton grisé ; un bouton
+    /// qui ne l'est jamais n'en a pas.
     fn disabled_reason(&self) -> &str {
-        self.accept_disabled.unwrap_or(self.accept_hint)
+        match self.accept {
+            AcceptButton::Always { .. } => "",
+            AcceptButton::Gated { reason, .. } => reason,
+        }
     }
 }
 
 /// [`modal_dialog`] avec un bouton par défaut personnalisé (`footer`) et des
 /// boutons **secondaires** (`extra_buttons`), posés à gauche du pied, de
 /// gauche à droite, avant la zone de message ; Cancel puis le bouton principal
-/// restent à droite (S-F6).
+/// restent à droite (S-F6). `nature` est celle d'un pied de dialogue :
+/// réglages, brouillon ou choix.
 pub(super) fn modal_dialog_with(
     ctx: &egui::Context,
     id: egui::Id,
     title: &str,
-    default_size: egui::Vec2,
+    nature: DialogNature,
     footer_spec: DialogFooter<'_>,
     extra_buttons: impl FnOnce(&mut egui::Ui),
     add_contents: impl FnOnce(&mut egui::Ui),
@@ -229,8 +458,7 @@ pub(super) fn modal_dialog_with(
         ctx,
         id,
         title,
-        default_size,
-        FooterLayout::Dialog,
+        nature,
         footer_spec,
         extra_buttons,
         add_contents,
@@ -246,7 +474,7 @@ pub(super) fn modal_wizard(
     ctx: &egui::Context,
     id: egui::Id,
     title: &str,
-    default_size: egui::Vec2,
+    size: InteractiveSize,
     footer_spec: DialogFooter<'_>,
     step_buttons: impl FnOnce(&mut egui::Ui),
     add_contents: impl FnOnce(&mut egui::Ui),
@@ -255,8 +483,7 @@ pub(super) fn modal_wizard(
         ctx,
         id,
         title,
-        default_size,
-        FooterLayout::Wizard,
+        DialogNature::Wizard(size),
         footer_spec,
         step_buttons,
         add_contents,
@@ -271,7 +498,7 @@ pub(super) fn modal_read_only(
     ctx: &egui::Context,
     id: egui::Id,
     title: &str,
-    default_size: egui::Vec2,
+    size: PlainSize,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> DialogOutcome {
     let label = tr!("dialog-close");
@@ -280,14 +507,8 @@ pub(super) fn modal_read_only(
         ctx,
         id,
         title,
-        default_size,
-        FooterLayout::ReadOnly,
-        DialogFooter {
-            accept_label: &label,
-            accept_hint: &hint,
-            accept_enabled: true,
-            accept_disabled: None,
-        },
+        DialogNature::ReadOnly(size),
+        DialogFooter::always(&label, &hint),
         |_| {},
         add_contents,
     )
@@ -313,7 +534,7 @@ pub(super) fn modal_confirm(
     ctx: &egui::Context,
     id: egui::Id,
     title: &str,
-    default_size: egui::Vec2,
+    size: PlainSize,
     verb: &str,
     verb_hint: &str,
     add_contents: impl FnOnce(&mut egui::Ui),
@@ -322,14 +543,8 @@ pub(super) fn modal_confirm(
         ctx,
         id,
         title,
-        default_size,
-        FooterLayout::Confirm,
-        DialogFooter {
-            accept_label: verb,
-            accept_hint: verb_hint,
-            accept_enabled: true,
-            accept_disabled: None,
-        },
+        DialogNature::Confirm(size),
+        DialogFooter::always(verb, verb_hint),
         |_| {},
         add_contents,
     ) {
@@ -359,7 +574,7 @@ pub(super) fn modal_save_changes(
     ctx: &egui::Context,
     id: egui::Id,
     title: &str,
-    default_size: egui::Vec2,
+    size: PlainSize,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> SaveChangesOutcome {
     let label = tr!("unsaved-save");
@@ -368,14 +583,8 @@ pub(super) fn modal_save_changes(
         ctx,
         id,
         title,
-        default_size,
-        FooterLayout::SaveChanges,
-        DialogFooter {
-            accept_label: &label,
-            accept_hint: &hint,
-            accept_enabled: true,
-            accept_disabled: None,
-        },
+        DialogNature::SaveChanges(size),
+        DialogFooter::always(&label, &hint),
         |_| {},
         add_contents,
     ) {
@@ -404,7 +613,7 @@ pub(super) fn modal_alert(
     ctx: &egui::Context,
     id: egui::Id,
     title: &str,
-    default_size: egui::Vec2,
+    size: PlainSize,
     action: (&str, &str),
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> AlertOutcome {
@@ -415,14 +624,8 @@ pub(super) fn modal_alert(
         ctx,
         id,
         title,
-        default_size,
-        FooterLayout::ReadOnly,
-        DialogFooter {
-            accept_label: &label,
-            accept_hint: &hint,
-            accept_enabled: true,
-            accept_disabled: None,
-        },
+        DialogNature::Alert(size),
+        DialogFooter::always(&label, &hint),
         |ui| {
             acted = ui
                 .add(egui::Button::new(action.0).min_size(FOOTER_BUTTON_SIZE))
@@ -520,13 +723,11 @@ fn any_gesture(ctx: &egui::Context) -> bool {
 }
 
 /// Le corps commun des dialogues modaux.
-#[expect(clippy::too_many_arguments)]
 fn modal_frame(
     ctx: &egui::Context,
     id: egui::Id,
     title: &str,
-    default_size: egui::Vec2,
-    layout: FooterLayout,
+    nature: DialogNature,
     footer_spec: DialogFooter<'_>,
     extra_buttons: impl FnOnce(&mut egui::Ui),
     add_contents: impl FnOnce(&mut egui::Ui),
@@ -550,7 +751,7 @@ fn modal_frame(
                 size: egui::vec2(saved.width, saved.height),
             },
             None => {
-                let size = default_size.min(screen.size());
+                let size = nature.size().min(screen.size());
                 DialogGeometry {
                     pos: screen.center() - size / 2.0,
                     size,
@@ -569,8 +770,11 @@ fn modal_frame(
 
     // S-F9 : un pas du focus initial, avant que les widgets se posent (egui
     // ne suit une direction de focus que pendant la passe où elle est donnée).
+    let focus = nature.initial_focus();
     if just_opened {
-        ctx.data_mut(|data| data.insert_temp(walk_id, FocusWalk::default()));
+        if focus == InitialFocus::FirstField {
+            ctx.data_mut(|data| data.insert_temp(walk_id, FocusWalk::default()));
+        }
     } else {
         advance_initial_focus(ctx, walk_id, anchor_id, layer);
     }
@@ -644,11 +848,13 @@ fn modal_frame(
                 );
                 body.set_clip_rect(ui.clip_rect().intersect(body.max_rect()));
                 // L'ancre du focus initial (S-F9) : invisible, en tête du contenu.
-                body.interact(
-                    egui::Rect::from_min_size(body.max_rect().min, egui::Vec2::ZERO),
-                    anchor_id,
-                    egui::Sense::focusable_noninteractive(),
-                );
+                if focus == InitialFocus::FirstField {
+                    body.interact(
+                        egui::Rect::from_min_size(body.max_rect().min, egui::Vec2::ZERO),
+                        anchor_id,
+                        egui::Sense::focusable_noninteractive(),
+                    );
+                }
                 add_contents(&mut body);
                 let mut footer = ui.new_child(
                     egui::UiBuilder::new()
@@ -665,10 +871,18 @@ fn modal_frame(
                 );
                 let message = footer_message(
                     error.as_deref(),
-                    footer_spec.accept_enabled,
+                    footer_spec.enabled(),
                     footer_spec.disabled_reason(),
                 );
-                clicks = paint_footer(&mut footer, layout, &footer_spec, message, extra_buttons);
+                let focus_default = just_opened && focus == InitialFocus::DefaultButton;
+                clicks = paint_footer(
+                    &mut footer,
+                    nature,
+                    &footer_spec,
+                    message,
+                    focus_default,
+                    extra_buttons,
+                );
             });
         },
         |ui, rect| {
@@ -735,9 +949,9 @@ fn modal_frame(
         FrameOutcome::Accept
     } else if clicks.secondary {
         FrameOutcome::Secondary
-    } else if clicks.cancel || (enter && layout == FooterLayout::Confirm) {
+    } else if clicks.cancel || (enter && nature.cancel_is_default()) {
         FrameOutcome::Cancel
-    } else if enter && footer_spec.accept_enabled {
+    } else if enter && footer_spec.enabled() {
         FrameOutcome::Accept
     } else {
         FrameOutcome::Open
@@ -780,16 +994,17 @@ struct FooterClicks {
 /// boutons (S-M7, S-F10).
 fn paint_footer(
     footer: &mut egui::Ui,
-    layout: FooterLayout,
+    nature: DialogNature,
     spec: &DialogFooter<'_>,
     message: Option<FooterMessage<'_>>,
+    focus_default: bool,
     extra_buttons: impl FnOnce(&mut egui::Ui),
 ) -> FooterClicks {
     let mut clicks = FooterClicks::default();
     let default_fill = footer.visuals().selection.bg_fill;
     // Premier ajouté = le plus à droite : le bouton principal — par défaut,
     // sauf dans une confirmation, où il est destructeur et Cancel l'est (S-R4).
-    let confirm = layout == FooterLayout::Confirm;
+    let confirm = nature.cancel_is_default();
     let response = footer
         .scope(|ui| {
             let mut accept = egui::Button::new(spec.accept_label).min_size(FOOTER_BUTTON_SIZE);
@@ -798,11 +1013,16 @@ fn paint_footer(
             } else {
                 accept = accept.fill(default_fill);
             }
-            ui.add_enabled(spec.accept_enabled, accept)
-                .on_hover_text(spec.accept_hint)
+            ui.add_enabled(spec.enabled(), accept)
+                .on_hover_text(spec.hint())
                 .on_disabled_hover_text(spec.disabled_reason())
         })
         .inner;
+    // S-F11 : le bouton par défaut prend le focus à l'ouverture (le principal ;
+    // Cancel dans une confirmation, plus bas).
+    if focus_default && !confirm {
+        response.request_focus();
+    }
     clicks.ids.push(response.id);
     clicks.accept = response.clicked();
     let cancel = |ui: &mut egui::Ui, clicks: &mut FooterClicks| {
@@ -811,24 +1031,27 @@ fn paint_footer(
             button = button.fill(default_fill);
         }
         let response = ui.add(button).on_hover_text(tr!("dialog-cancel", "hint"));
+        if focus_default && confirm {
+            response.request_focus();
+        }
         clicks.ids.push(response.id);
         clicks.cancel = response.clicked();
     };
-    match layout {
-        FooterLayout::Dialog => {
+    match nature.footer() {
+        FooterShape::Dialog => {
             cancel(footer, &mut clicks);
             footer.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 extra_buttons(ui);
                 paint_footer_message(ui, message);
             });
         }
-        FooterLayout::Confirm => {
+        FooterShape::Confirm => {
             cancel(footer, &mut clicks);
             footer.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 paint_footer_message(ui, message);
             });
         }
-        FooterLayout::SaveChanges => {
+        FooterShape::SaveChanges => {
             cancel(footer, &mut clicks);
             footer.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 let response = ui
@@ -845,14 +1068,14 @@ fn paint_footer(
                 paint_footer_message(ui, message);
             });
         }
-        FooterLayout::Wizard => {
+        FooterShape::Wizard => {
             extra_buttons(footer);
             footer.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 cancel(ui, &mut clicks);
                 paint_footer_message(ui, message);
             });
         }
-        FooterLayout::ReadOnly => {
+        FooterShape::ReadOnly => {
             footer.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 extra_buttons(ui);
                 paint_footer_message(ui, message);
@@ -934,62 +1157,42 @@ mod tests {
             .centre
     }
 
-    /// [`modal_frame`] rendu en [`DialogOutcome`].
-    #[expect(clippy::too_many_arguments)]
-    fn dialog_frame(
-        ctx: &egui::Context,
-        id: egui::Id,
-        title: &str,
-        default_size: egui::Vec2,
-        layout: FooterLayout,
-        footer_spec: DialogFooter<'_>,
-        extra_buttons: impl FnOnce(&mut egui::Ui),
-        add_contents: impl FnOnce(&mut egui::Ui),
-    ) -> DialogOutcome {
-        modal_frame(
-            ctx,
-            id,
-            title,
-            default_size,
-            layout,
-            footer_spec,
-            extra_buttons,
-            add_contents,
-        )
-        .dialog()
+    /// Une nature de brouillon, de la taille libre des tests.
+    fn brouillon() -> DialogNature {
+        DialogNature::Draft(InteractiveSize::Free(egui::vec2(600.0, 300.0)))
     }
 
-    /// Un dialogue de `layout` dont le bouton principal est `principal` (grisé
+    /// Une nature d'assistant, de la taille libre des tests.
+    fn assistant() -> DialogNature {
+        DialogNature::Wizard(InteractiveSize::Free(egui::vec2(600.0, 300.0)))
+    }
+
+    /// Un dialogue de `nature` dont le bouton principal est `principal` (grisé
     /// avec la raison `raison` si `actif` est faux), un bouton supplémentaire
     /// « Autre » ; rend l'issue de l'image et ses textes.
     fn pied(
         context: &egui::Context,
-        layout: FooterLayout,
+        nature: DialogNature,
         actif: bool,
         events: Vec<egui::Event>,
         mut contenu: impl FnMut(&mut egui::Ui),
     ) -> (DialogOutcome, Vec<Texte>) {
         let mut issue = DialogOutcome::Open;
         let sortie = image_de(context, egui::vec2(800.0, 600.0), events, |ui| {
-            issue = dialog_frame(
+            issue = modal_frame(
                 ui.ctx(),
                 egui::Id::new("dialogue_pied"),
                 "Titre",
-                egui::vec2(600.0, 300.0),
-                layout,
-                DialogFooter {
-                    accept_label: "Principal",
-                    accept_hint: "Bulle",
-                    accept_enabled: actif,
-                    accept_disabled: Some("Raison"),
-                },
+                nature,
+                DialogFooter::gated("Principal", "Bulle", actif, "Raison"),
                 |ui| {
                     let _ = ui.button("Autre");
                 },
                 |ui| {
                     contenu(ui);
                 },
-            );
+            )
+            .dialog();
         });
         (issue, textes(&sortie.shapes))
     }
@@ -1003,7 +1206,7 @@ mod tests {
         let context = egui::Context::default();
         let mut peints = Vec::new();
         for _ in 0..3 {
-            peints = pied(&context, FooterLayout::Dialog, true, Vec::new(), |_| {}).1;
+            peints = pied(&context, brouillon(), true, Vec::new(), |_| {}).1;
         }
         let (autre, cancel, principal) = (
             centre(&peints, "Autre"),
@@ -1015,7 +1218,7 @@ mod tests {
 
         let context = egui::Context::default();
         for _ in 0..3 {
-            peints = pied(&context, FooterLayout::Wizard, true, Vec::new(), |_| {}).1;
+            peints = pied(&context, assistant(), true, Vec::new(), |_| {}).1;
         }
         let (autre, cancel, principal) = (
             centre(&peints, "Autre"),
@@ -1039,9 +1242,15 @@ mod tests {
         let mut peints = Vec::new();
         for events in [vec![], vec![], vec![], vec![touche(egui::Key::Enter)]] {
             let sortie = image_de(&context, egui::vec2(800.0, 600.0), events, |ui| {
-                issue = modal_read_only(ui.ctx(), id, "Titre", egui::vec2(300.0, 200.0), |ui| {
-                    ui.label("contenu");
-                });
+                issue = modal_read_only(
+                    ui.ctx(),
+                    id,
+                    "Titre",
+                    PlainSize::Content(egui::vec2(300.0, 200.0)),
+                    |ui| {
+                        ui.label("contenu");
+                    },
+                );
             });
             if issue == DialogOutcome::Open {
                 peints = textes(&sortie.shapes);
@@ -1076,17 +1285,17 @@ mod tests {
         let context = egui::Context::default();
         let mut peints = Vec::new();
         for _ in 0..3 {
-            peints = pied(&context, FooterLayout::Dialog, false, Vec::new(), |_| {}).1;
+            peints = pied(&context, brouillon(), false, Vec::new(), |_| {}).1;
         }
         assert!(peints.iter().any(|t| t.texte == "Raison"));
         context.data_mut(|data| {
             data.insert_temp(dialog_error_id(), Some("Échec du calcul".to_string()));
         });
-        peints = pied(&context, FooterLayout::Dialog, false, Vec::new(), |_| {}).1;
+        peints = pied(&context, brouillon(), false, Vec::new(), |_| {}).1;
         assert!(peints.iter().any(|t| t.texte == "Échec du calcul"));
         assert!(!peints.iter().any(|t| t.texte == "Raison"));
         context.data_mut(|data| data.insert_temp(dialog_error_id(), None::<String>));
-        peints = pied(&context, FooterLayout::Dialog, false, Vec::new(), |_| {}).1;
+        peints = pied(&context, brouillon(), false, Vec::new(), |_| {}).1;
         assert!(
             peints.iter().any(|t| t.texte == "Raison"),
             "la raison revient"
@@ -1094,7 +1303,7 @@ mod tests {
 
         let actif = egui::Context::default();
         for _ in 0..3 {
-            peints = pied(&actif, FooterLayout::Dialog, true, Vec::new(), |_| {}).1;
+            peints = pied(&actif, brouillon(), true, Vec::new(), |_| {}).1;
         }
         assert!(!peints.iter().any(|t| t.texte == "Raison"), "témoin");
     }
@@ -1107,7 +1316,7 @@ mod tests {
     ) -> (DialogOutcome, Option<egui::Id>) {
         let mut champ = None;
         let mut case = false;
-        let issue = pied(context, FooterLayout::Dialog, true, events, |ui| {
+        let issue = pied(context, brouillon(), true, events, |ui| {
             ui.checkbox(&mut case, "case");
             champ = Some(ui.text_edit_singleline(texte).id);
         })
@@ -1158,17 +1367,17 @@ mod tests {
     fn sans_champ_le_focus_initial_ne_laisse_rien_de_focalise() {
         let context = egui::Context::default();
         for _ in 0..8 {
-            pied(&context, FooterLayout::Dialog, true, Vec::new(), |ui| {
+            pied(&context, brouillon(), true, Vec::new(), |ui| {
                 ui.label("contenu");
             });
         }
         assert_eq!(context.memory(|memory| memory.focused()), None);
 
         let context = egui::Context::default();
-        pied(&context, FooterLayout::Dialog, true, Vec::new(), |_| {});
+        pied(&context, brouillon(), true, Vec::new(), |_| {});
         let (issue, _) = pied(
             &context,
-            FooterLayout::Dialog,
+            brouillon(),
             true,
             vec![touche(egui::Key::Enter)],
             |_| {},
@@ -1190,7 +1399,7 @@ mod tests {
         let ouvrir = |events: Vec<egui::Event>, taille: egui::Vec2| {
             let mut issue = DialogOutcome::Open;
             image_de(&context, egui::vec2(800.0, 600.0), events, |ui| {
-                issue = modal_dialog(ui.ctx(), id, "Titre", taille, |ui| {
+                issue = modal_dialog(ui.ctx(), id, "Titre", InteractiveSize::Free(taille), |ui| {
                     ui.label("contenu");
                 });
             });
@@ -1245,7 +1454,7 @@ mod tests {
                 ui.ctx(),
                 egui::Id::new("confirmation"),
                 "Supprimer le modèle",
-                egui::vec2(400.0, 160.0),
+                PlainSize::Content(egui::vec2(400.0, 160.0)),
                 "Supprimer",
                 "Irréversible",
                 |ui| {
@@ -1267,7 +1476,7 @@ mod tests {
                 ui.ctx(),
                 egui::Id::new("trio"),
                 "Modifications",
-                egui::vec2(400.0, 160.0),
+                PlainSize::Content(egui::vec2(400.0, 160.0)),
                 |ui| {
                     ui.label("Enregistrer ?");
                 },
@@ -1394,7 +1603,16 @@ mod tests {
         let repos = confirmation(&context, vec![egui::Event::PointerMoved(ailleurs)]).1;
         assert!(!rectangle_de(&repos, rouge), "témoin : pointeur parti");
         let focus = (0..6).any(|_| {
-            let sortie = confirmation(&context, vec![touche(egui::Key::Tab)]).1;
+            // Cancel a le focus à l'ouverture (S-F11) : le verbe est son
+            // voisin d'avant, Maj + Tab y mène.
+            let retour = egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::SHIFT,
+            };
+            let sortie = confirmation(&context, vec![retour]).1;
             rectangle_de(&confirmation(&context, Vec::new()).1, rouge)
                 || rectangle_de(&sortie, rouge)
         });
@@ -1412,7 +1630,7 @@ mod tests {
                     ui.ctx(),
                     egui::Id::new("alerte"),
                     "Échec",
-                    egui::vec2(400.0, 160.0),
+                    PlainSize::Content(egui::vec2(400.0, 160.0)),
                     ("Réessayer", "Aide"),
                     |ui| {
                         ui.label("Raté");
@@ -1439,6 +1657,186 @@ mod tests {
         );
     }
 
+    /// S-F11 : chaque nature dit son pied, sa taille par défaut (une classe),
+    /// son focus initial ; la taille est celle du champ quand l'appelant en
+    /// donne une. Classes : Petite 480 x 170, Moyenne 480 x 420, Grande 640 x 500.
+    #[test]
+    fn chaque_nature_fixe_son_pied_sa_taille_et_son_focus() {
+        use InitialFocus::{DefaultButton, FirstField, Nothing};
+        let petite = egui::vec2(480.0, 170.0);
+        let moyenne = egui::vec2(480.0, 420.0);
+        let grande = egui::vec2(640.0, 500.0);
+        let interactive = InteractiveSize::Default;
+        let simple = PlainSize::Default;
+        for (nature, pied, taille, focus) in [
+            (
+                DialogNature::Settings(interactive),
+                FooterShape::Dialog,
+                moyenne,
+                FirstField,
+            ),
+            (
+                DialogNature::Draft(interactive),
+                FooterShape::Dialog,
+                moyenne,
+                FirstField,
+            ),
+            (
+                DialogNature::Choice(simple),
+                FooterShape::Dialog,
+                petite,
+                FirstField,
+            ),
+            (
+                DialogNature::Wizard(interactive),
+                FooterShape::Wizard,
+                grande,
+                FirstField,
+            ),
+            (
+                DialogNature::ReadOnly(simple),
+                FooterShape::ReadOnly,
+                moyenne,
+                Nothing,
+            ),
+            (
+                DialogNature::Confirm(simple),
+                FooterShape::Confirm,
+                petite,
+                DefaultButton,
+            ),
+            (
+                DialogNature::SaveChanges(simple),
+                FooterShape::SaveChanges,
+                petite,
+                DefaultButton,
+            ),
+            (
+                DialogNature::Alert(simple),
+                FooterShape::ReadOnly,
+                petite,
+                DefaultButton,
+            ),
+        ] {
+            assert_eq!(nature.footer(), pied, "{nature:?} : pied");
+            assert_eq!(nature.size(), taille, "{nature:?} : taille par défaut");
+            assert_eq!(nature.initial_focus(), focus, "{nature:?} : focus");
+        }
+        // Le champ de la variante l'emporte sur la classe par défaut.
+        assert_eq!(
+            DialogNature::Choice(PlainSize::Class(SizeClass::Large)).size(),
+            grande
+        );
+        assert_eq!(
+            DialogNature::Choice(PlainSize::Content(egui::vec2(560.0, 170.0))).size(),
+            egui::vec2(560.0, 170.0)
+        );
+        assert_eq!(
+            DialogNature::Draft(InteractiveSize::Free(egui::vec2(1000.0, 660.0))).size(),
+            egui::vec2(1000.0, 660.0)
+        );
+        assert_eq!(
+            DialogNature::Settings(InteractiveSize::Class(SizeClass::Small)).size(),
+            petite
+        );
+    }
+
+    /// Le widget focalisé est-il le bouton peint `texte` ?
+    fn focus_sur_le_bouton(context: &egui::Context, peints: &[Texte], texte: &str) -> bool {
+        let Some(focused) = context.memory(|memory| memory.focused()) else {
+            return false;
+        };
+        context
+            .read_response(focused)
+            .is_some_and(|response| response.rect.contains(centre(peints, texte)))
+    }
+
+    /// S-F11 : à l'ouverture, une confirmation donne le focus à **Cancel**, un
+    /// enregistrement et une alerte à leur bouton principal — jamais à un champ,
+    /// même si le contenu en a un ; une lecture seule ne le donne à rien.
+    /// Témoin : un brouillon, lui, le donne au champ.
+    #[test]
+    fn le_focus_initial_suit_la_nature() {
+        let mut texte = String::from("abc");
+        let ouvrir = |nature: DialogNature, texte: &mut String| {
+            let context = egui::Context::default();
+            let mut peints = Vec::new();
+            let mut champ = None;
+            for _ in 0..6 {
+                let sortie = image_de(&context, egui::vec2(800.0, 600.0), Vec::new(), |ui| {
+                    modal_frame(
+                        ui.ctx(),
+                        egui::Id::new("nature_focus"),
+                        "Titre",
+                        nature,
+                        DialogFooter::always("Principal", "Bulle"),
+                        |_| {},
+                        |ui| {
+                            champ = Some(ui.text_edit_singleline(texte).id);
+                        },
+                    );
+                });
+                peints = textes(&sortie.shapes);
+            }
+            (context, peints, champ)
+        };
+        let simple = PlainSize::Default;
+
+        let (context, peints, champ) = ouvrir(DialogNature::Confirm(simple), &mut texte);
+        assert!(
+            focus_sur_le_bouton(&context, &peints, &tr!("dialog-cancel")),
+            "Cancel"
+        );
+        assert_ne!(context.memory(|memory| memory.focused()), champ);
+
+        for nature in [
+            DialogNature::SaveChanges(simple),
+            DialogNature::Alert(simple),
+        ] {
+            let (context, peints, champ) = ouvrir(nature, &mut texte);
+            assert!(
+                focus_sur_le_bouton(&context, &peints, "Principal"),
+                "{nature:?}"
+            );
+            assert_ne!(context.memory(|memory| memory.focused()), champ);
+        }
+
+        let (context, _, _) = ouvrir(DialogNature::ReadOnly(simple), &mut texte);
+        assert_eq!(context.memory(|memory| memory.focused()), None, "lecture");
+
+        let (context, _, champ) = ouvrir(DialogNature::Draft(InteractiveSize::Default), &mut texte);
+        assert_eq!(
+            context.memory(|memory| memory.focused()),
+            champ,
+            "témoin : le brouillon va au champ"
+        );
+    }
+
+    /// S-F10, S-F11 : un pied « peut être grisé » grisé montre sa **raison**,
+    /// jamais la bulle du bouton actif ; un pied « toujours actif » n'a pas de
+    /// raison. (La bulle n'est peinte qu'au survol : on lit donc le pied.)
+    #[test]
+    fn un_pied_grise_montre_sa_raison_et_non_sa_bulle() {
+        let context = egui::Context::default();
+        let mut peints = Vec::new();
+        for _ in 0..3 {
+            peints = pied(&context, brouillon(), false, Vec::new(), |_| {}).1;
+        }
+        assert!(peints.iter().any(|t| t.texte == "Raison"));
+        assert!(!peints.iter().any(|t| t.texte == "Bulle"));
+        let grise = DialogFooter::gated("P", "Bulle", false, "Raison");
+        assert!(!grise.enabled());
+        assert_eq!(grise.disabled_reason(), "Raison");
+        assert_eq!(grise.hint(), "Bulle");
+        let toujours = DialogFooter::always("P", "Bulle");
+        assert!(toujours.enabled());
+        assert_eq!(toujours.disabled_reason(), "", "témoin : jamais de raison");
+        assert_eq!(
+            footer_message(None, toujours.enabled(), toujours.disabled_reason()),
+            None
+        );
+    }
+
     /// Une image de 800 × 600 avec `events`, où `ui` dessine l'arrière-plan.
     fn image(context: &egui::Context, events: Vec<egui::Event>, ui: impl FnMut(&mut egui::Ui)) {
         image_de(context, egui::vec2(800.0, 600.0), events, ui);
@@ -1459,10 +1857,15 @@ mod tests {
                     clicks.set(clicks.get() + 1);
                 }
                 if modal {
-                    let close =
-                        modal_dialog(ui.ctx(), id, "Test", egui::vec2(300.0, 200.0), |ui| {
+                    let close = modal_dialog(
+                        ui.ctx(),
+                        id,
+                        "Test",
+                        InteractiveSize::Free(egui::vec2(300.0, 200.0)),
+                        |ui| {
                             ui.label("contenu");
-                        });
+                        },
+                    );
                     if close != DialogOutcome::Open {
                         closed.set(close);
                     }
@@ -1541,13 +1944,8 @@ mod tests {
                         ui.ctx(),
                         id,
                         "Test",
-                        egui::vec2(300.0, 200.0),
-                        DialogFooter {
-                            accept_label: "Suivant",
-                            accept_hint: "",
-                            accept_enabled,
-                            accept_disabled: Some("raison"),
-                        },
+                        brouillon(),
+                        DialogFooter::gated("Suivant", "", accept_enabled, "raison"),
                         |_| {},
                         |ui| {
                             ui.label("contenu");

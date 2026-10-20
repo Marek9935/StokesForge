@@ -14,7 +14,7 @@
 
 use eframe::egui;
 
-use super::dialogs::{modal_read_only, DialogOutcome};
+use super::dialogs::{modal_read_only, DialogOutcome, PlainSize, SizeClass};
 use super::form::{choice, form, ChoiceOption};
 use super::reorder_list::{move_before, reorder_move, reorder_row};
 use super::tab_strip::{tab_strip, TabStripSide};
@@ -51,7 +51,7 @@ pub(super) fn preferences_window(
         ctx,
         egui::Id::new("stokesforge_preferences"),
         &tr!("preferences-title"),
-        egui::vec2(420.0, 300.0),
+        PlainSize::Class(SizeClass::Medium),
         |ui| {
             let tabs = [
                 (Page::General, tr!("preferences-general")),

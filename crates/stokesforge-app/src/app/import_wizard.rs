@@ -24,7 +24,8 @@ use stokesforge_app_state::state::{
 use stokesforge_app_state::tr;
 
 use super::dialogs::{
-    modal_confirm, modal_wizard, ConfirmOutcome, DialogFooter, DialogOutcome, FOOTER_BUTTON_SIZE,
+    modal_confirm, modal_wizard, ConfirmOutcome, DialogFooter, DialogOutcome, InteractiveSize,
+    PlainSize, FOOTER_BUTTON_SIZE,
 };
 use super::form::{choice, choice_by, form, ChoiceOption, Form};
 use super::hover_help::{help_beside, help_text};
@@ -525,7 +526,7 @@ fn import_template_controls(rows: &mut Form<'_>, state: &mut AppState, actions: 
             rows.ui().ctx(),
             egui::Id::new("stokesforge_import_template_delete"),
             &tr!("import-files-delete-title"),
-            egui::vec2(420.0, 150.0),
+            PlainSize::Default,
             &tr!("import-files-delete-yes"),
             &tr!("import-files-delete-yes", "hint"),
             |ui| {
@@ -1343,7 +1344,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
     // dans les mêmes demandes, l'une après l'autre : `RefCell`.
     let requests = std::cell::RefCell::new(ImportWizardRequests::default());
     // Grisé, Finish dit pourquoi (S-G1, S-F10) : dans le pied et dans sa bulle
-    // (`accept_disabled`).
+    // (`DialogFooter::gated`).
     let (finish_label, finish_hint) = (
         tr!("import-button-finish"),
         tr!("import-button-finish", "hint"),
@@ -1353,13 +1354,9 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
         ctx,
         egui::Id::new("stokesforge_import_wizard"),
         &tr!("import-window-title"),
-        egui::vec2(1000.0, 620.0),
-        DialogFooter {
-            accept_label: &finish_label,
-            accept_hint: &finish_hint,
-            accept_enabled: has_files,
-            accept_disabled: Some(&add_file_first),
-        },
+        // TAILLE-LIBRE(#300): six étapes dont un aperçu du fichier à droite à toutes les étapes ; le tableau de l'aperçu demande plus de 600 px de large, au-delà de la classe Large
+        InteractiveSize::Free(egui::vec2(1000.0, 620.0)),
+        DialogFooter::gated(&finish_label, &finish_hint, has_files, &add_file_first),
         |footer| {
             // Ajoutés de droite à gauche, contre Finish : « Next » puis
             // « Back » (S-F6 : Back · Next · Finish groupés à droite).

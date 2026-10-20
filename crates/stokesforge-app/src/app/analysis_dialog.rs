@@ -16,7 +16,8 @@ use stokesforge_core::number_format::{format_exact, format_with_uncertainty};
 use super::analysis_forms::{form_body, value_row};
 use super::analysis_preview::{preview, PreviewOutcome};
 use super::dialogs::{
-    modal_confirm, modal_dialog_with, ConfirmOutcome, DialogFooter, DialogOutcome,
+    modal_confirm, modal_dialog_with, ConfirmOutcome, DialogFooter, DialogNature, DialogOutcome,
+    InteractiveSize, PlainSize,
 };
 use super::form::{toggle_texts, ChoiceOption};
 use crate::theme;
@@ -204,13 +205,14 @@ pub(super) fn analysis_window(
         ctx,
         id,
         &title,
-        egui::vec2(1000.0, 660.0),
-        DialogFooter {
-            accept_label: &accept_label,
-            accept_hint: &accept_hint,
+        // TAILLE-LIBRE(#300): deux colonnes (réglages de 330 et aperçu cliquable avec ses outils et ses valeurs) : l'aperçu a besoin de 600 px de large au moins, au-delà de la classe Large
+        DialogNature::Draft(InteractiveSize::Free(egui::vec2(1000.0, 660.0))),
+        DialogFooter::gated(
+            &accept_label,
+            &accept_hint,
             accept_enabled,
-            accept_disabled: Some(&accept_disabled),
-        },
+            &accept_disabled,
+        ),
         |_| {},
         |ui| {
             let full = ui.available_size();
@@ -309,13 +311,8 @@ pub(super) fn calculation_delete_window(
         ctx,
         egui::Id::new("stokesforge_delete_calculation"),
         &tr!("analysis-delete-title"),
-        egui::vec2(520.0, 190.0),
-        DialogFooter {
-            accept_label: &accept,
-            accept_hint: &accept_hint,
-            accept_enabled: true,
-            accept_disabled: None,
-        },
+        DialogNature::Choice(PlainSize::Default),
+        DialogFooter::always(&accept, &accept_hint),
         |ui| {
             if ui
                 .button(tr!("analysis-delete-with-columns"))
@@ -369,7 +366,7 @@ pub(super) fn analysis_replace_window(
         ctx,
         egui::Id::new("stokesforge_replace_analysis"),
         &tr!("analysis-replace-title"),
-        egui::vec2(520.0, 170.0),
+        PlainSize::Default,
         &tr!("analysis-replace-accept"),
         &tr!("analysis-output-replace-hint"),
         |ui| {

@@ -27,23 +27,13 @@ use stokesforge_app_state::state::{
 use stokesforge_app_state::tr;
 
 use super::curve_settings::curve_settings_page;
-use super::dialogs::{modal_dialog, modal_read_only, DialogOutcome};
+use super::dialogs::{
+    modal_dialog, modal_read_only, DialogOutcome, InteractiveSize, PlainSize, SizeClass,
+};
 use super::form::{choice, form, ChoiceOption, Form};
 use super::graph_window::{published_axis_bounds, PanelBounds};
 use super::hover_help::hover_help;
 use super::tab_strip::{tab_strip, TabStripSide};
-
-/// Largeur par défaut de la fenêtre des propriétés d'un graphe
-/// ([`plot_settings_window`]).
-const PLOT_SETTINGS_WIDTH: f32 = 380.0;
-/// Hauteur par défaut de la fenêtre des propriétés d'un graphe. La fenêtre
-/// se redimensionne ensuite librement, y compris plus haut que son contenu
-/// (voir [`plot_settings_contents`]).
-const PLOT_SETTINGS_HEIGHT: f32 = 460.0;
-/// Dimensions par défaut de la fenêtre des séries (#179) : une liste et un
-/// éditeur côte à côte.
-const CURVE_SETTINGS_WIDTH: f32 = 640.0;
-const CURVE_SETTINGS_HEIGHT: f32 = 500.0;
 
 /// Fenêtre des propriétés d'un graphe : un dialogue flottant (même famille
 /// que `import_window`), ouvert par le clic droit sur un composant du
@@ -93,13 +83,16 @@ pub(super) fn plot_settings_window(ctx: &egui::Context, state: &mut AppState) {
         (
             tr!("curve-window-title", name = node.name()),
             "stokesforge_curve_settings",
-            egui::vec2(CURVE_SETTINGS_WIDTH, CURVE_SETTINGS_HEIGHT),
+            // Les séries (#179) : une liste et un éditeur côte à côte.
+            InteractiveSize::Class(SizeClass::Large),
         )
     } else {
         (
             tr!("plot-window-title", name = node.name()),
             "stokesforge_plot_settings",
-            egui::vec2(PLOT_SETTINGS_WIDTH, PLOT_SETTINGS_HEIGHT),
+            // La fenêtre se redimensionne ensuite librement, y compris plus
+            // haut que son contenu (voir [`plot_settings_contents`]).
+            InteractiveSize::Class(SizeClass::Medium),
         )
     };
     state.begin_plot_edit(settings.graph);
@@ -141,7 +134,7 @@ pub(super) fn column_metadata_window(
         ctx,
         egui::Id::new("stokesforge_column_metadata"),
         &title,
-        egui::vec2(520.0, 420.0),
+        PlainSize::Class(SizeClass::Medium),
         |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 egui::Grid::new("stokesforge_column_metadata_grid")

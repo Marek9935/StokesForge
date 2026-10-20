@@ -13,7 +13,9 @@
 
 use eframe::egui;
 
-use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
+use super::dialogs::{
+    modal_dialog_with, DialogFooter, DialogNature, DialogOutcome, InteractiveSize,
+};
 use super::form::{choice, form, ChoiceOption};
 use super::hover_help::help_beside;
 use super::reorder_list::{move_before, reorder_move, reorder_row};
@@ -224,13 +226,14 @@ pub(super) fn preferences_proto(ctx: &egui::Context, bench: &mut Bench) {
         ctx,
         egui::Id::new("preferences_proto"),
         "Preferences",
-        egui::vec2(560.0, 470.0),
-        DialogFooter {
-            accept_label: "Apply",
-            accept_hint: "Save the preferences and close.",
-            accept_enabled: blocker.is_none(),
-            accept_disabled: blocker.as_deref(),
-        },
+        // TAILLE-LIBRE(#300): banc de test dont les captures de référence (tests/snapshots/preferences_proto_*.png) fixent la taille
+        DialogNature::Draft(InteractiveSize::Free(egui::vec2(560.0, 470.0))),
+        DialogFooter::gated(
+            "Apply",
+            "Save the preferences and close.",
+            blocker.is_none(),
+            blocker.as_deref().unwrap_or(""),
+        ),
         |ui| {
             if ui.button("Reset Page").clicked() {
                 reset_page.set(true);

@@ -45,7 +45,7 @@ dit *comment* l'écrire. Points qui touchent les mots :
 - **raison d'un grisage** : dit quoi faire (« Select a series first »),
   clé `disabled-*` (#226) ou attribut `.disabled` de la clé ; pour le bouton
   principal d'un dialogue, la même phrase s'écrit aussi dans le pied
-  (`DialogFooter::accept_disabled`, #228) — courte, une ligne ;
+  (`DialogFooter::gated`, #228) — courte, une ligne ;
 - **pied des dialogues** : `dialog-ok`, `dialog-cancel`, `dialog-close`
   (lecture seule) ; une erreur d'un geste du dialogue y va d'office par
   `fail` (clé `error-*`), jamais dans la barre d'état ;

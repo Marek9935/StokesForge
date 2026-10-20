@@ -40,7 +40,14 @@
 //!   dont les arguments nomment un outil n'est pas dans une fenêtre ; exception
 //!   par `// OUTIL-EN-FENETRE(#299): <justification>` écrit juste avant ;
 //! - `aucun_geste_hors_de_la_matrice` (#299, D4) : tout fichier qui lit une
-//!   molette ou un double-clic est cité par `docs/gestes.md`.
+//!   molette ou un double-clic est cité par `docs/gestes.md` ;
+//! - `aucune_taille_libre_sans_justification` (#300, S-F11) : une fenêtre
+//!   interactive prend une classe de taille ; une taille libre
+//!   (`InteractiveSize::Free`) exige `// TAILLE-LIBRE(#300): <justification>`
+//!   juste avant ;
+//! - `le_catalogue_des_fenetres_et_le_code_concordent` (#300, S-F11) : tout
+//!   identifiant `stokesforge_…` passé à une fonction `modal_*` figure dans
+//!   `docs/fenetres.md`, et réciproquement ; ne vérifie pas les tailles.
 //!
 //! L'ancienne garde « les modules d'état ne nomment pas egui » (#255) n'est
 //! plus : depuis #263 ces modules vivent dans `stokesforge-app-state`, qui ne
@@ -1614,16 +1621,16 @@ fn nomme_un_outil(arguments: &str) -> bool {
         .contains("tool")
 }
 
-/// La justification du marqueur [`MARQUEUR_OUTIL`] dans les
-/// [`PORTEE_DU_MARQUEUR`] lignes qui précèdent la ligne `ligne` (1-based) ou
-/// sur elle, `None` si aucun marqueur.
-fn justification_du_marqueur(original: &[char], ligne: usize) -> Option<String> {
+/// La justification de `marqueur` (ici [`MARQUEUR_OUTIL`], plus bas
+/// [`MARQUEUR_TAILLE`]) dans les [`PORTEE_DU_MARQUEUR`] lignes qui précèdent la
+/// ligne `ligne` (1-based) ou sur elle, `None` si aucun marqueur.
+fn justification_du_marqueur(original: &[char], ligne: usize, marqueur: &str) -> Option<String> {
     let texte: String = original.iter().collect();
     let lignes: Vec<&str> = texte.lines().collect();
     let fin = ligne.min(lignes.len());
     let debut = fin.saturating_sub(PORTEE_DU_MARQUEUR + 1);
     lignes[debut..fin].iter().rev().find_map(|ligne| {
-        let (_, reste) = ligne.split_once(MARQUEUR_OUTIL)?;
+        let (_, reste) = ligne.split_once(marqueur)?;
         Some(reste.trim().to_string())
     })
 }
@@ -1651,7 +1658,7 @@ fn selecteurs_d_outil_sans_exception(sources: &[Fichier]) -> Vec<String> {
             }
             let ligne = ligne_de(&source.original, i);
             let endroit = format!("src/{}:{ligne}", fichier.chemin);
-            match justification_du_marqueur(&source.original, ligne) {
+            match justification_du_marqueur(&source.original, ligne, MARQUEUR_OUTIL) {
                 None => trouves.push(format!("{endroit} : aucun marqueur")),
                 Some(texte) if texte.chars().count() < JUSTIFICATION_MINIMALE => {
                     trouves.push(format!("{endroit} : justification vide ou trop courte"));
@@ -1878,4 +1885,296 @@ fn la_garde_des_gestes_voit_un_geste_hors_de_la_matrice() {
     // Une citation périmée : `app/vieux.rs` n'existe plus.
     let ecarts = ecarts_de_la_matrice(&[fichier("app/grid.rs", "fn g() {}")], matrice);
     assert_eq!(ecarts.len(), 1, "{ecarts:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Une taille libre se justifie (#300, S-F11)
+// ---------------------------------------------------------------------------
+
+/// Le marqueur d'une fenêtre interactive hors des classes de taille :
+/// `// TAILLE-LIBRE(#300): <pourquoi aucune classe ne convient>`.
+const MARQUEUR_TAILLE: &str = "TAILLE-LIBRE(#300):";
+
+/// La forme qui demande une taille libre : la fenêtre **sans** interaction
+/// riche prend la taille de son contenu par `PlainSize::Content`, sans marqueur.
+const TAILLE_LIBRE: &str = "InteractiveSize::Free(";
+
+/// Les tailles libres du code de production sans leur exception justifiée,
+/// `chemin:ligne : raison`.
+fn tailles_libres_sans_justification(sources: &[Fichier]) -> Vec<String> {
+    let mut trouvees = Vec::new();
+    for fichier in sources {
+        let source = fichier.production();
+        for i in 0..source.masque.len() {
+            if !commence_par(&source.masque, i, TAILLE_LIBRE) {
+                continue;
+            }
+            let ligne = ligne_de(&source.original, i);
+            let endroit = format!("src/{}:{ligne}", fichier.chemin);
+            match justification_du_marqueur(&source.original, ligne, MARQUEUR_TAILLE) {
+                None => trouvees.push(format!("{endroit} : aucun marqueur")),
+                Some(texte) if texte.chars().count() < JUSTIFICATION_MINIMALE => {
+                    trouvees.push(format!("{endroit} : justification vide ou trop courte"));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    trouvees
+}
+
+/// Règle #300 (S-F11) : une fenêtre interactive (réglages, brouillon,
+/// assistant) prend l'une des trois classes de taille de `app/dialogs.rs`
+/// (Petite, Moyenne, Grande) ; hors classes, `InteractiveSize::Free` exige
+/// `// TAILLE-LIBRE(#300): <justification>` dans les douze lignes qui
+/// précèdent, justification d'au moins 15 caractères. Les fenêtres sans
+/// interaction riche (confirmation, alerte, lecture seule, choix) prennent la
+/// taille de leur contenu sans marqueur : le type ne laisse pas la fenêtre
+/// interactive en faire autant.
+#[test]
+fn aucune_taille_libre_sans_justification() {
+    let sources = sources::sources();
+    assert!(
+        sources.iter().any(|f| f.chemin == "app/dialogs.rs"),
+        "app/dialogs.rs non lu : la garde ne verrait plus la brique des dialogues"
+    );
+    let fautives = tailles_libres_sans_justification(&sources);
+    assert!(
+        fautives.is_empty(),
+        "taille libre sans justification — prendre une classe (SizeClass) ou écrire \
+         `// {MARQUEUR_TAILLE} <justification>` juste avant (docs/fenetres.md) : {fautives:?}"
+    );
+}
+
+/// Le témoin : une taille libre nue est vue ; une exception vide, trop courte,
+/// d'un autre numéro, sans numéro ou trop loin l'est aussi ; une exception
+/// justifiée, un commentaire, une chaîne et le code de test passent.
+#[test]
+fn la_garde_des_tailles_voit_une_taille_libre_nue() {
+    let nue = "fn f() { let _ = DialogNature::Draft(InteractiveSize::Free(vec2(1.0, 2.0))); }";
+    assert_eq!(
+        tailles_libres_sans_justification(&[fichier("app/w.rs", nue)]).len(),
+        1
+    );
+    let loin = "\n".repeat(PORTEE_DU_MARQUEUR + 2);
+    for avant in [
+        "// TAILLE-LIBRE(#300):\n".to_string(),
+        "// TAILLE-LIBRE(#300): ok\n".to_string(),
+        "// TAILLE-LIBRE: l'aperçu demande beaucoup de place\n".to_string(),
+        "// TAILLE-LIBRE(#299): l'aperçu demande beaucoup de place\n".to_string(),
+        format!("// TAILLE-LIBRE(#300): l'aperçu demande beaucoup de place{loin}"),
+    ] {
+        let code = format!(
+            "fn f() {{\n{avant}let _ = DialogNature::Draft(InteractiveSize::Free(vec2(1.0, 2.0)));\n}}"
+        );
+        assert_eq!(
+            tailles_libres_sans_justification(&[fichier("app/w.rs", &code)]).len(),
+            1,
+            "exception acceptée à tort : {code}"
+        );
+    }
+    for code in [
+        "fn f() {\n// TAILLE-LIBRE(#300): l'aperçu demande beaucoup de place\nlet _ = InteractiveSize::Free(v);\n}",
+        "fn f() {\n// TAILLE-LIBRE(#300): l'aperçu demande beaucoup de place\n// (suite)\nlet _ = InteractiveSize::Free(v);\n}",
+        "fn f() { // InteractiveSize::Free(v)\n let _ = \"InteractiveSize::Free(v)\"; }",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { let _ = InteractiveSize::Free(v); } }",
+        "fn f() { let _ = PlainSize::Content(v); let _ = InteractiveSize::Class(c); }",
+    ] {
+        assert!(
+            tailles_libres_sans_justification(&[fichier("app/w.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Le catalogue des fenêtres et le code concordent (#300, S-F11)
+// ---------------------------------------------------------------------------
+
+/// Les fonctions de dialogue modal : un identifiant `stokesforge_…` passé à
+/// l'une d'elles est celui d'une fenêtre du catalogue.
+const APPELS_MODAUX: [&str; 7] = [
+    "modal_dialog_with",
+    "modal_dialog",
+    "modal_wizard",
+    "modal_read_only",
+    "modal_confirm",
+    "modal_save_changes",
+    "modal_alert",
+];
+
+/// Les identifiants que le code **construit** (un `&str` choisi avant l'appel,
+/// pas un littéral dans ses arguments) : la garde ne les voit pas dans un appel
+/// et se contente de les chercher comme littéraux, puis dans le catalogue.
+const IDENTIFIANTS_CONSTRUITS: [&str; 3] = [
+    "stokesforge_plot_settings",
+    "stokesforge_curve_settings",
+    "stokesforge_analysis",
+];
+
+/// Les littéraux `"stokesforge_…"` écrits dans les arguments d'un appel modal
+/// de `fichier`, `(identifiant, ligne)`.
+fn identifiants_passes_aux_dialogues(fichier: &Fichier) -> Vec<(String, usize)> {
+    let source = fichier.production();
+    let mut trouves = Vec::new();
+    for i in 0..source.masque.len() {
+        let Some(nom) = APPELS_MODAUX
+            .iter()
+            .find(|nom| mot_en(&source.masque, i, nom))
+        else {
+            continue;
+        };
+        let apres = i + nom.len();
+        let definition = i >= 3 && commence_par(&source.masque, i - 3, "fn ");
+        if source.masque.get(apres) != Some(&'(') || definition {
+            continue;
+        }
+        let Some(fin) = fermante(&source.masque, apres) else {
+            continue;
+        };
+        // L'identifiant précède les fermetures du contenu : un `"stokesforge_…"`
+        // d'une grille ou d'un défilement qui y est posé n'est pas une fenêtre.
+        let arguments: String = source.code[apres..=fin].iter().collect();
+        let arguments = arguments.split('|').next().unwrap_or_default();
+        for (k, _) in arguments.match_indices("\"stokesforge_") {
+            let identifiant: String = arguments[k + 1..]
+                .chars()
+                .take_while(|c| est_ident(*c))
+                .collect();
+            trouves.push((identifiant, ligne_de(&source.original, i)));
+        }
+    }
+    trouves
+}
+
+/// Les identifiants `stokesforge_…` écrits entre apostrophes inverses dans le
+/// catalogue.
+fn identifiants_du_catalogue(catalogue: &str) -> Vec<String> {
+    catalogue
+        .split('`')
+        .skip(1)
+        .step_by(2)
+        .filter(|jeton| jeton.starts_with("stokesforge_") && jeton.chars().all(est_ident))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Les écarts entre les appels modaux du code et le catalogue : un identifiant
+/// passé à un dialogue absent du catalogue, une ligne du catalogue sans appel.
+fn ecarts_du_catalogue(sources: &[Fichier], catalogue: &str, construits: &[&str]) -> Vec<String> {
+    let dans_le_catalogue = identifiants_du_catalogue(catalogue);
+    let mut ecarts = Vec::new();
+    let mut appeles = Vec::new();
+    let mut litteraux = String::new();
+    for fichier in sources {
+        litteraux.push_str(&fichier.production().code_en_texte());
+        for (identifiant, ligne) in identifiants_passes_aux_dialogues(fichier) {
+            if !dans_le_catalogue.contains(&identifiant) {
+                ecarts.push(format!(
+                    "src/{}:{ligne} : `{identifiant}` passé à un dialogue, absent de docs/fenetres.md",
+                    fichier.chemin
+                ));
+            }
+            appeles.push(identifiant);
+        }
+    }
+    for identifiant in &dans_le_catalogue {
+        let construit = construits.contains(&identifiant.as_str())
+            && litteraux.contains(&format!("\"{identifiant}\""));
+        if !appeles.contains(identifiant) && !construit {
+            ecarts.push(format!(
+                "docs/fenetres.md : `{identifiant}` sans appel de dialogue dans le code"
+            ));
+        }
+    }
+    for construit in construits {
+        if !dans_le_catalogue.iter().any(|id| id == construit) {
+            ecarts.push(format!(
+                "`{construit}` (identifiant construit) absent de docs/fenetres.md"
+            ));
+        }
+    }
+    ecarts
+}
+
+/// Le catalogue des fenêtres.
+fn catalogue_des_fenetres() -> String {
+    let chemin = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("docs")
+        .join("fenetres.md");
+    std::fs::read_to_string(&chemin)
+        .unwrap_or_else(|e| panic!("{} illisible : {e}", chemin.display()))
+}
+
+/// Règle #300 (S-F11) : `docs/fenetres.md` est le catalogue des fenêtres. Tout
+/// identifiant `stokesforge_…` passé à une fonction `modal_*` y figure, et toute
+/// ligne du catalogue a son appel : une fenêtre neuve entre dans le catalogue
+/// dans le même commit, une fenêtre retirée en sort. Les identifiants construits
+/// avant l'appel (`IDENTIFIANTS_CONSTRUITS`) sont vérifiés comme littéraux.
+/// **Ne vérifie pas** les tailles, les types ni les pages : elles restent à la
+/// relecture.
+#[test]
+fn le_catalogue_des_fenetres_et_le_code_concordent() {
+    let sources = sources::sources();
+    assert!(
+        sources.iter().any(|f| f.chemin == "app/confirmations.rs"),
+        "app/confirmations.rs non lu : la garde ne verrait plus les dialogues bloquants"
+    );
+    let ecarts = ecarts_du_catalogue(
+        &sources,
+        &catalogue_des_fenetres(),
+        &IDENTIFIANTS_CONSTRUITS,
+    );
+    assert!(ecarts.is_empty(), "{ecarts:?}");
+}
+
+/// Le témoin : un identifiant passé à un dialogue mais absent du catalogue est
+/// vu, sous chaque fonction modale ; une ligne du catalogue sans appel l'est
+/// aussi ; un identifiant construit sans littéral l'est aussi ; un appel
+/// catalogué, un identifiant construit présent, une définition, un commentaire
+/// et le code de test passent.
+#[test]
+fn la_garde_du_catalogue_voit_un_ecart() {
+    let catalogue = "| Fenêtre | `stokesforge_connue` | `stokesforge_construite` |";
+    let construit = ["stokesforge_construite"];
+    let base = "fn g() { let _ = \"stokesforge_construite\"; }";
+    let appel = "fn h() { modal_dialog(egui::Id::new(\"stokesforge_connue\")); }";
+    let avec = |code: &str| {
+        vec![
+            fichier("app/w.rs", code),
+            fichier("app/c.rs", base),
+            fichier("app/d.rs", appel),
+        ]
+    };
+    assert!(ecarts_du_catalogue(&avec("fn f() {}"), catalogue, &construit).is_empty());
+    for nom in APPELS_MODAUX {
+        let code = format!("fn f() {{ {nom}(ctx, egui::Id::new(\"stokesforge_inconnue\"), t); }}");
+        assert_eq!(
+            ecarts_du_catalogue(&avec(&code), catalogue, &construit).len(),
+            1,
+            "non vu : {nom}"
+        );
+    }
+    // Une ligne du catalogue sans appel.
+    let seul = [fichier("app/c.rs", base)];
+    assert_eq!(ecarts_du_catalogue(&seul, catalogue, &construit).len(), 1);
+    // Un identifiant construit sans littéral dans le code.
+    let sans_litteral = [fichier("app/d.rs", appel)];
+    assert_eq!(
+        ecarts_du_catalogue(&sans_litteral, catalogue, &construit).len(),
+        1
+    );
+    for code in [
+        "fn modal_dialog(ctx: &Context, id: Id) {}",
+        "fn f() { // modal_alert(ctx, Id::new(\"stokesforge_inconnue\"))\n }",
+        "fn f() {}\n#[cfg(test)]\nmod tests { fn g() { modal_alert(Id::new(\"stokesforge_inconnue\")); } }",
+        "fn f() { modal_dialog_with(ctx, id, t, n); }",
+    ] {
+        assert!(
+            ecarts_du_catalogue(&avec(code), catalogue, &construit).is_empty(),
+            "faux positif : {code}"
+        );
+    }
 }

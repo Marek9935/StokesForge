@@ -10,7 +10,7 @@
 
 use eframe::egui;
 
-use super::dialogs::{modal_dialog_with, DialogFooter, DialogOutcome};
+use super::dialogs::{modal_dialog_with, DialogFooter, DialogNature, DialogOutcome, PlainSize};
 use stokesforge_app_state::state::{Action, AppState, StaleExport};
 use stokesforge_app_state::tr;
 
@@ -30,13 +30,9 @@ pub(super) fn stale_export_window(
         ctx,
         egui::Id::new("stokesforge_stale_export"),
         &tr!("stale-export-title"),
-        egui::vec2(560.0, 170.0),
-        DialogFooter {
-            accept_label: &accept,
-            accept_hint: &accept_hint,
-            accept_enabled: true,
-            accept_disabled: None,
-        },
+        // Quatre boutons aux libellés longs : plus large que la classe Small.
+        DialogNature::Choice(PlainSize::Content(egui::vec2(560.0, 170.0))),
+        DialogFooter::always(&accept, &accept_hint),
         |ui| {
             if ui
                 .button(tr!("stale-export-without-warning"))

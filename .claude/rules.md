@@ -28,7 +28,7 @@ l'historique ou à l'acteur.
 | Test de robustesse `bN` | `docs/tests.md` | `stokesforge-robustesse/src/lib.rs` (index) + le **seul** fichier `bN` visé + le crate qu'il éprouve | les 20 autres fichiers de `tests/` |
 | Question transverse (« où vit X ? ») | `docs/README.md` | rien encore | tout |
 
-**Fenêtre ou dialogue neuf (#300, E1).** Ouvrir la liste des fenêtres existantes (`docs/fenetres.md`) et **une fenêtre de référence du même type** (son module dans `src/app/` : `window_*.rs`, `dialogs.rs`…) : on imite un jumeau, on n'invente pas. Ces modules ne sont alors plus « à ne pas ouvrir ». Lire aussi `docs/principes-ui.md`.
+**Fenêtre ou dialogue neuf (#300, E1).** Choisir sa **nature** (`DialogNature` dans `app/dialogs.rs`, S-F11 : elle fixe le pied, la classe de taille Petite / Moyenne / Grande, le focus initial) et l'ajouter au catalogue avec son identifiant `stokesforge_…`. Ouvrir la liste des fenêtres existantes (`docs/fenetres.md`) et **une fenêtre de référence du même type** (son module dans `src/app/` : `window_*.rs`, `dialogs.rs`…) : on imite un jumeau, on n'invente pas. Ces modules ne sont alors plus « à ne pas ouvrir ». Lire aussi `docs/principes-ui.md`.
 
 ## Les pièges qui coûtent le plus cher
 

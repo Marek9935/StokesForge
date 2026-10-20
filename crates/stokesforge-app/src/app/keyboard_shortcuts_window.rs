@@ -4,7 +4,7 @@
 
 use eframe::egui;
 
-use super::dialogs::{modal_read_only, DialogOutcome};
+use super::dialogs::{modal_read_only, DialogOutcome, PlainSize};
 use super::shortcuts::{HelpArea, HELP};
 use crate::theme;
 use stokesforge_app_state::state::{Action, AppState};
@@ -23,7 +23,7 @@ pub(super) fn keyboard_shortcuts_window(
         ctx,
         egui::Id::new("stokesforge_keyboard_shortcuts"),
         &tr!("keyboard-shortcuts-title"),
-        egui::vec2(480.0, 460.0),
+        PlainSize::Content(egui::vec2(480.0, 460.0)),
         |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for area in HelpArea::ALL {
@@ -65,17 +65,23 @@ mod tests {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut actions = Vec::new();
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(900.0, 700.0),
-                )),
-                ..Default::default()
-            },
-            |_| keyboard_shortcuts_window(&ctx, &state, &mut actions),
-        );
-        output.textures_delta.clear();
+        // Deux images : une fenêtre se peint à la seconde (la première la
+        // mesure) ; une lecture seule n'a plus de passe jetée du focus initial
+        // pour la lui donner (S-F11).
+        let mut output = egui::FullOutput::default();
+        for _ in 0..2 {
+            output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 700.0),
+                    )),
+                    ..Default::default()
+                },
+                |_| keyboard_shortcuts_window(&ctx, &state, &mut actions),
+            );
+            output.textures_delta.clear();
+        }
         session.shutdown().unwrap();
         output
             .shapes

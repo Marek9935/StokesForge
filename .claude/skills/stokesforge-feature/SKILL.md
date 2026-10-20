@@ -42,7 +42,7 @@ Dans cet ordre, sans sauter d'étape :
 6. **Jumeaux (#300, #299) — pour toute fenêtre, dialogue ou geste neuf.**
    Lister les équivalents existants (`docs/fenetres.md`), dire lequel on
    imite, et comparer une capture (`run-stokesforge`) de la fenêtre neuve avec
-   celle de référence. Une fenêtre neuve a sa **maquette validée par
+   celle de référence. Une fenêtre neuve choisit sa **nature** (`DialogNature`, S-F11 : pied, classe de taille, focus) dans `docs/fenetres.md` et entre dans son catalogue. Une fenêtre neuve a sa **maquette validée par
    l'utilisateur avant le code** (E2 : toujours ; formulaire de décisions,
    cf. `stokesforge-bug-report/references/formulaire-de-decisions.md`). Poser
    aussi la question #299 : « ce geste existe-t-il déjà ailleurs, et sous quel

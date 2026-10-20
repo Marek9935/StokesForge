@@ -28,11 +28,12 @@ use stokesforge_app_state::tr;
 
 use super::dialogs::{
     modal_alert, modal_confirm, modal_dialog_with, modal_read_only, modal_save_changes,
-    AlertOutcome, ConfirmOutcome, DialogFooter, DialogOutcome, SaveChangesOutcome,
+    AlertOutcome, ConfirmOutcome, DialogFooter, DialogNature, DialogOutcome, PlainSize,
+    SaveChangesOutcome, SizeClass,
 };
 
-/// Taille par défaut d'un dialogue bloquant.
-const BLOCKING_DIALOG_SIZE: egui::Vec2 = egui::vec2(480.0, 170.0);
+// Tous les dialogues bloquants sont de classe Petite (S-F11), la taille par
+// défaut de leur nature, sauf deux lectures seules qui la demandent.
 
 /// Peint le dialogue bloquant en attente, s'il y en a un, et pousse sa réponse.
 pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Action>) {
@@ -46,7 +47,7 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             ctx,
             egui::Id::new("stokesforge_alert"),
             &tr!("alert-low-r2-title"),
-            BLOCKING_DIALOG_SIZE,
+            PlainSize::Class(SizeClass::Small),
             |ui| {
                 ui.label(tr!("alert-low-r2"));
                 // Texte normal : les compteurs sont le contenu de la boîte.
@@ -64,7 +65,7 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             ctx,
             egui::Id::new("stokesforge_alert"),
             &tr!("alert-session-lost-title"),
-            BLOCKING_DIALOG_SIZE,
+            PlainSize::Class(SizeClass::Small),
             |ui| {
                 ui.label(tr!("alert-session-lost"));
                 ui.label(egui::RichText::new(&alert.message).weak());
@@ -99,7 +100,7 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             ctx,
             egui::Id::new("stokesforge_alert"),
             &title,
-            BLOCKING_DIALOG_SIZE,
+            PlainSize::Default,
             (&action.0, &action.1),
             |ui| {
                 ui.label(intro);
@@ -123,7 +124,7 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             ctx,
             egui::Id::new("stokesforge_overwrite"),
             &tr!("overwrite-title"),
-            BLOCKING_DIALOG_SIZE,
+            PlainSize::Default,
             &tr!("overwrite-replace"),
             &tr!("overwrite-replace", "hint"),
             |ui| {
@@ -151,7 +152,7 @@ fn unsaved_dialog(ctx: &egui::Context, gesture: &UnsavedGesture, actions: &mut V
         ctx,
         egui::Id::new("stokesforge_unsaved"),
         &tr!("unsaved-title"),
-        BLOCKING_DIALOG_SIZE,
+        PlainSize::Default,
         |ui| {
             ui.label(question);
         },
@@ -175,13 +176,8 @@ fn row_drop_dialog(ctx: &egui::Context, actions: &mut Vec<Action>) {
         ctx,
         egui::Id::new("stokesforge_row_drop"),
         &tr!("row-drop-title"),
-        BLOCKING_DIALOG_SIZE,
-        DialogFooter {
-            accept_label: &label,
-            accept_hint: &hint,
-            accept_enabled: true,
-            accept_disabled: None,
-        },
+        DialogNature::Choice(PlainSize::Default),
+        DialogFooter::always(&label, &hint),
         |ui| {
             if ui
                 .button(tr!("row-drop-present-axis"))

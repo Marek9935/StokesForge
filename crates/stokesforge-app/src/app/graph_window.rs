@@ -29,7 +29,7 @@ use stokesforge_app_state::state::{
 use stokesforge_app_state::tr;
 
 use super::analysis_handles::calculation_handles;
-use super::dialogs::{modal_dialog, DialogOutcome};
+use super::dialogs::{modal_dialog, DialogOutcome, InteractiveSize};
 use super::graph_text_edit::{
     add_annotation_at, annotation_editor_id, annotation_editor_ui, open_annotation_editor,
     open_group_name_editor_in_graph, open_legend_entry_editor, open_series_name_editor,
@@ -170,7 +170,7 @@ fn shape_properties_ui(
         ctx,
         id.with("dialog"),
         &tr!("object-properties-title"),
-        egui::vec2(360.0, 280.0),
+        InteractiveSize::Default,
         |ui| {
             for (coordinate, value) in [
                 ("X1", &mut edit.draft.x1),

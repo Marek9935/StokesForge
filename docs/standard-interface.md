@@ -84,6 +84,7 @@ mécanique.
 | S-F8 | `geometrie-memorisee` | Taille et position d'un dialogue sont mémorisées par sorte de dialogue, dans les préférences. |
 | S-F9 | `focus-initial` | Le premier champ de saisie a le focus à l'ouverture. |
 | S-F10 | `bouton-principal-grise` | Un bouton principal grisé dit sa raison dans le pied et en bulle. |
+| S-F11 | `nature-de-fenetre` | Une fenêtre modale a une nature (`DialogNature`) qui fixe son pied, sa taille par défaut (Petite 480 x 170, Moyenne 480 x 420, Grande 640 x 500), son focus initial et son bouton par défaut ; taille libre seulement justifiée pour une fenêtre interactive. |
 | S-G1 | `grise-avec-sa-raison` | Tout élément grisé porte sa raison, qui dit quoi faire (« Select a series first »). |
 | S-G2 | `raison-en-bulle-propre` | La raison est la bulle `.disabled` de l'élément lui-même, jamais mêlée à la bulle normale ni posée sur un groupe. |
 | S-G3 | `undo-redo-grises` | Undo et Redo grisés disent « Nothing to undo » ; actifs, ils nomment l'action (« Undo Rename »). |
@@ -153,6 +154,9 @@ deux règles ci-dessus :
 | brique « textes entourés » (`app/form.rs` : `toggle_texts`) | choix exclusif à bascule, cadre arrondi autour de chaque libellé (actif : fond plein de l'accent ; inactif : contour seul) ; réservée à la rangée de gestes de l'aperçu d'analyse (exception S-K7) | **en place** (#270) |
 | garde : aucun `add_space` littéral hors de `theme.rs` (`aucun_add_space_litteral_hors_du_theme`) | | **en place** (#227) |
 | zone de message du pied de `modal_dialog_with`, focus initial, taille mémorisée, `modal_wizard`, `modal_read_only` | ordre des boutons, erreur et raison dans le pied, Échap, S-F8, S-F9 | **en place** (#228) |
+| nature de fenêtre (`app/dialogs.rs` : `DialogNature`, `SizeClass`, `InteractiveSize`, `PlainSize`, `DialogFooter::always` / `gated`) | pied, classe de taille, focus initial et bouton par défaut imposés par des `match` exhaustifs (S-F11) | **en place** (#300) |
+| garde : aucune taille libre sans justification (`aucune_taille_libre_sans_justification`, témoin `la_garde_des_tailles_voit_une_taille_libre_nue`) | `InteractiveSize::Free` refusé sans le marqueur `// TAILLE-LIBRE(#300): <justification>` (S-F11) | **en place** (#300) |
+| garde : le catalogue des fenêtres et le code concordent (`le_catalogue_des_fenetres_et_le_code_concordent`, témoin `la_garde_du_catalogue_voit_un_ecart`) | tout identifiant `stokesforge_…` passé à un `modal_*` est dans [`fenetres.md`](fenetres.md), et chaque ligne du catalogue a son appel ; ne lit pas les tailles (S-F11) | **en place** (#300) |
 | confirmations et échec grave (`modal_confirm`, `modal_save_changes`, `modal_alert` ; `app/confirmations.rs`) | Cancel par défaut, trio Discard Changes · Cancel · Save, S-M8 | **en place** (#229) |
 | registre des touches de `app/shortcuts.rs`, `HELP`, Help › Keyboard Shortcuts | S-K1, S-K5 | **en place** (#231) |
 | garde : aucun `consume_key` hors de `app/shortcuts.rs` (`aucun_consume_key_hors_du_registre`) | | **en place** (#231) |
@@ -471,6 +475,20 @@ Historique : #225, #230 (barre d'état), #228 (S-M7), #229 (S-M8).
 - **Focus** (S-F9) : le premier champ de saisie l'a à l'ouverture.
 - **Bouton principal grisé** (S-F10 → S-R14) : raison dans le pied et en bulle ;
   une erreur affichée passe devant, la raison revient quand elle disparaît.
+- **Nature de fenêtre** (S-F11) : toute fenêtre modale a une nature
+  (`DialogNature`) qui fixe son pied, sa taille par défaut, son focus initial et
+  son bouton par défaut. La taille vient d'un **champ** de la variante, dont la
+  valeur par défaut est une classe : **Petite** 480 x 170 (une question, un
+  message), **Moyenne** 480 x 420 (des réglages, un formulaire), **Grande**
+  640 x 500 (une liste et son éditeur). Une fenêtre **interactive** (réglages,
+  brouillon, assistant) prend une classe ; hors classes, une **taille libre**
+  justifiée dans le code (`// TAILLE-LIBRE(#300): <justification>`). Une fenêtre
+  **sans interaction riche** (choix, lecture seule, confirmation,
+  enregistrement, alerte) peut prendre la taille de son contenu **sans
+  justification** : elle n'a pas de formulaire à ranger, et une taille mal
+  choisie y coûte peu. Focus initial : premier champ (réglages, brouillon,
+  choix, assistant, S-F9), bouton par défaut (confirmation : Cancel ;
+  enregistrement : Save ; alerte : Close), rien (lecture seule).
 
 Comment c'est tenu (`app/dialogs.rs`, tous par un même corps `modal_frame`) :
 
@@ -485,8 +503,10 @@ Comment c'est tenu (`app/dialogs.rs`, tous par un même corps `modal_frame`) :
   fenêtre en lecture seule : ce que l'utilisateur doit lire (les compteurs de
   R² faible, un message d'état à retenir) est en texte normal. Le gris d'egui a
   un contraste faible sur fond clair ; en cas de doute, texte normal.
-- **Raison du grisage** : `DialogFooter::accept_disabled` (#226) est la
-  raison quand `accept_enabled` est faux (clés `disabled-*` : Finish sans
+- **Raison du grisage** : `DialogFooter::gated` (#226, S-F11) porte la bulle
+  **et** la raison du bouton principal qui peut être grisé
+  (`DialogFooter::always` pour celui qui ne l'est jamais) ; la raison s'affiche
+  quand il est grisé (clés `disabled-*` : Finish sans
   fichier, Create d'une analyse incomplète — la raison est alors le premier
   manque du formulaire) ; écrite dans le pied **et** dans la bulle du bouton
   grisé ; `accept_hint` reste la bulle du bouton actif.
@@ -513,7 +533,31 @@ réglages en direct (S-F1) : `Action::BeginShapeEdit` ouvre la macro d'historiqu
 au premier changement, chaque réglage est un `SetShape`, OK referme la macro
 (`EndShapeEdit { keep: true }`, une entrée), Cancel l'avorte (`keep: false`).
 
-Historique : #228, #226 (raison du grisage).
+Comment c'est tenu (S-F11, `app/dialogs.rs`) : `DialogNature` est une
+énumération à `match` exhaustif sans `_` (pied, classe par défaut, focus
+initial, bouton par défaut) ; les briques `modal_*` prennent le champ de taille
+de leur nature (`InteractiveSize` : par défaut, classe, libre ;
+`PlainSize` : par défaut, classe, contenu), `modal_dialog_with` la nature
+(réglages, brouillon ou choix). Gardes (`stokesforge-app/tests/gardes.rs`) :
+
+- **`aucune_taille_libre_sans_justification`** : `InteractiveSize::Free(` du code
+  de production exige, dans les 12 lignes qui précèdent, le marqueur exact
+  `// TAILLE-LIBRE(#300): <justification>` de 15 caractères au moins. Témoin :
+  `la_garde_des_tailles_voit_une_taille_libre_nue` (nue, vide, trop courte,
+  autre numéro, sans numéro, trop loin ; justifiée, commentaire, chaîne et code
+  de test passent). Tailles libres aujourd'hui : l'analyse, l'assistant
+  d'import, le banc `preferences_proto`.
+- **`le_catalogue_des_fenetres_et_le_code_concordent`** : tout littéral
+  `"stokesforge_…"` passé en argument d'une fonction `modal_*` (avant ses
+  fermetures) figure en apostrophes inverses dans `docs/fenetres.md`, et chaque
+  identifiant du catalogue a son appel. Les identifiants **construits** avant
+  l'appel (`IDENTIFIANTS_CONSTRUITS` : propriétés du graphe, des séries,
+  analyse) sont cherchés comme littéraux. Témoin :
+  `la_garde_du_catalogue_voit_un_ecart`. **Limites** : elle ne lit pas les
+  tailles, les types ni les pages ; une fenêtre dont l'identifiant est dérivé
+  (`id.with(…)`, les propriétés d'un objet) n'est pas vue.
+
+Historique : #228, #226 (raison du grisage), #300 (S-F11 : natures de fenêtre, classes de taille, catalogue tenu par une garde).
 
 ### Confirmations
 

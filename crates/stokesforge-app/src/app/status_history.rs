@@ -7,7 +7,7 @@
 
 use eframe::egui;
 
-use super::dialogs::{modal_read_only, DialogOutcome};
+use super::dialogs::{modal_read_only, DialogOutcome, PlainSize};
 use super::empty_state::empty_state;
 use super::menus::status_line;
 use stokesforge_app_state::state::{Action, AppState};
@@ -40,7 +40,7 @@ pub(super) fn status_history_window(
         ctx,
         egui::Id::new("stokesforge_status_history"),
         &tr!("status-history-title"),
-        egui::vec2(520.0, 360.0),
+        PlainSize::Content(egui::vec2(520.0, 360.0)),
         |ui| {
             let mut messages = state.status_history().peekable();
             if messages.peek().is_none() {
@@ -73,7 +73,7 @@ pub(super) fn low_r2_list_window(ctx: &egui::Context, state: &AppState, actions:
         ctx,
         egui::Id::new("stokesforge_low_r2_list"),
         &tr!("alert-low-r2-title"),
-        egui::vec2(480.0, 170.0),
+        PlainSize::Content(egui::vec2(480.0, 170.0)),
         |ui| {
             // Texte normal : les compteurs sont le contenu, pas un détail (#290).
             ui.label(state.low_r2_list_text());
