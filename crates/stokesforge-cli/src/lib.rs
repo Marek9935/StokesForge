@@ -29,6 +29,24 @@ const USAGE: &str = "usage:
   stokesforge-cli recipes
   stokesforge-cli run [--project input.stf] [--out output.stf] SCRIPT.pyst";
 
+/// L'avertissement (anglais, stderr) de ce qu'une lecture a écarté, `None`
+/// pour un fichier propre (#309).
+#[cfg(feature = "python")]
+fn discarded_warning(
+    path: &std::path::Path,
+    report: &stokesforge_persistence::LoadReport,
+) -> Option<String> {
+    if report.is_clean() {
+        return None;
+    }
+    let calculations = report.discarded_calculations.len();
+    let corrections = report.discarded_corrections.len();
+    Some(format!(
+        "warning: {}: {calculations} calculation(s) and {corrections} correction record(s) were discarded",
+        path.display()
+    ))
+}
+
 /// Exécute la ligne de commande `args` (sans le nom du programme), en écrivant
 /// les résultats dans `out`. `Err` : un message pour l'erreur standard (code de
 /// sortie non nul).
@@ -244,7 +262,16 @@ fn run_script(args: &[String], out: &mut dyn Write) -> Result<(), String> {
     let source = std::fs::read_to_string(&path)
         .map_err(|err| format!("cannot read script {}: {err}", path.display()))?;
     let project = match input {
-        Some(path) => stokesforge_persistence::load(&path).map_err(|err| err.to_string())?,
+        Some(path) => {
+            let (project, _, report) =
+                stokesforge_persistence::load_with_report(&path).map_err(|err| err.to_string())?;
+            // Ce que la lecture a écarté est dit sur stderr (#309) : le
+            // script tourne quand même, sans erreur.
+            if let Some(warning) = discarded_warning(&path, &report) {
+                eprintln!("{warning}");
+            }
+            project
+        }
         None => Project::new("Script").map_err(|err| err.to_string())?,
     };
     let actor =

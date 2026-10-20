@@ -301,10 +301,13 @@ pub(crate) fn records_to_corrections(
     BTreeMap<NodeId, Arc<CorrectionRecord>>,
     Vec<DiscardedCalculation>,
 ) {
-    let named: BTreeMap<u64, DiscardedCalculation> = records
-        .iter()
-        .map(|r| (r.id, discarded_calculation(r)))
-        .collect();
+    // Deux enregistrements de même id : le premier fait foi (#309, F4).
+    let mut named: BTreeMap<u64, DiscardedCalculation> = BTreeMap::new();
+    for r in &records {
+        named
+            .entry(r.id)
+            .or_insert_with(|| discarded_calculation(r));
+    }
     let (kept, mut discarded) = records_to_calculations(records, max_id);
     let mut out = BTreeMap::new();
     for (id, c) in kept {
@@ -431,6 +434,12 @@ pub(crate) fn records_to_calculations(
         };
         // Même règle de forme qu'à l'écriture (core, #309).
         if calc.validate_shape().is_err() {
+            discarded.push(discarded_calculation(&r));
+            continue;
+        }
+        // Un identifiant déjà gardé : le premier fait foi, le second est
+        // compté parmi les écartés au lieu de le remplacer sans bruit (#309).
+        if out.contains_key(&id) {
             discarded.push(discarded_calculation(&r));
             continue;
         }
@@ -627,6 +636,48 @@ mod tests {
             discarded.iter().map(|d| d.id).collect::<Vec<_>>(),
             vec![60, 61, 62]
         );
+    }
+
+    /// #309 (F4) : deux calculs de même identifiant, le premier est gardé et
+    /// le second compté parmi les écartés.
+    #[test]
+    fn un_doublon_d_identifiant_garde_le_premier_et_compte_le_second() {
+        let mut a = record(good_operation(), 7);
+        a.id = 70;
+        let mut b = record(good_operation(), 8);
+        b.id = 70;
+        let (kept, discarded) = records_to_calculations(vec![a.clone(), b.clone()], 1000);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[&NodeId::from_raw(70)].series[0].y, NodeId::from_raw(7));
+        assert_eq!(discarded.iter().map(|d| d.id).collect::<Vec<_>>(), vec![70]);
+        // Même règle pour les traces de correction : A gardée, B écartée.
+        let (kept, discarded) = records_to_corrections(vec![a, b], 1000);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[&NodeId::from_raw(70)].series[0].y, NodeId::from_raw(7));
+        assert_eq!(discarded.len(), 1);
+        // Premier = autre opération qu'une correction : l'écarté est nommé
+        // d'après le premier enregistrement, pas d'après le doublon.
+        let integrate = tree_to_value(
+            &Operation::Integrate {
+                spec: stokesforge_analysis::integrate::IntegrateSpec {
+                    ranges: vec![],
+                    under: stokesforge_analysis::integrate::Under::Zero,
+                    cumulative: false,
+                    normalize: false,
+                },
+            }
+            .to_tree(),
+        );
+        let mut first = record(integrate, 7);
+        first.id = 71;
+        let mut second = record(good_operation(), 7);
+        second.id = 71;
+        let (kept, discarded) = records_to_corrections(vec![first, second], 1000);
+        assert!(kept.is_empty());
+        assert!(discarded
+            .iter()
+            .any(|d| d.kind.as_deref() == Some("integrate")));
+        assert_eq!(discarded.len(), 2);
     }
 
     /// #309 : une trace de correction écartée est comptée, qu'elle soit

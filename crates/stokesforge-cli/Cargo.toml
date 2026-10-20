@@ -23,4 +23,5 @@ stokesforge-importer = { path = "../stokesforge-importer" }
 stokesforge-persistence = { path = "../stokesforge-persistence" }
 
 [dev-dependencies]
+stokesforge-analysis = { path = "../stokesforge-analysis" }
 tempfile = "3"

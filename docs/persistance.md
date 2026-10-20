@@ -355,15 +355,43 @@ textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
   L'écart n'est plus silencieux (#278) : `load_with_report` rend un `LoadReport`
   (`discarded_calculations` : id du fichier, famille d'opération si elle se lit),
   que la session transmet (`SessionHandle::load_with_report`) et qu'`AppState`
-  affiche en avertissement (`status-load-calculations-discarded`). L'enregistrement
-  illisible n'est **pas conservé** (il ne se reconstruit pas) : il disparaît à la
-  prochaine sauvegarde. En amont, `Project::add_calculation`/`update_calculation`
+  affiche en avertissement (`status-load-discarded`, voir plus bas : un seul
+  message compte calculs et traces). L'enregistrement
+  illisible n'est **pas conservé** (il ne se reconstruit pas) : il disparaîtrait
+  à la prochaine sauvegarde, d'où la confirmation décrite plus bas (#309). Deux
+  calculs de même identifiant dans un fichier : le **premier** est gardé, le
+  second est compté parmi les écartés (`records_to_calculations`, et la table
+  de noms de `records_to_corrections`). En amont, `Project::add_calculation`/`update_calculation`
   refusent par `Operation::validate` toute opération qui ne se relirait pas (nombre
   non fini), pour qu'un tel enregistrement ne soit pas écrit.
 - Les colonnes de sortie sont des colonnes normales du classeur : le fichier garde
   leurs valeurs, aucun recalcul n'est nécessaire à l'ouverture pour un calcul manuel.
 - Une copie d'objets (#105) n'emporte pas les calculs : les colonnes copiées
   deviennent ordinaires.
+
+## Ce que la lecture a écarté : dire, avertir, confirmer (#309)
+
+- **Message unique** : `discarded_calculations_text` (`stokesforge-app-state`)
+  compte calculs **et** traces écartés dans une seule phrase de la barre d'état
+  (« 2 calculations and 1 correction record were discarded from the project
+  (#3, #4, #7) », clés `status-load-discarded*`) ; au plus cinq identifiants puis
+  « … », le compte reste exact. Même texte au démarrage (`mark_loaded`) et au
+  menu Fichier (`load`).
+- **CLI** : `stokesforge-cli run --project` lit par `load_with_report` ; un
+  fichier à écarts écrit `warning: … discarded` (anglais) sur stderr, puis le
+  script tourne (code de sortie 0). Ni erreur, ni question.
+- **Confirmation à l'enregistrement** : `AppState` retient le chemin source d'un
+  chargement qui a écarté quelque chose (`discarded_source`, posé par
+  `mark_loaded` et `load`). Enregistrer **sur ce chemin** passe par la fenêtre
+  « Écraser un fichier lu avec des écarts » (`Action::ConfirmDiscardedSave`,
+  `pending_discarded_save`, catalogue `docs/fenetres.md`) : l'attente n'est pas
+  un échec (aucune alerte, `after_save` conservé). Accepter écrit (et efface le
+  repère : la question ne revient pas) ; Cancel n'écrit rien, oublie le geste en
+  attente et rétablit le chemin d'un Enregistrer sous. Pas de question pour
+  Enregistrer sous un autre chemin, pour un fichier propre, pour le CLI et les
+  scripts, ni après un enregistrement réussi ; `new_project` et un autre
+  chargement effacent le repère. Un Enregistrer sous qui revient à la source
+  redemande tant que les écarts ne sont pas enregistrés.
 
 ## Corrections définitives des données (#212)
 
@@ -374,8 +402,7 @@ calculs, mais ne recrée aucun calcul actif ni colonne en lecture seule.
 Un ancien fichier se lit sans trace ; une opération inconnue ou un identifiant
 hors borne, une forme invalide ou une opération qui n'est pas une correction
 fait écarter uniquement sa trace, **comptée** dans `LoadReport::discarded_corrections`
-(#309) ; ce compte n'a pas encore de texte d'avertissement dédié (décision
-ouverte). `main` transmet le rapport du démarrage à `AppState::mark_loaded`. Les valeurs corrigées restent
+(#309). `main` transmet le rapport du démarrage à `AppState::mark_loaded`. Les valeurs corrigées restent
 dans les colonnes ordinaires. Le compteur reprend au-delà des identifiants des
 traces, même si `next_id_hint` est trop bas. Les copies de colonnes ne transportent
 pas ces traces, comme elles ne transportent pas les calculs. Les colonnes

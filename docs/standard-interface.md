@@ -587,7 +587,8 @@ Comment c'est tenu :
   réponse `Action::ConfirmUnsaved`), export dont l'extension `.svg` ajoutée
   viserait un fichier existant que le sélecteur natif n'a pas vu
   (`Action::ConfirmOverwrite` ; le sélecteur natif demande lui-même pour le
-  nom saisi), suppression d'un modèle d'import (modale peinte dans
+  nom saisi), enregistrement sur le fichier source d'une lecture qui a
+  écarté des données (`Action::ConfirmDiscardedSave`, #309), suppression d'un modèle d'import (modale peinte dans
   l'assistant, qui lit Entrée et Échap avant lui). **Choix**, pas des
   confirmations : l'axe X d'un dépôt de lignes, la suppression d'un calcul
   avec ou sans ses colonnes, l'export de séries périmées — ils gardent

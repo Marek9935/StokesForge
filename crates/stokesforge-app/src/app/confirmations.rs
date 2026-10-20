@@ -136,6 +136,27 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             ConfirmOutcome::Cancel => actions.push(Action::ConfirmOverwrite(false)),
         }
     }
+    if let Some((name, what)) = state.pending_discarded_save() {
+        match modal_confirm(
+            ctx,
+            egui::Id::new("stokesforge_discarded_save"),
+            &tr!("discarded-save-title"),
+            PlainSize::Default,
+            &tr!("discarded-save-replace"),
+            &tr!("discarded-save-replace", "hint"),
+            |ui| {
+                ui.label(tr!(
+                    "discarded-save-confirm",
+                    name = name.as_str(),
+                    what = what.as_str()
+                ));
+            },
+        ) {
+            ConfirmOutcome::Open => {}
+            ConfirmOutcome::Confirm => actions.push(Action::ConfirmDiscardedSave(true)),
+            ConfirmOutcome::Cancel => actions.push(Action::ConfirmDiscardedSave(false)),
+        }
+    }
     if state.pending_row_drop().is_some() {
         row_drop_dialog(ctx, actions);
     }

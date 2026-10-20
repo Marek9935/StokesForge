@@ -1023,7 +1023,7 @@ fn loading_a_file_with_an_unreadable_calculation_warns() {
     let status = state.status().expect("un message");
     assert_eq!(status.level, StatusLevel::Warning);
     assert!(
-        status.text.contains("could not be read") && status.text.contains('#'),
+        status.text.contains("was discarded") && status.text.contains('#'),
         "{}",
         status.text
     );
@@ -11363,4 +11363,261 @@ fn mark_loaded_avertit_des_calculs_ecartes_du_rapport() {
         stokesforge_app_state::state::StatusLevel::Warning
     );
     assert!(status.text.contains("#42"), "{}", status.text);
+}
+
+fn discarded(ids: &[u64]) -> Vec<stokesforge_session::DiscardedCalculation> {
+    ids.iter()
+        .map(|&id| stokesforge_session::DiscardedCalculation { id, kind: None })
+        .collect()
+}
+
+/// #309 (F1) : des traces de correction seules sont dites (message compté) ;
+/// calculs et traces forment **un seul** message qui compte les deux.
+#[test]
+fn le_rapport_compte_les_traces_et_les_calculs_dans_un_seul_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(demo_project(), &dir.path().join("p.stf"));
+    state.mark_loaded(&stokesforge_session::LoadReport {
+        discarded_corrections: discarded(&[7]),
+        ..Default::default()
+    });
+    let status = state.status().expect("un avertissement");
+    assert_eq!(
+        status.level,
+        stokesforge_app_state::state::StatusLevel::Warning
+    );
+    assert_eq!(
+        status.text,
+        "1 correction record was discarded from the project (#7)"
+    );
+    state.mark_loaded(&stokesforge_session::LoadReport {
+        discarded_calculations: discarded(&[3, 4]),
+        discarded_corrections: discarded(&[7]),
+    });
+    assert_eq!(
+        state.status().unwrap().text,
+        "2 calculations and 1 correction record were discarded from the project (#3, #4, #7)"
+    );
+}
+
+/// Un `.stf` à un calcul de correction que la lecture écartera (octets
+/// abîmés), à `path`.
+fn write_file_with_a_discarded_calculation(path: &Path) {
+    use stokesforge_analysis::correct::CorrectOp;
+    use stokesforge_analysis::ops::Operation;
+    use stokesforge_core::{CalculationDraft, OutputDraft, SeriesRef, SeriesResult};
+    let mut project = Project::new("P").unwrap();
+    let book = project.add_workbook(project.root(), None).unwrap();
+    let sheet = project.tree().children(book).unwrap()[0];
+    let y = project
+        .add_column(sheet, None, Some("Y"), Column::from_f64(&[1.0, 2.0]))
+        .unwrap();
+    project
+        .add_calculation(CalculationDraft {
+            operation: Operation::Correct {
+                op: CorrectOp::Subtract,
+            },
+            series: vec![SeriesRef {
+                x: None,
+                y,
+                sigma: None,
+            }],
+            aux: None,
+            outputs: vec![OutputDraft {
+                series: 0,
+                key: "corrected".into(),
+                index: None,
+                meta: ColumnMeta::default(),
+                data: vec![0.0, 1.0],
+            }],
+            results: vec![SeriesResult::default()],
+            keep_results: true,
+            auto_recalc: false,
+            low_r2_dialog: false,
+        })
+        .unwrap();
+    stokesforge_persistence::save(&project, path).unwrap();
+    let mut bytes = std::fs::read(path).unwrap();
+    let at = bytes
+        .windows(8)
+        .position(|w| w == b"subtract")
+        .expect("l'opération est dans le fichier");
+    bytes[at..at + 8].copy_from_slice(b"subtraXX");
+    std::fs::write(path, bytes).unwrap();
+}
+
+/// Une session sur un fichier abîmé, chargé par `Action::Load`.
+fn start_on_a_discarding_file(dir: &Path) -> (Session, AppState, std::path::PathBuf) {
+    let file = dir.join("abime.stf");
+    write_file_with_a_discarded_calculation(&file);
+    let (session, mut state) = start(Project::new("Vide").unwrap(), &file);
+    state.dispatch(Action::Load);
+    assert!(state.alert().is_none(), "le projet se charge");
+    (session, state, file)
+}
+
+/// #309 (F3) : enregistrer sur le fichier source d'une lecture qui a écarté
+/// des données demande d'abord ; accepter écrit, et l'enregistrement suivant
+/// ne demande plus rien.
+#[test]
+fn enregistrer_sur_la_source_avec_ecarts_demande_puis_ecrit() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state, file) = start_on_a_discarding_file(dir.path());
+    let before = std::fs::read(&file).unwrap();
+
+    state.dispatch(Action::Save);
+    let (name, what) = state.pending_discarded_save().expect("une question");
+    assert_eq!(name, "abime.stf");
+    assert_eq!(what, "1 calculation");
+    assert!(state.blocking_dialog());
+    assert!(state.alert().is_none(), "l'attente n'est pas un échec");
+    assert_eq!(std::fs::read(&file).unwrap(), before, "rien d'écrit");
+
+    state.dispatch(Action::ConfirmDiscardedSave(true));
+    assert!(state.pending_discarded_save().is_none());
+    assert_ne!(std::fs::read(&file).unwrap(), before, "écrit");
+    let (_, _, report) = stokesforge_persistence::load_with_report(&file).unwrap();
+    assert!(report.is_clean(), "le fichier réécrit est propre");
+
+    let written = std::fs::read(&file).unwrap();
+    state.dispatch(Action::AddGraph);
+    state.dispatch(Action::Save);
+    assert!(state.pending_discarded_save().is_none(), "plus de question");
+    assert_ne!(std::fs::read(&file).unwrap(), written);
+    session.shutdown().unwrap();
+}
+
+/// Cancel n'écrit rien et oublie le geste qui attendait l'enregistrement.
+#[test]
+fn refuser_l_ecrasement_n_ecrit_rien_et_oublie_le_geste() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state, file) = start_on_a_discarding_file(dir.path());
+    let before = std::fs::read(&file).unwrap();
+    state.dispatch(Action::AddGraph);
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
+    assert!(state.pending_discarded_save().is_some());
+    assert!(!state.take_quit_ready());
+
+    state.dispatch(Action::ConfirmDiscardedSave(false));
+    assert!(state.pending_discarded_save().is_none());
+    assert_eq!(std::fs::read(&file).unwrap(), before, "rien d'écrit");
+    assert!(!state.take_quit_ready(), "le geste est oublié");
+
+    // La question revient, et accepter n'exécute pas le Quit oublié.
+    state.dispatch(Action::Save);
+    assert!(
+        state.pending_discarded_save().is_some(),
+        "écarts toujours là"
+    );
+    state.dispatch(Action::ConfirmDiscardedSave(true));
+    assert!(!state.take_quit_ready(), "Quit oublié");
+    session.shutdown().unwrap();
+}
+
+/// Quit, Save, puis accepter : le projet est enregistré, puis l'application quitte.
+#[test]
+fn quitter_enregistrer_accepter_enregistre_puis_quitte() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state, file) = start_on_a_discarding_file(dir.path());
+    let before = std::fs::read(&file).unwrap();
+    state.dispatch(Action::AddGraph);
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Save));
+    assert!(!state.take_quit_ready(), "attend la réponse");
+    state.dispatch(Action::ConfirmDiscardedSave(true));
+    assert_ne!(std::fs::read(&file).unwrap(), before);
+    assert!(state.take_quit_ready(), "enregistré, puis Quit");
+    session.shutdown().unwrap();
+}
+
+/// Enregistrer sous un AUTRE chemin ne demande rien et laisse la source
+/// intacte ; y revenir demande tant que les écarts ne sont pas enregistrés, et
+/// Cancel rétablit le chemin précédent.
+#[test]
+fn enregistrer_sous_ailleurs_ne_demande_rien_mais_revenir_a_la_source_oui() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state, file) = start_on_a_discarding_file(dir.path());
+    let before = std::fs::read(&file).unwrap();
+    let other = dir.path().join("autre.stf");
+
+    state.dispatch(Action::SaveAs {
+        path: other.display().to_string(),
+    });
+    assert!(
+        state.pending_discarded_save().is_none(),
+        "ailleurs : sans question"
+    );
+    assert!(other.exists());
+    assert_eq!(std::fs::read(&file).unwrap(), before, "source intacte");
+    assert_eq!(state.path(), other.display().to_string());
+
+    state.dispatch(Action::SaveAs {
+        path: file.display().to_string(),
+    });
+    assert!(
+        state.pending_discarded_save().is_some(),
+        "retour à la source"
+    );
+    state.dispatch(Action::ConfirmDiscardedSave(false));
+    assert_eq!(state.path(), other.display().to_string(), "chemin rétabli");
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+
+    state.dispatch(Action::SaveAs {
+        path: file.display().to_string(),
+    });
+    state.dispatch(Action::ConfirmDiscardedSave(true));
+    assert_eq!(state.path(), file.display().to_string());
+    assert_ne!(std::fs::read(&file).unwrap(), before);
+    session.shutdown().unwrap();
+}
+
+/// Un fichier propre, ou un nouveau projet, n'ouvre aucune question.
+#[test]
+fn un_fichier_propre_ou_un_nouveau_projet_n_ouvre_aucune_question() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("propre.stf");
+    stokesforge_persistence::save(&demo_project(), &file).unwrap();
+    let (session, mut state) = start(Project::new("Vide").unwrap(), &file);
+    state.dispatch(Action::Load);
+    state.dispatch(Action::Save);
+    assert!(state.pending_discarded_save().is_none());
+
+    // Un nouveau projet efface le repère de la source abîmée.
+    let (session2, mut state2, bad) = start_on_a_discarding_file(dir.path());
+    state2.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    state2.set_path(bad.display().to_string());
+    state2.dispatch(Action::Save);
+    assert!(state2.pending_discarded_save().is_none());
+    session.shutdown().unwrap();
+    session2.shutdown().unwrap();
+}
+
+/// Le chargement du démarrage (`mark_loaded`) pose le même repère que le menu
+/// Fichier : le premier Enregistrer sur la source demande.
+#[test]
+fn le_chargement_du_demarrage_pose_le_repere_de_la_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("p.stf");
+    let (session, mut state) = start(demo_project(), &file);
+    state.mark_loaded(&stokesforge_session::LoadReport::default());
+    state.dispatch(Action::Save);
+    assert!(state.pending_discarded_save().is_none(), "rapport propre");
+
+    state.mark_loaded(&stokesforge_session::LoadReport {
+        discarded_corrections: discarded(&[7]),
+        ..Default::default()
+    });
+    let before = std::fs::read(&file).unwrap();
+    state.dispatch(Action::Save);
+    let (_, what) = state.pending_discarded_save().expect("une question");
+    assert_eq!(what, "1 correction record");
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    session.shutdown().unwrap();
 }

@@ -120,7 +120,7 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
     assert_eq!(
         text,
         format!(
-            "One calculation could not be read and was left out of the project ({})",
+            "1 calculation was discarded from the project ({})",
             list(&ids[..1])
         )
     );
@@ -131,7 +131,7 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
     assert_eq!(
         text,
         format!(
-            "2 calculations could not be read and were left out of the project ({})",
+            "2 calculations were discarded from the project ({})",
             list(&ids[..2])
         )
     );
@@ -142,7 +142,7 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
     assert_eq!(
         text,
         format!(
-            "5 calculations could not be read and were left out of the project ({})",
+            "5 calculations were discarded from the project ({})",
             list(&ids[..5])
         )
     );
@@ -154,7 +154,7 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
     assert_eq!(
         text,
         format!(
-            "6 calculations could not be read and were left out of the project ({}, …)",
+            "6 calculations were discarded from the project ({}, …)",
             list(&ids[..5])
         )
     );
@@ -170,17 +170,14 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
     assert_eq!(level, StatusLevel::Warning);
     assert_eq!(
         text,
-        format!(
-            "Un calcul illisible a été écarté du projet ({})",
-            list(&ids[..1])
-        )
+        format!("1 calcul a été écarté du projet ({})", list(&ids[..1]))
     );
     let ids = write_file(&path, 8, 6);
     let (_, text) = load_message(&path);
     assert_eq!(
         text,
         format!(
-            "6 calculs illisibles ont été écartés du projet ({}, …)",
+            "6 calculs ont été écartés du projet ({}, …)",
             list(&ids[..5])
         )
     );

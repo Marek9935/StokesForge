@@ -5190,6 +5190,7 @@ dependencies = [
 name = "stokesforge-cli"
 version = "0.0.0"
 dependencies = [
+ "stokesforge-analysis",
  "stokesforge-commands",
  "stokesforge-core",
  "stokesforge-import",

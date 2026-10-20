@@ -119,7 +119,7 @@ littéraux (`IDENTIFIANTS_CONSTRUITS` dans `tests/gardes.rs`).
 
 `confirmations::show` (`app/confirmations.rs`) les peint après tout le reste ;
 `AppState::blocking_dialog` (projet non enregistré, dépôt de lignes, alerte,
-écrasement) fait vider les autres actions de l'image
+écrasement, écrasement d'un fichier lu avec des écarts) fait vider les autres actions de l'image
 (`blocking_confirmations`). Tous de classe Petite (480 x 170).
 
 | Fenêtre | Nature | Identifiant | Ouverture |
@@ -128,6 +128,7 @@ littéraux (`IDENTIFIANTS_CONSTRUITS` dans `tests/gardes.rs`).
 | Échec d'enregistrement / d'ouverture | `Alert` | `stokesforge_alert` | un enregistrement ou une ouverture qui échoue (`AlertKind::SaveFailed`, `OpenFailed`) |
 | R² faible (avertissement), session perdue | `ReadOnly` (Petite) | `stokesforge_alert` | fin d'un calcul dont le R² est faible, si la préférence l'autorise (`AlertKind::LowRSquared`) ; session morte (`AlertKind::SessionLost`) |
 | Écraser un fichier | `Confirm` | `stokesforge_overwrite` | export dont l'extension ajoutée vise un fichier existant (`pending_overwrite`) |
+| Écraser un fichier lu avec des écarts | `Confirm` | `stokesforge_discarded_save` | Enregistrer qui écraserait le fichier source d'un chargement ayant écarté des calculs ou des traces non encore enregistrés (`pending_discarded_save`, #309) ; pas pour Enregistrer sous ailleurs |
 | Axe d'un dépôt de lignes | `Choice` | `stokesforge_row_drop` | glisser des lignes sur un graphe qui a déjà un axe X (`pending_row_drop`) |
 
 Les alertes (échec, R² faible, session perdue) partagent l'identifiant

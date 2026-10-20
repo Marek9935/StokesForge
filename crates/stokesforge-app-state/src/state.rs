@@ -44,7 +44,7 @@
 //!    d'appels ; le message de statut posé par `poll_script` reste neutre
 //!    (niveau `Info`), et l'état reste utilisable.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -137,6 +137,10 @@ pub enum Action {
     DismissAlert,
     /// Réponse à la confirmation d'écrasement d'un fichier exporté (S-F3).
     ConfirmOverwrite(bool),
+    /// Réponse à « Enregistrer écraserait le fichier lu sans ce que la lecture
+    /// a écarté » (#309, F3) : `true` écrit, `false` abandonne (et oublie le
+    /// geste qui attendait l'enregistrement).
+    ConfirmDiscardedSave(bool),
     /// Ajoute un graphique vide à la racine, annulable comme un tracé.
     AddGraph,
     /// Ajoute un classeur et sa feuille initiale à la racine du projet.
@@ -1109,27 +1113,62 @@ pub const MISSING_TEXT_DISPLAY: &str = "\u{00A0}";
 /// la liste est abrégée par « … » (le compte, lui, reste exact).
 const DISCARDED_IDS_SHOWN: usize = 5;
 
-/// L'avertissement de chargement pour les calculs que la lecture a écartés
-/// (#278), `None` quand rien ne l'a été. Les identifiants sont ceux du fichier.
+/// « 2 calculations and 1 correction record » : ce qu'une lecture a écarté,
+/// compté ; `None` quand rien ne l'a été.
+fn discarded_what(calculations: usize, corrections: usize) -> Option<String> {
+    let calculations_part = (calculations > 0)
+        .then(|| crate::tr!("status-load-discarded-calculations", count = calculations));
+    let corrections_part = (corrections > 0)
+        .then(|| crate::tr!("status-load-discarded-corrections", count = corrections));
+    match (calculations_part, corrections_part) {
+        (Some(first), Some(second)) => Some(crate::tr!(
+            "status-load-discarded-and",
+            first = first,
+            second = second
+        )),
+        (Some(only), None) | (None, Some(only)) => Some(only),
+        (None, None) => None,
+    }
+}
+
+/// L'avertissement de chargement pour ce que la lecture a écarté (#278,
+/// #309) : calculs **et** traces de correction dans un seul message qui les
+/// compte, `None` quand rien ne l'a été. Les identifiants sont ceux du
+/// fichier ; les calculs d'abord, puis les traces.
 fn discarded_calculations_text(report: &stokesforge_session::LoadReport) -> Option<String> {
-    let discarded = &report.discarded_calculations;
-    if discarded.is_empty() {
+    let calculations = &report.discarded_calculations;
+    let corrections = &report.discarded_corrections;
+    let total = calculations.len() + corrections.len();
+    if total == 0 {
         return None;
     }
-    let mut ids = discarded
+    let what = discarded_what(calculations.len(), corrections.len())?;
+    let mut ids = calculations
         .iter()
+        .chain(corrections)
         .take(DISCARDED_IDS_SHOWN)
         .map(|d| format!("#{}", d.id))
         .collect::<Vec<_>>()
         .join(", ");
-    if discarded.len() > DISCARDED_IDS_SHOWN {
+    if total > DISCARDED_IDS_SHOWN {
         ids.push_str(", …");
     }
-    Some(crate::tr!(
-        "status-load-calculations-discarded",
-        count = discarded.len(),
-        ids = ids
-    ))
+    // Le français accorde « écartée » avec les seules traces : deux clés.
+    Some(if calculations.is_empty() {
+        crate::tr!(
+            "status-load-discarded-corrections-only",
+            what = what,
+            total = total,
+            ids = ids
+        )
+    } else {
+        crate::tr!(
+            "status-load-discarded",
+            what = what,
+            total = total,
+            ids = ids
+        )
+    })
 }
 
 /// Construit le bloc de valeurs d'une colonne collée depuis un TSV : la
@@ -1396,6 +1435,33 @@ pub enum UnsavedChoice {
     /// Enregistrer (en demandant où si le projet n'a pas de fichier), puis
     /// poursuivre le geste si l'enregistrement a réussi.
     Save,
+}
+
+/// Le fichier source d'un chargement qui a écarté des données (#309, F3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiscardedSource {
+    path: PathBuf,
+    calculations: usize,
+    corrections: usize,
+}
+
+impl DiscardedSource {
+    /// `None` pour un rapport propre.
+    fn of(path: PathBuf, report: &stokesforge_session::LoadReport) -> Option<Self> {
+        (!report.is_clean()).then_some(Self {
+            path,
+            calculations: report.discarded_calculations.len(),
+            corrections: report.discarded_corrections.len(),
+        })
+    }
+}
+
+/// Un enregistrement suspendu à la réponse de la confirmation d'écrasement
+/// d'un fichier dont la lecture a écarté des données (#309, F3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingDiscardedSave {
+    /// Le chemin à rétablir si la réponse est Cancel (Save As vers la source).
+    restore_path: Option<String>,
 }
 
 /// Un échec grave hors fenêtre (S-M8, #229) : dit par un dialogue bloquant,
@@ -2509,6 +2575,16 @@ pub struct AppState {
     alert: Option<Alert>,
     /// Export qui écraserait un fichier que le sélecteur n'a pas vu (S-F3).
     pending_overwrite: Option<(PathBuf, Box<PlotSpec>)>,
+    /// Le fichier **source** du dernier chargement et ce que sa lecture a
+    /// écarté, tant que cela n'a pas été enregistré (#309, F3) : l'écraser
+    /// supprimerait ces données du disque, d'où la confirmation. Posé par
+    /// [`AppState::mark_loaded`] et `load` (rien si le fichier est propre) ;
+    /// effacé par un enregistrement réussi vers ce chemin, `new_project` ou
+    /// un autre chargement.
+    discarded_source: Option<DiscardedSource>,
+    /// L'enregistrement attend la réponse à la confirmation ci-dessus ;
+    /// distinct d'un échec (aucune alerte, `after_save` conservé).
+    pending_discarded_save: Option<PendingDiscardedSave>,
     /// Feuille dont l'onglet est en édition de nom.
     renaming_sheet: Option<NodeId>,
     /// Dépôt de lignes en attente du choix de l'axe X (#166).
@@ -2713,6 +2789,8 @@ impl AppState {
             quit_ready: false,
             alert: None,
             pending_overwrite: None,
+            discarded_source: None,
+            pending_discarded_save: None,
             renaming_sheet: None,
             pending_row_drop: None,
             object_clipboard_origin: format!(
@@ -2890,6 +2968,7 @@ impl AppState {
     /// supprimerait sans bruit ce que la lecture a écarté.
     pub fn mark_loaded(&mut self, report: &stokesforge_session::LoadReport) {
         self.saved_revision = Some((self.snapshot.revision, self.snapshot.geometry_revision));
+        self.discarded_source = DiscardedSource::of(PathBuf::from(&self.path), report);
         if let Some(text) = discarded_calculations_text(report) {
             self.warn(text);
         }
@@ -4495,6 +4574,7 @@ impl AppState {
                     }
                 }
             }
+            Action::ConfirmDiscardedSave(accept) => self.confirm_discarded_save(accept),
             Action::AddGraph => self.execute(Command::AddGraph {
                 parent: self.snapshot.tree.root(),
                 name: None,
@@ -5110,6 +5190,7 @@ impl AppState {
                     self.pending_analysis_replacement = false;
                     self.pending_stale_export = None;
                     self.pending_overwrite = None;
+                    self.pending_discarded_save = None;
                     self.object_clipboard_output = None;
                     self.copied_objects.clear();
                 }
@@ -6509,12 +6590,35 @@ impl AppState {
             self.fail(tr!("error-save-script-running"));
             return false;
         }
+        // Écraser le fichier source d'une lecture qui a écarté des données les
+        // supprimerait du disque : on demande d'abord (#309, F3). L'attente
+        // n'est pas un échec ; `after_save` reste en attente de la réponse.
+        if self
+            .discarded_source
+            .as_ref()
+            .is_some_and(|source| source.path == Path::new(&self.path))
+        {
+            self.pending_discarded_save = Some(PendingDiscardedSave { restore_path: None });
+            return false;
+        }
+        self.write_save()
+    }
+
+    /// L'écriture de [`AppState::save`], sans plus de question.
+    fn write_save(&mut self) -> bool {
         let path = PathBuf::from(&self.path);
         match self.handle.save(&path) {
             Ok(()) => {
                 self.refresh();
                 self.saved_revision =
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));
+                if self
+                    .discarded_source
+                    .as_ref()
+                    .is_some_and(|source| source.path == path)
+                {
+                    self.discarded_source = None;
+                }
                 let text = crate::tr!("status-saved", path = self.path.as_str());
                 self.notice(text);
                 if let Some(gesture) = self.after_save.take() {
@@ -6540,8 +6644,44 @@ impl AppState {
     fn save_as(&mut self, path: String) {
         let previous = std::mem::replace(&mut self.path, path);
         if !self.save() {
-            self.path = previous;
+            if let Some(pending) = self.pending_discarded_save.as_mut() {
+                // Vers la source : le chemin n'est rétabli que si la réponse
+                // est Cancel ou si l'écriture échoue.
+                pending.restore_path = Some(previous);
+            } else {
+                self.path = previous;
+            }
         }
+    }
+
+    /// Voir [`Action::ConfirmDiscardedSave`].
+    fn confirm_discarded_save(&mut self, accept: bool) {
+        let Some(pending) = self.pending_discarded_save.take() else {
+            return;
+        };
+        let saved = accept && self.write_save();
+        if !saved {
+            if let Some(previous) = pending.restore_path {
+                self.path = previous;
+            }
+            if !accept {
+                self.after_save = None;
+            }
+        }
+    }
+
+    /// Le fichier que l'enregistrement écraserait sans ce que sa lecture a
+    /// écarté, avec ce qui l'a été (« 2 calculations and 1 correction record »),
+    /// en attente de confirmation (#309, F3).
+    pub fn pending_discarded_save(&self) -> Option<(String, String)> {
+        self.pending_discarded_save.as_ref()?;
+        let source = self.discarded_source.as_ref()?;
+        let what = discarded_what(source.calculations, source.corrections)?;
+        let name = source.path.file_name().map_or_else(
+            || source.path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        Some((name, what))
     }
 
     /// Applique `change` à un clone du spec de `graph` et l'envoie au modèle
@@ -6765,6 +6905,7 @@ impl AppState {
                 self.refresh();
                 self.saved_revision =
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));
+                self.discarded_source = DiscardedSource::of(PathBuf::from(&self.path), &report);
                 true
             }
             Err(err) => {
@@ -6817,6 +6958,7 @@ impl AppState {
             || self.pending_row_drop.is_some()
             || self.alert.is_some()
             || self.pending_overwrite.is_some()
+            || self.pending_discarded_save.is_some()
     }
 
     /// Plus rien ne retient l'application (Quit accepté) ; une seule fois.
@@ -6904,6 +7046,7 @@ impl AppState {
             Ok(_) => {
                 self.path.clear();
                 self.saved_revision = None;
+                self.discarded_source = None;
                 self.selected_sheets.clear();
                 self.selection.clear();
                 self.editing = None;

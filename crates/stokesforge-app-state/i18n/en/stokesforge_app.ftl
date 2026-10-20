@@ -114,6 +114,10 @@ overwrite-title = Replace File
 overwrite-confirm = “{ $name }” already exists. Replace it?
 overwrite-replace = Replace
     .hint = Overwrites the existing file; this cannot be undone
+discarded-save-title = Replace File
+discarded-save-confirm = “{ $name }” was read with { $what } left out. Saving replaces it without them: discarded data will be lost.
+discarded-save-replace = Replace
+    .hint = Saves the project over the file; the discarded data cannot be recovered
 action-import = Import…
     .hint = Reads instrument files into sheets
 action-refresh-from-source = Refresh from Source
@@ -264,11 +268,23 @@ status-level-warning = Warning
 status-level-error = Error
 status-saved = Saved to { $path }
 status-loaded = Loaded from { $path }
-status-load-calculations-discarded =
-    { $count ->
-        [one] One calculation could not be read and was left out of the project ({ $ids })
-       *[other] { $count } calculations could not be read and were left out of the project ({ $ids })
+status-load-discarded-calculations = { $count } { $count ->
+        [one] calculation
+       *[other] calculations
     }
+status-load-discarded-corrections = { $count } { $count ->
+        [one] correction record
+       *[other] correction records
+    }
+status-load-discarded-and = { $first } and { $second }
+status-load-discarded = { $what } { $total ->
+        [one] was
+       *[other] were
+    } discarded from the project ({ $ids })
+status-load-discarded-corrections-only = { $what } { $total ->
+        [one] was
+       *[other] were
+    } discarded from the project ({ $ids })
 status-nothing-to-undo = Nothing to undo
 status-nothing-to-redo = Nothing to redo
 status-clipboard-unreadable = Clipboard is empty or unreadable

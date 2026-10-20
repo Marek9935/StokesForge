@@ -114,6 +114,10 @@ overwrite-title = Remplacer le fichier
 overwrite-confirm = « { $name } » existe déjà. Le remplacer ?
 overwrite-replace = Remplacer
     .hint = Écrase le fichier existant ; cette action ne peut pas être annulée
+discarded-save-title = Remplacer le fichier
+discarded-save-confirm = « { $name } » a été lu sans { $what }. L'enregistrer le remplace sans eux : les données écartées seront perdues.
+discarded-save-replace = Remplacer
+    .hint = Enregistre le projet sur le fichier ; les données écartées ne pourront pas être récupérées
 action-import = Importer…
     .hint = Lit des fichiers d'appareil dans des feuilles
 action-refresh-from-source = Actualiser depuis la source
@@ -263,11 +267,23 @@ status-level-warning = Avertissement
 status-level-error = Erreur
 status-saved = Enregistré dans { $path }
 status-loaded = Chargé depuis { $path }
-status-load-calculations-discarded =
-    { $count ->
-        [one] Un calcul illisible a été écarté du projet ({ $ids })
-       *[other] { $count } calculs illisibles ont été écartés du projet ({ $ids })
+status-load-discarded-calculations = { $count } { $count ->
+        [one] calcul
+       *[other] calculs
     }
+status-load-discarded-corrections = { $count } { $count ->
+        [one] trace de correction
+       *[other] traces de correction
+    }
+status-load-discarded-and = { $first } et { $second }
+status-load-discarded = { $what } { $total ->
+        [one] a été écarté
+       *[other] ont été écartés
+    } du projet ({ $ids })
+status-load-discarded-corrections-only = { $what } { $total ->
+        [one] a été écartée
+       *[other] ont été écartées
+    } du projet ({ $ids })
 status-nothing-to-undo = Rien à annuler
 status-nothing-to-redo = Rien à rétablir
 status-clipboard-unreadable = Presse-papiers vide ou illisible
