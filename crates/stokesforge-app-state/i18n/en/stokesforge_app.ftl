@@ -273,6 +273,11 @@ status-nothing-to-undo = Nothing to undo
 status-nothing-to-redo = Nothing to redo
 status-clipboard-unreadable = Clipboard is empty or unreadable
 status-paste-non-contiguous = Cannot paste into a non-contiguous selection
+status-paste-columns-dropped =
+    { $count ->
+        [one] One column did not fit and was not pasted
+       *[other] { $count } columns did not fit and were not pasted
+    }
 status-graph-copied = Graph copied as { $formats }
 status-graph-copied-partly = Graph copied as { $formats }; { $missing } could not be prepared
 status-language-not-saved = Could not save the language choice: { $detail }

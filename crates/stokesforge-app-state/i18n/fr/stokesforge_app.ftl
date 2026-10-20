@@ -272,6 +272,11 @@ status-nothing-to-undo = Rien à annuler
 status-nothing-to-redo = Rien à rétablir
 status-clipboard-unreadable = Presse-papiers vide ou illisible
 status-paste-non-contiguous = Impossible de coller dans une sélection non contiguë
+status-paste-columns-dropped =
+    { $count ->
+        [one] Une colonne ne tenait pas dans la feuille et n'a pas été collée
+       *[other] { $count } colonnes ne tenaient pas dans la feuille et n'ont pas été collées
+    }
 status-graph-copied = Graphique copié en { $formats }
 status-graph-copied-partly = Graphique copié en { $formats } ; { $missing } n'a pas pu être préparé
 status-language-not-saved = Impossible d'enregistrer le choix de la langue : { $detail }

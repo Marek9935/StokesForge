@@ -1105,14 +1105,6 @@ impl From<ScriptOutcome> for ScriptOutput {
 /// usuel.
 pub const MISSING_TEXT_DISPLAY: &str = "\u{00A0}";
 
-/// Construit le bloc de valeurs d'une colonne collée depuis un TSV : la
-/// colonne d'indice `col_index` de chaque ligne de `rows` (une ligne plus
-/// courte fournit une case vide), lue selon `kind` par la règle unique de la
-/// saisie, [`ValueBlock::from_texts`] (#258) — dates des colonnes `DateTime`,
-/// `inf` / `nan` gardés en texte, case vide = valeur manquante. Un texte qui
-/// ne rentre pas dans une colonne `Numeric`/`DateTime` rend un bloc `Mixed`
-/// avec `true` : l'appelant écrit alors par `Command::SetCellsPromoting` et
-/// non `Command::SetCells`, exactement comme une saisie tolérante au clavier.
 /// Plafond d'identifiants nommés dans l'avertissement de chargement : au-delà,
 /// la liste est abrégée par « … » (le compte, lui, reste exact).
 const DISCARDED_IDS_SHOWN: usize = 5;
@@ -1140,6 +1132,15 @@ fn discarded_calculations_text(report: &stokesforge_session::LoadReport) -> Opti
     ))
 }
 
+/// Construit le bloc de valeurs d'une colonne collée depuis un TSV : la
+/// colonne d'indice `col_index` de chaque ligne de `rows` (une ligne plus
+/// courte fournit une case vide ; les collages de lignes de données passent
+/// par [`value_block_keeping_absent_cells`], qui garde la valeur existante),
+/// lue selon `kind` par la règle unique de la saisie, [`ValueBlock::from_texts`] (#258) — dates des colonnes `DateTime`,
+/// `inf` / `nan` gardés en texte, case vide = valeur manquante. Un texte qui
+/// ne rentre pas dans une colonne `Numeric`/`DateTime` rend un bloc `Mixed`
+/// avec `true` : l'appelant écrit alors par `Command::SetCellsPromoting` et
+/// non `Command::SetCells`, exactement comme une saisie tolérante au clavier.
 fn value_block_from_tsv_column(
     kind: ColumnType,
     rows: &[Vec<String>],
@@ -1150,6 +1151,47 @@ fn value_block_from_tsv_column(
         .map(|row| row.get(col_index).map(String::as_str).unwrap_or(""))
         .collect();
     ValueBlock::from_texts(kind, &texts)
+}
+
+/// Bloc d'un collage de lignes de données (#311) pour la colonne `col_index` :
+/// une case **absente** (ligne plus courte que la colonne visée) garde la
+/// valeur que la colonne portait déjà, une case présente et vide reste une
+/// valeur manquante. Le bloc s'arrête à la dernière case présente : une
+/// colonne n'est jamais allongée par des cases absentes. `None` quand aucune
+/// case n'est présente. Les cases gardées se lisent par [`Column::cell`] (un
+/// `MixedCell`, jamais repassé en texte) ; le bloc, lui, vient de
+/// [`value_block_from_tsv_column`], donc `promoting` est celui de la saisie.
+fn value_block_keeping_absent_cells(
+    column: &Column,
+    start: usize,
+    rows: &[Vec<String>],
+    col_index: usize,
+) -> Option<(ValueBlock, bool)> {
+    let last = rows.iter().rposition(|row| row.get(col_index).is_some())?;
+    let rows = &rows[..=last];
+    let (block, promoting) = value_block_from_tsv_column(column.column_type(), rows, col_index);
+    let kept = |i: usize| rows[i].get(col_index).is_none();
+    if !(0..rows.len()).any(kept) {
+        return Some((block, promoting));
+    }
+    let block = match block {
+        ValueBlock::Float(mut values) => {
+            for i in (0..values.len()).filter(|&i| kept(i)) {
+                values[i] = match column.cell(start + i) {
+                    MixedCell::Number(x) => x,
+                    _ => f64::NAN,
+                };
+            }
+            ValueBlock::Float(values)
+        }
+        ValueBlock::Mixed(mut cells) => {
+            for i in (0..cells.len()).filter(|&i| kept(i)) {
+                cells[i] = column.cell(start + i);
+            }
+            ValueBlock::Mixed(cells)
+        }
+    };
+    Some((block, promoting))
 }
 
 /// Vrai si `column` (supposée `Mixed`) ne porterait que des nombres et des
@@ -7662,6 +7704,11 @@ impl AppState {
     ///   une cellule ; en absolu, tout retombe sur son rang d'origine quelle
     ///   que soit l'ancre.
     ///
+    /// Collage de lignes de données (#311) : une case **absente** (ligne plus
+    /// courte) garde la valeur existante, une case présente et vide est une
+    /// valeur manquante ; les colonnes copiées au-delà de la feuille sont
+    /// abandonnées, le statut en donne le nombre.
+    ///
     /// Une colonne formule refuse naturellement l'écriture de données
     /// (`CoreError::FormulaColumnReadOnly`) : signalée par le statut, sans
     /// bloquer les autres colonnes déjà collées. Un collage qui touche
@@ -7778,6 +7825,18 @@ impl AppState {
         }
     }
 
+    /// Statut posé quand la copie compte plus de colonnes que la feuille n'en
+    /// a à partir de l'ancre (#311) : les colonnes en trop sont abandonnées,
+    /// jamais ajoutées. Posé **après** les écritures (chaque commande
+    /// réécrit le statut), et seulement si aucune n'a échoué : une erreur
+    /// (colonne formule) reste affichée.
+    fn notice_dropped_columns(&mut self, wanted: usize, available: usize) {
+        if wanted > available && !self.last_action_failed() {
+            let dropped = wanted - available;
+            self.notice(tr!("status-paste-columns-dropped", count = dropped));
+        }
+    }
+
     /// [`GridClipboard::Relative`] : voir [`AppState::apply_paste`] pour la
     /// règle. Rien ne se colle si `anchor` n'est pas de la même sorte que
     /// `relative` (champs contre cellule de donnée, ou l'inverse).
@@ -7829,6 +7888,7 @@ impl AppState {
                 if grouped {
                     self.end_grouped_macro();
                 }
+                self.notice_dropped_columns(column_count, targets.len());
             }
             (GridCursor::Data(_, anchor_row), RelativeCopy::DataRows { start, rows }) => {
                 let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
@@ -7847,21 +7907,22 @@ impl AppState {
                     return;
                 }
                 for (index, &column) in targets.iter().enumerate() {
-                    let Some(kind) = self
-                        .snapshot
-                        .tree
-                        .node(column)
-                        .and_then(Node::as_column)
-                        .map(Column::column_type)
+                    let Some(col) = self.snapshot.tree.node(column).and_then(Node::as_column)
                     else {
                         continue;
                     };
-                    let (values, promoting) = value_block_from_tsv_column(kind, rows, index);
+                    let kind = col.column_type();
+                    let Some((values, promoting)) =
+                        value_block_keeping_absent_cells(col, paste_row, rows, index)
+                    else {
+                        continue;
+                    };
                     self.execute_pasted_cells(column, paste_row, values, promoting, kind, grouped);
                 }
                 if grouped {
                     self.end_grouped_macro();
                 }
+                self.notice_dropped_columns(column_count, targets.len());
             }
             // Champs copiés + ancre sur une cellule de donnée, ou lignes de
             // données copiées + ancre sur un champ d'en-tête : sortes
@@ -7954,6 +8015,7 @@ impl AppState {
         if grouped {
             self.end_grouped_macro();
         }
+        self.notice_dropped_columns(columns.len(), targets.len());
     }
 
     /// Relit les métadonnées actuelles de `column`, laisse `update` en

@@ -521,6 +521,10 @@ méthode de `PanelSpec` qu'ils déclenchent : un test qui appelle
 | `decode` sans gestion des guillemets | idem + `a_single_multiline_text_cell_pastes_as_one_cell` |
 | `decode` sans `\r\n` | `un_tableur_windows_termine_ses_lignes_par_crlf`, `external_clipboard_from_text_lit_le_format_des_tableurs` |
 | `cell_copy_text_in` qui retire `MISSING_TEXT_DISPLAY` après coup | `a_typed_non_breaking_space_survives_copy_and_paste` |
+| case absente lue comme vide (`unwrap_or("")`, plus de `value_block_keeping_absent_cells`) | `a_pasted_row_shorter_than_the_others_keeps_the_existing_cell`, `a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo` (#311) |
+| case présente et vide traitée comme absente | `a_present_but_empty_pasted_cell_is_still_a_missing_value`, `pure_data_copy_paste_keeps_working_without_header_markers` |
+| bloc non coupé après la dernière case présente (colonne allongée) | `a_short_last_row_does_not_lengthen_the_shorter_column` |
+| statut `status-paste-columns-dropped` retiré / posé sans débordement | `a_paste_wider_than_the_sheet_reports_the_dropped_columns`, `a_paste_that_fits_the_sheet_width_reports_nothing` |
 
 Le collage rejoue la structure interne quand le texte est celui qu'on a poussé :
 pour éprouver le chemin « texte externe », coller dans une **autre** session.

@@ -1980,6 +1980,165 @@ fn pure_data_copy_paste_keeps_working_without_header_markers() {
     assert!(matches!(cell(&state, signal, 4), Cell::Float(v) if v.is_nan()));
 }
 
+/// #311 : une case ABSENTE (ligne plus courte que la colonne visée) garde la
+/// valeur existante ; seule la case présente est écrite.
+#[test]
+fn a_pasted_row_shorter_than_the_others_keeps_the_existing_cell() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_cell(sheet1, temps, 2);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "1\t2\n3\n4\t5".to_string(),
+    });
+    assert_eq!(cell(&state, temps, 2), Cell::Float(1.0));
+    assert_eq!(cell(&state, signal, 2), Cell::Float(2.0));
+    assert_eq!(cell(&state, temps, 3), Cell::Float(3.0));
+    assert_eq!(
+        cell(&state, signal, 3),
+        Cell::Float(40.0),
+        "case absente entre deux cases présentes : la valeur existante reste"
+    );
+    assert_eq!(cell(&state, signal, 4), Cell::Float(5.0));
+}
+
+/// #311 : une case PRÉSENTE et vide (`"3\t"`) reste une valeur manquante.
+#[test]
+fn a_present_but_empty_pasted_cell_is_still_a_missing_value() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    state.select_cell(sheet1, temps, 2);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "1\t2\n3\t".to_string(),
+    });
+    assert_eq!(cell(&state, temps, 3), Cell::Float(3.0));
+    assert!(matches!(cell(&state, signal, 3), Cell::Float(v) if v.is_nan()));
+}
+
+/// #311 : la dernière ligne courte n'allonge pas la colonne la plus courte.
+#[test]
+fn a_short_last_row_does_not_lengthen_the_shorter_column() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let len = |state: &AppState, id| {
+        state
+            .tree()
+            .node(id)
+            .and_then(|n| n.as_column())
+            .map(|c| c.len())
+    };
+
+    state.select_cell(sheet1, temps, 4);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "1\t2\n3".to_string(),
+    });
+    assert_eq!(len(&state, temps), Some(6), "Temps reçoit ses deux cases");
+    assert_eq!(
+        len(&state, signal),
+        Some(5),
+        "Signal ne reçoit que la sienne"
+    );
+    assert_eq!(cell(&state, signal, 4), Cell::Float(2.0));
+}
+
+/// #311 : même collage sur une colonne `Mixed` — la case absente garde sa
+/// cellule telle quelle, et le tout reste une seule entrée d'historique.
+#[test]
+fn a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+    while state.can_undo() {
+        state.dispatch(Action::Undo);
+    }
+
+    state.select_cell(sheet1, temps, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "1\t2\tx\n3\t4\n5\t6\ty".to_string(),
+    });
+    assert_eq!(cell(&state, note, 0), Cell::Text(Some("x".to_string())));
+    assert_eq!(
+        cell(&state, note, 1),
+        Cell::Text(None),
+        "case absente : la cellule Mixed existante reste"
+    );
+    assert_eq!(cell(&state, note, 2), Cell::Text(Some("y".to_string())));
+    assert_eq!(cell(&state, signal, 1), Cell::Float(4.0));
+
+    state.dispatch(Action::Undo);
+    assert_eq!(cell(&state, note, 0), Cell::Text(Some("a".to_string())));
+    assert_eq!(cell(&state, note, 2), Cell::Text(Some(String::new())));
+    assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
+    assert_eq!(cell(&state, signal, 0), Cell::Float(10.0));
+    assert!(!state.can_undo(), "un seul Annuler a tout défait");
+}
+
+/// #311 : plus de colonnes copiées que la feuille n'en a à partir de l'ancre :
+/// celles qui tiennent s'écrivent, le statut compte les autres.
+#[test]
+fn a_paste_wider_than_the_sheet_reports_the_dropped_columns() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    state.select_cell(sheet1, signal, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "1\t2\t3\n4\t5\t6".to_string(),
+    });
+    assert_eq!(cell(&state, signal, 0), Cell::Float(1.0));
+    assert_eq!(cell(&state, note, 0), Cell::Float(2.0));
+    assert_eq!(cell(&state, temps, 0), Cell::Float(0.0));
+    let status = state.status().expect("un message");
+    assert!(!status.is_error());
+    assert!(
+        status.text.contains("One column"),
+        "statut inattendu : {}",
+        status.text
+    );
+}
+
+/// #311 : un collage qui tient en largeur ne pose aucun statut de débordement.
+#[test]
+fn a_paste_that_fits_the_sheet_width_reports_nothing() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.select_cell(sheet1, temps, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "1\t2\t3\n4\t5\t6".to_string(),
+    });
+    assert!(
+        state
+            .status()
+            .is_none_or(|status| !status.text.contains("did not fit")),
+        "aucun statut de débordement"
+    );
+}
+
 /// #259 : une case texte qui porte une tabulation ou un retour à la ligne se
 /// colle d'un seul tenant dans une autre session (donc par le seul texte du
 /// presse-papiers, comme depuis un tableur) — rien ne glisse sur les cases

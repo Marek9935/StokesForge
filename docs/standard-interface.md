@@ -380,6 +380,7 @@ Historique : #223.
   (1×10⁻⁵), notation `e` dans la grille et les champs. Les graduations restent en
   notation `e` (elles ne passent pas par Typst) : l'exposant typographique des
   graduations n'est pas livré.
+- **Collage de lignes de données** : une case **absente** (ligne plus courte que la colonne visée) garde la valeur existante et n'allonge jamais la colonne ; une case **présente et vide** (`3<tab>`) est une valeur manquante. Si la copie compte plus de colonnes que la feuille n'en a à partir de l'ancre, les colonnes en trop sont abandonnées (aucune n'est ajoutée) et la barre d'état le dit (`status-paste-columns-dropped`).
 - **Dates** (S-D4) : ISO 8601 (`2026-10-10 14:05`) ; formes de saisie (#218, en place) : ISO `2026-10-10 14:30` et `JJ/MM/AAAA [HH:MM[:SS]]` (`10/10/2026 14:30`), **jour d'abord**, jamais mois d'abord ; un nombre nu reste un timestamp POSIX ; le reste promeut la colonne en Mixed, comme tout texte non numérique. Lecteur et formateur uniques : `stokesforge_core::datetime` (grille, collage, conversion Mixed → Date/Time) ; `stokesforge-import` en garde une copie, accordée par un test de `stokesforge-importer`.
 - **Chemins** (S-D5) : nom du fichier seul dans les messages, chemin complet en
   bulle.
