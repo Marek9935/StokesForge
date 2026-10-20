@@ -551,6 +551,10 @@ fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
             path: path.to_path_buf(),
             detail: format!("float column buffer of {len} bytes, not a multiple of 8"),
         },
+        ConvertError::TooManyRows { found, limit } => PersistenceError::Corrupt {
+            path: path.to_path_buf(),
+            detail: format!("a column announces {found} rows, beyond the accepted limit ({limit})"),
+        },
         ConvertError::BadMixedTag(tag) => PersistenceError::Corrupt {
             path: path.to_path_buf(),
             detail: format!(

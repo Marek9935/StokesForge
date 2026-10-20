@@ -232,6 +232,13 @@ est refusé **dès la lecture**. Très loin de `u64::MAX`, où `IdAllocator::nex
 refuserait de toute façon, mais bien assez tôt pour qu'un fichier falsifié ne
 puisse pas amener en mémoire un projet inutilisable (batterie `b4`).
 
+`MAX_COLUMN_ROWS` (`stokesforge_core::column`). Une colonne dont le fichier
+annonce plus de lignes (`tags.len()` pour `Mixed`, `octets / 8` pour `Float`,
+`values.len()` pour l'ancien `Text`) est refusée en `Corrupt`
+(`ConvertError::TooManyRows`, aide `check_rows`) **avant** toute allocation
+(#316). Il n'y a pas de plafond de taille de fichier ni de budget global de
+cellules : décisions encore ouvertes.
+
 ## Ce qu'il faut savoir avant de modifier
 
 - **Relire `docs/archive/rustrewrite/format-fichier-plx.md`** avant de toucher

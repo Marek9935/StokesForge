@@ -3,6 +3,7 @@
 //! dérive pas du modèle (voir la doc de crate) : ces fonctions sont le seul
 //! endroit où les deux mondes se rencontrent.
 
+use stokesforge_core::column::MAX_COLUMN_ROWS;
 use stokesforge_core::{
     Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, CoreError, MixedCell, Node, NodeId,
     NodeKind, ValueBlock, WindowMeta,
@@ -62,6 +63,16 @@ pub(crate) enum ConvertError {
         found: usize,
         /// `"numbers"` ou `"texts"`, pour le message.
         what: &'static str,
+    },
+    /// Une colonne du fichier annonce plus de lignes que
+    /// `stokesforge_core::column::MAX_COLUMN_ROWS` (#316) : refusée avant
+    /// toute allocation, pour qu'un fichier forgé ne réserve pas des
+    /// gigaoctets.
+    TooManyRows {
+        /// Nombre de lignes annoncé par le fichier.
+        found: usize,
+        /// Plafond accepté.
+        limit: usize,
     },
     /// `Column::from_block` a refusé la paire (type, valeurs) reconstruite.
     Core(CoreError),
@@ -794,7 +805,32 @@ fn encode_floats(values: &[f64]) -> Vec<u8> {
 
 /// Décode un buffer d'octets bruts little-endian en `f64`. `Err` si la
 /// longueur n'est pas un multiple de 8.
-fn decode_floats(bytes: &[u8]) -> Result<Vec<f64>, ConvertError> {
+/// Ancien format `ValuesRecord::Text` : chaque `Option<String>` devient la
+/// cellule mixte équivalente, sans réanalyse (`None → Empty`).
+fn legacy_text_cells(
+    values: Vec<Option<String>>,
+    limit: usize,
+) -> Result<Vec<MixedCell>, ConvertError> {
+    check_rows(values.len(), limit)?;
+    Ok(values
+        .into_iter()
+        .map(|value| match value {
+            None => MixedCell::Empty,
+            Some(text) => MixedCell::Text(text),
+        })
+        .collect())
+}
+
+/// Refuse une colonne de plus de `limit` lignes, avant toute allocation.
+fn check_rows(len: usize, limit: usize) -> Result<(), ConvertError> {
+    if len > limit {
+        return Err(ConvertError::TooManyRows { found: len, limit });
+    }
+    Ok(())
+}
+
+fn decode_floats(bytes: &[u8], limit: usize) -> Result<Vec<f64>, ConvertError> {
+    check_rows(bytes.len() / 8, limit)?;
     if !bytes.len().is_multiple_of(8) {
         return Err(ConvertError::BadFloatLength(bytes.len()));
     }
@@ -841,8 +877,10 @@ fn decode_mixed(
     tags: &[u8],
     numbers: &[u8],
     texts: Vec<String>,
+    limit: usize,
 ) -> Result<Vec<MixedCell>, ConvertError> {
-    let numbers = decode_floats(numbers)?;
+    check_rows(tags.len(), limit)?;
+    let numbers = decode_floats(numbers, limit)?;
     let expected_numbers = tags.iter().filter(|&&tag| tag == MIXED_TAG_NUMBER).count();
     if expected_numbers != numbers.len() {
         return Err(ConvertError::BadMixedLength {
@@ -985,7 +1023,9 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
         } => {
             let column_type: ColumnType = column_type.into();
             let block = match values {
-                ValuesRecord::Float(bytes) => ValueBlock::Float(decode_floats(&bytes)?),
+                ValuesRecord::Float(bytes) => {
+                    ValueBlock::Float(decode_floats(&bytes, MAX_COLUMN_ROWS)?)
+                }
                 // Migration de compatibilité : un fichier écrit avant le
                 // retrait du type `Text` homogène porte encore cette
                 // étiquette. `TypeRecord::Text` s'est déjà relu en
@@ -994,20 +1034,14 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                 // réanalyse numérique (`None → Empty`, `Some(s) → Text(s)`)
                 // — une colonne texte d'hier est, cellule pour cellule, une
                 // colonne mixte entièrement textuelle aujourd'hui.
-                ValuesRecord::Text(values) => ValueBlock::Mixed(
-                    values
-                        .into_iter()
-                        .map(|value| match value {
-                            None => MixedCell::Empty,
-                            Some(text) => MixedCell::Text(text),
-                        })
-                        .collect(),
-                ),
+                ValuesRecord::Text(values) => {
+                    ValueBlock::Mixed(legacy_text_cells(values, MAX_COLUMN_ROWS)?)
+                }
                 ValuesRecord::Mixed {
                     tags,
                     numbers,
                     texts,
-                } => ValueBlock::Mixed(decode_mixed(&tags, &numbers, texts)?),
+                } => ValueBlock::Mixed(decode_mixed(&tags, &numbers, texts, MAX_COLUMN_ROWS)?),
             };
             let meta = ColumnMeta {
                 role: role.into(),
@@ -1092,6 +1126,34 @@ pub(crate) fn node_to_record(node: &Node) -> NodeRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_rows_refuses_only_beyond_the_limit() {
+        assert!(check_rows(3, 3).is_ok());
+        assert!(matches!(
+            check_rows(4, 3),
+            Err(ConvertError::TooManyRows { found: 4, limit: 3 })
+        ));
+    }
+
+    #[test]
+    fn column_decoders_refuse_beyond_the_row_limit() {
+        assert!(decode_floats(&[0u8; 24], 3).is_ok());
+        assert!(matches!(
+            decode_floats(&[0u8; 32], 3),
+            Err(ConvertError::TooManyRows { .. })
+        ));
+        assert!(decode_mixed(&[0, 0, 0], &[], vec![], 3).is_ok());
+        assert!(matches!(
+            decode_mixed(&[0, 0, 0, 0], &[], vec![], 3),
+            Err(ConvertError::TooManyRows { .. })
+        ));
+        assert!(legacy_text_cells(vec![None; 3], 3).is_ok());
+        assert!(matches!(
+            legacy_text_cells(vec![None; 4], 3),
+            Err(ConvertError::TooManyRows { .. })
+        ));
+    }
 
     /// Un calque à deux groupes de deux séries, le premier nommé « Été ».
     fn calque_a_deux_groupes() -> PanelSpec {

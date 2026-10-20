@@ -126,6 +126,10 @@ pas de boucler sur `ConcurrentWriteError`).
 Mesurer plutôt que chronométrer : `b17` et `b21` comptent des **octets
 alloués**, pas des millisecondes, pour que l'assertion dise « ce coût ne doit
 pas croître avec X » et reste vraie sur n'importe quelle machine.
+Exception assumée (#316) : `b17_charger_un_dossier_a_beaucoup_d_enfants_n_est_pas_quadratique`
+borne un temps (10 s, très large) car un coût quadratique en CPU n'alloue rien.
+Les refus de `MAX_COLUMN_ROWS` à la lecture se testent par `check_rows` et des
+limites minuscules (`convert.rs`), jamais avec 10^8 lignes.
 
 ## Recalcul ciblé (#193) — et ce qu'il faut tester en s'appuyant dessus
 

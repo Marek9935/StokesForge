@@ -300,3 +300,42 @@ fn b17_nommer_une_colonne_automatiquement_ne_coute_pas_plus_que_la_nommer() {
         pire.1
     );
 }
+
+/// #316 : charger un dossier à très grand nombre d'enfants ne doit pas
+/// coûter un balayage de la liste par enfant (quadratique). Borne de temps
+/// très large : 200 000 enfants prenaient plusieurs minutes avant, quelques
+/// dizaines de millisecondes après.
+#[test]
+fn b17_charger_un_dossier_a_beaucoup_d_enfants_n_est_pas_quadratique() {
+    use stokesforge_core::{NodeKind, Tree};
+    const N: u64 = 200_000;
+    let racine = NodeId::from_raw(1);
+    let enfants: Vec<NodeId> = (2..N + 2).map(NodeId::from_raw).collect();
+    let mut noeuds = vec![Node::new(
+        racine,
+        "Projet",
+        NodeKind::Folder {
+            children: enfants.clone(),
+        },
+    )
+    .unwrap()];
+    for (i, id) in enfants.iter().enumerate() {
+        noeuds.push(
+            Node::with_parent(
+                *id,
+                &format!("D{i}"),
+                Some(racine),
+                NodeKind::Folder { children: vec![] },
+            )
+            .unwrap(),
+        );
+    }
+    let debut = std::time::Instant::now();
+    let arbre = Tree::from_nodes(racine, noeuds).expect("arbre valide");
+    let ecoule = debut.elapsed();
+    assert_eq!(arbre.len(), N as usize + 1);
+    assert!(
+        ecoule < std::time::Duration::from_secs(10),
+        "chargement de {N} enfants : {ecoule:?} (quadratique ?)"
+    );
+}

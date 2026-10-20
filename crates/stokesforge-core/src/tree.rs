@@ -197,6 +197,16 @@ impl Tree {
             )));
         }
 
+        // Une passe : occurrences de chaque (parent, enfant) dans les listes
+        // d'enfants — évite un `filter().count()` par frère (quadratique sur
+        // un dossier à grand nombre d'enfants, #316).
+        let mut listed: HashMap<(NodeId, NodeId), usize> = HashMap::new();
+        for (id, node) in &self.nodes {
+            for child in node.children() {
+                *listed.entry((*id, *child)).or_insert(0) += 1;
+            }
+        }
+
         for (id, node) in &self.nodes {
             for child in node.children() {
                 let child_node = self.nodes.get(child).ok_or_else(|| {
@@ -234,11 +244,7 @@ impl Tree {
                     containment_message(parent_node.kind(), node.kind())
                 )));
             }
-            let occurrences = parent_node
-                .children()
-                .iter()
-                .filter(|child| **child == *id)
-                .count();
+            let occurrences = listed.get(&(parent, *id)).copied().unwrap_or(0);
             if occurrences != 1 {
                 return Err(CoreError::Structure(format!(
                     "{id} is listed {occurrences} times as a child of {parent} (exactly one expected)"
@@ -991,6 +997,50 @@ mod tests {
                 .insert(parent, index, Node::new(id, name, kind).unwrap())
                 .unwrap()
         }
+    }
+
+    /// Charge un arbre dont la racine (1) liste `listed` et dont les nœuds
+    /// `others` sont des dossiers déclarant la racine pour parent.
+    fn load_flat(listed: Vec<u64>, others: &[u64]) -> CoreResult<Tree> {
+        let children = listed.into_iter().map(NodeId::from_raw).collect();
+        let mut nodes =
+            vec![Node::new(NodeId::from_raw(1), "Projet", NodeKind::Folder { children }).unwrap()];
+        for raw in others {
+            nodes.push(
+                Node::with_parent(
+                    NodeId::from_raw(*raw),
+                    &format!("D{raw}"),
+                    Some(NodeId::from_raw(1)),
+                    folder_kind(),
+                )
+                .unwrap(),
+            );
+        }
+        Tree::from_nodes(NodeId::from_raw(1), nodes)
+    }
+
+    fn structure_message(result: CoreResult<Tree>) -> String {
+        match result {
+            Err(CoreError::Structure(message)) => message,
+            other => panic!("attendu Structure, obtenu {:?}", other.map(|_| ())),
+        }
+    }
+
+    #[test]
+    fn from_nodes_refuses_a_child_listed_twice() {
+        let message = structure_message(load_flat(vec![2, 2], &[2]));
+        assert!(message.contains("listed 2 times"), "{message}");
+    }
+
+    #[test]
+    fn from_nodes_refuses_a_node_missing_from_its_parent_list() {
+        let message = structure_message(load_flat(vec![], &[2]));
+        assert!(message.contains("listed 0 times"), "{message}");
+    }
+
+    #[test]
+    fn from_nodes_accepts_a_child_listed_once() {
+        assert!(load_flat(vec![2, 3], &[2, 3]).is_ok());
     }
 
     #[test]

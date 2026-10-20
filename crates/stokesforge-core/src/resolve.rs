@@ -240,7 +240,7 @@ pub fn series_label(series: &SeriesSpec, tree: &Tree) -> String {
     }
     if let Some(row) = series.row {
         // Série « ligne » (#166) : la ligne est son nom, comme dans la grille.
-        return format!("Row {}", row + 1);
+        return format!("Row {}", row.saturating_add(1));
     }
     let Some(y_node) = tree.node(series.y).filter(|node| node.kind().is_column()) else {
         return "(référence rompue)".to_string();
@@ -841,6 +841,21 @@ mod tests {
         assert_eq!(resolved.point_count(), 3);
         assert_eq!(resolved.x.as_ref().unwrap().as_slice(), &[0.0, 10.0, 20.0]);
         assert_eq!(resolved.y.as_ref().unwrap().as_slice(), &[2.0, 5.0, 8.0]);
+    }
+
+    /// Une `row` lue d'un fichier peut valoir `usize::MAX` : le libellé ne
+    /// doit pas déborder (#316).
+    #[test]
+    fn a_row_series_label_does_not_overflow_on_the_largest_row() {
+        let (project, _, ids) = kinetics();
+        let series = SeriesSpec {
+            row: Some(usize::MAX),
+            ..SeriesSpec::new(ids[0])
+        };
+        assert_eq!(
+            series_label(&series, project.tree()),
+            "Row 18446744073709551615"
+        );
     }
 
     /// Une ligne au-delà d'une colonne plus courte vaut `NaN` (le point ne se
