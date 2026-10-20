@@ -3389,7 +3389,7 @@ fn script_source_lives_in_state_and_is_not_lost_by_other_actions() {
     );
 }
 
-/// Phase S-R4 : le banc doit savoir où sont les graphes, puisqu'il en affiche
+/// Phase R4 : le banc doit savoir où sont les graphes, puisqu'il en affiche
 /// un. Le pendant de `sheets()`, et la seule partie du panneau de rendu qui
 /// se teste sans fenêtre — le reste, c'est `stokesforge-render-egui` qui le
 /// couvre (`tests/cache_session.rs`).
@@ -6991,7 +6991,7 @@ fn begin_plot_edit_resets_the_draft_when_switching_graphs() {
     );
 }
 
-/// Une série dont le type de tracé est [`PlotType::Unknown`] (S-C5, variante
+/// Une série dont le type de tracé est [`PlotType::Unknown`] (C5, variante
 /// d'une version plus récente de StokesForge que ce lecteur ne connaît pas) doit
 /// pouvoir être ouverte dans le brouillon d'édition et affichée dans la
 /// liste des séries sans jamais paniquer — invariant 10 (« un défaut de

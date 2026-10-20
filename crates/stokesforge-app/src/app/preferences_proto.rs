@@ -202,7 +202,7 @@ impl Bench {
     }
 }
 
-/// Pourquoi « Apply » est grisé, s'il l'est (G1) : un dossier fixé sans chemin.
+/// Pourquoi « Apply » est grisé, s'il l'est (S-G1) : un dossier fixé sans chemin.
 pub(super) fn apply_blocker(draft: &Proto) -> Option<String> {
     draft
         .folders

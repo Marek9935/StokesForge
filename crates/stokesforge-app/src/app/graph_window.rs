@@ -144,7 +144,7 @@ struct ShapeProperties {
     macro_open: bool,
 }
 
-/// Réglages en direct (F1) : chaque changement du brouillon s'applique tout
+/// Réglages en direct (S-F1) : chaque changement du brouillon s'applique tout
 /// de suite dans une macro d'historique ; OK la garde (une seule entrée),
 /// Cancel l'avorte et l'objet retrouve son état d'ouverture.
 fn shape_properties_ui(

@@ -9155,7 +9155,7 @@ mod tests {
         );
     }
 
-    /// S-C4 — la reproduction du banc (`b15_une_mesure_scientifique_tient_dans_une_cellule`)
+    /// C4 — la reproduction du banc (`b15_une_mesure_scientifique_tient_dans_une_cellule`)
     /// fixe la spécification ; ce test fige les mêmes trois valeurs au niveau
     /// de la fonction de formatage elle-même, sans passer par une session.
     #[test]
@@ -9197,7 +9197,7 @@ mod tests {
         }
     }
 
-    /// S-C4 — zéro ne bascule jamais en notation scientifique (`"0e0"` serait
+    /// C4 — zéro ne bascule jamais en notation scientifique (`"0e0"` serait
     /// correct mais illisible pour un cas aussi courant).
     #[test]
     fn c4_zero_reste_decimal() {
@@ -9205,7 +9205,7 @@ mod tests {
         assert_eq!(format_f64_for_display(-0.0), "-0");
     }
 
-    /// S-C4 — une valeur ordinaire (celle que la grille affiche le plus
+    /// C4 — une valeur ordinaire (celle que la grille affiche le plus
     /// souvent) n'est pas touchée par le seuil.
     #[test]
     fn c4_une_valeur_ordinaire_reste_decimale() {
