@@ -337,3 +337,51 @@ fn la_deconvolution_directe_n_utilise_pas_le_solveur_et_n_avertit_pas_de_non_con
         .iter()
         .any(|w| matches!(w, Warning::Undetermined(_))));
 }
+
+fn custom(formula: &str, initial: f64) -> Operation {
+    Operation::Fit {
+        spec: FitSpec {
+            model: Model::Custom {
+                formula: formula.into(),
+            },
+            params: vec![ParamSetting {
+                initial: Some(initial),
+                ..ParamSetting::default()
+            }],
+        },
+        range: None,
+        residuals: false,
+    }
+}
+
+fn constante(y: f64) -> SeriesInput {
+    SeriesInput {
+        x: (0..8).map(f64::from).collect(),
+        y: vec![y; 8],
+        sigma: None,
+    }
+}
+
+/// C1 (#313) : un minimum en pointe (`|a−3| + 0,5(a−3) + 1`, pente centrée
+/// 0,5) où aucun pas ne baisse le χ² est rendu avec « not converged », pas
+/// présenté comme un ajustement convergé.
+#[test]
+fn un_solveur_bloque_sur_une_pointe_avertit_non_converge() {
+    let o = run_one(
+        &custom("abs(a-3) + 0.5*(a-3) + 1", 3.0),
+        constante(0.0),
+        None,
+    );
+    assert_eq!(o.warnings, vec![Warning::NotConverged]);
+}
+
+/// C6 (#313) : `sqrt(a)` en a = 0 n'a pas de pente (sqrt d'un négatif) : erreur
+/// « modèle non évaluable », pas un « convergé » ni un système singulier.
+#[test]
+fn un_modele_sans_pente_au_depart_est_une_erreur_modele_non_evaluable() {
+    let err = run(&custom("sqrt(a)", 0.0), &[constante(1.0)], None).unwrap_err();
+    assert_eq!(
+        err,
+        stokesforge_analysis::error::AnalysisError::ModelNotEvaluable
+    );
+}

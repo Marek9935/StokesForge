@@ -172,6 +172,18 @@ fn warning_to_record(w: &Warning) -> WarningRecord {
             kind: "undetermined".into(),
             count: *n as u64,
         },
+        Warning::IrfTruncated => WarningRecord {
+            kind: "irf_truncated".into(),
+            count: 0,
+        },
+        Warning::BridgedReferenceGap(n) => WarningRecord {
+            kind: "bridged_reference_gap".into(),
+            count: *n as u64,
+        },
+        Warning::DivisionByZero(n) => WarningRecord {
+            kind: "division_by_zero".into(),
+            count: *n as u64,
+        },
     }
 }
 
@@ -182,6 +194,9 @@ fn record_to_warning(r: &WarningRecord) -> Option<Warning> {
         "negative_clipped" => Some(Warning::NegativeClipped(r.count as usize)),
         "not_converged" => Some(Warning::NotConverged),
         "undetermined" => Some(Warning::Undetermined(r.count as usize)),
+        "irf_truncated" => Some(Warning::IrfTruncated),
+        "bridged_reference_gap" => Some(Warning::BridgedReferenceGap(r.count as usize)),
+        "division_by_zero" => Some(Warning::DivisionByZero(r.count as usize)),
         _ => None,
     }
 }
@@ -806,6 +821,9 @@ mod tests {
             Warning::NegativeClipped(_) => 2,
             Warning::NotConverged => 3,
             Warning::Undetermined(_) => 4,
+            Warning::IrfTruncated => 5,
+            Warning::BridgedReferenceGap(_) => 6,
+            Warning::DivisionByZero(_) => 7,
         }
     }
 
@@ -814,10 +832,13 @@ mod tests {
             Warning::SignalStepNotUniform,
             Warning::IrfStepMismatch,
             Warning::NotConverged,
+            Warning::IrfTruncated,
         ];
         for n in [0, 1, 2, 3, 17, u32::MAX as usize, usize::MAX] {
             all.push(Warning::NegativeClipped(n));
             all.push(Warning::Undetermined(n));
+            all.push(Warning::BridgedReferenceGap(n));
+            all.push(Warning::DivisionByZero(n));
         }
         all
     }
@@ -826,7 +847,7 @@ mod tests {
     fn tout_avertissement_fait_l_aller_retour_des_enregistrements() {
         let all = tous_les_avertissements();
         let rangs: std::collections::BTreeSet<usize> = all.iter().map(rang).collect();
-        assert_eq!(rangs.len(), 5, "toutes les variantes sont éprouvées");
+        assert_eq!(rangs.len(), 8, "toutes les variantes sont éprouvées");
         for w in &all {
             assert_eq!(record_to_warning(&warning_to_record(w)).as_ref(), Some(w));
         }
@@ -841,6 +862,9 @@ mod tests {
             (Warning::NegativeClipped(4), "negative_clipped", 4),
             (Warning::NotConverged, "not_converged", 0),
             (Warning::Undetermined(2), "undetermined", 2),
+            (Warning::IrfTruncated, "irf_truncated", 0),
+            (Warning::BridgedReferenceGap(3), "bridged_reference_gap", 3),
+            (Warning::DivisionByZero(1), "division_by_zero", 1),
         ];
         for (w, kind, count) in attendu {
             let r = warning_to_record(&w);

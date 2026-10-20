@@ -801,3 +801,99 @@ fn une_serie_tracee_depuis_un_calcul_perime_est_marquee_et_le_graphe_peut_y_reno
         .unwrap();
     assert_eq!(drapeaux(&g), [false, false]);
 }
+
+// ── Colonnes de longueurs différentes (C4, #313) ───────────────────────
+
+/// Un classeur à X, Y de longueurs données, et une référence constante = 2 sur
+/// un large domaine : `Correct`/`Divide` rend y / 2.
+fn inegales(x: &[f64], y: &[f64]) -> (Project, NodeId, SeriesRef, AuxRef) {
+    let mut project = Project::new("P").unwrap();
+    let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+    let sheet = project.tree().children(book).unwrap()[0];
+    let mut add = |name: &str, v: &[f64]| {
+        project
+            .add_column(sheet, None, Some(name), Column::from_f64(v))
+            .unwrap()
+    };
+    let cx = add("X", x);
+    let cy = add("Y", y);
+    let rx = add("RX", &[-100.0, 100.0]);
+    let ry = add("RY", &[2.0, 2.0]);
+    (
+        project,
+        cy,
+        SeriesRef {
+            x: Some(cx),
+            y: cy,
+            sigma: None,
+        },
+        AuxRef { x: Some(rx), y: ry },
+    )
+}
+
+fn corrige(project: &Project, series: SeriesRef, aux: &AuxRef) -> Vec<f64> {
+    let computed = compute(
+        project.tree(),
+        &Operation::Correct {
+            op: CorrectOp::Divide,
+        },
+        &[series],
+        Some(aux),
+    )
+    .unwrap();
+    computed.columns[0].data.clone()
+}
+
+#[test]
+fn la_sortie_a_la_longueur_de_x_quand_x_est_donne() {
+    // X plus court que Y : les lignes de Y au-delà de X n'ont pas d'abscisse.
+    let (p, _, s, aux) = inegales(&[1.0, 2.0, 3.0], &[2.0, 4.0, 6.0, 8.0, 10.0]);
+    assert_eq!(corrige(&p, s, &aux), vec![1.0, 2.0, 3.0]);
+    // X plus long que Y : les lignes de Y manquantes sont vides (NaN).
+    let (p, _, s, aux) = inegales(&[1.0, 2.0, 3.0, 4.0, 5.0], &[2.0, 4.0, 6.0]);
+    let data = corrige(&p, s, &aux);
+    assert_eq!(data.len(), 5);
+    assert_eq!(&data[..3], &[1.0, 2.0, 3.0]);
+    assert!(data[3].is_nan() && data[4].is_nan());
+}
+
+#[test]
+fn sans_x_la_sortie_a_la_longueur_de_y() {
+    let (p, _, mut s, aux) = inegales(&[1.0, 2.0], &[2.0, 4.0, 6.0, 8.0]);
+    s.x = None;
+    assert_eq!(corrige(&p, s, &aux), vec![1.0, 2.0, 3.0, 4.0]);
+}
+
+#[test]
+fn le_remplacement_avec_y_plus_long_que_x_garde_les_cellules_au_dela_de_x() {
+    let (mut p, y, s, aux) = inegales(&[1.0, 2.0, 3.0], &[2.0, 4.0, 6.0, 8.0, 10.0]);
+    let data = corrige(&p, s.clone(), &aux);
+    let versions: Vec<(NodeId, u64)> = [s.x.unwrap(), y, aux.y, aux.x.unwrap()]
+        .into_iter()
+        .map(|c| (c, p.tree().get(c).unwrap().as_column().unwrap().version()))
+        .collect();
+    let mut draft = CalculationDraft {
+        operation: Operation::Correct {
+            op: CorrectOp::Divide,
+        },
+        series: vec![s],
+        aux: Some(aux),
+        outputs: vec![out(0, "corrected", data, "c")],
+        results: vec![SeriesResult::default()],
+        keep_results: false,
+        auto_recalc: false,
+        low_r2_dialog: false,
+    };
+    // Sans complétion, la garde de longueur du cœur refuse la sortie courte.
+    assert!(matches!(
+        p.replace_analysis_data(draft.clone(), &versions),
+        Err(CoreError::Structure(_))
+    ));
+    draft.complete_for_replacement(p.tree());
+    assert_eq!(draft.outputs[0].data.len(), 5);
+    p.replace_analysis_data(draft, &versions).unwrap();
+    let col = p.tree().get(y).unwrap().as_column().unwrap();
+    let got: Vec<f64> = (0..5).map(|r| col.values().number_at(r)).collect();
+    // Les trois premières lignes sont corrigées, les deux autres gardent l'original.
+    assert_eq!(got, vec![1.0, 2.0, 3.0, 8.0, 10.0]);
+}

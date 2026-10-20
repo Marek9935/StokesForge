@@ -268,6 +268,14 @@ fn series_dict<'py>(
             Warning::Undetermined(n) => {
                 format!("{n} parameter(s) are not determined by the data (no uncertainty)")
             }
+            Warning::IrfTruncated => {
+                "the response is cut off above 1% of its peak (missing tail taken as zero)"
+                    .to_string()
+            }
+            Warning::BridgedReferenceGap(n) => {
+                format!("{n} point(s) were interpolated across an empty cell of the reference")
+            }
+            Warning::DivisionByZero(n) => format!("{n} division(s) by zero were left empty"),
         })?;
     }
     dict.set_item("columns", columns)?;
@@ -328,7 +336,7 @@ fn run(
                 known = snapshot.tree.calculations().keys().copied().collect();
             }
             let values = computed.results.clone();
-            let draft = draft(
+            let mut draft = draft(
                 &tree,
                 &series,
                 op.clone(),
@@ -339,6 +347,7 @@ fn run(
                 peaks,
             );
             if replace_original {
+                draft.complete_for_replacement(&tree);
                 let mut ids: Vec<NodeId> = series
                     .iter()
                     .flat_map(|s| [Some(s.y), s.x, s.sigma].into_iter().flatten())

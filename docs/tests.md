@@ -296,6 +296,30 @@ nomme les comportements.
 | garde des boucles calcul → formule → calcul retirée | `b22` (propriété 3 : une commande sans rapport réécrit des colonnes) |
 | manuel : changement de définition non « cru » (`Trust`) | `modifier_un_calcul_manuel_perime_le_met_a_jour_sans_le_reperimer` seul |
 
+### Mutants éprouvés (#313, avertissements et erreurs d'analyse)
+
+Calcul pur, hors fingerprint : les avertissements viennent de `ops::run`, que le
+recalcul ciblé et le complet appellent identiquement (`b22` et `b19` restent
+verts). Les cas sont nommés dans `stokesforge-analysis` (`solver.rs`, `deconv.rs`,
+`correct.rs` en `mod tests`, `tests/plateau.rs`, `tests/ops.rs`), `stokesforge-core/tests/calculations.rs`
+(C4) et les trois tables de transport des `Warning` (persistance, `analysis_dialog.rs`,
+`analysis_warning_text.rs`).
+
+| Mutant (ce qui est cassé) | Vu par |
+|---|---|
+| arrêt sans pas accepté toujours « convergé » (`stalled` jamais levé) | `un_solveur_sans_pas_accepte_et_a_pente_forte_est_marque_bloque`, `un_solveur_bloque_sur_une_pointe_avertit_non_converge` |
+| test de non-fini retiré avant le pli `max` (pente `NaN` lue comme « convergé ») | `une_pente_non_finie_est_une_erreur_modele_non_evaluable` (solveur et `tests/plateau.rs`), `largeur_imposee_minuscule_ou_non_finie_n_est_pas_jugee_par_decompose` |
+| dérivée non finie remise à 0 (case « sans effet ») | mêmes cas (l'erreur redevient `SingularSystem`) |
+| seuil d'ajustement exact retiré (cosinus lu sur du bruit d'arrondi) | `un_ajustement_sain_ou_bruite_ne_previent_pas` (`tests/indetermine.rs`) |
+| IRF coupée : seuil 1 % déplacé (0,5 % ou 2 %), bords ou points hors fenêtre ignorés | `une_irf_coupee_au_dessus_d_un_pour_cent_de_son_pic_est_signalee` (0,5 / 0,9 / 1,1 / 5 %), `un_point_d_irf_hors_de_la_fenetre_est_signale_selon_le_decalage`, `la_deconvolution_directe_dit_une_irf_coupee_et_garde_la_renormalisation` |
+| trou de la référence : comptage retiré, point exactement sur un point gardé compté | `un_trou_de_la_reference_est_enjambe_et_compte`, `un_trou_au_milieu_de_la_reference_est_enjambe_et_dit`, `un_trou_en_fin_ou_sans_position_n_est_pas_un_enjambement` |
+| division par zéro : compte de tout non-fini (débordement compris), ligne de base non comptée, `±inf` de `sat/sa` | `la_division_par_une_reference_nulle_est_comptee_pas_le_debordement`, `une_ligne_de_base_passant_par_zero_compte_la_division`, `un_denominateur_nul_donne_nan_et_pas_l_infini`, `des_amplitudes_de_somme_nulle_donnent_des_durees_moyennes_nan` |
+| longueur de X remplacée par la plus longue des colonnes (C4) | `la_sortie_a_la_longueur_de_x_quand_x_est_donne`, `sans_x_la_sortie_a_la_longueur_de_y` |
+| refus « source length » rétabli pour une sortie plus courte que Y | `le_remplacement_avec_y_plus_long_que_x_garde_les_cellules_au_dela_de_x` |
+
+Mutant équivalent connu : `h >= lo && h <= hi` dans `bridges_hole` (un trou
+à la même abscisse qu'un point gardé suppose un X dupliqué).
+
 ### Ajouter une fonctionnalité qui en dépend : les tests à écrire
 
 **A. Une donnée de plus entre dans le calcul d'une formule** (fonction

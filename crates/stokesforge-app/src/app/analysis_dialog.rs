@@ -104,6 +104,15 @@ pub(super) fn warning_text(warning: &Warning) -> String {
             "analysis-warning-undetermined",
             count = i64::try_from(*count).unwrap_or(i64::MAX)
         ),
+        Warning::IrfTruncated => tr!("analysis-warning-irf-truncated"),
+        Warning::BridgedReferenceGap(count) => tr!(
+            "analysis-warning-bridged-reference-gap",
+            count = i64::try_from(*count).unwrap_or(i64::MAX)
+        ),
+        Warning::DivisionByZero(count) => tr!(
+            "analysis-warning-division-by-zero",
+            count = i64::try_from(*count).unwrap_or(i64::MAX)
+        ),
     }
 }
 
@@ -414,6 +423,18 @@ mod tests {
                 Warning::Undetermined(3),
                 tr!(in &loader; "analysis-warning-undetermined", count = 3_i64),
             ),
+            (
+                Warning::IrfTruncated,
+                tr!(in &loader; "analysis-warning-irf-truncated"),
+            ),
+            (
+                Warning::BridgedReferenceGap(3),
+                tr!(in &loader; "analysis-warning-bridged-reference-gap", count = 3_i64),
+            ),
+            (
+                Warning::DivisionByZero(2),
+                tr!(in &loader; "analysis-warning-division-by-zero", count = 2_i64),
+            ),
         ];
         for (warning, text) in &attendu {
             assert_eq!(&warning_text(warning), text, "{warning:?}");
@@ -427,6 +448,14 @@ mod tests {
         assert_ne!(
             warning_text(&Warning::NegativeClipped(3)),
             warning_text(&Warning::NegativeClipped(4))
+        );
+        assert_ne!(
+            warning_text(&Warning::BridgedReferenceGap(3)),
+            warning_text(&Warning::BridgedReferenceGap(4))
+        );
+        assert_ne!(
+            warning_text(&Warning::DivisionByZero(1)),
+            warning_text(&Warning::DivisionByZero(2))
         );
     }
 

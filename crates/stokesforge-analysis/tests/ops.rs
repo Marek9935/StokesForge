@@ -540,3 +540,110 @@ fn deconvolution_signal_non_uniforme_leve_l_avertissement_et_couvre_le_dernier_x
     let o = &run(&dir, &[regulier], Some(&aux)).unwrap()[0];
     assert!(!o.warnings.contains(&Warning::SignalStepNotUniform));
 }
+
+// ── C3, C5 (#313) : trous de la référence, divisions par zéro ───────────
+
+fn correction(op: CorrectOp) -> Operation {
+    Operation::Correct { op }
+}
+
+fn reference(x: &[f64], y: &[f64]) -> AuxInput {
+    AuxInput {
+        x: x.to_vec(),
+        y: y.to_vec(),
+    }
+}
+
+fn donnees(x: &[f64]) -> SeriesInput {
+    SeriesInput {
+        x: x.to_vec(),
+        y: vec![1.0; x.len()],
+        sigma: None,
+    }
+}
+
+/// Le trou d'une cellule vide au milieu de la référence est enjambé par
+/// interpolation : les trois points qui tombent dedans sont comptés.
+#[test]
+fn un_trou_au_milieu_de_la_reference_est_enjambe_et_dit() {
+    let aux = reference(&[1.0, 2.0, 3.0, 4.0], &[1.0, f64::NAN, 3.0, 4.0]);
+    let out = run(
+        &correction(CorrectOp::Multiply),
+        &[donnees(&[1.5, 2.0, 2.5, 3.5])],
+        Some(&aux),
+    )
+    .unwrap();
+    let o = &out[0];
+    assert_eq!(o.warnings, vec![Warning::BridgedReferenceGap(3)]);
+    // Interpolation entre (1, 1) et (3, 3) : y = x.
+    assert_eq!(col(o, "corrected").data, vec![1.5, 2.0, 2.5, 3.5]);
+}
+
+/// NaN en fin de référence : le domaine se termine avant, rien n'est enjambé.
+/// Une ligne de référence sans X n'a pas de position : silence.
+#[test]
+fn un_trou_en_fin_ou_sans_position_n_est_pas_un_enjambement() {
+    let fin = reference(&[1.0, 2.0, 3.0, 4.0], &[1.0, 2.0, 3.0, f64::NAN]);
+    let o = &run(
+        &correction(CorrectOp::Multiply),
+        &[donnees(&[1.5, 2.5, 3.5])],
+        Some(&fin),
+    )
+    .unwrap()[0];
+    assert_eq!(o.warnings, vec![]);
+    let sans_x = reference(&[1.0, f64::NAN, 3.0], &[1.0, 2.0, 3.0]);
+    let o = &run(
+        &correction(CorrectOp::Multiply),
+        &[donnees(&[1.5, 2.5])],
+        Some(&sans_x),
+    )
+    .unwrap()[0];
+    assert_eq!(o.warnings, vec![]);
+}
+
+#[test]
+fn une_reference_nulle_en_un_point_donne_nan_et_une_division_par_zero() {
+    let aux = reference(&[1.0, 2.0, 3.0], &[1.0, 0.0, 1.0]);
+    let o = &run(
+        &correction(CorrectOp::Divide),
+        &[donnees(&[1.0, 2.0, 3.0])],
+        Some(&aux),
+    )
+    .unwrap()[0];
+    let c = &col(o, "corrected").data;
+    assert!(c[1].is_nan() && c[0] == 1.0 && c[2] == 1.0);
+    assert_eq!(o.warnings, vec![Warning::DivisionByZero(1)]);
+    // Multiplier par zéro n'est pas une division.
+    let o = &run(
+        &correction(CorrectOp::Multiply),
+        &[donnees(&[1.0, 2.0, 3.0])],
+        Some(&aux),
+    )
+    .unwrap()[0];
+    assert_eq!(o.warnings, vec![]);
+}
+
+/// Une ligne de base qui passe par zéro : la division est comptée, la
+/// soustraction non.
+#[test]
+fn une_ligne_de_base_passant_par_zero_compte_la_division() {
+    let method = BaselineMethod::Line {
+        p1: (0.0, 0.0),
+        p2: (10.0, 10.0),
+    };
+    let divide = Operation::Baseline {
+        method: method.clone(),
+        op: BaselineOp::Divide,
+        keep_baseline: false,
+    };
+    let o = &run(&divide, &[line(11, |x| x + 1.0)], None).unwrap()[0];
+    assert!(col(o, "corrected").data[0].is_nan());
+    assert_eq!(o.warnings, vec![Warning::DivisionByZero(1)]);
+    let subtract = Operation::Baseline {
+        method,
+        op: BaselineOp::Subtract,
+        keep_baseline: false,
+    };
+    let o = &run(&subtract, &[line(11, |x| x + 1.0)], None).unwrap()[0];
+    assert_eq!(o.warnings, vec![]);
+}

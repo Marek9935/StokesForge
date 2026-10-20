@@ -241,7 +241,8 @@ pub struct PeaksFit {
     pub dof: usize,
     /// Nombre de paramètres libres que les données ne déterminent pas (#203).
     pub undetermined: usize,
-    /// Arrêt sur un plateau, pas sur un minimum (#281).
+    /// Arrêt sur un plateau (#281) ou solveur bloqué sans pas accepté (C1, #313) :
+    /// pas sur un minimum.
     pub plateau: bool,
 }
 
@@ -425,7 +426,7 @@ pub fn decompose(series: &Series, spec: &PeaksSpec) -> Result<PeaksFit, Analysis
         reduced_chi2: sol.reduced_chi2,
         dof: sol.dof,
         undetermined: sol.undetermined.iter().filter(|u| **u).count(),
-        plateau: sol.plateau,
+        plateau: sol.plateau || sol.stalled,
     })
 }
 
@@ -676,12 +677,18 @@ mod tests {
     fn largeur_imposee_minuscule_ou_non_finie_n_est_pas_jugee_par_decompose() {
         // `decompose` ne refuse que `<= 0` ; le reste (NaN, inf, positif
         // minuscule) est du ressort de `validate` ou du solveur, qui échoue
-        // sans rendre de faux ajustement (comportement actuel épinglé).
+        // sans rendre de faux ajustement (comportement actuel épinglé). Une
+        // largeur infinie donne une pente non finie : modèle non évaluable (C6).
         let s = une_gaussienne();
         for fwhm in [f64::MIN_POSITIVE, 1e-300, 1e-9, f64::NAN, f64::INFINITY] {
+            let attendu = if fwhm.is_infinite() {
+                AnalysisError::ModelNotEvaluable
+            } else {
+                AnalysisError::SingularSystem
+            };
             assert_eq!(
                 decompose(&s, &seed_spec(None, Some(fwhm))).unwrap_err(),
-                AnalysisError::SingularSystem,
+                attendu,
                 "fwhm = {fwhm:e}"
             );
         }

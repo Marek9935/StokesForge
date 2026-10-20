@@ -30,6 +30,18 @@ fn phrases(language: Language) -> Vec<(&'static str, String)> {
             "analysis-warning-undetermined",
             tr!(in &loader; "analysis-warning-undetermined", count = 3_i64),
         ),
+        (
+            "analysis-warning-irf-truncated",
+            tr!(in &loader; "analysis-warning-irf-truncated"),
+        ),
+        (
+            "analysis-warning-bridged-reference-gap",
+            tr!(in &loader; "analysis-warning-bridged-reference-gap", count = 3_i64),
+        ),
+        (
+            "analysis-warning-division-by-zero",
+            tr!(in &loader; "analysis-warning-division-by-zero", count = 2_i64),
+        ),
     ]
 }
 
@@ -78,6 +90,10 @@ fn les_nombres_sont_interpoles_sans_separateur_de_milliers() {
         tr!(in &loader_fr; "analysis-warning-undetermined", count = n),
         tr!(in &loader_en; "analysis-warning-negative-clipped", count = n),
         tr!(in &loader_fr; "analysis-warning-negative-clipped", count = n),
+        tr!(in &loader_en; "analysis-warning-bridged-reference-gap", count = n),
+        tr!(in &loader_fr; "analysis-warning-bridged-reference-gap", count = n),
+        tr!(in &loader_en; "analysis-warning-division-by-zero", count = n),
+        tr!(in &loader_fr; "analysis-warning-division-by-zero", count = n),
     ] {
         assert!(text.contains("12345"), "{text}");
     }

@@ -139,4 +139,24 @@ L'interface du traitement mathématique est répartie ainsi :
   combinaison des précédentes) n'a pas d'incertitude et lève
   `Warning::Undetermined(n)` ; si aucun paramètre libre n'est déterminé,
   l'ajustement est refusé (`SingularSystem`, #203).
+- Avertissements et erreurs de calcul (#313) : `Warning::NotConverged` couvre
+  aussi un solveur qui n'accepte aucun pas alors que la pente du résidu reste
+  au-dessus de 1e-6 (le point de départ est rendu avec son R², jamais en
+  silence) ; un paramètre collé à sa borne reste convergé. Une pente non
+  finie (ex. `sqrt(a)` en a = 0) est l'erreur `ModelNotEvaluable`. En
+  déconvolution, `Warning::IrfTruncated` signale une réponse coupée au-dessus
+  de 1 % de son pic au décalage retenu (le noyau reste renormalisé). En
+  correction par référence, une cellule vide ou non finie au milieu de la
+  référence est enjambée par interpolation et les points de données qui y
+  tombent sont comptés (`Warning::BridgedReferenceGap(n)`) ; une ligne de
+  référence sans X, ou un `NaN` en fin de référence, ne compte pas.
+  `Warning::DivisionByZero(n)` compte les divisions par zéro (correction par
+  référence, ligne de base en Divide) rendues `NaN` ; un débordement à
+  diviseur non nul n'est pas compté. Les durées moyennes de la reconvolution
+  sont `NaN` (jamais ±∞) quand la somme des amplitudes est nulle.
+- Longueur d'une série (#313) : un calcul lit **la longueur de la colonne X**
+  si elle est donnée, sinon celle de Y ; Y et σ sont tronqués ou complétés de
+  vides à cette longueur. Les lignes de Y au-delà de X n'ont pas d'abscisse :
+  la sortie s'arrête à X et un remplacement des données originales leur garde
+  leur valeur.
 

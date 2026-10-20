@@ -107,7 +107,23 @@ pub struct Solution {
     /// rendue (jamais d'erreur dure : elle ferait perdre le résultat) mais ne
     /// doit pas être lue comme un ajustement convergé.
     pub plateau: bool,
+    /// Le solveur n'a pu accepter **aucun** pas alors que la pente restait
+    /// au-dessus de `STALL_COSINE` (C1, #313) : le point de départ est rendu
+    /// tel quel, avec son R², sans être un minimum. Rendu et signalé comme le
+    /// plateau, jamais en erreur dure ni en silence.
+    pub stalled: bool,
 }
+
+/// Seuil relâché de la pente (cosinus résidu/colonne) sous lequel un arrêt
+/// sans pas accepté reste un minimum atteint : plus lâche que le `1e-9` de
+/// l'arrêt par gradient, car les derniers pas d'un vrai minimum butent sur
+/// l'arrondi avant d'atteindre ce seuil.
+const STALL_COSINE: f64 = 1e-6;
+
+/// Part de l'énergie des Y (pondérée comme le résidu) sous laquelle le χ² est
+/// du bruit d'arrondi : un ajustement exact (données sans bruit) n'a plus de
+/// pente à lire, son cosinus vaut ~0,05 sans rien vouloir dire.
+const EXACT_FIT_FRACTION: f64 = 1e-20;
 
 /// λ du pas de vérification (#293) : l'amortissement de Marquardt suit la
 /// diagonale de `JᵀJ`, qui vaut 1e15 et plus pour un X décalé de 1e7 ; sous ce
@@ -178,6 +194,7 @@ pub fn solve_problem(
     let mut lambda = 1e-3;
     let mut iterations = 0;
     let mut converged = false;
+    let mut stalled = false;
     // Un pas minuscule n'est une preuve de convergence que s'il n'est pas
     // minuscule à cause de l'amortissement (#293) : on le vérifie par un pas
     // presque non amorti avant de conclure.
@@ -188,6 +205,12 @@ pub fn solve_problem(
         jacobian(terms, &values, slots, &free, &mut jac, &mut buf);
         let a = jac.gram();
         let g = jac.transpose_mul(&r);
+        // Un non-fini dans le gradient ou le Gram échapperait au pli `max`
+        // ci-dessous (qui ignore NaN) : le solveur conclurait « convergé »
+        // sur un jacobien NaN (C6, #313). À tester avant le pli.
+        if g.iter().any(|v| !v.is_finite()) || !(0..free.len()).all(|k| a.get(k, k).is_finite()) {
+            return Err(AnalysisError::ModelNotEvaluable);
+        }
         // Critère de gradient **indépendant de l'échelle** des données (le
         // `gtol` de MINPACK) : cosinus de l'angle entre le résidu et chaque
         // colonne du jacobien. Un seuil absolu arrêtait l'ajustement dès le
@@ -205,6 +228,7 @@ pub fn solve_problem(
             converged = true;
             break;
         }
+
         let mut improved = false;
         for _ in 0..40 {
             // Pas de Levenberg-Marquardt par moindres carrés **augmentés**
@@ -268,8 +292,36 @@ pub fn solve_problem(
             }
         }
         if !improved {
-            // Plus aucun pas ne fait baisser le χ² : minimum local atteint.
+            // Plus aucun pas ne fait baisser le χ² : minimum local atteint si la
+            // pente est (presque) nulle ; sinon le solveur est bloqué (C1) et la
+            // solution est rendue marquée, jamais présentée comme convergée.
             converged = true;
+            // Aucun pas n'ayant été accepté, `a`, `g` et `residual_norm` sont
+            // ceux de ce point. Un paramètre collé à sa borne ne relève pas d'ici :
+            // son pas projeté ne bouge plus, `chi2_trial <= chi2` l'accepte et
+            // l'arrêt `moved < 1e-11` le déclare convergé, sans avertissement.
+            // Un résidu au niveau de l'arrondi (ajustement exact) n'a pas de
+            // pente lisible : son cosinus n'est que du bruit, jamais un blocage.
+            let energy: f64 = terms
+                .iter()
+                .map(|t| {
+                    t.y.iter()
+                        .enumerate()
+                        .map(|(i, y)| {
+                            let w = t.sigma.map_or(1.0, |s| 1.0 / s[i]);
+                            (y * w) * (y * w)
+                        })
+                        .sum::<f64>()
+                })
+                .sum();
+            let exact = chi2 <= EXACT_FIT_FRACTION * energy;
+            stalled = !exact
+                && (0..free.len()).any(|k| {
+                    let norm = a.get(k, k).sqrt();
+                    norm > 0.0
+                        && residual_norm > 0.0
+                        && g[k].abs() / (norm * residual_norm) >= STALL_COSINE
+                });
             break;
         }
         if converged {
@@ -359,6 +411,7 @@ pub fn solve_problem(
         iterations,
         terms: stats,
         plateau,
+        stalled,
     })
 }
 
@@ -431,7 +484,8 @@ fn jacobian(
                 .max(if pmax > 0.0 { 0.0 } else { 1e-9 });
         let mut coarse = column(terms, &mut work, slots, i, h, buf, &mut plus, &mut minus);
         for _ in 0..MAX_STEP_REFINEMENTS {
-            if !h.is_finite() {
+            // Affiner un pas ne rend pas une dérivée non finie fine.
+            if !h.is_finite() || coarse.values.iter().any(|v| !v.is_finite()) {
                 break;
             }
             let fine_h = h / STEP_REFINEMENT_RATIO;
@@ -499,7 +553,9 @@ fn column(
     };
     for (p, mn) in plus.iter().zip(minus.iter()) {
         let d = if den > 0.0 { (p - mn) / den } else { 0.0 };
-        column.values.push(if d.is_finite() { d } else { 0.0 });
+        // Une dérivée non finie reste telle quelle (C6, #313) : la mettre à 0
+        // faisait passer un modèle non évaluable pour une case sans effet.
+        column.values.push(d);
         // Un pas qui ne déplace plus la valeur n'apprend rien : bruit infini.
         column.noise.push(if den > 0.0 {
             ROUNDOFF_FACTOR * f64::EPSILON * p.abs().max(mn.abs()) / den
@@ -1054,6 +1110,72 @@ mod tests {
         assert_eq!(
             solve_problem(&[Slot::new("a", 0.0)], &[nan], Options::default()).unwrap_err(),
             AnalysisError::NonFiniteModel
+        );
+    }
+
+    /// Terme à `eval` sur mesure : `y` constant, modèle `f` d'une case.
+    fn one_case<'a>(x: &'a [f64], y: &'a [f64], f: impl Fn(f64) -> f64 + 'a) -> Term<'a> {
+        Term {
+            x,
+            y,
+            sigma: None,
+            eval: Box::new(move |p, out| {
+                for o in out.iter_mut() {
+                    *o = f(p[0]);
+                }
+            }),
+        }
+    }
+
+    /// C1 (#313) : un coin sans descente. `f = 1 + |d| + 0,5·d` (d = a − 3) a un
+    /// minimum en pointe : la pente centrée vaut 0,5, aucun pas ne baisse le
+    /// χ². Le départ est rendu, marqué `stalled`, jamais « convergé » en silence.
+    #[test]
+    fn un_solveur_sans_pas_accepte_et_a_pente_forte_est_marque_bloque() {
+        let x = xs(5, 0.0, 4.0);
+        let y = vec![0.0; 5];
+        let term = one_case(&x, &y, |a| {
+            let d = a - 3.0;
+            1.0 + d.abs() + 0.5 * d
+        });
+        let sol = solve_problem(&[Slot::new("a", 3.0)], &[term], Options::default()).unwrap();
+        assert!(sol.stalled, "{sol:?}");
+        assert_eq!(sol.values[0], 3.0);
+    }
+
+    /// Un vrai minimum lisse (pente nulle) ne bascule pas ; un paramètre collé
+    /// à sa borne non plus.
+    #[test]
+    fn un_minimum_lisse_ou_une_borne_atteinte_ne_sont_pas_bloques() {
+        let x = xs(5, 0.0, 4.0);
+        let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let lisse = one_case(&x, &y, |a| a);
+        let sol = solve_problem(&[Slot::new("a", 5.0)], &[lisse], Options::default()).unwrap();
+        assert!(
+            !sol.stalled && (sol.values[0] - 3.0).abs() < 1e-4,
+            "{sol:?}"
+        );
+
+        // f = 1 + a, a ≥ 0 : le minimum sous contrainte est la borne.
+        let mut slot = Slot::new("a", 2.0);
+        slot.min = 0.0;
+        let zero = vec![0.0; 5];
+        let borne = one_case(&x, &zero, |a| 1.0 + a);
+        let sol = solve_problem(&[slot], &[borne], Options::default()).unwrap();
+        assert!(!sol.stalled && sol.values[0] == 0.0, "{sol:?}");
+    }
+
+    /// C6 (#313) : un jacobien NaN échappait au pli `max` (qui ignore NaN) et
+    /// le solveur concluait « convergé ». `sqrt(a)` en a = 0 : la différence
+    /// centrée lit `sqrt(−h)`.
+    #[test]
+    fn une_pente_non_finie_est_une_erreur_modele_non_evaluable() {
+        let x = xs(5, 0.0, 4.0);
+        let y = vec![1.0; 5];
+        let term = one_case(&x, &y, f64::sqrt);
+        assert_eq!(
+            solve_problem(&[Slot::new("a", 0.0)], &[term], Options::default()).unwrap_err(),
+            AnalysisError::ModelNotEvaluable
         );
     }
 }

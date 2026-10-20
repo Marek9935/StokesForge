@@ -21,6 +21,8 @@ pub enum AnalysisError {
     EmptyBounds { name: String, min: f64, max: f64 },
     #[error("the model gives a non-finite value at the starting parameters")]
     NonFiniteModel,
+    #[error("the model gives a non-finite slope at the current parameters")]
+    ModelNotEvaluable,
     #[error("the fit does not determine its parameters (singular system)")]
     SingularSystem,
     #[error("the fit did not converge within {iterations} iterations")]

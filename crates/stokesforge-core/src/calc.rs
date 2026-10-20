@@ -344,6 +344,26 @@ impl Calculation {
 }
 
 impl CalculationDraft {
+    /// Prépare le remplacement des données originales (C4, #313) : une sortie
+    /// a la longueur de X, plus courte que Y quand X l'est. Elle est complétée
+    /// de `NaN` jusqu'à la longueur de la colonne Y source ; ces lignes n'ont
+    /// pas d'abscisse et gardent leur cellule originale à l'écriture. À appeler
+    /// avant `ReplaceAnalysisData`, dont la garde de longueur reste entière.
+    pub fn complete_for_replacement(&mut self, tree: &Tree) {
+        for output in &mut self.outputs {
+            let Some(source) = self.series.get(output.series) else {
+                continue;
+            };
+            let len = tree
+                .node(source.y)
+                .and_then(|n| n.as_column())
+                .map_or(0, Column::len);
+            if output.data.len() < len {
+                output.data.resize(len, f64::NAN);
+            }
+        }
+    }
+
     fn validate(&self) -> CoreResult<()> {
         validate_calculation_shape(
             self.series.len(),
@@ -991,21 +1011,21 @@ fn column_len(tree: &Tree, column: NodeId) -> Result<usize, ComputeError> {
 type ReadColumns = (Vec<f64>, Vec<f64>, Option<Vec<f64>>);
 
 /// Une paire (X, Y) lue dans `tree`. Sans colonne X, l'abscisse est le numéro
-/// de ligne (à partir de 1). Les deux colonnes sont prolongées de `NaN` à la
-/// plus longue : une ligne incomplète est écartée par l'opération.
+/// de ligne (à partir de 1). **La longueur est celle de X** s'il est donné,
+/// sinon celle de Y (C4, #313) : Y et l'incertitude sont ramenés à cette
+/// longueur, prolongés de `NaN` s'ils sont plus courts (ligne incomplète,
+/// écartée par l'opération), tronqués s'ils sont plus longs (les lignes au-delà
+/// de X n'ont pas d'abscisse).
 fn read_pair(
     tree: &Tree,
     x: Option<NodeId>,
     y: NodeId,
     extra: Option<NodeId>,
 ) -> Result<ReadColumns, ComputeError> {
-    let mut len = column_len(tree, y)?;
-    if let Some(x) = x {
-        len = len.max(column_len(tree, x)?);
-    }
-    if let Some(e) = extra {
-        len = len.max(column_len(tree, e)?);
-    }
+    let len = match x {
+        Some(x) => column_len(tree, x)?,
+        None => column_len(tree, y)?,
+    };
     let xs = match x {
         Some(x) => numbers(tree, x, len)?,
         None => (1..=len).map(|r| r as f64).collect(),

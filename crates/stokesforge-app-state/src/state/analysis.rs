@@ -284,7 +284,7 @@ impl AppState {
                 return;
             }
         }
-        let (draft, all_values) = match form.draft_with_values(&self.snapshot.tree) {
+        let (mut draft, all_values) = match form.draft_with_values(&self.snapshot.tree) {
             Ok(drafted) => drafted,
             Err(issue) => {
                 self.fail(issue_message(&issue));
@@ -292,6 +292,7 @@ impl AppState {
             }
         };
         let command = if form.replace_original {
+            draft.complete_for_replacement(&self.snapshot.tree);
             let mut inputs: Vec<NodeId> = draft
                 .series
                 .iter()

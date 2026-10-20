@@ -27,7 +27,15 @@ pub struct DeconvWarnings {
     pub irf_step_mismatch: bool,
     /// Points de Y négatifs ramenés à 0 (Richardson-Lucy suppose Y ≥ 0).
     pub negative_clipped: usize,
+    /// L'IRF est coupée au-dessus de [`IRF_TRUNCATION_FRACTION`] de son pic au
+    /// décalage retenu (C2, #313) : la queue manquante vaut 0 puis le noyau est
+    /// renormalisé, ce qui déforme les durées de vie sans que rien le dise.
+    pub irf_truncated: bool,
 }
+
+/// Part du pic de l'IRF au-dessus de laquelle une coupure (fin de l'IRF, ou
+/// points hors de la fenêtre du signal) est signalée : 1 %.
+pub const IRF_TRUNCATION_FRACTION: f64 = 0.01;
 
 // ── FFT ────────────────────────────────────────────────────────────────
 
@@ -230,6 +238,26 @@ fn kernel(irf: &Series, grid: &Grid, n: usize, shift: f64) -> Result<Vec<f64>, A
     Ok(h)
 }
 
+/// L'IRF est-elle coupée au décalage `shift` ? Oui si un de ses points hors de
+/// la fenêtre `[start − shift, start + (n−1)·step − shift]` du noyau dépasse
+/// 1 % du pic, ou si un de ses bords (premier ou dernier point) le dépasse : au
+/// delà du bord, l'interpolation lit 0 (C2, #313). Le noyau renormalisé reste.
+fn irf_truncated(irf: &Series, grid: &Grid, shift: f64) -> bool {
+    let peak = irf.y.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if !(peak > 0.0) || irf.is_empty() {
+        return false;
+    }
+    let limit = IRF_TRUNCATION_FRACTION * peak;
+    let first = grid.start - shift;
+    let last = grid.start + (grid.n.saturating_sub(1)) as f64 * grid.step - shift;
+    let outside = irf
+        .x
+        .iter()
+        .zip(&irf.y)
+        .any(|(&x, &y)| (x < first || x > last) && y > limit);
+    outside || irf.y[0] > limit || irf.y[irf.len() - 1] > limit
+}
+
 fn irf_step_mismatch(irf: &Series, grid: &Grid) -> bool {
     if irf.len() < 2 {
         return false;
@@ -275,6 +303,7 @@ pub fn deconvolve(
     let mut warnings = DeconvWarnings::default();
     let grid = grid_of(&sig.x, &mut warnings)?;
     warnings.irf_step_mismatch = irf_step_mismatch(&irf, &grid);
+    warnings.irf_truncated = irf_truncated(&irf, &grid, shift);
     let n = grid.n;
     let h = kernel(&irf, &grid, n, shift)?;
     let gy = grid.sample(&sig.x, &sig.y);
@@ -386,13 +415,24 @@ pub struct Reconvolution {
     pub dof: usize,
     /// Nombre de paramètres libres que les données ne déterminent pas (#203).
     pub undetermined: usize,
-    /// Arrêt sur un plateau, pas sur un minimum (#281).
+    /// Arrêt sur un plateau (#281) ou solveur bloqué sans pas accepté (C1, #313) :
+    /// pas sur un minimum.
     pub plateau: bool,
     /// Durée de vie moyenne pondérée par les amplitudes `ΣAτ/ΣA`.
     pub tau_amplitude_weighted: f64,
     /// Durée de vie moyenne pondérée par l'intensité `ΣAτ²/ΣAτ`.
     pub tau_intensity_weighted: f64,
     pub warnings: DeconvWarnings,
+}
+
+/// `num / den`, `NaN` si le dénominateur est nul (jamais ±∞, C5, #313) : des
+/// amplitudes de somme nulle ne définissent pas de durée de vie moyenne.
+fn ratio_or_nan(num: f64, den: f64) -> f64 {
+    if den == 0.0 {
+        f64::NAN
+    } else {
+        num / den
+    }
 }
 
 pub fn reconvolve(
@@ -481,7 +521,7 @@ pub fn reconvolve(
 
     let step = grid.step;
     let gn = grid.n;
-    let model = move |v: &[f64]| -> Result<Vec<f64>, AnalysisError> {
+    let model = |v: &[f64]| -> Result<Vec<f64>, AnalysisError> {
         let h = kernel(&irf, &grid, gn, v[1 + 2 * nc])?;
         let mut out = vec![v[0]; gn];
         for i in 0..nc {
@@ -512,6 +552,7 @@ pub fn reconvolve(
     let sol = solve_problem(&slots, &[term], Options::default())?;
     let fitted = grid.read_back(&sig.x, &model(&sol.values)?);
 
+    warnings.irf_truncated = irf_truncated(&irf, &grid, sol.values[1 + 2 * nc]);
     let (mut sa, mut sat, mut sat2) = (0.0, 0.0, 0.0);
     for i in 0..nc {
         let (a, t) = (sol.values[1 + 2 * i], sol.values[2 + 2 * i]);
@@ -530,9 +571,9 @@ pub fn reconvolve(
         reduced_chi2: sol.reduced_chi2,
         dof: sol.dof,
         undetermined: sol.undetermined.iter().filter(|u| **u).count(),
-        plateau: sol.plateau,
-        tau_amplitude_weighted: sat / sa,
-        tau_intensity_weighted: sat2 / sat,
+        plateau: sol.plateau || sol.stalled,
+        tau_amplitude_weighted: ratio_or_nan(sat, sa),
+        tau_intensity_weighted: ratio_or_nan(sat2, sat),
         warnings,
     })
 }
@@ -540,6 +581,7 @@ pub fn reconvolve(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fit::ParamSetting;
 
     fn grid(n: usize, step: f64) -> Vec<f64> {
         (0..n).map(|i| i as f64 * step).collect()
@@ -614,6 +656,7 @@ mod tests {
         assert!((get("bkg") - 3.0).abs() < 1e-3);
         assert!(r.r_squared > 1.0 - 1e-9);
         assert!(!r.warnings.irf_step_mismatch && !r.warnings.non_uniform_signal);
+        assert!(!r.warnings.irf_truncated);
         // Moyenne pondérée par les amplitudes : (100·1.2 + 50·4)/150.
         assert!((r.tau_amplitude_weighted - 320.0 / 150.0).abs() < 1e-2);
     }
@@ -1128,5 +1171,112 @@ mod tests {
             }
         }
         assert!(non_uniformes >= 20, "{non_uniformes} grilles non uniformes");
+    }
+
+    /// IRF de pic 1 en x = 3 (x = 0..=9), dont les deux bords valent `first` et
+    /// `last`.
+    fn irf_with_edges(first: f64, last: f64) -> Series {
+        let mut y = vec![0.0, 0.4, 0.8, 1.0, 0.8, 0.4, 0.2, 0.1, 0.05, 0.0];
+        y[0] = first;
+        y[9] = last;
+        Series::new(grid(10, 1.0), y)
+    }
+
+    fn signal_grid() -> Grid {
+        Grid {
+            start: 0.0,
+            step: 1.0,
+            n: 100,
+            identity: true,
+        }
+    }
+
+    /// C2 (#313) : le noyau est coupé si l'IRF s'arrête au-dessus de 1 % de son
+    /// pic. 5 % et 1,1 % avertissent, 0,9 % et 0,5 % non.
+    #[test]
+    fn une_irf_coupee_au_dessus_d_un_pour_cent_de_son_pic_est_signalee() {
+        let g = signal_grid();
+        for (edge, want) in [(0.05, true), (0.011, true), (0.009, false), (0.005, false)] {
+            assert_eq!(
+                irf_truncated(&irf_with_edges(0.0, edge), &g, 0.0),
+                want,
+                "bord de fin {edge}"
+            );
+            assert_eq!(
+                irf_truncated(&irf_with_edges(edge, 0.0), &g, 0.0),
+                want,
+                "bord de début {edge}"
+            );
+        }
+    }
+
+    /// Un point de l'IRF hors de la fenêtre du noyau, au-dessus de 1 %, est
+    /// perdu ; sous 1 %, non. Le décalage déplace la fenêtre.
+    #[test]
+    fn un_point_d_irf_hors_de_la_fenetre_est_signale_selon_le_decalage() {
+        let g = signal_grid();
+        let irf = irf_with_edges(0.0, 0.0);
+        assert!(!irf_truncated(&irf, &g, 0.0));
+        // Décalage −2,5 : la fenêtre commence en 2,5 ; le point x = 2 (0,8) est hors.
+        assert!(irf_truncated(&irf, &g, -2.5));
+        // Décalage −9 : seul x = 9 (0) reste ; x = 8 (0,05) est au-dessus de 1 %.
+        assert!(irf_truncated(&irf, &g, -9.0));
+        // Décalage positif : la fenêtre s'étend avant 0 et après 99 − shift.
+        assert!(irf_truncated(&irf, &g, 95.0));
+    }
+
+    #[test]
+    fn la_deconvolution_directe_dit_une_irf_coupee_et_garde_la_renormalisation() {
+        let step = 1.0;
+        let irf = irf_with_edges(0.0, 0.05);
+        let signal = Series::new(
+            grid(64, step),
+            (0..64).map(|i| (-(i as f64) / 8.0).exp()).collect(),
+        );
+        let m = DirectMethod::Wiener { noise: Some(0.01) };
+        let d = deconvolve(&signal, &irf, 0.0, m).unwrap();
+        assert!(d.warnings.irf_truncated);
+        let ok = deconvolve(&signal, &irf_with_edges(0.0, 0.0), 0.0, m).unwrap();
+        assert!(!ok.warnings.irf_truncated);
+    }
+
+    /// C5 (#313) : des amplitudes de somme nulle ne définissent pas de durée
+    /// de vie moyenne : NaN, jamais ±∞.
+    #[test]
+    fn un_denominateur_nul_donne_nan_et_pas_l_infini() {
+        assert!(ratio_or_nan(3.0, 0.0).is_nan());
+        assert!(ratio_or_nan(-3.0, 0.0).is_nan());
+        assert_eq!(ratio_or_nan(6.0, 3.0), 2.0);
+    }
+
+    /// C5 de bout en bout : deux amplitudes fixées à +5 et −5 (somme nulle) ne
+    /// donnent aucune durée de vie moyenne.
+    #[test]
+    fn des_amplitudes_de_somme_nulle_donnent_des_durees_moyennes_nan() {
+        let step = 0.05;
+        let irf = irf_series(400, step, 1.0, 0.1);
+        let signal = synth(&irf, step, &[(10.0, 1.0)], 1.0);
+        let fixed = |v: f64| ParamSetting {
+            initial: Some(v),
+            fixed: true,
+            ..ParamSetting::default()
+        };
+        let spec = ReconvSpec {
+            components: 2,
+            // bkg, A1, tau1, A2, tau2, shift
+            params: vec![
+                ParamSetting::default(),
+                fixed(5.0),
+                fixed(1.0),
+                fixed(-5.0),
+                fixed(2.0),
+                fixed(0.0),
+            ],
+            shift_initial: 0.0,
+            fit_shift: false,
+            window: None,
+        };
+        let r = reconvolve(&signal, &irf, &spec).unwrap();
+        assert!(r.tau_amplitude_weighted.is_nan(), "{r:?}");
     }
 }

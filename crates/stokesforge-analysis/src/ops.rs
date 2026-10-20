@@ -202,9 +202,18 @@ pub enum Warning {
     /// Paramètres libres que les données ne déterminent pas : leur incertitude
     /// est omise (#203).
     Undetermined(usize),
-    /// Le solveur s'est arrêté sur un plateau, non sur un minimum (#281) : le
-    /// résultat est rendu mais n'est pas un ajustement convergé.
+    /// Le solveur s'est arrêté sur un plateau (#281) ou sans pouvoir accepter
+    /// de pas alors que la pente restait grande (C1, #313), non sur un
+    /// minimum : le résultat est rendu mais n'est pas un ajustement convergé.
     NotConverged,
+    /// L'IRF est coupée au-dessus de 1 % de son pic au décalage retenu : la
+    /// queue manquante vaut 0 et le noyau est renormalisé (C2, #313).
+    IrfTruncated,
+    /// Points de données interpolés à travers un trou (cellule vide ou non
+    /// finie) de la colonne de référence (C3, #313).
+    BridgedReferenceGap(usize),
+    /// Divisions par zéro, rendues vides (`NaN`) (C5, #313).
+    DivisionByZero(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -359,6 +368,18 @@ fn aux_series(aux: Option<&AuxInput>) -> Result<Series, AnalysisError> {
     Ok(c.series)
 }
 
+/// X des lignes de la référence dont Y n'est pas fini alors que X l'est : les
+/// trous que `correct` peut enjamber. Une ligne sans X n'a pas de position.
+fn aux_holes(aux: Option<&AuxInput>) -> Vec<f64> {
+    aux.map_or_else(Vec::new, |a| {
+        a.x.iter()
+            .zip(&a.y)
+            .filter(|(x, y)| x.is_finite() && !y.is_finite())
+            .map(|(x, _)| *x)
+            .collect()
+    })
+}
+
 fn deconv_warnings(w: deconv::DeconvWarnings) -> Vec<Warning> {
     let mut out = Vec::new();
     if w.non_uniform_signal {
@@ -366,6 +387,9 @@ fn deconv_warnings(w: deconv::DeconvWarnings) -> Vec<Warning> {
     }
     if w.irf_step_mismatch {
         out.push(Warning::IrfStepMismatch);
+    }
+    if w.irf_truncated {
+        out.push(Warning::IrfTruncated);
     }
     if w.negative_clipped > 0 {
         out.push(Warning::NegativeClipped(w.negative_clipped));
@@ -637,8 +661,15 @@ pub fn run(
             } => run_baseline(&mut o, a, input, method, *op, *keep_baseline)?,
             Operation::Correct { op } => {
                 let reference = aux_series(aux)?;
-                let c = correct::correct(&a.series, &reference, *op)?;
+                let holes = aux_holes(aux);
+                let c = correct::correct(&a.series, &reference, &holes, *op)?;
                 o.column("corrected", None, a.expand(&c.values));
+                if c.bridged > 0 {
+                    o.warnings.push(Warning::BridgedReferenceGap(c.bridged));
+                }
+                if c.division_by_zero > 0 {
+                    o.warnings.push(Warning::DivisionByZero(c.division_by_zero));
+                }
                 o.value(
                     "count.out_of_reference",
                     None,
@@ -727,6 +758,17 @@ fn run_baseline(
     let corrected: Vec<f64> = (0..a.len)
         .map(|i| baseline::apply(op, input.y[i], base[i]))
         .collect();
+    // Division par une ligne de base exactement nulle : comptée (C5, #313).
+    let by_zero = if op == BaselineOp::Divide {
+        (0..a.len)
+            .filter(|&i| input.y[i].is_finite() && base[i] == 0.0)
+            .count()
+    } else {
+        0
+    };
+    if by_zero > 0 {
+        o.warnings.push(Warning::DivisionByZero(by_zero));
+    }
     o.column("corrected", None, corrected);
     if keep {
         o.column("baseline", None, base);

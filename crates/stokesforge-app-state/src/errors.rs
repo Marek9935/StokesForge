@@ -666,6 +666,7 @@ pub mod analysis {
                 max = max.to_string()
             ),
             AnalysisError::NonFiniteModel => tr!("error-analysis-non-finite-model"),
+            AnalysisError::ModelNotEvaluable => tr!("error-analysis-model-not-evaluable"),
             AnalysisError::SingularSystem => tr!("error-analysis-singular-system"),
             AnalysisError::NotConverged { iterations } => tr!(
                 "error-analysis-not-converged",
@@ -770,6 +771,7 @@ pub mod analysis {
                     max: 1.0,
                 },
                 AnalysisError::NonFiniteModel,
+                AnalysisError::ModelNotEvaluable,
                 AnalysisError::SingularSystem,
                 AnalysisError::NotConverged { iterations: 100 },
                 AnalysisError::NotEnoughAnchors {
@@ -800,6 +802,7 @@ pub mod analysis {
                     | AnalysisError::NoFreeParameter
                     | AnalysisError::EmptyBounds { .. }
                     | AnalysisError::NonFiniteModel
+                    | AnalysisError::ModelNotEvaluable
                     | AnalysisError::SingularSystem
                     | AnalysisError::NotConverged { .. }
                     | AnalysisError::NotEnoughAnchors { .. }
@@ -814,7 +817,7 @@ pub mod analysis {
                 }
                 crate::errors::tests_support::check(sample, &error_message(sample));
             }
-            assert_eq!(samples.len(), 17);
+            assert_eq!(samples.len(), 18);
         }
 
         #[test]
