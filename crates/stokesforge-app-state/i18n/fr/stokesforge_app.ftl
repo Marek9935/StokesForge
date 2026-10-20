@@ -379,6 +379,9 @@ import-delimiter-fixed = Largeur fixe
 import-format-widths-hint = Largeur de chaque colonne sauf la dernière, p. ex. 10,8,8
 import-format-decimal = Séparateur décimal
 import-format-thousands = Séparateur de milliers
+import-format-date-order = Ordre des dates
+import-date-day-first = Jour, puis mois
+import-date-month-first = Mois, puis jour
 import-format-missing = Valeurs manquantes
     .hint = Séparées par des virgules. Lues comme des cellules vides : --, n/a, *, NaN…
 import-format-comment-prefix = Préfixe de commentaire
@@ -614,6 +617,7 @@ error-file-unreadable-target = Impossible d'enregistrer sur { $path } : c'est u
 error-import-binary = Le fichier n'est pas un texte lisible
 error-import-empty = Le fichier est vide
 error-import-no-data = Aucune donnée après l'en-tête. Vérifier le nombre de lignes d'en-tête
+error-import-whitespace-thousands = L'espace ne peut pas à la fois séparer les colonnes et grouper les milliers. Choisir un autre séparateur de colonnes ou de milliers
 error-import-file = { $path } : { $detail }
 
 # Formules

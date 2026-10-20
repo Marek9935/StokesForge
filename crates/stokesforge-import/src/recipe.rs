@@ -64,6 +64,10 @@ pub struct ImportRecipe {
     /// `'\''`…), `None` s'il n'y en a pas.
     #[serde(default)]
     pub thousands: Option<char>,
+    /// Ordre des champs d'une date à barres ou points (`03/04/2026`) : jour
+    /// d'abord (défaut) ou mois d'abord. Sans effet sur `AAAA-MM-JJ`.
+    #[serde(default)]
+    pub date_order: DateOrder,
     /// Jetons qui valent « valeur manquante » (`--`, `n/a`, `*`, `NaN`…) : la
     /// cellule reste vide au lieu de devenir du texte (et une colonne mixte).
     #[serde(default)]
@@ -199,10 +203,22 @@ impl ImportRecipe {
     }
 }
 
+/// Ordre jour/mois d'une date `JJ/MM/AAAA` ou `MM/JJ/AAAA` (réglage de la
+/// recette). Le jour d'abord est la règle du projet (#217) et le défaut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum DateOrder {
+    /// `03/04/2026` = 3 avril 2026.
+    #[default]
+    DayFirst,
+    /// `03/04/2026` = 4 mars 2026.
+    MonthFirst,
+}
+
 /// Encodage forcé d'un fichier, quand la détection automatique se trompe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Encoding {
-    /// UTF-16 avec marque, sinon UTF-8, sinon Windows-1252.
+    /// UTF-16 avec marque, sinon UTF-8 (un octet invalide isolé est lu en
+    /// Windows-1252 : décodage mixte, voir [`crate::decode`]).
     #[default]
     Auto,
     /// UTF-8 (une marque d'ordre est retirée ; un octet invalide devient
@@ -445,6 +461,7 @@ impl ImportRecipe {
             excluded_metadata: Vec::new(),
             column_roles: Vec::new(),
             thousands: None,
+            date_order: DateOrder::default(),
             missing_tokens: Vec::new(),
             comment_prefix: String::new(),
             skip_data_rows: 0,
@@ -542,6 +559,7 @@ mod tests {
             excluded_metadata: vec!["DATE".into()],
             column_roles: vec![ColumnRoleChoice::X, ColumnRoleChoice::Ignore],
             thousands: Some(' '),
+            date_order: DateOrder::MonthFirst,
             missing_tokens: vec!["--".into(), "n/a".into()],
             comment_prefix: "#".into(),
             skip_data_rows: 2,
@@ -557,6 +575,7 @@ mod tests {
             block_split: BlockSplit::BeforeLine("TITLE".into()),
         };
         let json = serde_json::to_string(&recipe).unwrap();
+        assert!(json.contains("MonthFirst"));
         let back: ImportRecipe = serde_json::from_str(&json).unwrap();
         assert_eq!(recipe, back);
     }
@@ -585,5 +604,6 @@ mod tests {
         assert_eq!(recipe.preview_lines, 20);
         assert_eq!(recipe.data_end, DataEnd::None);
         assert!(recipe.keep_header_metadata, "tout est conservé par défaut");
+        assert_eq!(recipe.date_order, DateOrder::DayFirst);
     }
 }

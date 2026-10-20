@@ -469,6 +469,7 @@ pub mod import {
             ImportError::NotText => tr!("error-import-binary"),
             ImportError::Empty => tr!("error-import-empty"),
             ImportError::NoDataRows => tr!("error-import-no-data"),
+            ImportError::WhitespaceWithSpaceThousands => tr!("error-import-whitespace-thousands"),
         }
     }
 
@@ -507,13 +508,15 @@ pub mod import {
                 ImportError::NotText,
                 ImportError::Empty,
                 ImportError::NoDataRows,
+                ImportError::WhitespaceWithSpaceThousands,
             ];
-            let mut seen = [false; 3];
+            let mut seen = [false; 4];
             for sample in &samples {
                 let index = match sample {
                     ImportError::NotText => 0,
                     ImportError::Empty => 1,
                     ImportError::NoDataRows => 2,
+                    ImportError::WhitespaceWithSpaceThousands => 3,
                 };
                 seen[index] = true;
             }

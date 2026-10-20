@@ -10,9 +10,18 @@
 //!
 //! 1. marque d'ordre UTF-16 (`FF FE` / `FE FF`) → UTF-16 ;
 //! 2. UTF-8 valide (marque `EF BB BF` retirée si présente) → tel quel ;
-//! 3. sinon, si les octets ressemblent à du texte → Windows-1252.
+//! 3. sinon, **décodage mixte** : chaque séquence UTF-8 valide est gardée,
+//!    chaque octet invalide est lu en Windows-1252 (un fichier presque UTF-8
+//!    dont un seul octet est invalide garde ses autres accents) ;
+//! 4. dans tous les cas, si les octets ne ressemblent pas à du texte → refus.
 //!
-//! Windows-1252 accepte les 256 octets sans échec ; c'est donc le filtre
+//! Risque accepté : un fichier réellement écrit en Windows-1252 dont deux
+//! octets consécutifs forment par hasard une séquence UTF-8 valide (`Ã©`,
+//! octets `C3 A9`) est lu `é`, pas `Ã©`. Pour ce cas rare, l'encodage se force
+//! dans la recette (`Encoding::Windows1252`).
+//!
+//! Un fichier entièrement Windows-1252 (sans séquence UTF-8 valide) est lu
+//! comme avant. Windows-1252 accepte les 256 octets sans échec ; c'est donc le filtre
 //! « ressemble à du texte » qui distingue un fichier texte d'un binaire :
 //! aucun caractère de contrôle C0 hors tabulation, saut de ligne, retour
 //! chariot, saut de page, et `0x1A` (fin de fichier DOS). Un fichier binaire
@@ -36,12 +45,23 @@ pub fn decode_text(bytes: &[u8]) -> Result<Cow<'_, str>, ImportError> {
     let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
     let text = match std::str::from_utf8(bytes) {
         Ok(text) => Cow::Borrowed(text),
-        Err(_) => Cow::Owned(bytes.iter().map(|&b| windows_1252(b)).collect()),
+        Err(_) => Cow::Owned(decode_mixed(bytes)),
     };
     if text.chars().any(is_binary_control) {
         return Err(ImportError::NotText);
     }
     Ok(text)
+}
+
+/// Décodage mixte : les séquences UTF-8 valides sont gardées, chaque octet
+/// invalide est lu en Windows-1252. Ne panique sur aucun octet (invariant 10).
+fn decode_mixed(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for chunk in bytes.utf8_chunks() {
+        out.push_str(chunk.valid());
+        out.extend(chunk.invalid().iter().map(|&b| windows_1252(b)));
+    }
+    out
 }
 
 /// Décode `bytes` avec l'encodage **choisi** dans la recette
@@ -98,12 +118,22 @@ pub fn detect_encoding(bytes: &[u8]) -> Option<&'static str> {
         "UTF-16 (gros-boutiste)"
     } else {
         let body = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
-        if std::str::from_utf8(body).is_ok() {
-            "UTF-8"
+        if std::str::from_utf8(body).is_err() {
+            if !has_valid_multibyte(body) {
+                "Windows-1252"
+            } else {
+                "UTF-8 (+ Windows-1252)"
+            }
         } else {
-            "Windows-1252"
+            "UTF-8"
         }
     })
+}
+
+/// Vrai si `bytes` contient au moins une séquence UTF-8 multi-octets valide
+/// (sinon le décodage mixte ne diffère pas de Windows-1252 pur).
+fn has_valid_multibyte(bytes: &[u8]) -> bool {
+    bytes.utf8_chunks().any(|c| !c.valid().is_ascii())
 }
 
 fn decode_utf16(bytes: &[u8], word: fn([u8; 2]) -> u16) -> Result<Cow<'_, str>, ImportError> {
@@ -165,6 +195,22 @@ mod tests {
     }
 
     #[test]
+    fn octet_invalide_isole_dans_du_utf8_est_lu_en_windows_1252() {
+        // « °C ok » en UTF-8 valide, puis un 0xB0 isolé : le premier degré est
+        // gardé, le second lu en Windows-1252 — pas de mojibake global.
+        let mut bytes = "°C ok".as_bytes().to_vec();
+        bytes.push(0xB0);
+        assert_eq!(decode_text(&bytes).unwrap(), "°C ok°");
+    }
+
+    #[test]
+    fn octet_e9_suivi_d_ascii_donne_e_accent_aigu() {
+        assert_eq!(decode_text(b"caf\xE9 noir").unwrap(), "café noir");
+        // Octet de tête tronqué en fin de fichier : pas de panique.
+        assert_eq!(decode_text(b"a\xE2\x82").unwrap(), "a\u{e2}\u{201a}");
+    }
+
+    #[test]
     fn utf16_avec_marque() {
         let le: Vec<u8> = [0xFF, 0xFE]
             .into_iter()
@@ -202,6 +248,9 @@ mod encoding_tests {
     fn names_the_encoding() {
         assert_eq!(detect_encoding(b"a;b\n"), Some("UTF-8"));
         assert_eq!(detect_encoding(&[b'1', 0xB0, b'C']), Some("Windows-1252"));
+        let mut mixed = "°C ok".as_bytes().to_vec();
+        mixed.push(0xB0);
+        assert_eq!(detect_encoding(&mixed), Some("UTF-8 (+ Windows-1252)"));
         assert_eq!(
             detect_encoding(&[0xFF, 0xFE, b'a', 0]),
             Some("UTF-16 (petit-boutiste)")

@@ -185,7 +185,7 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
         skip_str(raw[remaining[0]], recipe.skip_chars),
         numbers.decimal,
         numbers.thousands(),
-    );
+    )?;
 
     let column_header = if recipe.has_column_header_row {
         let i = remaining.remove(0);
@@ -214,6 +214,7 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
         &separator,
         &numbers,
         recipe.column_kind(0),
+        recipe.date_order,
     );
     if kept == 0 {
         return Err(ImportError::NoDataRows);

@@ -177,8 +177,12 @@ pub fn preview(bytes: &[u8], recipe: &ImportRecipe) -> Result<FilePreview, Impor
                 .into_iter()
                 .enumerate()
                 .map(|(column, t)| {
-                    let (_, text) =
-                        crate::parse::read_cell(t, recipe.column_kind(column), &layout.numbers);
+                    let (_, text) = crate::parse::read_cell(
+                        t,
+                        recipe.column_kind(column),
+                        &layout.numbers,
+                        recipe.date_order,
+                    );
                     PreviewCell {
                         text: t.trim().to_string(),
                         is_text: text.is_some(),
@@ -269,7 +273,12 @@ pub fn detect_header_layout(
         return crate::recipe::HeaderLayout::default();
     }
     let numbers = NumberFormat::new(decimal, None, &[], lines.iter().copied());
-    let effective = resolve_separator(&separator, lines[lines.len() - 1], numbers.decimal, None);
+    // Sans milliers (`None`) : `resolve_separator` ne refuse jamais ici.
+    let Ok(effective) =
+        resolve_separator(&separator, lines[lines.len() - 1], numbers.decimal, None)
+    else {
+        return crate::recipe::HeaderLayout::default();
+    };
     let ref_count = effective.tokenize(lines[lines.len() - 1]).len();
 
     let mut i = 0usize;

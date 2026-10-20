@@ -138,6 +138,16 @@ N lignes après l'en-tête ou N lignes avant la fin. Le clic droit sur l'aperçu
 permet d'annuler la coupure automatique ; l'aperçu et l'import utilisent le
 même découpage (`stokesforge_import::layout`, `data_end`).
 
+**Format des nombres, dates et encodage (#314).** Un séparateur « espaces »
+(choisi, ou résolu depuis Auto) avec l'espace pour milliers est refusé, à
+l'aperçu (message dans la fenêtre) comme à l'import : `1 234,5` serait coupé en
+deux colonnes ; `;` et tabulation acceptent ces milliers. Le réglage « Ordre des
+dates » (jour d'abord par défaut, ou mois d'abord) règle `03/04/2026` ; l'ISO ne
+change pas. En encodage Auto, un fichier presque UTF-8 est décodé en mixte : les
+séquences UTF-8 valides sont gardées, chaque octet invalide est lu en
+Windows-1252 ; un fichier Windows-1252 dont deux octets forment par hasard une
+séquence UTF-8 (`Ã©`) est lu `é` — forcer l'encodage dans ce cas.
+
 **Plusieurs blocs.** `BlockSplit` découpe un fichier qui enchaîne plusieurs
 spectres (à chaque ligne commençant par un texte comme `TITLE`, ou aux lignes
 vides) : `parse_blocks` rend un tableau par bloc, chacun avec son en-tête, et

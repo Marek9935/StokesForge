@@ -381,6 +381,9 @@ import-delimiter-fixed = Fixed width
 import-format-widths-hint = Width of each column but the last, e.g. 10,8,8
 import-format-decimal = Decimal separator
 import-format-thousands = Thousands separator
+import-format-date-order = Date order
+import-date-day-first = Day, then month
+import-date-month-first = Month, then day
 import-format-missing = Missing values
     .hint = Comma-separated. Read as empty cells: --, n/a, *, NaN…
 import-format-comment-prefix = Comment prefix
@@ -618,6 +621,7 @@ error-file-unreadable-target = Cannot save over { $path }: it is a StokesForge f
 error-import-binary = The file is not readable text
 error-import-empty = The file is empty
 error-import-no-data = No data found after the header. Check the number of header lines
+error-import-whitespace-thousands = A space cannot both separate the columns and group the thousands. Choose another delimiter or another thousands separator
 error-import-file = { $path }: { $detail }
 
 # Formulas

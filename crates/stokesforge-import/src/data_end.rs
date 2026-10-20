@@ -18,6 +18,7 @@ pub(crate) fn data_len<'a>(
     separator: &EffectiveSeparator,
     numbers: &NumberFormat,
     first_column_kind: crate::recipe::ColumnKind,
+    date_order: crate::recipe::DateOrder,
 ) -> usize {
     match end {
         DataEnd::None => total,
@@ -50,7 +51,7 @@ pub(crate) fn data_len<'a>(
                     .is_some_and(|token| match first_column_kind {
                         crate::recipe::ColumnKind::Auto => numbers.is_numeric(token),
                         crate::recipe::ColumnKind::DateTime => {
-                            crate::datetime::parse_datetime(token).is_some()
+                            crate::datetime::parse_datetime_with(token, date_order).is_some()
                         }
                         crate::recipe::ColumnKind::Text => !token.trim().is_empty(),
                     })

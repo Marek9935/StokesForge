@@ -3,8 +3,8 @@
 //! en cause (issue #23).
 
 use stokesforge_import::{
-    detect_header_layout, parse, preview, DataEnd, DecimalStyle, HeaderSkip, ImportRecipe,
-    LineRole, Separator,
+    detect_header_layout, parse, preview, DataEnd, DateOrder, DecimalStyle, HeaderSkip,
+    ImportError, ImportRecipe, LineRole, Separator,
 };
 
 /// Nombre de cellules de la première ligne de données de l'aperçu, et
@@ -410,18 +410,82 @@ fn inf_reste_du_texte_et_ne_coupe_pas_la_fin_automatique() {
     assert_eq!(shown.total_data_lines, 3);
 }
 
-/// Séparateur « espaces » et milliers espace : l'espace insécable est un
-/// séparateur de milliers, pas une coupure de colonne.
+/// Séparateur « espaces » (choisi, ou résolu depuis Auto) avec l'espace pour
+/// milliers : `1 234,5` serait coupé en deux colonnes. L'import et l'aperçu
+/// refusent la combinaison, exactement de la même façon.
 #[test]
-fn espaces_et_milliers_espace_gardent_l_insecable() {
-    let mut recipe = ImportRecipe::new("Milliers");
-    recipe.separator = Separator::Whitespace;
-    recipe.decimal = DecimalStyle::Comma;
-    recipe.thousands = Some(' ');
-    let table = parse("1\u{a0}234,5 7\n".as_bytes(), &recipe).unwrap();
-    assert_eq!(table.columns.len(), 2);
-    assert_eq!(table.columns[0].values, vec![1234.5]);
-    assert_eq!(table.columns[1].values, vec![7.0]);
-    let table = parse("1\u{202f}234,5 7\n".as_bytes(), &recipe).unwrap();
-    assert_eq!(table.columns[0].values, vec![1234.5]);
+fn espaces_et_milliers_espace_sont_refuses_par_parse_et_preview() {
+    for separator in [Separator::Whitespace, Separator::Auto] {
+        let mut recipe = ImportRecipe::new("Milliers");
+        recipe.separator = separator;
+        recipe.decimal = DecimalStyle::Comma;
+        recipe.thousands = Some(' ');
+        let bytes = "1 234,5 7\n".as_bytes();
+        let err = parse(bytes, &recipe).unwrap_err();
+        assert_eq!(err, ImportError::WhitespaceWithSpaceThousands);
+        assert_eq!(preview(bytes, &recipe).unwrap_err(), err);
+    }
+}
+
+/// Avec un séparateur de colonnes explicite, l'espace reste un séparateur de
+/// milliers valable (espaces insécables compris).
+#[test]
+fn point_virgule_et_tabulation_acceptent_les_milliers_espace() {
+    for (separator, bytes) in [
+        (Separator::Semicolon, "1 234,5;7\n"),
+        (Separator::Tab, "1 234,5\t7\n"),
+        (Separator::Semicolon, "1\u{a0}234,5;7\n"),
+    ] {
+        let mut recipe = ImportRecipe::new("Milliers");
+        recipe.separator = separator;
+        recipe.decimal = DecimalStyle::Comma;
+        recipe.thousands = Some(' ');
+        let table = parse(bytes.as_bytes(), &recipe).unwrap();
+        assert_eq!(table.columns[0].values, vec![1234.5]);
+        assert_eq!(table.columns[1].values, vec![7.0]);
+        assert!(preview(bytes.as_bytes(), &recipe).is_ok());
+    }
+}
+
+/// Ordre jour/mois (B2) : la colonne forcée en dates suit le réglage de la
+/// recette, l'ISO n'en dépend pas, un mois 13 reste du texte.
+#[test]
+fn ordre_jour_mois_de_la_recette_gouverne_les_dates() {
+    use stokesforge_import::ColumnKind;
+    let days = |text: &str, order: DateOrder| {
+        let mut recipe = ImportRecipe::new("Dates");
+        recipe.separator = Separator::Semicolon;
+        recipe.column_kinds = vec![ColumnKind::DateTime];
+        recipe.date_order = order;
+        let table = parse(format!("{text};1\n").as_bytes(), &recipe).unwrap();
+        table.columns[0].values[0]
+    };
+    let ts = |iso: &str| stokesforge_import::parse_datetime_for_accord(iso).unwrap();
+    assert_eq!(days("03/04/2026", DateOrder::MonthFirst), ts("2026-03-04"));
+    assert_eq!(days("03/04/2026", DateOrder::DayFirst), ts("2026-04-03"));
+    assert!(days("13/01/2026", DateOrder::MonthFirst).is_nan());
+    assert_eq!(days("2026-03-04", DateOrder::MonthFirst), ts("2026-03-04"));
+    assert_eq!(days("2026-03-04", DateOrder::DayFirst), ts("2026-03-04"));
+}
+
+/// La fin automatique des données lit la première colonne comme des dates
+/// selon l'ordre : « 13/01/2026 » est une date en jour d'abord (les lignes
+/// précédentes, mois 13+, sont alors du texte gardé), pas en mois d'abord (où
+/// elle coupe les données).
+#[test]
+fn fin_auto_des_donnees_suit_l_ordre_jour_mois() {
+    use stokesforge_import::ColumnKind;
+    let bytes = b"01/13/2026;1\n02/14/2026;2\n03/15/2026;3\n13/01/2026;4\n";
+    let rows = |order| {
+        let mut recipe = ImportRecipe::new("Dates");
+        recipe.separator = Separator::Semicolon;
+        recipe.column_kinds = vec![ColumnKind::DateTime];
+        recipe.data_end = DataEnd::Auto;
+        recipe.date_order = order;
+        let n = parse(bytes, &recipe).unwrap().row_count();
+        assert_eq!(preview(bytes, &recipe).unwrap().total_data_lines, n);
+        n
+    };
+    assert_eq!(rows(DateOrder::MonthFirst), 3);
+    assert_eq!(rows(DateOrder::DayFirst), 4);
 }

@@ -55,11 +55,7 @@ pub struct ParsedColumn {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum EffectiveSeparator {
     Char(char),
-    /// `keep_nbsp` (milliers « espace ») : U+00A0 et U+202F ne coupent pas,
-    /// `NumberFormat::parse` les retire du nombre.
-    Whitespace {
-        keep_nbsp: bool,
-    },
+    Whitespace,
     /// Colonnes à largeur fixe : la largeur de chacune sauf la dernière.
     Fixed(Vec<usize>),
 }
@@ -72,13 +68,7 @@ impl EffectiveSeparator {
     pub(crate) fn tokenize<'a>(&self, line: &'a str) -> Vec<&'a str> {
         match self {
             EffectiveSeparator::Char(c) => line.split(*c).collect(),
-            EffectiveSeparator::Whitespace { keep_nbsp: false } => {
-                line.split_whitespace().collect()
-            }
-            EffectiveSeparator::Whitespace { keep_nbsp: true } => line
-                .split(is_column_space)
-                .filter(|token| !token.is_empty())
-                .collect(),
+            EffectiveSeparator::Whitespace => line.split_whitespace().collect(),
             EffectiveSeparator::Fixed(widths) => {
                 let mut tokens = Vec::with_capacity(widths.len() + 1);
                 let mut rest = line;
@@ -102,19 +92,10 @@ impl EffectiveSeparator {
     pub(crate) fn split_key_value<'a>(&self, line: &'a str) -> Option<(&'a str, &'a str)> {
         match self {
             EffectiveSeparator::Char(c) => line.split_once(*c),
-            EffectiveSeparator::Whitespace { keep_nbsp: false } => {
-                line.split_once(char::is_whitespace)
-            }
-            EffectiveSeparator::Whitespace { keep_nbsp: true } => line.split_once(is_column_space),
+            EffectiveSeparator::Whitespace => line.split_once(char::is_whitespace),
             EffectiveSeparator::Fixed(_) => line.split_once(['=', ':', ';', '\t']),
         }
     }
-}
-
-/// Espace qui coupe une colonne quand les milliers sont « espace » : tout
-/// blanc sauf les espaces insécables (U+00A0, U+202F).
-fn is_column_space(c: char) -> bool {
-    c.is_whitespace() && !matches!(c, '\u{a0}' | '\u{202f}')
 }
 
 /// Le résultat d'un import réussi : les colonnes lues, plus toute anomalie
@@ -189,6 +170,11 @@ pub enum ImportError {
     Empty,
     #[error("no data line found after the header")]
     NoDataRows,
+    /// Séparateur « espaces » (choisi, ou détecté) avec l'espace pour milliers :
+    /// `1 234,5` serait coupé en deux colonnes. Refusé à l'aperçu comme à
+    /// l'import.
+    #[error("whitespace column separator cannot be combined with a space as thousands separator")]
+    WhitespaceWithSpaceThousands,
 }
 
 use crate::recipe::{DecimalStyle, ImportRecipe, NameSource, Separator};
@@ -325,7 +311,9 @@ pub(crate) fn table_from_layout(
                 .tokenize(skip_str(layout.raw[i], recipe.skip_chars))
                 .into_iter()
                 .enumerate()
-                .map(|(column, t)| read_cell(t, recipe.column_kind(column), numbers))
+                .map(|(column, t)| {
+                    read_cell(t, recipe.column_kind(column), numbers, recipe.date_order)
+                })
                 .collect()
         })
         .collect();
@@ -416,6 +404,7 @@ pub(crate) fn read_cell(
     token: &str,
     kind: crate::recipe::ColumnKind,
     numbers: &crate::numbers::NumberFormat,
+    date_order: crate::recipe::DateOrder,
 ) -> (f64, Option<String>) {
     use crate::recipe::ColumnKind;
     let trimmed = token.trim();
@@ -427,7 +416,7 @@ pub(crate) fn read_cell(
             (value, text)
         }
         ColumnKind::Text => (f64::NAN, (!trimmed.is_empty()).then(|| trimmed.to_string())),
-        ColumnKind::DateTime => match crate::datetime::parse_datetime(trimmed) {
+        ColumnKind::DateTime => match crate::datetime::parse_datetime_with(trimmed, date_order) {
             Some(seconds) => (seconds, None),
             None => (
                 f64::NAN,
@@ -446,16 +435,17 @@ pub(crate) fn read_cell(
 /// Avec la virgule pour décimale, la virgule n'est jamais candidate : elle
 /// ne peut pas être à la fois séparateur et décimale, et deux virgules
 /// décimales sur une ligne battraient sinon une seule tabulation.
+///
+/// `Err(WhitespaceWithSpaceThousands)` si le séparateur résolu est « espaces »
+/// et que les milliers sont l'espace : la combinaison est ambiguë et refusée.
 pub(crate) fn resolve_separator(
     separator: &Separator,
     first_line: &str,
     decimal: DecimalStyle,
     thousands: Option<char>,
-) -> EffectiveSeparator {
-    let whitespace = EffectiveSeparator::Whitespace {
-        keep_nbsp: thousands == Some(' '),
-    };
-    match separator {
+) -> Result<EffectiveSeparator, ImportError> {
+    let whitespace = EffectiveSeparator::Whitespace;
+    let resolved = match separator {
         Separator::Comma => EffectiveSeparator::Char(','),
         Separator::Semicolon => EffectiveSeparator::Char(';'),
         Separator::Tab => EffectiveSeparator::Char('\t'),
@@ -480,7 +470,11 @@ pub(crate) fn resolve_separator(
                 _ => whitespace,
             }
         }
+    };
+    if resolved == EffectiveSeparator::Whitespace && thousands == Some(' ') {
+        return Err(ImportError::WhitespaceWithSpaceThousands);
     }
+    Ok(resolved)
 }
 
 /// Résout le nom de série selon `recipe.name_source` : `Filename` rend

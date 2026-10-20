@@ -234,3 +234,13 @@ plus la case « Détection automatique » : seul le bouton « Détecter depuis l
 fichier » agit (`HeaderLayout::auto_detect` reste dans la recette, sans effet).
 
 Nombres : un résultat non fini (`inf`, `Infinity`, `1e400`) se lit `NaN` et le jeton reste visible en texte (colonne `Mixed`), comme `nan` ; la fin automatique des données et la détection des sous-en-têtes le comptent pourtant comme un nombre (`NumberFormat::is_numeric`).
+
+## Milliers espace, ordre des dates, encodage mixte (issue #314)
+
+Décisions du 2026-10-20. Séparateur « espaces » (choisi ou résolu depuis Auto)
++ milliers espace : `ImportError::WhitespaceWithSpaceThousands`, rendu par
+`analyze` donc identique à l'aperçu et à l'import ; le maintien de U+00A0/U+202F
+(`keep_nbsp`) est retiré. `ImportRecipe::date_order` (`DayFirst` par défaut,
+`MonthFirst`) gouverne les dates à barres de l'import (`parse_datetime_with`) ;
+`stokesforge-core` garde le jour d'abord (#217). Encodage `Auto` : décodage
+mixte UTF-8 + Windows-1252 octet par octet, libellé « UTF-8 (+ Windows-1252) ».

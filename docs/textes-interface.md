@@ -127,6 +127,7 @@ l'interface, mais son mot est déjà fixé.
 | Delimiter | Séparateur | Caractère qui sépare les valeurs d'une ligne | Délimiteur | O |
 | Decimal separator | Séparateur décimal | Caractère entre partie entière et décimale | Virgule (pour le nom) | O |
 | Thousands separator | Séparateur de milliers | Caractère qui groupe les chiffres | Milliers | O |
+| Date order | Ordre des dates | Jour d'abord ou mois d'abord pour `03/04/2026` | Format de date | O |
 | Fixed width | Largeur fixe | Colonnes de largeur donnée, sans séparateur | Colonnes fixes | O |
 | Encoding | Encodage | Jeu de caractères du fichier | Codage, Charset | G |
 | Preview | Aperçu | Contenu du fichier tel que lu | Prévisualisation | O |

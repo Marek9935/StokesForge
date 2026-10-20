@@ -5,15 +5,27 @@
 //! Formats reconnus (séparateurs de date `-`, `/` ou `.`) :
 //! - `AAAA-MM-JJ`, avec une heure facultative (`T` ou espace, puis `HH:MM` ou
 //!   `HH:MM:SS`, fraction de seconde admise) ;
-//! - `JJ/MM/AAAA` et `JJ/MM/AA` (l'ordre jour-mois français ; `AA < 70` →
-//!   20AA, sinon 19AA), même heure facultative ;
+//! - `JJ/MM/AAAA` et `JJ/MM/AA` (jour d'abord par défaut ; `AA < 70` →
+//!   20AA, sinon 19AA), même heure facultative. Avec
+//!   [`DateOrder::MonthFirst`] (réglage `date_order` de la recette) les deux
+//!   premiers champs sont permutés : `03/04/2026` vaut alors le 4 mars. Un
+//!   mois hors 1..=12 après permutation donne `None`, jamais une date
+//!   devinée. La forme ISO `AAAA-MM-JJ` ne dépend pas de l'ordre. Le crate
+//!   `stokesforge-core` garde, lui, le jour d'abord (#217).
 //! - une heure seule (`HH:MM[:SS]`), comptée depuis minuit le 1970-01-01.
 //!
 //! Tout le reste est `None` : la cellule reste un texte, jamais une date
 //! inventée.
 
-/// Timestamp POSIX (secondes, UTC) du texte, ou `None`.
+use crate::recipe::DateOrder;
+
+/// Timestamp POSIX (secondes, UTC) du texte, jour d'abord, ou `None`.
 pub fn parse_datetime(text: &str) -> Option<f64> {
+    parse_datetime_with(text, DateOrder::DayFirst)
+}
+
+/// Comme [`parse_datetime`], avec l'ordre jour/mois de la recette.
+pub fn parse_datetime_with(text: &str, order: DateOrder) -> Option<f64> {
     let text = text.trim();
     if text.is_empty() {
         return None;
@@ -24,7 +36,7 @@ pub fn parse_datetime(text: &str) -> Option<f64> {
         None => (Some(text), None),
     };
     let days = match date_part {
-        Some(date) => days_since_epoch(date)?,
+        Some(date) => days_since_epoch(date, order)?,
         None => 0,
     };
     let seconds = match time_part {
@@ -50,7 +62,7 @@ fn seconds_of_day(time: &str) -> Option<f64> {
     Some(f64::from(hours) * 3600.0 + f64::from(minutes) * 60.0 + seconds)
 }
 
-fn days_since_epoch(date: &str) -> Option<i64> {
+fn days_since_epoch(date: &str, order: DateOrder) -> Option<i64> {
     let fields: Vec<&str> = date.split(['-', '/', '.']).collect();
     if fields.len() != 3
         || fields
@@ -63,17 +75,19 @@ fn days_since_epoch(date: &str) -> Option<i64> {
         .iter()
         .map(|f| f.parse().ok())
         .collect::<Option<_>>()?;
+    // Les deux premiers champs d'une date finissant par l'année : (jour, mois)
+    // ou (mois, jour) selon la recette.
+    let (first, second) = match order {
+        DateOrder::DayFirst => (numbers[0], numbers[1]),
+        DateOrder::MonthFirst => (numbers[1], numbers[0]),
+    };
     let (year, month, day) = if fields[0].len() == 4 {
         (numbers[0], numbers[1], numbers[2])
     } else if fields[2].len() == 4 {
-        (numbers[2], numbers[1], numbers[0])
+        (numbers[2], second, first)
     } else if fields[2].len() == 2 {
         let yy = numbers[2];
-        (
-            if yy < 70 { 2000 + yy } else { 1900 + yy },
-            numbers[1],
-            numbers[0],
-        )
+        (if yy < 70 { 2000 + yy } else { 1900 + yy }, second, first)
     } else {
         return None;
     };
@@ -119,6 +133,38 @@ mod tests {
         assert_eq!(parse_datetime("15:17:22"), Some(55_042.0));
         assert_eq!(parse_datetime("1969-12-31"), Some(-86_400.0));
         assert_eq!(parse_datetime("2000-01-01 00:00:01,5"), Some(946_684_801.5));
+    }
+
+    #[test]
+    fn month_first_swaps_day_and_month_but_not_iso() {
+        use super::parse_datetime_with;
+        use crate::recipe::DateOrder::{DayFirst, MonthFirst};
+        // 4 mars 2026 mois d'abord ; 3 avril 2026 jour d'abord.
+        assert_eq!(
+            parse_datetime_with("03/04/2026", MonthFirst),
+            parse_datetime_with("2026-03-04", DayFirst)
+        );
+        assert_eq!(
+            parse_datetime_with("03/04/2026", DayFirst),
+            parse_datetime_with("2026-04-03", MonthFirst)
+        );
+        assert_ne!(
+            parse_datetime_with("03/04/2026", MonthFirst),
+            parse_datetime_with("03/04/2026", DayFirst)
+        );
+        // Mois 13 : pas une date.
+        assert_eq!(parse_datetime_with("13/01/2026", MonthFirst), None);
+        assert!(parse_datetime_with("13/01/2026", DayFirst).is_some());
+        // Année sur deux chiffres, avec heure.
+        assert_eq!(
+            parse_datetime_with("11/25/24 15:17:22", MonthFirst),
+            Some(1_732_547_842.0)
+        );
+        // ISO : identique dans les deux ordres.
+        assert_eq!(
+            parse_datetime_with("2026-03-04 10:00", MonthFirst),
+            parse_datetime_with("2026-03-04 10:00", DayFirst)
+        );
     }
 
     #[test]

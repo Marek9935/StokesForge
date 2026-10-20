@@ -749,6 +749,18 @@ fn import_number_controls(rows: &mut Form<'_>, recipe: &mut stokesforge_import::
                 .map(|candidate| ChoiceOption::new(candidate, thousands_label(candidate))),
         )
     });
+    rows.row(tr!("import-format-date-order"), |ui| {
+        use stokesforge_import::DateOrder;
+        choice(
+            ui,
+            "stokesforge_import_date_order_combo",
+            &mut recipe.date_order,
+            &[
+                ChoiceOption::new(DateOrder::DayFirst, tr!("import-date-day-first")),
+                ChoiceOption::new(DateOrder::MonthFirst, tr!("import-date-month-first")),
+            ],
+        )
+    });
     rows.row(tr!("import-format-missing"), |ui| {
         let mut text = recipe.missing_tokens.join(", ");
         if help_beside(ui, tr!("import-format-missing", "hint"), |ui| {
