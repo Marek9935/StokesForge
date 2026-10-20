@@ -39,7 +39,7 @@ dont la valeur par défaut est une classe :
 | Moyenne | 480 x 420 | des réglages ou un formulaire à quelques pages |
 | Grande | 640 x 500 | une liste et son éditeur côte à côte |
 
-- **Fenêtre interactive** (réglages, brouillon, assistant : `InteractiveSize`) :
+- **Fenêtre interactive** (réglages, réglages en direct, brouillon, assistant : `InteractiveSize`) :
   la classe par défaut de la nature, une autre classe, ou une **taille libre**
   (`InteractiveSize::Free`) qui exige `// TAILLE-LIBRE(#300): <justification>`
   dans les douze lignes qui précèdent (15 caractères au moins). Tailles libres
@@ -57,6 +57,7 @@ dont la valeur par défaut est une classe :
 | `Draft` | `modal_dialog_with` | Moyenne | premier champ |
 | `Choice` | `modal_dialog_with` | Petite | premier champ (s'il y en a) |
 | `Wizard` | `modal_wizard` | Grande | premier champ |
+| `LiveSettings` | `modal_live_settings` | Moyenne | premier champ (S-F9) |
 | `ReadOnly` | `modal_read_only` | Moyenne | aucun |
 | `Confirm` | `modal_confirm` | Petite | Cancel (S-F5) |
 | `SaveChanges` | `modal_save_changes` | Petite | Save |
@@ -77,7 +78,8 @@ obligatoires, S-F10).
 | **Création sur brouillon** (S-F1) | `modal_dialog_with` | `Draft` | `[secondaires] [message] [Cancel] [verbe]` | une action qui crée ; le bouton porte son verbe (Create, Import) |
 | **Choix** | `modal_dialog_with` | `Choice` | idem, secondaires = autres réponses | une question sans réponse « oui » |
 | **Assistant** | `modal_wizard` | `Wizard` | `[Cancel] [message] [Back · Next] [Finish]` | plusieurs étapes ordonnées |
-| **Lecture seule** (S-F2) | `modal_read_only` | `ReadOnly` | `[secondaires] [message] [Close]` | consulter, ou régler sans rien à valider |
+| **Réglages appliqués en direct** (S-F2) | `modal_live_settings` | `LiveSettings` | `[message] [Close]` | régler sans rien à valider ni annuler : pied de lecture seule, mais des champs (focus, taille par classe) |
+| **Lecture seule** (S-F2) | `modal_read_only` | `ReadOnly` | `[secondaires] [message] [Close]` | consulter seulement |
 | **Confirmation** (S-F3 à S-F5) | `modal_confirm` | `Confirm` | `[message] [Cancel] [verbe]` | seulement ce que Ctrl+Z ne rattrape pas |
 | **Enregistrer ?** | `modal_save_changes` | `SaveChanges` | `[Discard Changes] [message] [Cancel] [Save]` | projet non enregistré |
 | **Échec grave** (S-M8) | `modal_alert` | `Alert` | `[action] [message] [Close]` | échec avec une action possible |
@@ -101,7 +103,7 @@ leur état est ouvert dans `AppState`, sauf les blocants (dernière section).
 | Propriétés d'un objet (rectangle, flèche…) | `Settings` | Moyenne | coordonnées X1 Y1 X2 Y2, couleurs de trait et de fond | double-clic sur l'objet, Object Manager (`open_shape_properties`) | dérivé de l'objet, `graph_window.rs` |
 | Analyse (nouvelle ou modification) | `Draft` | libre 1000 x 660 | deux colonnes : réglages (330 de large, défilants) et aperçu cliquable avec outils et valeurs | menu Analysis, clic droit, panneau des résultats (`Action::OpenAnalysis`) | `stokesforge_analysis` (construit), `analysis_dialog.rs`, `analysis_forms.rs`, `analysis_preview.rs` |
 | Assistant d'import | `Wizard` | libre 1000 x 620 | 6 étapes : Files, Format, Header, Columns, Metadata, Destination ; aperçu du fichier à droite à toutes les étapes | File > Import, Ctrl+3 (`open_import_dialog`) | `stokesforge_import_wizard`, `import_wizard.rs` |
-| Préférences | `ReadOnly` (réglages immédiats) | Moyenne | 3 onglets : General (langue, taille maximale d'un fichier à l'ouverture, analyse), Display (nouveaux classeurs), Export (formats de Copy Graph) | File > Preferences (`Action::OpenPreferences`) | `stokesforge_preferences`, `preferences_window.rs` |
+| Préférences | `LiveSettings` (réglages immédiats) | Moyenne | 3 onglets : General (langue, taille maximale d'un fichier à l'ouverture, analyse), Display (nouveaux classeurs), Export (formats de Copy Graph) | File > Preferences (`Action::OpenPreferences`) | `stokesforge_preferences`, `preferences_window.rs` |
 | Raccourcis clavier | `ReadOnly` | contenu 480 x 460 | liste défilante par zone, générée de `shortcuts::HELP` | Help > Keyboard Shortcuts (`Action::OpenKeyboardShortcuts`) | `stokesforge_keyboard_shortcuts`, `keyboard_shortcuts_window.rs` |
 | Historique de la barre d'état | `ReadOnly` | contenu 520 x 360 | les 50 derniers messages, état vide si aucun | clic sur la ligne d'état (`Action::OpenStatusHistory`) | `stokesforge_status_history`, `status_history.rs` |
 | Liste des R² faibles | `ReadOnly` | contenu 480 x 170 | compteurs par type, texte normal | pastille de la barre d'état (`Action::OpenLowR2List`) | `stokesforge_low_r2_list`, `status_history.rs` |
@@ -224,7 +226,8 @@ standard) :
 | Création sur brouillon | `analysis_window` (`analysis_dialog.rs`) | verbe du bouton, raison du grisage, aperçu |
 | Choix | `stale_export_window` (`stale_export.rs`) | secondaires + principal, le plus court |
 | Assistant | `import_window` (`import_wizard.rs`) | le seul ; Back · Next · Finish |
-| Lecture seule | `keyboard_shortcuts_window.rs` (le plus simple) ; `preferences_window.rs` pour des réglages immédiats à onglets | Close seul |
+| Réglages en direct | `preferences_window.rs` (onglets, réglages immédiats) | Close seul, focus sur le premier champ |
+| Lecture seule | `keyboard_shortcuts_window.rs` (le plus simple) | Close seul |
 | Confirmation | `analysis_replace_window` (`analysis_dialog.rs`) ; `confirmations.rs` pour les blocantes | Cancel par défaut |
 
 ## Produire une capture

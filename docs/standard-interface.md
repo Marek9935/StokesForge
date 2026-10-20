@@ -84,7 +84,7 @@ mécanique.
 | S-F8 | `geometrie-memorisee` | Taille et position d'un dialogue sont mémorisées par sorte de dialogue, dans les préférences. |
 | S-F9 | `focus-initial` | Le premier champ de saisie a le focus à l'ouverture. |
 | S-F10 | `bouton-principal-grise` | Un bouton principal grisé dit sa raison dans le pied et en bulle. |
-| S-F11 | `nature-de-fenetre` | Une fenêtre modale a une nature (`DialogNature`) qui fixe son pied, sa taille par défaut (Petite 480 x 170, Moyenne 480 x 420, Grande 640 x 500), son focus initial et son bouton par défaut ; taille libre seulement justifiée pour une fenêtre interactive. |
+| S-F11 | `nature-de-fenetre` | Une fenêtre modale a une nature (`DialogNature`) qui fixe son pied, sa taille par défaut (Petite 480 x 170, Moyenne 480 x 420, Grande 640 x 500), son focus initial et son bouton par défaut ; taille libre seulement justifiée pour une fenêtre interactive (réglages, réglages en direct à Close seul comme Préférences, brouillon, assistant). |
 | S-G1 | `grise-avec-sa-raison` | Tout élément grisé porte sa raison, qui dit quoi faire (« Select a series first »). |
 | S-G2 | `raison-en-bulle-propre` | La raison est la bulle `.disabled` de l'élément lui-même, jamais mêlée à la bulle normale ni posée sur un groupe. |
 | S-G3 | `undo-redo-grises` | Undo et Redo grisés disent « Nothing to undo » ; actifs, ils nomment l'action (« Undo Rename »). |
@@ -153,7 +153,7 @@ deux règles ci-dessus :
 | choix exclusif dans un menu (`menu_sections::menu_choice`) | coche seule (S-C3) | **en place** (#227) |
 | brique « textes entourés » (`app/form.rs` : `toggle_texts`) | choix exclusif à bascule, cadre arrondi autour de chaque libellé (actif : fond plein de l'accent ; inactif : contour seul) ; réservée à la rangée de gestes de l'aperçu d'analyse (exception S-K7) | **en place** (#270) |
 | garde : aucun `add_space` littéral hors de `theme.rs` (`aucun_add_space_litteral_hors_du_theme`) | | **en place** (#227) |
-| zone de message du pied de `modal_dialog_with`, focus initial, taille mémorisée, `modal_wizard`, `modal_read_only` | ordre des boutons, erreur et raison dans le pied, Échap, S-F8, S-F9 | **en place** (#228) |
+| zone de message du pied de `modal_dialog_with`, focus initial, taille mémorisée, `modal_wizard`, `modal_live_settings`, `modal_read_only` | ordre des boutons, erreur et raison dans le pied, Échap, S-F8, S-F9 | **en place** (#228) |
 | nature de fenêtre (`app/dialogs.rs` : `DialogNature`, `SizeClass`, `InteractiveSize`, `PlainSize`, `DialogFooter::always` / `gated`) | pied, classe de taille, focus initial et bouton par défaut imposés par des `match` exhaustifs (S-F11) | **en place** (#300) |
 | garde : aucune taille libre sans justification (`aucune_taille_libre_sans_justification`, témoin `la_garde_des_tailles_voit_une_taille_libre_nue`) | `InteractiveSize::Free` refusé sans le marqueur `// TAILLE-LIBRE(#300): <justification>` (S-F11) | **en place** (#300) |
 | garde : le catalogue des fenêtres et le code concordent (`le_catalogue_des_fenetres_et_le_code_concordent`, témoin `la_garde_du_catalogue_voit_un_ecart`) | tout identifiant `stokesforge_…` passé à un `modal_*` est dans [`fenetres.md`](fenetres.md), et chaque ligne du catalogue a son appel ; ne lit pas les tailles (S-F11) | **en place** (#300) |
@@ -486,20 +486,22 @@ Historique : #225, #230 (barre d'état), #228 (S-M7), #229 (S-M8).
   valeur par défaut est une classe : **Petite** 480 x 170 (une question, un
   message), **Moyenne** 480 x 420 (des réglages, un formulaire), **Grande**
   640 x 500 (une liste et son éditeur). Une fenêtre **interactive** (réglages,
-  brouillon, assistant) prend une classe ; hors classes, une **taille libre**
+  réglages en direct, brouillon, assistant) prend une classe ; hors classes, une **taille libre**
   justifiée dans le code (`// TAILLE-LIBRE(#300): <justification>`). Une fenêtre
   **sans interaction riche** (choix, lecture seule, confirmation,
   enregistrement, alerte) peut prendre la taille de son contenu **sans
   justification** : elle n'a pas de formulaire à ranger, et une taille mal
   choisie y coûte peu. Focus initial : premier champ (réglages, brouillon,
-  choix, assistant, S-F9), bouton par défaut (confirmation : Cancel ;
+  choix, assistant, S-F9 ; réglages **appliqués en direct** à Close seul, comme
+  Préférences : premier champ aussi, car ils ont des champs), bouton par défaut (confirmation : Cancel ;
   enregistrement : Save ; alerte : Close), rien (lecture seule).
 
 Comment c'est tenu (`app/dialogs.rs`, tous par un même corps `modal_frame`) :
 
 - **`modal_dialog_with`** : `[secondaires] [message] [Cancel] [principal]` ;
   **`modal_wizard`** : `[Cancel] [message] [Back · Next] [Finish]` (l'assistant
-  d'import) ; **`modal_read_only`** : `[message] [Close]` (métadonnées d'une
+  d'import) ; **`modal_live_settings`** : `[message] [Close]` avec focus sur le premier champ
+  (Préférences) ; **`modal_read_only`** : `[message] [Close]` (métadonnées d'une
   colonne). Un geste d'une fenêtre en lecture seule (« Use as x' ») reste un
   bouton de son contenu.
 - **Texte atténué (`.weak()`)** : réservé à ce qui est secondaire — détail

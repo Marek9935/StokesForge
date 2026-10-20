@@ -1,20 +1,21 @@
-//! File › Preferences (#148) : la version minimale de la fenêtre des
-//! préférences de l'application. Une seule rubrique, **General**, qui ne
-//! porte que la langue, seul réglage global déjà persisté et réglable ailleurs
-//! (File › Language), puis **Export**, qui règle les formats de Copy Graph :
-//! l'ordre se change au glisser (`reorder_list.rs`), chaque format se coche.
-//! Les autres rubriques de l'inventaire de #148 (Display, Folders and Paths)
-//! s'ajouteront une à une, avec leurs questions tranchées.
+//! File › Preferences (#148) : la fenêtre des préférences de l'application,
+//! en trois onglets : **General** (la langue, réglable aussi par
+//! File › Language, et l'analyse), **Display** (les classeurs neufs) et
+//! **Export** (les formats de Copy Graph : l'ordre se change au glisser,
+//! `reorder_list.rs`, chaque format se coche). Les autres rubriques de
+//! l'inventaire de #148 (Folders and Paths) s'ajouteront une à une, avec
+//! leurs questions tranchées.
 //!
 //! Les réglages s'appliquent **tout de suite** (comme le menu Language) : la
-//! fenêtre ne change donc rien à valider ou à annuler et passe par
-//! `modal_read_only` (Close seul, S-F2). Elle ne touche ni le projet ni
+//! fenêtre n'a rien à valider ni à annuler et passe par `modal_live_settings`
+//! (Close seul, S-F2 ; interactive, donc focus sur le premier champ et taille
+//! par classe, S-F9, S-F11). Elle ne touche ni le projet ni
 //! l'historique ; l'état ouvert/fermé est une décision d'interface de
 //! `AppState`, l'application de la langue reste à `StokesForgeApp`.
 
 use eframe::egui;
 
-use super::dialogs::{modal_read_only, DialogOutcome, PlainSize, SizeClass};
+use super::dialogs::{modal_live_settings, DialogOutcome, InteractiveSize, SizeClass};
 use super::form::{choice, form, ChoiceOption};
 use super::reorder_list::{move_before, reorder_move, reorder_row};
 use super::tab_strip::{tab_strip, TabStripSide};
@@ -49,11 +50,11 @@ pub(super) fn preferences_window(
     // ni le fichier des préférences.
     let page_id = egui::Id::new("stokesforge_preferences_page");
     let mut page: Page = ctx.data(|data| data.get_temp(page_id)).unwrap_or_default();
-    let outcome = modal_read_only(
+    let outcome = modal_live_settings(
         ctx,
         egui::Id::new("stokesforge_preferences"),
         &tr!("preferences-title"),
-        PlainSize::Class(SizeClass::Medium),
+        InteractiveSize::Class(SizeClass::Medium),
         |ui| {
             let tabs = [
                 (Page::General, tr!("preferences-general")),

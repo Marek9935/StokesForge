@@ -180,6 +180,7 @@ fn la_fenetre_des_proprietes_est_construite_comme_les_autres() {
     // et l'échec grave (#229) : le même corps.
     for variante in [
         "modal_wizard",
+        "modal_live_settings",
         "modal_read_only",
         "modal_confirm",
         "modal_save_changes",
@@ -1993,10 +1994,11 @@ fn la_garde_des_tailles_voit_une_taille_libre_nue() {
 
 /// Les fonctions de dialogue modal : un identifiant `stokesforge_…` passé à
 /// l'une d'elles est celui d'une fenêtre du catalogue.
-const APPELS_MODAUX: [&str; 7] = [
+const APPELS_MODAUX: [&str; 8] = [
     "modal_dialog_with",
     "modal_dialog",
     "modal_wizard",
+    "modal_live_settings",
     "modal_read_only",
     "modal_confirm",
     "modal_save_changes",

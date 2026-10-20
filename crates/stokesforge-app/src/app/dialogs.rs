@@ -1,5 +1,5 @@
 //! Dialogues **modaux** : [`modal_dialog`], [`modal_dialog_with`],
-//! [`modal_wizard`], [`modal_read_only`], [`modal_confirm`],
+//! [`modal_wizard`], [`modal_live_settings`], [`modal_read_only`], [`modal_confirm`],
 //! [`modal_save_changes`] et [`modal_alert`], la brique de toute boîte de
 //! dialogue et de tout assistant — même cadre, même barre de titre, même
 //! blocage du reste de l'interface. Elle pose la fenêtre par la brique des
@@ -186,6 +186,10 @@ pub(super) enum DialogNature {
     Choice(PlainSize),
     /// Assistant : `[Cancel] [message] [Back · Next] [Finish]`.
     Wizard(InteractiveSize),
+    /// Réglages **appliqués en direct**, sans rien à valider ni annuler :
+    /// `[message] [Close]` (S-F2). Interactive (des champs à remplir : focus
+    /// sur le premier, taille par classe), mais au pied d'une lecture seule.
+    LiveSettings(InteractiveSize),
     /// Lecture seule : `[secondaires] [message] [Close]`.
     ReadOnly(PlainSize),
     /// Confirmation : `[message] [Cancel] [verbe]`, Cancel par défaut.
@@ -228,7 +232,7 @@ impl DialogNature {
         match self {
             Self::Settings(_) | Self::Draft(_) | Self::Choice(_) => FooterShape::Dialog,
             Self::Wizard(_) => FooterShape::Wizard,
-            Self::ReadOnly(_) | Self::Alert(_) => FooterShape::ReadOnly,
+            Self::LiveSettings(_) | Self::ReadOnly(_) | Self::Alert(_) => FooterShape::ReadOnly,
             Self::Confirm(_) => FooterShape::Confirm,
             Self::SaveChanges(_) => FooterShape::SaveChanges,
         }
@@ -237,7 +241,9 @@ impl DialogNature {
     /// La classe de taille quand l'appelant n'en dit pas.
     pub(super) fn default_class(self) -> SizeClass {
         match self {
-            Self::Settings(_) | Self::Draft(_) | Self::ReadOnly(_) => SizeClass::Medium,
+            Self::Settings(_) | Self::Draft(_) | Self::LiveSettings(_) | Self::ReadOnly(_) => {
+                SizeClass::Medium
+            }
             Self::Wizard(_) => SizeClass::Large,
             Self::Choice(_) | Self::Confirm(_) | Self::SaveChanges(_) | Self::Alert(_) => {
                 SizeClass::Small
@@ -249,7 +255,10 @@ impl DialogNature {
     pub(super) fn size(self) -> egui::Vec2 {
         let default = self.default_class();
         match self {
-            Self::Settings(size) | Self::Draft(size) | Self::Wizard(size) => size.resolve(default),
+            Self::Settings(size)
+            | Self::Draft(size)
+            | Self::LiveSettings(size)
+            | Self::Wizard(size) => size.resolve(default),
             Self::Choice(size)
             | Self::ReadOnly(size)
             | Self::Confirm(size)
@@ -263,9 +272,11 @@ impl DialogNature {
     /// une alerte attendent un bouton ; une lecture seule n'a rien à saisir.
     pub(super) fn initial_focus(self) -> InitialFocus {
         match self {
-            Self::Settings(_) | Self::Draft(_) | Self::Wizard(_) | Self::Choice(_) => {
-                InitialFocus::FirstField
-            }
+            Self::Settings(_)
+            | Self::Draft(_)
+            | Self::LiveSettings(_)
+            | Self::Wizard(_)
+            | Self::Choice(_) => InitialFocus::FirstField,
             Self::Confirm(_) | Self::SaveChanges(_) | Self::Alert(_) => InitialFocus::DefaultButton,
             Self::ReadOnly(_) => InitialFocus::Nothing,
         }
@@ -279,6 +290,7 @@ impl DialogNature {
             | Self::Draft(_)
             | Self::Choice(_)
             | Self::Wizard(_)
+            | Self::LiveSettings(_)
             | Self::ReadOnly(_)
             | Self::SaveChanges(_)
             | Self::Alert(_) => false,
@@ -486,6 +498,32 @@ pub(super) fn modal_wizard(
         DialogNature::Wizard(size),
         footer_spec,
         step_buttons,
+        add_contents,
+    )
+    .dialog()
+}
+
+/// Une fenêtre de **réglages appliqués en direct** (S-F2, S-F11) : rien à
+/// valider ni à annuler, donc un seul bouton, Close, comme la lecture seule ;
+/// mais elle a des champs, donc le focus initial va au premier (S-F9) et la
+/// taille se range dans une classe ([`InteractiveSize`]). Mêmes issues que
+/// [`modal_read_only`].
+pub(super) fn modal_live_settings(
+    ctx: &egui::Context,
+    id: egui::Id,
+    title: &str,
+    size: InteractiveSize,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) -> DialogOutcome {
+    let label = tr!("dialog-close");
+    let hint = tr!("dialog-close", "hint");
+    modal_frame(
+        ctx,
+        id,
+        title,
+        DialogNature::LiveSettings(size),
+        DialogFooter::always(&label, &hint),
+        |_| {},
         add_contents,
     )
     .dialog()
@@ -1694,6 +1732,12 @@ mod tests {
                 FirstField,
             ),
             (
+                DialogNature::LiveSettings(interactive),
+                FooterShape::ReadOnly,
+                moyenne,
+                FirstField,
+            ),
+            (
                 DialogNature::ReadOnly(simple),
                 FooterShape::ReadOnly,
                 moyenne,
@@ -1803,6 +1847,18 @@ mod tests {
 
         let (context, _, _) = ouvrir(DialogNature::ReadOnly(simple), &mut texte);
         assert_eq!(context.memory(|memory| memory.focused()), None, "lecture");
+
+        // Des réglages en direct ont des champs : focus sur le premier, comme
+        // un brouillon, malgré le pied « Close seul » d'une lecture.
+        let (context, _, champ) = ouvrir(
+            DialogNature::LiveSettings(InteractiveSize::Default),
+            &mut texte,
+        );
+        assert_eq!(
+            context.memory(|memory| memory.focused()),
+            champ,
+            "réglages en direct : le premier champ"
+        );
 
         let (context, _, champ) = ouvrir(DialogNature::Draft(InteractiveSize::Default), &mut texte);
         assert_eq!(
