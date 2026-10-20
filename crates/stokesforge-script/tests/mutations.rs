@@ -142,7 +142,9 @@ assert pyst.info(pyst.resolve('[Book1]Sheet1!B'))['row_count'] == 5
     assert_eq!(floats(&banc, banc.a), vec![1., 2., 3.]);
     banc.session.redo().unwrap();
     assert_eq!(floats(&banc, banc.a)[1].to_bits(), (-0.0_f64).to_bits());
-    run(&banc, "pyst.set_values(a, [])");
+    // #312 : l'annulation/rétablissement de l'hôte a changé la colonne depuis
+    // la lecture du script ; il la relit avant d'écrire.
+    run(&banc, "pyst.values(a)\npyst.set_values(a, [])");
     assert!(floats(&banc, banc.a).is_empty());
     banc.session.undo().unwrap();
     assert_eq!(floats(&banc, banc.a).len(), 2);
@@ -501,4 +503,118 @@ pyst.set_values(pyst.resolve('[Book1]Sheet1!A'), [99.])
     banc.session.undo().unwrap();
     assert_eq!(*banc.session.snapshot().unwrap().tree, *before.tree);
     assert!(!banc.session.snapshot().unwrap().history.can_undo);
+}
+
+// --- #312 : version de lecture retenue, expected_version, refus immédiat ----
+
+/// Exécution dont on attend l'échec ; rend le texte de l'erreur.
+fn run_fails(banc: &Banc, source: &str) -> String {
+    banc.engine
+        .run(source)
+        .unwrap()
+        .error
+        .expect("le script devait échouer")
+}
+
+/// Édition d'un autre client (l'interface) sur A, hors de tout script.
+fn edit_a_from_another_client(banc: &Banc) {
+    banc.session
+        .execute(Command::SetCells {
+            column: banc.a,
+            start: 1,
+            values: ValueBlock::Float(vec![99.]),
+            expected_version: None,
+        })
+        .unwrap();
+}
+
+const LIRE_A: &str = "h = pyst.resolve('[Book1]Sheet1!A')\n";
+
+#[test]
+fn set_column_refuse_une_colonne_modifiee_depuis_la_lecture() {
+    let banc = banc();
+    run(&banc, &format!("{LIRE_A}v = pyst.column(h)\n"));
+    edit_a_from_another_client(&banc);
+    let before = banc.session.snapshot().unwrap();
+    let error = run_fails(&banc, "pyst.set_column(h, v * 2)\n");
+    assert!(error.contains("ConcurrentWriteError"), "{error}");
+    assert!(
+        !error.contains("5 times") && !error.contains("five"),
+        "{error}"
+    );
+    assert_eq!(floats(&banc, banc.a), vec![1., 99., 3.]);
+    let after = banc.session.snapshot().unwrap();
+    assert_eq!(after.history, before.history);
+}
+
+#[test]
+fn set_values_refuse_une_colonne_modifiee_depuis_la_lecture() {
+    let banc = banc();
+    run(&banc, &format!("{LIRE_A}v = pyst.values(h)\n"));
+    edit_a_from_another_client(&banc);
+    let before = banc.session.snapshot().unwrap();
+    let error = run_fails(&banc, "pyst.set_values(h, [7., 8., 9.])\n");
+    assert!(error.contains("ConcurrentWriteError"), "{error}");
+    assert_eq!(floats(&banc, banc.a), vec![1., 99., 3.]);
+    assert_eq!(banc.session.snapshot().unwrap().history, before.history);
+}
+
+#[test]
+fn deux_ecritures_a_la_suite_apres_une_lecture_reussissent() {
+    let banc = banc();
+    run(
+        &banc,
+        &format!(
+            "{LIRE_A}v = pyst.column(h)\npyst.set_column(h, v * 2)\npyst.set_column(h, v * 3)\n\
+             pyst.set_values(h, [4., 5., 6.])\npyst.set_values(h, [7., 8., 9.])\n"
+        ),
+    );
+    assert_eq!(floats(&banc, banc.a), vec![7., 8., 9.]);
+}
+
+#[test]
+fn expected_version_explicite_prime_sur_la_version_lue() {
+    let banc = banc();
+    run(&banc, &format!("{LIRE_A}v = pyst.column(h)\n"));
+    edit_a_from_another_client(&banc);
+    // Version courante fournie : réussit malgré l'édition postérieure à la
+    // lecture (v est l'ancienne lecture : l'édition de l'autre est écrasée
+    // en connaissance de cause).
+    run(
+        &banc,
+        "pyst.set_column(h, v * 2, expected_version=pyst.info(h)['column']['version'])\n",
+    );
+    assert_eq!(floats(&banc, banc.a), vec![2., 4., 6.]);
+    // Ancienne version : refus, colonne inchangée.
+    let error = run_fails(
+        &banc,
+        "pyst.set_values(h, [0., 0., 0.], expected_version=0)\n",
+    );
+    assert!(error.contains("ConcurrentWriteError"), "{error}");
+    let error = run_fails(&banc, "pyst.set_column(h, v, expected_version=0)\n");
+    assert!(error.contains("ConcurrentWriteError"), "{error}");
+    assert_eq!(floats(&banc, banc.a), vec![2., 4., 6.]);
+}
+
+#[test]
+fn colonne_jamais_lue_reste_ecrivable() {
+    let banc = banc();
+    run(
+        &banc,
+        &format!("{LIRE_A}pyst.set_values(h, [5., 5., 5.])\n"),
+    );
+    edit_a_from_another_client(&banc);
+    run(&banc, "pyst.set_values(h, [6., 6., 6.])\n");
+    assert_eq!(floats(&banc, banc.a), vec![6., 6., 6.]);
+}
+
+#[test]
+fn undo_oublie_les_versions_lues() {
+    let banc = banc();
+    run(&banc, &format!("{LIRE_A}v = pyst.column(h)\n"));
+    edit_a_from_another_client(&banc);
+    // Sans undo() la version lue serait périmée (l'édition est annulée plus bas).
+    // Après undo(), le script n'a plus de version de lecture : écriture permise.
+    run(&banc, "pyst.undo()\npyst.set_column(h, v * 2)\n");
+    assert_eq!(floats(&banc, banc.a), vec![2., 4., 6.]);
 }

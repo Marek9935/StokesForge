@@ -27,13 +27,6 @@ use stokesforge_core::{ColumnMeta, ColumnValues, CoreError, Node, NodeId, ValueB
 use stokesforge_plot::{PlotSpec, SeriesAxis, ShapeKind, ShapeRef, ShapeSpec};
 use stokesforge_session::{SessionError, SessionHandle, Snapshot};
 
-/// A2 (`guide-de-correction-robustesse.md` §F6, §4/§7 de
-/// `cahier-des-charges-api-script.md`) — nombre de tentatives que
-/// [`set_column`] s'accorde avant de renoncer. Cinq, comme le cahier des
-/// charges le fixe : ni une variable d'environnement ni un paramètre, pour
-/// que le contrat lu par un auteur de script soit celui que le code applique.
-const MAX_SET_COLUMN_ATTEMPTS: u32 = 5;
-
 /// Erreur de l'hôte **déjà traduite** dans le vocabulaire des quatre
 /// exceptions de la surface `pyst`.
 ///
@@ -52,8 +45,8 @@ pub(crate) enum HostError {
     /// Valeur refusée : mauvais type, mauvaise longueur, mauvaise nature
     /// d'objet.
     InvalidValue(String),
-    /// A2 — [`set_column`] a essuyé [`MAX_SET_COLUMN_ATTEMPTS`] refus
-    /// consécutifs pour cause d'écriture concurrente sur la même colonne.
+    /// #312 — la colonne a changé depuis la version lue (ou fournie par
+    /// `expected_version`) : l'écriture est refusée aussitôt, sans retentative.
     ConcurrentWrite(String),
 }
 
@@ -79,15 +72,12 @@ impl HostError {
             CoreError::IdentifiersExhausted => {
                 HostError::InvalidValue(CoreError::IdentifiersExhausted.to_string())
             }
-            // A2 — n'atteint normalement jamais cette traduction générique :
-            // [`set_column`] intercepte cette variante avant tout appel à
-            // `from_session`/`from_core`, pour retenter plutôt que traduire.
-            // Couverte ici pour l'exhaustivité du `match`, avec le même
-            // vocabulaire que la traduction que `set_column` construit
-            // elle-même après la cinquième tentative.
-            CoreError::ConcurrentModification { .. } => {
-                HostError::ConcurrentWrite(error.to_string())
-            }
+            // #312 (D2) — refus immédiat, sans retentative : le script lève
+            // `ConcurrentWriteError` et décide lui-même de relire.
+            CoreError::ConcurrentModification { .. } => HostError::ConcurrentWrite(format!(
+                "{error}: another client modified the column since it was read; \
+                 read it again before writing"
+            )),
             // Une colonne-formule refuse toute écriture directe de cellule
             // (`stokesforge-commands::History::apply_data`) : côté script, c'est
             // une valeur invalide au même titre qu'un type incompatible, pas
@@ -213,7 +203,7 @@ pub(crate) fn column_values(
     session: &SessionHandle,
     id: NodeId,
     epoch: u64,
-) -> Result<ColumnValues, HostError> {
+) -> Result<(ColumnValues, u64), HostError> {
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     let node = checked_node(&snapshot, id, epoch)?;
     let column = node.as_column().ok_or_else(|| {
@@ -222,7 +212,7 @@ pub(crate) fn column_values(
             node.kind().with_article()
         ))
     })?;
-    Ok(column.values().clone())
+    Ok((column.values().clone(), column.version()))
 }
 
 /// `pyst.column` : le buffer `f64` partagé de la colonne, prêt à être emprunté
@@ -235,7 +225,7 @@ pub(crate) fn float_buffer(
     session: &SessionHandle,
     id: NodeId,
     epoch: u64,
-) -> Result<Arc<Vec<f64>>, HostError> {
+) -> Result<(Arc<Vec<f64>>, u64), HostError> {
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     let node = checked_node(&snapshot, id, epoch)?;
     let column = node.as_column().ok_or_else(|| {
@@ -249,14 +239,15 @@ pub(crate) fn float_buffer(
     // (voir `stokesforge_core::Column::numeric_view`). Lui rendre une copie
     // matérialisée serait une vue qui ne suit plus la colonne — un piège
     // silencieux pour un script qui croirait tenir le buffer.
-    column.float_values().cloned().ok_or_else(|| {
+    let buffer = column.float_values().cloned().ok_or_else(|| {
         HostError::InvalidValue(format!(
             "column \"{}\" is of type {}: pyst.column only returns numeric \
              columns",
             node.name(),
             column.column_type().type_name()
         ))
-    })
+    })?;
+    Ok((buffer, column.version()))
 }
 
 /// `pyst.set_column` : écrit `values` dans la colonne, **par une commande**,
@@ -269,16 +260,21 @@ pub(crate) fn float_buffer(
 /// La longueur est validée avant de réserver la macro du script. Si cette
 /// réservation est nouvelle, relire et revérifier l'époque et la longueur :
 /// une écriture ou un Load a pu passer avant la réservation. Sous la macro,
-/// les autres clients ne peuvent plus écrire ; `expected_version` et la borne
-/// historique de cinq tentatives restent des garde-fous au moment d'appliquer.
+/// les autres clients ne peuvent plus écrire.
+///
+/// #312 — version attendue, par priorité : l'argument `expected` du script,
+/// puis la version **retenue à la lecture** (`pyst.column`/`pyst.values`), puis
+/// la version courante (colonne jamais lue : écriture permise, non protégée).
+/// Un refus pour version périmée est **immédiat** (`ConcurrentWrite`).
 pub(crate) fn set_column(
     context: &ScriptContext,
     id: NodeId,
     epoch: u64,
     values: Vec<f64>,
+    expected: Option<u64>,
 ) -> Result<(), HostError> {
     let session = context.session();
-    for _ in 0..MAX_SET_COLUMN_ATTEMPTS {
+    loop {
         let snapshot = session.snapshot().map_err(HostError::from_session)?;
         check_epoch(id, epoch, snapshot.epoch)?;
         let node = snapshot.tree.node(id).ok_or_else(|| {
@@ -311,28 +307,43 @@ pub(crate) fn set_column(
             // Valider à nouveau sous la macro exclusive, avant la commande.
             continue;
         }
-        let expected_version = column.version();
-        match session.execute(Command::SetCells {
-            column: id,
-            start: 0,
-            values: ValueBlock::Float(values.clone()),
-            expected_version: Some(expected_version),
-        }) {
-            Ok(_) => return Ok(()),
-            // A2 — un autre client a modifié la colonne entre l'instantané
-            // lu ci-dessus et l'application de cette commande : on relit un
-            // instantané frais et on retente, plutôt que de refuser sec ou
-            // d'écraser silencieusement son travail.
-            Err(SessionError::Command(CommandError::Core(CoreError::ConcurrentModification {
-                ..
-            }))) => continue,
-            Err(other) => return Err(HostError::from_session(other)),
-        }
+        let expected_version = expected
+            .or_else(|| context.remembered_version(id, epoch))
+            .unwrap_or_else(|| column.version());
+        session
+            .execute(Command::SetCells {
+                column: id,
+                start: 0,
+                values: ValueBlock::Float(values),
+                expected_version: Some(expected_version),
+            })
+            .map_err(HostError::from_session)?;
+        retain_written_version(context, id, epoch)?;
+        return Ok(());
     }
-    Err(HostError::ConcurrentWrite(format!(
-        "writing column {id} was refused {MAX_SET_COLUMN_ATTEMPTS} times in a row: \
-         another client keeps modifying it; read the current state again or retry later"
-    )))
+}
+
+/// Après une écriture réussie du script sur une colonne **qu'il a lue**, la
+/// version retenue devient la version neuve (relue sur l'instantané, sous la
+/// macro) : le script connaît ce qu'il vient d'écrire, ses écritures suivantes
+/// ne se refusent pas elles-mêmes. Une colonne jamais lue reste non retenue
+/// (limite documentée : écriture non protégée).
+fn retain_written_version(
+    context: &ScriptContext,
+    id: NodeId,
+    epoch: u64,
+) -> Result<(), HostError> {
+    if context.remembered_version(id, epoch).is_none() {
+        return Ok(());
+    }
+    let snapshot = context
+        .session()
+        .snapshot()
+        .map_err(HostError::from_session)?;
+    if let Some(column) = checked_node(&snapshot, id, epoch)?.as_column() {
+        context.remember_version(id, epoch, column.version());
+    }
+    Ok(())
 }
 
 /// `pyst.undo` : un cran de la pile d'historique de l'hôte.
@@ -343,6 +354,8 @@ pub(crate) fn undo(context: &ScriptContext) -> Result<bool, HostError> {
     // L'annulation explicite est un point de validation : elle annule le
     // groupe entier construit jusqu'ici, puis permet de nouvelles écritures.
     context.finish_write(true)?;
+    // #312 — les versions lues décrivent un état que l'annulation défait.
+    context.forget_versions();
     context
         .session()
         .undo()
@@ -616,6 +629,8 @@ pub(crate) fn import_file(
         }
         Err(error) => {
             session.abort_macro().map_err(HostError::from_session)?;
+            // L'abandon défait l'écriture : les versions lues sont périmées.
+            context.forget_versions();
             Err(error)
         }
     }
@@ -693,6 +708,7 @@ pub(crate) fn set_values(
     id: NodeId,
     epoch: u64,
     cells: ValueBlock,
+    expected: Option<u64>,
 ) -> Result<(), HostError> {
     let snapshot = context
         .session()
@@ -735,7 +751,10 @@ pub(crate) fn set_values(
         .as_column()
         .ok_or_else(|| HostError::InvalidValue("expected a column handle".into()))?;
     let previous_length = column.len();
-    let version = column.version();
+    // #312 — même priorité que `set_column`.
+    let version = expected
+        .or_else(|| context.remembered_version(id, epoch))
+        .unwrap_or_else(|| column.version());
     let session = context.session();
     // Atomicité : SetCells puis DeleteCells sont un seul geste. Une macro
     // imbriquée (LIFO dans la macro `Script`, invariant 8) permet de défaire
@@ -767,10 +786,10 @@ pub(crate) fn set_values(
         Ok(())
     })();
     match result {
-        Ok(()) => session
-            .end_macro()
-            .map(|_| ())
-            .map_err(HostError::from_session),
+        Ok(()) => {
+            session.end_macro().map_err(HostError::from_session)?;
+            retain_written_version(context, id, epoch)
+        }
         Err(error) => {
             session.abort_macro().map_err(HostError::from_session)?;
             Err(error)

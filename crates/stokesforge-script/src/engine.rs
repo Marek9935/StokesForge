@@ -50,10 +50,11 @@
 //! qu'il touche à `pyst`.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::c_long;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use pyo3::exceptions::{PyKeyboardInterrupt, PyRuntimeError};
@@ -61,6 +62,7 @@ use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTracebackMethods};
 use stokesforge_commands::MacroKind;
+use stokesforge_core::NodeId;
 use stokesforge_python::interpreter::EmbeddedPython;
 use stokesforge_session::SessionHandle;
 
@@ -100,9 +102,36 @@ pub(crate) struct ScriptContext {
     /// Ouverte seulement à la première écriture ; un script de lecture ne
     /// réserve jamais la session. Atomique pour rester utilisable GIL relâché.
     macro_open: AtomicBool,
+    /// #312 — version de chaque colonne telle qu'elle a été **lue** par le
+    /// script (`pyst.column`, `pyst.values`), clé `(nœud, époque de la
+    /// poignée)`. Données Rust pures (invariant 9). Le contexte vit autant que
+    /// le fil de script : la table survit d'une saisie de console à l'autre.
+    read_versions: Mutex<HashMap<(NodeId, u64), u64>>,
 }
 
 impl ScriptContext {
+    /// Retient la version lue d'une colonne (la plus récente lecture gagne).
+    pub(crate) fn remember_version(&self, id: NodeId, epoch: u64, version: u64) {
+        if let Ok(mut table) = self.read_versions.lock() {
+            table.insert((id, epoch), version);
+        }
+    }
+
+    /// Version retenue pour la colonne, si le script l'a lue.
+    pub(crate) fn remembered_version(&self, id: NodeId, epoch: u64) -> Option<u64> {
+        self.read_versions
+            .lock()
+            .ok()
+            .and_then(|table| table.get(&(id, epoch)).copied())
+    }
+
+    /// Oublie toutes les versions retenues (après un `undo`).
+    pub(crate) fn forget_versions(&self) {
+        if let Ok(mut table) = self.read_versions.lock() {
+            table.clear();
+        }
+    }
+
     /// Poignée vers l'acteur.
     pub(crate) fn session(&self) -> &SessionHandle {
         &self.session
@@ -137,6 +166,11 @@ impl ScriptContext {
         match result {
             Ok(_) => {
                 self.macro_open.store(false, Ordering::Release);
+                if !commit {
+                    // #312 — l'abandon défait les écritures du script : les
+                    // versions retenues ne décrivent plus rien.
+                    self.forget_versions();
+                }
                 Ok(())
             }
             Err(error) => {
@@ -449,6 +483,7 @@ fn start(
         session,
         shared: Arc::clone(shared),
         macro_open: AtomicBool::new(false),
+        read_versions: Mutex::new(HashMap::new()),
     });
     CONTEXT.with(|cell| *cell.borrow_mut() = Some(context));
 

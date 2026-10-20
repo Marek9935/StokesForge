@@ -222,7 +222,34 @@ autres clients ne peuvent plus écrire, sauvegarder ou charger pendant le
 groupe ; les lectures restent possibles. Le moteur possède toujours une
 identité de client distincte de son appelant, même si celui-ci lui transmet
 un clone de sa poignée. Les mutations revalident l'époque après acquisition
-de la macro ; les écritures de cellules portent encore `expected_version`.
+de la macro ; les écritures de cellules portent encore `expected_version`
+(voir « Version de lecture » ci-dessous).
+
+### Version de lecture (#312)
+
+Deux mécanismes, qui partagent la même comparaison de version :
+
+- **Version lue, retenue par défaut.** `pyst.column` et `pyst.values` retiennent
+  la `version` de la colonne lue (même instantané que les valeurs), dans une
+  table `(nœud, époque) → version` du contexte de script, qui survit d'une
+  saisie de console à l'autre. `set_column` / `set_values` exigent cette
+  version : si la colonne a changé depuis (édition de l'interface, autre
+  client), l'écriture est refusée aussitôt par `ConcurrentWriteError`, sans
+  retentative et sans écraser l'édition. Après une écriture réussie, la version
+  retenue devient la version neuve : deux écritures successives réussissent.
+  `pyst.undo()` oublie toutes les versions retenues.
+- **`expected_version=` facultatif** (mot-clé) sur `set_column` et `set_values` :
+  il remplace la version retenue. `pyst.info(h)['column']['version']` fournit la
+  version courante ; `pyst.info` ne retient rien. Priorité : argument, puis
+  version retenue, puis version courante.
+
+Limites connues : une colonne **écrite sans lecture préalable** n'est pas
+protégée (version courante) ; une colonne **B lue pour calculer A** ne protège
+que B, l'écriture de A reste non protégée si A n'a pas été lue. La version ne
+couvre que type et valeurs (invariants 8 et 11), ni nom ni métadonnées.
+Asymétrie assumée : aucune valeur n'est filtrée à l'écriture, un `inf` écrit
+par un script est stocké tel quel, alors que l'import le convertit en NaN ou
+en texte.
 
 `pyst.undo()` reste utilisable pendant un script : il termine le groupe en
 cours puis l'annule entièrement. C'est un point de validation explicite ;
@@ -237,8 +264,8 @@ longueur inchangée, tableaux non contigus acceptés et masque non vide refusé.
 les autres colonnes restent inchangés. Aucune suppression de queue ne
 précède la validation de l'écriture. L'écriture et la suppression de la queue
 sont enveloppées dans une macro imbriquée (`abort_macro` si la seconde échoue) :
-le tout réussit ou ne laisse rien. D'où vient la version de lecture que porte
-`expected_version` reste une décision ouverte (#312).
+le tout réussit ou ne laisse rien. La version de lecture suit la même règle
+que `set_column`.
 
 `set_values` accepte un tableau numpy float64 1D (mêmes contrôles) ou un
 itérable de `float`, `int`, `str`, `None`. Les entiers Python hors de
@@ -481,8 +508,8 @@ l'instantané avant même de chercher le `NodeId` dans l'arbre courant
 Quatre exceptions, et seulement quatre : `UnknownPathError`,
 `BrokenReferenceError`, `InvalidValueError`, `ConcurrentWriteError`. Les trois
 premières viennent telles quelles de la spécification v1, pour ne pas avoir à
-les renommer ensuite ; la quatrième distingue l'épuisement des tentatives de
-réécriture (cinq refus consécutifs pour cause de concurrence) des autres refus.
+les renommer ensuite ; la quatrième distingue le refus immédiat d'une écriture dont la colonne a
+changé depuis sa lecture (#312, sans retentative) des autres refus.
 Toute erreur de l'hôte — `SessionError`, `CommandError`, `CoreError` — est
 **traduite** en l'une d'elles, jamais transportée telle quelle à travers le
 canal.

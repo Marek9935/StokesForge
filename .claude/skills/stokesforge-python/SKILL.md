@@ -171,7 +171,10 @@ avant création ne modifie rien ; une erreur de commande avorte la macro.
 elle exige que la version de la colonne n'ait pas bougé **au moment
 d'appliquer**, ce qui ferme la fenêtre entre l'instantané qu'un script a lu et
 la commande qu'il envoie. Une nouvelle écriture exposée aux scripts doit la
-porter aussi.
+porter aussi (#312) : version retenue à la lecture par `ScriptContext`
+(`pyst.column`/`values`), mot-clé facultatif `expected_version=`, refus
+immédiat `ConcurrentWriteError` sans retentative, versions oubliées par
+`undo()`. Limites : colonne non lue, colonne B lue pour calculer A.
 
 ## Tracé et exécution sans fenêtre
 

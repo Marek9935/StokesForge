@@ -97,6 +97,12 @@ fn remettre_a_zero() {
             expected_version: None,
         })
         .unwrap();
+    // #312 : le moteur est partagé entre les tests et retient la version lue.
+    // La remise à zéro est une édition « d'un autre client » : le script relit
+    // la colonne, comme il le doit avant d'écrire.
+    b.engine
+        .run("pyst.column(pyst.resolve('[Book1]Sheet1!A'))")
+        .expect("le moteur doit accepter le travail");
 }
 
 // ============================================================== conversions

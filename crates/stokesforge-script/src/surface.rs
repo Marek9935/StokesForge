@@ -17,9 +17,9 @@
 //! [`BrokenReferenceError`], [`InvalidValueError`], [`ConcurrentWriteError`].
 //! Les trois premières sont reprises telles quelles de la spécification de
 //! l'API v1, pour ne pas avoir à les renommer ensuite ; la quatrième
-//! l'anticipe (A2, `guide-de-correction-robustesse.md` §F6) : `set_column`
-//! peut désormais retenter une écriture refusée pour cause de concurrence, et
-//! doit distinguer cet épuisement de tentatives des autres refus. Toute
+//! l'anticipe (A2, `guide-de-correction-robustesse.md` §F6, puis #312) :
+//! `set_column` et `set_values` refusent aussitôt une écriture dont la colonne
+//! a changé depuis sa lecture, et doivent distinguer ce conflit des autres refus. Toute
 //! erreur de l'hôte (`SessionError`, `CommandError`, `CoreError`) est
 //! **traduite** en l'une d'elles (cf. [`crate::bridge`]), jamais transportée
 //! telle quelle à travers le canal de l'acteur.
@@ -68,9 +68,9 @@ create_exception!(
     pyst,
     ConcurrentWriteError,
     PyException,
-    "pyst.set_column was refused five times in a row because another client kept \
-     modifying the same column. This is neither a script bug nor a refused value: read the \
-     current state again, or retry later."
+    "pyst.set_column or pyst.set_values was refused because another client modified the \
+     column after the script read it. This is neither a script bug nor a refused value: \
+     read the column again, then write."
 );
 
 /// Traduit une erreur de l'hôte, déjà classée, en exception Python.
@@ -253,9 +253,10 @@ fn values<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyTuple>
     context.check_interrupt()?;
     let id = handle.id;
     let epoch = handle.epoch;
-    let values = py
+    let (values, version) = py
         .detach(|| bridge::column_values(context.session(), id, epoch))
         .map_err(to_py_error)?;
+    context.remember_version(id, epoch, version);
     let cells: Vec<Bound<'py, PyAny>> = match values {
         ColumnValues::Float(values) => values
             .iter()
@@ -295,9 +296,10 @@ fn column<'py>(py: Python<'py>, poignee: &Handle) -> PyResult<Bound<'py, PyArray
     let session = context.session();
     let id = poignee.id;
     let epoch = poignee.epoch;
-    let buffer = py
+    let (buffer, version) = py
         .detach(|| bridge::float_buffer(session, id, epoch))
         .map_err(to_py_error)?;
+    context.remember_version(id, epoch, version);
     borrowed_readonly_array(py, &buffer)
 }
 
@@ -313,9 +315,21 @@ fn column<'py>(py: Python<'py>, poignee: &Handle) -> PyResult<Bound<'py, PyArray
 /// La longueur doit rester exactement celle de la colonne. Une autre
 /// longueur lève `InvalidValueError` avant toute commande. Pour remplacer la
 /// longueur et écrire du texte, utiliser `set_values`.
+///
+/// Écriture protégée : la colonne doit être inchangée depuis la dernière
+/// lecture du script (`column`/`values`), sinon `ConcurrentWriteError`
+/// aussitôt, sans retentative ni écrasement. `expected_version` (facultatif,
+/// la `version` rendue par `info`) remplace cette version de lecture. Une
+/// colonne jamais lue par le script n'est pas protégée. `undo()` oublie les
+/// versions lues.
 #[pyfunction]
-#[pyo3(text_signature = "(poignee, valeurs)")]
-fn set_column(py: Python<'_>, poignee: &Handle, valeurs: &Bound<'_, PyAny>) -> PyResult<()> {
+#[pyo3(signature = (poignee, valeurs, *, expected_version=None))]
+fn set_column(
+    py: Python<'_>,
+    poignee: &Handle,
+    valeurs: &Bound<'_, PyAny>,
+    expected_version: Option<u64>,
+) -> PyResult<()> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
     let id = poignee.id;
@@ -329,7 +343,7 @@ fn set_column(py: Python<'_>, poignee: &Handle, valeurs: &Bound<'_, PyAny>) -> P
     }
     let values = copy_array_to_vec(valeurs)
         .map_err(|error| InvalidValueError::new_err(error.to_string()))?;
-    py.detach(move || bridge::set_column(&context, id, epoch, values))
+    py.detach(move || bridge::set_column(&context, id, epoch, values, expected_version))
         .map_err(to_py_error)
 }
 
@@ -558,15 +572,24 @@ fn check_value_count(count: usize) -> PyResult<()> {
 /// Copie les entrées ; le type et les métadonnées restent inchangés. `True`
 /// et `False` sont refusés (`InvalidValueError`, colonne inchangée). L'écriture
 /// et la troncature de la queue forment une seule opération atomique. La
-/// provenance de la version de lecture reste une décision ouverte (#312).
+/// colonne doit être inchangée depuis la dernière lecture du script
+/// (`column`/`values`), ou depuis `expected_version` si fourni (facultatif) :
+/// sinon `ConcurrentWriteError` aussitôt, sans écrasement. Une colonne jamais
+/// lue n'est pas protégée.
 #[pyfunction]
-fn set_values(py: Python<'_>, handle: &Handle, values: &Bound<'_, PyAny>) -> PyResult<()> {
+#[pyo3(signature = (handle, values, *, expected_version=None))]
+fn set_values(
+    py: Python<'_>,
+    handle: &Handle,
+    values: &Bound<'_, PyAny>,
+    expected_version: Option<u64>,
+) -> PyResult<()> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
     let cells = copy_cells(values)?;
     context.check_interrupt()?;
     let (id, epoch) = (handle.id, handle.epoch);
-    py.detach(|| bridge::set_values(&context, id, epoch, cells))
+    py.detach(|| bridge::set_values(&context, id, epoch, cells, expected_version))
         .map_err(to_py_error)
 }
 
