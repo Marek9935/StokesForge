@@ -291,39 +291,49 @@ pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CalculationRecord>
     map_to_records(&traces)
 }
 
+/// Rend les traces gardées et celles écartées : une trace illisible (ou qui
+/// échoue à la validation), ou dont l'opération n'est pas une correction,
+/// est comptée (#309) au lieu de disparaître sans bruit.
 pub(crate) fn records_to_corrections(
     records: Vec<CalculationRecord>,
     max_id: u64,
-) -> BTreeMap<NodeId, Arc<CorrectionRecord>> {
-    // Une trace de correction illisible reste écartée sans rapport : c'est
-    // une trace d'historique, pas un calcul que l'utilisateur voit.
-    records_to_calculations(records, max_id)
-        .0
-        .into_iter()
-        .filter(|(_, c)| {
-            matches!(
-                c.operation,
-                Operation::Baseline { .. } | Operation::Correct { .. }
-            )
-        })
-        .map(|(id, calc)| {
-            (
-                id,
-                Arc::new(CorrectionRecord {
-                    operation: calc.operation.clone(),
-                    series: calc.series.clone(),
-                    aux: calc.aux.clone(),
-                    results: calc.results.clone(),
-                    originals: calc
-                        .outputs
-                        .iter()
-                        .filter(|o| o.key == ORIGINAL_KEY)
-                        .filter_map(|o| Some((calc.series.get(o.series)?.y, o.column?)))
-                        .collect(),
-                }),
-            )
-        })
-        .collect()
+) -> (
+    BTreeMap<NodeId, Arc<CorrectionRecord>>,
+    Vec<DiscardedCalculation>,
+) {
+    let named: BTreeMap<u64, DiscardedCalculation> = records
+        .iter()
+        .map(|r| (r.id, discarded_calculation(r)))
+        .collect();
+    let (kept, mut discarded) = records_to_calculations(records, max_id);
+    let mut out = BTreeMap::new();
+    for (id, c) in kept {
+        if !matches!(
+            c.operation,
+            Operation::Baseline { .. } | Operation::Correct { .. }
+        ) {
+            if let Some(d) = named.get(&id.raw()) {
+                discarded.push(d.clone());
+            }
+            continue;
+        }
+        out.insert(
+            id,
+            Arc::new(CorrectionRecord {
+                operation: c.operation.clone(),
+                series: c.series.clone(),
+                aux: c.aux.clone(),
+                results: c.results.clone(),
+                originals: c
+                    .outputs
+                    .iter()
+                    .filter(|o| o.key == ORIGINAL_KEY)
+                    .filter_map(|o| Some((c.series.get(o.series)?.y, o.column?)))
+                    .collect(),
+            }),
+        );
+    }
+    (out, discarded)
 }
 
 // ── Enregistrement → modèle ─────────────────────────────────────────────
@@ -419,6 +429,11 @@ pub(crate) fn records_to_calculations(
                 None => None,
             },
         };
+        // Même règle de forme qu'à l'écriture (core, #309).
+        if calc.validate_shape().is_err() {
+            discarded.push(discarded_calculation(&r));
+            continue;
+        }
         out.insert(id, Arc::new(calc));
     }
     (out, discarded)
@@ -581,6 +596,72 @@ mod tests {
                     kind: Some("teleportation".into())
                 },
             ]
+        );
+    }
+
+    /// #309 : la forme d'un calcul est revérifiée à la lecture (même règle que
+    /// l'écriture, core) ; l'écarté est nommé, jamais une panique.
+    #[test]
+    fn une_forme_invalide_ecarte_et_nomme_le_calcul() {
+        let mut bad_output = record(good_operation(), 7);
+        bad_output.id = 60;
+        bad_output.outputs = vec![OutputRefRecord {
+            series: 5,
+            key: "corrected".into(),
+            index: None,
+            column: None,
+        }];
+        let mut no_series = record(good_operation(), 7);
+        no_series.id = 61;
+        no_series.series.clear();
+        let mut bad_results = record(good_operation(), 7);
+        bad_results.id = 62;
+        bad_results.results = vec![SeriesResultRecord::default(); 2];
+        let mut fine = record(good_operation(), 7);
+        fine.id = 63;
+        fine.results = vec![SeriesResultRecord::default()];
+        let (kept, discarded) =
+            records_to_calculations(vec![bad_output, no_series, bad_results, fine], 1000);
+        assert_eq!(kept.keys().map(|k| k.raw()).collect::<Vec<_>>(), vec![63]);
+        assert_eq!(
+            discarded.iter().map(|d| d.id).collect::<Vec<_>>(),
+            vec![60, 61, 62]
+        );
+    }
+
+    /// #309 : une trace de correction écartée est comptée, qu'elle soit
+    /// illisible, hors borne, de forme invalide ou d'une autre opération ; les
+    /// autres traces restent chargées.
+    #[test]
+    fn une_trace_ecartee_est_comptee() {
+        let junk = Value::Map(vec![(Value::from("kind"), Value::from("teleportation"))]);
+        let fit = tree_to_value(
+            &Operation::Integrate {
+                spec: stokesforge_analysis::integrate::IntegrateSpec {
+                    ranges: vec![],
+                    under: stokesforge_analysis::integrate::Under::Zero,
+                    cumulative: false,
+                    normalize: false,
+                },
+            }
+            .to_tree(),
+        );
+        let mut unreadable = record(junk, 7);
+        unreadable.id = 70;
+        let mut out_of_bound = record(good_operation(), 5000);
+        out_of_bound.id = 71;
+        let mut not_a_correction = record(fit, 7);
+        not_a_correction.id = 72;
+        let mut healthy = record(good_operation(), 7);
+        healthy.id = 73;
+        let (kept, discarded) = records_to_corrections(
+            vec![unreadable, out_of_bound, not_a_correction, healthy],
+            1000,
+        );
+        assert_eq!(kept.keys().map(|k| k.raw()).collect::<Vec<_>>(), vec![73]);
+        assert_eq!(
+            discarded.iter().map(|d| d.id).collect::<Vec<_>>(),
+            vec![70, 71, 72]
         );
     }
 

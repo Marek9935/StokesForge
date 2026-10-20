@@ -133,12 +133,16 @@ pub struct DiscardedCalculation {
 pub struct LoadReport {
     /// Calculs d'analyse écartés (#278).
     pub discarded_calculations: Vec<DiscardedCalculation>,
+    /// Traces de correction écartées (#309) : illisibles, hors borne, de forme
+    /// invalide ou d'une autre opération qu'une correction. Comptées ici, mais
+    /// sans texte d'avertissement dédié pour l'instant.
+    pub discarded_corrections: Vec<DiscardedCalculation>,
 }
 
 impl LoadReport {
     /// Rien n'a été écarté.
     pub fn is_clean(&self) -> bool {
-        self.discarded_calculations.is_empty()
+        self.discarded_calculations.is_empty() && self.discarded_corrections.is_empty()
     }
 }
 
@@ -501,21 +505,21 @@ fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Pro
 
     let (kept, discarded_calculations) =
         calculations::records_to_calculations(body.calculations, MAX_NODE_ID);
+    let (traces, discarded_corrections) =
+        calculations::records_to_corrections(body.correction_traces, MAX_NODE_ID);
     let tree = Tree::from_nodes(NodeId::from_raw(body.root), nodes)
         .map_err(|source| PersistenceError::InvalidModel {
             path: path.to_path_buf(),
             source,
         })?
         .with_saved_colors(convert::record_to_saved_colors(body.saved_colors))
-        .with_correction_traces(calculations::records_to_corrections(
-            body.correction_traces,
-            MAX_NODE_ID,
-        ))
+        .with_correction_traces(traces)
         .with_calculations(kept);
     Ok((
         Project::from_tree(Arc::new(tree), body.next_id_hint),
         LoadReport {
             discarded_calculations,
+            discarded_corrections,
         },
     ))
 }

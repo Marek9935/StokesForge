@@ -232,24 +232,51 @@ pub struct CorrectionRecord {
 /// Plafond de séries d'un même calcul (un lot de spectres).
 pub const MAX_CALCULATION_SERIES: usize = 10_000;
 
+/// Forme d'un calcul : seule source des règles structurelles, appelée à
+/// l'écriture (`CalculationDraft`) comme à la lecture d'un `.stf` (#309).
+/// `output_series` : le rang de série de chaque sortie ; `results` : le
+/// nombre de résultats gardés.
+pub fn validate_calculation_shape(
+    series: usize,
+    output_series: impl IntoIterator<Item = usize>,
+    results: usize,
+) -> CoreResult<()> {
+    if series == 0 || series > MAX_CALCULATION_SERIES {
+        return Err(CoreError::Structure(format!(
+            "a calculation needs between 1 and {MAX_CALCULATION_SERIES} series, got {series}"
+        )));
+    }
+    if output_series.into_iter().any(|s| s >= series) {
+        return Err(CoreError::Structure(
+            "a calculation output refers to a series that does not exist".to_string(),
+        ));
+    }
+    if results != 0 && results != series {
+        return Err(CoreError::Structure(
+            "a calculation keeps one result per series".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+impl Calculation {
+    /// Vérifie la forme (voir [`validate_calculation_shape`]).
+    pub fn validate_shape(&self) -> CoreResult<()> {
+        validate_calculation_shape(
+            self.series.len(),
+            self.outputs.iter().map(|o| o.series),
+            self.results.len(),
+        )
+    }
+}
+
 impl CalculationDraft {
     fn validate(&self) -> CoreResult<()> {
-        if self.series.is_empty() || self.series.len() > MAX_CALCULATION_SERIES {
-            return Err(CoreError::Structure(format!(
-                "a calculation needs between 1 and {MAX_CALCULATION_SERIES} series, got {}",
-                self.series.len()
-            )));
-        }
-        if self.outputs.iter().any(|o| o.series >= self.series.len()) {
-            return Err(CoreError::Structure(
-                "a calculation output refers to a series that does not exist".to_string(),
-            ));
-        }
-        if !self.results.is_empty() && self.results.len() != self.series.len() {
-            return Err(CoreError::Structure(
-                "a calculation keeps one result per series".to_string(),
-            ));
-        }
+        validate_calculation_shape(
+            self.series.len(),
+            self.outputs.iter().map(|o| o.series),
+            self.results.len(),
+        )?;
         // Une opération invalide (non-fini, plafond) ne s'enregistre pas : elle
         // serait écrite puis perdue à la relecture du `.stf` (#278).
         self.operation

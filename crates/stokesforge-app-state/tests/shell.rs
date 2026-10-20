@@ -1104,7 +1104,7 @@ fn un_fichier_existant_ne_rend_pas_le_projet_enregistre_sans_chargement() {
 
     // Témoin : le chargement explicite pose le repère.
     state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
-    state.mark_loaded();
+    state.mark_loaded(&stokesforge_session::LoadReport::default());
     let title = state.window_title();
     assert!(!title.contains('•'), "{title}");
     state.dispatch(Action::Quit {
@@ -11334,4 +11334,33 @@ fn le_titre_porte_le_nom_du_projet_et_un_point_tant_qu_il_n_est_pas_enregistre()
     assert!(dirty.contains("projet.stf •"), "{dirty}");
     state.dispatch(Action::Save);
     assert_eq!(state.window_title(), saved);
+}
+
+/// #309 : le rapport de la lecture du démarrage est dit comme celui du menu
+/// Fichier ; un rapport vide ne dit rien de plus.
+#[test]
+fn mark_loaded_avertit_des_calculs_ecartes_du_rapport() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_session, mut state) = start(demo_project(), &dir.path().join("p.stf"));
+    state.mark_loaded(&stokesforge_session::LoadReport::default());
+    assert!(
+        state
+            .status()
+            .is_none_or(|s| s.level != stokesforge_app_state::state::StatusLevel::Warning),
+        "rapport vide : pas d'avertissement"
+    );
+    let report = stokesforge_session::LoadReport {
+        discarded_calculations: vec![stokesforge_session::DiscardedCalculation {
+            id: 42,
+            kind: Some("fit".into()),
+        }],
+        ..Default::default()
+    };
+    state.mark_loaded(&report);
+    let status = state.status().expect("un avertissement");
+    assert_eq!(
+        status.level,
+        stokesforge_app_state::state::StatusLevel::Warning
+    );
+    assert!(status.text.contains("#42"), "{}", status.text);
 }

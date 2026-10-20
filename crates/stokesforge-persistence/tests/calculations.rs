@@ -614,3 +614,69 @@ fn un_nan_edite_a_la_main_dans_le_fichier_ecarte_et_signale_le_calcul() {
         }]
     );
 }
+
+/// #309 : une trace de correction illisible n'est pas perdue sans bruit : le
+/// rapport la compte (`discarded_corrections`), le reste se charge.
+#[test]
+fn une_trace_de_correction_illisible_est_comptee_par_le_rapport() {
+    let mut project = Project::new("P").unwrap();
+    let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+    let sheet = project.tree().children(book).unwrap()[0];
+    let y = project
+        .add_column(sheet, None, Some("Y"), Column::from_f64(&[10.0, 20.0]))
+        .unwrap();
+    let version = project
+        .tree()
+        .get(y)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .version();
+    let trace = project
+        .replace_analysis_data(
+            CalculationDraft {
+                operation: Operation::Correct {
+                    op: CorrectOp::Subtract,
+                },
+                series: vec![SeriesRef {
+                    x: None,
+                    y,
+                    sigma: None,
+                }],
+                aux: None,
+                outputs: vec![OutputDraft {
+                    series: 0,
+                    key: "corrected".into(),
+                    index: None,
+                    meta: ColumnMeta::default(),
+                    data: vec![0.0, 10.0],
+                }],
+                results: vec![SeriesResult::default()],
+                keep_results: false,
+                auto_recalc: false,
+                low_r2_dialog: true,
+            },
+            &[(y, version)],
+        )
+        .unwrap()
+        .raw();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("p.stf");
+    save(&project, &path).unwrap();
+    let clean = stokesforge_persistence::load_with_report(&path).unwrap();
+    assert!(clean.2.is_clean());
+    assert_eq!(clean.0.tree().correction_traces().len(), 1);
+
+    patch(&path, b"subtract", b"subtraXX");
+    let (loaded, _, report) = stokesforge_persistence::load_with_report(&path).unwrap();
+    assert!(loaded.tree().correction_traces().is_empty());
+    assert!(report.discarded_calculations.is_empty());
+    assert_eq!(
+        report.discarded_corrections,
+        vec![stokesforge_persistence::DiscardedCalculation {
+            id: trace,
+            kind: Some("correct".into())
+        }]
+    );
+    assert!(!report.is_clean());
+}

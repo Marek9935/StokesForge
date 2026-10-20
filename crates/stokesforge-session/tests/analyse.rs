@@ -734,3 +734,82 @@ fn le_chargement_relaie_les_calculs_ecartes_de_la_persistance() {
     assert!(handle.load_with_report(&absent).is_err());
     assert_eq!(handle.snapshot().unwrap().revision, revision3);
 }
+
+/// #309 : le rapport relaie aussi les traces de correction écartées.
+#[test]
+fn le_chargement_relaie_les_traces_de_correction_ecartees() {
+    use stokesforge_analysis::correct::CorrectOp;
+    use stokesforge_core::{CalculationDraft, ColumnMeta, OutputDraft, SeriesRef, SeriesResult};
+    let mut project = stokesforge_core::Project::new("P").unwrap();
+    let book = project.add_workbook(project.root(), Some("Book")).unwrap();
+    let sheet = project.tree().children(book).unwrap()[0];
+    let y = project
+        .add_column(
+            sheet,
+            None,
+            Some("Y"),
+            stokesforge_core::Column::from_f64(&[10.0, 20.0]),
+        )
+        .unwrap();
+    let version = project
+        .tree()
+        .get(y)
+        .unwrap()
+        .as_column()
+        .unwrap()
+        .version();
+    let trace = project
+        .replace_analysis_data(
+            CalculationDraft {
+                operation: Operation::Correct {
+                    op: CorrectOp::Subtract,
+                },
+                series: vec![SeriesRef {
+                    x: None,
+                    y,
+                    sigma: None,
+                }],
+                aux: None,
+                outputs: vec![OutputDraft {
+                    series: 0,
+                    key: "corrected".into(),
+                    index: None,
+                    meta: ColumnMeta::default(),
+                    data: vec![0.0, 10.0],
+                }],
+                results: vec![SeriesResult::default()],
+                keep_results: false,
+                auto_recalc: false,
+                low_r2_dialog: true,
+            },
+            &[(y, version)],
+        )
+        .unwrap();
+    let session = Session::spawn(project, None).unwrap();
+    let handle = session.handle();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("p.stf");
+    handle.save(&path).unwrap();
+    assert!(handle.load_with_report(&path).unwrap().1.is_clean());
+    let mut octets = std::fs::read(&path).unwrap();
+    let at = octets
+        .windows(8)
+        .position(|w| w == b"subtract")
+        .expect("l'opération est dans le fichier");
+    octets[at..at + 8].copy_from_slice(b"subtraXX");
+    std::fs::write(&path, &octets).unwrap();
+    let (_, rapport) = handle.load_with_report(&path).unwrap();
+    assert_eq!(
+        rapport.discarded_corrections,
+        vec![DiscardedCalculation {
+            id: trace.raw(),
+            kind: Some("correct".into())
+        }]
+    );
+    assert!(handle
+        .snapshot()
+        .unwrap()
+        .tree
+        .correction_traces()
+        .is_empty());
+}

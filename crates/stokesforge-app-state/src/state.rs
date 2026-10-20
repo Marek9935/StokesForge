@@ -2885,9 +2885,14 @@ impl AppState {
     /// Déclare le projet courant **chargé depuis** [`AppState::path`] : il
     /// n'a alors rien à enregistrer. Appelé par le binaire après un vrai
     /// chargement, jamais pour un projet de démonstration ni parce qu'un
-    /// fichier du même nom existe (#315).
-    pub fn mark_loaded(&mut self) {
+    /// fichier du même nom existe (#315). Le `report` de cette lecture est dit
+    /// comme celui du menu Fichier (#309) : sinon le premier Enregistrer
+    /// supprimerait sans bruit ce que la lecture a écarté.
+    pub fn mark_loaded(&mut self, report: &stokesforge_session::LoadReport) {
         self.saved_revision = Some((self.snapshot.revision, self.snapshot.geometry_revision));
+        if let Some(text) = discarded_calculations_text(report) {
+            self.warn(text);
+        }
     }
 
     /// Enregistre la géométrie de la fenêtre de contenu `node` auprès de

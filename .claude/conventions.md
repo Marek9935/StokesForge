@@ -121,6 +121,7 @@ Règles sorties du skill `stokesforge-feature` (F1, #301) : le skill ne porte pl
   saisie ; une colonne corrigée plusieurs fois garde **une seule** donnée
   brute (celle d'avant la première correction, #308) et « Restore original
   data » la rend quelle que soit la trace, en retirant la colonne de toutes ; ne jamais créer un calcul dont la sortie est sa propre source.
+  Une trace écartée à la lecture est comptée dans `LoadReport::discarded_corrections` (#309).
   Le choix de destination utilise `ChoiceOption::disabled` pour les sources
   en lecture seule ; les sources tracées plusieurs fois exigent `modal_confirm`.
 

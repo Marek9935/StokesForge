@@ -347,7 +347,11 @@ textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
 - Lecture tolérante (invariant 10) : un calcul dont l'opération est illisible
   (forme, ou `Operation::validate` en échec : un `NaN` écrit à la main, #291),
   ou dont un identifiant dépasse `MAX_NODE_ID`, est **écarté** sans échec — ses
-  colonnes restent des colonnes ordinaires. Un avertissement inconnu est ignoré.
+  colonnes restent des colonnes ordinaires. La forme est revérifiée à la lecture
+  par la règle unique de core (`validate_calculation_shape`, aussi appelée par
+  `CalculationDraft::validate`) : 1 à `MAX_CALCULATION_SERIES` séries, sorties
+  sur une série existante, résultats vides ou un par série (#309). Un
+  avertissement inconnu est ignoré.
   L'écart n'est plus silencieux (#278) : `load_with_report` rend un `LoadReport`
   (`discarded_calculations` : id du fichier, famille d'opération si elle se lit),
   que la session transmet (`SessionHandle::load_with_report`) et qu'`AppState`
@@ -368,7 +372,10 @@ textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
 et résultats. Le transport réutilise l'encodage des opérations/résultats des
 calculs, mais ne recrée aucun calcul actif ni colonne en lecture seule.
 Un ancien fichier se lit sans trace ; une opération inconnue ou un identifiant
-hors borne fait écarter uniquement sa trace. Les valeurs corrigées restent
+hors borne, une forme invalide ou une opération qui n'est pas une correction
+fait écarter uniquement sa trace, **comptée** dans `LoadReport::discarded_corrections`
+(#309) ; ce compte n'a pas encore de texte d'avertissement dédié (décision
+ouverte). `main` transmet le rapport du démarrage à `AppState::mark_loaded`. Les valeurs corrigées restent
 dans les colonnes ordinaires. Le compteur reprend au-delà des identifiants des
 traces, même si `next_id_hint` est trop bas. Les copies de colonnes ne transportent
 pas ces traces, comme elles ne transportent pas les calculs. Les colonnes

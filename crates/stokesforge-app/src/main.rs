@@ -14,7 +14,7 @@ use stokesforge_app::app::StokesForgeApp;
 use stokesforge_app_state::state::AppState;
 use stokesforge_core::{Column, NodeId, Project};
 use stokesforge_plot::{AxisSpec, LineSpec, PanelSpec, PlotSpec, SeriesSpec};
-use stokesforge_session::Session;
+use stokesforge_session::{LoadReport, Session};
 
 /// Script d'exemple qui pré-remplit la zone de script : il fonctionne tel
 /// quel sur le projet de démonstration ([`demo_project`]) et illustre le
@@ -27,11 +27,11 @@ print(\"longueur :\", len(v), \"premier :\", v[0])\n";
 
 fn main() -> anyhow::Result<()> {
     let requested = std::env::args().nth(1).map(PathBuf::from);
-    let (session, path, loaded) = session_for_project(requested)?;
+    let (session, path, report) = session_for_project(requested)?;
     let mut state = AppState::new(session.handle(), path.display().to_string())
         .context("premier instantané du projet")?;
-    if loaded {
-        state.mark_loaded();
+    if let Some(report) = &report {
+        state.mark_loaded(report);
     }
     state.set_script_source(EXAMPLE_SCRIPT.to_string());
     configure_script_engine(&mut state);
@@ -103,10 +103,13 @@ fn configure_window_backend(_builder: &mut eframe::EventLoopBuilder<eframe::User
 /// Le chargement passe par l'acteur pour restaurer aussi les géométries,
 /// conservées à côté du modèle. Charger seulement `Project` les perdrait.
 ///
-/// Rend aussi si le projet a été **chargé** depuis le chemin : seul ce cas
-/// pose le repère « enregistré ». Sans argument, la démonstration n'a pas de
+/// Rend aussi le rapport de lecture si le projet a été **chargé** depuis le
+/// chemin (`None` sinon) : seul ce cas pose le repère « enregistré », et le
+/// rapport est transmis à `mark_loaded` pour que l'écarté soit dit (#309). Sans argument, la démonstration n'a pas de
 /// chemin, donc un `demo.stf` du dossier courant n'est ni lu ni écrasé (#315).
-fn session_for_project(requested: Option<PathBuf>) -> anyhow::Result<(Session, PathBuf, bool)> {
+fn session_for_project(
+    requested: Option<PathBuf>,
+) -> anyhow::Result<(Session, PathBuf, Option<LoadReport>)> {
     let load_existing = requested.as_ref().is_some_and(|path| path.exists());
     let path = requested.unwrap_or_default();
     let project = if load_existing {
@@ -115,13 +118,16 @@ fn session_for_project(requested: Option<PathBuf>) -> anyhow::Result<(Session, P
         demo_project()?
     };
     let session = Session::spawn(project, None).context("démarrage du thread de session")?;
-    if load_existing {
-        session
+    let report = if load_existing {
+        let (_, report) = session
             .handle()
-            .load(&path)
+            .load_with_report(&path)
             .with_context(|| format!("chargement de {}", path.display()))?;
-    }
-    Ok((session, path, load_existing))
+        Some(report)
+    } else {
+        None
+    };
+    Ok((session, path, report))
 }
 
 /// Localise l'interpréteur embarqué et le pose sur `state`, **sans le
@@ -408,8 +414,11 @@ mod startup_tests {
         original.handle().save(&path).unwrap();
         original.shutdown().unwrap();
 
-        let (loaded, actual_path, was_loaded) = session_for_project(Some(path.clone())).unwrap();
-        assert!(was_loaded, "un fichier existant est chargé");
+        let (loaded, actual_path, report) = session_for_project(Some(path.clone())).unwrap();
+        assert!(
+            report.is_some_and(|r| r.is_clean()),
+            "un fichier existant est chargé"
+        );
         let snapshot = loaded.handle().snapshot().unwrap();
         assert_eq!(actual_path, path);
         assert_eq!(snapshot.window_geometries.get(&book), Some(&geometry));
@@ -422,9 +431,9 @@ mod startup_tests {
     /// le projet ni écrasé sans contrôle.
     #[test]
     fn sans_argument_la_demo_n_a_ni_chemin_ni_repere_charge() {
-        let (session, path, loaded) = session_for_project(None).unwrap();
+        let (session, path, report) = session_for_project(None).unwrap();
         assert!(path.as_os_str().is_empty());
-        assert!(!loaded);
+        assert!(report.is_none());
         session.shutdown().unwrap();
     }
 
@@ -433,9 +442,68 @@ mod startup_tests {
     fn un_chemin_absent_n_est_pas_un_chargement() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("absent.stf");
-        let (session, actual, loaded) = session_for_project(Some(path.clone())).unwrap();
+        let (session, actual, report) = session_for_project(Some(path.clone())).unwrap();
         assert_eq!(actual, path);
-        assert!(!loaded);
+        assert!(report.is_none());
+        session.shutdown().unwrap();
+    }
+
+    /// #309 : le rapport de la lecture de démarrage est rendu à l'appelant ;
+    /// un calcul écarté n'y est pas perdu.
+    #[test]
+    fn le_demarrage_rend_le_rapport_des_calculs_ecartes() {
+        use stokesforge_analysis::correct::CorrectOp;
+        use stokesforge_analysis::ops::Operation;
+        use stokesforge_core::{
+            CalculationDraft, ColumnMeta, OutputDraft, SeriesRef, SeriesResult,
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ecarte.stf");
+        let mut project = Project::new("P").unwrap();
+        let book = project.add_workbook(project.root(), None).unwrap();
+        let sheet = project.tree().children(book).unwrap()[0];
+        let y = project
+            .add_column(sheet, None, Some("Y"), Column::from_f64(&[1.0, 2.0]))
+            .unwrap();
+        project
+            .add_calculation(CalculationDraft {
+                operation: Operation::Correct {
+                    op: CorrectOp::Subtract,
+                },
+                series: vec![SeriesRef {
+                    x: None,
+                    y,
+                    sigma: None,
+                }],
+                aux: None,
+                outputs: vec![OutputDraft {
+                    series: 0,
+                    key: "corrected".into(),
+                    index: None,
+                    meta: ColumnMeta::default(),
+                    data: vec![0.0, 1.0],
+                }],
+                results: vec![SeriesResult::default()],
+                keep_results: true,
+                auto_recalc: false,
+                low_r2_dialog: false,
+            })
+            .unwrap();
+        let writer = Session::spawn(project, None).unwrap();
+        writer.handle().save(&path).unwrap();
+        writer.shutdown().unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        let at = bytes
+            .windows(8)
+            .position(|w| w == b"subtract")
+            .expect("l'opération est dans le fichier");
+        bytes[at..at + 8].copy_from_slice(b"subtraXX");
+        std::fs::write(&path, bytes).unwrap();
+
+        let (session, _, report) = session_for_project(Some(path)).unwrap();
+        let report = report.expect("fichier chargé");
+        assert!(!report.is_clean());
+        assert_eq!(report.discarded_calculations.len(), 1);
         session.shutdown().unwrap();
     }
 }
