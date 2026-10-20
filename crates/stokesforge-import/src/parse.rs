@@ -55,7 +55,11 @@ pub struct ParsedColumn {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum EffectiveSeparator {
     Char(char),
-    Whitespace,
+    /// `keep_nbsp` (milliers « espace ») : U+00A0 et U+202F ne coupent pas,
+    /// `NumberFormat::parse` les retire du nombre.
+    Whitespace {
+        keep_nbsp: bool,
+    },
     /// Colonnes à largeur fixe : la largeur de chacune sauf la dernière.
     Fixed(Vec<usize>),
 }
@@ -68,7 +72,13 @@ impl EffectiveSeparator {
     pub(crate) fn tokenize<'a>(&self, line: &'a str) -> Vec<&'a str> {
         match self {
             EffectiveSeparator::Char(c) => line.split(*c).collect(),
-            EffectiveSeparator::Whitespace => line.split_whitespace().collect(),
+            EffectiveSeparator::Whitespace { keep_nbsp: false } => {
+                line.split_whitespace().collect()
+            }
+            EffectiveSeparator::Whitespace { keep_nbsp: true } => line
+                .split(is_column_space)
+                .filter(|token| !token.is_empty())
+                .collect(),
             EffectiveSeparator::Fixed(widths) => {
                 let mut tokens = Vec::with_capacity(widths.len() + 1);
                 let mut rest = line;
@@ -92,10 +102,19 @@ impl EffectiveSeparator {
     pub(crate) fn split_key_value<'a>(&self, line: &'a str) -> Option<(&'a str, &'a str)> {
         match self {
             EffectiveSeparator::Char(c) => line.split_once(*c),
-            EffectiveSeparator::Whitespace => line.split_once(char::is_whitespace),
+            EffectiveSeparator::Whitespace { keep_nbsp: false } => {
+                line.split_once(char::is_whitespace)
+            }
+            EffectiveSeparator::Whitespace { keep_nbsp: true } => line.split_once(is_column_space),
             EffectiveSeparator::Fixed(_) => line.split_once(['=', ':', ';', '\t']),
         }
     }
+}
+
+/// Espace qui coupe une colonne quand les milliers sont « espace » : tout
+/// blanc sauf les espaces insécables (U+00A0, U+202F).
+fn is_column_space(c: char) -> bool {
+    c.is_whitespace() && !matches!(c, '\u{a0}' | '\u{202f}')
 }
 
 /// Le résultat d'un import réussi : les colonnes lues, plus toute anomalie
@@ -431,12 +450,16 @@ pub(crate) fn resolve_separator(
     separator: &Separator,
     first_line: &str,
     decimal: DecimalStyle,
+    thousands: Option<char>,
 ) -> EffectiveSeparator {
+    let whitespace = EffectiveSeparator::Whitespace {
+        keep_nbsp: thousands == Some(' '),
+    };
     match separator {
         Separator::Comma => EffectiveSeparator::Char(','),
         Separator::Semicolon => EffectiveSeparator::Char(';'),
         Separator::Tab => EffectiveSeparator::Char('\t'),
-        Separator::Whitespace => EffectiveSeparator::Whitespace,
+        Separator::Whitespace => whitespace,
         Separator::Custom(c) => EffectiveSeparator::Char(*c),
         Separator::FixedWidth(widths) => EffectiveSeparator::Fixed(widths.clone()),
         Separator::Auto => {
@@ -454,7 +477,7 @@ pub(crate) fn resolve_separator(
             ];
             match candidates.into_iter().max_by_key(|(_, count)| *count) {
                 Some((c, count)) if count > 0 => EffectiveSeparator::Char(c),
-                _ => EffectiveSeparator::Whitespace,
+                _ => whitespace,
             }
         }
     }

@@ -1,5 +1,7 @@
 //! Lecture des nombres : séparateur décimal (fixé ou détecté), séparateur de
-//! milliers, jetons de valeur manquante. Un [`NumberFormat`] est résolu **une
+//! milliers (avec milliers espace : U+00A0 et U+202F aussi), jetons de valeur
+//! manquante. Un résultat non fini (`inf`, `Infinity`, `1e400`) n'est pas un
+//! nombre ici : `NaN`, donc jeton conservé en texte. Un [`NumberFormat`] est résolu **une
 //! fois** par fichier, sur les mêmes lignes pour [`crate::parse::parse`] et
 //! [`crate::preview::preview`] : c'est ce qui les garde d'accord.
 
@@ -58,16 +60,42 @@ impl NumberFormat {
         !token.is_empty() && self.missing.contains(&token)
     }
 
+    /// Le séparateur de milliers de la recette.
+    pub fn thousands(&self) -> Option<char> {
+        self.thousands
+    }
+
     /// Analyse un jeton en `f64` ; `NaN` pour tout ce qui ne s'y prête pas —
-    /// jamais d'erreur (invariant 10).
+    /// jamais d'erreur (invariant 10). Un résultat non fini (`inf`,
+    /// `Infinity`, `-inf`, `1e400`) vaut aussi `NaN` : le jeton reste alors
+    /// visible en texte (colonne `Mixed`), au lieu d'entrer comme `±inf`
+    /// dans une colonne numérique.
     pub fn parse(&self, token: &str) -> f64 {
+        let value = self.parse_raw(token);
+        if value.is_finite() {
+            value
+        } else {
+            f64::NAN
+        }
+    }
+
+    /// Le jeton a-t-il la forme d'un nombre, infini compris ? Pour les
+    /// décisions de structure (fin automatique des données, sous-en-tête) :
+    /// une ligne `inf` est une ligne de données, pas la fin du fichier.
+    pub fn is_numeric(&self, token: &str) -> bool {
+        !self.parse_raw(token).is_nan()
+    }
+
+    fn parse_raw(&self, token: &str) -> f64 {
         let trimmed = token.trim();
         if trimmed.is_empty() || self.is_missing(trimmed) {
             return f64::NAN;
         }
         let mut normalized = String::with_capacity(trimmed.len());
         for c in trimmed.chars() {
-            if Some(c) == self.thousands || (self.thousands == Some(' ') && c == '\u{a0}') {
+            if Some(c) == self.thousands
+                || (self.thousands == Some(' ') && matches!(c, '\u{a0}' | '\u{202f}'))
+            {
                 continue;
             }
             normalized.push(match (self.decimal, c) {
@@ -154,8 +182,20 @@ mod tests {
         let f = fmt(DecimalStyle::Comma, Some(' '), &[], &[]);
         assert_eq!(f.parse("1 234,5"), 1234.5);
         assert_eq!(f.parse("1\u{a0}234,5"), 1234.5);
+        assert_eq!(f.parse("1\u{202f}234,5"), 1234.5);
         let g = fmt(DecimalStyle::Dot, Some(','), &[], &[]);
         assert_eq!(g.parse("1,234.5"), 1234.5);
+    }
+
+    #[test]
+    fn non_finite_results_are_nan() {
+        let f = fmt(DecimalStyle::Dot, None, &[], &[]);
+        for token in ["inf", "Infinity", "-inf", "1e400", "-1e400", "+INF"] {
+            assert!(f.parse(token).is_nan(), "{token:?}");
+            assert!(f.is_numeric(token), "{token:?}");
+        }
+        assert!(!f.is_numeric("abc"));
+        assert_eq!(f.parse("1e300"), 1e300);
     }
 
     #[test]

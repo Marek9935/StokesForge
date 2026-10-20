@@ -12,7 +12,7 @@ use crate::recipe::{HeaderSkip, ImportRecipe};
 
 /// Le découpage d'un texte selon une recette.
 pub(crate) struct Layout<'a> {
-    /// Toutes les lignes du texte, blanches comprises (`\r` final retiré).
+    /// Toutes les lignes du texte, blanches comprises (terminateurs retirés).
     pub raw: Vec<&'a str>,
     /// Première ligne non blanche, et fin (exclue) après retrait des lignes
     /// blanches de queue : la zone analysée.
@@ -30,6 +30,36 @@ pub(crate) struct Layout<'a> {
     pub data: Vec<usize>,
     pub separator: EffectiveSeparator,
     pub numbers: NumberFormat,
+}
+
+/// **Le** découpage en lignes : `\r\n`, `\n` et `\r` seul (anciens Mac)
+/// terminent une ligne. Un texte qui finit par un terminateur donne une
+/// dernière ligne vide (blanche, retirée ensuite). Employé par [`analyze`] et
+/// par `preview::detect_header_layout` : jamais d'autre découpeur.
+pub(crate) fn split_lines(text: &str) -> Vec<&str> {
+    let bytes = text.as_bytes();
+    let mut lines = Vec::new();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\n' => {
+                lines.push(&text[start..i]);
+                start = i + 1;
+            }
+            b'\r' => {
+                lines.push(&text[start..i]);
+                if bytes.get(i + 1) == Some(&b'\n') {
+                    i += 1;
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    lines.push(&text[start..]);
+    lines
 }
 
 /// `line` privée de ses `skip_chars` premiers caractères.
@@ -51,7 +81,7 @@ fn is_comment(line: &str, prefix: &str) -> bool {
 /// fichier vide, ou plus aucune ligne de donnée après l'en-tête, le pied de
 /// page, la ligne de noms ou les lignes ignorées.
 pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout<'a>, ImportError> {
-    let raw: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
+    let raw = split_lines(text);
     // Lignes blanches aux deux extrémités seulement : une ligne vide au milieu
     // reste à sa place (elle finira toute en NaN plutôt que de décaler
     // discrètement les suivantes).
@@ -154,6 +184,7 @@ pub(crate) fn analyze<'a>(text: &'a str, recipe: &ImportRecipe) -> Result<Layout
         &recipe.separator,
         skip_str(raw[remaining[0]], recipe.skip_chars),
         numbers.decimal,
+        numbers.thousands(),
     );
 
     let column_header = if recipe.has_column_header_row {
@@ -280,6 +311,19 @@ pub(crate) fn split_blocks<'a>(text: &'a str, split: &crate::recipe::BlockSplit)
         }
     }
     blocks
+}
+
+#[cfg(test)]
+mod line_tests {
+    use super::split_lines;
+
+    #[test]
+    fn cr_lf_and_lone_cr_end_a_line() {
+        assert_eq!(split_lines("a\rb\rc"), vec!["a", "b", "c"]);
+        assert_eq!(split_lines("a\r\nb"), vec!["a", "b"]);
+        assert_eq!(split_lines("a\nb\r\n\rc\n"), vec!["a", "b", "", "c", ""]);
+        assert_eq!(split_lines(""), vec![""]);
+    }
 }
 
 #[cfg(test)]

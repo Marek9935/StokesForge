@@ -81,7 +81,7 @@ rôles.
 **Bornage à deux niveaux**, voir la doc de tête de
 `crates/stokesforge-import/src/preview.rs` :
 
-- découper le fichier en lignes (`str::split('\n')`) reste `O(taille du
+- découper le fichier en lignes (`layout::split_lines` : `\r\n`, `\n` ou `\r` seul) reste `O(taille du
   fichier)` — incompressible, et déjà le cas de l'ancien `import_preview`
   (qui, lui, analysait **toutes** les lignes de données cellule par
   cellule, à chaque image) ;
@@ -232,3 +232,5 @@ La ligne se masque (menu Fenêtre) ; la sélection par clé est dans l'étape
 l'import), `unify_header`, `detect_encoding`. Le réglage d'en-tête n'expose
 plus la case « Détection automatique » : seul le bouton « Détecter depuis le
 fichier » agit (`HeaderLayout::auto_detect` reste dans la recette, sans effet).
+
+Nombres : un résultat non fini (`inf`, `Infinity`, `1e400`) se lit `NaN` et le jeton reste visible en texte (colonne `Mixed`), comme `nan` ; la fin automatique des données et la détection des sous-en-têtes le comptent pourtant comme un nombre (`NumberFormat::is_numeric`).

@@ -48,7 +48,7 @@ pub(crate) fn data_len<'a>(
                     .tokenize(line)
                     .first()
                     .is_some_and(|token| match first_column_kind {
-                        crate::recipe::ColumnKind::Auto => !numbers.parse(token).is_nan(),
+                        crate::recipe::ColumnKind::Auto => numbers.is_numeric(token),
                         crate::recipe::ColumnKind::DateTime => {
                             crate::datetime::parse_datetime(token).is_some()
                         }

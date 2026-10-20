@@ -3,7 +3,8 @@
 //! en cause (issue #23).
 
 use stokesforge_import::{
-    parse, preview, DecimalStyle, HeaderSkip, ImportRecipe, LineRole, Separator,
+    detect_header_layout, parse, preview, DataEnd, DecimalStyle, HeaderSkip, ImportRecipe,
+    LineRole, Separator,
 };
 
 /// Nombre de cellules de la première ligne de données de l'aperçu, et
@@ -366,4 +367,61 @@ fn les_recettes_enregistrees_gardent_leur_fin_de_donnees() {
     value.as_object_mut().unwrap().remove("data_end");
     let without: ImportRecipe = serde_json::from_value(value).expect("sans le champ");
     assert_eq!(without.data_end, stokesforge_import::DataEnd::None);
+}
+
+/// Fichier à fins de ligne `\r` seules (anciens Mac) : l'aperçu, l'import et
+/// la détection des lignes d'en-tête découpent pareil.
+#[test]
+fn fichier_cr_seul_avec_ligne_de_noms() {
+    let mut recipe = ImportRecipe::new("CR");
+    recipe.has_column_header_row = true;
+    recipe.separator = Separator::Semicolon;
+    let bytes = b"Temps;Signal\r1;2\r3;4\r5;6\r";
+    assert_same_split(bytes, &recipe);
+    let table = parse(bytes, &recipe).unwrap();
+    assert_eq!(table.columns.len(), 2);
+    assert_eq!(table.columns[0].values, vec![1.0, 3.0, 5.0]);
+    assert_eq!(table.columns[1].values, vec![2.0, 4.0, 6.0]);
+    let shown = preview(bytes, &recipe).unwrap();
+    assert_eq!(shown.total_data_lines, 3);
+    // Deux lignes de titre, puis des données : même compte qu'en `\n`.
+    let cr = b"Titre\rAutre;texte;x\r1;2;3\r4;5;6\r";
+    let lf = b"Titre\nAutre;texte;x\n1;2;3\n4;5;6\n";
+    let layout = |b: &[u8]| detect_header_layout(b, Separator::Semicolon, DecimalStyle::Dot);
+    assert_eq!(layout(cr), layout(lf));
+    assert_eq!(layout(cr).main_header_lines, 1);
+}
+
+/// `inf` n'entre pas comme infini : jeton gardé en texte, et la fin
+/// automatique des données ne coupe pas avant cette ligne.
+#[test]
+fn inf_reste_du_texte_et_ne_coupe_pas_la_fin_automatique() {
+    let mut recipe = ImportRecipe::new("Inf");
+    recipe.separator = Separator::Semicolon;
+    recipe.data_end = DataEnd::Auto;
+    let bytes = b"1;10\ninf;20\n3;30\n";
+    let table = parse(bytes, &recipe).unwrap();
+    assert_eq!(table.row_count(), 3);
+    assert_eq!(table.columns[0].values[0], 1.0);
+    assert!(table.columns[0].values[1].is_nan());
+    assert_eq!(table.columns[0].texts[1].as_deref(), Some("inf"));
+    assert_eq!(table.columns[0].values[2], 3.0);
+    let shown = preview(bytes, &recipe).unwrap();
+    assert_eq!(shown.total_data_lines, 3);
+}
+
+/// Séparateur « espaces » et milliers espace : l'espace insécable est un
+/// séparateur de milliers, pas une coupure de colonne.
+#[test]
+fn espaces_et_milliers_espace_gardent_l_insecable() {
+    let mut recipe = ImportRecipe::new("Milliers");
+    recipe.separator = Separator::Whitespace;
+    recipe.decimal = DecimalStyle::Comma;
+    recipe.thousands = Some(' ');
+    let table = parse("1\u{a0}234,5 7\n".as_bytes(), &recipe).unwrap();
+    assert_eq!(table.columns.len(), 2);
+    assert_eq!(table.columns[0].values, vec![1234.5]);
+    assert_eq!(table.columns[1].values, vec![7.0]);
+    let table = parse("1\u{202f}234,5 7\n".as_bytes(), &recipe).unwrap();
+    assert_eq!(table.columns[0].values, vec![1234.5]);
 }

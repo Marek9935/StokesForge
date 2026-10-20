@@ -59,8 +59,8 @@ annuler.
 | `recipe` | le **modèle de recette** : description figée et sérialisable d'un format d'appareil. Ne connaît pas le moteur de parsing |
 | `parse` | applique une recette à un fichier |
 | (crate `stokesforge-importer`) | `plan_import`, `make_import_column` : des tableaux analysés aux **colonnes du modèle**, partagés par l'application, le CLI et `pyst.import_file` — ne jamais réécrire cette conversion dans un consommateur ; chacun décide seulement comment écrire (commandes, `Project` direct) |
-| `layout` | **le** découpage d'un fichier en zones (en-tête, sous-en-tête, noms, données, pied, commentaires, lignes ignorées), calculé une fois et partagé par `parse` et `preview` : ne jamais réécrire cette suite d'étapes dans l'un des deux |
-| `numbers`, `datetime` | lecture des nombres (décimale `Auto`, milliers, valeurs manquantes) et des dates en timestamps POSIX (copie de `stokesforge_core::datetime::parse_datetime`, accord testé dans `stokesforge-importer`) |
+| `layout` | **le** découpage (lignes terminées par `\r\n`, `\n` ou `\r` : `layout::split_lines`, seul découpeur, aussi pour `detect_header_layout`) d'un fichier en zones (en-tête, sous-en-tête, noms, données, pied, commentaires, lignes ignorées), calculé une fois et partagé par `parse` et `preview` : ne jamais réécrire cette suite d'étapes dans l'un des deux |
+| `numbers`, `datetime` | lecture des nombres (décimale `Auto`, milliers — espace : U+00A0/U+202F aussi, qui ne coupent pas une colonne « espaces » —, valeurs manquantes ; un résultat non fini `inf`/`1e400` est `NaN`, jeton gardé en texte) et des dates en timestamps POSIX (copie de `stokesforge_core::datetime::parse_datetime`, accord testé dans `stokesforge-importer`) |
 | `builtin`, `choose` | modèles fournis d'office, et choix automatique d'un modèle (extension, nom, signature de contenu) |
 | `preview` | (même découpage que `parse` : séparateur résolu sur la même ligne, virgule exclue si décimale virgule — test `accord_apercu_import.rs`, issue #23) classe chaque ligne en rôle (en-tête principal, sous-en-tête et son rôle, donnée, pied) pour l'aperçu en direct |
 | `store` | enregistre et recharge les recettes (JSON) |

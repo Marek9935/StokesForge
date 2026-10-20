@@ -12,7 +12,7 @@
 //! sans reparser (encore moins analyser cellule à cellule) tout le fichier à
 //! chaque frappe. Deux bornes distinctes y pourvoient :
 //!
-//! - le **découpage en lignes** (`str::split('\n')`) est fait une fois, sur
+//! - le **découpage en lignes** (`layout::split_lines` : `\r\n`, `\n` ou `\r`) est fait une fois, sur
 //!   tout le fichier — c'est `O(taille du fichier)`, incompressible pour
 //!   savoir où sont les lignes, mais ne fait qu'indexer des tranches de la
 //!   chaîne d'origine (pas de copie) ;
@@ -260,9 +260,8 @@ pub fn detect_header_layout(
     let Ok(text) = crate::decode::decode_text(bytes) else {
         return crate::recipe::HeaderLayout::default();
     };
-    let lines: Vec<&str> = text
-        .split('\n')
-        .map(|l| l.trim_end_matches('\r'))
+    let lines: Vec<&str> = crate::layout::split_lines(&text)
+        .into_iter()
         .filter(|l| !l.trim().is_empty())
         .take(SCAN_CAP)
         .collect();
@@ -270,7 +269,7 @@ pub fn detect_header_layout(
         return crate::recipe::HeaderLayout::default();
     }
     let numbers = NumberFormat::new(decimal, None, &[], lines.iter().copied());
-    let effective = resolve_separator(&separator, lines[lines.len() - 1], numbers.decimal);
+    let effective = resolve_separator(&separator, lines[lines.len() - 1], numbers.decimal, None);
     let ref_count = effective.tokenize(lines[lines.len() - 1]).len();
 
     let mut i = 0usize;
@@ -284,7 +283,7 @@ pub fn detect_header_layout(
         let tokens = effective.tokenize(lines[i]);
         let all_numeric = tokens
             .iter()
-            .all(|t| t.trim().is_empty() || !numbers.parse(t).is_nan());
+            .all(|t| t.trim().is_empty() || numbers.is_numeric(t));
         if all_numeric {
             break;
         }
