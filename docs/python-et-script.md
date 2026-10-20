@@ -235,12 +235,16 @@ longueur inchangée, tableaux non contigus acceptés et masque non vide refusé.
 `set_values` remplace aussi la longueur, par composition de `SetCells` puis
 `DeleteCells` pour retirer la queue ; l'identité, le type, les métadonnées et
 les autres colonnes restent inchangés. Aucune suppression de queue ne
-précède la validation de l'écriture.
+précède la validation de l'écriture. L'écriture et la suppression de la queue
+sont enveloppées dans une macro imbriquée (`abort_macro` si la seconde échoue) :
+le tout réussit ou ne laisse rien. D'où vient la version de lecture que porte
+`expected_version` reste une décision ouverte (#312).
 
 `set_values` accepte un tableau numpy float64 1D (mêmes contrôles) ou un
 itérable de `float`, `int`, `str`, `None`. Les entiers Python hors de
 [-2⁵³, 2⁵³] sont refusés : convertir explicitement si la perte de précision
-est voulue. Une colonne numérique/date-heure refuse les textes et traduit
+est voulue. `True` et `False` sont refusés (`InvalidValueError`, colonne
+inchangée) : convertir explicitement en `int` ou `float`. Une colonne numérique/date-heure refuse les textes et traduit
 `None` en NaN ; une colonne mixte conserve chaque cellule telle quelle
 (`None`, `""`, `"12"`, NaN et -0.0 sont distincts). Les entrées sont copiées.
 Les dates sont des timestamps POSIX en secondes.

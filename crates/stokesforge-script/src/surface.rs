@@ -506,6 +506,12 @@ fn copy_cells(values: &Bound<'_, PyAny>) -> PyResult<ValueBlock> {
             MixedCell::Empty
         } else if value.is_instance_of::<pyo3::types::PyString>() {
             MixedCell::Text(value.extract::<String>()?)
+        } else if value.is_instance_of::<pyo3::types::PyBool>() {
+            // bool est une sous-classe de int : le tester avant, sinon
+            // True/False seraient écrits en silence comme 1.0/0.0.
+            return Err(invalid(
+                "bool is not a valid cell: convert it explicitly to int or float".into(),
+            ));
         } else if value.is_instance_of::<pyo3::types::PyInt>()
             || value.is_instance_of::<pyo3::types::PyFloat>()
         {
@@ -549,7 +555,10 @@ fn check_value_count(count: usize) -> PyResult<()> {
 /// colonne. Accepte numpy float64 1D ou un iterable de float/int/str/None.
 /// Numeric/datetime refusent les textes et traduisent None en NaN ; mixed
 /// conserve None, texte vide, texte numérique, NaN et zéro signé distincts.
-/// Copie les entrées ; le type et les métadonnées restent inchangés.
+/// Copie les entrées ; le type et les métadonnées restent inchangés. `True`
+/// et `False` sont refusés (`InvalidValueError`, colonne inchangée). L'écriture
+/// et la troncature de la queue forment une seule opération atomique. La
+/// provenance de la version de lecture reste une décision ouverte (#312).
 #[pyfunction]
 fn set_values(py: Python<'_>, handle: &Handle, values: &Bound<'_, PyAny>) -> PyResult<()> {
     let context = engine::current_context()?;

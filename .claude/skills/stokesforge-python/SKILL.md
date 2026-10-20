@@ -148,7 +148,8 @@ Le lot #67 ajoute `create_workbook`, `create_worksheet`, `create_column`,
 `rename`, `remove`, `set_values` et `set_column_meta` : réutiliser les
 commandes, pas un second mutateur. `set_column` garde sa longueur fixe ;
 `set_values` remplace longueur et cellules sans changer le type ni la
-provenance, par `SetCells` puis `DeleteCells`. Ne pas normaliser NaN en Empty
+provenance, par `SetCells` puis `DeleteCells` sous une macro imbriquée
+(atomique) ; `True`/`False` sont refusés (`PyBool` testé avant `PyInt`). Ne pas normaliser NaN en Empty
 pour une entrée numpy écrite dans une colonne mixte.
 
 Le moteur donne une identité de client distincte à son contexte. La première

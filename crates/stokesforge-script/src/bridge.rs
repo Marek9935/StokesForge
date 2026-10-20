@@ -735,26 +735,47 @@ pub(crate) fn set_values(
         .as_column()
         .ok_or_else(|| HostError::InvalidValue("expected a column handle".into()))?;
     let previous_length = column.len();
-    context
-        .session()
-        .execute(Command::SetCells {
-            column: id,
-            start: 0,
-            values,
-            expected_version: Some(column.version()),
-        })
+    let version = column.version();
+    let session = context.session();
+    // Atomicité : SetCells puis DeleteCells sont un seul geste. Une macro
+    // imbriquée (LIFO dans la macro `Script`, invariant 8) permet de défaire
+    // l'écriture si la suppression de la queue échouait. Aucun chemin d'échec
+    // de `DeleteCells` n'est connu sous la macro exclusive du script (la
+    // colonne vient d'être validée et personne d'autre n'écrit) : pas de
+    // témoin boîte noire, la garde reste défensive.
+    session
+        .begin_macro(MacroKind::Script)
         .map_err(HostError::from_session)?;
-    if length < previous_length {
-        context
-            .session()
-            .execute(Command::DeleteCells {
-                columns: vec![id],
-                at: length,
-                count: previous_length - length,
+    let result = (|| {
+        session
+            .execute(Command::SetCells {
+                column: id,
+                start: 0,
+                values,
+                expected_version: Some(version),
             })
             .map_err(HostError::from_session)?;
+        if length < previous_length {
+            session
+                .execute(Command::DeleteCells {
+                    columns: vec![id],
+                    at: length,
+                    count: previous_length - length,
+                })
+                .map_err(HostError::from_session)?;
+        }
+        Ok(())
+    })();
+    match result {
+        Ok(()) => session
+            .end_macro()
+            .map(|_| ())
+            .map_err(HostError::from_session),
+        Err(error) => {
+            session.abort_macro().map_err(HostError::from_session)?;
+            Err(error)
+        }
     }
-    Ok(())
 }
 
 /// Modifie uniquement les champs demandés, en préservant provenance d'import

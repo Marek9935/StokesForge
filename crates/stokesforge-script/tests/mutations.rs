@@ -175,6 +175,26 @@ assert math.copysign(1., v[1]) == -1.
 }
 
 #[test]
+fn set_values_refuse_les_booleens_et_laisse_la_colonne_inchangee() {
+    let banc = banc();
+    run(
+        &banc,
+        r#"
+a = pyst.resolve('[Book1]Sheet1!A')
+for bad in ([True, 2.], [1., False]):
+    try:
+        pyst.set_values(a, bad)
+    except pyst.InvalidValueError:
+        pass
+    else:
+        raise AssertionError('bool accepté')
+assert pyst.values(a) == (1., 2., 3.)
+"#,
+    );
+    assert_eq!(floats(&banc, banc.a), vec![1., 2., 3.]);
+}
+
+#[test]
 fn erreur_non_rattrapee_annule_aussi_les_creations_et_preserve_redo() {
     let banc = banc();
     run(
