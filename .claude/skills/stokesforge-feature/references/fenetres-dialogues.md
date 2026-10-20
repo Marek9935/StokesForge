@@ -8,7 +8,7 @@ Quand la lire : on crée ou modifie une fenêtre de contenu, un dialogue, un ass
 - Ce que la brique fait seule (taille, position, Échap, focus) : `docs/fenetres.md` § Taille, position, Échap, focus : ce que la brique fait seule.
 - Dialogues, pied, boutons, erreurs, confirmations : `docs/standard-interface.md` § Fenêtres et dialogues ; `docs/standard-interface.md` § Confirmations.
 - Briques (`show_window_in_layer`, `modal_dialog_with`, `modal_wizard`, `modal_read_only`, `modal_confirm`...) : `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `toute fenêtre passe par la brique commune`.
-- Panneaux fixes : `.claude/conventions.md` § Object Manager, panneaux fixes, menus ; `docs/application.md` § Panneaux rétractables et détachés (#100).
+- Panneaux fixes : `.claude/conventions.md` § Object Manager, panneaux fixes, menus ; `docs/application/fenetres-et-panneaux.md` § Panneaux rétractables et détachés (#100).
 - Échec d'un geste de dialogue : `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue).
 - Macro d'historique d'un dialogue d'édition : `docs/commandes-et-historique.md`.
 

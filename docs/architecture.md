@@ -64,17 +64,17 @@ dépendances.
 | `stokesforge-commands` | les commandes, la pile d'undo hybride, les macros | [commandes](commandes-et-historique.md) |
 | `stokesforge-persistence` | `save`/`load`, schéma de transport, format `.stf` | [persistance](persistance.md) |
 | `stokesforge-session` | l'acteur, les `Snapshot`, la `revision` | [session](session.md) |
-| `stokesforge-import` | lecture des fichiers d'appareil (CSV/TXT/ASC), recettes, aperçu ; indépendant de core/UI | [application](application.md) |
+| `stokesforge-import` | lecture des fichiers d'appareil (CSV/TXT/ASC), recettes, aperçu ; indépendant de core/UI | [application](application/projet-et-import.md) |
 | `stokesforge-render` | mesure de texte, pipeline Plotters, **tout le rendu** | [rendu](rendu.md) |
 | `stokesforge-render-egui` | backend écran (`DrawingBackend` → `egui::Shape`), cache de formes, lecture des entrées egui (molette, glisser), feathering ; le calcul du zoom/pan et du point le plus proche est dans `stokesforge-render` (#262) | [rendu](rendu.md) |
 | `stokesforge-render-svg` | export SVG, et par-dessus PDF et PNG | [rendu](rendu.md) |
 | `stokesforge-python` | interpréteur CPython embarqué, aller-retour numpy | [python](python-et-script.md) |
 | `stokesforge-script` | le fil de script, la surface `pyst`, l'interruption | [python](python-et-script.md) |
-| `stokesforge-app-state` | l'état de l'application **sans egui** (#263) : `AppState` et ses `Action`, sélection, préférences, formulaires d'analyse, Object Manager, texte d'interface (`tr!`, catalogues Fluent `en`/`fr`) et erreurs mises en phrase ; testable sans fenêtre (`tests/shell.rs`). Ni `egui`, ni `eframe`, ni `winit`, ni `wgpu` : le compilateur tient la frontière | [application](application.md) |
-| `stokesforge-app` | la coquille UI eframe (banc d'essai) : fenêtres, grille, menus, thème, icônes, copie de la figure au presse-papiers ; peint l'état de `stokesforge-app-state`. Avec lui, **seuls** crates qui traduisent l'interface (Fluent : `i18n-embed`, `i18n-embed-fl`, `rust-embed`, `fluent-syntax`) | [application](application.md) |
-| `stokesforge-cli` | import et scripts Python sans interface | [application](application.md) |
-| `stokesforge-importer` | du résultat de `stokesforge-import` aux colonnes du modèle (plan de feuilles, construction des colonnes) — sans commandes ni interface, partagé par l'application, le CLI et les scripts | [application](application.md) |
-| `stokesforge-clipboard` | offre d'un même contenu au presse-papiers système sous plusieurs types MIME (la figure d'un graphe : SVG, PNG, PDF) ; Wayland, X11, Windows, macOS ; indépendant du reste du workspace | [application](application.md) |
+| `stokesforge-app-state` | l'état de l'application **sans egui** (#263) : `AppState` et ses `Action`, sélection, préférences, formulaires d'analyse, Object Manager, texte d'interface (`tr!`, catalogues Fluent `en`/`fr`) et erreurs mises en phrase ; testable sans fenêtre (`tests/shell.rs`). Ni `egui`, ni `eframe`, ni `winit`, ni `wgpu` : le compilateur tient la frontière | [application](application/etat-et-console.md) |
+| `stokesforge-app` | la coquille UI eframe (banc d'essai) : fenêtres, grille, menus, thème, icônes, copie de la figure au presse-papiers ; peint l'état de `stokesforge-app-state`. Avec lui, **seuls** crates qui traduisent l'interface (Fluent : `i18n-embed`, `i18n-embed-fl`, `rust-embed`, `fluent-syntax`) | [application](application/coquille-et-code.md) |
+| `stokesforge-cli` | import et scripts Python sans interface | [application](application/etat-et-console.md) |
+| `stokesforge-importer` | du résultat de `stokesforge-import` aux colonnes du modèle (plan de feuilles, construction des colonnes) — sans commandes ni interface, partagé par l'application, le CLI et les scripts | [application](application/projet-et-import.md) |
+| `stokesforge-clipboard` | offre d'un même contenu au presse-papiers système sous plusieurs types MIME (la figure d'un graphe : SVG, PNG, PDF) ; Wayland, X11, Windows, macOS ; indépendant du reste du workspace | [application](application/graphe.md) |
 | `stokesforge-robustesse` | 22 batteries de tests aux limites, 2 sondes hors-processus | [tests](tests.md) |
 | `stokesforge-arch-guard` | lecture commune des `Cargo.toml` pour les garde-fous de dépendances (dev-dependency) | [tests](tests.md) |
 

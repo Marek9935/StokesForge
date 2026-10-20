@@ -112,7 +112,7 @@ dérogation doit dire qu'elle est à corriger, pas qu'elle existe.
 
 **Un module par surface, et les tests avec leur code.** Dans
 `stokesforge-app`, le code d'une surface d'interface vit dans son module de
-`src/app/` (table dans `docs/application.md`, § Découpage du code), à imports
+`src/app/` (table dans `docs/application/coquille-et-code.md`, § Découpage du code), à imports
 explicites ; `app.rs` ne garde que l'orchestration de l'image. Un test suit le
 code qu'il éprouve : déplacer une fonction, c'est déplacer ses tests, puis les
 relire (ce qu'ils prouvent, leur témoin vérifié par mutation) — à chaque

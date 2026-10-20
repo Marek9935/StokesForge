@@ -13,7 +13,7 @@
 //! par-dessus. Deux fondations techniques y sont posées : la disposition est
 //! en **fenêtres flottantes confinées** (`egui::Window`, module [`app`]), et
 //! Save/Load passent par un sélecteur de fichiers natif (`rfd`) — voir
-//! `docs/application.md` pour le détail de ce qui est fait et de ce qui ne
+//! `docs/application/README.md` pour le détail de ce qui est fait et de ce qui ne
 //! l'est pas encore.
 //!
 //! # Découpage

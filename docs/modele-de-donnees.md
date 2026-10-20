@@ -32,7 +32,7 @@ par usage : courbes, texte, fonds) ne sont pas un nœud mais sont portées par
 session, le retour arrière et le fichier `.stf` sans chemin à part, et se
 modifient par la commande `SetSavedColors`. Les couleurs enregistrées « pour
 l'utilisateur » ne sont, elles, pas dans le modèle (voir
-`docs/application.md`).
+`docs/application/graphe.md`).
 
 **Ligne x' (#164).** `ColumnMeta::x_prime: Option<f64>` porte, par colonne, une
 abscisse propre (typiquement l'instant d'un spectre dans une cinétique). Toujours

@@ -4,8 +4,8 @@ Quand la lire : on peint une barre de défilement, un jeu d'onglets, une liste o
 
 ## Où lire la règle
 
-- Barres de défilement : `docs/application.md` § Thème (paragraphe « Barres de défilement : un seul standard ») ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes (`theme::scroll_style`).
-- Quatre rôles (onglets, liste, choix exclusif, bascule d'outil) : `docs/application.md` § Onglets, listes et sélection : quatre aspects, quatre rôles (#169).
+- Barres de défilement : `docs/application/theme-i18n-systeme.md` § Thème (paragraphe « Barres de défilement : un seul standard ») ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes (`theme::scroll_style`).
+- Quatre rôles (onglets, liste, choix exclusif, bascule d'outil) : `docs/application/fenetres-et-panneaux.md` § Onglets, listes et sélection : quatre aspects, quatre rôles (#169).
 - Gras, titres de section, couleurs d'état, formulaire en grille, `choice`, écarts : `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `aspect commun (#169)` ; `docs/standard-interface.md` § Choix, disposition.
 - Principe général : `docs/principes-ui.md` § 1. Une brique, un geste.
 - Gardes : `docs/tests.md` § Les garde-fous à ne pas casser.

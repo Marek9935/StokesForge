@@ -4,11 +4,11 @@ Quand la lire : on ajoute une action, un raccourci clavier ou une entrée de cli
 
 ## Où lire la règle
 
-- Ce que Qt donnait gratuitement et qu'il faut écrire ici : `docs/application.md` § Ce que Qt donnait gratuitement, et qu'il faut écrire ici.
+- Ce que Qt donnait gratuitement et qu'il faut écrire ici : `docs/application/etat-et-console.md` § Ce que Qt donnait gratuitement, et qu'il faut écrire ici.
 - Registre des raccourcis, `SHORTCUT_*`, curseurs : `docs/standard-interface.md` § Clavier et souris ; `docs/gestes.md` § Le modèle.
-- Ctrl+C / X / V non reçus comme `Event::Key`, constantes décoratives, presse-papiers système : `docs/application.md` § Ce que Qt donnait gratuitement, et qu'il faut écrire ici ; copie de figure : `.claude/conventions.md` § Copie d'objets et de figures.
-- Tab, flèches et `GRID_KEYS` : `docs/application.md` § Tab et flèches appartiennent à la grille (#38).
-- Menu contextuel de la grille : `docs/application.md` § Menus contextuels de la grille ; grammaire : `docs/menus.md` § Règles.
+- Ctrl+C / X / V non reçus comme `Event::Key`, constantes décoratives, presse-papiers système : `docs/application/etat-et-console.md` § Ce que Qt donnait gratuitement, et qu'il faut écrire ici ; copie de figure : `.claude/conventions.md` § Copie d'objets et de figures.
+- Tab, flèches et `GRID_KEYS` : `docs/application/grille.md` § Tab et flèches appartiennent à la grille (#38).
+- Menu contextuel de la grille : `docs/application/grille.md` § Menus contextuels de la grille ; grammaire : `docs/menus.md` § Règles.
 - Libellés : clés `action-*` (un libellé par action), skill `stokesforge-textes-interface`, `docs/textes-interface.md` ; garde `aucun_libelle_en_dur`.
 
 ## À vérifier

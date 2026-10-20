@@ -97,7 +97,7 @@ colonnes de sortie et rédaction : `.claude/conventions.md`, section « Erreurs 
 L'interface est écrite **d'abord en anglais** ; le français est une traduction
 (chantier #39). Tout passe par Fluent, dans `stokesforge-app` seulement. Le pourquoi
 est en tête de `crates/stokesforge-app-state/src/i18n.rs` ; la vue d'ensemble dans
-`docs/application.md` § « Interface multilingue ».
+`docs/application/theme-i18n-systeme.md` § « Interface multilingue ».
 
 ### Ajouter un texte
 

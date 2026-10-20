@@ -2,7 +2,7 @@
 //!
 //! L'application ne suit **pas** le thème clair/sombre du système : elle
 //! impose sa propre palette, dérivée de [`egui::Visuals::light`] (jamais du
-//! sombre — cf. `docs/application.md` § « Thème »). Deux raisons à ce choix :
+//! sombre — cf. `docs/application/theme-i18n-systeme.md` § « Thème »). Deux raisons à ce choix :
 //!
 //! - une appli scientifique se juge sur ses graphes, pas sur son chrome —
 //!   `stokesforge-render`/`stokesforge-render-egui` dessinent les tracés sur un fond

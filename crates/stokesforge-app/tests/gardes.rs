@@ -710,7 +710,7 @@ fn boutons_selectionnables_hors_d_un_choix(sources: &[Fichier]) -> Vec<String> {
     trouves
 }
 
-/// Règle #169 (`docs/application.md`, § Onglets, listes et sélection) : le
+/// Règle #169 (`docs/application/fenetres-et-panneaux.md`, § Onglets, listes et sélection) : le
 /// fond vert arrondi d'un bouton sélectionné d'egui ne marque qu'un **choix
 /// exclusif** dans un menu, une liste déroulante ou le sélecteur de couleur.
 /// Une entrée de liste ou d'arbre est une ligne de liste (`list_row`,

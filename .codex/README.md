@@ -90,18 +90,18 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 |---|---|---|
 | Découpage et dépendances | `docs/architecture.md` | `Cargo.toml`, manifestes des crates |
 | Arbre, colonnes, identifiants, description de graphe | `docs/modele-de-donnees.md` | `stokesforge-core`, `stokesforge-id`, `stokesforge-plot` |
-| Copie d’objets et presse-papiers | `docs/application.md` (§ Project Manager), `docs/persistance.md` (§ Presse-papiers) | `stokesforge-core/src/copy.rs`, `Project::insert_copy`, `Command::InsertCopy`, `stokesforge-persistence/src/clipboard.rs`, `stokesforge-app/src/app/project_manager.rs` |
+| Copie d’objets et presse-papiers | `docs/application/gestionnaires.md` (§ Project Manager), `docs/persistance.md` (§ Presse-papiers) | `stokesforge-core/src/copy.rs`, `Project::insert_copy`, `Command::InsertCopy`, `stokesforge-persistence/src/clipboard.rs`, `stokesforge-app/src/app/project_manager.rs` |
 | Undo/redo et macros | `docs/commandes-et-historique.md` | `stokesforge-commands`, méthodes de `stokesforge-core` appelées |
 | Sauvegarde, chargement et format `.stf` | `docs/persistance.md` | `stokesforge-persistence`, types du modèle et du graphe |
 | Acteur, concurrence, instantanés | `docs/session.md` | `stokesforge-session`, commandes et persistance appelées |
 | Tracé, axes, légendes, export, Typst | `docs/rendu.md` | `stokesforge-render` d'abord, puis `stokesforge-render-egui` / `stokesforge-render-svg`, `stokesforge-core/src/resolve.rs` |
-| Menus et clics droits | `docs/menus.md` (grammaire), `docs/application.md` (§ Menus thématiques) | `stokesforge-app/src/app/menu_sections.rs`, `menus.rs`, `object_manager_ui.rs`, `project_manager.rs`, `grid.rs`, `graph_window.rs`, `tab_strip.rs` |
+| Menus et clics droits | `docs/menus.md` (grammaire), `docs/application/menus-et-barres.md` (§ Menus thématiques) | `stokesforge-app/src/app/menu_sections.rs`, `menus.rs`, `object_manager_ui.rs`, `project_manager.rs`, `grid.rs`, `graph_window.rs`, `tab_strip.rs` |
 | Comportement de l'interface (champs, messages, dialogues, grisage, clavier) | `docs/standard-interface.md` (#217, sections *en place* / *à venir*) | le module de la surface dans `src/app/`, `app/dialogs.rs`, `app/shortcuts.rs`, `theme.rs` |
-| Fenêtre, grille, raccourcis | `docs/application.md` (§ Découpage du code) | `stokesforge-app-state/src/state.rs`, le module de la surface dans `src/app/` (`app.rs` pour l'orchestration seule), `selection.rs`, `object_manager.rs` (aussi dans `stokesforge-app-state/src/`), `stokesforge-app/src/theme.rs` ; `stokesforge-session` |
+| Fenêtre, grille, raccourcis | `docs/application/coquille-et-code.md` (§ Découpage du code) | `stokesforge-app-state/src/state.rs`, le module de la surface dans `src/app/` (`app.rs` pour l'orchestration seule), `selection.rs`, `object_manager.rs` (aussi dans `stokesforge-app-state/src/`), `stokesforge-app/src/theme.rs` ; `stokesforge-session` |
 | Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app-state/src/state.rs` et `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
 | Python embarqué et scripts `pyst` | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
 | Tests et robustesse | `docs/tests.md` | tests du crate ; index `stokesforge-robustesse/src/lib.rs`, puis batterie `bN` concernée |
-| Distribution | `crates/stokesforge-python/README.md`, `docs/application.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
+| Distribution | `crates/stokesforge-python/README.md`, `docs/application/etat-et-console.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
 | Licence, contributions et interfaces d'extension | `docs/licence-et-extensions.md`, `CONTRIBUTING.md` | `LICENSE`, `LICENSE-EXCEPTION`, `deny.toml`, `about.toml`, `scripts/licenses-{tools.env,rust.sh,dist.sh,test.sh}`, `scripts/licenses.hbs`, `vendor/{crate-license-notices,epaint-default-fonts,python/licenses}/` |
 
 Les noms de crates désignent `crates/<nom>/`. Le manifeste racine inclut

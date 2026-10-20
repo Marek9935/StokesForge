@@ -79,7 +79,7 @@ standard, § Clavier et souris.
 `stokesforge-app-state` porte l'état, les textes et les erreurs mises en
 phrase, sans egui ; `stokesforge-app` ne fait que peindre et traduire les
 gestes en actions. Un dialogue ouvert est un drapeau de `AppState`, pas une
-variable locale de la coquille. Détail : [`application.md`](application.md),
+variable locale de la coquille. Détail : [`application/`](application/README.md),
 [`architecture.md`](architecture.md).
 
 ## Où aller ensuite
@@ -91,5 +91,5 @@ variable locale de la coquille. Détail : [`application.md`](application.md),
 | ajouter une entrée de menu | [`menus.md`](menus.md) |
 | écrire un texte visible | [`textes-interface.md`](textes-interface.md) |
 | ajouter une icône | [`icones.md`](icones.md) |
-| toucher à la fenêtre principale, à la grille | [`application.md`](application.md) |
+| toucher à la fenêtre principale, à la grille | [`application/`](application/README.md) |
 | connaître les conventions par domaine | `.claude/conventions.md`, section « Application » |

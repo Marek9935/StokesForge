@@ -24,7 +24,7 @@
 //!
 //! | Affichage | Mécanisme | Vérifié |
 //! |---|---|---|
-//! | Wayland | `Clipboard::store_formats` du patch `vendor/smithay-clipboard` : le worker partagé avec egui-winit offre un `wl_data_source` par type MIME | à la main (voir `docs/application.md`) |
+//! | Wayland | `Clipboard::store_formats` du patch `vendor/smithay-clipboard` : le worker partagé avec egui-winit offre un `wl_data_source` par type MIME | à la main (voir `docs/application/graphe.md`) |
 //! | X11 | un propriétaire de la sélection `CLIPBOARD` ([`x11`]), `TARGETS` puis un type par représentation | test réel, `--ignored` |
 //! | Windows | un format enregistré par représentation (`PNG`, `image/svg+xml`, `application/pdf`) | compile seulement |
 //! | macOS | `NSPasteboard`, un type UTI par représentation | compile seulement |

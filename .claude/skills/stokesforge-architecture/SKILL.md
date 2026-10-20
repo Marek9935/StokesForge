@@ -157,7 +157,7 @@ une règle tenue par la relecture se perd.
 | l'acteur, la concurrence | `docs/session.md` |
 | le tracé, les axes, l'export | `docs/rendu.md` |
 | Python embarqué, scripts | `docs/python-et-script.md` |
-| la fenêtre, la grille, les raccourcis | `docs/application.md` (§ Découpage du code : un module par surface) |
+| la fenêtre, la grille, les raccourcis | `docs/application/coquille-et-code.md` (§ Découpage du code : un module par surface) |
 | l'ordre et le rangement des menus | `docs/menus.md` |
 | les mots de l'interface, la traduction | `docs/textes-interface.md` |
 | les icônes | `docs/icones.md` |

@@ -160,4 +160,4 @@ Quand la version stable d'eframe choisie emploie winit avec dépôt Wayland :
 4. Réexaminer `configure_window_backend` : le choix natif doit rester celui
    de winit ; conserver le secours `STOKESFORGE_X11=1` s'il reste utile.
 5. Rejouer la matrice manuelle et les tests du workspace, puis actualiser
-   `docs/application.md`, `.codex/README.md`, `AGENTS.md` et `CLAUDE.md`.
+   `docs/application/`, `.codex/README.md`, `AGENTS.md` et `CLAUDE.md`.

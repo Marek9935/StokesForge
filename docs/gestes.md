@@ -4,7 +4,7 @@
 geste sur chaque surface**. Une surface nouvelle, ou un geste nouveau sur une
 surface existante, se range ici ; un geste qui diffère de la même action
 ailleurs se signale contre cette page. Les raccourcis clavier sont dans
-`app/shortcuts.rs` (registre) et `docs/application.md`, pas ici.
+`app/shortcuts.rs` (registre) et `docs/application/README.md`, pas ici.
 
 Cette page décrit l'**état réel du code** (relevé le 2026-10-20). Ce qui est
 décidé mais pas encore écrit est marqué **À VENIR** et ne doit pas être lu

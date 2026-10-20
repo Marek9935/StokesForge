@@ -50,7 +50,7 @@
 //!
 //! # Où vit le reste
 //!
-//! La table complète module → rôle est dans `docs/application.md`, § Découpage
+//! La table complète module → rôle est dans `docs/application/coquille-et-code.md`, § Découpage
 //! du code.
 //!
 //! - menus et barre d'état : `menus.rs` ([`StokesForgeApp::menu_bar`],

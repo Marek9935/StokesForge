@@ -64,7 +64,7 @@ qu'une fonctionnalité existe, ni qu'elle reste à faire. **Le code fait foi.**
 | est un **réglage de vue propre à un document** (rangées d'en-tête d'un classeur) | mémoire d'egui sous l'identifiant du nœud, défaut des nouveaux documents en préférence publiée dans le `Context` (`grid::header_rows`) | jamais un drapeau global : tous les classeurs le suivraient ; rien dans le modèle ni le `.stf` |
 | change le **cadrage de vue** (zoom, pan) | `ViewState` sur `GraphView` | ce n'est **pas** une mutation du modèle : personne ne veut annuler un zoom par Ctrl+Z |
 | est une **décision** d'interface (quoi proposer, quoi griser, comment nommer) | `stokesforge-app-state/src/state.rs` (crate **sans egui**, #263 : un `use egui` n'y compile pas) | doit rester testable sans fenêtre |
-| est du **dessin ou de l'événement** egui | le module de **la surface** dans `stokesforge-app/src/app/` (grille `grid.rs`, classeur `workbook.rs`, graphe `graph_window.rs`, menus `menus.rs`, barres de format `format.rs`, dialogue `plot_settings.rs`…, table complète dans `docs/application.md`, § Découpage du code ; fiche [rangement-du-code](references/rangement-du-code.md)) — `app.rs` n'en reçoit que l'appel | rien de ce qu'ils contiennent n'est une décision de produit ; jamais une logique de surface dans `app.rs` |
+| est du **dessin ou de l'événement** egui | le module de **la surface** dans `stokesforge-app/src/app/` (grille `grid.rs`, classeur `workbook.rs`, graphe `graph_window.rs`, menus `menus.rs`, barres de format `format.rs`, dialogue `plot_settings.rs`…, table complète dans `docs/application/coquille-et-code.md`, § Découpage du code ; fiche [rangement-du-code](references/rangement-du-code.md)) — `app.rs` n'en reçoit que l'appel | rien de ce qu'ils contiennent n'est une décision de produit ; jamais une logique de surface dans `app.rs` |
 | est une **fonctionnalité de tracé** | `stokesforge-render` (générique sur le backend) | jamais dans un seul backend (invariant 5) ; voir le skill **stokesforge-rendu** |
 | lit un **fichier de données** | `stokesforge-import` | reste indépendant de l'UI, de `core`, des commandes et de la session |
 
@@ -159,7 +159,7 @@ Deux endroits, deux rôles distincts :
   été essayé, ce qui a été écarté, la contrainte technique qui a imposé la
   forme retenue. C'est là que va le raisonnement, au plus près du code qu'il
   justifie. Le *quoi* se lit dans la signature juste en dessous.
-- **La page `docs/` du domaine** (`application.md`, `rendu.md`,
+- **La page `docs/` du domaine** (`application/`, `rendu.md`,
   `modele-de-donnees.md`…) décrit le code **tel qu'il est** et oriente. Elle ne
   planifie rien, ne spécifie rien, ne recopie pas le raisonnement des `//!` :
   elle dit où le trouver, et porte ce qui traverse plusieurs modules.

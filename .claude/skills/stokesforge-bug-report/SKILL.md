@@ -106,7 +106,7 @@ et recensés dans `docs/archive/rustrewrite/questions-ouvertes.md` §11. Un refu
 ### Une limite assumée du banc
 
 `stokesforge-app` reste décrit comme un banc d'intégration, mais ses capacités
-évoluent. Vérifier chaque limite dans `docs/application.md` **et dans le
+évoluent. Vérifier chaque limite dans `docs/application/README.md` **et dans le
 code** : l'ancienne absence de restauration des fenêtres ou de sélecteur de
 couleur ne doit plus servir à écarter un signalement. Ne pas recopier ici une
 liste figée de fonctions absentes.

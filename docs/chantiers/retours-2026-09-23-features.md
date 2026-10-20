@@ -6,7 +6,7 @@ tous corrigés, ne sont plus suivis ici (voir les issues GitLab).
 Note de passation : elle rejoindra `docs/archive/` quand sa dernière case sera
 cochée. Les références `app.rs:N` datent du 2026-09-23, avant le découpage
 d'`app.rs` en modules (#115) : le code vit depuis dans `src/app/` (table
-module → rôle dans `docs/application.md`). Chaque chantier passe par le skill `stokesforge-feature` — les quatre
+module → rôle dans `docs/application/coquille-et-code.md`). Chaque chantier passe par le skill `stokesforge-feature` — les quatre
 surfaces d'une action (raccourci, menu, grisage, libellé) ne se tiennent en
 accord que si on y pense à chaque fois.
 
@@ -37,7 +37,7 @@ menu contextuel, le clavier et le panneau d'icônes.
 « *Même correctif B5 que `book_contents`* » — la duplication est connue et
 oblige à corriger deux fois.
 
-Objectif de fond : **factoriser plutôt que dupliquer**. `docs/application.md`
+Objectif de fond : **factoriser plutôt que dupliquer**. `docs/application/fenetres-et-panneaux.md`
 explique ce qui doit rester séparé (les tampons de saisie transitoires, à cause
 de la fermeture `'static` de `show_viewport_deferred`) — un bandeau qui ne fait
 que pousser des `Action` n'y bute pas.
@@ -59,7 +59,7 @@ ce qui la rend testable sans fenêtre dans `tests/shell.rs`.
       `grid_contents`), `app.rs:3395-3415` (`header_field_widget`), et le
       duplicata détaché `app.rs:5453-5484`.
 - [ ] **Mettre à jour le commentaire `app.rs:4455-4467` et la section « Tab en
-      dernière colonne » de `docs/application.md`** : ils décrivent la
+      dernière colonne » de `docs/application/grille.md`** : ils décrivent la
       décision que ce chantier renverse, ils deviendraient faux.
 
 ⚠️ Ce n'est pas la réparation d'un oubli : le comportement actuel est un choix
@@ -169,7 +169,7 @@ retouchent l'apparence de la même bande, éviter deux passages séparés.
 - [x] Implémenté dans `graph_view_contents`
       (`crates/stokesforge-app/src/app.rs`) ; test adapté
       (`le_rendu_garde_son_ratio_et_se_met_a_l_echelle_dans_la_zone_disponible`) ;
-      `docs/application.md` mis à jour.
+      `docs/application/` mis à jour.
 
 ---
 

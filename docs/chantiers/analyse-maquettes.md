@@ -89,7 +89,7 @@ Trois constats, trouvés en dessinant, qui pèsent sur les choix :
 
 1. **La fenêtre modale empêche de cliquer sur le graphe.** `modal_dialog_with`
    bloque tout clic hors de la fenêtre (le contour clignote en rouge,
-   `docs/application.md` § Propriétés des graphiques). Or la fenêtre de
+   `docs/application/graphe.md` § Propriétés des graphiques). Or la fenêtre de
    réglage commune est une modale (règle du dépôt) **et** les points et
    plages se posent à la souris sur le graphe (décision du 2026-10-08). Les
    deux ne tiennent ensemble que si la fenêtre porte **son propre aperçu

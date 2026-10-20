@@ -4,8 +4,8 @@ Quand la lire : la tâche touche l'Object Manager, la sélection d'un graphe, le
 
 ## Où lire la règle
 
-- Object Manager (#81-85), réglages de vue (#139), sélection partagée, `with_graph_view` : `.claude/conventions.md` § Object Manager, panneaux fixes, menus ; `docs/application.md` § Gestionnaire d'objets (Object Manager.
-- Série, groupe, glisser par la poignée : `.claude/conventions.md` § Séries et groupes ; `docs/application.md` § Gestionnaire d'objets (Object Manager.
+- Object Manager (#81-85), réglages de vue (#139), sélection partagée, `with_graph_view` : `.claude/conventions.md` § Object Manager, panneaux fixes, menus ; `docs/application/gestionnaires.md` § Gestionnaire d'objets (Object Manager.
+- Série, groupe, glisser par la poignée : `.claude/conventions.md` § Séries et groupes ; `docs/application/gestionnaires.md` § Gestionnaire d'objets (Object Manager.
 - Isolation des préférences dans les tests : `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, piège `cfg(test)`.
 - Corrections définitives (#212), `ReplaceAnalysisData` : `.claude/conventions.md` § Analyse (#181) ; tests : `docs/tests.md` § Remplacement définitif d'une correction (#212).
 

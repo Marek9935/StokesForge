@@ -68,7 +68,7 @@ n'existe pas encore » aussi — c'est la plus facile à se tromper.
 
 | La question porte sur | Page | Code |
 |---|---|---|
-| grille, saisie, sélection, copier/coller, menus contextuels, raccourcis, fenêtres, thème, console de script | `docs/application.md` | `stokesforge-app-state/src/state.rs`, `stokesforge-app/src/app.rs` et `src/app/` (barre de menus : `app/menus.rs`), `selection.rs` |
+| grille, saisie, sélection, copier/coller, menus contextuels, raccourcis, fenêtres, thème, console de script | `docs/application/README.md` | `stokesforge-app-state/src/state.rs`, `stokesforge-app/src/app.rs` et `src/app/` (barre de menus : `app/menus.rs`), `selection.rs` |
 | types de colonnes, valeurs manquantes, colonnes mixtes, noms et champs d'en-tête | `docs/modele-de-donnees.md` | `stokesforge-core` |
 | annulation, macros, ce qu'un Ctrl+Z ramène | `docs/commandes-et-historique.md` | `stokesforge-commands/src/command.rs` |
 | enregistrement, format de fichier, compatibilité | `docs/persistance.md` | `stokesforge-persistence` |
@@ -94,7 +94,7 @@ d'affirmer sa validation sur un compositeur.
 capacités avancent vite : une liste de manques recopiée ici vieillit plus vite
 que le code. Ne jamais affirmer un manque sans `rg` (le sélecteur de couleur
 et les calques multiples, longtemps listés ici comme absents, existent). Les
-manques encore vérifiés au 2026-10-08, écrits dans `docs/application.md` :
+manques encore vérifiés au 2026-10-08, écrits dans `docs/application/README.md` :
 
 - l'éditeur de matrice est un espace réservé ;
 - pas de largeur de barre ni de nombre de classes d'histogramme dans la
@@ -170,7 +170,7 @@ et le texte du SVG (« SVG Text » : texte modifiable par défaut, ou contours,
 #162). **Coller la figure dans une autre application** (Word, Inkscape…) :
 Ctrl+C sur le graphique sans objet sélectionné, ou « Copy Graph » dans ce
 même sous-menu — SVG, PNG et PDF à la fois (#149).
-`docs/application.md` § Propriétés des graphiques.
+`docs/application/graphe.md` § Propriétés des graphiques.
 
 Quatre comportements ressemblent à des manques et n'en sont pas :
 

@@ -7,8 +7,8 @@ Quand la lire : pour toute fonctionnalité, avant de coder (décider où l'utili
 - Grammaire (sections, sous-menus, absent / grisé, verbes nus, séparateurs) : `docs/menus.md` § Règles ; `docs/menus.md` § Ordre canonique des sections ; `docs/menus.md` § Ajouter une entrée.
 - Contenu et enveloppe : `docs/menus.md` § Le principe : contenu et enveloppe.
 - Résumé opérationnel et peintures partagées : `.claude/conventions.md` § Object Manager, panneaux fixes, menus (point `Menus (#114, #152)`).
-- Barre de menus (File, Edit, Workbook, Graph, View, Window) et menus thématiques : `docs/application.md` § Menus thématiques (#114).
-- Menu contextuel de la grille (`GridMenu`) : `docs/application.md` § Menus contextuels de la grille ; écarts délibérés entre menu et clavier : même section et `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue).
+- Barre de menus (File, Edit, Workbook, Graph, View, Window) et menus thématiques : `docs/application/menus-et-barres.md` § Menus thématiques (#114).
+- Menu contextuel de la grille (`GridMenu`) : `docs/application/grille.md` § Menus contextuels de la grille ; écarts délibérés entre menu et clavier : même section et `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue).
 - Rien d'atteignable seulement au clic droit : `docs/menus.md` § Règles.
 
 ## À vérifier

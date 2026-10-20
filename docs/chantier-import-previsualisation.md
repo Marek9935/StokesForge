@@ -208,7 +208,7 @@ l'en-tête, N lignes avant la fin. La règle vit dans `data_end.rs`, appelée pa
 le découpage partagé `layout`, pour que `parse` **et** `preview` coupent au
 même endroit. `footer_skip_lines` s'applique d'abord. Les options et le clic
 droit sur la ligne de coupure sont disponibles dans l'assistant ; voir
-`docs/application.md` § « Assistant d'import ». Le pied peut être conservé
+`docs/application/projet-et-import.md` § « Assistant d'import ». Le pied peut être conservé
 dans les métadonnées avec `keep_footer_metadata`.
 
 ## Métadonnées de fichier par colonne (issue #5)
@@ -227,7 +227,7 @@ La ligne se masque (menu Fenêtre) ; la sélection par clé est dans l'étape
 ## Assistant en étapes (issue #6)
 
 `import_window` est maintenant un assistant en six étapes (voir
-`docs/application.md` § « Assistant d'import »). Côté `stokesforge-import` :
+`docs/application/projet-et-import.md` § « Assistant d'import »). Côté `stokesforge-import` :
 `ImportRecipe::column_roles` (`ColumnRoleChoice`, Ignorer retire la colonne à
 l'import), `unify_header`, `detect_encoding`. Le réglage d'en-tête n'expose
 plus la case « Détection automatique » : seul le bouton « Détecter depuis le

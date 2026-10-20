@@ -4,9 +4,9 @@ Quand la lire : un champ de couleur du modèle ou de l'interface, le sélecteur,
 
 ## Où lire la règle
 
-- Sélecteur commun, usages, couleurs enregistrées, sélecteur replié, `egui::Area` plutôt que `egui::Popup` : `docs/application.md` § Propriétés des graphiques (paragraphe « Custom color ») ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `color_picker::color_field`.
+- Sélecteur commun, usages, couleurs enregistrées, sélecteur replié, `egui::Area` plutôt que `egui::Popup` : `docs/application/graphe.md` § Propriétés des graphiques (paragraphe « Custom color ») ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `color_picker::color_field`.
 - Couleur vide = automatique, encre automatique : `docs/rendu.md` § Couleurs du texte et des échelles : l'encre automatique.
-- Couleur globale / thème (`apply_theme`, `set_text_color`) : `docs/application.md` § Propriétés des graphiques.
+- Couleur globale / thème (`apply_theme`, `set_text_color`) : `docs/application/graphe.md` § Propriétés des graphiques.
 - Persistance d'un champ neuf (`#[serde(default)]`) : `docs/persistance.md` § Le format ne s'écrit pas dans le modèle.
 - Échantillons : `docs/icones.md` § Échantillons de couleur (#89).
 

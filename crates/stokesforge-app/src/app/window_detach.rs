@@ -28,7 +28,7 @@
 //! ou le menu « Fenêtre ». Sous Wayland, le compositeur peut ignorer une
 //! position de fenêtre
 //! demandée par l'application — la même réserve que documente déjà
-//! `docs/application.md` pour `rfd` ; cette tâche ne demande explicitement
+//! `docs/application/theme-i18n-systeme.md` pour `rfd` ; cette tâche ne demande explicitement
 //! aucune position (elle laisse le compositeur placer la fenêtre), donc n'en
 //! souffre pas directement, mais la limite vaut d'être connue avant d'y
 //! ajouter un jour une position mémorisée.

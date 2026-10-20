@@ -4,10 +4,10 @@ Quand la lire : la fonctionnalité touche un graphe (geste continu, texte libre,
 
 ## Où lire la règle
 
-- Ligne de partage état / coquille : `docs/application.md` § Deux crates : l'état et la coquille ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes.
-- Action qui a besoin de l'état de vue (zoom) : `docs/application.md` § Propriétés des graphiques (`GraphView::framed_spec`, `Action::ExportGraph`).
-- Geste continu, édition de texte sur place : `docs/application.md` § Propriétés des graphiques (`annotation_interactions`) ; `docs/rendu.md` § Couleurs du texte et des échelles : l'encre automatique (placement du champ dans le cadre du rendu).
-- Calque par indice, calque actif, ajout de séries : `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue) ; `docs/application.md` § Glisser une sélection de colonnes vers un graphe.
+- Ligne de partage état / coquille : `docs/application/coquille-et-code.md` § Deux crates : l'état et la coquille ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes.
+- Action qui a besoin de l'état de vue (zoom) : `docs/application/graphe.md` § Propriétés des graphiques (`GraphView::framed_spec`, `Action::ExportGraph`).
+- Geste continu, édition de texte sur place : `docs/application/graphe.md` § Propriétés des graphiques (`annotation_interactions`) ; `docs/rendu.md` § Couleurs du texte et des échelles : l'encre automatique (placement du champ dans le cadre du rendu).
+- Calque par indice, calque actif, ajout de séries : `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue) ; `docs/application/graphe.md` § Glisser une sélection de colonnes vers un graphe.
 - Graphe neuf sans titre : `.claude/conventions.md` § Graphes neufs et fenêtres détachées.
 - Table couche -> lieu (modèle, vue, décision, dessin, rendu, import) : tableau de la section 2 du `SKILL.md`.
 

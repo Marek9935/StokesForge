@@ -8,7 +8,7 @@ traduction (#39). Ce guide est la source unique des termes et des règles : un
 texte visible qui s'en écarte est un défaut. Les chemins `app.rs:N` désignent
 `crates/stokesforge-app/src/` au 2026-10-01, avant le découpage d'`app.rs` en
 modules (#115) : le code de chaque surface vit depuis dans `src/app/` (table
-module → rôle dans `docs/application.md`). Depuis #263, les modules d'état et les
+module → rôle dans `docs/application/coquille-et-code.md`). Depuis #263, les modules d'état et les
 catalogues `i18n/` vivent dans `stokesforge-app-state` (les numéros de ligne
 de `state.rs` cités plus bas désignent son contenu d'alors).
 

@@ -10,7 +10,7 @@ Le *quoi* et le *pourquoi* du résultat, eux, vivent dans les pages normales :
 [`modele-de-donnees.md`](modele-de-donnees.md) (le type et ses règles),
 [`persistance.md`](persistance.md) (le format et la compatibilité),
 [`commandes-et-historique.md`](commandes-et-historique.md) (les deux écritures
-de cellules), [`application.md`](application.md) (la saisie).
+de cellules), [`application/grille.md`](application/grille.md) (la saisie).
 
 ## L'objectif
 

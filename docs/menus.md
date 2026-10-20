@@ -4,7 +4,7 @@ Source **unique** des règles d'organisation des menus de la barre et des
 clics droits. Une entrée nouvelle se range dans une section de cette
 grammaire ; un menu qui la viole se signale contre cette page. Le *comment*
 (brique, peintures partagées) est dans `crates/stokesforge-app/src/app/menu_sections.rs`
-et `docs/application.md` (§ Menus thématiques) ; les termes et les majuscules
+et `docs/application/menus-et-barres.md` (§ Menus thématiques) ; les termes et les majuscules
 sont dans `docs/textes-interface.md`.
 
 ## Le principe : contenu et enveloppe

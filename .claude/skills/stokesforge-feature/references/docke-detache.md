@@ -6,8 +6,8 @@ Quand la lire : avant de toucher à une surface d'interface (classeur, graphe, n
 
 - Règles de câblage de la vue détachée (état recopié, raccourcis globaux, IDs egui) : `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue).
 - Fenêtres détachées et réveil du viewport : `.claude/conventions.md` § Graphes neufs et fenêtres détachées.
-- Contrainte `'static` de `show_viewport_deferred` et ce qui en découle : `docs/application.md` § Détachement générique des onglets de contenu ; `docs/application.md` § Project Manager et fenêtres par contenu.
-- Panneaux fixes (PM, OM, console) attachés / détachés : `.claude/conventions.md` § Object Manager, panneaux fixes, menus ; `docs/application.md` § Panneaux rétractables et détachés (#100).
+- Contrainte `'static` de `show_viewport_deferred` et ce qui en découle : `docs/application/fenetres-et-panneaux.md` § Détachement générique des onglets de contenu ; `docs/application/gestionnaires.md` § Project Manager et fenêtres par contenu.
+- Panneaux fixes (PM, OM, console) attachés / détachés : `.claude/conventions.md` § Object Manager, panneaux fixes, menus ; `docs/application/fenetres-et-panneaux.md` § Panneaux rétractables et détachés (#100).
 - Copie d'objets entre projets, F2 et Ctrl+D : `.claude/conventions.md` § Copie d'objets et de figures.
 
 ## À vérifier

@@ -43,7 +43,7 @@ pub(super) fn tab_contents(
 
 /// Contenu d'un [`Tab::Matrix`] — **espace réservé documenté**. L'édition de
 /// matrice est explicitement hors périmètre de cette tâche
-/// (`docs/application.md`) : la fenêtre s'ouvre et se focalise exactement
+/// (`docs/application/gestionnaires.md`) : la fenêtre s'ouvre et se focalise exactement
 /// comme les trois autres natures, mais ne montre qu'un message plutôt qu'un
 /// éditeur. `stokesforge-core::NodeKind::Matrix` n'a aujourd'hui aucun contenu
 /// (juste des métadonnées de fenêtre) — il n'y a donc littéralement rien
