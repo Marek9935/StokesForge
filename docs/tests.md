@@ -527,6 +527,10 @@ méthode de `PanelSpec` qu'ils déclenchent : un test qui appelle
 | case présente et vide traitée comme absente | `a_present_but_empty_pasted_cell_is_still_a_missing_value`, `pure_data_copy_paste_keeps_working_without_header_markers` |
 | bloc non coupé après la dernière case présente (colonne allongée) | `a_short_last_row_does_not_lengthen_the_shorter_column` |
 | statut `status-paste-columns-dropped` retiré / posé sans débordement | `a_paste_wider_than_the_sheet_reports_the_dropped_columns`, `a_paste_that_fits_the_sheet_width_reports_nothing` |
+| `looks_like_thousands_separator` élargi à `\d+,\d+` (ou à `1,5`) | `la_forme_milliers_est_reconnue_exactement` (`stokesforge-core/src/number_format.rs`) |
+| avis `status-cell-decimal-comma` retiré, ou posé au collage | `typing_a_thousands_looking_number_in_a_numeric_cell_notices_the_decimal_comma`, `the_decimal_comma_notice_also_applies_to_a_mixed_cell`, `pasting_a_thousands_looking_number_does_not_notice` (#311) |
+| rangées d'en-tête jetées non comptées (`status-paste-fields-dropped`) / message combiné cassé | `a_header_field_paste_anchored_low_counts_the_rows_beyond_formula`, `a_header_field_paste_anchored_on_long_name_reports_nothing`, `columns_and_header_fields_dropped_together_give_one_combined_notice` (#311) |
+| « 2026 » en Date/Time lu autrement que 2026 secondes | `from_texts_datetime_lit_un_nombre_nu_comme_des_secondes` (`stokesforge-core/src/column.rs`) |
 
 Le collage rejoue la structure interne quand le texte est celui qu'on a poussé :
 pour éprouver le chemin « texte externe », coller dans une **autre** session.

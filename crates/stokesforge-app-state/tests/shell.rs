@@ -2139,6 +2139,184 @@ fn a_paste_that_fits_the_sheet_width_reports_nothing() {
     );
 }
 
+// -- #311 (E2, E4) : avis de virgule décimale, champs d'en-tête débordants --
+
+fn status_text(state: &AppState) -> String {
+    state.status().map(|s| s.text.clone()).unwrap_or_default()
+}
+
+/// #311 (E2) : « 1,234 » saisi dans une cellule Numeric reste lu 1.234 (R6),
+/// et la barre d'état le dit ; « 1,5 » n'a rien d'ambigu : aucun avis.
+#[test]
+fn typing_a_thousands_looking_number_in_a_numeric_cell_notices_the_decimal_comma() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 1,
+        text: "1,234".to_string(),
+    });
+    assert_eq!(cell(&state, temps, 1), Cell::Float(1.234));
+    let status = state.status().expect("un avis");
+    assert!(!status.is_error());
+    assert!(
+        status.text.contains("1,234") && status.text.contains("1.234"),
+        "avis inattendu : {}",
+        status.text
+    );
+
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 2,
+        text: "1,5".to_string(),
+    });
+    assert_eq!(cell(&state, temps, 2), Cell::Float(1.5));
+    assert!(
+        !status_text(&state).contains("decimal comma"),
+        "pas d'avis pour 1,5 : {}",
+        status_text(&state)
+    );
+}
+
+/// #311 (E2) : l'avis vaut aussi pour une cellule d'une colonne Mixed.
+#[test]
+fn the_decimal_comma_notice_also_applies_to_a_mixed_cell() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 0,
+        text: "n/a".to_string(),
+    });
+    state.dispatch(Action::CommitCell {
+        column: temps,
+        row: 1,
+        text: "12,345".to_string(),
+    });
+    assert!(
+        status_text(&state).contains("decimal comma"),
+        "avis attendu : {}",
+        status_text(&state)
+    );
+}
+
+/// #311 (E2) : le collage ne pose pas l'avis (saisie de cellule seulement).
+#[test]
+fn pasting_a_thousands_looking_number_does_not_notice() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    state.select_cell(sheet1, temps, 0);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "1,234".to_string(),
+    });
+    assert!(!status_text(&state).contains("decimal comma"));
+}
+
+/// Copie de trois rangées d'en-tête (Nom long, Unité, Commentaire) d'une
+/// colonne, prête à coller ; renvoie le texte copié.
+fn copy_three_header_rows(state: &mut AppState, sheet: NodeId, column: NodeId) -> String {
+    set_header_field(state, column, HeaderField::LongName, "L");
+    set_header_field(state, column, HeaderField::Unit, "u");
+    set_header_field(state, column, HeaderField::Comment, "c");
+    state.select_header_field(sheet, column, HeaderField::LongName);
+    state.extend_header_field_selection(sheet, column, HeaderField::Comment);
+    state.copy_selection(sheet).expect("sélection non vide")
+}
+
+/// #311 (E4) : trois rangées collées avec la première sur Formule : Formule
+/// est écrite, les deux autres rangées sont comptées dans le statut, le tout
+/// en une seule entrée d'historique.
+#[test]
+fn a_header_field_paste_anchored_low_counts_the_rows_beyond_formula() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let note = column_id(&state, sheet1, "Note");
+    let text = copy_three_header_rows(&mut state, sheet1, temps);
+
+    state.select_header_field(sheet1, note, HeaderField::Formula);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+    assert_eq!(state.column_meta(note).formula.as_deref(), Some("L"));
+    assert_eq!(state.column_meta(note).unit, "", "rangée jetée");
+    let status = state.status().expect("un statut");
+    assert!(!status.is_error(), "{}", status.text);
+    assert!(
+        status.text.contains("2 header fields did not fit"),
+        "statut inattendu : {}",
+        status.text
+    );
+    state.dispatch(Action::Undo);
+    assert_eq!(state.column_meta(note).formula, None, "un Annuler suffit");
+}
+
+/// #311 (E4) : ancré sur Nom long, les trois rangées tiennent : aucun statut.
+#[test]
+fn a_header_field_paste_anchored_on_long_name_reports_nothing() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let note = column_id(&state, sheet1, "Note");
+    let text = copy_three_header_rows(&mut state, sheet1, temps);
+
+    state.select_header_field(sheet1, note, HeaderField::LongName);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+    assert_eq!(state.column_meta(note).comment, "c");
+    assert!(
+        !status_text(&state).contains("did not fit"),
+        "statut inattendu : {}",
+        status_text(&state)
+    );
+}
+
+/// #311 (E4) : colonnes et champs qui débordent ensemble : un seul message.
+#[test]
+fn columns_and_header_fields_dropped_together_give_one_combined_notice() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+    for column in [temps, signal] {
+        set_header_field(&mut state, column, HeaderField::LongName, "L");
+        set_header_field(&mut state, column, HeaderField::Unit, "u");
+    }
+    state.select_header_field(sheet1, temps, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, signal, HeaderField::Unit);
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
+
+    state.select_header_field(sheet1, note, HeaderField::Formula);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text,
+    });
+    let status = state.status().expect("un statut");
+    assert!(!status.is_error(), "{}", status.text);
+    assert!(
+        status
+            .text
+            .contains("1 column(s) and 1 header field(s) did not fit"),
+        "statut inattendu : {}",
+        status.text
+    );
+}
+
 /// #259 : une case texte qui porte une tabulation ou un retour à la ligne se
 /// colle d'un seul tenant dans une autre session (donc par le seul texte du
 /// presse-papiers, comme depuis un tableur) — rien ne glisse sur les cases

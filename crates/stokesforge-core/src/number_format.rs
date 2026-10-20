@@ -53,6 +53,20 @@ pub fn parse_input(text: &str) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
+/// Vrai si `text` (rogné) a exactement la forme `\d{1,3},\d{3}` : une saisie
+/// que [`parse_input`] lit comme une décimale (`1,234` → 1.234) alors qu'un
+/// lecteur anglophone y verrait un millier (#311, S-R6). Sert à l'avis discret
+/// de la barre d'état après la saisie d'une cellule ; ne change pas la lecture.
+pub fn looks_like_thousands_separator(text: &str) -> bool {
+    let Some((head, tail)) = text.trim().split_once(',') else {
+        return false;
+    };
+    (1..=3).contains(&head.len())
+        && tail.len() == 3
+        && head.bytes().all(|b| b.is_ascii_digit())
+        && tail.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// Résultats et graduations : 3 chiffres significatifs.
 pub fn format_results(value: f64) -> String {
     format_significant(value, RESULT_DIGITS)
@@ -354,6 +368,18 @@ mod tests {
         assert_eq!(parse_input("1.5"), Some(1.5));
         // Effet assumé (S-R6) : « 1,000 » est lu 1.
         assert_eq!(parse_input("1,000"), Some(1.0));
+    }
+
+    #[test]
+    fn la_forme_milliers_est_reconnue_exactement() {
+        for oui in ["1,234", "12,345", "999,000", " 1,234 "] {
+            assert!(looks_like_thousands_separator(oui), "{oui:?}");
+        }
+        for non in [
+            "1,5", "1234,567", "12,3456", "1.234", "1,234.5", "", ",", "a,123", "1,23a", "-1,234",
+        ] {
+            assert!(!looks_like_thousands_separator(non), "{non:?}");
+        }
     }
 
     #[test]

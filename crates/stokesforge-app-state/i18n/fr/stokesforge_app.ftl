@@ -293,6 +293,13 @@ status-paste-columns-dropped =
         [one] Une colonne ne tenait pas dans la feuille et n'a pas été collée
        *[other] { $count } colonnes ne tenaient pas dans la feuille et n'ont pas été collées
     }
+status-cell-decimal-comma = « { $text } » a été lu { $value } (virgule décimale)
+status-paste-fields-dropped =
+    { $count ->
+        [one] Un champ d'en-tête ne tenait pas dans la feuille et n'a pas été collé
+       *[other] { $count } champs d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
+    }
+status-paste-columns-fields-dropped = { $columns } colonne(s) et { $fields } champ(s) d'en-tête ne tenaient pas dans la feuille et n'ont pas été collés
 status-graph-copied = Graphique copié en { $formats }
 status-graph-copied-partly = Graphique copié en { $formats } ; { $missing } n'a pas pu être préparé
 status-language-not-saved = Impossible d'enregistrer le choix de la langue : { $detail }

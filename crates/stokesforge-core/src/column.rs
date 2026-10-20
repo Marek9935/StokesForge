@@ -2113,6 +2113,15 @@ mod tests {
         }
     }
 
+    /// #311 (E1) : « 2026 » nu, tapé dans une colonne Date/Time, reste un
+    /// nombre de secondes POSIX (1970-01-01 00:33:46), pas une année.
+    #[test]
+    fn from_texts_datetime_lit_un_nombre_nu_comme_des_secondes() {
+        let (bloc, promoting) = ValueBlock::from_texts(ColumnType::DateTime, &["2026"]);
+        assert_eq!(bloc, ValueBlock::Float(vec![2026.0]));
+        assert!(!promoting);
+    }
+
     #[test]
     fn from_texts_datetime_garde_la_date_comme_valeur_dans_un_bloc_elargi() {
         let (bloc, promoting) =

@@ -347,7 +347,12 @@ Historique : #288, #290 (pastille et liste groupée).
 - « , » et « . » acceptés dans un champ qui contient **un seul nombre** et
   dans les cellules Numeric (S-N4, S-N5 → S-R6). À la validation, la virgule devient
   un point : l'interface affiche toujours le point. Effet assumé : en anglais,
-  « 1,000 » est lu 1.
+  « 1,000 » est lu 1. **Avis discret** (#311) : quand une **saisie de cellule**
+  (colonne Numeric ou Mixed) a exactement la forme `\d{1,3},\d{3}` (« 1,234 »),
+  la barre d'état dit comment elle a été lue (« "1,234" was read as 1.234
+  (decimal comma) »). L'avis suit l'écriture réussie ; il ne vaut ni pour le
+  collage ni pour une colonne Date/Time, et ne change pas la règle
+  (`number_format::looks_like_thousands_separator`).
 - Formules et listes de valeurs : point obligatoire (la virgule y sépare).
 - Cellule Mixed : suit la règle Numeric (décidé) — « 1,5 » devient le nombre
   1.5. Une seule lecture, `stokesforge_core::number_format::parse_input`,
@@ -385,8 +390,8 @@ Historique : #223.
   (1×10⁻⁵), notation `e` dans la grille et les champs. Les graduations restent en
   notation `e` (elles ne passent pas par Typst) : l'exposant typographique des
   graduations n'est pas livré.
-- **Collage de lignes de données** : une case **absente** (ligne plus courte que la colonne visée) garde la valeur existante et n'allonge jamais la colonne ; une case **présente et vide** (`3<tab>`) est une valeur manquante. Si la copie compte plus de colonnes que la feuille n'en a à partir de l'ancre, les colonnes en trop sont abandonnées (aucune n'est ajoutée) et la barre d'état le dit (`status-paste-columns-dropped`).
-- **Dates** (S-D4) : ISO 8601 (`2026-10-10 14:05`) ; formes de saisie (#218, en place) : ISO `2026-10-10 14:30` et `JJ/MM/AAAA [HH:MM[:SS]]` (`10/10/2026 14:30`), **jour d'abord**, jamais mois d'abord ; un nombre nu reste un timestamp POSIX ; le reste promeut la colonne en Mixed, comme tout texte non numérique. Lecteur et formateur uniques : `stokesforge_core::datetime` (grille, collage, conversion Mixed → Date/Time) ; `stokesforge-import` en garde une copie, accordée par un test de `stokesforge-importer`.
+- **Collage de lignes de données** : une case **absente** (ligne plus courte que la colonne visée) garde la valeur existante et n'allonge jamais la colonne ; une case **présente et vide** (`3<tab>`) est une valeur manquante. Si la copie compte plus de colonnes que la feuille n'en a à partir de l'ancre, les colonnes en trop sont abandonnées (aucune n'est ajoutée) et la barre d'état le dit (`status-paste-columns-dropped`). Pour un collage de **champs d'en-tête** ancré bas, les rangées qui passent au-delà de Formule sont jetées et comptées de la même façon (`status-paste-fields-dropped`) ; si des colonnes et des champs débordent ensemble, un seul message les donne (`status-paste-columns-fields-dropped`). Ctrl+Maj+V de colonnes entières réécrit tout l'en-tête à son rang d'origine (matrice voulue).
+- **Dates** (S-D4) : ISO 8601 (`2026-10-10 14:05`) ; formes de saisie (#218, en place) : ISO `2026-10-10 14:30` et `JJ/MM/AAAA [HH:MM[:SS]]` (`10/10/2026 14:30`), **jour d'abord**, jamais mois d'abord ; un nombre nu reste un timestamp POSIX en **secondes** (« 2026 » devient 1970-01-01 00:33:46, pas l'année 2026 : décidé, #311) ; le reste promeut la colonne en Mixed, comme tout texte non numérique. Lecteur et formateur uniques : `stokesforge_core::datetime` (grille, collage, conversion Mixed → Date/Time) ; `stokesforge-import` en garde une copie, accordée par un test de `stokesforge-importer`.
 - **Chemins** (S-D5) : nom du fichier seul dans les messages, chemin complet en
   bulle.
 

@@ -7585,6 +7585,21 @@ impl AppState {
         if kind == ColumnType::Mixed {
             self.auto_promote_mixed_column_if_all_numeric(column);
         }
+        // Avis discret (#311, S-R6) : « 1,234 » est lu 1.234, pas mille deux
+        // cent trente-quatre. Posé après `execute` (qui réécrit le statut), et
+        // seulement pour une saisie de cellule Numeric ou Mixed qui a abouti.
+        if matches!(kind, ColumnType::Numeric | ColumnType::Mixed)
+            && !self.last_action_failed()
+            && stokesforge_core::number_format::looks_like_thousands_separator(&text)
+        {
+            if let Some(value) = stokesforge_core::number_format::parse_input(&text) {
+                self.notice(tr!(
+                    "status-cell-decimal-comma",
+                    text = text.trim().to_string(),
+                    value = stokesforge_core::number_format::format_exact(value)
+                ));
+            }
+        }
         true
     }
 
@@ -7973,16 +7988,31 @@ impl AppState {
         }
     }
 
-    /// Statut posé quand la copie compte plus de colonnes que la feuille n'en
-    /// a à partir de l'ancre (#311) : les colonnes en trop sont abandonnées,
-    /// jamais ajoutées. Posé **après** les écritures (chaque commande
-    /// réécrit le statut), et seulement si aucune n'a échoué : une erreur
-    /// (colonne formule) reste affichée.
-    fn notice_dropped_columns(&mut self, wanted: usize, available: usize) {
-        if wanted > available && !self.last_action_failed() {
-            let dropped = wanted - available;
-            self.notice(tr!("status-paste-columns-dropped", count = dropped));
+    /// Statut posé quand la copie déborde de la feuille (#311) : `columns`
+    /// colonnes au-delà du bord droit, `fields` rangées d'en-tête au-delà de
+    /// Formule (collage de champs ancré bas). Ce qui déborde est abandonné,
+    /// jamais ajouté. Posé **après** les écritures (chaque commande réécrit le
+    /// statut), et seulement si aucune n'a échoué : une erreur (colonne
+    /// formule) reste affichée. Un seul message si les deux débordent.
+    fn notice_dropped(&mut self, columns: usize, fields: usize) {
+        if self.last_action_failed() {
+            return;
         }
+        match (columns, fields) {
+            (0, 0) => {}
+            (columns, 0) => self.notice(tr!("status-paste-columns-dropped", count = columns)),
+            (0, fields) => self.notice(tr!("status-paste-fields-dropped", count = fields)),
+            (columns, fields) => self.notice(tr!(
+                "status-paste-columns-fields-dropped",
+                columns = columns,
+                fields = fields
+            )),
+        }
+    }
+
+    /// Nombre de colonnes à abandonner : `wanted` voulues, `available` places.
+    fn dropped_columns(wanted: usize, available: usize) -> usize {
+        wanted.saturating_sub(available)
     }
 
     /// [`GridClipboard::Relative`] : voir [`AppState::apply_paste`] pour la
@@ -8036,7 +8066,12 @@ impl AppState {
                 if grouped {
                     self.end_grouped_macro();
                 }
-                self.notice_dropped_columns(column_count, targets.len());
+                // Rangées d'en-tête jetées : l'ancre bas les pousse au-delà de
+                // Formule (`writes` ne garde que celles qui tiennent).
+                self.notice_dropped(
+                    Self::dropped_columns(column_count, targets.len()),
+                    rows.len() - writes.len(),
+                );
             }
             (GridCursor::Data(_, anchor_row), RelativeCopy::DataRows { start, rows }) => {
                 let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
@@ -8070,7 +8105,7 @@ impl AppState {
                 if grouped {
                     self.end_grouped_macro();
                 }
-                self.notice_dropped_columns(column_count, targets.len());
+                self.notice_dropped(Self::dropped_columns(column_count, targets.len()), 0);
             }
             // Champs copiés + ancre sur une cellule de donnée, ou lignes de
             // données copiées + ancre sur un champ d'en-tête : sortes
@@ -8163,7 +8198,7 @@ impl AppState {
         if grouped {
             self.end_grouped_macro();
         }
-        self.notice_dropped_columns(columns.len(), targets.len());
+        self.notice_dropped(Self::dropped_columns(columns.len(), targets.len()), 0);
     }
 
     /// Relit les métadonnées actuelles de `column`, laisse `update` en

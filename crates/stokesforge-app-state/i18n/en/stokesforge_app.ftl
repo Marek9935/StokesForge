@@ -294,6 +294,13 @@ status-paste-columns-dropped =
         [one] One column did not fit and was not pasted
        *[other] { $count } columns did not fit and were not pasted
     }
+status-cell-decimal-comma = "{ $text }" was read as { $value } (decimal comma)
+status-paste-fields-dropped =
+    { $count ->
+        [one] One header field did not fit and was not pasted
+       *[other] { $count } header fields did not fit and were not pasted
+    }
+status-paste-columns-fields-dropped = { $columns } column(s) and { $fields } header field(s) did not fit and were not pasted
 status-graph-copied = Graph copied as { $formats }
 status-graph-copied-partly = Graph copied as { $formats }; { $missing } could not be prepared
 status-language-not-saved = Could not save the language choice: { $detail }
