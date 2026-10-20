@@ -47,7 +47,13 @@ cette colonne à l'abscisse x' (`NaN` si la colonne est plus courte), dans
 l'ordre de la feuille. `x` est ignoré. Résolue à la volée par
 `stokesforge_core::resolve` (donc vivante : éditer la feuille ou un x' met la
 série à jour) ; une feuille sans x' donne une série vide, la perte de l'ancre
-une référence rompue. `NodeCopy::capture` embarque toutes les colonnes x' de la
+une référence rompue. **La ligne suit les insertions et suppressions de lignes**
+de sa feuille (#307) : `InsertRows` pousse `r >= at` à `r + count`, `DeleteRows`
+ramène `r >= at + count` à `r - count`, dans le même delta (champ `plots`, donc
+annulable d'un bloc). Une ligne `r` dans la plage supprimée ne change pas : la
+série trace alors la ligne qui a pris sa place (cas ouvert, décision D1 de #307).
+`DeleteCells` ne déplace aucune ligne de feuille et ne touche pas aux séries.
+`NodeCopy::capture` embarque toutes les colonnes x' de la
 feuille quand un graphe copié a une telle série.
 
 **Groupe de séries (#177).** `SeriesSpec::group: Option<u32>` : les séries d'un

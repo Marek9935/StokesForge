@@ -111,7 +111,11 @@ Dans cet ordre, en s'arrêtant aux maillons que la commande touche réellement :
    nomme un mot introuvable à l'écran. Les autres natures de nœud gardent leur
    nom réel — celui-là *est* affiché, dans le Project Manager.
 3. **`stokesforge-commands/src/history.rs`** — le delta calculé à l'application, et
-   son annulation.
+   son annulation. Une commande de données qui **déplace des lignes** réécrit
+   dans le même delta les références de ligne qui en dépendent (séries
+   « ligne » des graphes : champ `plots` de `InsertRows`/`DeleteRows`, #307) :
+   specs avant/après capturés à l'application, écrits par `set_plot_spec`, pas
+   d'inverse recalculé.
 4. **`stokesforge-persistence`** — seulement si la commande écrit un état qui doit
    survivre au rechargement. `convert.rs`/`schema.rs` ont leurs propres types
    de transport : `stokesforge-plot` ne dépend pas de `serde` (invariant 3), la

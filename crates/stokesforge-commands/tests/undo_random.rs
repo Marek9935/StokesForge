@@ -21,6 +21,7 @@ use proptest::test_runner::{Config, RngAlgorithm, TestCaseError, TestRng, TestRu
 
 use stokesforge_commands::{Command, History, HistoryLabel, MacroKind};
 use stokesforge_core::{Column, ColumnType, MixedCell, Node, NodeId, Project, ValueBlock};
+use stokesforge_plot::{PlotSpec, SeriesSpec};
 
 // -- tirage ---------------------------------------------------------------
 
@@ -182,7 +183,7 @@ impl World {
         let sheet1 = project
             .resolve_path("[Book1]Sheet1")
             .expect("feuille Sheet1");
-        project
+        let col_a = project
             .add_column(sheet1, None, Some("A"), Column::from_f64(&[1.0, 2.0, 3.0]))
             .expect("colonne A");
         project
@@ -199,9 +200,23 @@ impl World {
         let sheet2 = project
             .add_worksheet(book, Some("Sheet2"))
             .expect("feuille Sheet2");
-        project
+        let col_x = project
             .add_column(sheet2, None, Some("X"), Column::from_f64(&[0.5, 1.5]))
             .expect("colonne X");
+        // Un graphe à séries « ligne » (#307) : les insertions et suppressions
+        // de lignes tirées réécrivent ses `PlotSpec` (delta `plots`), donc
+        // l'égalité d'arbre couvre aussi leur annulation et leur rétablissement.
+        let mut spec = PlotSpec::empty("Lignes");
+        let panel = spec.panels.get_mut(0).expect("panneau");
+        for (anchor, row) in [(col_a, 4), (col_a, 1), (col_x, 2), (col_x, 0)] {
+            let mut series = SeriesSpec::new(anchor);
+            series.row = Some(row);
+            panel.series.push(series);
+        }
+        let root = project.root();
+        project
+            .add_graph(root, Some("Lignes"), spec)
+            .expect("graphe de lignes");
         Self {
             project,
             sheets: vec![sheet1, sheet2],

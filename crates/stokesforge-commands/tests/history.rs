@@ -2368,3 +2368,210 @@ fn set_plot_spec_refuses_a_node_that_is_not_a_graph() {
     assert!(history.is_empty());
     assert_eq!(**f.project.tree(), *before);
 }
+
+// -- 12 bis. séries « ligne » (#307) ----------------------------------------
+
+/// Graphe dont chaque série trace la ligne `rows[i]` de la feuille de
+/// `anchors[i]`. Rend `(graphe, V)` où `V` est une colonne de 8 lignes
+/// (`0..8`) de `Sheet2`, porteuse d'un `x'`.
+fn row_graph(f: &mut Fixture, series: &[(Option<NodeId>, Option<usize>)]) -> (NodeId, NodeId) {
+    let v = f
+        .project
+        .add_column(
+            f.sheet2,
+            None,
+            Some("V"),
+            Column::from_f64(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]),
+        )
+        .expect("colonne V");
+    f.project
+        .set_column_meta(
+            v,
+            ColumnMeta {
+                x_prime: Some(1.0),
+                ..ColumnMeta::default()
+            },
+        )
+        .expect("x'");
+    let mut spec = PlotSpec::empty("Lignes");
+    let panel = spec.panels.get_mut(0).expect("panneau");
+    for (anchor, row) in series {
+        let mut s = stokesforge_plot::SeriesSpec::new(anchor.unwrap_or(v));
+        s.row = *row;
+        panel.series.push(s);
+    }
+    let root = f.project.root();
+    let graph = f
+        .project
+        .add_graph(root, Some("Fig"), spec)
+        .expect("graphe");
+    (graph, v)
+}
+
+fn series_rows(project: &Project, graph: NodeId) -> Vec<Option<usize>> {
+    match project.tree().get(graph).expect("nœud").kind() {
+        NodeKind::Graph { spec, .. } => spec.panels[0].series.iter().map(|s| s.row).collect(),
+        other => panic!("attendu un graphe, trouvé {other:?}"),
+    }
+}
+
+fn plot_spec_of(project: &Project, graph: NodeId) -> PlotSpec {
+    match project.tree().get(graph).expect("nœud").kind() {
+        NodeKind::Graph { spec, .. } => spec.clone(),
+        other => panic!("attendu un graphe, trouvé {other:?}"),
+    }
+}
+
+#[test]
+fn delete_rows_shifts_row_series_and_round_trips() {
+    let mut f = fixture();
+    let (graph, v) = row_graph(&mut f, &[(None, Some(5))]);
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+
+    history
+        .execute(
+            &mut f.project,
+            Command::DeleteRows {
+                sheet: f.sheet2,
+                at: 1,
+                count: 1,
+            },
+        )
+        .expect("suppression");
+    let after = snapshot(&f.project);
+    assert_eq!(series_rows(&f.project, graph), vec![Some(4)]);
+    // Bout à bout : la série trace toujours l'ancienne ligne 5.
+    let spec = plot_spec_of(&f.project, graph);
+    let resolved = stokesforge_core::resolve_series(f.project.tree(), &spec.panels[0].series[0]);
+    assert_eq!(resolved.y.expect("y").as_slice(), &[5.0]);
+    assert_eq!(floats(&f.project, v)[4], 5.0);
+
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(series_rows(&f.project, graph), vec![Some(5)]);
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(series_rows(&f.project, graph), vec![Some(4)]);
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn delete_rows_leaves_row_series_before_or_inside_the_range() {
+    let mut f = fixture();
+    let (graph, _) = row_graph(&mut f, &[(None, Some(1)), (None, Some(3)), (None, Some(4))]);
+    let mut history = History::new();
+    // Plage [3, 5) : la ligne 1 est avant, 3 et 4 sont dans la plage (cas
+    // ouvert, laissés tels quels).
+    history
+        .execute(
+            &mut f.project,
+            Command::DeleteRows {
+                sheet: f.sheet2,
+                at: 3,
+                count: 2,
+            },
+        )
+        .expect("suppression");
+    assert_eq!(
+        series_rows(&f.project, graph),
+        vec![Some(1), Some(3), Some(4)]
+    );
+}
+
+#[test]
+fn delete_rows_shifts_a_series_just_after_the_range() {
+    let mut f = fixture();
+    let (graph, _) = row_graph(&mut f, &[(None, Some(5))]);
+    let mut history = History::new();
+    // Plage [3, 5) : la ligne 5 est la première après la plage.
+    history
+        .execute(
+            &mut f.project,
+            Command::DeleteRows {
+                sheet: f.sheet2,
+                at: 3,
+                count: 2,
+            },
+        )
+        .expect("suppression");
+    assert_eq!(series_rows(&f.project, graph), vec![Some(3)]);
+}
+
+#[test]
+fn insert_rows_shifts_row_series_from_the_insertion_row_on() {
+    let mut f = fixture();
+    let (graph, _) = row_graph(&mut f, &[(None, Some(2)), (None, Some(1))]);
+    let mut history = History::new();
+    let before = snapshot(&f.project);
+    history
+        .execute(
+            &mut f.project,
+            Command::InsertRows {
+                sheet: f.sheet2,
+                at: 2,
+                count: 3,
+            },
+        )
+        .expect("insertion");
+    let after = snapshot(&f.project);
+    assert_eq!(series_rows(&f.project, graph), vec![Some(5), Some(1)]);
+    assert_eq!(history.undo(&mut f.project), Ok(true));
+    assert_eq!(series_rows(&f.project, graph), vec![Some(2), Some(1)]);
+    assert_eq!(**f.project.tree(), *before);
+    assert_eq!(history.redo(&mut f.project), Ok(true));
+    assert_eq!(**f.project.tree(), *after);
+}
+
+#[test]
+fn row_series_of_another_sheet_and_column_series_are_untouched() {
+    let mut f = fixture();
+    // Une série ancrée dans Sheet1 (colonne A) ; une série « colonne ».
+    let a = f.a;
+    let (graph, _) = row_graph(&mut f, &[(Some(a), Some(5)), (None, None)]);
+    let spec_before = plot_spec_of(&f.project, graph);
+    let mut history = History::new();
+    history
+        .execute(
+            &mut f.project,
+            Command::DeleteRows {
+                sheet: f.sheet2,
+                at: 1,
+                count: 1,
+            },
+        )
+        .expect("suppression");
+    assert_eq!(plot_spec_of(&f.project, graph), spec_before);
+    history
+        .execute(
+            &mut f.project,
+            Command::InsertRows {
+                sheet: f.sheet2,
+                at: 0,
+                count: 1,
+            },
+        )
+        .expect("insertion");
+    assert_eq!(plot_spec_of(&f.project, graph), spec_before);
+}
+
+#[test]
+fn row_series_beyond_the_sheet_resolve_to_nan_without_panicking() {
+    let mut f = fixture();
+    let (graph, v) = row_graph(&mut f, &[(None, Some(20))]);
+    let mut history = History::new();
+    history
+        .execute(
+            &mut f.project,
+            Command::DeleteRows {
+                sheet: f.sheet2,
+                at: 0,
+                count: 1,
+            },
+        )
+        .expect("suppression");
+    assert_eq!(series_rows(&f.project, graph), vec![Some(19)]);
+    let spec = plot_spec_of(&f.project, graph);
+    let resolved = stokesforge_core::resolve_series(f.project.tree(), &spec.panels[0].series[0]);
+    assert!(resolved.y.expect("y").as_slice()[0].is_nan());
+    let _ = v;
+}

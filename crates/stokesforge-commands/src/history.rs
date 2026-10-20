@@ -73,6 +73,11 @@ pub enum DataDelta {
         at: usize,
         /// Nombre de lignes insérées.
         count: usize,
+        /// Graphes dont des séries « ligne » (`row = Some(r)`) ont suivi
+        /// l'insertion : `(graphe, spec avant, spec après)`, capturés à
+        /// l'application (invariant 8). Annuler remet l'avant, rétablir
+        /// l'après — aucun inverse recalculé.
+        plots: Vec<(NodeId, PlotSpec, PlotSpec)>,
     },
     /// Suppression de lignes : les valeurs retirées, par colonne touchée.
     DeleteRows {
@@ -86,6 +91,10 @@ pub enum DataDelta {
         count: usize,
         /// Valeurs retirées, par colonne touchée, dans l'ordre de la feuille.
         removed: Vec<(NodeId, ValueBlock)>,
+        /// Graphes dont des séries « ligne » ont suivi la suppression :
+        /// `(graphe, spec avant, spec après)`. Même règle que pour
+        /// `InsertRows`.
+        plots: Vec<(NodeId, PlotSpec, PlotSpec)>,
     },
     /// Suppression de cellules par colonnes explicites, indépendamment les
     /// unes des autres (touche Suppr sur une sélection qui ne couvre pas
@@ -1240,20 +1249,41 @@ impl History {
                 // `DeleteRows`, où le niveau feuille est de toute façon
                 // impossible (une colonne vidée jusqu'à sa fin n'a plus de
                 // ligne `at`).
+                // Les séries « ligne » du projet suivent : specs relevés avant
+                // la mutation, réécrits après (par `set_plot_spec`).
+                let moved = shifted_row_specs(project.tree(), sheet, |r| {
+                    (r >= at).then(|| r.saturating_add(count))
+                });
                 let columns = project.insert_rows(sheet, at, count)?;
+                let plots = write_row_specs(project, moved)?;
                 Ok(Entry::Data {
-                    delta: Box::new(DataDelta::InsertRows { columns, at, count }),
+                    delta: Box::new(DataDelta::InsertRows {
+                        columns,
+                        at,
+                        count,
+                        plots,
+                    }),
                     label,
                 })
             }
             Command::DeleteRows { sheet, at, count } => {
+                // Une série « ligne » après la plage supprimée recule de
+                // `count`. Une série dont la ligne est dans la plage supprimée
+                // reste telle quelle (décision ouverte, #307 D1) : elle trace
+                // alors la ligne qui a pris sa place, ou rien au-delà de la
+                // feuille (NaN, invariant 10).
+                let moved = shifted_row_specs(project.tree(), sheet, |r| {
+                    (r >= at.saturating_add(count)).then(|| r - count)
+                });
                 let removed = project.delete_rows(sheet, at, count)?;
+                let plots = write_row_specs(project, moved)?;
                 Ok(Entry::Data {
                     delta: Box::new(DataDelta::DeleteRows {
                         sheet,
                         at,
                         count,
                         removed,
+                        plots,
                     }),
                     label,
                 })
@@ -1456,16 +1486,29 @@ impl History {
                 project.set_length(*column, *before_length)?;
                 Ok(())
             }
-            DataDelta::InsertRows { columns, at, count } => {
+            DataDelta::InsertRows {
+                columns,
+                at,
+                count,
+                plots,
+            } => {
                 for column in columns {
                     project.delete_column_rows(*column, *at, *count)?;
                 }
+                for (graph, before, _) in plots {
+                    project.set_plot_spec(*graph, before.clone())?;
+                }
                 Ok(())
             }
-            DataDelta::DeleteRows { at, removed, .. } => {
+            DataDelta::DeleteRows {
+                at, removed, plots, ..
+            } => {
                 for (column, block) in removed {
                     project.insert_column_rows(*column, *at, block.len())?;
                     project.set_values(*column, *at, block.clone())?;
+                }
+                for (graph, before, _) in plots {
+                    project.set_plot_spec(*graph, before.clone())?;
                 }
                 Ok(())
             }
@@ -1530,18 +1573,31 @@ impl History {
                 project.set_values(*column, *start, after.clone())?;
                 Ok(())
             }
-            DataDelta::InsertRows { columns, at, count } => {
+            DataDelta::InsertRows {
+                columns,
+                at,
+                count,
+                plots,
+            } => {
                 for column in columns {
                     project.insert_column_rows(*column, *at, *count)?;
                 }
+                for (graph, _, after) in plots {
+                    project.set_plot_spec(*graph, after.clone())?;
+                }
                 Ok(())
             }
-            DataDelta::DeleteRows { at, removed, .. } => {
+            DataDelta::DeleteRows {
+                at, removed, plots, ..
+            } => {
                 // Colonne par colonne, et non `delete_rows` au niveau feuille :
                 // seules les colonnes réellement touchées la première fois
                 // doivent l'être à nouveau.
                 for (column, block) in removed {
                     project.delete_column_rows(*column, *at, block.len())?;
+                }
+                for (graph, _, after) in plots {
+                    project.set_plot_spec(*graph, after.clone())?;
                 }
                 Ok(())
             }
@@ -1729,6 +1785,55 @@ fn write_cells(
 }
 
 /// Type et valeurs actuels d'une colonne (snapshot d'un changement de type).
+/// Specs des graphes dont au moins une série « ligne » (`row = Some(r)`,
+/// ancre `y` dans `sheet`) bouge selon `shift` (`Some(nouvelle ligne)` ou
+/// `None` pour la laisser). Pur : lit l'arbre, ne mute rien. Une ancre
+/// rompue (colonne absente) est ignorée. Rend `(graphe, avant, après)` pour
+/// les seuls graphes modifiés.
+fn shifted_row_specs(
+    tree: &Tree,
+    sheet: NodeId,
+    shift: impl Fn(usize) -> Option<usize>,
+) -> Vec<(NodeId, PlotSpec, PlotSpec)> {
+    let mut out = Vec::new();
+    for id in tree.walk_all() {
+        let Ok(node) = tree.get(id) else { continue };
+        let stokesforge_core::NodeKind::Graph { spec, .. } = node.kind() else {
+            continue;
+        };
+        let mut after = spec.clone();
+        let mut changed = false;
+        for panel in after.panels.iter_mut() {
+            for series in &mut panel.series {
+                let Some(row) = series.row else { continue };
+                if tree.parent(series.y).ok().flatten() != Some(sheet) {
+                    continue;
+                }
+                if let Some(new_row) = shift(row) {
+                    series.row = Some(new_row);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            out.push((id, spec.clone(), after));
+        }
+    }
+    out
+}
+
+/// Écrit les specs relevés par [`shifted_row_specs`] (par
+/// `Project::set_plot_spec`, invariant 1) et rend le delta `plots`.
+fn write_row_specs(
+    project: &mut Project,
+    moved: Vec<(NodeId, PlotSpec, PlotSpec)>,
+) -> CoreResult<Vec<(NodeId, PlotSpec, PlotSpec)>> {
+    for (graph, _, after) in &moved {
+        project.set_plot_spec(*graph, after.clone())?;
+    }
+    Ok(moved)
+}
+
 fn column_state(project: &Project, column: NodeId) -> CoreResult<(ColumnType, ColumnValues)> {
     let node = project.tree().get(column)?;
     let target = node

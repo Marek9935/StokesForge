@@ -172,6 +172,17 @@ nouveau groupe ajoute une variante de `MacroKind`, sa clé `history-macro-*` et
 sa ligne de `Display`. L'historique n'est pas écrit dans le `.stf`
 ([`persistance.md`](persistance.md)).
 
+### Une commande de données qui déplace des lignes réécrit les références de ligne (#307)
+
+`DataDelta::InsertRows` et `DeleteRows` portent `plots: Vec<(NodeId, PlotSpec,
+PlotSpec)>` (graphe, spec avant, spec après) : les séries « ligne »
+(`row = Some(r)`) dont l'ancre `y` est dans la feuille suivent le décalage. Les
+specs sont relevés avant la mutation des données, réécrits après par
+`Project::set_plot_spec` (invariant 1), et capturés à l'application
+(invariant 8) : `revert` remet l'avant, `reapply` l'après, sans inverse recalculé
+et sans `Entry::Macro` (le libellé « Delete N rows » reste). Une ancre rompue est
+ignorée ; la ligne dans la plage supprimée reste telle quelle (D1 ouverte).
+
 ## Macros
 
 `begin_macro` / `end_macro` / `abort_macro` groupent des commandes en une seule
