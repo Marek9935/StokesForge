@@ -340,10 +340,15 @@ impl GraphView {
     /// Outil de tracé actif : un glisser principal trace l'objet (aperçu),
     /// le relâchement le valide en un seul [`GraphEvent::ShapeChanged`] puis
     /// rend la main à l'outil Pointeur.
-    pub(crate) fn handle_shape_draw(&mut self, response: &Response, spec: &PlotSpec) {
+    pub(crate) fn handle_shape_draw(&mut self, response: &Response, spec: &PlotSpec, pan: bool) {
         let Some(kind) = self.tool.shape_kind() else {
             return;
         };
+        // Ctrl ou bouton milieu à la pression : c'est un pan, pas un tracé,
+        // et un Ctrl + clic ne pose rien (#318).
+        if pan {
+            return;
+        }
         // Egui appelle aussi « clic » les petits glissers. Leur garde-fou
         // de 4 px reste inchangé : seule une pression quasi immobile (1 px
         // de tolérance écran) insère la taille par défaut.

@@ -1179,3 +1179,145 @@ fn double_cliquer_un_axe_ou_une_courbe_ouvre_ses_parametres() {
     let signaux = double_clic(&context, &mut view, &banc, rect, courbe);
     assert_eq!(signaux, vec![GraphEvent::OpenSeriesProperties(attendue)]);
 }
+
+// -- #318 : Ctrl + glisser panne partout, y compris au-dessus d'un objet --
+
+fn ctrl_clavier(on: bool) -> egui::Event {
+    egui::Event::ModifiersChanged(if on {
+        egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        }
+    } else {
+        egui::Modifiers::NONE
+    })
+}
+
+/// Glisse de `from` à `to` en cinq pas, Ctrl enfoncé dès avant la pression
+/// (ou le bouton milieu si `milieu`) ; rend les signaux sortis.
+fn glisser_sous_ctrl(
+    context: &egui::Context,
+    view: &mut GraphView,
+    banc: &Banc,
+    rect: Rect,
+    from: Pos2,
+    to: Pos2,
+    milieu: bool,
+) -> Vec<stokesforge_render_egui::GraphEvent> {
+    let button = if milieu {
+        egui::PointerButton::Middle
+    } else {
+        egui::PointerButton::Primary
+    };
+    let press = |pos: Pos2, pressed: bool| egui::Event::PointerButton {
+        pos,
+        button,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let mut debut = vec![egui::Event::PointerMoved(from), press(from, true)];
+    if !milieu {
+        debut.insert(0, ctrl_clavier(true));
+    }
+    let mut signaux = image_avec(context, view, banc, rect, debut, 0.1);
+    for pas in 1..=5 {
+        let pos = from + (to - from) * (pas as f32 / 5.0);
+        signaux.extend(image_avec(
+            context,
+            view,
+            banc,
+            rect,
+            vec![egui::Event::PointerMoved(pos)],
+            0.1 + 0.05 * pas as f64,
+        ));
+    }
+    signaux.extend(image_avec(
+        context,
+        view,
+        banc,
+        rect,
+        vec![press(to, false), ctrl_clavier(false)],
+        0.5,
+    ));
+    signaux.extend(image_avec(context, view, banc, rect, vec![], 0.6));
+    signaux
+}
+
+/// Un texte libre, un titre et une forme ne se déplacent pas sous Ctrl ou
+/// clic milieu : le geste est un pan, sans `AnnotationMoved`, `TextMoved` ni
+/// `ShapeChanged`. Le glisser simple, lui, les déplace toujours (tests
+/// voisins).
+#[test]
+fn ctrl_glisser_parti_d_un_objet_panne_au_lieu_de_le_deplacer() {
+    use stokesforge_render_egui::TextTarget;
+    let rect = Rect::from_min_size(Pos2::ZERO, egui::vec2(600.0, 400.0));
+    for milieu in [false, true] {
+        // Texte libre.
+        let banc = banc_avec_texte();
+        let context = contexte();
+        let mut view = GraphView::new();
+        image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+        let (centre, _, _) = view
+            .annotation_screen_box(stokesforge_plot::AnnotationRef { panel: 0, index: 0 })
+            .expect("texte tracé");
+        let signaux = glisser_sous_ctrl(
+            &context,
+            &mut view,
+            &banc,
+            rect,
+            centre,
+            centre + egui::vec2(60.0, 0.0),
+            milieu,
+        );
+        assert!(signaux.is_empty(), "texte (milieu={milieu}) : {signaux:?}");
+        assert!(
+            view.view().generation() > 0,
+            "texte (milieu={milieu}) : pas de pan"
+        );
+        assert!(view.annotation_preview().is_none());
+
+        // Titre.
+        let banc = Banc::with_title("Titre");
+        let context = contexte();
+        let mut view = GraphView::new();
+        image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+        let (centre, _, _) = view.text_screen_box(TextTarget::Title).expect("titre");
+        let signaux = glisser_sous_ctrl(
+            &context,
+            &mut view,
+            &banc,
+            rect,
+            centre,
+            centre + egui::vec2(0.0, 60.0),
+            milieu,
+        );
+        assert!(signaux.is_empty(), "titre (milieu={milieu}) : {signaux:?}");
+        assert!(
+            view.view().generation() > 0,
+            "titre (milieu={milieu}) : pas de pan"
+        );
+
+        // Forme.
+        let banc = banc_avec_forme();
+        let context = contexte();
+        let mut view = GraphView::new();
+        image_avec(&context, &mut view, &banc, rect, vec![], 0.0);
+        let (a, b) = forme_a_l_ecran(&view, 0);
+        let centre = a.lerp(b, 0.5);
+        let signaux = glisser_sous_ctrl(
+            &context,
+            &mut view,
+            &banc,
+            rect,
+            centre,
+            centre + egui::vec2(60.0, 0.0),
+            milieu,
+        );
+        assert!(signaux.is_empty(), "forme (milieu={milieu}) : {signaux:?}");
+        assert!(
+            view.view().generation() > 0,
+            "forme (milieu={milieu}) : pas de pan"
+        );
+    }
+}

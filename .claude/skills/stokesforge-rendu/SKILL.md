@@ -97,6 +97,9 @@ Corollaire pratique : une traduction de donnée (une cellule mixte qui devient
   annuler un zoom par Ctrl+Z. La règle « toute mutation passe par une
   commande » ne s'applique pas au cadrage de vue — et le panneau de
   configuration des graphes n'a, et n'aura, aucun champ de navigation.
+  Le pan du graphe se fait par Ctrl + glisser ou clic milieu + glisser (jamais
+  au glisser simple, #318) ; le geste est décidé à la pression (`decide_nav`) et
+  le feathering ne se coupe que pendant un geste réel (invariant 6).
 
 **Une règle en `f64` ne s'écrit pas dans `stokesforge-render-egui`** (#254,
 #262). Cadrage d'un geste, zoom, pan, point le plus proche du curseur :

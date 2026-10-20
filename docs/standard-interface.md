@@ -705,10 +705,14 @@ Historique : #227, #237 (largeur « quelques chiffres »), #241 (volet Results).
   **toute sortie est justifiée deux fois**, dans le code et ici.
 - **Les gestes sont dans une matrice** (S-K8, #299) : [`gestes.md`](gestes.md)
   dit ce que font clic, glisser, double-clic, molette, Ctrl + molette, Ctrl +
-  glisser et clic droit sur chaque surface (graphe, aperçu d'analyse, grille,
+  glisser, clic milieu et clic droit sur chaque surface (graphe, aperçu d'analyse, grille,
   arbres, onglets, fenêtres, champs). Une surface nouvelle, ou un geste nouveau
   sur une surface existante, s'y range ; un geste qui diffère de la même action
   ailleurs se signale contre cette page. La matrice n'est pas recopiée ici.
+  Le déplacement de la vue est le même geste partout (#318, #270) : Ctrl +
+  glisser ou clic milieu + glisser, sur le graphe comme sur l'aperçu
+  d'analyse ; le glisser simple ne déplace jamais la vue (il déplace l'objet
+  saisi, ou rien), et parti d'un axe, le geste ne déplace que cette échelle.
 
 Comment c'est tenu (S-K7, S-K8) :
 

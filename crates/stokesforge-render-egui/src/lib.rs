@@ -221,8 +221,10 @@ pub enum GraphEvent {
 /// comme le cadrage : jamais dans le modèle, jamais annulable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum GraphTool {
-    /// Le défaut : glisser fait défiler la vue, les textes se saisissent et
-    /// se déplacent, Ctrl+molette zoome.
+    /// Le défaut : un glisser simple ne déplace que les objets (textes,
+    /// formes, titre, légende) ; Ctrl + glisser ou clic milieu + glisser fait
+    /// défiler la vue (une seule échelle si le geste part d'un axe, #318),
+    /// Ctrl+molette zoome.
     #[default]
     Pointer,
     /// Glisser trace un rectangle de zoom.
@@ -556,12 +558,26 @@ pub struct GraphView {
     events: Vec<GraphEvent>,
 }
 
-/// La cible d'un glisser de navigation : toute la zone de tracé, ou une seule
-/// échelle (glisser sur un axe, #167).
+/// Ce que fait le glisser en cours, décidé à la pression (comme `DragMode`
+/// de l'aperçu d'analyse) : toute la zone de tracé, une seule échelle (glisser
+/// parti d'un axe, #167), ou aucun pan. Le pan exige Ctrl ou le bouton milieu
+/// à la pression (#318) ; relâcher Ctrl en route ne l'interrompt pas, le
+/// presser en route ne le déclenche pas.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum NavDrag {
     Plot,
-    Axis { panel: usize, side: AxisSide },
+    Axis {
+        panel: usize,
+        side: AxisSide,
+    },
+    /// Pas de pan : glisser simple (outil, objet ou rien).
+    Inert,
+}
+
+impl NavDrag {
+    fn is_pan(self) -> bool {
+        !matches!(self, NavDrag::Inert)
+    }
 }
 
 /// Les quatre sélections d'une vue, pour détecter qu'elles ont changé.
@@ -1304,7 +1320,9 @@ impl GraphView {
         // Un réglage de `Context`, donc pour toute la fenêtre : sans effet
         // tant qu'un seul graphe est affiché à la fois (`stokesforge-app`
         // aujourd'hui), à revoir si plusieurs vues cohabitent un jour.
-        feathering::apply(&context, Feathering::during_drag(response.dragged()));
+        // Seul un geste réel le coupe (#318) : un glisser simple sans effet
+        // (Pointeur sur le fond) laisse le feathering en place ; il est
+        // appliqué plus bas, une fois la navigation traitée.
 
         // Un aperçu validé s'efface dès que le modèle l'a rattrapé.
         if self
@@ -1322,6 +1340,13 @@ impl GraphView {
         self.selected_text = self.selected_text.filter(|t| t.visible(&spec).is_some());
         self.follow_selection(&spec);
         self.handle_navigation(&response, &context, &spec);
+        let real_gesture = response.dragged()
+            && (self.nav_drag.is_some_and(NavDrag::is_pan)
+                || self.drag_box.is_some()
+                || self.shape_drag.is_some()
+                || self.annotation_drag.is_some()
+                || self.text_drag.is_some());
+        feathering::apply(&context, Feathering::during_drag(real_gesture));
 
         let key = CacheKey {
             revision: snapshot.revision,
@@ -1489,6 +1514,47 @@ impl GraphView {
             .commit_axis_gesture(&last.panels, panel_index, side, gesture);
     }
 
+    /// Décide, à la pression, ce que fera le glisser en cours (#318) : un pan
+    /// si Ctrl est enfoncé (bouton principal) ou si c'est le bouton milieu,
+    /// sur une seule échelle quand la pression part d'un axe ; sinon aucun
+    /// pan. Rend l'état de ce geste, y compris à l'image du relâchement (un
+    /// Ctrl + clic ne doit rien poser). `None` au repos.
+    fn decide_nav(&mut self, response: &Response, context: &egui::Context) -> Option<NavDrag> {
+        let (primary, middle, command, press) = context.input(|input| {
+            (
+                input.pointer.button_down(PointerButton::Primary),
+                input.pointer.button_down(PointerButton::Middle),
+                input.modifiers.command,
+                input.pointer.press_origin(),
+            )
+        });
+        let down =
+            (response.is_pointer_button_down_on() && (primary || middle)) || response.dragged();
+        if !down {
+            let ended = self.nav_drag.take();
+            // Un clic complet dans une seule image n'a pas laissé d'état.
+            return ended.or_else(|| {
+                (response.clicked_by(PointerButton::Primary) && command).then_some(NavDrag::Plot)
+            });
+        }
+        if self.nav_drag.is_none() {
+            let origin = press.or_else(|| {
+                response
+                    .interact_pointer_pos()
+                    .map(|pos| pos - response.drag_delta())
+            });
+            let wants_pan = middle || (primary && command);
+            self.nav_drag = Some(match (wants_pan, origin) {
+                (true, Some(origin)) => match self.axis_at(origin) {
+                    Some((panel, side)) => NavDrag::Axis { panel, side },
+                    None => NavDrag::Plot,
+                },
+                _ => NavDrag::Inert,
+            });
+        }
+        self.nav_drag
+    }
+
     /// Ctrl+molette (zoom), glissé principal (pan avec l'outil Pointeur,
     /// rectangle de zoom élastique avec l'outil Zoom), clic de l'outil Texte
     /// et double-clic (réinitialisation) — tâches 7.1 et 7.4, issue #62. Ne fait rien tant qu'aucune figure n'a encore été tracée.
@@ -1496,6 +1562,8 @@ impl GraphView {
         if self.last.is_none() {
             return;
         }
+        let nav = self.decide_nav(response, context);
+        let pan = nav.is_some_and(NavDrag::is_pan);
 
         // Issue #35 : un clic choisit le texte libre sous le pointeur (ou
         // aucun), un double-clic sur un texte l'édite au lieu de
@@ -1582,16 +1650,17 @@ impl GraphView {
             }
         }
         if self.tool == GraphTool::Pointer
+            && !pan
             && (self.handle_annotation_drag(response, spec)
                 || self.handle_shape_drag(response, spec)
                 || self.handle_text_drag(response, spec))
         {
             return;
         }
-        self.handle_shape_draw(response, spec);
+        self.handle_shape_draw(response, spec, pan);
 
         // Outil Texte : un clic dans la zone de tracé pose le texte.
-        if self.tool == GraphTool::Text && response.clicked() {
+        if self.tool == GraphTool::Text && !pan && response.clicked() {
             if let Some((panel, x, y)) = pointer.and_then(|pos| self.data_at(pos)) {
                 self.events.push(GraphEvent::PlaceText { panel, x, y });
             }
@@ -1626,49 +1695,35 @@ impl GraphView {
             }
         }
 
-        if !response.dragged_by(PointerButton::Primary) {
-            self.nav_drag = None;
-        }
-        if self.tool == GraphTool::Pointer && response.dragged_by(PointerButton::Primary) {
+        // Pan : Ctrl + glisser ou clic milieu + glisser, partout dans le
+        // graphe, quel que soit l'outil (#318). La cible est celle décidée à
+        // la pression : une fois qu'on glisse, le curseur peut sortir de la
+        // zone de tracé ou de l'axe sans que la cible ne change.
+        let panning = response.dragged_by(PointerButton::Primary)
+            || response.dragged_by(PointerButton::Middle);
+        if let (true, Some(target)) = (panning, nav.filter(|n| n.is_pan())) {
             let delta = response.drag_delta();
             if let Some(pos) = response.interact_pointer_pos() {
-                // La cible est celle du point de départ du geste, décidée à
-                // la première image : une fois qu'on glisse, le curseur peut
-                // sortir de la zone de tracé (paner jusqu'au bord d'un
-                // panneau voisin) ou de l'axe sans que la cible ne change en
-                // cours de route. Un glisser parti d'un axe ne déplace que
-                // cette échelle (#167).
                 let origin = pos - delta;
-                let target = match self.nav_drag {
-                    Some(target) => target,
-                    None => {
-                        let target = match self.axis_at(origin) {
-                            Some((panel, side)) => NavDrag::Axis { panel, side },
-                            None => NavDrag::Plot,
-                        };
-                        self.nav_drag = Some(target);
-                        target
-                    }
-                };
                 let scale = self.display_scale().unwrap_or(1.0);
-                let pan = Gesture::Pan {
+                let gesture = Gesture::Pan {
                     dx: (delta.x / scale) as f64,
                     dy: (delta.y / scale) as f64,
                 };
                 match target {
-                    NavDrag::Axis { panel, side } => self.commit_axis_gesture(panel, side, pan),
-                    NavDrag::Plot => {
+                    NavDrag::Axis { panel, side } => self.commit_axis_gesture(panel, side, gesture),
+                    _ => {
                         if let Some((panel_index, _)) =
                             self.panel_at(origin).or_else(|| self.panel_at(pos))
                         {
-                            self.commit_gesture(panel_index, pan);
+                            self.commit_gesture(panel_index, gesture);
                         }
                     }
                 }
             }
         }
 
-        if self.tool == GraphTool::ZoomBox && response.dragged_by(PointerButton::Primary) {
+        if self.tool == GraphTool::ZoomBox && !pan && response.dragged_by(PointerButton::Primary) {
             if let Some(pos) = response.interact_pointer_pos() {
                 // **Ne pas** se fier à `drag_started_by` pour capturer le
                 // point de départ : sur un widget sensible au clic *et* au

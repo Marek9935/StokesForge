@@ -36,8 +36,8 @@ de l'**outil actif** de la barre Tools.
 |---|---|---|
 | Clic | courbe, texte libre, forme, titre, légende | sélectionne l'objet (l'outil Pointeur seul sélectionne une courbe) |
 | Clic | zone nue | désélectionne ; active le calque cliqué ; outil Texte : pose un texte |
-| Glisser | zone de tracé, outil Pointeur | déplace la vue (pan) |
-| Glisser | un axe, outil Pointeur | ne déplace que l'échelle de cet axe |
+| Glisser | zone de tracé, outil Pointeur ou Texte | — (rien : plus de pan au glisser simple, #318) |
+| Glisser | un axe | — (rien ; le pan d'une échelle se fait sous Ctrl ou au clic milieu) |
 | Glisser | texte libre, forme, titre ou légende, outil Pointeur | déplace l'objet (une poignée de largeur le redimensionne) |
 | Glisser | zone de tracé, outil Zoom | rectangle de zoom (au-delà de 4 px) |
 | Glisser | zone de tracé, outil de forme | trace la forme ; un clic sans mouvement pose la taille par défaut |
@@ -47,7 +47,9 @@ de l'**outil actif** de la barre Tools.
 | Molette | — | — (la molette seule ne zoome pas, #62) |
 | Ctrl + molette (ou pincement) | zone de tracé | zoom ancré sous le pointeur |
 | Ctrl + molette | un axe | zoom de cette seule échelle |
-| Ctrl + glisser | zone de tracé, outil Pointeur | déplace la vue, comme le glisser simple (le modificateur n'est pas lu) |
+| Ctrl + glisser, ou clic milieu + glisser | zone de tracé, tout outil, y compris au-dessus d'un texte, d'un titre, d'une forme, de la légende ou d'une poignée d'analyse | déplace la vue (pan) ; ni rectangle de zoom, ni forme tracée, ni objet déplacé ; hors du cadre du graphe : — |
+| Ctrl + glisser, ou clic milieu + glisser | un axe | ne déplace que l'échelle de cet axe (même geste que l'aperçu d'analyse, #318) |
+| Ctrl + clic | zone de tracé, outil Texte ou de forme | — (aucun texte posé, aucune forme, pas de retour au Pointeur) |
 | Clic droit | tout objet ou la zone | sélectionne la cible et ouvre son menu |
 | Maj + molette | — | — |
 
@@ -179,6 +181,13 @@ Surfaces lues (chemins relatifs à `src/` ; `render-egui/` pour
 
 ## Vérification (2026-10-20)
 
+**Graphe, avant #318** : les lignes ci-dessous qui disent « glisser = pan » et
+« glisser un axe » décrivent le comportement d'**avant #318** (le Pointeur
+déplaçait la vue au glisser simple, sans lire Ctrl). Aujourd'hui : Ctrl ou
+clic milieu + glisser, couvert par les tests d'interaction et de session de
+stokesforge-render-egui (voir docs/tests.md), rejoué dans l'application après #318. Le geste est lu à la
+pression : Ctrl relâché en route, le pan continue ; pressé en route, rien.
+
 Rejoué dans l'application réelle (pilote `run-stokesforge`, X11 sous
 Xwayland, souris et molette injectées par XTEST). Une ligne par geste de la
 matrice ; « lu dans le code » = non rejoué.
@@ -193,7 +202,7 @@ changeait jamais en vrai.
 
 - **Confirmés** : clic sur une fenêtre derrière ; graphe : Molette seule sans
   zoom, Ctrl + molette (zone, ancré), Ctrl + molette sur un axe (cette échelle
-  seule), glisser = pan, glisser un axe, outil Zoom (rectangle), double-clic
+  seule), glisser = pan (avant #318), glisser un axe (avant #318), outil Zoom (rectangle), double-clic
   courbe (paramètres), double-clic zone nue (recadre), clic et glisser de la
   légende ; grille : clic, Ctrl + clic, Maj + clic, glisser, Ctrl + glisser,
   lettre de colonne (clic, Maj, Ctrl), numéro de ligne (clic, Maj), case « # »,

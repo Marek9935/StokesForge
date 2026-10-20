@@ -249,7 +249,8 @@ forme de taille par défaut (#153) : rectangle carré et ellipse circulaire de
 du point cliqué. Glisser trace librement l'objet (aperçu dans la vue) ; le
 clic ou relâchement rend la main à l'outil Pointeur et sélectionne l'objet.
 Avec le Pointeur : un clic sélectionne (contour et poignées),
-glisser le corps déplace, glisser une poignée redimensionne, Suppr retire.
+glisser le corps déplace (Ctrl + glisser ou clic milieu + glisser déplace la vue
+au lieu de l'objet, #318), glisser une poignée redimensionne, Suppr retire.
 Maintenir Maj pendant le redimensionnement conserve les proportions à l'écran
 au début du geste : le coin opposé reste fixe, une poignée de côté conserve
 le côté opposé et le centre de l'autre dimension. Une ligne ou flèche garde

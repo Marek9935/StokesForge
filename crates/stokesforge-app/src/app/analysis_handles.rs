@@ -173,7 +173,18 @@ pub(super) fn calculation_handles(
             painter.vline(at.x, plot.y_range(), line);
         }
         let hit = egui::Rect::from_center_size(at, egui::Vec2::splat(GRAB_RADIUS * 2.0));
-        let response = ui.interact(hit, handle_id(graph, handle.slot), egui::Sense::drag());
+        // Ctrl ou clic milieu : le geste est un pan du graphe (#318), la
+        // poignée le laisse passer. Une poignée déjà tenue garde son glisser.
+        let passes_pan = drag.is_none()
+            && ui.input(|i| {
+                i.modifiers.command || i.pointer.button_down(egui::PointerButton::Middle)
+            });
+        let sense = if passes_pan {
+            egui::Sense::hover()
+        } else {
+            egui::Sense::drag()
+        };
+        let response = ui.interact(hit, handle_id(graph, handle.slot), sense);
         let response = super::cursors::grab_handle(response);
         let hot = response.hovered() || response.dragged();
         painter.circle(

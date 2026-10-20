@@ -176,74 +176,281 @@ fn zoomer_a_la_molette_retrecit_le_cadrage_et_fait_avancer_la_generation() {
     );
 }
 
-#[test]
-fn glisser_le_bouton_principal_deplace_le_cadrage() {
+/// Ctrl tel que le livre un clavier réel : `ctrl` et `command` ensemble.
+fn ctrl(on: bool) -> Event {
+    Event::ModifiersChanged(if on {
+        egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        }
+    } else {
+        egui::Modifiers::NONE
+    })
+}
+
+/// Un glisser rejoué sur cinq images (#318) : pression en `start`, deux
+/// déplacements, relâchement en `end`. `ctrl_pression` : Ctrl enfoncé avant
+/// la pression ; `ctrl_en_route` : son état dès l'image du premier
+/// déplacement. Rend, image par image, si la figure vient du cache.
+#[allow(clippy::too_many_arguments)]
+fn glisser(
+    context: &egui::Context,
+    view: &mut GraphView,
+    snapshot: &Snapshot,
+    graph: NodeId,
+    start: Pos2,
+    end: Pos2,
+    button: PointerButton,
+    ctrl_pression: bool,
+    ctrl_en_route: bool,
+) -> Vec<bool> {
+    let mid = start + (end - start) * 0.5;
+    let mut pression = Vec::new();
+    if ctrl_pression {
+        pression.push(ctrl(true));
+    }
+    pression.push(pointer_moved(start));
+    pression.push(pointer_button(start, button, true));
+    let mut en_route = Vec::new();
+    if ctrl_en_route != ctrl_pression {
+        en_route.push(ctrl(ctrl_en_route));
+    }
+    en_route.push(pointer_moved(mid));
+    let mut fin = vec![pointer_button(end, button, false)];
+    if ctrl_en_route {
+        fin.push(ctrl(false));
+    }
+    [pression, en_route, vec![pointer_moved(end)], fin, vec![]]
+        .into_iter()
+        .map(|events| image(context, view, snapshot, graph, events))
+        .collect()
+}
+
+fn largeur(range: (f64, f64)) -> f64 {
+    range.1 - range.0
+}
+
+/// Le glisser de cadrage de base, sur le fond, pour les tests de #318.
+fn pan_sur_le_fond(
+    tool: stokesforge_render_egui::GraphTool,
+    button: PointerButton,
+    ctrl_pression: bool,
+    ctrl_en_route: bool,
+) -> ((f64, f64), (f64, f64), u64, Vec<bool>) {
     let (session, graph) = banc();
     let snapshot = session.handle().snapshot().expect("instantané");
     let context = contexte();
     let mut view = GraphView::new();
-
+    view.set_tool(tool);
     image(&context, &mut view, &snapshot, graph, vec![]);
-    let avant = view
-        .last_drawn()
-        .expect("une figure a été tracée")
-        .x_range();
-
-    let start = Pos2::new(300.0, 300.0);
-    let end = Pos2::new(500.0, 300.0);
-
-    // Presser sur le rectangle interactif de l'image précédente.
-    image(
+    let avant = view.last_drawn().expect("figure").x_range();
+    let cache = glisser(
         &context,
         &mut view,
         &snapshot,
         graph,
-        vec![
-            pointer_moved(start),
-            pointer_button(start, PointerButton::Primary, true),
-        ],
+        Pos2::new(300.0, 300.0),
+        Pos2::new(500.0, 300.0),
+        button,
+        ctrl_pression,
+        ctrl_en_route,
     );
-    // Bouger, bouton toujours enfoncé (l'état « pressé » persiste tant
-    // qu'aucun événement de relâchement n'arrive).
-    image(
-        &context,
-        &mut view,
-        &snapshot,
-        graph,
-        vec![pointer_moved(end)],
-    );
-    // Relâcher, et laisser une image de plus stabiliser la figure.
-    image(
-        &context,
-        &mut view,
-        &snapshot,
-        graph,
-        vec![pointer_button(end, PointerButton::Primary, false)],
-    );
-    image(&context, &mut view, &snapshot, graph, vec![]);
+    let apres = view.last_drawn().expect("figure").x_range();
+    (avant, apres, view.view().generation(), cache)
+}
 
+/// #318 : Ctrl + glisser déplace le cadrage, partout dans le tracé et quel
+/// que soit l'outil Pointeur ; glisser vers la droite fait apparaître ce qui
+/// était à gauche (les deux bornes baissent), sans changer la largeur.
+#[test]
+fn ctrl_glisser_deplace_le_cadrage() {
+    use stokesforge_render_egui::GraphTool;
+    let (avant, apres, generation, _) =
+        pan_sur_le_fond(GraphTool::Pointer, PointerButton::Primary, true, true);
     assert!(
-        view.view().generation() > 0,
-        "le glissé n'a fait avancer aucune génération de vue"
+        generation > 0,
+        "le glissé n'a fait avancer aucune génération"
     );
-    let apres = view
-        .last_drawn()
-        .expect("une figure a été tracée")
-        .x_range();
-    // Glisser vers la droite fait apparaître ce qui était à gauche : les
-    // deux bornes doivent baisser (`stokesforge_render::interact`, dérivation
-    // détaillée et déjà vérifiée dans `crates/stokesforge-render/src/interact.rs`).
     assert!(
         apres.0 < avant.0 && apres.1 < avant.1,
-        "le glissé n'a pas déplacé le cadrage dans le sens attendu : \
-         avant {avant:?}, après {apres:?}"
+        "mauvais sens : avant {avant:?}, après {apres:?}"
     );
-    // La largeur du cadrage, elle, ne doit pas avoir bougé : un pan n'est
-    // pas un zoom.
     assert!(
-        ((apres.1 - apres.0) - (avant.1 - avant.0)).abs() < 1e-6,
-        "un pan a changé la largeur du cadrage : avant {avant:?}, après {apres:?}"
+        (largeur(apres) - largeur(avant)).abs() < 1e-6,
+        "un pan n'est pas un zoom"
     );
+}
+
+/// #318 : le clic milieu + glisser fait le même pan, sans Ctrl.
+#[test]
+fn clic_milieu_glisser_deplace_le_cadrage() {
+    use stokesforge_render_egui::GraphTool;
+    let (avant, apres, generation, _) =
+        pan_sur_le_fond(GraphTool::Pointer, PointerButton::Middle, false, false);
+    assert!(generation > 0, "le glissé milieu n'a rien cadré");
+    assert!(
+        apres.0 < avant.0 && apres.1 < avant.1,
+        "{avant:?} -> {apres:?}"
+    );
+    assert!((largeur(apres) - largeur(avant)).abs() < 1e-6);
+}
+
+/// #318 : un glisser simple (bouton principal, sans Ctrl) ne fait plus de
+/// pan avec le Pointeur : cadrage et génération inchangés, et la figure
+/// reste servie par le cache pendant tout le geste (rien à reconstruire).
+#[test]
+fn glisser_simple_sur_le_fond_ne_fait_rien() {
+    use stokesforge_render_egui::GraphTool;
+    let (avant, apres, generation, cache) =
+        pan_sur_le_fond(GraphTool::Pointer, PointerButton::Primary, false, false);
+    assert_eq!(generation, 0, "un glisser simple a cadré");
+    assert_eq!(avant, apres);
+    assert!(
+        cache.iter().all(|c| *c),
+        "la figure a été reconstruite : {cache:?}"
+    );
+}
+
+/// #318 : Ctrl relâché en route, le pan continue ; Ctrl pressé en route, il
+/// ne démarre pas (le geste est décidé à la pression).
+#[test]
+fn ctrl_se_lit_a_la_pression_pas_en_route() {
+    use stokesforge_render_egui::GraphTool;
+    let (avant, apres, generation, _) =
+        pan_sur_le_fond(GraphTool::Pointer, PointerButton::Primary, true, false);
+    assert!(
+        generation > 0 && apres.0 < avant.0,
+        "le pan s'est arrêté avec Ctrl"
+    );
+    let (_, _, generation, _) =
+        pan_sur_le_fond(GraphTool::Pointer, PointerButton::Primary, false, true);
+    assert_eq!(generation, 0, "Ctrl pressé en route a déclenché un pan");
+}
+
+/// #318 : l'outil Zoom garde son rectangle au glisser simple ; Ctrl ou clic
+/// milieu y font un pan, sans rectangle (la largeur du cadrage ne change pas).
+#[test]
+fn zoom_ctrl_glisser_panne_sans_rectangle() {
+    use stokesforge_render_egui::GraphTool;
+    let (avant, apres, _, _) =
+        pan_sur_le_fond(GraphTool::ZoomBox, PointerButton::Primary, false, false);
+    assert!(
+        largeur(apres) < largeur(avant),
+        "le rectangle de zoom a disparu"
+    );
+    for (button, ctrl_pression) in [
+        (PointerButton::Primary, true),
+        (PointerButton::Middle, false),
+    ] {
+        let (avant, apres, _, _) =
+            pan_sur_le_fond(GraphTool::ZoomBox, button, ctrl_pression, ctrl_pression);
+        assert!(
+            apres.0 < avant.0 && apres.1 < avant.1,
+            "pas de pan : {avant:?} -> {apres:?}"
+        );
+        assert!(
+            (largeur(apres) - largeur(avant)).abs() < 1e-6,
+            "un rectangle a zoomé pendant le pan : {avant:?} -> {apres:?}"
+        );
+    }
+}
+
+/// #318 : avec un outil de tracé, Ctrl + glisser panne sans rien tracer et
+/// l'outil reste actif ; Ctrl + clic ne pose ni forme ni texte.
+#[test]
+fn les_outils_de_trace_ne_tracent_pas_sous_ctrl() {
+    use stokesforge_render_egui::{GraphEvent, GraphTool};
+    for tool in [GraphTool::Rectangle, GraphTool::Line] {
+        let (session, graph) = banc();
+        let snapshot = session.handle().snapshot().expect("instantané");
+        let context = contexte();
+        let mut view = GraphView::new();
+        view.set_tool(tool);
+        image(&context, &mut view, &snapshot, graph, vec![]);
+        let avant = view.last_drawn().expect("figure").x_range();
+        glisser(
+            &context,
+            &mut view,
+            &snapshot,
+            graph,
+            Pos2::new(300.0, 300.0),
+            Pos2::new(500.0, 300.0),
+            PointerButton::Primary,
+            true,
+            true,
+        );
+        assert!(
+            view.take_events().is_empty(),
+            "{tool:?} : un événement sous Ctrl"
+        );
+        assert_eq!(view.tool(), tool, "l'outil a rendu la main");
+        assert!(view.shape_preview().is_none());
+        let apres = view.last_drawn().expect("figure").x_range();
+        assert!(apres.0 < avant.0, "{tool:?} : pas de pan");
+
+        // Ctrl + clic simple : aucune forme.
+        for events in [
+            vec![
+                ctrl(true),
+                pointer_moved(SOUS_CURSEUR),
+                pointer_button(SOUS_CURSEUR, PointerButton::Primary, true),
+            ],
+            vec![pointer_button(SOUS_CURSEUR, PointerButton::Primary, false)],
+            vec![ctrl(false)],
+            vec![],
+        ] {
+            image(&context, &mut view, &snapshot, graph, events);
+        }
+        let events = view.take_events();
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, GraphEvent::ShapeChanged { .. })),
+            "{tool:?} : une forme sous Ctrl + clic : {events:?}"
+        );
+        assert_eq!(view.tool(), tool);
+    }
+}
+
+/// #318 : Ctrl + clic avec l'outil Texte ne pose aucun texte.
+#[test]
+fn ctrl_clic_avec_l_outil_texte_ne_pose_rien() {
+    let (session, graph) = banc();
+    let snapshot = session.handle().snapshot().expect("instantané");
+    let context = contexte();
+    let mut view = GraphView::new();
+    view.set_tool(stokesforge_render_egui::GraphTool::Text);
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    for events in [
+        vec![
+            ctrl(true),
+            pointer_moved(SOUS_CURSEUR),
+            pointer_button(SOUS_CURSEUR, PointerButton::Primary, true),
+        ],
+        vec![pointer_button(SOUS_CURSEUR, PointerButton::Primary, false)],
+        vec![ctrl(false)],
+        vec![],
+    ] {
+        image(&context, &mut view, &snapshot, graph, events);
+    }
+    assert!(
+        view.take_events().is_empty(),
+        "un texte posé sous Ctrl + clic"
+    );
+    // Un glisser simple avec l'outil Texte ne fait rien non plus.
+    glisser(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        Pos2::new(300.0, 300.0),
+        Pos2::new(500.0, 300.0),
+        PointerButton::Primary,
+        false,
+        false,
+    );
+    assert_eq!(view.view().generation(), 0);
 }
 
 #[test]
@@ -1222,23 +1429,53 @@ fn la_molette_et_le_glisser_sur_un_axe_ne_cadrent_que_cette_echelle() {
         "les autres calques ne bougent pas"
     );
 
-    // Glisser sur l'axe X du haut (calque à axes propres).
+    // Glisser simple parti d'un axe : rien (#318).
     let arrivee = Pos2::new(dessus.x + 80.0, dessus.y);
-    for events in [
-        vec![
-            pointer_moved(dessus),
-            pointer_button(dessus, PointerButton::Primary, true),
-        ],
-        vec![pointer_moved(arrivee)],
-        vec![pointer_moved(Pos2::new(
-            arrivee.x + 20.0,
-            arrivee.y + 150.0,
-        ))],
-        vec![pointer_button(arrivee, PointerButton::Primary, false)],
-        vec![],
-    ] {
-        image(&context, &mut view, &snapshot, graph, events);
-    }
+    glisser(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        dessus,
+        arrivee,
+        PointerButton::Primary,
+        false,
+        false,
+    );
+    assert!(
+        view.view().framing(1).is_none(),
+        "un glisser simple sur un axe a cadré"
+    );
+    // Ctrl + glisser, puis clic milieu + glisser, parti de l'axe X du haut
+    // (calque à axes propres) : cette échelle seule.
+    glisser(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        dessus,
+        arrivee,
+        PointerButton::Primary,
+        true,
+        true,
+    );
+    let apres_ctrl = view.view().framing(1).expect("l'axe X du haut est cadré").x;
+    glisser(
+        &context,
+        &mut view,
+        &snapshot,
+        graph,
+        dessus,
+        arrivee,
+        PointerButton::Middle,
+        false,
+        false,
+    );
+    assert_ne!(
+        view.view().framing(1).unwrap().x,
+        apres_ctrl,
+        "le clic milieu n'a pas cadré l'axe"
+    );
     let propre = view.view().framing(1).expect("l'axe X du haut est cadré");
     assert!(propre.x.is_some() && propre.y.is_none(), "{propre:?}");
     assert_eq!(
@@ -1287,4 +1524,66 @@ fn un_groupe_se_selectionne_par_sa_premiere_serie_et_une_autre_courbe_le_leve() 
     view.select_series_group(Some(SeriesGroupRef::new(0, 9)), &spec);
     assert_eq!(view.selected_group(), None);
     assert_eq!(view.selected_series(), None, "groupe absent : rien");
+}
+
+/// #318, invariant 6 : le feathering n'est coupé que par un geste réel. Un
+/// glisser simple sans effet (Pointeur sur le fond) le laisse en place ; un
+/// pan (Ctrl) le coupe le temps du geste et le rétablit au relâchement.
+#[test]
+fn le_feathering_ne_se_coupe_que_pendant_un_geste_reel() {
+    use stokesforge_render_egui::feathering;
+    let (session, graph) = banc();
+    let snapshot = session.handle().snapshot().expect("instantané");
+    let context = contexte();
+    let mut view = GraphView::new();
+    image(&context, &mut view, &snapshot, graph, vec![]);
+    let (start, mid, end) = (
+        Pos2::new(300.0, 300.0),
+        Pos2::new(400.0, 300.0),
+        Pos2::new(500.0, 300.0),
+    );
+    for (ctrl_on, coupe) in [(false, false), (true, true)] {
+        let mut pression = vec![
+            pointer_moved(start),
+            pointer_button(start, PointerButton::Primary, true),
+        ];
+        if ctrl_on {
+            pression.insert(0, ctrl(true));
+        }
+        image(&context, &mut view, &snapshot, graph, pression);
+        image(
+            &context,
+            &mut view,
+            &snapshot,
+            graph,
+            vec![pointer_moved(mid)],
+        );
+        image(
+            &context,
+            &mut view,
+            &snapshot,
+            graph,
+            vec![pointer_moved(end)],
+        );
+        assert_eq!(
+            feathering::current(&context).is_on(),
+            !coupe,
+            "Ctrl={ctrl_on} : feathering pendant le glisser"
+        );
+        image(
+            &context,
+            &mut view,
+            &snapshot,
+            graph,
+            vec![
+                pointer_button(end, PointerButton::Primary, false),
+                ctrl(false),
+            ],
+        );
+        image(&context, &mut view, &snapshot, graph, vec![]);
+        assert!(
+            feathering::current(&context).is_on(),
+            "pas rétabli au repos"
+        );
+    }
 }

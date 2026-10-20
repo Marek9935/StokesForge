@@ -1204,7 +1204,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn le_pan_principal_atteint_la_figure_sous_la_zone_de_depot() {
+    fn le_pan_sous_ctrl_atteint_la_figure_sous_la_zone_de_depot() {
         let (session, graph) = graphe();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let context = egui::Context::default();
@@ -1240,12 +1240,22 @@ pub(super) mod tests {
         let start = egui::pos2(380.0, 322.0);
         paint(vec![egui::Event::PointerMoved(start)]);
         let end = start + egui::vec2(30.0, -20.0);
-        paint(vec![egui::Event::PointerButton {
-            pos: start,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        }]);
+        // Ctrl + glisser : le pan du graphe (#318) ; le glisser simple ne
+        // déplace plus la vue.
+        let ctrl = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        };
+        paint(vec![
+            egui::Event::ModifiersChanged(ctrl),
+            egui::Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: ctrl,
+            },
+        ]);
         paint(vec![egui::Event::PointerMoved(end)]);
         paint(vec![egui::Event::PointerMoved(
             end + egui::vec2(20.0, -10.0),
@@ -1258,7 +1268,7 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn le_pan_principal_atteint_la_figure_dans_la_fenetre_flottante() {
+    fn le_pan_sous_ctrl_atteint_la_figure_dans_la_fenetre_flottante() {
         let (session, graph) = graphe();
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let context = egui::Context::default();
@@ -1319,12 +1329,22 @@ pub(super) mod tests {
         let start = panel_center.get().unwrap();
         paint(vec![egui::Event::PointerMoved(start)]);
         let end = start + egui::vec2(30.0, -20.0);
-        paint(vec![egui::Event::PointerButton {
-            pos: start,
-            button: egui::PointerButton::Primary,
-            pressed: true,
-            modifiers: egui::Modifiers::NONE,
-        }]);
+        // Ctrl + glisser : le pan du graphe (#318) ; le glisser simple ne
+        // déplace plus la vue.
+        let ctrl = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..egui::Modifiers::NONE
+        };
+        paint(vec![
+            egui::Event::ModifiersChanged(ctrl),
+            egui::Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: ctrl,
+            },
+        ]);
         paint(vec![egui::Event::PointerMoved(end)]);
         paint(vec![egui::Event::PointerMoved(
             end + egui::vec2(20.0, -10.0),

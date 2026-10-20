@@ -486,12 +486,18 @@ omet les panneaux trop petits pour être tracés (`MIN_CELL`), ce qui décale se
 rangs. `(row, column)` ne sert qu'à la grille : plusieurs calques peuvent se
 superposer dans la même case (#167), donc ne l'identifient pas.
 
+Le pan est le même pour tous les outils (#318) : Ctrl + glisser ou clic milieu +
+glisser, une seule échelle si le geste part d'un axe ; il est décidé à la
+pression (`NavDrag`, `decide_nav`) et passe avant les glissers d'objets, de
+rectangle de zoom et de tracé. Le feathering ne se coupe que pendant un geste
+réel (pan, rectangle, objet déplacé ou tracé), pas pour un glisser sans effet.
+
 Gestes câblés : Ctrl+molette (zoom ; la molette seule ne fait rien), double-clic
 (réinitialisation), plus réticule et désignation de point (`PointHit`, rayon
 `HIT_RADIUS`). Le glisser principal dépend de l'**outil** de la vue
 (`GraphTool`, issue #62, réglage de vue comme le cadrage, jamais annulable) :
-`Pointer` (défaut) fait défiler la vue et déplace les textes, `ZoomBox` trace le
-rectangle de zoom élastique, `Text` pose un texte au clic
+`Pointer` (défaut) déplace les textes et objets (le glisser simple ne fait plus
+défiler la vue), `ZoomBox` trace le rectangle de zoom élastique, `Text` pose un texte au clic
 (`GraphEvent::PlaceText`, puis retour au pointeur). Le clic droit n'est plus un
 geste de zoom : il ouvre le menu contextuel.
 
