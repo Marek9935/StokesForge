@@ -39,13 +39,17 @@
 //! ## Ce que l'empreinte doit contenir — la règle à ne pas casser
 //!
 //! **Toute donnée qui entre dans le calcul d'une colonne-formule entre dans
-//! son empreinte** : le texte de la formule, la colonne que désigne chaque
-//! lettre (identifiant, pas lettre), la version de chacune, la longueur du
+//! son empreinte** : la formule stockée (fragments de texte et **identifiants**
+//! des colonnes lues, #321 : jamais des lettres), pour chacune la version de
+//! son contenu — ou `None` quand elle n'est plus dans la feuille, car
+//! l'appartenance à la feuille est lue par le calcul —, la longueur du
 //! résultat (#194 : la plus longue des colonnes lues, à défaut celle des
-//! colonnes ordinaires de la feuille), la position de la colonne elle-même, la version de
-//! la colonne elle-même (une saisie directe dans une colonne-formule doit
-//! être écrasée), et l'issue (formule illisible, prise dans un cycle,
-//! calculée). Un calcul qui lirait une donnée de plus — le nom d'une
+//! colonnes ordinaires de la feuille), la version de la colonne elle-même
+//! (une saisie directe dans une colonne-formule doit être écrasée), et
+//! l'issue (formule illisible, prise dans un cycle, calculée). Le texte
+//! **affiché** (les lettres) n'est pas lu par le calcul : il n'entre pas dans
+//! l'empreinte, et déplacer une colonne ne réécrit rien. Un calcul qui lirait
+//! une donnée de plus — le nom d'une
 //! colonne, son unité, une autre feuille, une fonction `row()` — sans
 //! l'ajouter ici serait « propre » à tort : la valeur affichée resterait
 //! fausse sans erreur. Ce qu'il faut tester alors : `docs/tests.md`,
@@ -80,7 +84,11 @@
 //!   plutôt que leurs versions — le mode complet réécrit les colonnes-formule à
 //!   chaque passe, ce qui ferait changer les versions sans changer le contenu ;
 //!   un changement de *définition* (`UpdateCalculation`, annulation) est un geste
-//!   de l'utilisateur : le résultat est à jour par construction (`Trust`) ;
+//!   de l'utilisateur : le résultat est à jour par construction (`Trust`).
+//!   Un calcul **automatique** que le fichier a rendu `Manual` obéit à la même
+//!   comparaison de contenu tant que ses entrées ne changent pas vraiment, dans
+//!   les deux modes (sans elle, le mode complet l'effaçait et divergeait du
+//!   ciblé — latent avant #321, trouvé par `b22`) ;
 //! - au chargement le mémo est vidé et **aucun calcul n'est relancé** (A1, #316) :
 //!   automatiques comme manuels sont crus, valeurs du fichier gardées
 //!   (`Recalculator::run_after_load`, drapeau ponctuel `trust_loaded`, dans les
@@ -102,8 +110,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use stokesforge_analysis::ops::Operation;
 use stokesforge_analysis::AnalysisError;
 use stokesforge_core::{
-    compute, evaluate_formula, topological_order, AuxRef, Calculation, ColumnType, ColumnValues,
-    ComputeError, Formula, NodeId, NumericStatus, Project, SeriesRef, Staleness, ValueBlock,
+    compute, evaluate_formula, topological_order, AuxRef, Calculation, ColumnFormula, ColumnType,
+    ColumnValues, ComputeError, Formula, FormulaError, NodeId, NumericStatus, Project, SeriesRef,
+    Staleness, ValueBlock,
 };
 
 /// Façon dont l'acteur recalcule les colonnes-formule après chaque requête
@@ -236,7 +245,8 @@ impl Recalculator {
     /// commande vient de toucher » : `Undo`/`Redo`/`AbortMacro` ne portent
     /// aucune commande à inspecter (seule `History` sait ce qu'elle vient de
     /// restaurer, et elle ne l'expose pas), et `Command::Move` peut déplacer
-    /// une colonne d'une feuille à une autre, changeant les lettres des deux.
+    /// une colonne d'une feuille à une autre : les formules de l'ancienne
+    /// feuille qui la lisaient ne la trouvent plus (`#REF`).
     /// Inspecter n'est pas recalculer : une colonne dont l'empreinte n'a pas
     /// bougé n'est ni lue ni réécrite. Le coût d'une passe sans rien à
     /// recalculer est linéaire dans le nombre de nœuds, plus l'analyse de
@@ -358,7 +368,7 @@ impl Recalculator {
         // résultat final (bloc `NaN`), elle ne participe pas au graphe de
         // dépendance — une colonne qui la référencerait la trouve
         // immédiatement disponible (à `NaN`), pas « en attente ».
-        let mut parsed: BTreeMap<NodeId, (String, Formula)> = BTreeMap::new();
+        let mut parsed: BTreeMap<NodeId, (ColumnFormula, Formula)> = BTreeMap::new();
         for &id in &columns {
             let Some(source) = project
                 .tree()
@@ -369,7 +379,7 @@ impl Recalculator {
                 continue;
             };
             seen.insert(id);
-            match Formula::parse(&source) {
+            match source.compile() {
                 Ok(formula) => {
                     parsed.insert(id, (source, formula));
                 }
@@ -419,13 +429,13 @@ impl Recalculator {
         // `stokesforge_core::topological_order`).
         let mut edges: BTreeMap<NodeId, BTreeSet<NodeId>> =
             parsed.keys().map(|&id| (id, BTreeSet::new())).collect();
+        // `parsed` ne contient que des colonnes de cette feuille : une
+        // référence vers une autre feuille n'est jamais une arête.
         for (&id, (_, formula)) in &parsed {
-            for index in formula.referenced_columns() {
-                if let Some(&dep_id) = columns.get(index) {
-                    if parsed.contains_key(&dep_id) {
-                        if let Some(deps) = edges.get_mut(&id) {
-                            deps.insert(dep_id);
-                        }
+            for dep_id in formula.referenced_columns() {
+                if parsed.contains_key(&dep_id) {
+                    if let Some(deps) = edges.get_mut(&id) {
+                        deps.insert(dep_id);
                     }
                 }
             }
@@ -462,22 +472,22 @@ impl Recalculator {
             let Some((source, formula)) = parsed.get(&id) else {
                 continue;
             };
-            let Some(self_index) = columns.iter().position(|&c| c == id) else {
-                continue;
-            };
             // Lue ici, pas avant la boucle : les colonnes-formule déjà
             // traitées dans cette boucle (celles dont `id` dépend, forcément
             // plus tôt dans `order`) ont pu être réécrites, donc changer de
             // version — c'est ce qui propage le recalcul le long d'une
-            // chaîne.
-            let sources: Vec<_> = formula
+            // chaîne. Chaque identifiant se résout parmi les colonnes de la
+            // **feuille** seulement (jamais dans tout l'arbre) : `None` veut
+            // dire « hors de la feuille », et entre dans l'empreinte.
+            let sources: Vec<(NodeId, Option<u64>)> = formula
                 .referenced_columns()
                 .into_iter()
-                .map(|index| {
-                    let resolved = columns.get(index).and_then(|&column_id| {
-                        column_version(project, column_id).map(|version| (column_id, version))
-                    });
-                    (index, resolved)
+                .map(|column_id| {
+                    let version = columns
+                        .contains(&column_id)
+                        .then(|| column_version(project, column_id))
+                        .flatten();
+                    (column_id, version)
                 })
                 .collect();
             // La plus longue des colonnes lues, lue elle aussi après les
@@ -485,18 +495,15 @@ impl Recalculator {
             // version, déjà dans l'empreinte.
             let target_len = sources
                 .iter()
-                .filter_map(|(_, resolved)| *resolved)
-                .filter_map(|(column_id, _)| column_len(project, column_id))
+                .filter(|(_, version)| version.is_some())
+                .filter_map(|(column_id, _)| column_len(project, *column_id))
                 .max()
                 .unwrap_or(ordinary_len);
             let fingerprint = Fingerprint::new(
                 project,
                 id,
                 source.clone(),
-                Outcome::Evaluated {
-                    self_index,
-                    sources,
-                },
+                Outcome::Evaluated { sources },
                 target_len,
             );
             if !self.is_stale(id, &fingerprint) {
@@ -509,7 +516,7 @@ impl Recalculator {
                         .tree()
                         .node(column_id)
                         .and_then(|node| node.as_column())
-                        .map(|column| column.values().clone())
+                        .map(|column| (column_id, column.values().clone()))
                 })
                 .collect();
             // Une colonne de `columns` a disparu entre la lecture de `columns`
@@ -523,8 +530,16 @@ impl Recalculator {
                 continue;
             }
             let values: Vec<_> = values.into_iter().flatten().collect();
-            let evaluation = evaluate_formula(formula, self_index, &values, target_len);
-            write_formula_column(project, id, evaluation.values, &evaluation.statuses);
+            let evaluation = evaluate_formula(formula, &values, target_len);
+            // Une colonne lue qui n'est plus dans la feuille (`#REF`) laisse
+            // des cellules **vides**, pas `---` : il n'y a pas de calcul qui
+            // a échoué, la formule n'a plus de quoi lire. Statuts vides =
+            // aucune ligne marquée (`write_formula_column`).
+            let statuses: &[NumericStatus] = match evaluation.error {
+                Some(FormulaError::DeletedColumn) => &[],
+                _ => &evaluation.statuses,
+            };
+            write_formula_column(project, id, evaluation.values, statuses);
             self.record(project, id, fingerprint);
         }
     }
@@ -536,8 +551,9 @@ impl Recalculator {
 /// garantissent que recalculer écrirait exactement le même contenu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Fingerprint {
-    /// Texte de la formule, tel que saisi.
-    source: String,
+    /// La formule stockée : fragments de texte et identifiants des colonnes
+    /// lues (#321). Jamais les lettres affichées, que le calcul ne lit pas.
+    source: ColumnFormula,
     /// L'issue du calcul, et les sources qu'elle a lues.
     outcome: Outcome,
     /// Longueur du résultat : la plus longue des colonnes lues, ou à défaut
@@ -557,7 +573,7 @@ impl Fingerprint {
     fn new(
         project: &Project,
         column: NodeId,
-        source: String,
+        source: ColumnFormula,
         outcome: Outcome,
         target_len: usize,
     ) -> Self {
@@ -579,18 +595,13 @@ enum Outcome {
     /// de lu. Le type de sortie, qui dépend des colonnes désignées, est fixé
     /// avant l'écriture et changer de type change la version de la colonne.
     Blocked,
-    /// Calculée. Chaque lettre référencée, avec la colonne qu'elle désigne et
-    /// la version de son contenu (`None` : lettre hors de la feuille, le
-    /// calcul dégrade en `NaN`). `self_index` est lu par
-    /// `stokesforge_core::evaluate_formula` (auto-référence) : il entre donc
-    /// dans l'empreinte, même si une auto-référence finit aujourd'hui dans
-    /// [`Outcome::Blocked`] avant d'y arriver — aucun test ne peut donc le
-    /// voir manquer (`docs/tests.md`, « Recalcul ciblé », mutants), et il
-    /// reste là pour le jour où `evaluate_formula` s'en servirait autrement.
-    Evaluated {
-        self_index: usize,
-        sources: Vec<(usize, Option<(NodeId, u64)>)>,
-    },
+    /// Calculée. Chaque colonne lue, avec la version de son contenu — ou
+    /// `None` : elle n'est pas dans la feuille (supprimée, ou dans une autre
+    /// feuille), le calcul dégrade (`FormulaError::DeletedColumn`, cellules
+    /// vides). L'appartenance à la feuille est lue par le calcul : elle entre
+    /// donc dans l'empreinte, et une colonne qui revient (annulation) fait
+    /// recalculer.
+    Evaluated { sources: Vec<(NodeId, Option<u64>)> },
 }
 
 /// Longueur courante de `column`, `None` si ce n'est pas (ou plus) une
@@ -615,7 +626,7 @@ fn column_version(project: &Project, column: NodeId) -> Option<u64> {
 
 /// Type que devrait porter la colonne-résultat de `formula` d'après les
 /// colonnes qu'elle référence, ou `None` quand ça ne peut pas se décider
-/// (référence hors bornes, ou vers une colonne qui a disparu) — dans ce cas,
+/// (référence hors de la feuille, ou vers une colonne qui a disparu) — dans ce cas,
 /// l'appelant laisse le type de la colonne inchangé plutôt que de choisir au
 /// hasard.
 ///
@@ -636,8 +647,10 @@ fn desired_formula_column_type(
     project: &Project,
 ) -> Option<ColumnType> {
     let mut any_reference = false;
-    for index in formula.referenced_columns() {
-        let &column_id = columns.get(index)?;
+    for column_id in formula.referenced_columns() {
+        if !columns.contains(&column_id) {
+            return None;
+        }
         project
             .tree()
             .node(column_id)
@@ -889,10 +902,18 @@ impl Recalculator {
         calc: &Calculation,
         fingerprint: CalcFingerprint,
     ) {
-        let seen = if calc.auto_recalc {
-            Vec::new()
-        } else {
+        // Le contenu des entrées se retient pour un calcul manuel, et pour un
+        // automatique que le fichier a rendu périmé (`Manual`, ou `InputMissing`
+        // que `Trust` ramène à `Manual`) : voir `update_calculation`.
+        let waits_for_a_gesture = !calc.auto_recalc
+            || matches!(
+                calc.stale,
+                Some(Staleness::Manual) | Some(Staleness::InputMissing)
+            );
+        let seen = if waits_for_a_gesture {
             snapshot_inputs(project, &fingerprint.inputs)
+        } else {
+            Vec::new()
         };
         self.calc_memo.insert(id, CalcMemo { fingerprint, seen });
     }
@@ -923,6 +944,29 @@ impl Recalculator {
             match (self.mode, previous) {
                 (FormulaRecalc::Targeted, Some(p)) if p.fingerprint == fingerprint => {
                     CalcAction::Skip
+                }
+                // Un calcul automatique marqué `Manual` (lu d'un fichier où
+                // il était périmé ou en échec, A1 #316) attend un geste : tant
+                // que le **contenu** de ses entrées est celui qu'il a vu, le
+                // recalculer le ferait passer de `Manual` à `Failed` ou à « à
+                // jour » sans que personne n'ait rien demandé — et le mode
+                // complet, qui réécrit les colonnes-formule (donc leurs
+                // versions) à chaque passe, divergerait du ciblé (batterie
+                // `b22`, latent avant #321). Une vraie modification d'une
+                // entrée le recalcule comme n'importe quel automatique.
+                (_, Some(p))
+                    if calc.stale == Some(Staleness::Manual)
+                        && p.fingerprint.definition == fingerprint.definition
+                        && p.fingerprint.inputs == fingerprint.inputs =>
+                {
+                    CalcAction::Skip
+                }
+                (_, Some(p))
+                    if calc.stale == Some(Staleness::Manual)
+                        && p.fingerprint.definition == fingerprint.definition
+                        && same_contents(project, &fingerprint.inputs, &p.seen) =>
+                {
+                    CalcAction::Renumber
                 }
                 _ => CalcAction::Recompute,
             }
@@ -1036,12 +1080,13 @@ fn calculations_in_a_cycle(project: &Project) -> HashSet<NodeId> {
                 .node(id)
                 .and_then(|n| n.as_column())
                 .and_then(|c| c.meta().formula.clone());
-            if let Some(Ok(formula)) = source.as_deref().map(Formula::parse) {
+            if let Some(Ok(formula)) = source.as_ref().map(ColumnFormula::compile) {
+                // Les colonnes de **cette feuille** seulement, comme `recalc_sheet`.
                 deps.extend(
                     formula
                         .referenced_columns()
                         .into_iter()
-                        .filter_map(|index| columns.get(index).copied()),
+                        .filter(|column| columns.contains(column)),
                 );
             }
         }
@@ -1104,7 +1149,7 @@ mod tests {
     }
 
     /// `A [1,2,3]` puis `B = A*2`, `C = B+1`, `D = C+1` (une chaîne : chaque
-    /// colonne attend la précédente ; les lettres sont positionnelles).
+    /// colonne attend la précédente).
     fn chaine() -> (Project, [NodeId; 3]) {
         let mut project = Project::new("Demo").expect("projet");
         let root = project.root();
@@ -1118,11 +1163,15 @@ mod tests {
             let column = project
                 .add_column(sheet, None, Some(name), Column::new(ColumnType::Numeric))
                 .expect("colonne");
+            let formula = project
+                .tree()
+                .formula_from_letters(column, text)
+                .expect("formule saisie");
             project
                 .set_column_meta(
                     column,
                     ColumnMeta {
-                        formula: Some(text.into()),
+                        formula: Some(formula),
                         ..Default::default()
                     },
                 )

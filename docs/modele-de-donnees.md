@@ -216,6 +216,20 @@ Côté calcul, une colonne mixte n'est **pas** « non numérique » : `formula`
 l'accepte et ses trous valent `NaN` ligne à ligne. Seule une colonne
 entièrement texte est refusée en bloc.
 
+**Formules par identifiant (#321).** `ColumnMeta::formula` est une
+`ColumnFormula` : une suite de fragments `Text` (opérateurs, nombres,
+parenthèses) et `Column(NodeId)` — la colonne lue, retenue par son identifiant,
+jamais par une lettre de position. Les lettres (`A`, `B`… par position dans la
+feuille) n'existent qu'aux frontières : `Tree::formula_from_letters` (saisie,
+collage, `pyst`) les convertit en identifiants et refuse une lettre inconnue ou
+la colonne elle-même ; `Tree::formula_letters` les rend à l'affichage, `#REF`
+pour une colonne qui n'est plus dans la feuille (supprimée ou déplacée ailleurs :
+elle reste stockée, Annuler la rend). Insérer, supprimer ou déplacer des colonnes
+(dont les sorties d'une analyse, #320) ne change donc jamais ce qu'une formule
+lit. Une formule dupliquée avec sa feuille lit les colonnes **de la copie**
+(`Project::insert_copy`) ; un identifiant lu n'est jamais réattribué
+(`Project::from_tree`).
+
 ## Les calculs d'analyse (#181)
 
 `stokesforge-analysis` est le calcul pur (aucune dépendance du workspace, `NaN`

@@ -10,22 +10,21 @@
 //! dessous.
 //!
 //! Quatre sortes de lecteurs, et une seule exclusion :
-//! - une colonne **à formule** de la même feuille, quand une de ses lettres
-//!   désigne la colonne supprimée **ou une colonne qui la suit** (les lettres
-//!   suivantes glissent : `C = B*2` désigne une autre colonne une fois A
-//!   supprimée) ;
+//! - une colonne **à formule** de la même feuille qui lit une colonne
+//!   supprimée (#321 : une formule retient les colonnes par identifiant, les
+//!   lettres suivantes ne glissent plus — la formule s'affiche `#REF`) ;
 //! - un **calcul d'analyse** dont une série (X, Y, σ) est une colonne
 //!   supprimée. La référence cachée d'une correction (`aux`) ne compte pas :
 //!   c'est une copie. Un calcul dont une colonne de sortie disparaît avec le
 //!   geste ne compte pas non plus : il disparaît avec elle.
 //!
-//! Les formules ne sont jamais réécrites (`docs/modele-de-donnees.md`).
+//! Le texte stocké d'une formule n'est jamais réécrit
+//! (`docs/modele-de-donnees.md`) : les lettres affichées suivent les colonnes.
 
 use std::collections::BTreeSet;
 
 use stokesforge_analysis::ops::OperationKind;
 use stokesforge_commands::HistoryLabel;
-use stokesforge_core::formula::Formula;
 use stokesforge_core::{Node, NodeId, NodeKind, Tree};
 
 use super::AppState;
@@ -96,9 +95,9 @@ pub(super) fn column_users(tree: &Tree, deleted: &[NodeId]) -> Vec<ColumnUser> {
         let Ok(columns) = tree.children(sheet) else {
             continue;
         };
-        let Some(first) = columns.iter().position(|c| gone.contains(c)) else {
+        if !columns.iter().any(|c| gone.contains(c)) {
             continue;
-        };
+        }
         for &column in columns {
             if gone.contains(&column) {
                 continue;
@@ -106,13 +105,10 @@ pub(super) fn column_users(tree: &Tree, deleted: &[NodeId]) -> Vec<ColumnUser> {
             let Some(node) = tree.node(column) else {
                 continue;
             };
-            let Some(text) = node.as_column().and_then(|c| c.meta().formula.clone()) else {
+            let Some(formula) = node.as_column().and_then(|c| c.meta().formula.as_ref()) else {
                 continue;
             };
-            let Ok(formula) = Formula::parse(&text) else {
-                continue;
-            };
-            if formula.referenced_columns().iter().any(|&i| i >= first) {
+            if formula.columns().iter().any(|read| gone.contains(read)) {
                 users.push(ColumnUser::Formula {
                     name: node.name().to_string(),
                 });

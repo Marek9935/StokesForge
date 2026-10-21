@@ -73,9 +73,12 @@ use tempfile::TempDir;
 
 // -- tirage ---------------------------------------------------------------
 
-/// Formules tirées : références dans et hors de la feuille (jusqu'à `G`),
-/// auto-références et cycles selon la colonne qui les reçoit, division (des
-/// zéros sont saisis), constante pure, texte illisible.
+/// Formules tirées, **en lettres** (#321) : références dans et hors de la
+/// feuille (jusqu'à `G`), auto-références et cycles selon la colonne qui les
+/// reçoit, division (des zéros sont saisis), constante pure, texte illisible.
+/// Le pas les convertit en identifiants (`Tree::formula_from_letters`) comme le
+/// fait l'interface ; un refus (lettre hors de la feuille, auto-référence)
+/// rend un pas sans commande, compté « refusé ».
 const FORMULES: [&str; 13] = [
     "A*2", "B+1", "A+B", "C-A", "D/2", "A*", "F+1", "1+2", "A+B*C", "E", "(A+B)/D", "G-1", "B*B",
 ];
@@ -412,27 +415,40 @@ fn projet() -> Project {
     let book = project.add_workbook(root, Some("Book1")).expect("classeur");
     let s1 = project.resolve_path("[Book1]Sheet1").expect("feuille 1");
     let s2 = project.add_worksheet(book, None).expect("feuille 2");
-    let formule = |texte: &str| ColumnMeta {
-        formula: Some(texte.to_string()),
-        ..Default::default()
-    };
-    let colonnes: [(NodeId, &[f64], Option<ColumnMeta>); 7] = [
+    let colonnes: [(NodeId, &[f64], Option<&str>); 7] = [
         (s1, &[1.0, 2.0, 3.0], None),
         (s1, &[10.0, 0.0, 30.0, 40.0], None),
-        (s1, &[], Some(formule("A*2"))),
-        (s1, &[], Some(formule("C+B"))),
+        (s1, &[], Some("A*2")),
+        (s1, &[], Some("C+B")),
         (s2, &[1.0, 2.0, 3.0, 4.0, 5.0], None),
-        (s2, &[], Some(formule("A/2"))),
-        (s2, &[], Some(formule("1+2"))),
+        (s2, &[], Some("A/2")),
+        (s2, &[], Some("1+2")),
     ];
-    for (sheet, valeurs, meta) in colonnes {
-        let mut colonne = Column::from_f64(valeurs);
-        if let Some(meta) = meta {
-            colonne.set_meta(meta);
-        }
-        project
-            .add_column(sheet, None, None, colonne)
+    let mut avec_formule = Vec::new();
+    for (sheet, valeurs, formule) in colonnes {
+        let id = project
+            .add_column(sheet, None, None, Column::from_f64(valeurs))
             .expect("colonne");
+        if let Some(texte) = formule {
+            avec_formule.push((id, texte));
+        }
+    }
+    // Les formules se saisissent en lettres une fois les colonnes de leur
+    // feuille en place (#321) : lettres vers identifiants.
+    for (id, texte) in avec_formule {
+        let formula = project
+            .tree()
+            .formula_from_letters(id, texte)
+            .expect("formule de départ");
+        project
+            .set_column_meta(
+                id,
+                ColumnMeta {
+                    formula: Some(formula),
+                    ..Default::default()
+                },
+            )
+            .expect("formule posée");
     }
     project
 }
@@ -586,12 +602,19 @@ fn commande(pas: &Pas, tree: &Tree, rang: usize) -> Option<Command> {
             feuille: f,
             colonne: c,
             formule,
-        } => colonne(f, c).map(|column| Command::SetColumnMeta {
-            column,
-            meta: ColumnMeta {
-                formula: Some(FORMULES[formule].to_string()),
-                ..Default::default()
-            },
+        } => colonne(f, c).and_then(|column| {
+            // Lettres vers identifiants sur l'instantané (les deux jumelles
+            // portent les mêmes identifiants). Un refus — lettre hors de la
+            // feuille, colonne qui se lit elle-même — rend `None` : le pas
+            // n'est pas joué, comme tout pas sans cible (#321).
+            let formula = tree.formula_from_letters(column, FORMULES[formule]).ok()?;
+            Some(Command::SetColumnMeta {
+                column,
+                meta: ColumnMeta {
+                    formula: Some(formula),
+                    ..Default::default()
+                },
+            })
         }),
         Pas::RetirerFormule {
             feuille: f,

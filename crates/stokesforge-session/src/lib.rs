@@ -553,11 +553,17 @@ mod tests {
         (Session::spawn(project, None).expect("acteur"), sheet, c)
     }
 
-    fn formule_c(c: NodeId) -> Command {
+    fn formule_c(handle: &SessionHandle, c: NodeId) -> Command {
+        let formula = handle
+            .snapshot()
+            .expect("instantané")
+            .tree
+            .formula_from_letters(c, "A*2")
+            .expect("formule saisie");
         Command::SetColumnMeta {
             column: c,
             meta: stokesforge_core::ColumnMeta {
-                formula: Some("A*2".into()),
+                formula: Some(formula),
                 ..Default::default()
             },
         }
@@ -571,7 +577,7 @@ mod tests {
         let handle = session.handle();
         let before = handle.snapshot().expect("instantané").revision;
         handle
-            .execute_interruptible(formule_c(c))
+            .execute_interruptible(formule_c(&handle, c))
             .expect("commande");
         assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
         assert_eq!(handle.take_recalc_end(), Some(RecalcEnd::Done));
@@ -598,7 +604,7 @@ mod tests {
         let first = handle.snapshot().expect("instantané");
         handle.gauge.stop_next_for_test();
         handle
-            .execute_interruptible(formule_c(c))
+            .execute_interruptible(formule_c(&handle, c))
             .expect("commande");
         assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
         assert_eq!(handle.take_recalc_end(), Some(RecalcEnd::Stopped));
@@ -618,7 +624,7 @@ mod tests {
         for structurelle in [true, false] {
             let (session, sheet, c) = feuille();
             let handle = session.handle();
-            handle.execute(formule_c(c)).expect("formule");
+            handle.execute(formule_c(&handle, c)).expect("formule");
             let command = if structurelle {
                 // « Renommer M en M ».
                 Command::Rename {
@@ -673,7 +679,7 @@ mod tests {
         let handle = session.handle();
         handle.gauge.panic_in_next_recalc_for_test();
         handle
-            .execute_interruptible(formule_c(c))
+            .execute_interruptible(formule_c(&handle, c))
             .expect("la commande est appliquée avant le recalcul");
         assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
         assert_eq!(handle.recalc_running(), None);
@@ -696,7 +702,7 @@ mod tests {
         let (session, _, c) = feuille();
         let handle = session.handle();
         handle
-            .execute_interruptible(formule_c(c))
+            .execute_interruptible(formule_c(&handle, c))
             .expect("commande");
         assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
         let finished = 1; // numéro du premier recalcul

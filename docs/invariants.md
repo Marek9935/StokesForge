@@ -240,9 +240,10 @@ erreur devient un message de statut affiché.
 ## 11. Un recalcul ciblé rend exactement le recalcul complet
 
 Depuis #193, l'acteur ne réécrit une colonne-formule que si une donnée de son
-calcul a changé ; il le sait en comparant une **empreinte** (texte, colonne
-que désigne chaque lettre et sa version, longueur du résultat, version propre,
-issue) à celle de son dernier calcul. Ce que la règle protège est la seule
+calcul a changé ; il le sait en comparant une **empreinte** (la formule
+stockée — fragments de texte et **identifiants** de colonnes, #321 —, la version
+de chaque colonne lue ou son absence de la feuille, longueur du résultat,
+version propre, issue) à celle de son dernier calcul. Ce que la règle protège est la seule
 défaillance possible d'une telle optimisation, et elle est silencieuse : une
 donnée lue par le calcul mais absente de l'empreinte laisse une valeur fausse
 affichée, sans erreur.
@@ -255,7 +256,11 @@ Deux conséquences qui traversent les crates :
   ajoute. La référence d'une correction est lue sur une **copie figée** du
   classeur caché des copies (#248), jamais sur la colonne d'origine : la copie
   est dédoublonnée par **contenu**, jamais par numéro de version, qui dépend de
-  l'historique et fausserait l'oracle `b22` ;
+  l'historique et fausserait l'oracle `b22`. Une formule lit une colonne **de
+  sa feuille** : l'appartenance à la feuille (`None` dans l'empreinte : la
+  colonne a été supprimée ou déplacée ailleurs) est lue par le calcul, donc dans
+  l'empreinte ; les **lettres affichées**, que le calcul ne lit pas, n'y sont
+  pas (elles suivent les colonnes) ;
 - **toute écriture de données d'une colonne tire un numéro de version neuf**
   (`Project::next_column_version`, `stokesforge-core`), **et toute insertion
   d'une colonne qui porte déjà un numéro fait passer le compteur au-delà**

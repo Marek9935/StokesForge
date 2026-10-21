@@ -935,8 +935,9 @@ fn a_non_trivial_plot_spec_round_trips_intact() {
     }
 }
 
-/// `ColumnMeta::formula` (colonnes calculées, v1) survit à `save`/`load`,
-/// `None` comme `Some(_)`.
+/// `ColumnMeta::formula` (colonnes calculées) survit à `save`/`load`, `None`
+/// comme `Some(_)` : mêmes fragments, mêmes identifiants (#321), et les lettres
+/// affichées sont celles d'avant.
 #[test]
 fn column_formula_survives_save_and_load() {
     let mut project = Project::new("Demo").expect("projet valide");
@@ -953,11 +954,22 @@ fn column_formula_survives_save_and_load() {
     let b = project
         .add_column(sheet, None, Some("B"), Column::from_f64(&[10.0, 20.0]))
         .expect("colonne B");
+    let formula = project
+        .tree()
+        .formula_from_letters(b, "A*2")
+        .expect("formule saisie");
+    assert_eq!(
+        formula.parts(),
+        [
+            stokesforge_core::FormulaPart::Column(a),
+            stokesforge_core::FormulaPart::Text("*2".to_string())
+        ]
+    );
     project
         .set_column_meta(
             b,
             ColumnMeta {
-                formula: Some("A*2".to_string()),
+                formula: Some(formula.clone()),
                 ..Default::default()
             },
         )
@@ -974,8 +986,382 @@ fn column_formula_survives_save_and_load() {
     let node_b = loaded.tree().node(b).expect("colonne B présente");
     assert_eq!(
         node_b.as_column().expect("colonne").meta().formula,
-        Some("A*2".to_string())
+        Some(formula)
     );
+    assert_eq!(loaded.tree().formula_letters(b).as_deref(), Some("A*2"));
+}
+
+/// Une formule qui lit une colonne **supprimée** (`#REF`) revient telle
+/// quelle : l'identifiant reste stocké, le fichier ne le perd pas, et le
+/// prochain identifiant ne le réattribue pas (invariant 7).
+#[test]
+fn a_formula_with_a_deleted_column_survives_save_and_load() {
+    let mut project = Project::new("Demo").expect("projet valide");
+    let root = project.root();
+    let book = project
+        .add_empty_workbook(root, Some("Book1"))
+        .expect("classeur");
+    let sheet = project
+        .add_worksheet(book, Some("Sheet1"))
+        .expect("feuille");
+    let a = project
+        .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0]))
+        .expect("colonne A");
+    let b = project
+        .add_column(sheet, None, Some("B"), Column::from_f64(&[10.0, 20.0]))
+        .expect("colonne B");
+    let c = project
+        .add_column(sheet, None, Some("C"), Column::from_f64(&[0.0, 0.0]))
+        .expect("colonne C");
+    let formula = project
+        .tree()
+        .formula_from_letters(c, "B*2")
+        .expect("formule saisie");
+    project
+        .set_column_meta(
+            c,
+            ColumnMeta {
+                formula: Some(formula.clone()),
+                ..Default::default()
+            },
+        )
+        .expect("formule posée");
+    project.remove(b).expect("suppression de B");
+    assert_eq!(project.tree().formula_letters(c).as_deref(), Some("#REF*2"));
+
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("ref.plyx");
+    save(&project, &path).expect("sauvegarde réussie");
+    let loaded = load(&path).expect("chargement réussi");
+
+    let reloaded = loaded
+        .tree()
+        .node(c)
+        .and_then(|node| node.as_column())
+        .and_then(|column| column.meta().formula.clone())
+        .expect("formule relue");
+    assert_eq!(reloaded, formula, "mêmes fragments, mêmes identifiants");
+    assert_eq!(loaded.tree().formula_letters(c).as_deref(), Some("#REF*2"));
+    assert!(loaded.tree().node(a).is_some());
+    assert!(
+        loaded.next_id_hint() > b.raw(),
+        "l'identifiant de la colonne supprimée n'est pas réattribué"
+    );
+}
+
+/// Un fichier d'avant #321 porte la formule en lettres sous la clé `formula` :
+/// elle n'est plus lue (le format n'a pas à rester compatible en
+/// développement) — la colonne se charge **avec ses valeurs et sans formule**,
+/// et reste une colonne ordinaire (jamais rangée en `Unknown`).
+#[test]
+fn a_legacy_letters_formula_is_dropped_and_the_column_keeps_its_values() {
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    struct FileBody {
+        root: u64,
+        next_id_hint: u64,
+        nodes: Vec<NodeRecord>,
+    }
+    #[derive(Serialize)]
+    struct NodeRecord {
+        id: u64,
+        name: String,
+        parent: Option<u64>,
+        kind: KindRecord,
+    }
+    #[derive(Serialize)]
+    enum KindRecord {
+        Folder {
+            children: Vec<u64>,
+        },
+        Workbook {
+            sheets: Vec<u64>,
+            hidden: bool,
+            label: String,
+            comment: String,
+        },
+        Worksheet {
+            columns: Vec<u64>,
+        },
+        Column(Box<ColumnRecord>),
+    }
+    #[derive(Serialize)]
+    struct ColumnRecord {
+        column_type: &'static str,
+        role: &'static str,
+        unit: String,
+        long_name: String,
+        comment: String,
+        display_format: String,
+        values: ValuesRecord,
+        version: u64,
+        formula: Option<String>,
+    }
+    #[derive(Serialize)]
+    enum ValuesRecord {
+        Float(#[serde(with = "serde_bytes")] Vec<u8>),
+    }
+
+    let valeurs: Vec<u8> = [1.0f64, 2.0, 3.0]
+        .iter()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+    let node = |id: u64, name: &str, parent: u64, kind: KindRecord| NodeRecord {
+        id,
+        name: name.to_string(),
+        parent: Some(parent),
+        kind,
+    };
+    let body = FileBody {
+        root: 1,
+        next_id_hint: 6,
+        nodes: vec![
+            NodeRecord {
+                id: 1,
+                name: "Projet".to_string(),
+                parent: None,
+                kind: KindRecord::Folder { children: vec![2] },
+            },
+            node(
+                2,
+                "Book1",
+                1,
+                KindRecord::Workbook {
+                    sheets: vec![3],
+                    hidden: false,
+                    label: String::new(),
+                    comment: String::new(),
+                },
+            ),
+            node(
+                3,
+                "Sheet1",
+                2,
+                KindRecord::Worksheet {
+                    columns: vec![4, 5],
+                },
+            ),
+            node(
+                4,
+                "A",
+                3,
+                KindRecord::Column(Box::new(ColumnRecord {
+                    column_type: "Numeric",
+                    role: "Y",
+                    unit: String::new(),
+                    long_name: String::new(),
+                    comment: String::new(),
+                    display_format: String::new(),
+                    values: ValuesRecord::Float(valeurs.clone()),
+                    version: 1,
+                    formula: None,
+                })),
+            ),
+            node(
+                5,
+                "B",
+                3,
+                KindRecord::Column(Box::new(ColumnRecord {
+                    column_type: "Numeric",
+                    role: "Y",
+                    unit: String::new(),
+                    long_name: String::new(),
+                    comment: String::new(),
+                    display_format: String::new(),
+                    values: ValuesRecord::Float(valeurs),
+                    version: 2,
+                    formula: Some("A*2".to_string()),
+                })),
+            ),
+        ],
+    };
+    let mut bytes = b"STKF".to_vec();
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&rmp_serde::to_vec_named(&body).expect("encodage"));
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("ancien.plyx");
+    std::fs::write(&path, &bytes).expect("écriture");
+
+    let loaded = load(&path).expect("l'ancien fichier se charge");
+    let column = loaded
+        .tree()
+        .node(stokesforge_core::NodeId::from_raw(5))
+        .and_then(|node| node.as_column())
+        .expect("colonne B ordinaire, pas un nœud inconnu");
+    assert_eq!(column.meta().formula, None, "l'ancienne formule est perdue");
+    assert_eq!(column.len(), 3, "les valeurs sont gardées");
+    assert_eq!(column.values().number_at(2), 3.0);
+}
+
+/// Écrit dans `dir` un fichier fabriqué : `Sheet1` porte `A` (id 4) et `B`
+/// (id 5), dont la formule est `<colonne lue> * 2`, la colonne lue étant
+/// désignée par son identifiant brut `lue`.
+fn fichier_fabrique_avec_formule(dir: &std::path::Path, lue: u64) -> std::path::PathBuf {
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    struct FileBody {
+        root: u64,
+        next_id_hint: u64,
+        nodes: Vec<NodeRecord>,
+    }
+    #[derive(Serialize)]
+    struct NodeRecord {
+        id: u64,
+        name: String,
+        parent: Option<u64>,
+        kind: KindRecord,
+    }
+    #[derive(Serialize)]
+    enum KindRecord {
+        Folder {
+            children: Vec<u64>,
+        },
+        Workbook {
+            sheets: Vec<u64>,
+            hidden: bool,
+            label: String,
+            comment: String,
+        },
+        Worksheet {
+            columns: Vec<u64>,
+        },
+        Column(Box<ColumnRecord>),
+    }
+    #[derive(Serialize)]
+    struct ColumnRecord {
+        column_type: &'static str,
+        role: &'static str,
+        unit: String,
+        long_name: String,
+        comment: String,
+        display_format: String,
+        values: ValuesRecord,
+        version: u64,
+        formula_parts: Option<Vec<PartRecord>>,
+    }
+    #[derive(Serialize)]
+    enum PartRecord {
+        Text(String),
+        Column(u64),
+    }
+    #[derive(Serialize)]
+    enum ValuesRecord {
+        Float(#[serde(with = "serde_bytes")] Vec<u8>),
+    }
+
+    let valeurs: Vec<u8> = [1.0f64, 2.0, 3.0]
+        .iter()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+    let node = |id: u64, name: &str, parent: u64, kind: KindRecord| NodeRecord {
+        id,
+        name: name.to_string(),
+        parent: Some(parent),
+        kind,
+    };
+    let body = FileBody {
+        root: 1,
+        next_id_hint: 6,
+        nodes: vec![
+            NodeRecord {
+                id: 1,
+                name: "Projet".to_string(),
+                parent: None,
+                kind: KindRecord::Folder { children: vec![2] },
+            },
+            node(
+                2,
+                "Book1",
+                1,
+                KindRecord::Workbook {
+                    sheets: vec![3],
+                    hidden: false,
+                    label: String::new(),
+                    comment: String::new(),
+                },
+            ),
+            node(
+                3,
+                "Sheet1",
+                2,
+                KindRecord::Worksheet {
+                    columns: vec![4, 5],
+                },
+            ),
+            node(
+                4,
+                "A",
+                3,
+                KindRecord::Column(Box::new(ColumnRecord {
+                    column_type: "Numeric",
+                    role: "Y",
+                    unit: String::new(),
+                    long_name: String::new(),
+                    comment: String::new(),
+                    display_format: String::new(),
+                    values: ValuesRecord::Float(valeurs.clone()),
+                    version: 1,
+                    formula_parts: None,
+                })),
+            ),
+            node(
+                5,
+                "B",
+                3,
+                KindRecord::Column(Box::new(ColumnRecord {
+                    column_type: "Numeric",
+                    role: "Y",
+                    unit: String::new(),
+                    long_name: String::new(),
+                    comment: String::new(),
+                    display_format: String::new(),
+                    values: ValuesRecord::Float(valeurs),
+                    version: 2,
+                    formula_parts: Some(vec![
+                        PartRecord::Column(lue),
+                        PartRecord::Text("*2".to_string()),
+                    ]),
+                })),
+            ),
+        ],
+    };
+    let mut bytes = b"STKF".to_vec();
+    bytes.extend_from_slice(&1u32.to_le_bytes());
+    bytes.extend_from_slice(&rmp_serde::to_vec_named(&body).expect("encodage"));
+    let path = dir.join("fabrique.stf");
+    std::fs::write(&path, &bytes).expect("écriture");
+
+    path
+}
+
+/// Invariant 10 : un identifiant lu par une formule qui ne désigne aucune
+/// colonne de la feuille (fichier fabriqué, colonne disparue) se charge sans
+/// panic — la formule s'affiche `#REF`, elle se calcule en erreur de colonne
+/// supprimée.
+#[test]
+fn a_formula_reading_an_id_outside_the_sheet_loads_as_ref() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = fichier_fabrique_avec_formule(dir.path(), 99);
+    let loaded = load(&path).expect("le fichier se charge");
+    assert_eq!(
+        loaded
+            .tree()
+            .formula_letters(stokesforge_core::NodeId::from_raw(5))
+            .as_deref(),
+        Some("#REF*2")
+    );
+}
+
+/// Invariant 7 : l'identifiant d'une colonne lue est borné à la lecture comme
+/// tous les autres (`MAX_NODE_ID`) — sans quoi un fichier fabriqué ferait
+/// démarrer l'allocateur au bord de `u64`.
+#[test]
+fn a_formula_reading_an_id_beyond_the_limit_is_refused() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = fichier_fabrique_avec_formule(dir.path(), 2_000_000_000_000);
+    assert!(load(&path).is_err(), "identifiant hors borne refusé");
 }
 
 /// Les couleurs enregistrées dans le projet, rangées par usage, survivent à

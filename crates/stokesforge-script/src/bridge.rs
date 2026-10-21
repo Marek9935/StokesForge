@@ -179,14 +179,16 @@ pub(crate) fn children(
     Ok(node.children().iter().map(|id| (*id, epoch)).collect())
 }
 
-/// Description du nœud et nombre de lignes éventuel, sur un seul instantané.
-/// Partager le nœud évite de recopier ses buffers ou ses métadonnées de fichier
-/// pour en extraire quelques champs, une fois le GIL repris.
+/// Description du nœud, nombre de lignes éventuel et formule d'une colonne
+/// **en lettres** (celles d'aujourd'hui, `#REF` pour une colonne lue qui n'est
+/// plus dans la feuille), sur un seul instantané. Partager le nœud évite de
+/// recopier ses buffers ou ses métadonnées de fichier pour en extraire quelques
+/// champs, une fois le GIL repris.
 pub(crate) fn info(
     session: &SessionHandle,
     id: NodeId,
     epoch: u64,
-) -> Result<(Arc<Node>, Option<usize>), HostError> {
+) -> Result<(Arc<Node>, Option<usize>, Option<String>), HostError> {
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     let node = checked_node(&snapshot, id, epoch)?;
     let row_count = if node.kind().is_worksheet() {
@@ -194,7 +196,11 @@ pub(crate) fn info(
     } else {
         node.as_column().map(|column| column.len())
     };
-    Ok((Arc::clone(node), row_count))
+    Ok((
+        Arc::clone(node),
+        row_count,
+        snapshot.tree.formula_letters(id),
+    ))
 }
 
 /// Cellules stockées, sans conversion : seul l'Arc est cloné ici. La copie
@@ -833,7 +839,22 @@ pub(crate) fn set_column_meta(
             "unit" => meta.unit = value.unwrap_or_default(),
             "comment" => meta.comment = value.unwrap_or_default(),
             "display_format" => meta.display_format = value.unwrap_or_default(),
-            "formula" => meta.formula = value,
+            // Seule une clé `formula` fournie touche à la formule : les autres
+            // champs laissent la formule stockée telle quelle (jamais un
+            // aller-retour par les lettres, sinon un `#REF` bloquerait toute
+            // modification de l'unité). Lettres vers identifiants par
+            // `Tree::formula_from_letters`, comme l'interface.
+            "formula" => {
+                meta.formula = match value {
+                    None => None,
+                    Some(text) => Some(
+                        snapshot
+                            .tree
+                            .formula_from_letters(id, &text)
+                            .map_err(|error| HostError::InvalidValue(error.to_string()))?,
+                    ),
+                }
+            }
             _ => {
                 return Err(HostError::InvalidValue(format!(
                     "unknown column metadata field: {key}"

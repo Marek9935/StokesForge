@@ -362,6 +362,13 @@ textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
   **Depuis A1 (#316), l'ouverture ne recalcule plus aucun calcul** (voir
   « Empreinte des entrées » ci-dessous) : il reste périmé (`manual`) avec les
   valeurs du fichier jusqu'à « Recalculate ».
+- Formules (#321) : `formula_parts` — liste de fragments `Text(texte)` /
+  `Column(identifiant)`, l'identifiant borné à la lecture comme tout identifiant
+  (`MAX_NODE_ID`, invariant 7). Un identifiant qui ne désigne aucune colonne de la
+  feuille (fichier fabriqué, colonne disparue) se charge et s'affiche `#REF`
+  (invariant 10). L'ancienne clé `formula` (lettres) n'est plus lue : le format
+  n'a pas à rester compatible en développement, la colonne se charge avec ses
+  valeurs et sans formule.
 - Empreinte des entrées (A1, #316) : chaque calcul écrit `inputs_digest`, une
   empreinte **du contenu** de ses colonnes d'entrée (`Calculation::inputs_digest`,
   `stokesforge-core/src/calc.rs` : type + valeurs, `f64::to_bits` petit-boutiste,

@@ -64,10 +64,15 @@ fn ajustement() -> Operation {
 
 /// Ajoute un ajustement linéaire de (X, Y), automatique ou non.
 fn ajouter(handle: &SessionHandle, m: &Montage, auto: bool) -> NodeId {
+    ajouter_sur(handle, m.x, m.y, auto)
+}
+
+/// Ajoute un ajustement linéaire de (`x`, `y`), automatique ou non.
+fn ajouter_sur(handle: &SessionHandle, x: NodeId, y: NodeId, auto: bool) -> NodeId {
     let snapshot = handle.snapshot().unwrap();
     let series = vec![SeriesRef {
-        x: Some(m.x),
-        y: m.y,
+        x: Some(x),
+        y,
         sigma: None,
     }];
     let op = ajustement();
@@ -141,6 +146,93 @@ fn colonne_fit(snapshot: &Snapshot, id: NodeId) -> Vec<f64> {
 
 fn modes() -> [FormulaRecalc; 2] {
     [FormulaRecalc::Targeted, FormulaRecalc::Full]
+}
+
+/// #320 : une analyse insère ses colonnes de sortie **au milieu** de la feuille,
+/// ce qui faisait glisser les lettres de position — une formule lisait une
+/// autre colonne sans prévenir. Depuis #321 une formule retient la colonne
+/// elle-même.
+///
+/// Feuille `A [1,2,3,4]`, `B [10,20,30,41]`, `C [100,200,300,400]`, `D` vide ;
+/// `D = C*1`, puis un ajustement linéaire de (A, B) en recalcul automatique :
+/// la sortie s'insère juste après B (la feuille devient A, B, sortie, C, D).
+/// `D` vaut toujours `C`, et s'affiche `D*1` (C est désormais la quatrième
+/// colonne). Mutant : résolution par position (D lirait la courbe ajustée).
+#[test]
+fn une_analyse_qui_insere_ses_sorties_ne_change_pas_ce_que_lit_une_formule() {
+    for mode in modes() {
+        let mut project = Project::new("Demo").unwrap();
+        let root = project.root();
+        project.add_workbook(root, Some("Book1")).unwrap();
+        let sheet = project.resolve_path("[Book1]Sheet1").unwrap();
+        let mut colonne = |nom: &str, valeurs: &[f64]| {
+            project
+                .add_column(sheet, None, Some(nom), Column::from_f64(valeurs))
+                .unwrap()
+        };
+        let a = colonne("A", &[1.0, 2.0, 3.0, 4.0]);
+        let b = colonne("B", &[10.0, 20.0, 30.0, 41.0]);
+        let c = colonne("C", &[100.0, 200.0, 300.0, 400.0]);
+        let d = project
+            .add_column(
+                sheet,
+                None,
+                Some("D"),
+                Column::new(stokesforge_core::ColumnType::Numeric),
+            )
+            .unwrap();
+        let session = Session::spawn_with_recalc(project, None, mode).unwrap();
+        let handle = session.handle();
+        let lire_d = |s: &Snapshot| -> Vec<f64> {
+            let colonne = s.tree.node(d).unwrap().as_column().unwrap();
+            (0..colonne.len())
+                .map(|row| match colonne.get(row) {
+                    stokesforge_core::Cell::Float(v) => v,
+                    other => panic!("cellule inattendue : {other:?}"),
+                })
+                .collect()
+        };
+
+        let formule = handle
+            .snapshot()
+            .unwrap()
+            .tree
+            .formula_from_letters(d, "C*1")
+            .unwrap();
+        handle
+            .execute(Command::SetColumnMeta {
+                column: d,
+                meta: ColumnMeta {
+                    formula: Some(formule),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        assert_eq!(
+            lire_d(&handle.snapshot().unwrap()),
+            [100.0, 200.0, 300.0, 400.0]
+        );
+
+        ajouter(&handle, &Montage { sheet, x: a, y: b }, true);
+        let s = handle.snapshot().unwrap();
+        let colonnes = s.tree.children(sheet).unwrap().to_vec();
+        assert_eq!(colonnes.len(), 5, "la sortie de l'ajustement est insérée");
+        assert_eq!(
+            (colonnes[0], colonnes[1], colonnes[3], colonnes[4]),
+            (a, b, c, d),
+            "la sortie est insérée au milieu, juste après B : C et D glissent ({mode:?})"
+        );
+        assert_eq!(
+            lire_d(&s),
+            [100.0, 200.0, 300.0, 400.0],
+            "D lit toujours C ({mode:?})"
+        );
+        assert_eq!(
+            s.tree.formula_letters(d).as_deref(),
+            Some("D*1"),
+            "C est maintenant la quatrième colonne : la lettre affichée suit ({mode:?})"
+        );
+    }
 }
 
 #[test]
@@ -316,11 +408,17 @@ fn une_formule_nourrit_un_calcul_et_un_calcul_nourrit_une_formule() {
             .unwrap()
             .last()
             .unwrap();
+        let formule_de_double = handle
+            .snapshot()
+            .unwrap()
+            .tree
+            .formula_from_letters(double, &format!("{}*2", nom(lettre)))
+            .unwrap();
         handle
             .execute(Command::SetColumnMeta {
                 column: double,
                 meta: ColumnMeta {
-                    formula: Some(format!("{}*2", nom(lettre))),
+                    formula: Some(formule_de_double),
                     ..Default::default()
                 },
             })
@@ -408,6 +506,145 @@ fn au_chargement_aucun_calcul_n_est_relance_et_l_empreinte_dit_s_il_est_perime()
                 "auto={auto} {mode:?}"
             );
         }
+    }
+}
+
+/// Un calcul automatique que le fichier a rendu périmé (`Manual`) attend un
+/// geste : une commande sans rapport qui suit ne le recalcule pas, dans les deux
+/// modes (le mode complet le recalculait, passait à `Failed` ou « à jour » et
+/// divergeait du ciblé — trouvé par `b22` en posant #321). Une vraie
+/// modification de ses entrées, elle, le recalcule comme tout automatique.
+/// Mutant : retirer les deux armes `Manual` de `update_calculation` (le mode
+/// complet efface le marqueur).
+#[test]
+fn un_automatique_perime_au_chargement_attend_un_geste_meme_en_mode_complet() {
+    for mode in modes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.stf");
+        let (_session, handle, m) = demarrer(mode);
+        let id = ajouter(&handle, &m, true);
+        handle.save(&path).unwrap();
+        alterer_fichier(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
+        handle.load(&path).unwrap();
+        assert_eq!(
+            handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .calculation(id)
+                .unwrap()
+                .stale,
+            Some(Staleness::Manual),
+            "{mode:?}"
+        );
+
+        // Une colonne sans rapport : une passe de recalcul, aucune entrée touchée.
+        handle
+            .execute(Command::AddColumn {
+                sheet: m.sheet,
+                index: None,
+                name: Some("Autre".into()),
+                column: Column::from_f64(&[7.0, 8.0]),
+            })
+            .unwrap();
+        let apres = handle.snapshot().unwrap();
+        assert_eq!(
+            apres.tree.calculation(id).unwrap().stale,
+            Some(Staleness::Manual),
+            "toujours périmé, {mode:?}"
+        );
+        assert!(
+            (pente(&apres, id) - 10.0).abs() < 1e-9,
+            "valeurs du fichier gardées, {mode:?}"
+        );
+
+        // Témoin : changer vraiment une entrée le recalcule (la réécrire à l'identique, non).
+        handle.execute(saisir(m.y, &[3.0, 6.0, 9.0, 12.0])).unwrap();
+        let fin = handle.snapshot().unwrap();
+        assert_eq!(fin.tree.calculation(id).unwrap().stale, None, "{mode:?}");
+        assert!((pente(&fin, id) - 3.0).abs() < 1e-9, "{mode:?}");
+    }
+}
+
+/// Même cas, quand l'entrée est une colonne-formule : le mode complet la
+/// réécrit à chaque passe, donc change sa **version** sans changer son
+/// **contenu** — le calcul périmé reste périmé (`Renumber`), dans les deux
+/// modes. Mutant : retirer la comparaison de contenu (l'arme `Renumber`).
+#[test]
+fn un_automatique_perime_qui_lit_une_formule_reste_perime_en_mode_complet() {
+    for mode in modes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.stf");
+        let (_session, handle, m) = demarrer(mode);
+        handle
+            .execute(Command::AddColumn {
+                sheet: m.sheet,
+                index: None,
+                name: Some("F".into()),
+                column: Column::from_f64(&[0.0; 4]),
+            })
+            .unwrap();
+        let f = *handle
+            .snapshot()
+            .unwrap()
+            .tree
+            .children(m.sheet)
+            .unwrap()
+            .last()
+            .unwrap();
+        let formule = handle
+            .snapshot()
+            .unwrap()
+            .tree
+            .formula_from_letters(f, "B*1")
+            .unwrap();
+        handle
+            .execute(Command::SetColumnMeta {
+                column: f,
+                meta: ColumnMeta {
+                    formula: Some(formule),
+                    ..Default::default()
+                },
+            })
+            .unwrap();
+        let id = ajouter_sur(&handle, m.x, f, true);
+        handle.save(&path).unwrap();
+        // Les valeurs de Y, puis celles de F (le même contenu, plus loin dans
+        // le fichier) : la formule recalculée au chargement retrouve les
+        // nouvelles, le calcul n'a pas vu les entrées changer.
+        alterer_fichier(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
+        alterer_fichier(&path, &[10.0, 20.0, 30.0, 40.0], &[2.0, 4.0, 6.0, 8.0]);
+        handle.load(&path).unwrap();
+        assert_eq!(
+            handle
+                .snapshot()
+                .unwrap()
+                .tree
+                .calculation(id)
+                .unwrap()
+                .stale,
+            Some(Staleness::Manual),
+            "{mode:?}"
+        );
+
+        handle
+            .execute(Command::AddColumn {
+                sheet: m.sheet,
+                index: None,
+                name: Some("Autre".into()),
+                column: Column::from_f64(&[7.0, 8.0]),
+            })
+            .unwrap();
+        let apres = handle.snapshot().unwrap();
+        assert_eq!(
+            apres.tree.calculation(id).unwrap().stale,
+            Some(Staleness::Manual),
+            "toujours périmé, {mode:?}"
+        );
+        assert!(
+            (pente(&apres, id) - 10.0).abs() < 1e-9,
+            "valeurs du fichier gardées, {mode:?}"
+        );
     }
 }
 

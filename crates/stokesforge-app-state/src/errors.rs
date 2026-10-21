@@ -569,6 +569,7 @@ pub mod formula {
             FormulaError::SelfReference(letter) => {
                 tr!("error-formula-self-reference", letter = letter.as_str())
             }
+            FormulaError::DeletedColumn => tr!("error-formula-deleted-column"),
             FormulaError::Cycle => tr!("error-formula-cycle"),
             FormulaError::TooDeep => tr!("error-formula-too-deep"),
         }
@@ -583,17 +584,19 @@ pub mod formula {
                 FormulaError::Parse("incomplete expression".into()),
                 FormulaError::UnknownColumn("C".into()),
                 FormulaError::SelfReference("A".into()),
+                FormulaError::DeletedColumn,
                 FormulaError::Cycle,
                 FormulaError::TooDeep,
             ];
-            let mut seen = [false; 5];
+            let mut seen = [false; 6];
             for sample in &samples {
                 let index = match sample {
                     FormulaError::Parse(_) => 0,
                     FormulaError::UnknownColumn(_) => 1,
                     FormulaError::SelfReference(_) => 2,
-                    FormulaError::Cycle => 3,
-                    FormulaError::TooDeep => 4,
+                    FormulaError::DeletedColumn => 3,
+                    FormulaError::Cycle => 4,
+                    FormulaError::TooDeep => 5,
                 };
                 seen[index] = true;
             }
@@ -609,10 +612,34 @@ pub mod formula {
         }
 
         #[test]
+        fn la_colonne_supprimee_dit_quoi_remplacer() {
+            // Comparée en anglais : la langue ne dépend pas de l'environnement.
+            crate::i18n::set_language(crate::i18n::Language::English);
+            assert_eq!(
+                error_message(&FormulaError::DeletedColumn),
+                "Column deleted. Replace #REF with a column letter"
+            );
+            // Le `Display` du crate du dessous reste de l'anglais brut.
+            assert_eq!(
+                FormulaError::DeletedColumn.to_string(),
+                "the formula reads a column that no longer exists in the worksheet"
+            );
+            // Le catalogue français porte la même clé.
+            let fr = include_str!("../i18n/fr/stokesforge_app.ftl");
+            assert!(fr.contains(
+                "error-formula-deleted-column = Colonne supprimée. Remplacer #REF par une lettre de colonne"
+            ));
+        }
+
+        #[test]
         fn l_erreur_de_formule_trop_profonde_est_mise_en_phrase() {
-            use stokesforge_core::Formula;
-            let formule = "(".repeat(101) + "A" + &")".repeat(101);
-            let erreur = Formula::parse(&formule).unwrap_err();
+            use stokesforge_core::{ColumnFormula, FormulaPart, NodeId};
+            let formule = ColumnFormula::from_parts(vec![
+                FormulaPart::Text("(".repeat(101)),
+                FormulaPart::Column(NodeId::from_raw(1)),
+                FormulaPart::Text(")".repeat(101)),
+            ]);
+            let erreur = formule.compile().unwrap_err();
             assert_eq!(erreur, FormulaError::TooDeep);
             // Comparée en anglais : la langue ne dépend pas de l'environnement.
             crate::i18n::set_language(crate::i18n::Language::English);

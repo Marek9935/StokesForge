@@ -439,8 +439,8 @@ pub(crate) fn run(
                     // traitées comme un cache qu'on ne fait pas confiance
                     // à l'aveugle : un fichier a pu être modifié par un
                     // autre processus, une version antérieure de StokesForge,
-                    // ou porter des colonnes dont l'ordre (donc les
-                    // lettres) a changé sans que les valeurs suivent.
+                    // ou porter des colonnes dont l'ordre a changé sans que
+                    // les valeurs suivent.
                     // Recalculer les formules ici est le choix retenu (peu
                     // coûteux — voir `recalc_formulas`). Le mémo est vidé :
                     // il décrit un projet qui n'existe plus.

@@ -47,6 +47,7 @@
 use std::sync::Arc;
 
 use crate::error::{CoreError, CoreResult};
+use crate::formula::ColumnFormula;
 
 /// Type de données stocké. `Numeric` et `DateTime` partagent la représentation
 /// `f64` (pour `DateTime`, un timestamp POSIX en secondes) ; `Mixed` porte le
@@ -237,15 +238,19 @@ pub struct ColumnMeta {
     pub x_prime: Option<f64>,
     /// Format d'affichage (chaîne libre interprétée par la couche UI).
     pub display_format: String,
-    /// Formule de calcul (`"A+B"`, `"(A-B)*2"`, ...), `None` pour une colonne
-    /// ordinaire. Une colonne dont la formule est `Some(_)` est recalculée
-    /// automatiquement — voir `stokesforge_core::formula` pour l'évaluateur et
-    /// `stokesforge-session::actor` pour l'orchestration du recalcul — et refuse
-    /// une écriture directe (`Command::SetCells`, voir `stokesforge-commands`) :
-    /// ses valeurs ne sont jamais la source de vérité, seule la formule
-    /// l'est. `#[serde(default)]` côté persistance (`stokesforge-persistence`) :
-    /// un fichier écrit avant ce champ n'a que des colonnes ordinaires.
-    pub formula: Option<String>,
+    /// Formule de calcul (`A+B`, `(A-B)*2`, ... à l'écran), `None` pour une
+    /// colonne ordinaire. Une colonne dont la formule est `Some(_)` est
+    /// recalculée automatiquement — voir `stokesforge_core::formula` pour
+    /// l'évaluateur et `stokesforge-session::actor` pour l'orchestration du
+    /// recalcul — et refuse une écriture directe (`Command::SetCells`, voir
+    /// `stokesforge-commands`) : ses valeurs ne sont jamais la source de
+    /// vérité, seule la formule l'est. Elle retient les colonnes lues **par
+    /// identifiant** (#321) : les lettres affichées s'obtiennent par
+    /// [`crate::Tree::formula_letters`], et se saisissent par
+    /// [`crate::Tree::formula_from_letters`]. `#[serde(default)]` côté
+    /// persistance (`stokesforge-persistence`) : un fichier écrit avant ce
+    /// champ n'a que des colonnes ordinaires.
+    pub formula: Option<ColumnFormula>,
     /// Métadonnées du fichier d'origine (en-tête, et pied de page si la
     /// recette le demande), conservées à l'import — voir [`MetaLine`]. Vide
     /// pour une colonne saisie à la main. Lecture seule côté interface : seule

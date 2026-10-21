@@ -525,6 +525,20 @@ fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Pro
         if let Some(parent_id) = parent {
             check_node_id(parent_id, path)?;
         }
+        // Les colonnes qu'une formule lit sont des identifiants comme les
+        // autres : bornés à la lecture (invariant 7), sans quoi un fichier
+        // fabriqué ferait démarrer l'allocateur au bord de `u64`.
+        if let schema::KindRecord::Column {
+            formula_parts: Some(parts),
+            ..
+        } = &kind
+        {
+            for part in parts {
+                if let schema::FormulaPartRecord::Column(read) = part {
+                    check_node_id(*read, path)?;
+                }
+            }
+        }
         let kind = convert::record_to_kind(kind).map_err(|err| convert_error(err, path))?;
         let node = Node::with_parent(
             NodeId::from_raw(id),
@@ -1014,7 +1028,7 @@ mod tests {
                 display_format: String::new(),
                 values: schema::ValuesRecord::Float(vec![0, 1, 2]), // 3 octets, pas multiple de 8
                 version: 0,
-                formula: None,
+                formula_parts: None,
                 file_metadata: Vec::new(),
                 import_source: None,
                 x_prime: None,
@@ -1083,7 +1097,7 @@ mod tests {
                     Some("1.5".to_string()),
                 ]),
                 version: 3,
-                formula: None,
+                formula_parts: None,
                 file_metadata: Vec::new(),
                 import_source: None,
                 x_prime: None,

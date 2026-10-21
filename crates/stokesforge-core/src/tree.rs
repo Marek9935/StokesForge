@@ -19,6 +19,7 @@ use stokesforge_plot::SavedColors;
 use crate::calc::{Calculation, CorrectionRecord};
 use crate::column::Column;
 use crate::error::{CoreError, CoreResult};
+use crate::formula::{ColumnFormula, FormulaError};
 use crate::id::NodeId;
 use crate::name::check_name;
 use crate::node::{containment_message, Node, NodeKind};
@@ -527,6 +528,44 @@ impl Tree {
             .map(Column::len)
             .max()
             .unwrap_or(0))
+    }
+
+    /// Colonnes de la feuille de `column` (ses sœurs, elle comprise), dans
+    /// l'ordre de la feuille — ce qui fait les lettres. Vide si `column` n'a
+    /// pas de parent.
+    fn sheet_columns_of(&self, column: NodeId) -> &[NodeId] {
+        self.parent(column)
+            .ok()
+            .flatten()
+            .and_then(|sheet| self.children(sheet).ok())
+            .unwrap_or(&[])
+    }
+
+    /// Lit une formule **saisie en lettres** pour `column` : chaque lettre
+    /// devient l'identifiant de la colonne qu'elle désigne dans la feuille de
+    /// `column` (voir [`ColumnFormula::from_letters`] pour les refus).
+    ///
+    /// C'est, avec [`Tree::formula_letters`], le **seul** passage lettres ↔
+    /// identifiants — partagé par l'application et par `pyst`. Il se fait
+    /// *au-dessus* des commandes : `Command::SetColumnMeta` ne valide jamais
+    /// les références, et le geste qui modifie un autre champ garde la
+    /// formule stockée telle quelle (sinon un `#REF` bloquerait toute
+    /// modification de l'unité).
+    pub fn formula_from_letters(
+        &self,
+        column: NodeId,
+        text: &str,
+    ) -> Result<ColumnFormula, FormulaError> {
+        ColumnFormula::from_letters(text, self.sheet_columns_of(column), column)
+    }
+
+    /// Texte à afficher pour la formule de `column` : les lettres **actuelles**
+    /// de ses colonnes lues, `#REF` pour une colonne qui n'est plus dans la
+    /// feuille. `None` si `column` n'est pas une colonne ou n'a pas de
+    /// formule. Affichage seulement : jamais relu pour calculer.
+    pub fn formula_letters(&self, column: NodeId) -> Option<String> {
+        let formula = self.node(column)?.as_column()?.meta().formula.as_ref()?;
+        Some(formula.letters(self.sheet_columns_of(column)))
     }
 
     /// Itère sur `(NodeId, &Node)` sans ordre garanti (persistance, statistiques).

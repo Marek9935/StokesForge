@@ -147,6 +147,17 @@ impl Project {
             .map(|(id, _)| id.raw())
             .chain(tree.calculations().keys().map(|id| id.raw()))
             .chain(tree.correction_traces().keys().map(|id| id.raw()))
+            // Les identifiants que lisent les formules (#321) : une colonne
+            // lue peut ne plus être dans l'arbre (supprimée, puis fichier
+            // enregistré), et son numéro ne doit jamais être réattribué — la
+            // formule en lirait une autre (invariant 7).
+            .chain(
+                tree.iter()
+                    .filter_map(|(_, node)| node.as_column())
+                    .filter_map(|column| column.meta().formula.as_ref())
+                    .flat_map(|formula| formula.columns())
+                    .map(|id| id.raw()),
+            )
             .max()
             .unwrap_or(0);
         // A7 — le compteur de version de colonne n'est pas encore persisté
@@ -435,6 +446,48 @@ impl Project {
                 )?;
                 ids.insert(source.id(), id);
                 root.get_or_insert(id);
+            }
+            // Les formules des colonnes copiées lisent les colonnes **de la
+            // copie** (#321), comme les séries ci-dessus : renumérotées après
+            // la boucle, parce qu'une formule peut lire une sœur insérée plus
+            // tard (ordre préfixe). Une référence hors de la copie reçoit une
+            // réservation sans nœud — elle s'affiche `#REF`, et ni une colonne
+            // existante ni une future allocation ne doivent lui donner un autre
+            // sens dans la destination.
+            let mut reserved = std::collections::HashMap::new();
+            for source in copy.nodes() {
+                let Some(formula) = source
+                    .as_column()
+                    .and_then(|column| column.meta().formula.as_ref())
+                else {
+                    continue;
+                };
+                let Some(&new_column) = ids.get(&source.id()) else {
+                    continue;
+                };
+                let mut failure = None;
+                let remapped = formula.remap(|old| {
+                    if let Some(&id) = ids.get(&old).or_else(|| reserved.get(&old)) {
+                        return id;
+                    }
+                    match self.ids.next() {
+                        Ok(id) => {
+                            reserved.insert(old, id);
+                            id
+                        }
+                        Err(error) => {
+                            failure.get_or_insert(error);
+                            old
+                        }
+                    }
+                });
+                if let Some(error) = failure {
+                    return Err(error);
+                }
+                let column = Arc::make_mut(&mut self.tree).column_mut(new_column)?;
+                let mut meta = column.meta().clone();
+                meta.formula = Some(remapped);
+                column.set_meta(meta);
             }
             root.ok_or_else(|| CoreError::Structure("empty copy".into()))
         })();
@@ -1254,5 +1307,165 @@ mod tests {
         assert_eq!(project.next_window_name("Book"), "Book3");
         project.add_empty_workbook(root, Some("Book1")).unwrap();
         assert_eq!(project.next_window_name("Book"), "Book3");
+    }
+
+    // -- formules par identifiant (#321) --
+
+    /// Feuille de `book` (« Sheet1 ») et `count` colonnes ordinaires à la suite.
+    fn sheet_with_columns(
+        project: &mut Project,
+        book: &str,
+        count: usize,
+    ) -> (NodeId, Vec<NodeId>) {
+        let root = project.root();
+        project.add_workbook(root, Some(book)).expect("classeur");
+        let sheet = project
+            .resolve_path(&format!("[{book}]Sheet1"))
+            .expect("feuille");
+        let columns = (0..count)
+            .map(|k| {
+                project
+                    .add_column(sheet, None, None, Column::from_f64(&[k as f64 + 1.0]))
+                    .expect("colonne")
+            })
+            .collect();
+        (sheet, columns)
+    }
+
+    /// Pose la formule `text` (en lettres) sur `column`, comme le fait l'interface.
+    fn set_formula(project: &mut Project, column: NodeId, text: &str) {
+        let formula = project
+            .tree()
+            .formula_from_letters(column, text)
+            .expect("formule");
+        let mut meta = project
+            .tree()
+            .node(column)
+            .and_then(Node::as_column)
+            .expect("colonne")
+            .meta()
+            .clone();
+        meta.formula = Some(formula);
+        project.set_column_meta(column, meta).expect("méta");
+    }
+
+    /// Colonnes de la feuille, dans l'ordre.
+    fn columns_of(project: &Project, sheet: NodeId) -> Vec<NodeId> {
+        project.tree().children(sheet).expect("feuille").to_vec()
+    }
+
+    /// La formule stockée de `column`.
+    fn formula_of(project: &Project, column: NodeId) -> crate::ColumnFormula {
+        project
+            .tree()
+            .node(column)
+            .and_then(Node::as_column)
+            .and_then(|column| column.meta().formula.clone())
+            .expect("formule")
+    }
+
+    /// Une feuille dupliquée : la formule de la copie lit les colonnes **de la
+    /// copie**, pas celles de la mère (F7). Témoin : la mère garde les siennes.
+    /// Mutant : renumérotation retirée -> la copie lit les colonnes de la mère
+    /// (ses lettres s'affichent `#REF`).
+    #[test]
+    fn dupliquer_une_feuille_fait_lire_a_la_copie_ses_propres_colonnes() {
+        let mut project = Project::new("Demo").expect("projet");
+        let (sheet, columns) = sheet_with_columns(&mut project, "Book1", 3);
+        set_formula(&mut project, columns[2], "A+B*2");
+
+        let copy = project.duplicate_worksheet(sheet, "Copie").expect("copie");
+        let copied = columns_of(&project, copy);
+        assert_eq!(copied.len(), 3);
+
+        assert_eq!(
+            formula_of(&project, copied[2]).columns(),
+            std::collections::BTreeSet::from([copied[0], copied[1]]),
+            "la copie lit les colonnes de la copie"
+        );
+        assert_eq!(
+            project.tree().formula_letters(copied[2]).as_deref(),
+            Some("A+B*2")
+        );
+        // Témoin : la mère lit toujours les siennes.
+        assert_eq!(
+            formula_of(&project, columns[2]).columns(),
+            std::collections::BTreeSet::from([columns[0], columns[1]])
+        );
+        assert_eq!(
+            project.tree().formula_letters(columns[2]).as_deref(),
+            Some("A+B*2")
+        );
+    }
+
+    /// Coller une colonne-formule seule dans un autre projet : ses références
+    /// sortent de la copie, elles s'affichent `#REF` et le restent, même quand
+    /// la destination reçoit assez de colonnes neuves pour rattraper les
+    /// numéros de la source (réservation sans nœud, comme les séries).
+    /// Mutant : références laissées telles quelles, ou réservation retirée.
+    #[test]
+    fn une_reference_rompue_a_la_copie_reste_ref_apres_l_ajout_de_colonnes() {
+        let mut source = Project::new("Source").expect("projet");
+        let (_, source_columns) = sheet_with_columns(&mut source, "BookS", 3);
+        set_formula(&mut source, source_columns[2], "A+B");
+        let copy = crate::NodeCopy::capture(source.tree(), source_columns[2])
+            .expect("capture")
+            .into_external();
+
+        let mut destination = Project::new("Destination").expect("projet");
+        let (sheet, _) = sheet_with_columns(&mut destination, "BookD", 0);
+        let pasted = destination
+            .insert_copy(sheet, &copy, "Collée")
+            .expect("collage");
+        assert_eq!(
+            destination.tree().formula_letters(pasted).as_deref(),
+            Some("#REF+#REF")
+        );
+
+        // La destination reçoit assez de colonnes pour passer les numéros de la source.
+        for _ in 0..12 {
+            destination
+                .add_column(sheet, None, None, Column::from_f64(&[0.0]))
+                .expect("colonne");
+        }
+        assert_eq!(
+            destination.tree().formula_letters(pasted).as_deref(),
+            Some("#REF+#REF"),
+            "aucune colonne neuve n'est lue par erreur"
+        );
+        // Témoin : les numéros réservés ne sont ceux d'aucune colonne de la feuille.
+        let formula = formula_of(&destination, pasted);
+        let ids = columns_of(&destination, sheet);
+        assert!(formula.has_deleted_reference(&ids));
+        assert!(formula.columns().iter().all(|id| !ids.contains(id)));
+    }
+
+    /// `next_id_hint` en retard : un fichier enregistré après la suppression
+    /// d'une colonne lue garde son numéro dans la formule, et ce numéro ne doit
+    /// jamais être réattribué. Mutant : la chaîne des identifiants de formule
+    /// retirée de `highest`.
+    #[test]
+    fn from_tree_ne_reattribue_pas_un_identifiant_lu_par_une_formule() {
+        let mut project = Project::new("Demo").expect("projet");
+        let (_, columns) = sheet_with_columns(&mut project, "Book1", 2);
+        let mut meta = project
+            .tree()
+            .node(columns[1])
+            .and_then(Node::as_column)
+            .expect("colonne")
+            .meta()
+            .clone();
+        meta.formula = Some(crate::ColumnFormula::from_parts(vec![
+            crate::FormulaPart::Column(NodeId::from_raw(99)),
+            crate::FormulaPart::Text("*2".into()),
+        ]));
+        project.set_column_meta(columns[1], meta).expect("méta");
+
+        let reloaded = Project::from_tree(project.tree().clone(), 1);
+        assert!(
+            reloaded.next_id_hint() > 99,
+            "prochain identifiant : {}",
+            reloaded.next_id_hint()
+        );
     }
 }

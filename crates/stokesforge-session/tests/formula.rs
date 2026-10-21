@@ -7,7 +7,7 @@ use stokesforge_commands::{ColumnRef, Command, HistoryLabel};
 use stokesforge_core::{
     Cell, Column, ColumnMeta, ColumnType, MixedCell, NodeId, Project, ValueBlock,
 };
-use stokesforge_session::{Session, Snapshot};
+use stokesforge_session::{Session, SessionHandle, Snapshot};
 
 /// `Book1 → Sheet1` avec `A [1,2,3]`, `B [10,20,30]` et une colonne `C`
 /// numérique vide — de quoi lui poser une formule dans chaque test. Rend
@@ -49,11 +49,19 @@ fn read_floats(snapshot: &Snapshot, column: NodeId) -> Vec<f64> {
         .collect()
 }
 
-fn set_formula(column: NodeId, formula: &str) -> Command {
+/// La commande qui pose `formula` (saisie en **lettres**) : lettres vers
+/// identifiants par `Tree::formula_from_letters`, comme l'interface (#321).
+fn set_formula(handle: &SessionHandle, column: NodeId, formula: &str) -> Command {
+    let formula = handle
+        .snapshot()
+        .expect("snapshot")
+        .tree
+        .formula_from_letters(column, formula)
+        .expect("formule saisie");
     Command::SetColumnMeta {
         column,
         meta: ColumnMeta {
-            formula: Some(formula.to_string()),
+            formula: Some(formula),
             ..Default::default()
         },
     }
@@ -78,7 +86,7 @@ fn setting_a_formula_recalculates_immediately() {
     let handle = session.handle();
 
     handle
-        .execute(set_formula(c, "A+B"))
+        .execute(set_formula(&handle, c, "A+B"))
         .expect("poser la formule");
     let snapshot = handle.snapshot().expect("snapshot");
     assert_eq!(read_floats(&snapshot, c), vec![11.0, 22.0, 33.0]);
@@ -99,7 +107,7 @@ fn editing_a_source_column_recalculates_the_formula_column() {
     let handle = session.handle();
 
     handle
-        .execute(set_formula(c, "A+B"))
+        .execute(set_formula(&handle, c, "A+B"))
         .expect("poser la formule");
     let undo_label_after_formula = handle.snapshot().expect("snapshot").history.undo_label;
 
@@ -172,10 +180,10 @@ fn a_dependency_cycle_degrades_to_nan_without_hanging() {
         .expect("colonne D ajoutée");
 
     handle
-        .execute(set_formula(c, "D+1"))
+        .execute(set_formula(&handle, c, "D+1"))
         .expect("poser C = D+1");
     handle
-        .execute(set_formula(d, "C+1"))
+        .execute(set_formula(&handle, d, "C+1"))
         .expect("poser D = C+1, ce qui referme le cycle");
 
     let snapshot = handle.snapshot().expect("snapshot");
@@ -217,7 +225,7 @@ fn undoing_a_formula_set_on_a_column_with_prior_values_restores_them() {
     let undo_label_before_formula = handle.snapshot().expect("snapshot").history.undo_label;
 
     handle
-        .execute(set_formula(c, "A+B"))
+        .execute(set_formula(&handle, c, "A+B"))
         .expect("poser C = A+B");
     let snapshot = handle.snapshot().expect("snapshot");
     assert_eq!(
@@ -254,11 +262,15 @@ fn undoing_a_formula_set_on_a_column_with_prior_values_restores_them() {
 #[test]
 fn load_recalculates_rather_than_trusting_the_saved_values() {
     let (mut project, a, b, c) = fixture();
+    let formula = project
+        .tree()
+        .formula_from_letters(c, "A+B")
+        .expect("formule saisie");
     project
         .set_column_meta(
             c,
             ColumnMeta {
-                formula: Some("A+B".to_string()),
+                formula: Some(formula),
                 ..Default::default()
             },
         )
@@ -336,7 +348,7 @@ fn mixed_reference_retypes_the_formula_column_and_shows_dashes_on_failure() {
     let session = Session::spawn(project, None).expect("thread de l'acteur démarré");
     let handle = session.handle();
     handle
-        .execute(set_formula(c, "A+B"))
+        .execute(set_formula(&handle, c, "A+B"))
         .expect("poser C = A+B");
 
     let snapshot = handle.snapshot().expect("snapshot");
@@ -379,7 +391,7 @@ fn formula_referencing_only_numeric_columns_still_becomes_mixed() {
     let handle = session.handle();
 
     handle
-        .execute(set_formula(c, "A+B"))
+        .execute(set_formula(&handle, c, "A+B"))
         .expect("poser C = A+B");
 
     let snapshot = handle.snapshot().expect("snapshot");
@@ -405,7 +417,7 @@ fn a_formula_with_no_column_reference_stays_numeric() {
     let handle = session.handle();
 
     handle
-        .execute(set_formula(c, "42"))
+        .execute(set_formula(&handle, c, "42"))
         .expect("poser C = 42, une constante pure");
 
     let snapshot = handle.snapshot().expect("snapshot");

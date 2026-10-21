@@ -35,7 +35,10 @@ use stokesforge_app_state::state::{
     UnsavedChoice, UnsavedGesture, INFO_LIFETIME, STATUS_HISTORY_LEN,
 };
 use stokesforge_commands::{ColumnRef, HistoryLabel, MacroKind};
-use stokesforge_core::{Cell, Column, ColumnMeta, ColumnRole, ColumnType, NodeId, Project, Tree};
+use stokesforge_core::{
+    Cell, Column, ColumnFormula, ColumnMeta, ColumnRole, ColumnType, FormulaPart, NodeId, Project,
+    Tree,
+};
 use stokesforge_import::{
     DecimalStyle, HeaderSkip, ImportRecipe, NameSource, RecipeStore, Separator,
 };
@@ -2313,10 +2316,16 @@ fn pasting_a_thousands_looking_number_does_not_notice() {
     assert!(!status_text(&state).contains("decimal comma"));
 }
 
+/// Lettres affichées de la formule d'une colonne (#321 : la formule est
+/// stockée par identifiants, les lettres ne sont qu'un affichage).
+fn formula_letters(state: &AppState, column: NodeId) -> Option<String> {
+    state.tree().formula_letters(column)
+}
+
 /// Copie de trois rangées d'en-tête (Nom long, Unité, Commentaire) d'une
 /// colonne, prête à coller ; renvoie le texte copié.
 fn copy_three_header_rows(state: &mut AppState, sheet: NodeId, column: NodeId) -> String {
-    set_header_field(state, column, HeaderField::LongName, "L");
+    set_header_field(state, column, HeaderField::LongName, "A");
     set_header_field(state, column, HeaderField::Unit, "u");
     set_header_field(state, column, HeaderField::Comment, "c");
     state.select_header_field(sheet, column, HeaderField::LongName);
@@ -2341,7 +2350,7 @@ fn a_header_field_paste_anchored_low_counts_the_rows_beyond_formula() {
         sheet: sheet1,
         text,
     });
-    assert_eq!(state.column_meta(note).formula.as_deref(), Some("L"));
+    assert_eq!(formula_letters(&state, note).as_deref(), Some("A"));
     assert_eq!(state.column_meta(note).unit, "", "rangée jetée");
     let status = state.status().expect("un statut");
     assert!(!status.is_error(), "{}", status.text);
@@ -2351,7 +2360,7 @@ fn a_header_field_paste_anchored_low_counts_the_rows_beyond_formula() {
         status.text
     );
     state.dispatch(Action::Undo);
-    assert_eq!(state.column_meta(note).formula, None, "un Annuler suffit");
+    assert_eq!(formula_letters(&state, note), None, "un Annuler suffit");
 }
 
 /// #311 (E4) : ancré sur Nom long, les trois rangées tiennent : aucun statut.
@@ -2387,7 +2396,7 @@ fn columns_and_header_fields_dropped_together_give_one_combined_notice() {
     let signal = column_id(&state, sheet1, "Signal");
     let note = column_id(&state, sheet1, "Note");
     for column in [temps, signal] {
-        set_header_field(&mut state, column, HeaderField::LongName, "L");
+        set_header_field(&mut state, column, HeaderField::LongName, "A");
         set_header_field(&mut state, column, HeaderField::Unit, "u");
     }
     state.select_header_field(sheet1, temps, HeaderField::LongName);
@@ -2648,12 +2657,14 @@ fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fie
 
     set_header_field(&mut state, temps, HeaderField::LongName, "a");
     set_header_field(&mut state, temps, HeaderField::Unit, "b");
-    set_header_field(&mut state, temps, HeaderField::Comment, "c");
+    // « A » : une lettre de colonne valable, car ce texte atterrit sur le
+    // champ Formule de `Note` (les formules se saisissent en lettres, #321).
+    set_header_field(&mut state, temps, HeaderField::Comment, "A");
 
     state.select_header_field(sheet1, temps, HeaderField::LongName);
     state.extend_header_field_selection(sheet1, temps, HeaderField::Comment);
     let text = state.copy_selection(sheet1).expect("sélection non vide");
-    assert_eq!(text, "a\nb\nc\n");
+    assert_eq!(text, "a\nb\nA\n");
 
     // Ancré sur le champ Nom long de `Signal` (le même rang que le premier
     // champ copié) : les trois champs s'appliquent, décalage nul.
@@ -2665,7 +2676,7 @@ fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fie
     let meta = state.column_meta(signal);
     assert_eq!(meta.long_name, "a");
     assert_eq!(meta.unit, "b");
-    assert_eq!(meta.comment, "c");
+    assert_eq!(meta.comment, "A");
 
     // Ancré sur Unité cette fois (un rang plus bas) : le rectangle se
     // décale d'autant — Unité reçoit la première ligne copiée, Commentaire
@@ -2680,7 +2691,81 @@ fn pasting_a_header_only_copy_onto_a_single_header_field_anchors_and_offsets_fie
     let meta = state.column_meta(note);
     assert_eq!(meta.unit, "a");
     assert_eq!(meta.comment, "b");
-    assert_eq!(meta.formula, Some("c".to_string()));
+    assert_eq!(formula_letters(&state, note).as_deref(), Some("A"));
+}
+
+// -- Formules par identifiant (#321) --
+
+/// Une lettre qui ne désigne aucune colonne de la feuille est refusée : rien
+/// n'est écrit, la barre d'état dit laquelle (en saisie comme au collage).
+#[test]
+fn a_formula_naming_a_missing_column_is_refused_with_a_message() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let note = column_id(&state, sheet1, "Note");
+
+    set_header_field(&mut state, signal, HeaderField::Formula, "Z*2");
+    assert_eq!(formula_letters(&state, signal), None, "rien n'est écrit");
+    let status = state.status().expect("un statut");
+    assert!(status.is_error(), "{}", status.text);
+    assert!(
+        status.text.contains("Column Z does not exist"),
+        "statut inattendu : {}",
+        status.text
+    );
+
+    // Au collage, le même refus (et son message à lui) : rien n'est écrit.
+    state.select_header_field(sheet1, note, HeaderField::Formula);
+    state.dispatch(Action::Paste {
+        sheet: sheet1,
+        text: "Y*2".to_string(),
+    });
+    assert_eq!(formula_letters(&state, note), None, "collage refusé");
+    let status = state.status().expect("un statut");
+    assert!(status.is_error(), "{}", status.text);
+    assert!(
+        status.text.contains("Column Y does not exist"),
+        "statut inattendu : {}",
+        status.text
+    );
+}
+
+/// Une colonne lue qui disparaît laisse `#REF` dans le texte affiché ; quitter
+/// la case sans rien changer ne réécrit pas la formule (le texte affiché n'est
+/// jamais relu : `#REF` serait refusé), et Annuler rend la colonne et sa
+/// lettre.
+#[test]
+fn a_formula_reading_a_deleted_column_shows_ref_and_survives_an_unchanged_edit() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
+    let stored = state.column_meta(signal).formula;
+    assert!(stored.is_some());
+
+    state.select_column(sheet1, temps);
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+    assert_eq!(formula_letters(&state, signal).as_deref(), Some("#REF*2"));
+
+    // Ouvrir la case puis la quitter telle quelle : la formule reste, sans
+    // message d'erreur.
+    state.begin_header_edit(signal, HeaderField::Formula);
+    assert_eq!(
+        state.header_editing_mut().map(|edit| edit.buffer.clone()),
+        Some("#REF*2".to_string())
+    );
+    state.commit_header_edit();
+    assert_eq!(state.column_meta(signal).formula, stored, "formule intacte");
+    assert!(
+        !state.status().is_some_and(|status| status.is_error()),
+        "aucune erreur : {}",
+        status_text(&state)
+    );
 }
 
 // -- Retirer une formule (#236) --
@@ -2710,7 +2795,7 @@ fn removing_a_formula_deletes_the_values_and_one_undo_restores_both() {
     let value = cell(&state, signal, 0);
 
     set_header_field(&mut state, signal, HeaderField::Formula, "");
-    assert_eq!(state.column_meta(signal).formula, None);
+    assert_eq!(formula_letters(&state, signal), None);
     assert_eq!(
         column_len(&state, signal),
         0,
@@ -2719,7 +2804,7 @@ fn removing_a_formula_deletes_the_values_and_one_undo_restores_both() {
     assert!(column_len(&state, temps) > 0, "les autres colonnes restent");
 
     state.dispatch(Action::Undo);
-    assert_eq!(state.column_meta(signal).formula, Some("A*2".to_string()));
+    assert_eq!(formula_letters(&state, signal).as_deref(), Some("A*2"));
     assert_eq!(column_len(&state, signal), with_formula);
     assert_eq!(cell(&state, signal, 0), value);
 }
@@ -2736,7 +2821,7 @@ fn clearing_the_formula_field_with_backspace_also_deletes_the_values() {
     state.select_header_field(sheet1, signal, HeaderField::Formula);
     state.dispatch(Action::ClearSelectedCells { sheet: sheet1 });
 
-    assert_eq!(state.column_meta(signal).formula, None);
+    assert_eq!(formula_letters(&state, signal), None);
     assert_eq!(column_len(&state, signal), 0);
 }
 
@@ -2755,13 +2840,13 @@ fn remove_formula_keep_data_keeps_the_values_in_one_undo_step() {
     assert!(state.grid_menu(sheet1).unwrap().offers_keep_formula_data);
     state.dispatch(Action::RemoveFormulaKeepData { sheet: sheet1 });
 
-    assert_eq!(state.column_meta(signal).formula, None);
+    assert_eq!(formula_letters(&state, signal), None);
     assert_eq!(column_len(&state, signal), len);
     assert_eq!(cell(&state, signal, 0), value);
     assert!(!state.grid_menu(sheet1).unwrap().offers_keep_formula_data);
 
     state.dispatch(Action::Undo);
-    assert_eq!(state.column_meta(signal).formula, Some("A*2".to_string()));
+    assert_eq!(formula_letters(&state, signal).as_deref(), Some("A*2"));
 }
 
 /// Workbook › Columns : la même entrée, sur des colonnes entières.
@@ -2780,10 +2865,10 @@ fn remove_columns_formula_keep_data_works_from_the_columns_menu() {
     state.dispatch(Action::RemoveColumnsFormulaKeepData {
         columns: vec![temps, signal],
     });
-    assert_eq!(state.column_meta(signal).formula, None);
+    assert_eq!(formula_letters(&state, signal), None);
     assert_eq!(column_len(&state, signal), len);
     state.dispatch(Action::Undo);
-    assert_eq!(state.column_meta(signal).formula, Some("A*2".to_string()));
+    assert_eq!(formula_letters(&state, signal).as_deref(), Some("A*2"));
 }
 
 /// L'entrée n'est offerte que sur une formule existante.
@@ -2820,24 +2905,26 @@ fn copying_a_single_formula_field_can_paste_it_into_another_columns_formula_fiel
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let (_session, mut state) = start_demo(dir.path());
     let sheet1 = sheet_named(state.tree(), "Sheet1");
-    let temps = column_id(&state, sheet1, "Temps");
     let signal = column_id(&state, sheet1, "Signal");
 
-    set_header_field(&mut state, temps, HeaderField::Formula, "A*2");
-    state.select_header_field(sheet1, temps, HeaderField::Formula);
+    // `Temps` est la colonne A : sa formule ne peut pas se lire elle-même,
+    // la source de la copie est donc `Signal`.
+    set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
+    state.select_header_field(sheet1, signal, HeaderField::Formula);
     let text = state.copy_selection(sheet1).expect("sélection non vide");
     assert_eq!(
         text, "A*2",
         "une seule case copiée : son texte, rien d'autre"
     );
 
-    state.select_header_field(sheet1, signal, HeaderField::Formula);
+    let note = column_id(&state, sheet1, "Note");
+    state.select_header_field(sheet1, note, HeaderField::Formula);
     state.dispatch(Action::Paste {
         sheet: sheet1,
         text,
     });
 
-    assert_eq!(state.column_meta(signal).formula, Some("A*2".to_string()));
+    assert_eq!(formula_letters(&state, note).as_deref(), Some("A*2"));
 }
 
 /// Règle 1 : un texte externe sans tabulation ni retour à la ligne (jamais
@@ -3176,7 +3263,9 @@ fn pasting_relative_header_fields_drops_what_overflows_past_the_formula_field() 
     let signal = column_id(&state, sheet1, "Signal");
 
     set_header_field(&mut state, temps, HeaderField::LongName, "a");
-    set_header_field(&mut state, temps, HeaderField::Unit, "b");
+    // « A » : atterrit sur le champ Formule de `Signal`, où seule une lettre
+    // de colonne de la feuille est valable (#321).
+    set_header_field(&mut state, temps, HeaderField::Unit, "A");
     set_header_field(&mut state, temps, HeaderField::Comment, "c");
     set_header_field(&mut state, signal, HeaderField::LongName, "intact");
     set_header_field(&mut state, signal, HeaderField::Unit, "intact aussi");
@@ -3195,7 +3284,7 @@ fn pasting_relative_header_fields_drops_what_overflows_past_the_formula_field() 
 
     let meta = state.column_meta(signal);
     assert_eq!(meta.comment, "a");
-    assert_eq!(meta.formula, Some("b".to_string()));
+    assert_eq!(formula_letters(&state, signal).as_deref(), Some("A"));
     assert_eq!(
         meta.long_name, "intact",
         "les champs au-dessus de l'ancre ne sont pas touchés"
@@ -3207,7 +3296,7 @@ fn pasting_relative_header_fields_drops_what_overflows_past_the_formula_field() 
         [&meta.long_name, &meta.unit, &meta.comment]
             .iter()
             .all(|value| *value != "c")
-            && meta.formula.as_deref() != Some("c"),
+            && formula_letters(&state, signal).as_deref() != Some("c"),
         "« c » débordait après Formule : il est jeté, pas replié ailleurs"
     );
     let note = column_id(&state, sheet1, "Note");
@@ -8295,6 +8384,7 @@ fn heavy_formula_project() -> Project {
     project
         .add_column(sheet, None, Some("A"), Column::from_f64(&values))
         .expect("A");
+    let colonne_a = project.tree().children(sheet).expect("feuille")[0];
     for index in 0..150 {
         let column = project
             .add_column(
@@ -8304,11 +8394,18 @@ fn heavy_formula_project() -> Project {
                 Column::new(ColumnType::Numeric),
             )
             .expect("colonne");
+        // Formule par identifiant (#321) : elle lit la colonne A.
+        let formula = ColumnFormula::from_parts(vec![
+            FormulaPart::Column(colonne_a),
+            FormulaPart::Text("*2+".into()),
+            FormulaPart::Column(colonne_a),
+            FormulaPart::Text("*3".into()),
+        ]);
         project
             .set_column_meta(
                 column,
                 ColumnMeta {
-                    formula: Some("A*2+A*3".into()),
+                    formula: Some(formula),
                     ..Default::default()
                 },
             )

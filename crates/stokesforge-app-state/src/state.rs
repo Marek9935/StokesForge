@@ -430,14 +430,18 @@ pub enum Action {
         /// Valeur saisie.
         text: String,
     },
-    /// Remplace la formule affichée d'une colonne
-    /// ([`stokesforge_core::ColumnMeta::formula`]) — stockage/affichage
-    /// seulement, l'évaluation reste celle de `stokesforge_core::formula` /
-    /// `stokesforge-session::actor`, hors du périmètre de cette action.
+    /// Remplace la formule d'une colonne
+    /// ([`stokesforge_core::ColumnMeta::formula`]) — l'évaluation reste celle
+    /// de `stokesforge_core::formula` / `stokesforge-session::actor`, hors du
+    /// périmètre de cette action. Le texte est saisi en **lettres** ; il est
+    /// converti en identifiants de colonnes par
+    /// [`stokesforge_core::Tree::formula_from_letters`] (#321). Un refus (lettre
+    /// inconnue, auto-référence, `#REF`) est dit dans la barre d'état et rien
+    /// n'est écrit.
     SetColumnFormula {
         /// Colonne visée.
         column: NodeId,
-        /// Nouvelle formule, ou `None` pour une colonne non calculée.
+        /// Nouvelle formule en lettres, ou `None` pour une colonne non calculée.
         formula: Option<String>,
     },
     /// Importe les fichiers vers la destination choisie dans le dialogue.
@@ -1630,6 +1634,15 @@ pub fn parse_x_prime(text: &str) -> Result<Option<f64>, ()> {
     }
 }
 
+/// Pourquoi un champ d'en-tête refuse un texte ([`HeaderField::write_text`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HeaderTextRefused {
+    /// x' : ce n'est pas un nombre fini.
+    NotANumber,
+    /// Formule : lettre inconnue, auto-référence ou `#REF`.
+    Formula(stokesforge_core::FormulaError),
+}
+
 impl HeaderField {
     /// Nombre de champs empilés. Le rang d'un champ dans la grille est
     /// `index() - COUNT` (`-COUNT..=-1`), les lignes de données commençant à 0.
@@ -1665,44 +1678,63 @@ impl HeaderField {
         }
     }
 
-    /// Texte du champ dans `meta`, tel qu'on l'affiche et le copie.
-    pub(crate) fn text_of(self, meta: &ColumnMeta) -> String {
+    /// Texte du champ de `column` (dont `meta` est la méta), tel qu'on
+    /// l'affiche et le copie. La formule s'affiche en **lettres actuelles**
+    /// (`Tree::formula_letters`, #321) : elles suivent les colonnes, `#REF`
+    /// pour une colonne lue qui n'est plus dans la feuille.
+    pub(crate) fn text_of(self, tree: &Tree, column: NodeId, meta: &ColumnMeta) -> String {
         match self {
             HeaderField::XPrime => meta.x_prime.map(format_exact).unwrap_or_default(),
             HeaderField::LongName => meta.long_name.clone(),
             HeaderField::Unit => meta.unit.clone(),
             HeaderField::Comment => meta.comment.clone(),
-            HeaderField::Formula => meta.formula.clone().unwrap_or_default(),
+            HeaderField::Formula => tree.formula_letters(column).unwrap_or_default(),
         }
     }
 
-    /// Écrit `text` dans le champ de `meta`. Faux (rien n'est écrit) quand le
-    /// texte n'est pas une valeur du champ : seul x' est typé, et refuse tout
-    /// ce qui n'est pas un nombre fini — un texte vide l'efface.
-    pub(crate) fn write_text(self, meta: &mut ColumnMeta, text: String) -> bool {
+    /// Écrit `text` dans le champ de `column` (dont `meta` est la méta). Refus
+    /// (rien n'est écrit) quand le texte n'est pas une valeur du champ : x'
+    /// refuse tout ce qui n'est pas un nombre fini, la formule refuse une
+    /// lettre inconnue, la colonne elle-même ou `#REF` — un texte vide
+    /// l'efface. Le passage lettres vers identifiants est
+    /// `Tree::formula_from_letters`, jamais une écriture à part.
+    pub(crate) fn write_text(
+        self,
+        tree: &Tree,
+        column: NodeId,
+        meta: &mut ColumnMeta,
+        text: String,
+    ) -> Result<(), HeaderTextRefused> {
         match self {
             HeaderField::XPrime => match parse_x_prime(&text) {
                 Ok(value) => {
                     meta.x_prime = value;
-                    true
+                    Ok(())
                 }
-                Err(()) => false,
+                Err(()) => Err(HeaderTextRefused::NotANumber),
             },
             HeaderField::LongName => {
                 meta.long_name = text;
-                true
+                Ok(())
             }
             HeaderField::Unit => {
                 meta.unit = text;
-                true
+                Ok(())
             }
             HeaderField::Comment => {
                 meta.comment = text;
-                true
+                Ok(())
             }
             HeaderField::Formula => {
-                meta.formula = (!text.trim().is_empty()).then_some(text);
-                true
+                meta.formula = if text.trim().is_empty() {
+                    None
+                } else {
+                    Some(
+                        tree.formula_from_letters(column, &text)
+                            .map_err(HeaderTextRefused::Formula)?,
+                    )
+                };
+                Ok(())
             }
         }
     }
@@ -4065,11 +4097,13 @@ impl AppState {
                     .map(|row| cell_copy_text_in(tree, column, row))
                     .collect();
                 FullColumnCopy {
-                    x_prime: HeaderField::XPrime.text_of(&meta),
+                    x_prime: HeaderField::XPrime.text_of(tree, column, &meta),
                     long_name: meta.long_name,
                     unit: meta.unit,
                     comment: meta.comment,
-                    formula: meta.formula.filter(|_| keep_formula),
+                    // Le presse-papiers porte des **lettres** (F8) : relues
+                    // dans la feuille d'arrivée au collage.
+                    formula: tree.formula_letters(column).filter(|_| keep_formula),
                     data,
                 }
             })
@@ -4086,7 +4120,7 @@ impl AppState {
     /// `app::grid::header_field_widget`, factorisé ici pour être partagé
     /// avec [`AppState::copy_selection`]/[`AppState::copy_full_columns`].
     pub fn header_field_display_text(&self, column: NodeId, field: HeaderField) -> String {
-        field.text_of(&self.column_meta(column))
+        field.text_of(&self.snapshot.tree, column, &self.column_meta(column))
     }
 
     /// Saisie en cours dans un champ d'en-tête de colonne, s'il y en a une.
@@ -4107,7 +4141,7 @@ impl AppState {
     /// réclamant le focus clavier pour lui-même).
     pub fn begin_header_edit(&mut self, column: NodeId, field: HeaderField) {
         self.editing = None;
-        let buffer = field.text_of(&self.column_meta(column));
+        let buffer = self.header_field_display_text(column, field);
         self.header_editing = Some(HeaderEdit {
             column,
             field,
@@ -4140,10 +4174,19 @@ impl AppState {
                 column: edit.column,
                 text: edit.buffer,
             },
-            HeaderField::Formula => Action::SetColumnFormula {
-                column: edit.column,
-                formula: (!edit.buffer.trim().is_empty()).then_some(edit.buffer),
-            },
+            HeaderField::Formula => {
+                // Ne pas toucher au champ n'écrit rien : valider tel quel le
+                // texte affiché (surtout s'il porte `#REF`, qu'on ne peut pas
+                // réécrire) laisse la formule stockée en l'état.
+                if edit.buffer == self.header_field_display_text(edit.column, HeaderField::Formula)
+                {
+                    return;
+                }
+                Action::SetColumnFormula {
+                    column: edit.column,
+                    formula: (!edit.buffer.trim().is_empty()).then_some(edit.buffer),
+                }
+            }
             HeaderField::XPrime => Action::SetColumnXPrime {
                 column: edit.column,
                 text: edit.buffer,
@@ -4711,7 +4754,18 @@ impl AppState {
             }
             Action::SetColumnXPrime { column, text } => self.set_column_x_prime(column, text),
             Action::SetColumnFormula { column, formula } => {
-                self.set_column_meta_field(column, |meta| meta.formula = formula);
+                // Refus : rien n'est écrit, la barre d'état dit pourquoi. Le
+                // passage lettres vers identifiants se fait ici, au-dessus de
+                // la commande (`SetColumnMeta` ne valide jamais les références).
+                match formula {
+                    None => self.set_column_meta_field(column, |meta| meta.formula = None),
+                    Some(text) => match self.snapshot.tree.formula_from_letters(column, &text) {
+                        Ok(formula) => {
+                            self.set_column_meta_field(column, |meta| meta.formula = Some(formula));
+                        }
+                        Err(error) => self.fail(errors::formula::error_message(&error)),
+                    },
+                }
             }
             Action::RemoveFormulaKeepData { sheet } => {
                 let columns = self.formula_columns_selected(sheet);
@@ -7776,8 +7830,10 @@ impl AppState {
             });
         }
         for (column, field) in header_fields {
+            let tree = Arc::clone(&self.snapshot.tree);
             self.set_column_meta_field(column, |meta| {
-                field.write_text(meta, String::new());
+                // Un texte vide est toujours accepté.
+                let _ = field.write_text(&tree, column, meta, String::new());
             });
         }
         if grouped {
@@ -8312,9 +8368,18 @@ impl AppState {
             self.fail(tr!("error-column-gone"));
             return;
         };
-        if !field.write_text(&mut meta, text) {
-            self.fail(crate::tr!("status-x-prime-invalid"));
-            return;
+        match field.write_text(&self.snapshot.tree, column, &mut meta, text) {
+            Ok(()) => {}
+            Err(HeaderTextRefused::NotANumber) => {
+                self.fail(crate::tr!("status-x-prime-invalid"));
+                return;
+            }
+            Err(HeaderTextRefused::Formula(error)) => {
+                // Formule collée dont une lettre n'existe pas dans la feuille
+                // d'arrivée, ou qui porte `#REF` : rien n'est écrit.
+                self.fail(errors::formula::error_message(&error));
+                return;
+            }
         }
         self.set_meta_dropping_formula_data(column, meta, false);
     }

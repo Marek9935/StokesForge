@@ -173,7 +173,7 @@ fn children(py: Python<'_>, handle: Option<&Handle>) -> PyResult<Vec<Handle>> {
 /// `column` (métadonnées d'une colonne, sinon None). Le nombre de lignes d'une
 /// feuille est le maximum des longueurs de ses colonnes, zéro si elle est vide.
 /// Les métadonnées comprennent `type`, `role`, `long_name`, `unit`, `comment`, `x_prime`,
-/// `display_format`, `formula` et `version`. Une poignée périmée lève
+/// `display_format`, `formula` (en lettres) et `version`. Une poignée périmée lève
 /// `BrokenReferenceError` ; aucune lecture ne change l'historique.
 #[pyfunction]
 fn info<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyDict>> {
@@ -181,7 +181,7 @@ fn info<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyDict>> {
     context.check_interrupt()?;
     let id = handle.id;
     let epoch = handle.epoch;
-    let (node, row_count) = py
+    let (node, row_count, formula) = py
         .detach(|| bridge::info(context.session(), id, epoch))
         .map_err(to_py_error)?;
     let result = PyDict::new(py);
@@ -231,7 +231,9 @@ fn info<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyDict>> {
         description.set_item("comment", meta.comment.as_str())?;
         description.set_item("x_prime", meta.x_prime)?;
         description.set_item("display_format", meta.display_format.as_str())?;
-        description.set_item("formula", meta.formula.as_deref())?;
+        // En lettres : celles d'aujourd'hui, `#REF` pour une colonne lue qui
+        // n'est plus dans la feuille (une formule `#REF` ne se réécrit pas).
+        description.set_item("formula", formula.as_deref())?;
         description.set_item("version", column.version())?;
         result.set_item("column", description)?;
     } else {
@@ -595,7 +597,9 @@ fn set_values(
 
 /// Modifie les seuls champs nommés : role (x, y, x2, y2, z, x_error, y_error,
 /// label, none), long_name, unit, comment, display_format, formula.
-/// Les valeurs sont des str ; formula=None retire la formule. Type, version
+/// Les valeurs sont des str ; formula=None retire la formule. La formule se
+/// saisit en lettres : une lettre qui ne désigne aucune colonne de la feuille,
+/// la colonne elle-même ou `#REF` lèvent `InvalidValueError`. Type, version
 /// et provenance sont préservés. Une colonne-formule refuse les écritures.
 #[pyfunction]
 #[pyo3(signature = (handle, **metadata))]

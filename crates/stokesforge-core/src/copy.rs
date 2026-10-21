@@ -117,10 +117,10 @@ impl NodeCopy {
                     for column in columns {
                         let mut value = tree.get(column)?.clone();
                         if let NodeKind::Column(column) = value.kind_mut() {
-                            // La feuille embarquée omet les colonnes non tracées
-                            // et change les lettres de position. Sa formule source
-                            // serait donc recalculée sur d’autres données par
-                            // l’acteur ; conserver les résultats figés uniquement.
+                            // La feuille embarquée omet les colonnes non tracées :
+                            // une formule y lirait des colonnes absentes de la copie
+                            // (`#REF`, cellules vides) au lieu de ses résultats.
+                            // Conserver les résultats figés uniquement.
                             let mut meta = column.meta().clone();
                             meta.formula = None;
                             column.set_meta(meta);

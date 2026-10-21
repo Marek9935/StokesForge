@@ -1,27 +1,44 @@
 //! Colonnes calculées par formule (v1, arithmétique simple intra-feuille).
 //!
 //! Portée : `+ - * /`, parenthèses, littéraux numériques, références de
-//! colonnes par leur **lettre de position** dans la feuille (`A` = première
-//! colonne, `B` = deuxième, ... `Z`, `AA`, `AB`, ... façon Origin/Excel).
-//! Pas de fonctions (`sin`, `sum`, ...), pas de référence inter-feuilles —
-//! hors de portée de cette version, voir la tête de tâche qui a introduit ce
-//! module.
+//! colonnes. Pas de fonctions (`sin`, `sum`, ...), pas de référence
+//! inter-feuilles — hors de portée de cette version.
+//!
+//! # Une formule désigne des colonnes, pas des lettres (#321)
+//!
+//! L'utilisateur tape et lit des **lettres** de position (`A` = première
+//! colonne, `B` = deuxième, ... `Z`, `AA`, `AB`, ... façon Origin/Excel), mais
+//! la formule **stockée** retient la colonne elle-même : [`ColumnFormula`] est
+//! une suite de fragments de texte (opérateurs, nombres, espaces,
+//! parenthèses, tels que saisis) et d'identifiants de colonne
+//! ([`FormulaPart`]). Les lettres ne servent qu'à la frontière :
+//! [`ColumnFormula::from_letters`] (saisie) et [`ColumnFormula::letters`]
+//! (affichage). Une colonne qui change de place, ou une analyse qui insère ses
+//! sorties au milieu de la feuille, change donc les lettres **affichées** sans
+//! jamais changer ce que lit la formule. Une formule ne se recalcule jamais à
+//! partir de ses lettres (`2C3` s'afficherait `2E3` si C devenait E) : les
+//! jetons viennent des fragments ([`ColumnFormula::compile`]).
+//!
+//! Un identifiant qui n'est plus dans la feuille (colonne supprimée, déplacée
+//! dans une autre feuille) s'affiche [`REF_TOKEN`] et se calcule en
+//! [`FormulaError::DeletedColumn`] : l'identifiant reste stocké, si bien
+//! qu'une annulation qui ramène la colonne ramène aussi la formule.
 //!
 //! Module pur : ni accès au `Project`, ni à l'arbre — [`evaluate`] ne prend
-//! qu'un slice de [`ColumnValues`] déjà extrait par l'appelant (typiquement
-//! `stokesforge-session::recalc`, qui orchestre le recalcul — voir sa doc de tête
-//! pour l'ordonnancement par dépendances et la détection de cycle, dont
-//! [`topological_order`] ci-dessous est l'outil générique).
+//! qu'un slice de [`ColumnValues`] déjà extrait par l'appelant, avec leurs
+//! identifiants (typiquement `stokesforge-session::recalc`, qui orchestre le
+//! recalcul — voir sa doc de tête pour l'ordonnancement par dépendances et la
+//! détection de cycle, dont [`topological_order`] ci-dessous est l'outil
+//! générique).
 //!
 //! # Dégradation gracieuse (invariant 10) — jamais de panic
 //!
-//! Une formule qui ne parse pas, référence une colonne hors bornes, non
-//! numérique, ou se référence elle-même, rend un bloc **entièrement `NaN`**
-//! de la longueur demandée, accompagné d'un [`FormulaError`] que l'appelant
-//! peut afficher — jamais une `Result` avalée en silence, jamais un panic.
-//! Une colonne référencée plus courte que la feuille n'est, elle, pas une
-//! erreur : [`ColumnValues::number_at`] rend déjà `NaN` au-delà de sa
-//! longueur, exactement le comportement voulu ici.
+//! Une formule qui ne compile pas, ou lit une colonne absente de la feuille,
+//! rend un bloc **entièrement `NaN`** de la longueur demandée, accompagné d'un
+//! [`FormulaError`] que l'appelant peut afficher — jamais une `Result` avalée
+//! en silence, jamais un panic. Une colonne référencée plus courte que la
+//! feuille n'est, elle, pas une erreur : [`ColumnValues::number_at`] rend déjà
+//! `NaN` au-delà de sa longueur, exactement le comportement voulu ici.
 //!
 //! Une colonne à types **mixtes** n'est pas « non numérique » : elle est
 //! acceptée, et ses cellules texte ou vides valent `NaN` ligne à ligne, comme
@@ -30,7 +47,13 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use stokesforge_id::NodeId;
+
 use crate::column::{ColumnValues, NumericStatus};
+
+/// Ce qu'une formule affiche à la place d'une colonne qu'elle ne trouve plus
+/// dans sa feuille (supprimée, ou déplacée dans une autre feuille).
+pub const REF_TOKEN: &str = "#REF";
 
 /// Pourquoi une formule ne produit pas les valeurs qu'elle décrit. Jamais un
 /// panic (invariant 10) : chaque variante est un état de première classe,
@@ -40,11 +63,18 @@ pub enum FormulaError {
     /// La chaîne ne s'analyse pas comme une formule valide de la grammaire
     /// v1 (jeton inattendu, parenthèse non refermée, formule vide, ...).
     Parse(String),
-    /// La lettre de colonne référencée dépasse le nombre de colonnes de la
-    /// feuille.
+    /// La lettre de colonne saisie ne désigne aucune colonne de la feuille
+    /// (refus de [`ColumnFormula::from_letters`]).
     UnknownColumn(String),
-    /// La formule référence la colonne qui la porte.
+    /// La formule saisie référence la colonne qui la porte (refus de
+    /// [`ColumnFormula::from_letters`]). Les boucles entre plusieurs
+    /// colonnes sont, elles, [`FormulaError::Cycle`] au calcul.
     SelfReference(String),
+    /// La formule lit une colonne qui n'est plus dans sa feuille (supprimée,
+    /// ou déplacée dans une autre feuille) — affichée [`REF_TOKEN`]. Au
+    /// calcul : cellules vides. À la saisie : un texte qui contient encore
+    /// `#REF` est refusé, il faut le remplacer par une lettre.
+    DeletedColumn,
     /// Cycle de dépendance entre colonnes-formule (directement ou par une
     /// colonne dont le calcul dépend lui-même d'un cycle) — détecté par
     /// l'orchestrateur ([`topological_order`]), jamais par une boucle qui
@@ -67,6 +97,12 @@ impl std::fmt::Display for FormulaError {
             FormulaError::SelfReference(letter) => {
                 write!(f, "the formula refers to its own column ({letter})")
             }
+            FormulaError::DeletedColumn => {
+                write!(
+                    f,
+                    "the formula reads a column that no longer exists in the worksheet"
+                )
+            }
             FormulaError::Cycle => write!(f, "dependency cycle between formula columns"),
             FormulaError::TooDeep => write!(f, "formula nested too deeply"),
         }
@@ -78,7 +114,8 @@ impl std::error::Error for FormulaError {}
 // -- lettres de colonne : même convention bijective en base 26 que
 // `Project::spreadsheet_name` (A, B, ..., Z, AA, AB, ...), dupliquée ici
 // plutôt que partagée : c'est une pure notation, sans rien à synchroniser
-// avec la génération de noms de colonnes façon tableur.
+// avec la génération de noms de colonnes façon tableur. Les lettres ne vivent
+// qu'à la frontière (saisie, affichage) : voir la doc de tête.
 
 /// Position 0-based → lettre(s) façon tableur.
 fn index_to_letters(index: usize) -> String {
@@ -96,8 +133,8 @@ fn index_to_letters(index: usize) -> String {
 }
 
 /// Lettre(s) façon tableur → position 0-based. `None` si `letters` contient
-/// autre chose que des lettres ASCII (ne devrait jamais arriver : le
-/// tokenizer ne construit ce jeton qu'à partir d'un run de lettres ASCII).
+/// autre chose que des lettres ASCII, ou si la suite déborde un `u64` (une
+/// suite de lettres absurdement longue ne désigne aucune colonne).
 fn letters_to_index(letters: &str) -> Option<usize> {
     if letters.is_empty() || !letters.chars().all(|c| c.is_ascii_alphabetic()) {
         return None;
@@ -115,7 +152,7 @@ fn letters_to_index(letters: &str) -> Option<usize> {
 #[derive(Debug, Clone, PartialEq)]
 enum Token {
     Number(f64),
-    Column(usize),
+    Column(NodeId),
     Plus,
     Minus,
     Star,
@@ -124,9 +161,51 @@ enum Token {
     RParen,
 }
 
-fn tokenize(source: &str) -> Result<Vec<Token>, FormulaError> {
-    let chars: Vec<char> = source.chars().collect();
+/// Fin (exclue) du littéral numérique qui commence à `start` : chiffres et
+/// points, puis un exposant optionnel (`1e-3`, `2.5E6`) accepté seulement
+/// s'il est syntaxiquement complet (au moins un chiffre après le signe
+/// optionnel), sinon le `e` reste intact — c'est alors une lettre de colonne
+/// (`1eA` ne se lit pas comme un exposant). Partagé par [`tokenize_text`] et
+/// [`ColumnFormula::from_letters`] : les deux doivent découper pareil, sans
+/// quoi `1e-3*A` lierait une colonne `E` à la saisie.
+fn number_end(chars: &[char], start: usize) -> usize {
+    let mut i = start;
+    while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
+        i += 1;
+    }
+    if i < chars.len() && (chars[i] == 'e' || chars[i] == 'E') {
+        let mut j = i + 1;
+        if j < chars.len() && (chars[j] == '+' || chars[j] == '-') {
+            j += 1;
+        }
+        if j < chars.len() && chars[j].is_ascii_digit() {
+            while j < chars.len() && chars[j].is_ascii_digit() {
+                j += 1;
+            }
+            i = j;
+        }
+    }
+    i
+}
+
+/// Jetons de tous les fragments, dans l'ordre : un fragment de texte est
+/// découpé, un identifiant de colonne est un jeton. **Aucune lettre n'est
+/// lue** — une lettre dans un fragment de texte (fichier fabriqué) est un
+/// caractère inattendu, pas une colonne (invariant 10 : une erreur de
+/// syntaxe, jamais un panic).
+fn tokenize(parts: &[FormulaPart]) -> Result<Vec<Token>, FormulaError> {
     let mut tokens = Vec::new();
+    for part in parts {
+        match part {
+            FormulaPart::Text(text) => tokenize_text(text, &mut tokens)?,
+            FormulaPart::Column(id) => tokens.push(Token::Column(*id)),
+        }
+    }
+    Ok(tokens)
+}
+
+fn tokenize_text(source: &str, tokens: &mut Vec<Token>) -> Result<(), FormulaError> {
+    let chars: Vec<char> = source.chars().collect();
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
@@ -158,49 +237,12 @@ fn tokenize(source: &str) -> Result<Vec<Token>, FormulaError> {
             }
             c if c.is_ascii_digit() || c == '.' => {
                 let start = i;
-                while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.') {
-                    i += 1;
-                }
-                // Exposant optionnel (`1e-3`, `2.5E6`) : accepté seulement
-                // s'il est syntaxiquement complet (au moins un chiffre après
-                // le signe optionnel), sinon on laisse le `e` intact — il
-                // n'a de toute façon aucun sens comme lettre de colonne
-                // isolée juste après un nombre, ce cas restera une erreur de
-                // parse plus loin, ce qui est le comportement voulu.
-                if i < chars.len() && (chars[i] == 'e' || chars[i] == 'E') {
-                    let mark = i;
-                    let mut j = i + 1;
-                    if j < chars.len() && (chars[j] == '+' || chars[j] == '-') {
-                        j += 1;
-                    }
-                    if j < chars.len() && chars[j].is_ascii_digit() {
-                        while j < chars.len() && chars[j].is_ascii_digit() {
-                            j += 1;
-                        }
-                        i = j;
-                    } else {
-                        i = mark;
-                    }
-                }
+                i = number_end(&chars, start);
                 let text: String = chars[start..i].iter().collect();
                 let value: f64 = text
                     .parse()
                     .map_err(|_| FormulaError::Parse(format!("invalid number: {text}")))?;
                 tokens.push(Token::Number(value));
-            }
-            c if c.is_ascii_alphabetic() => {
-                let start = i;
-                while i < chars.len() && chars[i].is_ascii_alphabetic() {
-                    i += 1;
-                }
-                let letters: String = chars[start..i]
-                    .iter()
-                    .collect::<String>()
-                    .to_ascii_uppercase();
-                let index = letters_to_index(&letters).ok_or_else(|| {
-                    FormulaError::Parse(format!("invalid column reference: {letters}"))
-                })?;
-                tokens.push(Token::Column(index));
             }
             other => {
                 return Err(FormulaError::Parse(format!(
@@ -209,7 +251,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, FormulaError> {
             }
         }
     }
-    Ok(tokens)
+    Ok(())
 }
 
 // -- AST --
@@ -217,7 +259,7 @@ fn tokenize(source: &str) -> Result<Vec<Token>, FormulaError> {
 #[derive(Debug, Clone, PartialEq)]
 enum Expr {
     Number(f64),
-    Column(usize),
+    Column(NodeId),
     Neg(Box<Expr>),
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
@@ -369,21 +411,173 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// Une formule analysée : arithmétique simple sur des colonnes désignées par
-/// leur lettre de position dans la feuille. Ne porte aucune référence à une
-/// feuille ou un projet précis — c'est [`evaluate`] qui la met en présence de
-/// colonnes concrètes.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Formula {
-    expr: Expr,
+/// Une formule **stockée** : le texte saisi, où chaque lettre de colonne est
+/// remplacée par l'identifiant de la colonne qu'elle désignait au moment de la
+/// saisie. Voir la doc de tête du module.
+///
+/// Les fragments [`FormulaPart::Text`] gardent ce que l'utilisateur a tapé
+/// (opérateurs, nombres, espaces, parenthèses). Aucun fragment n'est
+/// normalisé : un aller-retour par le fichier rend les mêmes fragments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ColumnFormula {
+    parts: Vec<FormulaPart>,
 }
 
-impl Formula {
-    /// Analyse `source`. `Err(FormulaError::Parse)` si la chaîne ne
-    /// correspond pas à la grammaire v1 — jamais un panic, quelle que soit
-    /// l'entrée (c'est un texte libre tapé par l'utilisateur).
-    pub fn parse(source: &str) -> Result<Formula, FormulaError> {
-        let tokens = tokenize(source)?;
+/// Un morceau d'une [`ColumnFormula`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormulaPart {
+    /// Texte saisi, sans lettre de colonne (ni, à la saisie, `#REF`).
+    Text(String),
+    /// La colonne lue, par son identifiant.
+    Column(NodeId),
+}
+
+impl ColumnFormula {
+    /// Reconstruit une formule depuis ses fragments (lecture d'un fichier).
+    /// Rien n'est vérifié ici : un texte qui ne compile pas, ou un
+    /// identifiant hors de la feuille, se dégrade au calcul
+    /// ([`ColumnFormula::compile`], [`evaluate`]).
+    pub fn from_parts(parts: Vec<FormulaPart>) -> Self {
+        Self { parts }
+    }
+
+    /// Les fragments, dans l'ordre du texte.
+    pub fn parts(&self) -> &[FormulaPart] {
+        &self.parts
+    }
+
+    /// Lit un texte saisi : chaque suite de lettres est la **position** d'une
+    /// colonne de la feuille (`sheet_columns`, dans l'ordre des enfants de la
+    /// feuille) et devient son identifiant ; `own` est la colonne qui portera
+    /// la formule.
+    ///
+    /// Refus (rien n'est construit) : une lettre qui ne désigne aucune
+    /// colonne ([`FormulaError::UnknownColumn`]), la colonne `own`
+    /// ([`FormulaError::SelfReference`]), `#REF` ([`FormulaError::DeletedColumn`] :
+    /// ce n'est pas une lettre, il faut le remplacer). Une erreur de syntaxe
+    /// (`A*`) n'est **pas** refusée ici : le texte est stocké tel quel et
+    /// [`ColumnFormula::compile`] la rend, comme avant les identifiants.
+    ///
+    /// Le découpage suit le lexer : un nombre à exposant (`1e-3`) est un
+    /// fragment de texte, pas une colonne `E`.
+    pub fn from_letters(
+        text: &str,
+        sheet_columns: &[NodeId],
+        own: NodeId,
+    ) -> Result<Self, FormulaError> {
+        let chars: Vec<char> = text.chars().collect();
+        let mut parts = Vec::new();
+        let mut buffer = String::new();
+        let mut i = 0;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '#'
+                && chars[i + 1..]
+                    .iter()
+                    .take(3)
+                    .collect::<String>()
+                    .eq_ignore_ascii_case("ref")
+            {
+                return Err(FormulaError::DeletedColumn);
+            } else if c.is_ascii_digit() || c == '.' {
+                let end = number_end(&chars, i);
+                buffer.extend(&chars[i..end]);
+                i = end;
+            } else if c.is_ascii_alphabetic() {
+                let start = i;
+                while i < chars.len() && chars[i].is_ascii_alphabetic() {
+                    i += 1;
+                }
+                let letters: String = chars[start..i]
+                    .iter()
+                    .collect::<String>()
+                    .to_ascii_uppercase();
+                let Some(&id) =
+                    letters_to_index(&letters).and_then(|index| sheet_columns.get(index))
+                else {
+                    return Err(FormulaError::UnknownColumn(letters));
+                };
+                if id == own {
+                    return Err(FormulaError::SelfReference(letters));
+                }
+                if !buffer.is_empty() {
+                    parts.push(FormulaPart::Text(std::mem::take(&mut buffer)));
+                }
+                parts.push(FormulaPart::Column(id));
+            } else {
+                buffer.push(c);
+                i += 1;
+            }
+        }
+        if !buffer.is_empty() {
+            parts.push(FormulaPart::Text(buffer));
+        }
+        Ok(Self { parts })
+    }
+
+    /// Le texte à afficher : chaque colonne lue s'écrit par sa **lettre de
+    /// position actuelle** dans `sheet_columns` (les lettres suivent les
+    /// colonnes), ou [`REF_TOKEN`] si elle n'y est plus. Pour l'affichage
+    /// seulement : jamais relu pour calculer ni pour modifier un autre champ
+    /// (voir la doc de tête).
+    pub fn letters(&self, sheet_columns: &[NodeId]) -> String {
+        let mut out = String::new();
+        for part in &self.parts {
+            match part {
+                FormulaPart::Text(text) => out.push_str(text),
+                FormulaPart::Column(id) => match sheet_columns.iter().position(|c| c == id) {
+                    Some(index) => out.push_str(&index_to_letters(index)),
+                    None => out.push_str(REF_TOKEN),
+                },
+            }
+        }
+        out
+    }
+
+    /// Vrai si une colonne lue n'est plus dans `sheet_columns` : la formule
+    /// s'affiche avec [`REF_TOKEN`] et se calcule en
+    /// [`FormulaError::DeletedColumn`].
+    pub fn has_deleted_reference(&self, sheet_columns: &[NodeId]) -> bool {
+        self.parts.iter().any(|part| match part {
+            FormulaPart::Column(id) => !sheet_columns.contains(id),
+            FormulaPart::Text(_) => false,
+        })
+    }
+
+    /// Identifiants de toutes les colonnes lues, sans jugement sur leur
+    /// présence dans la feuille.
+    pub fn columns(&self) -> BTreeSet<NodeId> {
+        self.parts
+            .iter()
+            .filter_map(|part| match part {
+                FormulaPart::Column(id) => Some(*id),
+                FormulaPart::Text(_) => None,
+            })
+            .collect()
+    }
+
+    /// Même formule, chaque identifiant passé par `map` (copie d'une feuille
+    /// ou d'un classeur : la copie lit ses propres colonnes). Les fragments de
+    /// texte sont inchangés.
+    pub fn remap(&self, mut map: impl FnMut(NodeId) -> NodeId) -> Self {
+        Self {
+            parts: self
+                .parts
+                .iter()
+                .map(|part| match part {
+                    FormulaPart::Column(id) => FormulaPart::Column(map(*id)),
+                    FormulaPart::Text(text) => FormulaPart::Text(text.clone()),
+                })
+                .collect(),
+        }
+    }
+
+    /// Analyse la formule : les jetons viennent des fragments, jamais du texte
+    /// affiché. `Err(FormulaError::Parse)` si elle ne correspond pas à la
+    /// grammaire v1 — jamais un panic, quelle que soit l'entrée (un texte
+    /// libre tapé, ou un fichier fabriqué).
+    pub fn compile(&self) -> Result<Formula, FormulaError> {
+        let tokens = tokenize(&self.parts)?;
         if tokens.is_empty() {
             return Err(FormulaError::Parse("empty formula".to_string()));
         }
@@ -396,19 +590,28 @@ impl Formula {
         }
         Ok(Formula { expr })
     }
+}
 
-    /// Positions (0-based, lettre de la feuille) de toutes les colonnes que
-    /// cette formule référence, sans jugement sur leur validité — c'est
-    /// [`evaluate`] qui vérifie qu'elles existent, sont numériques, et ne
-    /// désignent pas la colonne-formule elle-même. Sert aussi à
-    /// l'orchestrateur pour construire le graphe de dépendance entre
-    /// colonnes-formule (voir [`topological_order`]).
-    pub fn referenced_columns(&self) -> BTreeSet<usize> {
-        fn walk(expr: &Expr, out: &mut BTreeSet<usize>) {
+/// Une formule analysée : arithmétique simple sur des colonnes désignées par
+/// leur identifiant. Ne porte aucune référence à une feuille ou un projet
+/// précis — c'est [`evaluate`] qui la met en présence de colonnes concrètes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Formula {
+    expr: Expr,
+}
+
+impl Formula {
+    /// Identifiants de toutes les colonnes que cette formule référence, sans
+    /// jugement sur leur validité — c'est [`evaluate`] qui vérifie qu'elles
+    /// sont dans la feuille. Sert aussi à l'orchestrateur pour construire le
+    /// graphe de dépendance entre colonnes-formule (voir
+    /// [`topological_order`]).
+    pub fn referenced_columns(&self) -> BTreeSet<NodeId> {
+        fn walk(expr: &Expr, out: &mut BTreeSet<NodeId>) {
             match expr {
                 Expr::Number(_) => {}
-                Expr::Column(index) => {
-                    out.insert(*index);
+                Expr::Column(id) => {
+                    out.insert(*id);
                 }
                 Expr::Neg(inner) => walk(inner, out),
                 Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) => {
@@ -438,9 +641,9 @@ pub struct FormulaEvaluation {
     /// ([`NumericStatus::Missing`]) d'un vrai échec de calcul dû à un texte
     /// non numérique dans une colonne référencée ([`NumericStatus::Failed`])
     /// — voir [`ColumnValues::status_at`]. Toujours `Missing` partout si
-    /// `error.is_some()` : une erreur de formule (colonne inconnue,
-    /// auto-référence, cycle, ...) dégrade tout en bloc, sans qu'il y ait de
-    /// distinction ligne à ligne à faire.
+    /// `error.is_some()` : une erreur de formule (colonne absente de la
+    /// feuille, ...) dégrade tout en bloc, sans qu'il y ait de distinction
+    /// ligne à ligne à faire.
     pub statuses: Vec<NumericStatus>,
     /// `None` si l'évaluation a réussi.
     pub error: Option<FormulaError>,
@@ -458,39 +661,32 @@ impl FormulaEvaluation {
 
 /// Évalue `formula` ligne par ligne contre les colonnes d'une feuille.
 ///
-/// `columns[i]` doit être la colonne de lettre `index_to_letters(i)` de la
-/// feuille (l'ordre des enfants du nœud `Worksheet`) ; `self_index` est la
-/// position de la colonne-formule elle-même dans cette même feuille, pour
-/// détecter l'auto-référence. `target_len` est la longueur voulue du
-/// résultat, choisie par l'appelant (l'acteur prend la plus longue des
-/// colonnes lues, #194) — elle peut dépasser la longueur de certaines
-/// colonnes référencées : [`ColumnValues::get`] rend déjà `NaN`/`None`
-/// au-delà de leur longueur propre, donc une colonne plus courte complète
-/// naturellement à `NaN`, sans que ce soit une erreur.
+/// `columns` sont les colonnes de la feuille, chacune avec son identifiant :
+/// une colonne lue se cherche **par identifiant** dans cette liste, jamais
+/// par position, et jamais ailleurs (une colonne d'une autre feuille n'y est
+/// pas). `target_len` est la longueur voulue du résultat, choisie par
+/// l'appelant (l'acteur prend la plus longue des colonnes lues, #194) — elle
+/// peut dépasser la longueur de certaines colonnes référencées :
+/// [`ColumnValues::get`] rend déjà `NaN`/`None` au-delà de leur longueur
+/// propre, donc une colonne plus courte complète naturellement à `NaN`, sans
+/// que ce soit une erreur.
 ///
-/// Toute référence invalide (colonne hors bornes, non numérique,
-/// auto-référence) dégrade **tout** le résultat à `NaN` plutôt que de
-/// calculer partiellement : une formule dont une seule référence est
-/// mauvaise n'a pas de valeur partiellement fiable à rendre.
+/// Une colonne lue qui n'est pas dans `columns` dégrade **tout** le résultat
+/// à `NaN` ([`FormulaError::DeletedColumn`]) plutôt que de calculer
+/// partiellement : une formule dont une seule référence est mauvaise n'a pas
+/// de valeur partiellement fiable à rendre. L'auto-référence n'est pas
+/// jugée ici : la saisie la refuse, et une formule qui se lit elle-même dans
+/// un fichier fabriqué est un cycle pour l'orchestrateur.
 pub fn evaluate(
     formula: &Formula,
-    self_index: usize,
-    columns: &[ColumnValues],
+    columns: &[(NodeId, ColumnValues)],
     target_len: usize,
 ) -> FormulaEvaluation {
-    for index in formula.referenced_columns() {
-        if index == self_index {
-            return FormulaEvaluation::degraded(
-                target_len,
-                FormulaError::SelfReference(index_to_letters(index)),
-            );
-        }
-        match columns.get(index) {
+    let mut resolved: BTreeMap<NodeId, &ColumnValues> = BTreeMap::new();
+    for id in formula.referenced_columns() {
+        match columns.iter().find(|(column, _)| *column == id) {
             None => {
-                return FormulaEvaluation::degraded(
-                    target_len,
-                    FormulaError::UnknownColumn(index_to_letters(index)),
-                )
+                return FormulaEvaluation::degraded(target_len, FormulaError::DeletedColumn);
             }
             // Une colonne **mixte** — y compris une colonne entièrement
             // textuelle, il n'y a plus de type `Text` homogène à part — est
@@ -499,11 +695,13 @@ pub fn evaluate(
             // vides valent `NaN` (`ColumnValues::number_at`), exactement
             // comme une valeur manquante d'une colonne numérique — dégrader
             // la ligne, pas toute la formule (invariant 10).
-            Some(ColumnValues::Float(_)) | Some(ColumnValues::Mixed(_)) => {}
+            Some((_, values)) => {
+                resolved.insert(id, values);
+            }
         }
     }
     let (values, statuses) = (0..target_len)
-        .map(|row| eval_expr(&formula.expr, row, columns))
+        .map(|row| eval_expr(&formula.expr, row, &resolved))
         .unzip();
     FormulaEvaluation {
         values,
@@ -518,19 +716,23 @@ pub fn evaluate(
 /// ([`NumericStatus::combine`]) : un texte non numérique quelque part dans
 /// l'expression doit se voir, même noyé dans une addition avec une case
 /// vide.
-fn eval_expr(expr: &Expr, row: usize, columns: &[ColumnValues]) -> (f64, NumericStatus) {
+fn eval_expr(
+    expr: &Expr,
+    row: usize,
+    columns: &BTreeMap<NodeId, &ColumnValues>,
+) -> (f64, NumericStatus) {
     match expr {
         Expr::Number(value) => (*value, NumericStatus::Ok),
         // `number_at`/`status_at` plutôt que `get` : la lecture sans
         // allocation, qui rend déjà `NaN` pour tout ce qui n'est pas un
-        // nombre (colonne texte référencée — `evaluate` l'a de toute façon
-        // déjà refusée —, cellule texte ou vide d'une colonne mixte, ligne
-        // hors bornes). `get` clonerait une `String` par ligne pour la jeter
-        // aussitôt.
-        Expr::Column(index) => (
-            columns[*index].number_at(row),
-            columns[*index].status_at(row),
-        ),
+        // nombre (cellule texte ou vide d'une colonne mixte, ligne hors
+        // bornes). `get` clonerait une `String` par ligne pour la jeter
+        // aussitôt. Une colonne absente de `columns` ne peut pas arriver
+        // ici (`evaluate` l'a refusée) : `NaN`, jamais un panic.
+        Expr::Column(id) => match columns.get(id) {
+            Some(values) => (values.number_at(row), values.status_at(row)),
+            None => (f64::NAN, NumericStatus::Missing),
+        },
         Expr::Neg(inner) => {
             let (value, status) = eval_expr(inner, row, columns);
             (-value, status)
@@ -549,7 +751,7 @@ fn combine(
     a: &Expr,
     b: &Expr,
     row: usize,
-    columns: &[ColumnValues],
+    columns: &BTreeMap<NodeId, &ColumnValues>,
     op: impl Fn(f64, f64) -> f64,
 ) -> (f64, NumericStatus) {
     let (av, astatus) = eval_expr(a, row, columns);
@@ -626,6 +828,36 @@ mod tests {
     use crate::column::MixedCell;
     use std::sync::Arc;
 
+    /// Identifiant de la colonne de position `index` dans la feuille de test
+    /// (`A` = 1, `B` = 2, ...).
+    fn col(index: u64) -> NodeId {
+        NodeId::from_raw(index + 1)
+    }
+
+    /// Feuille de test : trente colonnes (`A` à `AD`) ; la colonne qui porte
+    /// la formule est hors feuille (`OWN`), pour que la saisie n'y refuse rien.
+    fn sheet() -> Vec<NodeId> {
+        (0..30).map(col).collect()
+    }
+
+    const OWN: NodeId = NodeId::from_raw(999);
+
+    /// Saisit `src` en lettres sur la feuille de test et la compile — le
+    /// chemin de l'utilisateur. Une erreur de syntaxe sort de `compile`.
+    fn parse(src: &str) -> Result<Formula, FormulaError> {
+        ColumnFormula::from_letters(src, &sheet(), OWN)?.compile()
+    }
+
+    /// Les valeurs des colonnes de la feuille, dans l'ordre, avec leur
+    /// identifiant (`A` = 1, ...).
+    fn sheet_values(values: &[ColumnValues]) -> Vec<(NodeId, ColumnValues)> {
+        values
+            .iter()
+            .enumerate()
+            .map(|(index, values)| (col(index as u64), values.clone()))
+            .collect()
+    }
+
     fn float_column(values: &[f64]) -> ColumnValues {
         ColumnValues::Float(Arc::new(values.to_vec()))
     }
@@ -662,85 +894,85 @@ mod tests {
 
     #[test]
     fn parses_simple_addition() {
-        let formula = Formula::parse("A+B").expect("parse");
-        assert_eq!(formula.referenced_columns(), BTreeSet::from([0, 1]));
+        let formula = parse("A+B").expect("parse");
+        assert_eq!(
+            formula.referenced_columns(),
+            BTreeSet::from([col(0), col(1)])
+        );
     }
 
     #[test]
     fn parses_parentheses_and_precedence() {
-        let formula = Formula::parse("(A-B)*2").expect("parse");
+        let formula = parse("(A-B)*2").expect("parse");
         let columns = [float_column(&[10.0]), float_column(&[3.0])];
-        let result = evaluate(&formula, 2, &columns, 1);
+        let result = evaluate(&formula, &sheet_values(&columns), 1);
         assert_eq!(result.values, vec![14.0]);
         assert_eq!(result.error, None);
     }
 
     #[test]
     fn multiplication_binds_tighter_than_addition() {
-        let formula = Formula::parse("A+B*2").expect("parse");
+        let formula = parse("A+B*2").expect("parse");
         let columns = [float_column(&[1.0]), float_column(&[3.0])];
-        let result = evaluate(&formula, 2, &columns, 1);
+        let result = evaluate(&formula, &sheet_values(&columns), 1);
         assert_eq!(result.values, vec![7.0]);
     }
 
     #[test]
     fn parses_division() {
-        let formula = Formula::parse("A/B").expect("parse");
+        let formula = parse("A/B").expect("parse");
         let columns = [float_column(&[10.0]), float_column(&[4.0])];
-        let result = evaluate(&formula, 2, &columns, 1);
+        let result = evaluate(&formula, &sheet_values(&columns), 1);
         assert_eq!(result.values, vec![2.5]);
     }
 
     #[test]
     fn parses_multi_letter_column_and_unary_minus() {
-        let formula = Formula::parse("-AA + 1").expect("parse");
-        assert_eq!(formula.referenced_columns(), BTreeSet::from([26]));
+        let formula = parse("-AA + 1").expect("parse");
+        assert_eq!(formula.referenced_columns(), BTreeSet::from([col(26)]));
     }
 
     #[test]
     fn column_letters_are_case_insensitive() {
-        let formula = Formula::parse("a+b").expect("parse");
-        assert_eq!(formula.referenced_columns(), BTreeSet::from([0, 1]));
+        let formula = parse("a+b").expect("parse");
+        assert_eq!(
+            formula.referenced_columns(),
+            BTreeSet::from([col(0), col(1)])
+        );
     }
 
     #[test]
     fn ignores_whitespace() {
-        let formula = Formula::parse("  A   +  B  ").expect("parse");
-        assert_eq!(formula.referenced_columns(), BTreeSet::from([0, 1]));
+        let formula = parse("  A   +  B  ").expect("parse");
+        assert_eq!(
+            formula.referenced_columns(),
+            BTreeSet::from([col(0), col(1)])
+        );
     }
 
     #[test]
     fn rejects_empty_formula() {
-        assert!(matches!(Formula::parse(""), Err(FormulaError::Parse(_))));
+        assert!(matches!(parse(""), Err(FormulaError::Parse(_))));
     }
 
     #[test]
     fn rejects_unmatched_parenthesis() {
-        assert!(matches!(
-            Formula::parse("(A+B"),
-            Err(FormulaError::Parse(_))
-        ));
+        assert!(matches!(parse("(A+B"), Err(FormulaError::Parse(_))));
     }
 
     #[test]
     fn rejects_trailing_garbage() {
-        assert!(matches!(
-            Formula::parse("A+B)"),
-            Err(FormulaError::Parse(_))
-        ));
+        assert!(matches!(parse("A+B)"), Err(FormulaError::Parse(_))));
     }
 
     #[test]
     fn rejects_unknown_character() {
-        assert!(matches!(
-            Formula::parse("A+B#2"),
-            Err(FormulaError::Parse(_))
-        ));
+        assert!(matches!(parse("A+B#2"), Err(FormulaError::Parse(_))));
     }
 
     #[test]
     fn rejects_dangling_operator() {
-        assert!(matches!(Formula::parse("A+"), Err(FormulaError::Parse(_))));
+        assert!(matches!(parse("A+"), Err(FormulaError::Parse(_))));
     }
 
     // -- évaluation, dégradation --
@@ -752,14 +984,14 @@ mod tests {
         // l'`Err(FormulaError::Parse)` de `Formula::parse`) ; ce test fige
         // seulement que `Formula::parse` échoue bien pour ce cas, la
         // dégradation NaN étant testée par l'orchestrateur (stokesforge-session).
-        assert!(Formula::parse("A@B").is_err());
+        assert!(parse("A@B").is_err());
     }
 
     #[test]
     fn missing_column_pads_with_nan() {
-        let formula = Formula::parse("A+B").expect("parse");
+        let formula = parse("A+B").expect("parse");
         let columns = [float_column(&[1.0, 2.0, 3.0]), float_column(&[10.0])];
-        let result = evaluate(&formula, 2, &columns, 3);
+        let result = evaluate(&formula, &sheet_values(&columns), 3);
         assert_eq!(result.error, None);
         assert_eq!(result.values[0], 11.0);
         assert!(result.values[1].is_nan());
@@ -767,16 +999,29 @@ mod tests {
     }
 
     #[test]
-    fn unknown_column_letter_degrades_everything_to_nan() {
-        let formula = Formula::parse("A+C").expect("parse");
+    fn a_column_absent_from_the_sheet_degrades_everything_to_nan() {
+        // `C` est dans la feuille de saisie, mais pas dans les colonnes
+        // fournies à l'évaluation (supprimée, ou dans une autre feuille).
+        let formula = parse("A+C").expect("parse");
         let columns = [float_column(&[1.0]), float_column(&[2.0])];
-        let result = evaluate(&formula, 5, &columns, 3);
-        assert_eq!(
-            result.error,
-            Some(FormulaError::UnknownColumn("C".to_string()))
-        );
+        let result = evaluate(&formula, &sheet_values(&columns), 3);
+        assert_eq!(result.error, Some(FormulaError::DeletedColumn));
         assert!(result.values.iter().all(|v| v.is_nan()));
         assert_eq!(result.values.len(), 3);
+    }
+
+    #[test]
+    fn evaluate_looks_columns_up_by_identifier_not_by_position() {
+        // La feuille permutée : `B` (2) en tête. La formule `A*2` lit
+        // l'identifiant 1, qui n'est plus en position 0.
+        let formula = parse("A*2").expect("parse");
+        let permuted = [
+            (col(1), float_column(&[100.0])),
+            (col(0), float_column(&[5.0])),
+        ];
+        let result = evaluate(&formula, &permuted, 1);
+        assert_eq!(result.error, None);
+        assert_eq!(result.values, vec![10.0]);
     }
 
     #[test]
@@ -786,12 +1031,12 @@ mod tests {
         // colonne `Mixed`, acceptée par la formule — seules les lignes dont
         // la cellule référencée ne vaut pas un nombre deviennent `NaN`, pas
         // toute la formule (invariant 10).
-        let formula = Formula::parse("A+B").expect("parse");
+        let formula = parse("A+B").expect("parse");
         let columns = [
             float_column(&[1.0, 2.0]),
             text_column(&[Some("10"), Some("x")]),
         ];
-        let result = evaluate(&formula, 5, &columns, 2);
+        let result = evaluate(&formula, &sheet_values(&columns), 2);
         assert_eq!(result.error, None);
         assert!(
             result.values[0].is_nan(),
@@ -801,27 +1046,13 @@ mod tests {
     }
 
     #[test]
-    fn self_reference_degrades_to_nan() {
-        let formula = Formula::parse("A+B").expect("parse");
-        let columns = [float_column(&[1.0]), float_column(&[2.0])];
-        // La colonne-formule est en position 0 (« A ») : elle se référence
-        // elle-même.
-        let result = evaluate(&formula, 0, &columns, 2);
-        assert_eq!(
-            result.error,
-            Some(FormulaError::SelfReference("A".to_string()))
-        );
-        assert!(result.values.iter().all(|v| v.is_nan()));
-    }
-
-    #[test]
     fn division_by_zero_is_ieee_not_an_error() {
         // Comportement flottant ordinaire, pas un cas de dégradation
         // spécifique au module : 0/0 = NaN, x/0 = ±inf, exactement comme
         // toute valeur manquante ou non finie déjà tolérée par le modèle.
-        let formula = Formula::parse("A/B").expect("parse");
+        let formula = parse("A/B").expect("parse");
         let columns = [float_column(&[1.0, 0.0]), float_column(&[0.0, 0.0])];
-        let result = evaluate(&formula, 5, &columns, 2);
+        let result = evaluate(&formula, &sheet_values(&columns), 2);
         assert_eq!(result.error, None);
         assert!(result.values[0].is_infinite());
         assert!(result.values[1].is_nan());
@@ -860,7 +1091,7 @@ mod tests {
         // Missing (A vide, B présent : la case résultat existe quand même
         // avec la valeur de B, comme aujourd'hui — seul le statut est
         // nouveau, pas la valeur).
-        let formula = Formula::parse("A+B").expect("parse");
+        let formula = parse("A+B").expect("parse");
         let a = float_column(&[1.0, 2.0, 3.0, 4.0, f64::NAN]);
         let b = mixed_column(&[
             Some(Ok(1.0)),
@@ -870,7 +1101,7 @@ mod tests {
             Some(Ok(1.0)),
         ]);
         let columns = [a, b];
-        let result = evaluate(&formula, 5, &columns, 5);
+        let result = evaluate(&formula, &sheet_values(&columns), 5);
         assert_eq!(result.error, None);
 
         assert_eq!(result.values[0], 2.0);
@@ -895,18 +1126,18 @@ mod tests {
 
     #[test]
     fn evaluate_status_is_ok_for_plain_arithmetic() {
-        let formula = Formula::parse("A*B").expect("parse");
+        let formula = parse("A*B").expect("parse");
         let columns = [float_column(&[2.0]), float_column(&[3.0])];
-        let result = evaluate(&formula, 5, &columns, 1);
+        let result = evaluate(&formula, &sheet_values(&columns), 1);
         assert_eq!(result.values, vec![6.0]);
         assert_eq!(result.statuses, vec![NumericStatus::Ok]);
     }
 
     #[test]
     fn evaluate_status_is_missing_when_both_operands_are_missing() {
-        let formula = Formula::parse("A+B").expect("parse");
+        let formula = parse("A+B").expect("parse");
         let columns = [mixed_column(&[None]), mixed_column(&[None])];
-        let result = evaluate(&formula, 5, &columns, 1);
+        let result = evaluate(&formula, &sheet_values(&columns), 1);
         assert!(result.values[0].is_nan());
         assert_eq!(result.statuses[0], NumericStatus::Missing);
     }
@@ -915,18 +1146,18 @@ mod tests {
     fn evaluate_status_failed_wins_over_missing() {
         // A vide, B texte non numérique : Failed doit l'emporter sur
         // Missing (jamais un vrai échec caché derrière une case vide).
-        let formula = Formula::parse("A+B").expect("parse");
+        let formula = parse("A+B").expect("parse");
         let columns = [mixed_column(&[None]), mixed_column(&[Some(Err("x"))])];
-        let result = evaluate(&formula, 5, &columns, 1);
+        let result = evaluate(&formula, &sheet_values(&columns), 1);
         assert!(result.values[0].is_nan());
         assert_eq!(result.statuses[0], NumericStatus::Failed);
     }
 
     #[test]
     fn degraded_evaluation_reports_missing_status_everywhere() {
-        let formula = Formula::parse("A+C").expect("parse");
+        let formula = parse("A+C").expect("parse");
         let columns = [float_column(&[1.0]), float_column(&[2.0])];
-        let result = evaluate(&formula, 5, &columns, 3);
+        let result = evaluate(&formula, &sheet_values(&columns), 3);
         assert!(result.error.is_some());
         assert_eq!(result.statuses, vec![NumericStatus::Missing; 3]);
     }
@@ -943,6 +1174,156 @@ mod tests {
                 "index {index} -> {letters}"
             );
         }
+    }
+
+    // -- saisie et affichage : lettres <-> identifiants --
+
+    fn abc() -> [NodeId; 3] {
+        [col(0), col(1), col(2)]
+    }
+
+    #[test]
+    fn from_letters_keeps_the_typed_text_around_the_columns() {
+        let [a, b, c] = abc();
+        let formula = ColumnFormula::from_letters("A+B*2", &[a, b, c], c).expect("saisie");
+        assert_eq!(
+            formula.parts(),
+            [
+                FormulaPart::Column(a),
+                FormulaPart::Text("+".into()),
+                FormulaPart::Column(b),
+                FormulaPart::Text("*2".into()),
+            ]
+        );
+        assert_eq!(formula.letters(&[a, b, c]), "A+B*2");
+        // Espaces et parenthèses sont gardés tels que saisis.
+        let spaced = ColumnFormula::from_letters(" ( a - B ) ", &[a, b, c], c).expect("saisie");
+        assert_eq!(spaced.letters(&[a, b, c]), " ( A - B ) ");
+    }
+
+    #[test]
+    fn from_letters_refuses_a_letter_that_names_no_column() {
+        let sheet = [col(0), col(1), col(2), col(3)];
+        assert_eq!(
+            ColumnFormula::from_letters("E*2", &sheet, OWN),
+            Err(FormulaError::UnknownColumn("E".into()))
+        );
+        // Une suite de lettres démesurée ne désigne rien non plus, sans panic.
+        let long = "Z".repeat(40);
+        assert_eq!(
+            ColumnFormula::from_letters(&long, &sheet, OWN),
+            Err(FormulaError::UnknownColumn(long.clone()))
+        );
+    }
+
+    #[test]
+    fn from_letters_refuses_the_column_that_carries_the_formula() {
+        let [a, b, c] = abc();
+        assert_eq!(
+            ColumnFormula::from_letters("C*2", &[a, b, c], c),
+            Err(FormulaError::SelfReference("C".into()))
+        );
+        // La même saisie sur une autre colonne est acceptée.
+        assert!(ColumnFormula::from_letters("C*2", &[a, b, c], a).is_ok());
+    }
+
+    #[test]
+    fn from_letters_refuses_the_ref_token() {
+        let [a, b, c] = abc();
+        for text in ["#REF*2", "A+#ref", "#REF"] {
+            assert_eq!(
+                ColumnFormula::from_letters(text, &[a, b, c], c),
+                Err(FormulaError::DeletedColumn),
+                "{text}"
+            );
+        }
+        // Un `#` qui n'est pas `#REF` n'est pas refusé ici : erreur de syntaxe.
+        let stored = ColumnFormula::from_letters("A#2", &[a, b, c], c).expect("stockée");
+        assert!(matches!(stored.compile(), Err(FormulaError::Parse(_))));
+    }
+
+    #[test]
+    fn from_letters_does_not_read_an_exponent_as_a_column() {
+        let [a, b, c] = abc();
+        let formula = ColumnFormula::from_letters("1e-3*A", &[a, b, c], c).expect("saisie");
+        assert_eq!(formula.columns(), BTreeSet::from([a]));
+        assert_eq!(formula.letters(&[a, b, c]), "1e-3*A");
+        let compiled = formula.compile().expect("compile");
+        assert_eq!(compiled.referenced_columns(), BTreeSet::from([a]));
+        // Un `e` qui n'ouvre pas un exposant complet est une lettre de colonne.
+        let letter =
+            ColumnFormula::from_letters("1e*A", &[a, b, c, col(3), col(4)], c).expect("saisie");
+        assert_eq!(letter.columns(), BTreeSet::from([a, col(4)]));
+    }
+
+    #[test]
+    fn a_syntax_error_is_stored_and_reported_by_compile() {
+        let [a, b, c] = abc();
+        let formula = ColumnFormula::from_letters("A*", &[a, b, c], c).expect("stockée");
+        assert!(matches!(formula.compile(), Err(FormulaError::Parse(_))));
+    }
+
+    #[test]
+    fn letters_follow_the_columns_when_the_sheet_is_permuted() {
+        let [a, b, c] = abc();
+        let formula = ColumnFormula::from_letters("A+B*2", &[a, b, c], c).expect("saisie");
+        // B passe en tête : le texte stocké ne change pas, les lettres si.
+        assert_eq!(formula.letters(&[b, a, c]), "B+A*2");
+        assert_eq!(formula.parts().len(), 4);
+        assert!(!formula.has_deleted_reference(&[b, a, c]));
+    }
+
+    #[test]
+    fn a_column_outside_the_sheet_is_written_ref() {
+        let [a, b, c] = abc();
+        let formula = ColumnFormula::from_letters("A+B*2", &[a, b, c], c).expect("saisie");
+        assert_eq!(formula.letters(&[b, c]), "#REF+A*2");
+        assert!(formula.has_deleted_reference(&[b, c]));
+        assert_eq!(formula.letters(&[]), "#REF+#REF*2");
+        // L'identifiant reste stocké : la colonne qui revient ramène la lecture.
+        assert_eq!(formula.columns(), BTreeSet::from([a, b]));
+        assert_eq!(formula.letters(&[a, b, c]), "A+B*2");
+    }
+
+    #[test]
+    fn the_stored_fragments_compile_even_when_the_displayed_letters_would_not() {
+        // `2C3` : si C devenait E, l'affichage serait `2E3` (un nombre), mais
+        // ce sont les fragments qui se compilent : jamais de retour par les
+        // lettres.
+        let [a, b, c] = abc();
+        let formula = ColumnFormula::from_parts(vec![
+            FormulaPart::Text("2".into()),
+            FormulaPart::Column(a),
+            FormulaPart::Text("3".into()),
+        ]);
+        assert_eq!(formula.letters(&[b, c, col(3), col(4), a]), "2E3");
+        assert!(matches!(formula.compile(), Err(FormulaError::Parse(_))));
+    }
+
+    #[test]
+    fn letters_in_a_text_fragment_are_a_syntax_error_not_a_column() {
+        // Fichier fabriqué (invariant 10) : jamais un panic, jamais une colonne.
+        let formula = ColumnFormula::from_parts(vec![
+            FormulaPart::Text("A+".into()),
+            FormulaPart::Column(col(1)),
+        ]);
+        assert!(matches!(formula.compile(), Err(FormulaError::Parse(_))));
+    }
+
+    #[test]
+    fn remap_renumbers_the_columns_and_keeps_the_text() {
+        let [a, b, c] = abc();
+        let formula = ColumnFormula::from_letters("A+B*2", &[a, b, c], c).expect("saisie");
+        let moved = formula.remap(|id| NodeId::from_raw(id.raw() + 100));
+        assert_eq!(
+            moved.parts(),
+            [
+                FormulaPart::Column(NodeId::from_raw(101)),
+                FormulaPart::Text("+".into()),
+                FormulaPart::Column(NodeId::from_raw(102)),
+                FormulaPart::Text("*2".into()),
+            ]
+        );
     }
 
     // -- ordre topologique / cycles --
@@ -1017,7 +1398,7 @@ mod tests {
     }
 
     fn trop_profonde(src: String) -> bool {
-        sur_2_mib(move || Formula::parse(&src) == Err(FormulaError::TooDeep))
+        sur_2_mib(move || parse(&src) == Err(FormulaError::TooDeep))
     }
 
     #[test]
@@ -1037,12 +1418,12 @@ mod tests {
     fn formule_juste_sous_le_plafond_acceptee_et_evaluee() {
         let v = sur_2_mib(|| {
             let columns = [float_column(&[2.0])];
-            let somme = Formula::parse(&format!("{}A", "A+".repeat(MAX_DEPTH - 2))).unwrap();
+            let somme = parse(&format!("{}A", "A+".repeat(MAX_DEPTH - 2))).unwrap();
             let n = MAX_DEPTH / NEST_COST - 1;
-            let parens = Formula::parse(&format!("{}A{}", "(".repeat(n), ")".repeat(n))).unwrap();
-            let neg = Formula::parse(&format!("{}A", "-".repeat(n))).unwrap();
+            let parens = parse(&format!("{}A{}", "(".repeat(n), ")".repeat(n))).unwrap();
+            let neg = parse(&format!("{}A", "-".repeat(n))).unwrap();
             let val = |f: &Formula| {
-                let r = evaluate(f, 5, &columns, 1);
+                let r = evaluate(f, &sheet_values(&columns), 1);
                 assert_eq!(r.error, None);
                 r.values[0]
             };
@@ -1081,7 +1462,7 @@ mod tests {
     }
 
     fn parse_ok(src: &str) -> bool {
-        match Formula::parse(src) {
+        match parse(src) {
             Ok(_) => true,
             Err(FormulaError::TooDeep) => false,
             Err(autre) => panic!("erreur inattendue : {autre:?}"),
@@ -1198,7 +1579,7 @@ mod tests {
         ];
         for (nom, src) in formes {
             sur_pile(UN_MIB, move || {
-                assert_eq!(Formula::parse(&src), Err(FormulaError::TooDeep), "{nom}");
+                assert_eq!(parse(&src), Err(FormulaError::TooDeep), "{nom}");
             });
         }
     }
@@ -1213,7 +1594,7 @@ mod tests {
                 "A+".repeat(500_000),
                 parens(500_000, "A"),
             ] {
-                assert_eq!(Formula::parse(&src), Err(FormulaError::TooDeep));
+                assert_eq!(parse(&src), Err(FormulaError::TooDeep));
             }
         });
         // Linéaire (quelques dizaines de ms en debug) ; la marge n'est là que
@@ -1253,12 +1634,12 @@ mod tests {
 
     /// Parse, lit les références, évalue, clone, compare et lâche la formule.
     fn parcours_complet(src: &str) -> f64 {
-        let formule = Formula::parse(src).expect("pire formule acceptée");
+        let formule = parse(src).expect("pire formule acceptée");
         let colonnes = [float_column(&[2.0, 3.0])];
         let copie = formule.clone();
         assert_eq!(formule, copie);
-        assert_eq!(formule.referenced_columns(), BTreeSet::from([0]));
-        let r = evaluate(&formule, 5, &colonnes, 2);
+        assert_eq!(formule.referenced_columns(), BTreeSet::from([col(0)]));
+        let r = evaluate(&formule, &sheet_values(&colonnes), 2);
         assert_eq!(r.error, None);
         r.values[0]
     }
@@ -1316,8 +1697,8 @@ mod tests {
     fn les_formules_ordinaires_sont_inchangees() {
         let colonnes = [float_column(&[2.0, 8.0]), float_column(&[4.0, 2.0])];
         let valeurs = |src: &str| {
-            let f = Formula::parse(src).unwrap();
-            let r = evaluate(&f, 9, &colonnes, 2);
+            let f = parse(src).unwrap();
+            let r = evaluate(&f, &sheet_values(&colonnes), 2);
             assert_eq!(r.error, None, "{src}");
             r.values
         };
@@ -1342,19 +1723,17 @@ mod tests {
         let lettres = ["A", "B", "C", "AA"];
         let termes: Vec<&str> = (0..1001).map(|i| lettres[i % 4]).collect();
         let src = termes.join("+");
-        let refs = sur_pile(UN_MIB, move || {
-            Formula::parse(&src).unwrap().referenced_columns()
-        });
-        assert_eq!(refs, BTreeSet::from([0, 1, 2, 26]));
+        let refs = sur_pile(UN_MIB, move || parse(&src).unwrap().referenced_columns());
+        assert_eq!(refs, BTreeSet::from([col(0), col(1), col(2), col(26)]));
         // Une référence unique tout au fond d'un empilement limite.
         let profond = format!("{}C{}", "(-".repeat(50), ")".repeat(50));
         let refs = sur_pile(UN_MIB, move || {
-            Formula::parse(&profond).unwrap().referenced_columns()
+            parse(&profond).unwrap().referenced_columns()
         });
-        assert_eq!(refs, BTreeSet::from([2]));
+        assert_eq!(refs, BTreeSet::from([col(2)]));
         // Rien à référencer : ensemble vide.
         let refs = sur_pile(UN_MIB, || {
-            Formula::parse(&vec!["1"; 1001].join("+"))
+            parse(&vec!["1"; 1001].join("+"))
                 .unwrap()
                 .referenced_columns()
         });
@@ -1365,7 +1744,7 @@ mod tests {
     fn une_formule_trop_profonde_degrade_evaluate_apres_un_parse_refuse() {
         // `evaluate` ne reçoit une `Formula` qu'après `parse` : un refus ne
         // laisse donc aucune formule à évaluer ; l'erreur est celle du parse.
-        let erreur = Formula::parse(&chaine("+", 1002)).unwrap_err();
+        let erreur = parse(&chaine("+", 1002)).unwrap_err();
         assert_eq!(erreur, FormulaError::TooDeep);
         assert_eq!(erreur.to_string(), "formula nested too deeply");
     }

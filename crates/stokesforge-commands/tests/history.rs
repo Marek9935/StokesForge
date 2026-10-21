@@ -2190,6 +2190,11 @@ fn set_column_meta_round_trip() {
 fn undoing_a_formula_set_on_a_column_with_prior_values_restores_them() {
     let mut f = fixture();
     let mut history = History::new();
+    let formule = f
+        .project
+        .tree()
+        .formula_from_letters(f.a, "B*2")
+        .expect("formule saisie");
 
     history
         .execute(
@@ -2197,7 +2202,7 @@ fn undoing_a_formula_set_on_a_column_with_prior_values_restores_them() {
             Command::SetColumnMeta {
                 column: f.a,
                 meta: ColumnMeta {
-                    formula: Some("B*2".to_string()),
+                    formula: Some(formule),
                     ..Default::default()
                 },
             },
@@ -2240,13 +2245,18 @@ fn undoing_a_formula_set_on_a_column_with_prior_values_restores_them() {
 fn set_cells_on_a_formula_column_is_refused() {
     let mut f = fixture();
     let mut history = History::new();
+    let formule = f
+        .project
+        .tree()
+        .formula_from_letters(f.a, "B*2")
+        .expect("formule saisie");
     history
         .execute(
             &mut f.project,
             Command::SetColumnMeta {
                 column: f.a,
                 meta: ColumnMeta {
-                    formula: Some("B*2".to_string()),
+                    formula: Some(formule),
                     ..Default::default()
                 },
             },

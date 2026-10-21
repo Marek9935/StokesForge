@@ -5,8 +5,8 @@
 
 use stokesforge_core::column::MAX_COLUMN_ROWS;
 use stokesforge_core::{
-    Column, ColumnMeta, ColumnRole, ColumnType, ColumnValues, CoreError, MixedCell, Node, NodeId,
-    NodeKind, ValueBlock, WindowMeta,
+    Column, ColumnFormula, ColumnMeta, ColumnRole, ColumnType, ColumnValues, CoreError,
+    FormulaPart, MixedCell, Node, NodeId, NodeKind, ValueBlock, WindowMeta,
 };
 use stokesforge_plot::{
     AnnotationSpec, AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle,
@@ -15,12 +15,13 @@ use stokesforge_plot::{
 };
 
 use crate::schema::{
-    AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, GroupGradientRecord, GroupNameRecord,
-    KindRecord, LegendPositionRecord, LegendSpecRecord, LineSpecRecord, LineStyleRecord,
-    NodeRecord, OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord, PlotTypeRecord, RoleRecord,
-    SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord, SeriesSpecRecord, ShapeKindRecord,
-    ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord, TextAlignRecord, TextAnchorRecord,
-    TextFontRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, FormulaPartRecord, GroupGradientRecord,
+    GroupNameRecord, KindRecord, LegendPositionRecord, LegendSpecRecord, LineSpecRecord,
+    LineStyleRecord, NodeRecord, OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord,
+    PlotTypeRecord, RoleRecord, SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord,
+    SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord,
+    TextAlignRecord, TextAnchorRecord, TextFontRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY,
+    MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -943,7 +944,16 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
                 display_format: meta.display_format.clone(),
                 values,
                 version: column.version(),
-                formula: meta.formula.clone(),
+                formula_parts: meta.formula.as_ref().map(|formula| {
+                    formula
+                        .parts()
+                        .iter()
+                        .map(|part| match part {
+                            FormulaPart::Text(text) => FormulaPartRecord::Text(text.clone()),
+                            FormulaPart::Column(id) => FormulaPartRecord::Column(id.raw()),
+                        })
+                        .collect()
+                }),
                 file_metadata: meta
                     .file_metadata
                     .iter()
@@ -1016,7 +1026,7 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
             display_format,
             values,
             version,
-            formula,
+            formula_parts,
             file_metadata,
             import_source,
             x_prime,
@@ -1049,7 +1059,23 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                 long_name,
                 comment,
                 display_format,
-                formula,
+                // Les identifiants lus par la formule ont déjà passé
+                // `check_node_id` (`build_project_reported`). Une colonne qui
+                // n'est plus dans la feuille se dégrade au calcul (`#REF`),
+                // jamais en panic (invariant 10).
+                formula: formula_parts.map(|parts| {
+                    ColumnFormula::from_parts(
+                        parts
+                            .into_iter()
+                            .map(|part| match part {
+                                FormulaPartRecord::Text(text) => FormulaPart::Text(text),
+                                FormulaPartRecord::Column(id) => {
+                                    FormulaPart::Column(NodeId::from_raw(id))
+                                }
+                            })
+                            .collect(),
+                    )
+                }),
                 // Un fichier peut porter n'importe quel flottant : seule une
                 // valeur finie est une abscisse.
                 x_prime: x_prime.filter(|value| value.is_finite()),

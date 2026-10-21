@@ -73,11 +73,18 @@ fn demarrer(mode: FormulaRecalc) -> (Session, SessionHandle, Feuille) {
     (session, handle, feuille)
 }
 
-fn formule(column: NodeId, texte: &str) -> Command {
+/// La commande qui pose `texte` (saisi en **lettres**) comme formule de
+/// `column` : lettres vers identifiants par `Tree::formula_from_letters`,
+/// comme l'interface (#321).
+fn formule(handle: &SessionHandle, column: NodeId, texte: &str) -> Command {
+    let formula = instantane(handle)
+        .tree
+        .formula_from_letters(column, texte)
+        .expect("formule saisie");
     Command::SetColumnMeta {
         column,
         meta: ColumnMeta {
-            formula: Some(texte.to_string()),
+            formula: Some(formula),
             ..Default::default()
         },
     }
@@ -149,6 +156,24 @@ fn tout_non_calcule(snapshot: &Snapshot, column: NodeId) -> bool {
     })
 }
 
+/// Vrai si toutes les cellules de `column` sont **vides** (`NaN` pour une
+/// colonne numérique, cellule vide pour une colonne mixte) — le résultat d'une
+/// formule dont une colonne lue a disparu (`#REF`), à ne pas confondre avec le
+/// `"---"` d'un calcul qui a échoué ([`tout_non_calcule`]).
+fn tout_vide(snapshot: &Snapshot, column: NodeId) -> bool {
+    let colonne = snapshot
+        .tree
+        .node(column)
+        .and_then(|node| node.as_column())
+        .expect("colonne présente");
+    !colonne.is_empty()
+        && (0..colonne.len()).all(|row| match colonne.get(row) {
+            Cell::Float(v) => v.is_nan(),
+            Cell::Text(None) => true,
+            Cell::Text(Some(_)) => false,
+        })
+}
+
 fn some(values: &[f64]) -> Vec<Option<f64>> {
     values.iter().copied().map(Some).collect()
 }
@@ -159,7 +184,9 @@ fn some(values: &[f64]) -> Vec<Option<f64>> {
 /// `(version avant, version après)` de la colonne-formule.
 fn versions_autour_d_une_commande_sans_rapport(mode: FormulaRecalc) -> (u64, u64) {
     let (_session, handle, f) = demarrer(mode);
-    handle.execute(formule(f.c, "A+B")).expect("formule");
+    handle
+        .execute(formule(&handle, f.c, "A+B"))
+        .expect("formule");
     let avant = instantane(&handle);
     handle
         .execute(sans_rapport(&avant, 0))
@@ -186,8 +213,12 @@ fn une_commande_sans_rapport_ne_reecrit_aucune_formule() {
 fn modifier_une_source_ne_recalcule_que_ses_dependantes() {
     for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
         let (_session, handle, f) = demarrer(mode);
-        handle.execute(formule(f.c, "A*2")).expect("C = A*2");
-        handle.execute(formule(f.d, "B+1")).expect("D = B+1");
+        handle
+            .execute(formule(&handle, f.c, "A*2"))
+            .expect("C = A*2");
+        handle
+            .execute(formule(&handle, f.d, "B+1"))
+            .expect("D = B+1");
         let avant = instantane(&handle);
 
         handle
@@ -219,8 +250,12 @@ fn chaine_inchangee_par_une_commande_sans_rapport(mode: FormulaRecalc) -> bool {
     let (_session, handle, f) = demarrer(mode);
     // D lit C qui lit A ; C est posée **après** D, pour que l'ordre de
     // déclaration ne coïncide pas avec l'ordre de calcul.
-    handle.execute(formule(f.d, "C+1")).expect("D = C+1");
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    handle
+        .execute(formule(&handle, f.d, "C+1"))
+        .expect("D = C+1");
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C = A*2");
     handle
         .execute(saisir(f.a, 1, &[7.0]))
         .expect("saisie dans A");
@@ -257,8 +292,12 @@ fn une_chaine_recalculee_est_stable_a_la_commande_suivante() {
 #[test]
 fn la_propagation_suit_la_chaine_et_revient_par_annuler_retablir() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
-    handle.execute(formule(f.d, "C+1")).expect("D = C+1");
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C = A*2");
+    handle
+        .execute(formule(&handle, f.d, "C+1"))
+        .expect("D = C+1");
 
     handle
         .execute(saisir(f.a, 2, &[50.0]))
@@ -283,21 +322,29 @@ fn la_propagation_suit_la_chaine_et_revient_par_annuler_retablir() {
 #[test]
 fn changer_le_texte_de_la_formule_recalcule() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
-    handle.execute(formule(f.c, "A*3")).expect("C = A*3");
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C = A*2");
+    handle
+        .execute(formule(&handle, f.c, "A*3"))
+        .expect("C = A*3");
     assert_eq!(nombres(&instantane(&handle), f.c), some(&[3.0, 6.0, 9.0]));
 
     handle.undo().expect("annuler");
     assert_eq!(nombres(&instantane(&handle), f.c), some(&[2.0, 4.0, 6.0]));
 }
 
-/// Déplacer une colonne change ce que désignent les lettres : la formule
-/// reste « A*2 » mais A est désormais une autre colonne (composante
-/// « colonne désignée », par identifiant et non par lettre).
-#[test]
-fn deplacer_une_source_change_ce_que_designe_la_lettre() {
-    let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+/// Joue « C = A*2, puis B passe en tête de la feuille » et rend `(valeurs de
+/// C, texte affiché de C, C est-elle restée à sa version ?, texte affiché
+/// après annulation)`.
+fn deplacer_b_en_tete(
+    mode: FormulaRecalc,
+) -> (Vec<Option<f64>>, Option<String>, bool, Option<String>) {
+    let (_session, handle, f) = demarrer(mode);
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C = A*2");
+    let avant = instantane(&handle);
     handle
         .execute(Command::Move {
             id: f.b,
@@ -305,22 +352,51 @@ fn deplacer_une_source_change_ce_que_designe_la_lettre() {
             index: 0,
         })
         .expect("B passe en tête");
-    // Ni A ni B n'ont été écrites : seule la désignation a changé.
-    assert_eq!(
-        nombres(&instantane(&handle), f.c),
-        some(&[20.0, 40.0, 60.0])
-    );
-
+    let apres = instantane(&handle);
     handle.undo().expect("annuler le déplacement");
-    assert_eq!(nombres(&instantane(&handle), f.c), some(&[2.0, 4.0, 6.0]));
+    (
+        nombres(&apres, f.c),
+        apres.tree.formula_letters(f.c),
+        version(&avant, f.c) == version(&apres, f.c),
+        instantane(&handle).tree.formula_letters(f.c),
+    )
 }
 
-/// Déplacer une source vers une autre feuille : la lettre désigne la
-/// colonne suivante, ou plus rien.
+/// Déplacer une source **dans la feuille** ne change pas ce que lit la formule
+/// (#321, F1) : elle retient la colonne par son identifiant. Les lettres
+/// **affichées** suivent (A est devenue la deuxième colonne : `B*2`), le texte
+/// stocké ne change pas, et rien n'est réécrit — ni A ni B n'ont été écrites,
+/// l'empreinte ne contient pas le texte affiché. Témoin : le recalcul complet
+/// réécrit la colonne. Mutant : résolution par position.
+#[test]
+fn deplacer_une_source_dans_la_feuille_la_formule_suit() {
+    let (valeurs, texte, inchangee, apres_annulation) = deplacer_b_en_tete(FormulaRecalc::Targeted);
+    assert_eq!(valeurs, some(&[2.0, 4.0, 6.0]), "C lit toujours A");
+    assert_eq!(
+        texte.as_deref(),
+        Some("B*2"),
+        "A est maintenant la deuxième colonne : la lettre affichée suit"
+    );
+    assert!(inchangee, "la formule n'est pas réécrite");
+    assert_eq!(apres_annulation.as_deref(), Some("A*2"));
+
+    let (valeurs, _, inchangee, _) = deplacer_b_en_tete(FormulaRecalc::Full);
+    assert_eq!(valeurs, some(&[2.0, 4.0, 6.0]), "oracle");
+    assert!(!inchangee, "témoin : le recalcul complet réécrit C");
+}
+
+/// Déplacer une source vers une autre feuille : la formule ne la trouve plus
+/// dans **sa** feuille, elle s'affiche `#REF` et ses cellules sont vides (pas
+/// `---`) ; annuler ramène la colonne, la formule et ses valeurs. Mutants :
+/// résolution dans tout l'arbre (la formule lirait encore la colonne partie),
+/// ou présence dans la feuille absente de l'empreinte (le déplacement ne
+/// ferait rien recalculer).
 #[test]
 fn deplacer_une_source_vers_une_autre_feuille() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.d, "B+1")).expect("D = B+1");
+    handle
+        .execute(formule(&handle, f.d, "B+1"))
+        .expect("D = B+1");
     let book = instantane(&handle)
         .tree
         .parent(f.sheet)
@@ -337,21 +413,51 @@ fn deplacer_une_source_vers_une_autre_feuille() {
         .expect("seconde feuille présente");
     handle
         .execute(Command::Move {
-            id: f.a,
+            id: f.b,
             new_parent: autre,
             index: 0,
         })
-        .expect("A part dans l'autre feuille");
-    // Feuille : B, C, D → « B » désigne C, vide : D lit une colonne vide et
-    // en prend la longueur (#194).
+        .expect("B part dans l'autre feuille");
     let s = instantane(&handle);
-    assert_eq!(nombres(&s, f.d), vec![]);
+    assert_eq!(s.tree.formula_letters(f.d).as_deref(), Some("#REF+1"));
+    assert!(tout_vide(&s, f.d), "cellules vides, pas « --- »");
+    assert_eq!(
+        nombres(&s, f.d).len(),
+        3,
+        "à la longueur des colonnes ordinaires"
+    );
 
     handle.undo().expect("annuler le déplacement");
+    let s = instantane(&handle);
+    assert_eq!(s.tree.formula_letters(f.d).as_deref(), Some("B+1"));
+    assert_eq!(nombres(&s, f.d), some(&[11.0, 21.0, 31.0]));
+}
+
+/// Supprimer une colonne que lit une formule : `#REF*2`, cellules vides ;
+/// Ctrl+Z ramène la colonne **et** la formule (l'identifiant est resté
+/// stocké), avec ses valeurs.
+#[test]
+fn supprimer_une_source_donne_ref_puis_l_annulation_rend_la_formule() {
+    let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
+    handle
+        .execute(formule(&handle, f.c, "B*2"))
+        .expect("C = B*2");
     assert_eq!(
-        nombres(&instantane(&handle), f.d),
-        some(&[11.0, 21.0, 31.0])
+        nombres(&instantane(&handle), f.c),
+        some(&[20.0, 40.0, 60.0])
     );
+
+    handle
+        .execute(Command::DeleteColumn { column: f.b })
+        .expect("supprimer B");
+    let s = instantane(&handle);
+    assert_eq!(s.tree.formula_letters(f.c).as_deref(), Some("#REF*2"));
+    assert!(tout_vide(&s, f.c), "cellules vides, pas « --- »");
+
+    handle.undo().expect("annuler la suppression");
+    let s = instantane(&handle);
+    assert_eq!(s.tree.formula_letters(f.c).as_deref(), Some("B*2"));
+    assert_eq!(nombres(&s, f.c), some(&[20.0, 40.0, 60.0]));
 }
 
 /// Une saisie dans une colonne-formule est refusée (`FormulaColumnReadOnly`),
@@ -362,7 +468,9 @@ fn deplacer_une_source_vers_une_autre_feuille() {
 #[test]
 fn une_colonne_formule_modifiee_directement_est_recalculee() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C = A*2");
     let refus = handle.execute(saisir(f.c, 0, &[999.0]));
     assert!(refus.is_err(), "la saisie directe reste refusée");
 
@@ -406,7 +514,9 @@ fn une_colonne_formule_modifiee_directement_est_recalculee() {
 #[test]
 fn le_resultat_suit_la_longueur_des_colonnes_lues() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C = A*2");
     handle
         .execute(saisir(f.a, 4, &[5.0]))
         .expect("A descend à 5 lignes");
@@ -418,7 +528,9 @@ fn le_resultat_suit_la_longueur_des_colonnes_lues() {
     assert_eq!(nombres(&instantane(&handle), f.c), some(&[2.0, 4.0, 6.0]));
 
     // Deux sources de longueurs différentes : la plus longue l'emporte.
-    handle.execute(formule(f.d, "A+B")).expect("D = A+B");
+    handle
+        .execute(formule(&handle, f.d, "A+B"))
+        .expect("D = A+B");
     handle
         .execute(saisir(f.b, 3, &[40.0]))
         .expect("B descend à 4 lignes");
@@ -435,7 +547,9 @@ fn le_resultat_suit_la_longueur_des_colonnes_lues() {
 #[test]
 fn une_constante_suit_les_colonnes_ordinaires() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "1+2")).expect("C = 1+2");
+    handle
+        .execute(formule(&handle, f.c, "1+2"))
+        .expect("C = 1+2");
     assert_eq!(nombres(&instantane(&handle), f.c), some(&[3.0, 3.0, 3.0]));
     handle
         .execute(saisir(f.d, 4, &[1.0]))
@@ -449,7 +563,9 @@ fn une_constante_suit_les_colonnes_ordinaires() {
 /// `(C après, C est-elle restée à sa version ?)`.
 fn allonger_une_colonne_non_lue(mode: FormulaRecalc) -> (Vec<Option<f64>>, bool) {
     let (_session, handle, f) = demarrer(mode);
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C = A*2");
     let avant = instantane(&handle);
     handle
         .execute(saisir(f.d, 4, &[1.0]))
@@ -481,7 +597,9 @@ fn allonger_une_colonne_non_lue_ne_change_pas_la_formule() {
 #[test]
 fn une_formule_illisible_suit_la_feuille_puis_se_corrige() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "A*")).expect("C illisible");
+    handle
+        .execute(formule(&handle, f.c, "A*"))
+        .expect("C illisible");
     let s = instantane(&handle);
     assert_eq!(nombres(&s, f.c), vec![None, None, None]);
 
@@ -498,7 +616,9 @@ fn une_formule_illisible_suit_la_feuille_puis_se_corrige() {
     assert_eq!(nombres(&instantane(&handle), f.c).len(), 3);
     handle.redo().expect("rétablir");
 
-    handle.execute(formule(f.c, "A*2")).expect("C corrigée");
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C corrigée");
     assert_eq!(nombres(&instantane(&handle), f.c), some(&[2.0, 4.0, 6.0]));
 }
 
@@ -508,14 +628,16 @@ fn une_formule_illisible_suit_la_feuille_puis_se_corrige() {
 #[test]
 fn un_cycle_cree_ailleurs_bloque_la_formule_et_se_defait() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "B*2")).expect("C = B*2");
+    handle
+        .execute(formule(&handle, f.c, "B*2"))
+        .expect("C = B*2");
     assert_eq!(
         nombres(&instantane(&handle), f.c),
         some(&[20.0, 40.0, 60.0])
     );
 
     handle
-        .execute(formule(f.b, "C+1"))
+        .execute(formule(&handle, f.b, "C+1"))
         .expect("B = C+1 : cycle");
     let s = instantane(&handle);
     assert!(tout_non_calcule(&s, f.c), "C est prise dans le cycle");
@@ -532,9 +654,11 @@ fn un_cycle_cree_ailleurs_bloque_la_formule_et_se_defait() {
 /// rapport laisse les versions de B et C intactes.
 fn cycle_inchange_par_une_commande_sans_rapport(mode: FormulaRecalc) -> bool {
     let (_session, handle, f) = demarrer(mode);
-    handle.execute(formule(f.c, "B*2")).expect("C = B*2");
     handle
-        .execute(formule(f.b, "C+1"))
+        .execute(formule(&handle, f.c, "B*2"))
+        .expect("C = B*2");
+    handle
+        .execute(formule(&handle, f.b, "C+1"))
         .expect("B = C+1 : cycle");
     let avant = instantane(&handle);
     assert!(tout_non_calcule(&avant, f.b) && tout_non_calcule(&avant, f.c));
@@ -565,9 +689,11 @@ fn un_cycle_stable_ne_se_reecrit_pas() {
 #[test]
 fn un_cycle_suit_la_longueur_de_la_feuille() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "B*2")).expect("C = B*2");
     handle
-        .execute(formule(f.b, "C+1"))
+        .execute(formule(&handle, f.c, "B*2"))
+        .expect("C = B*2");
+    handle
+        .execute(formule(&handle, f.b, "C+1"))
         .expect("B = C+1 : cycle");
     handle
         .execute(saisir(f.d, 4, &[1.0]))
@@ -587,10 +713,12 @@ fn un_cycle_suit_la_longueur_de_la_feuille() {
 fn une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite() {
     for (texte, cycle) in [("B*2", true), ("A*", false)] {
         let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-        handle.execute(formule(f.c, texte)).expect("formule de C");
+        handle
+            .execute(formule(&handle, f.c, texte))
+            .expect("formule de C");
         if cycle {
             handle
-                .execute(formule(f.b, "C+1"))
+                .execute(formule(&handle, f.b, "C+1"))
                 .expect("B = C+1 : cycle");
         }
         handle
@@ -611,7 +739,9 @@ fn une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite() {
 #[test]
 fn une_source_promue_en_texte_recalcule() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C = A*2");
     handle
         .execute(Command::SetCellsPromoting {
             column: f.a,
@@ -629,7 +759,9 @@ fn une_source_promue_en_texte_recalcule() {
 #[test]
 fn avorter_une_macro_recalcule() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C = A*2");
     handle.begin_macro(MacroKind::PasteCells).expect("macro");
     handle.execute(saisir(f.a, 0, &[5.0, 5.0])).expect("saisie");
     assert_eq!(nombres(&instantane(&handle), f.c), some(&[10.0, 10.0, 6.0]));
@@ -643,7 +775,9 @@ fn avorter_une_macro_recalcule() {
 #[test]
 fn une_colonne_formule_restauree_est_juste() {
     let (_session, handle, f) = demarrer(FormulaRecalc::Targeted);
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C = A*2");
     handle
         .execute(Command::DeleteColumn { column: f.c })
         .expect("supprimer C");
@@ -657,7 +791,9 @@ fn une_colonne_formule_restauree_est_juste() {
 /// colonne-formule **originale** a gardé sa version.
 fn original_inchange_par_une_saisie_dans_la_copie(mode: FormulaRecalc) -> bool {
     let (_session, handle, f) = demarrer(mode);
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    handle
+        .execute(formule(&handle, f.c, "A*2"))
+        .expect("C = A*2");
     handle
         .execute(Command::DuplicateWorksheet {
             sheet: f.sheet,
@@ -744,7 +880,9 @@ fn projet_truque(f: &Feuille, version_a: u64, version_c: u64, meta_c: ColumnMeta
 /// Pose `C = A*2` et rend `(version de A, version de C, métadonnées de C)`
 /// telles que le mémo vient de les noter.
 fn memo_de_c(handle: &SessionHandle, f: &Feuille) -> (u64, u64, ColumnMeta) {
-    handle.execute(formule(f.c, "A*2")).expect("C = A*2");
+    handle
+        .execute(formule(handle, f.c, "A*2"))
+        .expect("C = A*2");
     let s = instantane(handle);
     assert_eq!(nombres(&s, f.c), some(&[2.0, 4.0, 6.0]));
     let c = s
@@ -851,9 +989,22 @@ fn colonne_ajoutee_avec_sa_version(mode: FormulaRecalc) -> (Vec<Option<f64>>, u6
         .expect("A en version 40"),
     );
     ajouter("B", Column::from_f64(&[0.0]));
+    // `A*2`, saisie en lettres sur la feuille telle qu'elle est (A, B), pour
+    // une colonne C qui n'existe pas encore : lettres vers identifiants.
+    let existantes = instantane(&handle)
+        .tree
+        .children(sheet)
+        .expect("feuille")
+        .to_vec();
+    let formule_de_c = stokesforge_core::ColumnFormula::from_letters(
+        "A*2",
+        &existantes,
+        NodeId::from_raw(u64::MAX),
+    )
+    .expect("formule saisie");
     let mut c = Column::new(ColumnType::Numeric);
     c.set_meta(ColumnMeta {
-        formula: Some("A*2".into()),
+        formula: Some(formule_de_c),
         ..Default::default()
     });
     ajouter("C", c);
@@ -904,7 +1055,7 @@ fn une_formule_trop_profonde_est_un_bloc_non_calcule_puis_se_corrige() {
 
         // Juste sous le plafond : calculée, sur le fil de l'acteur (2 Mio).
         handle
-            .execute(formule(f.c, &somme_de_a(1001)))
+            .execute(formule(&handle, f.c, &somme_de_a(1001)))
             .expect("1001 termes");
         assert_eq!(
             nombres(&instantane(&handle), f.c),
@@ -914,14 +1065,16 @@ fn une_formule_trop_profonde_est_un_bloc_non_calcule_puis_se_corrige() {
 
         // Un terme de trop : refusée, bloc non calculé de 3 lignes.
         handle
-            .execute(formule(f.c, &somme_de_a(1002)))
+            .execute(formule(&handle, f.c, &somme_de_a(1002)))
             .expect("1002 termes");
         let s = instantane(&handle);
         assert_eq!(nombres(&s, f.c), vec![None, None, None], "{mode:?}");
         assert!(tout_non_calcule(&s, f.c), "{mode:?}");
 
         // Corrigée : recalculée, bien que la colonne soit déjà « à jour ».
-        handle.execute(formule(f.c, "A+B")).expect("corrigée");
+        handle
+            .execute(formule(&handle, f.c, "A+B"))
+            .expect("corrigée");
         assert_eq!(
             nombres(&instantane(&handle), f.c),
             some(&[11.0, 22.0, 33.0]),
@@ -936,7 +1089,7 @@ fn une_formule_trop_profonde_est_un_bloc_non_calcule_puis_se_corrige() {
             format!("{}A", "-".repeat(100_000)),
         ] {
             handle
-                .execute(formule(f.c, &trop_profonde))
+                .execute(formule(&handle, f.c, &trop_profonde))
                 .expect("trop profonde");
             let s = instantane(&handle);
             assert!(tout_non_calcule(&s, f.c), "{mode:?}");
@@ -964,9 +1117,11 @@ fn une_formule_trop_profonde_suit_la_feuille_et_rattrape_ses_lecteurs() {
     for mode in [FormulaRecalc::Targeted, FormulaRecalc::Full] {
         let (_session, handle, f) = demarrer(mode);
         handle
-            .execute(formule(f.c, &somme_de_a(1002)))
+            .execute(formule(&handle, f.c, &somme_de_a(1002)))
             .expect("C trop profonde");
-        handle.execute(formule(f.d, "C+1")).expect("D = C+1");
+        handle
+            .execute(formule(&handle, f.d, "C+1"))
+            .expect("D = C+1");
         let s = instantane(&handle);
         assert!(tout_non_calcule(&s, f.c), "{mode:?}");
         assert!(tout_non_calcule(&s, f.d), "{mode:?}");
@@ -980,7 +1135,9 @@ fn une_formule_trop_profonde_suit_la_feuille_et_rattrape_ses_lecteurs() {
         assert!(tout_non_calcule(&s, f.c), "{mode:?}");
 
         // C corrigée : D, qui la lit, suit dans la même passe.
-        handle.execute(formule(f.c, "A*2")).expect("C corrigée");
+        handle
+            .execute(formule(&handle, f.c, "A*2"))
+            .expect("C corrigée");
         let s = instantane(&handle);
         assert_eq!(nombres(&s, f.c)[..3], some(&[2.0, 4.0, 6.0]), "{mode:?}");
         assert_eq!(nombres(&s, f.d)[..3], some(&[3.0, 5.0, 7.0]), "{mode:?}");

@@ -8,7 +8,8 @@ use std::path::PathBuf;
 
 use stokesforge_commands::Command;
 use stokesforge_core::{
-    Column, ColumnMeta, ColumnRole, ColumnType, MixedCell, NodeId, Project, ValueBlock,
+    Column, ColumnFormula, ColumnMeta, ColumnRole, ColumnType, FormulaPart, MixedCell, NodeId,
+    Project, ValueBlock,
 };
 use stokesforge_python::interpreter::{self, EmbeddedPython};
 use stokesforge_script::ScriptEngine;
@@ -377,7 +378,9 @@ fn metadonnees_relues_et_roles_de_colonne_stables() {
                 meta: ColumnMeta {
                     role,
                     unit: "K".into(),
-                    formula: Some("2+3".into()),
+                    formula: Some(ColumnFormula::from_parts(vec![FormulaPart::Text(
+                        "2+3".into(),
+                    )])),
                     ..Default::default()
                 },
             })

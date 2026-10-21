@@ -189,16 +189,18 @@ pub(crate) enum KindRecord {
         /// aucun lecteur qui en retienne un.
         version: u64,
         /// Formule de calcul (`ColumnMeta::formula`), `None` pour une colonne
-        /// ordinaire. Absente des fichiers écrits avant l'ajout des colonnes
-        /// calculées : `KindRecordKnown` ramène ce champ à `None` via
-        /// `#[serde(default)]`, ce qui est le comportement voulu — un ancien
-        /// fichier ne décrivait que des colonnes ordinaires. Les valeurs déjà
-        /// présentes dans `values` ci-dessus sont traitées comme un cache :
-        /// `stokesforge-session::actor` déclenche un recalcul après tout
-        /// chargement (voir sa doc de tête), donc un désaccord entre un
-        /// fichier écrit par un tiers et ce que la formule recalculerait ne
-        /// survit pas au premier `load`.
-        formula: Option<String>,
+        /// ordinaire : fragments de texte et **identifiants** de colonnes lues
+        /// (#321), jamais des lettres de position. Champ `formula_parts`,
+        /// absent des fichiers antérieurs : `KindRecordKnown` le ramène à
+        /// `None` via `#[serde(default)]`. L'ancien champ `formula` (texte en
+        /// lettres, d'avant #321) n'est plus lu — le format n'a pas à rester
+        /// compatible en développement : la colonne se charge avec ses valeurs
+        /// et sans formule. Les valeurs présentes dans `values` ci-dessus sont
+        /// traitées comme un cache : `stokesforge-session::actor` déclenche un
+        /// recalcul après tout chargement (voir sa doc de tête), donc un
+        /// désaccord entre un fichier écrit par un tiers et ce que la formule
+        /// recalculerait ne survit pas au premier `load`.
+        formula_parts: Option<Vec<FormulaPartRecord>>,
         /// Métadonnées du fichier d'origine (`ColumnMeta::file_metadata`),
         /// paires clé / valeur dans l'ordre. Absentes des fichiers écrits
         /// avant ce champ : `KindRecordKnown` les ramène à une liste vide.
@@ -279,7 +281,7 @@ enum KindRecordKnown {
         #[serde(default)]
         version: u64,
         #[serde(default)]
-        formula: Option<String>,
+        formula_parts: Option<Vec<FormulaPartRecord>>,
         #[serde(default)]
         file_metadata: Vec<(String, String)>,
         #[serde(default)]
@@ -335,7 +337,7 @@ impl From<KindRecordKnown> for KindRecord {
                 display_format,
                 values,
                 version,
-                formula,
+                formula_parts,
                 file_metadata,
                 import_source,
                 x_prime,
@@ -348,7 +350,7 @@ impl From<KindRecordKnown> for KindRecord {
                 display_format,
                 values,
                 version,
-                formula,
+                formula_parts,
                 file_metadata,
                 import_source,
                 x_prime,
@@ -403,6 +405,16 @@ impl<'de> Deserialize<'de> for KindRecord {
     }
 }
 
+/// Un fragment d'une formule de colonne (`stokesforge_core::FormulaPart`) :
+/// du texte saisi, ou l'identifiant brut de la colonne lue (#321).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) enum FormulaPartRecord {
+    /// Opérateurs, nombres, espaces, parenthèses, tels que saisis.
+    Text(String),
+    /// Identifiant d'une colonne lue ; borné à la lecture (`MAX_NODE_ID`).
+    Column(u64),
+}
+
 /// Miroir de [`KindRecord`] **par référence** : sérialise une variante
 /// connue sans en cloner le contenu — en particulier les octets d'une
 /// colonne `Float`, potentiellement gros, que `Serialize` n'a besoin que de
@@ -430,7 +442,7 @@ enum KindRecordRef<'a> {
         display_format: &'a str,
         values: &'a ValuesRecord,
         version: u64,
-        formula: &'a Option<String>,
+        formula_parts: &'a Option<Vec<FormulaPartRecord>>,
         file_metadata: &'a Vec<(String, String)>,
         import_source: &'a Option<(String, String, u64, u64)>,
         x_prime: Option<f64>,
@@ -487,7 +499,7 @@ impl Serialize for KindRecord {
                 display_format,
                 values,
                 version,
-                formula,
+                formula_parts,
                 file_metadata,
                 import_source,
                 x_prime,
@@ -500,7 +512,7 @@ impl Serialize for KindRecord {
                 display_format,
                 values,
                 version: *version,
-                formula,
+                formula_parts,
                 file_metadata,
                 import_source,
                 x_prime: *x_prime,

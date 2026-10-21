@@ -91,24 +91,34 @@ fn supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_r
     assert_eq!(column_count(&s), 3, "Close ne rend pas la colonne");
 }
 
+/// #321 : une formule retient les colonnes par identifiant, une lettre qui
+/// glisse ne change donc rien à ce qu'elle lit — supprimer A n'avertit pas
+/// `C = B*2` (qui s'affiche désormais `A*2`, B étant devenue la première
+/// colonne). Le lecteur d'une colonne supprimée, lui, est toujours listé.
 #[test]
-fn les_lettres_qui_glissent_comptent_et_les_formules_en_amont_non() {
+fn les_lettres_qui_glissent_ne_comptent_pas_seule_la_colonne_lue_compte() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
-    // C = B*2 ne lit pas A, mais B change de lettre quand A disparaît.
     set_formula(&mut s, c[2], "B*2");
     delete(&mut s, &[c[0]]);
     assert_eq!(
         s.state.column_use_lines(),
+        None,
+        "C ne lit pas A : B change de lettre, pas de colonne"
+    );
+    assert_eq!(
+        s.state.tree().formula_letters(c[2]).as_deref(),
+        Some("A*2"),
+        "la lettre affichée suit la colonne"
+    );
+
+    // Témoin : supprimer B, que C lit, ouvre la liste.
+    delete(&mut s, &[c[1]]);
+    assert_eq!(
+        s.state.column_use_lines(),
         Some(vec!["C (formula)".to_string()])
     );
-    s.state.dispatch(Action::UndoColumnUse);
-
-    // Témoin : D est après toutes les lettres lues, rien ne glisse sous C.
-    delete(&mut s, &[c[3]]);
-    assert_eq!(s.state.column_use_lines(), None);
-    assert_eq!(column_count(&s), 3);
 }
 
 #[test]

@@ -76,7 +76,7 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 
 - Avant undo/historique ou format `.stf` : `docs/commandes-et-historique.md`, `docs/persistance.md`, puis `docs/archive/rustrewrite/format-fichier-plx.md` pour les options déjà écartées.
 - `docs/archive/rustrewrite/questions-ouvertes.md` §11 : plafonds/compteurs documentés — vérifier avant de "corriger" un comportement qui ressemble à un bug.
-- Recalcul des formules (#193) : ciblé par empreinte (`stokesforge-session/src/recalc.rs`, invariant 11). **Toute donnée lue par un calcul de formule entre dans l'empreinte** (la version d'une colonne ne couvre que type et valeurs, ni nom, ni méta, ni position), et **toute écriture de données d'une colonne tire une version neuve** par `Project`. Le recalcul complet reste comme oracle (`FormulaRecalc::Full`, batterie `b22`). Étendre le mécanisme (fonction de formule, #184, #186) : tests à écrire dans `docs/tests.md`, « Recalcul ciblé ».
+- Recalcul des formules (#193) : ciblé par empreinte (`stokesforge-session/src/recalc.rs`, invariant 11). **Toute donnée lue par un calcul de formule entre dans l'empreinte** (la version d'une colonne ne couvre que type et valeurs, ni nom, ni méta, ni position ; l'appartenance à la feuille d'une colonne lue y entre, les lettres affichées non — une formule retient ses colonnes par identifiant, #321), et **toute écriture de données d'une colonne tire une version neuve** par `Project`. Le recalcul complet reste comme oracle (`FormulaRecalc::Full`, batterie `b22`). Étendre le mécanisme (fonction de formule, #184, #186) : tests à écrire dans `docs/tests.md`, « Recalcul ciblé ».
 
 ## Délégation et choix du modèle
 

@@ -369,6 +369,17 @@ pyst.set_column_meta(b, unit='s', role='y')
 assert pyst.info(b)['column']['comment'] == 'À préserver'
 pyst.set_column_meta(b, formula='A * 2')
 assert pyst.info(b)['column']['formula'] == 'A * 2'
+# Une lettre qui ne désigne aucune colonne de la feuille est refusée (#321),
+# la formule posée reste ; écrire un autre champ ne la touche pas.
+try:
+    pyst.set_column_meta(b, formula='Z * 2')
+except pyst.InvalidValueError:
+    pass
+else:
+    raise AssertionError('lettre inconnue acceptée')
+assert pyst.info(b)['column']['formula'] == 'A * 2'
+pyst.set_column_meta(b, unit='m')
+assert pyst.info(b)['column']['formula'] == 'A * 2'
 try:
     pyst.set_values(b, [123.])
 except pyst.InvalidValueError:

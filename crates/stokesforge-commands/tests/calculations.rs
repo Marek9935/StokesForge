@@ -268,6 +268,13 @@ fn un_echec_ne_laisse_ni_entree_ni_changement() {
     assert_eq!(w.history.len(), 0);
 }
 
+/// Une formule quelconque : seule sa présence compte pour ces tests.
+fn formule_constante() -> stokesforge_core::ColumnFormula {
+    stokesforge_core::ColumnFormula::from_parts(vec![stokesforge_core::FormulaPart::Text(
+        "2".to_string(),
+    )])
+}
+
 #[test]
 fn une_formule_ne_se_pose_pas_sur_une_colonne_produite() {
     let mut w = world();
@@ -284,7 +291,7 @@ fn une_formule_ne_se_pose_pas_sur_une_colonne_produite() {
             Command::SetColumnMeta {
                 column: out,
                 meta: ColumnMeta {
-                    formula: Some("A*2".into()),
+                    formula: Some(formule_constante()),
                     ..Default::default()
                 },
             },
@@ -564,7 +571,7 @@ fn remplacement_refuse_formule_et_sortie_calculee_puis_supprime_trace_orpheline(
         .unwrap()
         .meta()
         .clone();
-    meta.formula = Some("A*2".into());
+    meta.formula = Some(formule_constante());
     w.project.set_column_meta(w.y, meta).unwrap();
     versions.iter_mut().for_each(|(id, version)| {
         *version = w
