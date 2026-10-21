@@ -61,5 +61,10 @@ rust-embed = "8.12.0"
 fluent-syntax = "0.12"
 
 [dev-dependencies]
+# `test-support` pour les tests d'intégration de ce crate (#329) : `cfg(test)` ne
+# vaut que pour ses tests unitaires. Sans cette ligne, `cargo test -p
+# stokesforge-app-state --test <nom>`, lancé seul, lit (et peut écrire) le vrai
+# `preferences.json` ; en `--workspace`, l'unification des features la masquait.
+stokesforge-app-state = { path = ".", features = ["test-support"] }
 stokesforge-arch-guard = { path = "../stokesforge-arch-guard" }
 tempfile = "3"

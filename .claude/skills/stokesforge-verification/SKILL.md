@@ -102,6 +102,7 @@ Ils ne vérifient pas un comportement mais une propriété de frontière. S'ils
 | `stokesforge-app/tests/support/sources.rs` | pas un test : le lecteur **unique** des gardes qui lisent le code (récursif sur `src/` des deux crates, `stokesforge-app-state` sous le préfixe `app-state/`, vue de production, recherche de fonction par nom, #116). Une garde nouvelle qui lit le code passe par lui — jamais `include_str!("app.rs")` ni un fichier nommé — et pose son témoin dans un autre fichier qu'`app.rs` |
 | `stokesforge-app-state/src/i18n.rs` (tests) | complétude `fr ⊆ en` avec les mêmes arguments, pseudo-langue `en-XA`, pluriels et typographie françaises ; **bloquant** : une clé ajoutée à `en` s'ajoute à `fr` dans le même commit |
 | `stokesforge-app/tests/isolation_preferences.rs` | les tests de l'app (qui bâtissent un `AppState` par `new`) n'atteignent pas le vrai `preferences.json` : la feature `test-support` de la dev-dependency d'`app-state` (`cfg(test)` ne passe pas la frontière du crate, #263) ; retirée, le test échoue |
+| `stokesforge-app-state/tests/isolation_test_support.rs` | les tests d'intégration d'`app-state`, lancés seuls, n'atteignent pas le vrai `preferences.json` : la dev-dependency du crate sur lui-même active `test-support` (#329) ; retirée, le test échoue |
 | `stokesforge-commands/tests/memory_pinning.rs` | l'historique n'épingle pas de gros buffers |
 
 Gardes **en place** du standard d'interface (#217) : `aucun_champ_numerique_hors_de_la_brique`

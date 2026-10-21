@@ -5164,6 +5164,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stokesforge-analysis",
+ "stokesforge-app-state",
  "stokesforge-arch-guard",
  "stokesforge-commands",
  "stokesforge-core",
