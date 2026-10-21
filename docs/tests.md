@@ -639,7 +639,7 @@ retour de la poignée originale et la macro Script avec `replace_original=True`.
 
 | Règle | Témoin |
 |---|---|
-| une formule dont une lettre est celle de la colonne supprimée **ou d'une suivante** est listée | `les_lettres_qui_glissent_comptent_et_les_formules_en_amont_non` (`i >= first` devenu `==` : rouge) |
+| une formule qui lit une colonne supprimée est listée ; celle dont seule une lettre glisse ne l'est pas (#321 : lecture par identifiant) | `supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_rien`, `les_lettres_qui_glissent_ne_comptent_pas_seule_la_colonne_lue_compte` (la liste de toute formule dès qu'une colonne part : rouge) |
 | une colonne sans lecteur n'ouvre rien | `une_colonne_sans_lecteur_n_ouvre_rien` |
 | un calcul d'analyse est nommé par sa famille et sa première sortie | `un_calcul_d_analyse_est_liste_par_sa_famille_et_sa_premiere_sortie` |
 | un calcul dont une sortie disparaît avec le geste n'est pas listé | `supprimer_un_classeur_emporte_ses_calculs_sans_rien_signaler` (sans l'exclusion : rouge) |
@@ -647,7 +647,24 @@ retour de la poignée originale et la macro Script avec `replace_original=True`.
 | Close ne rend rien | `supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_rien` |
 | Ctrl+Maj+C pose la question seulement si une colonne a une formule ; Valeurs vide la ligne Formule | `ctrl_maj_c_sur_une_colonne_formule_pose_la_question`, `ctrl_maj_c_sans_formule_copie_directement` |
 
-Limites : le geste de déplacement d'une colonne n'existe pas encore (#319) ; la référence cachée d'une correction (`aux`) est exclue par construction, sans témoin dédié.
+Limites : le geste de déplacement d'une colonne n'existe pas encore (#319) — ses effets sur les formules sont tenus au niveau de la session (`recalc_cible.rs`) ; la référence cachée d'une correction (`aux`) est exclue par construction, sans témoin dédié.
+
+## Formules par identifiant (#321, #320)
+
+Une formule retient ses colonnes par identifiant ; les lettres ne sont qu'aux frontières. Chaque règle a son témoin, vérifié par mutation.
+
+| Règle | Témoin |
+|---|---|
+| lettres vers identifiants : refus d'une lettre inconnue, de la colonne elle-même, de `#REF` ; l'exposant n'est pas une colonne | `stokesforge-core`, `formula::tests::from_letters_*` |
+| `#REF` à l'affichage pour une colonne hors feuille | `a_column_outside_the_sheet_is_written_ref` |
+| dupliquer une feuille fait lire à la copie ses propres colonnes ; une référence rompue reste `#REF` ; un identifiant lu n'est jamais réattribué au chargement | `project::tests` (`dupliquer_une_feuille_…`, `une_reference_rompue_…`, `from_tree_ne_reattribue_pas_…`) |
+| une analyse qui insère ses sorties au milieu ne change pas ce que lit une formule (#320) ; déplacer, supprimer puis annuler | `analyse.rs` (`une_analyse_qui_insere_…`), `recalc_cible.rs` (`deplacer_une_source_*`, `supprimer_une_source_donne_ref_…`) |
+| `.stf` : `formula_parts` aller-retour, id hors feuille chargé en `#REF`, id hors borne refusé, ancienne clé `formula` ignorée | `roundtrip.rs` (`a_formula_*`, `a_legacy_letters_formula_…`) |
+| saisie : lettre inconnue, auto-lecture, `#REF` modifié refusés dans `app-state` (`header_edit_refusal`), jamais une erreur de syntaxe ; `#REF` non modifié n'écrit rien ; `formula_issue` pour la case | `shell.rs` (`a_formula_reading_its_own_column_is_refused_while_typing`, `a_ref_formula_is_refused_only_when_its_text_is_changed`, `a_formula_naming_a_missing_column_…`) |
+| collage : la formule refusée seule n'est pas collée, la barre d'état dit le refus après les écritures ; Ctrl+Maj+C copie des lettres relues dans la feuille d'arrivée | `a_refused_formula_in_a_paste_…`, `copied_formulas_travel_as_letters_…` |
+| `pyst` : lettres en lecture et en écriture, refus d'une lettre inconnue et de `#REF`, un autre champ ne touche pas la formule | `script/tests/navigation.rs` (`les_formules_se_lisent_…`), `mutations.rs` |
+
+Limite : le cadre rouge, la bulle et le champ qui reste ouvert (grille) ne sont pas testables sans fenêtre : la décision (`header_edit_refusal`, `inplace_edit::resolve`) l'est, la peinture est relue à l'écran.
 
 ## Polynôme contraint sur un X décalé (#296)
 

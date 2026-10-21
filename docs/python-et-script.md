@@ -287,6 +287,12 @@ colonne `mixed`, puis appeler `set_values`.
 `set_column_meta` accepte `role`, `long_name`, `unit`, `comment`,
 `display_format` et `formula`. Les valeurs sont des chaînes, sauf
 `formula=None` qui retire la formule ; les rôles sont ceux de `info`.
+La formule s'écrit **en lettres de colonne** de la feuille de la colonne
+(`formula="A * 2"`, la casse est normalisée) et se lit de même ; une lettre qui
+ne désigne aucune colonne de la feuille, la colonne elle-même ou `#REF` lèvent
+`InvalidValueError` sans rien écrire (#321). Le script ne manipule jamais
+d'identifiants : le texte stocké de la formule n'est pas réécrit par un autre
+champ (changer `unit` d'une colonne dont la formule affiche `#REF` réussit).
 `type` et `version` restent en lecture seule. Une colonne-formule refuse
 les écritures directes. Poser une formule déclenche le recalcul existant,
 qui peut changer le type de la colonne pour porter les échecs de calcul ;
@@ -445,7 +451,7 @@ poignée rendue conserve l'époque de cet instantané.
 Les métadonnées `column` portent `type` (`numeric`, `datetime`, `mixed`),
 `role` (`x`, `y`, `x2`, `y2`, `z`, `x_error`, `y_error`, `label`, `none`), `long_name`,
 `unit`, `comment`, `x_prime` (nombre ou `None`, #164, lecture seule), `display_format`,
-`formula` (texte ou `None`) et `version`
+`formula` (lettres de colonne, `#REF` pour une colonne lue qui a disparu, ou `None`) et `version`
 (compteur de modification). Modifier ce dictionnaire ne touche jamais au
 modèle. Relire `info` après une modification pour obtenir l'état courant.
 

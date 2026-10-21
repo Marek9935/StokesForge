@@ -127,7 +127,9 @@ ouvrir de fenêtre.
    l'acteur comme conséquence d'une commande (sans entrée supplémentaire).
    Ce recalcul est **ciblé** (#193) : l'acteur garde, pour chaque
    colonne-formule, une « empreinte » de ce qu'il a lu au dernier calcul
-   (texte, colonnes désignées et leur numéro de version, longueur…)
+   (la formule stockée — texte et colonnes lues **par identifiant**, #321 —,
+   le numéro de version de chaque colonne lue de la feuille ou son absence,
+   longueur…)
    et ne recalcule que si elle a changé. Analogie Python : un
    `functools.lru_cache` dont la clé serait toutes les entrées du calcul —
    ce que l'analogie a de faux : la clé n'est pas le contenu des colonnes

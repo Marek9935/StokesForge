@@ -209,6 +209,7 @@ l'interface, mais son mot est déjà fixé.
 | Hex / RGB / HSL | Hexa / RVB / TSL | Façons d'écrire une couleur | — | G |
 | Resolution | Résolution | Facteur d'échelle d'un export PNG | DPI | G |
 | Outlines | Contours | Texte d'un SVG exporté dessiné en formes plutôt qu'en texte (#162) | Courbes, Tracés | G |
+| #REF | #REF | Ce qu'une formule de colonne affiche à la place d'une colonne lue qui n'est plus dans sa feuille (supprimée, ou déplacée) ; garde le sigle des tableurs (#321) | — | — |
 
 ### 2.6 Spectroscopie
 

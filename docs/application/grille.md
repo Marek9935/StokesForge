@@ -166,6 +166,24 @@ dans une spec de graphe, la retrouve dans un `.stf`. La grille ne l'affiche
 quatre champs de `ColumnMeta` (Nom long, Unité, Commentaire, Formule), qui
 sont encore autre chose.
 
+**Ligne Formule (#321).** Une formule retient les colonnes qu'elle lit **par
+identifiant** ; les lettres que la case montre et que l'on tape ne sont qu'un
+affichage, relu à chaque image : insérer, supprimer ou déplacer des colonnes
+(dont les sorties d'une analyse) ne change jamais ce que la formule lit, la
+lettre affichée suit la colonne (`a*2` s'écrit `A*2`). Si une colonne lue n'est
+plus dans la feuille, la case affiche `#REF` et peint un cadre rouge avec la
+bulle « Colonne supprimée. Remplacer #REF par une lettre de colonne ». Trois
+saisies sont **refusées** : une lettre qui ne désigne aucune colonne de la
+feuille, la colonne elle-même, et `#REF` modifié. Entrée ou Tab sur un texte
+refusé laissent le champ ouvert (cadre rouge, bulle qui dit pourquoi) ; un clic
+ailleurs le ferme sans rien écrire. Valider le texte affiché tel quel (même avec
+`#REF`) n'écrit rien. Une **erreur de syntaxe** n'est pas un refus : elle
+s'enregistre et la colonne se remplit de `---`. Au collage d'un rectangle, la
+formule refusée est la seule à ne pas être collée : les autres champs le sont, et
+la barre d'état dit le refus après les écritures. La décision se prend dans
+`stokesforge-app-state` (`header_edit_refusal`, `formula_issue`), la grille ne
+fait que la peindre.
+
 `stokesforge_commands::Command::label` construisait ses libellés d'historique sur
 le nom de nœud, et annonçait donc « Saisie dans Temps » pour une colonne que
 l'utilisateur ne connaît que comme « A » — un mot introuvable à l'écran, et

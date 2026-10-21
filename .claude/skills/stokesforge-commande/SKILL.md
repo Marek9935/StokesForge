@@ -68,6 +68,13 @@ Conventions déjà arbitrées, à suivre plutôt qu'à rejouer :
   direct ; si elle peut viser une colonne-formule, un cas nommé dans
   `stokesforge-session/tests/recalc_cible.rs` vérifie que la formule la
   réécrit (`docs/tests.md`, « Recalcul ciblé », B).
+- **une formule retient ses colonnes par identifiant** (`ColumnFormula`, #321) :
+  une commande qui insère, supprime ou déplace des colonnes ne change jamais ce
+  qu'une formule lit, et n'a pas à réécrire de texte. Une commande qui pose
+  `ColumnMeta::formula` reçoit une `ColumnFormula` déjà construite (lettres vers
+  identifiants par `Tree::formula_from_letters`, **au-dessus** de la commande :
+  `SetColumnMeta` ne valide jamais les références). Une copie de colonnes ou de
+  feuille renumérote les identifiants lus (`Project::insert_copy`).
 
 ## Structurelle ou données — la question qui décide du coût
 

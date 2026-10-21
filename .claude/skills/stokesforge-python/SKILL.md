@@ -176,6 +176,14 @@ porter aussi (#312) : version retenue à la lecture par `ScriptContext`
 immédiat `ConcurrentWriteError` sans retentative, versions oubliées par
 `undo()`. Limites : colonne non lue, colonne B lue pour calculer A.
 
+**Formules (#321).** `meta["formula"]` se lit et s'écrit en **lettres de
+colonne** de la feuille de la colonne ; le modèle les retient par identifiant,
+et le seul passage est `Tree::formula_from_letters` (`bridge::set_column_meta`),
+qui refuse une lettre inconnue, la colonne elle-même et `#REF` (`InvalidValueError`).
+Une colonne lue qui a disparu se lit `#REF`. Une écriture d'un autre champ garde
+la formule **stockée** : jamais un aller-retour par les lettres (sinon `#REF`
+bloquerait le changement d'une unité). Un script ne voit jamais d'identifiant.
+
 ## Tracé et exécution sans fenêtre
 
 `pyst.plot(y, x=None, *, graph=None, name=None, parent=None, **options)` crée
