@@ -389,6 +389,44 @@ fn metadonnees_relues_et_roles_de_colonne_stables() {
     }
 }
 
+/// Formules en lettres côté `pyst` (#321) : `info` lit des lettres, une lettre
+/// inconnue est refusée, une colonne lue qui disparaît laisse `#REF` (qu'on ne
+/// peut pas réécrire), et changer un autre champ de cette colonne réussit sans
+/// toucher à la formule.
+#[test]
+fn les_formules_se_lisent_et_s_ecrivent_en_lettres_et_ref_est_refuse() {
+    let banc = banc();
+    executer(
+        &banc,
+        r#"
+e = pyst.resolve('[Book1]Sheet1!Empty')
+pyst.set_column_meta(e, formula='a * 2')
+assert pyst.info(e)['column']['formula'] == 'A * 2'
+
+try:
+    pyst.set_column_meta(e, formula='F*2')
+except pyst.InvalidValueError:
+    pass
+else:
+    raise AssertionError('lettre sans colonne acceptée')
+assert pyst.info(e)['column']['formula'] == 'A * 2'
+
+pyst.remove(pyst.resolve('[Book1]Sheet1!A'))
+assert pyst.info(e)['column']['formula'] == '#REF * 2'
+
+try:
+    pyst.set_column_meta(e, formula='#REF * 2')
+except pyst.InvalidValueError:
+    pass
+else:
+    raise AssertionError('#REF réécrit')
+pyst.set_column_meta(e, unit='m')
+meta = pyst.info(e)['column']
+assert meta['unit'] == 'm' and meta['formula'] == '#REF * 2'
+"#,
+    );
+}
+
 #[test]
 fn session_fermee_refuse_aussi_la_racine_et_les_lectures_sans_poignee() {
     let Banc {

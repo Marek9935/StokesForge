@@ -568,6 +568,17 @@ impl Tree {
         Some(formula.letters(self.sheet_columns_of(column)))
     }
 
+    /// Vrai si la formule de `column` lit une colonne qui n'est plus dans sa
+    /// feuille (supprimée, ou déplacée ailleurs) : elle s'affiche avec
+    /// [`REF_TOKEN`](crate::REF_TOKEN) et se calcule en
+    /// [`FormulaError::DeletedColumn`].
+    pub fn formula_has_deleted_reference(&self, column: NodeId) -> bool {
+        self.node(column)
+            .and_then(Node::as_column)
+            .and_then(|column| column.meta().formula.as_ref())
+            .is_some_and(|formula| formula.has_deleted_reference(self.sheet_columns_of(column)))
+    }
+
     /// Itère sur `(NodeId, &Node)` sans ordre garanti (persistance, statistiques).
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &Node)> {
         self.nodes.iter().map(|(id, node)| (*id, node.as_ref()))

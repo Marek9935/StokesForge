@@ -1203,6 +1203,10 @@ fn header_field_widget(
             .header_editing()
             .is_some_and(|edit| edit.column == column && edit.field == field);
         if editing_here {
+            // Le refus de la ligne Formule (lettre inconnue, colonne qui se
+            // lit elle-même, `#REF` modifié) se décide dans `app-state` : la
+            // grille le peint et garde le champ ouvert (#321).
+            let refusal = state.header_edit_refusal();
             let Some(edit) = state.header_editing_mut() else {
                 return;
             };
@@ -1222,12 +1226,24 @@ fn header_field_widget(
                     .desired_width(f32::INFINITY),
                 opening,
                 inplace_edit::FocusLoss::Ends,
-                None,
+                refusal.as_deref(),
             );
             match shown.end {
                 None => {}
                 Some(inplace_edit::EditEnd::Cancel) => state.cancel_header_edit(),
                 Some(end) => {
+                    let refused = state.header_edit_refusal().is_some();
+                    // Entrée ou Tab sur un texte refusé : le champ reste
+                    // ouvert (cadre rouge et bulle). Un clic ailleurs ferme
+                    // sans rien écrire.
+                    let write = match inplace_edit::resolve(end, false, refused) {
+                        inplace_edit::Resolution::Stay => return,
+                        inplace_edit::Resolution::Close { write, .. } => write,
+                    };
+                    if !write {
+                        state.cancel_header_edit();
+                        return;
+                    }
                     let (tab, shift) = match end {
                         inplace_edit::EditEnd::Tab { shift } => (true, shift),
                         _ => (false, false),
@@ -1269,6 +1285,17 @@ fn header_field_widget(
                 .selectable(false)
                 .truncate(),
         );
+        // Une formule qui lit une colonne supprimée s'affiche `#REF` : cadre
+        // rouge et bulle sur sa case (#321). La phrase vient d'`app-state`.
+        if field == HeaderField::Formula {
+            if let Some(message) = state.formula_issue(column) {
+                crate::field_state::show_issue(
+                    ui,
+                    &response,
+                    &crate::field_state::FieldIssue::refused(message),
+                );
+            }
+        }
         if response.double_clicked() {
             state.begin_header_edit(column, field);
             return;

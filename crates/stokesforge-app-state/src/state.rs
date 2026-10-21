@@ -4123,6 +4123,40 @@ impl AppState {
         field.text_of(&self.snapshot.tree, column, &self.column_meta(column))
     }
 
+    /// Pourquoi le texte en cours de saisie dans le champ **Formule** est
+    /// refusé : une lettre qui ne désigne aucune colonne de la feuille, la
+    /// colonne elle-même, ou `#REF` modifié (#321). `None` pour tout le reste :
+    /// un texte vide (efface), le texte affiché tel quel (rien n'est écrit, même
+    /// avec `#REF`) et une **erreur de syntaxe**, qui s'enregistre (la colonne
+    /// se remplit de `---`). C'est le seul endroit qui décide ; la grille
+    /// garde le champ ouvert et peint le refus.
+    pub fn header_edit_refusal(&self) -> Option<String> {
+        let edit = self.header_editing.as_ref()?;
+        if edit.field != HeaderField::Formula {
+            return None;
+        }
+        if edit.buffer.trim().is_empty()
+            || edit.buffer == self.header_field_display_text(edit.column, HeaderField::Formula)
+        {
+            return None;
+        }
+        self.snapshot
+            .tree
+            .formula_from_letters(edit.column, &edit.buffer)
+            .err()
+            .map(|error| errors::formula::error_message(&error))
+    }
+
+    /// La phrase qui dit pourquoi la formule de `column` ne se calcule plus,
+    /// quand elle lit une colonne supprimée (`#REF`, #321) : la grille la
+    /// peint en cadre sur la case Formule.
+    pub fn formula_issue(&self, column: NodeId) -> Option<String> {
+        self.snapshot
+            .tree
+            .formula_has_deleted_reference(column)
+            .then(|| errors::formula::error_message(&stokesforge_core::FormulaError::DeletedColumn))
+    }
+
     /// Saisie en cours dans un champ d'en-tête de colonne, s'il y en a une.
     pub fn header_editing(&self) -> Option<&HeaderEdit> {
         self.header_editing.as_ref()
@@ -8058,7 +8092,9 @@ impl AppState {
     fn paste_single_value(&mut self, anchor: GridCursor, text: &str) {
         match anchor {
             GridCursor::Header(column, field) => {
-                self.paste_header_text(column, field, text.to_string());
+                if let Some(refusal) = self.paste_header_text(column, field, text.to_string()) {
+                    self.fail(refusal);
+                }
             }
             GridCursor::Data(column, row) => {
                 let Some(kind) = self
@@ -8207,10 +8243,12 @@ impl AppState {
                     self.fail(tr!("error-paste-group"));
                     return;
                 }
+                let mut refusal = None;
                 for &(field, cells) in &writes {
                     for (index, &column) in targets.iter().enumerate() {
                         let text = cells.get(index).cloned().unwrap_or_default();
-                        self.paste_header_text(column, field, text);
+                        let refused = self.paste_header_text(column, field, text);
+                        refusal = refusal.or(refused);
                     }
                 }
                 if grouped {
@@ -8222,6 +8260,11 @@ impl AppState {
                     Self::dropped_columns(column_count, targets.len()),
                     rows.len() - writes.len(),
                 );
+                // Le refus d'une formule passe en dernier : il l'emporte sur
+                // l'avis de débordement, les autres champs sont collés.
+                if let Some(refusal) = refusal {
+                    self.fail(refusal);
+                }
             }
             (GridCursor::Data(_, anchor_row), RelativeCopy::DataRows { start, rows }) => {
                 let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
@@ -8313,6 +8356,7 @@ impl AppState {
             self.fail(tr!("error-paste-group"));
             return;
         }
+        let mut refusal = None;
         if let Some(from) = header_from {
             for field_index in from..HeaderField::COUNT {
                 let field = HeaderField::from_index(field_index);
@@ -8324,7 +8368,8 @@ impl AppState {
                         HeaderField::Comment => source.comment.clone(),
                         HeaderField::Formula => source.formula.clone().unwrap_or_default(),
                     };
-                    self.paste_header_text(column, field, value);
+                    let refused = self.paste_header_text(column, field, value);
+                    refusal = refusal.or(refused);
                 }
             }
         }
@@ -8349,6 +8394,11 @@ impl AppState {
             self.end_grouped_macro();
         }
         self.notice_dropped(Self::dropped_columns(columns.len(), targets.len()), 0);
+        // Le refus d'une formule passe en dernier : les autres champs et les
+        // valeurs sont collés, la barre d'état dit ce qui ne l'est pas.
+        if let Some(refusal) = refusal {
+            self.fail(refusal);
+        }
     }
 
     /// Relit les métadonnées actuelles de `column`, laisse `update` en
@@ -8356,8 +8406,17 @@ impl AppState {
     /// (`Command::SetColumnMeta` — doctrine « remplacement en bloc, jamais
     /// par sous-champ » du crate `stokesforge-commands`, voir sa doc de tête).
     /// Écrit `text` dans le champ d'en-tête `field` de `column` ; un texte
-    /// que le champ refuse (x' non numérique) est signalé sans rien écrire.
-    fn paste_header_text(&mut self, column: NodeId, field: HeaderField, text: String) {
+    /// que le champ refuse est signalé sans rien écrire. x' non numérique : la
+    /// barre d'état le dit tout de suite. Formule refusée (lettre inconnue,
+    /// auto-lecture, `#REF`) : la **phrase** du refus est rendue, et c'est
+    /// l'appelant qui la pose, **après** les écritures de tout le collage (les
+    /// autres champs sont collés, la barre d'état garde le refus).
+    fn paste_header_text(
+        &mut self,
+        column: NodeId,
+        field: HeaderField,
+        text: String,
+    ) -> Option<String> {
         let Some(mut meta) = self
             .snapshot
             .tree
@@ -8366,27 +8425,28 @@ impl AppState {
             .map(|c| c.meta().clone())
         else {
             self.fail(tr!("error-column-gone"));
-            return;
+            return None;
         };
         match field.write_text(&self.snapshot.tree, column, &mut meta, text) {
             Ok(()) => {}
             Err(HeaderTextRefused::NotANumber) => {
                 self.fail(crate::tr!("status-x-prime-invalid"));
-                return;
+                return None;
             }
             Err(HeaderTextRefused::Formula(error)) => {
                 // Formule collée dont une lettre n'existe pas dans la feuille
-                // d'arrivée, ou qui porte `#REF` : rien n'est écrit.
-                self.fail(errors::formula::error_message(&error));
-                return;
+                // d'arrivée, ou qui porte `#REF` : rien n'est écrit dans ce
+                // champ.
+                return Some(errors::formula::error_message(&error));
             }
         }
         self.set_meta_dropping_formula_data(column, meta, false);
+        None
     }
 
     /// [`Action::SetColumnXPrime`].
     fn set_column_x_prime(&mut self, column: NodeId, text: String) {
-        self.paste_header_text(column, HeaderField::XPrime, text);
+        let _ = self.paste_header_text(column, HeaderField::XPrime, text);
     }
 
     fn set_column_meta_field(&mut self, column: NodeId, update: impl FnOnce(&mut ColumnMeta)) {

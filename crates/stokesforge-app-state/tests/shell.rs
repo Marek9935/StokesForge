@@ -2768,6 +2768,173 @@ fn a_formula_reading_a_deleted_column_shows_ref_and_survives_an_unchanged_edit()
     );
 }
 
+/// Le refus de la case Formule se décide dans `app-state`
+/// (`header_edit_refusal`), que la grille peint : la colonne qui se lit
+/// elle-même est refusée dès la frappe, et valider un texte refusé n'écrit rien.
+#[test]
+fn a_formula_reading_its_own_column_is_refused_while_typing() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let note = column_id(&state, sheet1, "Note"); // la colonne C
+
+    state.begin_header_edit(note, HeaderField::Formula);
+    assert_eq!(state.header_edit_refusal(), None, "rien de tapé");
+    state.header_editing_mut().expect("saisie").buffer = "C*2".to_string();
+    let refusal = state.header_edit_refusal().expect("auto-lecture refusée");
+    assert!(
+        refusal.contains("own column") && refusal.contains('C'),
+        "phrase inattendue : {refusal}"
+    );
+    state.commit_header_edit();
+    assert_eq!(formula_letters(&state, note), None, "rien n'est écrit");
+
+    // La minuscule est normalisée : `a*2` s'affiche `A*2`.
+    set_header_field(&mut state, note, HeaderField::Formula, "a*2");
+    assert_eq!(formula_letters(&state, note).as_deref(), Some("A*2"));
+}
+
+/// `#REF` : valider le texte affiché sans le toucher n'écrit rien et n'est pas
+/// refusé ; le modifier (`#REF*3`) est refusé ; vider efface ; une erreur de
+/// **syntaxe** n'est jamais un refus (elle s'enregistre). Et la case Formule
+/// porte son problème (`formula_issue`) tant qu'elle lit une colonne supprimée.
+#[test]
+fn a_ref_formula_is_refused_only_when_its_text_is_changed() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let temps = column_id(&state, sheet1, "Temps");
+    let signal = column_id(&state, sheet1, "Signal");
+
+    set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
+    assert_eq!(state.formula_issue(signal), None, "aucune colonne perdue");
+    state.select_column(sheet1, temps);
+    state.dispatch(Action::DeleteSelectedCells { sheet: sheet1 });
+    state.dispatch(Action::CloseColumnUse);
+    let issue = state.formula_issue(signal).expect("une colonne est perdue");
+    assert!(issue.contains("Column deleted"), "{issue}");
+    let stored = state.column_meta(signal).formula;
+
+    state.begin_header_edit(signal, HeaderField::Formula);
+    assert_eq!(state.header_edit_refusal(), None, "texte affiché : valide");
+    state.header_editing_mut().expect("saisie").buffer = "#REF*3".to_string();
+    let refusal = state.header_edit_refusal().expect("#REF modifié refusé");
+    assert!(refusal.contains("Column deleted"), "{refusal}");
+    state.commit_header_edit();
+    assert_eq!(
+        state.column_meta(signal).formula,
+        stored,
+        "rien n'est écrit"
+    );
+
+    state.begin_header_edit(signal, HeaderField::Formula);
+    state.header_editing_mut().expect("saisie").buffer = "B*".to_string();
+    assert_eq!(
+        state.header_edit_refusal(),
+        None,
+        "une erreur de syntaxe s'enregistre"
+    );
+    state.header_editing_mut().expect("saisie").buffer = String::new();
+    assert_eq!(state.header_edit_refusal(), None, "vider efface");
+    state.cancel_header_edit();
+}
+
+/// Collage d'un rectangle dont la formule est refusée dans la feuille
+/// d'arrivée : les autres champs sont collés, et la barre d'état dit le refus
+/// **en dernier** (la même phrase qu'à la saisie).
+#[test]
+fn a_refused_formula_in_a_paste_leaves_the_other_fields_pasted() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let sheet2 = sheet_named(state.tree(), "Sheet2");
+    let signal = column_id(&state, sheet1, "Signal");
+    let court = column_id(&state, sheet2, "Court"); // la colonne A de Sheet2
+
+    set_header_field(&mut state, signal, HeaderField::LongName, "ln");
+    set_header_field(&mut state, signal, HeaderField::Unit, "u");
+    set_header_field(&mut state, signal, HeaderField::Comment, "c");
+    set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
+    // Deux colonnes copiées (Signal et Note) pour une seule d'arrivée : l'avis
+    // de débordement part aussi, et le refus de la formule doit passer après.
+    let note = column_id(&state, sheet1, "Note");
+    state.select_header_field(sheet1, signal, HeaderField::LongName);
+    state.extend_header_field_selection(sheet1, note, HeaderField::Formula);
+    let text = state.copy_selection(sheet1).expect("sélection non vide");
+
+    // Dans Sheet2, « A » est la colonne qui reçoit : elle se lirait elle-même.
+    state.select_header_field(sheet2, court, HeaderField::LongName);
+    state.dispatch(Action::Paste {
+        sheet: sheet2,
+        text,
+    });
+    let meta = state.column_meta(court);
+    assert_eq!(
+        (
+            meta.long_name.as_str(),
+            meta.unit.as_str(),
+            meta.comment.as_str()
+        ),
+        ("ln", "u", "c"),
+        "les autres champs sont collés"
+    );
+    assert_eq!(formula_letters(&state, court), None, "formule refusée");
+    let status = state.status().expect("un statut");
+    assert!(status.is_error(), "{}", status.text);
+    assert!(
+        status.text.contains("own column"),
+        "statut inattendu (le refus passe après l'avis de débordement) : {}",
+        status.text
+    );
+}
+
+/// Ctrl+Maj+C (formules) copie des **lettres** : collées dans une autre
+/// feuille, elles sont relues dans la feuille d'arrivée (là, `A` est la
+/// colonne de cette feuille, pas celle d'où vient la copie).
+#[test]
+fn copied_formulas_travel_as_letters_and_are_read_in_the_destination_sheet() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let sheet2 = sheet_named(state.tree(), "Sheet2");
+    let signal = column_id(&state, sheet1, "Signal");
+    let court = column_id(&state, sheet2, "Court");
+
+    set_header_field(&mut state, signal, HeaderField::Formula, "A*2");
+    state.select_column(sheet1, signal);
+    assert_eq!(
+        state.copy_full_columns(sheet1),
+        None,
+        "la question est posée"
+    );
+    state.dispatch(Action::ConfirmFullColumnsCopy(
+        stokesforge_app_state::state::FullColumnsCopy::Formulas,
+    ));
+    let text = state.take_object_clipboard_text().expect("texte copié");
+    assert!(text.contains("A*2"), "des lettres : {text}");
+
+    state.dispatch(Action::AddColumn { sheet: sheet2 });
+    let columns = state.tree().children(sheet2).expect("feuille").to_vec();
+    let arrivee = *columns.last().expect("colonne ajoutée");
+    assert_ne!(arrivee, court);
+    state.select_header_field(sheet2, arrivee, HeaderField::XPrime);
+    state.dispatch(Action::Paste {
+        sheet: sheet2,
+        text,
+    });
+    assert_eq!(formula_letters(&state, arrivee).as_deref(), Some("A*2"));
+    let lue = state
+        .column_meta(arrivee)
+        .formula
+        .expect("formule collée")
+        .columns();
+    assert_eq!(
+        lue,
+        std::collections::BTreeSet::from([court]),
+        "lit la colonne A de Sheet2"
+    );
+}
+
 // -- Retirer une formule (#236) --
 
 fn column_len(state: &AppState, column: NodeId) -> usize {
