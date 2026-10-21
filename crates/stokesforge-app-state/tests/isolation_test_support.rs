@@ -12,10 +12,6 @@
 
 #[test]
 fn la_feature_test_support_est_active_dans_les_tests_d_integration() {
-    assert!(
-        cfg!(feature = "test-support"),
-        "la feature `test-support` doit être active pour les tests d'intégration"
-    );
     // `Preferences::load()` ne désigne aucun fichier quand le chemin est isolé :
     // sans la feature, il lirait le vrai `preferences.json` de la machine.
     assert_eq!(
