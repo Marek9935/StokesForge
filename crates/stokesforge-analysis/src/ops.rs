@@ -214,6 +214,9 @@ pub enum Warning {
     BridgedReferenceGap(usize),
     /// Divisions par zéro, rendues vides (`NaN`) (C5, #313).
     DivisionByZero(usize),
+    /// Polynôme contraint ajusté sur un X très décalé de 0, sans centrage : la
+    /// précision peut s'être dégradée (A2, #296).
+    ShiftedX,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -248,6 +251,12 @@ impl Outcome {
     fn warn_undetermined(&mut self, count: usize) {
         if count > 0 {
             self.warnings.push(Warning::Undetermined(count));
+        }
+    }
+
+    fn warn_shifted_x(&mut self, shifted: bool) {
+        if shifted {
+            self.warnings.push(Warning::ShiftedX);
         }
     }
 
@@ -821,6 +830,7 @@ fn run_fit(
         o.stats(fs.points, fs.r_squared, fs.reduced_chi2, fs.dof);
         o.warn_undetermined(fs.undetermined);
         o.warn_plateau(fs.plateau);
+        o.warn_shifted_x(fs.shifted_x);
         let fitted = a.eval_in(range, |x| model.eval(&fs.values, x));
         if residuals {
             let y = a.y_rows(&inputs[k]);

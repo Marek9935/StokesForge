@@ -276,6 +276,10 @@ fn series_dict<'py>(
                 format!("{n} point(s) were interpolated across an empty cell of the reference")
             }
             Warning::DivisionByZero(n) => format!("{n} division(s) by zero were left empty"),
+            Warning::ShiftedX => {
+                "the polynomial was fitted with constraints on X values far from 0: precision may be low (center X, e.g. subtract its mean)"
+                    .to_string()
+            }
         })?;
     }
     dict.set_item("columns", columns)?;

@@ -1494,6 +1494,7 @@ analysis-warning-undetermined = { $count } parameter(s) are not determined by th
 analysis-warning-irf-truncated = The response is cut off above 1% of its peak: the missing tail is taken as zero, the lifetimes may be biased
 analysis-warning-bridged-reference-gap = { $count } point(s) were interpolated across an empty cell of the reference column
 analysis-warning-division-by-zero = { $count } division(s) by zero were left empty
+analysis-warning-shifted-x = The constrained polynomial was fitted on X values far from 0: precision may be low. Subtract the mean of X first
 stale-series-hint = Out of date: its calculation needs to be recalculated
 stale-export-title = Out-of-date data
 stale-export-message = This graph shows { $count } calculation(s) that are out of date.

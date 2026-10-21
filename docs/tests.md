@@ -646,3 +646,7 @@ retour de la poignée originale et la macro Script avec `replace_original=True`.
 | Ctrl+Maj+C pose la question seulement si une colonne a une formule ; Valeurs vide la ligne Formule | `ctrl_maj_c_sur_une_colonne_formule_pose_la_question`, `ctrl_maj_c_sans_formule_copie_directement` |
 
 Limites : le geste de déplacement d'une colonne n'existe pas encore (#319) ; la référence cachée d'une correction (`aux`) est exclue par construction, sans témoin dédié.
+
+## Polynôme contraint sur un X décalé (#296)
+
+`fit::tests::polynome_contraint_sur_x_tres_decale_est_signale` : signalé (`shifted_x`) pour un polynôme fixé ou à valeur initiale sur X ≈ 1e4 ; témoins non signalés : X centré, décalage modéré (1e2), polynôme sans contrainte (QR centré). Transport `.stf` : `shifted_x` dans `persistence/src/calculations.rs` (tests d'aller-retour et de noms figés).

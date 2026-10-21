@@ -1490,6 +1490,7 @@ analysis-warning-undetermined = { $count } paramètre(s) ne sont pas déterminé
 analysis-warning-irf-truncated = La réponse est coupée au-dessus de 1 % de son pic : la queue manquante est prise pour nulle, les durées de vie peuvent être biaisées
 analysis-warning-bridged-reference-gap = { $count } point(s) ont été interpolés à travers une cellule vide de la colonne de référence
 analysis-warning-division-by-zero = { $count } division(s) par zéro ont été laissées vides
+analysis-warning-shifted-x = Le polynôme contraint a été ajusté sur des X loin de 0 : la précision peut être faible. Soustrayez d'abord la moyenne de X
 stale-series-hint = Pas à jour : son calcul doit être refait
 stale-export-title = Données pas à jour
 stale-export-message = Ce graphique montre { $count } calcul(s) pas à jour.

@@ -79,6 +79,10 @@ pub struct FittedSeries {
     /// Arrêt sur un plateau (#281) ou solveur bloqué sans pas accepté (C1,
     /// #313) : à ne pas lire comme un ajustement convergé.
     pub plateau: bool,
+    /// Polynôme ajusté par Levenberg-Marquardt (contrainte) sur un X très
+    /// décalé de 0, sans le centrage du chemin QR : la précision peut s'être
+    /// dégradée (#296, avertir plutôt que centrer).
+    pub shifted_x: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -203,6 +207,7 @@ fn fit_one(
             reduced_chi2: sol.reduced_chi2,
             undetermined: sol.undetermined.iter().filter(|u| **u).count(),
             plateau: sol.plateau || sol.stalled,
+            shifted_x: model.x_shift_is_large(x),
         },
         sol.dof,
         sol.iterations,
@@ -277,6 +282,7 @@ fn fit_linear(input: &FitInput, model: &CompiledModel) -> Option<(FittedSeries, 
             reduced_chi2: scale,
             undetermined: 0,
             plateau: false,
+            shifted_x: false,
         },
         dof,
     ))
@@ -350,6 +356,7 @@ fn fit_together(
             reduced_chi2: sol.reduced_chi2,
             undetermined: map[i].iter().filter(|&&s| sol.undetermined[s]).count(),
             plateau: sol.plateau || sol.stalled,
+            shifted_x: false,
             chi2: {
                 // χ² de la courbe seule.
                 let t = &terms[i];
@@ -1487,6 +1494,39 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// #296 : un polynôme contraint (LM, non centré) sur un X très décalé de 0
+    /// est signalé ; centré, modérément décalé ou sans contrainte (QR centré),
+    /// il ne l'est pas.
+    #[test]
+    fn polynome_contraint_sur_x_tres_decale_est_signale() {
+        let t = grid(21, -5.0, 5.0);
+        let c = [1.0, 0.5, 0.25];
+        let contraint = |fixed_top: bool| {
+            let mut sp = spec(Model::Polynomial { degree: 2 });
+            sp.params = vec![ParamSetting::default(); 2];
+            sp.params.push(ParamSetting {
+                fixed: fixed_top,
+                initial: Some(c[2]),
+                ..Default::default()
+            });
+            sp
+        };
+        let signale = |off: f64, sp: &FitSpec| {
+            let (i, _) = serie_decalee(off, &t, |_, v| horner(&c, v));
+            fit(&[i], sp).unwrap().series.remove(0).shifted_x
+        };
+        assert!(signale(1e4, &contraint(true)), "contraint, X ≈ 1e4");
+        assert!(signale(1e4, &contraint(false)), "valeur initiale seule");
+        assert!(!signale(0.0, &contraint(true)), "témoin : X centré");
+        assert!(!signale(1e2, &contraint(true)), "témoin : décalage modéré");
+        let mut libre = spec(Model::Polynomial { degree: 2 });
+        libre.params = vec![ParamSetting::default(); 3];
+        assert!(
+            !signale(1e4, &libre),
+            "témoin : sans contrainte (QR centré)"
+        );
     }
 
     #[test]

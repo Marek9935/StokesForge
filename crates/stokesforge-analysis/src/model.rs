@@ -145,6 +145,11 @@ impl Model {
     }
 }
 
+/// Rapport |moyenne X| / étendue de X au-delà duquel un polynôme contraint
+/// (Levenberg-Marquardt, non centré) est signalé (#296). Mesuré : à 10 d'étendue,
+/// un décalage de 1e2 reste juste, 1e3 et plus se dégrade.
+pub const X_SHIFT_WARN_RATIO: f64 = 100.0;
+
 impl CompiledModel {
     pub fn model(&self) -> &Model {
         &self.model
@@ -225,6 +230,23 @@ impl CompiledModel {
         } else {
             0.0
         }
+    }
+
+    /// Le X est-il si loin de 0, au regard de son étendue, qu'une base de
+    /// puissances non centrée perd sa précision (#296) ? Vrai seulement pour
+    /// une droite ou un polynôme (les autres modèles ne sont pas centrés) dont
+    /// la moyenne des X dépasse [`X_SHIFT_WARN_RATIO`] fois l'étendue.
+    pub fn x_shift_is_large(&self, x: &[f64]) -> bool {
+        let shift = self.x_shift(x);
+        if shift == 0.0 {
+            return false;
+        }
+        let finite = x.iter().copied().filter(|v| v.is_finite());
+        let (lo, hi) = finite.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+            (lo.min(v), hi.max(v))
+        });
+        let span = hi - lo;
+        span > 0.0 && shift.abs() > X_SHIFT_WARN_RATIO * span
     }
 
     /// Matrice `T` telle que `coefficients dans l'axe d'origine = T · coefficients

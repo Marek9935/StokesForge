@@ -113,6 +113,7 @@ pub(super) fn warning_text(warning: &Warning) -> String {
             "analysis-warning-division-by-zero",
             count = i64::try_from(*count).unwrap_or(i64::MAX)
         ),
+        Warning::ShiftedX => tr!("analysis-warning-shifted-x"),
     }
 }
 
@@ -434,6 +435,10 @@ mod tests {
             (
                 Warning::DivisionByZero(2),
                 tr!(in &loader; "analysis-warning-division-by-zero", count = 2_i64),
+            ),
+            (
+                Warning::ShiftedX,
+                tr!(in &loader; "analysis-warning-shifted-x"),
             ),
         ];
         for (warning, text) in &attendu {

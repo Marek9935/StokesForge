@@ -184,6 +184,10 @@ fn warning_to_record(w: &Warning) -> WarningRecord {
             kind: "division_by_zero".into(),
             count: *n as u64,
         },
+        Warning::ShiftedX => WarningRecord {
+            kind: "shifted_x".into(),
+            count: 0,
+        },
     }
 }
 
@@ -197,6 +201,7 @@ fn record_to_warning(r: &WarningRecord) -> Option<Warning> {
         "irf_truncated" => Some(Warning::IrfTruncated),
         "bridged_reference_gap" => Some(Warning::BridgedReferenceGap(r.count as usize)),
         "division_by_zero" => Some(Warning::DivisionByZero(r.count as usize)),
+        "shifted_x" => Some(Warning::ShiftedX),
         _ => None,
     }
 }
@@ -824,6 +829,7 @@ mod tests {
             Warning::IrfTruncated => 5,
             Warning::BridgedReferenceGap(_) => 6,
             Warning::DivisionByZero(_) => 7,
+            Warning::ShiftedX => 8,
         }
     }
 
@@ -833,6 +839,7 @@ mod tests {
             Warning::IrfStepMismatch,
             Warning::NotConverged,
             Warning::IrfTruncated,
+            Warning::ShiftedX,
         ];
         for n in [0, 1, 2, 3, 17, u32::MAX as usize, usize::MAX] {
             all.push(Warning::NegativeClipped(n));
@@ -847,7 +854,7 @@ mod tests {
     fn tout_avertissement_fait_l_aller_retour_des_enregistrements() {
         let all = tous_les_avertissements();
         let rangs: std::collections::BTreeSet<usize> = all.iter().map(rang).collect();
-        assert_eq!(rangs.len(), 8, "toutes les variantes sont éprouvées");
+        assert_eq!(rangs.len(), 9, "toutes les variantes sont éprouvées");
         for w in &all {
             assert_eq!(record_to_warning(&warning_to_record(w)).as_ref(), Some(w));
         }
@@ -865,6 +872,7 @@ mod tests {
             (Warning::IrfTruncated, "irf_truncated", 0),
             (Warning::BridgedReferenceGap(3), "bridged_reference_gap", 3),
             (Warning::DivisionByZero(1), "division_by_zero", 1),
+            (Warning::ShiftedX, "shifted_x", 0),
         ];
         for (w, kind, count) in attendu {
             let r = warning_to_record(&w);
