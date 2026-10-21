@@ -103,6 +103,10 @@ fn general_page(
     let before = low_r2;
     let mut max_file_mb = state.max_file_mb();
     let max_file_before = max_file_mb;
+    let mut autosave = state.autosave_enabled();
+    let autosave_before = autosave;
+    let mut autosave_minutes = state.autosave_minutes();
+    let autosave_minutes_before = autosave_minutes;
     form(ui, "preferences", |rows| {
         rows.section(tr!("preferences-general"));
         rows.row(tr!("menu-language"), |ui| {
@@ -124,6 +128,25 @@ fn general_page(
             );
         });
         rows.note(tr!("preferences-max-file-size-note"));
+        // Sauvegarde automatique (#317) : la période se grise si elle est coupée.
+        rows.checkbox(
+            &mut autosave,
+            tr!("preferences-autosave"),
+            Some(tr!("preferences-autosave", "hint")),
+        );
+        rows.row(tr!("preferences-autosave-minutes"), |ui| {
+            ui.add_enabled_ui(autosave, |ui| {
+                number_field(
+                    ui,
+                    "preferences_autosave_minutes",
+                    &mut autosave_minutes,
+                    &quantities::AUTOSAVE_MINUTES,
+                );
+            })
+            .response
+            .on_disabled_hover_text(tr!("disabled-autosave-off"));
+        });
+        rows.note(tr!("preferences-autosave-note"));
         // Préférence de l'application (#288) ; chaque calcul a la sienne.
         rows.section(tr!("preferences-analysis"));
         rows.checkbox(
@@ -137,6 +160,12 @@ fn general_page(
     }
     if max_file_mb != max_file_before {
         actions.push(Action::SetMaxFileMb(max_file_mb));
+    }
+    if autosave != autosave_before {
+        actions.push(Action::SetAutosave(autosave));
+    }
+    if autosave_minutes != autosave_minutes_before {
+        actions.push(Action::SetAutosaveMinutes(autosave_minutes));
     }
     chosen
 }
@@ -370,6 +399,39 @@ mod tests {
         harness.run();
         let formats: Vec<CopyFormat> = ordre(&harness).into_iter().map(|(f, _)| f).collect();
         assert_eq!(formats, [CopyFormat::Pdf, CopyFormat::Svg, CopyFormat::Png]);
+    }
+
+    /// Sauvegarde automatique (#317) : la case (cochée par défaut) et le champ
+    /// de la période sont peints dans General ; décocher la case la coupe et
+    /// grise le champ, la recocher le rend.
+    #[test]
+    fn la_rubrique_general_peint_la_sauvegarde_automatique() {
+        let mut harness = banc();
+        harness.get_by_label(&tr!("preferences-autosave"));
+        harness.get_by_label(&tr!("preferences-autosave-minutes"));
+        let champs_actifs = |h: &egui_kittest::Harness<'static, Banc>| {
+            use egui::accesskit::Role;
+            use egui_kittest::kittest::NodeT;
+            [Role::TextInput, Role::SpinButton]
+                .into_iter()
+                .flat_map(|role| h.query_all_by_role(role))
+                .filter(|node| !node.accesskit_node().is_disabled())
+                .count()
+        };
+        let actifs = champs_actifs(&harness);
+        assert!(harness.state().state.autosave_enabled());
+        harness.get_by_label(&tr!("preferences-autosave")).click();
+        harness.run();
+        assert!(!harness.state().state.autosave_enabled());
+        assert_eq!(
+            champs_actifs(&harness),
+            actifs - 1,
+            "le champ de la période est grisé"
+        );
+        harness.get_by_label(&tr!("preferences-autosave")).click();
+        harness.run();
+        assert!(harness.state().state.autosave_enabled());
+        assert_eq!(champs_actifs(&harness), actifs);
     }
 
     /// Rubrique Display : Metadata est cochée et x' décochée par défaut ; cocher

@@ -80,8 +80,10 @@ use crate::tr;
 use crate::user_colors::UserColors;
 
 mod analysis;
+mod autosave;
 mod column_use;
 pub use analysis::{CalculationDelete, StaleExport};
+pub use autosave::{RecoveryRow, AUTOSAVE_RETRY};
 pub use column_use::FullColumnsCopy;
 
 /// Durée pendant laquelle une commande attend la fin du recalcul de formules
@@ -851,6 +853,24 @@ pub enum Action {
     /// Règle le plafond de taille d'un `.stf` à l'ouverture, en Mo (A2, #316).
     /// Préférence de l'application : ni commande, ni historique, ni `.stf`.
     SetMaxFileMb(u32),
+    /// Active ou coupe la sauvegarde automatique (#317). Préférence de
+    /// l'application : ni commande, ni historique, ni `.stf`.
+    SetAutosave(bool),
+    /// Règle la période de la sauvegarde automatique, en minutes (#317) ;
+    /// ramenée à 1–60.
+    SetAutosaveMinutes(u32),
+    /// Récupération (#317) : ouvre la copie `path` dans la fenêtre courante,
+    /// derrière « Enregistrer ? » s'il y a du travail ; la liste reste ouverte.
+    RecoveryOpen(PathBuf),
+    /// Récupération : laisse la copie sur disque, elle sera reproposée au
+    /// prochain démarrage.
+    RecoveryIgnore(PathBuf),
+    /// Récupération : demande la suppression de la copie (confirmation).
+    RecoveryDelete(PathBuf),
+    /// Réponse à la confirmation de suppression d'une copie.
+    ConfirmRecoveryDelete(bool),
+    /// Ferme la fenêtre de récupération : chaque copie restante est ignorée.
+    CloseRecovery,
     /// Règle l'ordre et l'état des formats offerts par Copy Graph (#148,
     /// #149). Préférence de l'application : ni commande, ni historique, ni
     /// `.stf`.
@@ -1438,6 +1458,8 @@ pub enum UnsavedGesture {
     Open(String),
     /// Quit, ou la fermeture de la fenêtre.
     Quit,
+    /// Récupération (#317) : la copie de secours à ouvrir.
+    OpenRecovery(PathBuf),
 }
 
 /// La réponse au dialogue « Discard Changes · Cancel · Save » (S-F4).
@@ -2608,6 +2630,8 @@ pub struct AppState {
     /// Repère conservateur de l'enregistrement, sans épingler les buffers
     /// d'un ancien arbre. Une annulation demande aussi confirmation.
     saved_revision: Option<(u64, u64)>,
+    /// Sauvegarde automatique et récupération (#317, `state/autosave.rs`).
+    autosave: autosave::AutosaveState,
     /// Geste qui attend la réponse « Discard Changes · Cancel · Save » (S-F4).
     unsaved_pending: Option<UnsavedGesture>,
     /// Geste à poursuivre une fois le projet enregistré (réponse Save).
@@ -2829,10 +2853,12 @@ impl AppState {
         // Jamais déduit de `path` : un fichier qui existe n'est pas un projet
         // chargé (#315). `main` pose le repère par [`AppState::mark_loaded`].
         let saved_revision = None;
+        let autosave = autosave::AutosaveState::at((snapshot.revision, snapshot.geometry_revision));
         let mut state = Self {
             handle,
             snapshot,
             saved_revision,
+            autosave,
             unsaved_pending: None,
             after_save: None,
             quit_ready: false,
@@ -3023,6 +3049,7 @@ impl AppState {
     /// supprimerait sans bruit ce que la lecture a écarté.
     pub fn mark_loaded(&mut self, report: &stokesforge_session::LoadReport) {
         self.saved_revision = Some((self.snapshot.revision, self.snapshot.geometry_revision));
+        self.autosave_mark_clean();
         self.discarded_source = DiscardedSource::of(PathBuf::from(&self.path), report);
         if let Some(text) = discarded_calculations_text(report) {
             self.warn(text);
@@ -5197,6 +5224,13 @@ impl AppState {
                     ));
                 }
             }
+            Action::SetAutosave(on) => self.set_autosave(on),
+            Action::SetAutosaveMinutes(minutes) => self.set_autosave_minutes(minutes),
+            Action::RecoveryOpen(path) => self.recovery_open(path),
+            Action::RecoveryIgnore(path) => self.recovery_ignore(&path),
+            Action::RecoveryDelete(path) => self.recovery_request_delete(path),
+            Action::ConfirmRecoveryDelete(accept) => self.recovery_confirm_delete(accept),
+            Action::CloseRecovery => self.recovery_close(),
             Action::SetSvgTextMode(mode) => {
                 if let Err(error) = self.object_manager_preferences.save_svg_text_mode(mode) {
                     self.fail(tr!(
@@ -6766,6 +6800,9 @@ impl AppState {
                 self.refresh();
                 self.saved_revision =
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));
+                // Enregistré : la copie de secours n'a plus de raison d'être.
+                self.autosave_remove_slot();
+                self.autosave_mark_clean();
                 if self
                     .discarded_source
                     .as_ref()
@@ -7082,6 +7119,9 @@ impl AppState {
                 self.refresh();
                 self.saved_revision =
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));
+                // L'ancien projet est refermé proprement : sa copie s'en va.
+                self.autosave_remove_slot();
+                self.autosave_mark_clean();
                 self.discarded_source = DiscardedSource::of(PathBuf::from(&self.path), &report);
                 true
             }
@@ -7136,6 +7176,7 @@ impl AppState {
             || self.alert.is_some()
             || self.pending_overwrite.is_some()
             || self.pending_discarded_save.is_some()
+            || self.recovery_delete_pending()
     }
 
     /// Plus rien ne retient l'application (Quit accepté) ; une seule fois.
@@ -7186,7 +7227,12 @@ impl AppState {
         match gesture {
             UnsavedGesture::NewProject => self.new_project(),
             UnsavedGesture::Open(path) => self.open_project(path),
-            UnsavedGesture::Quit => self.quit_ready = true,
+            UnsavedGesture::Quit => {
+                // Fermeture propre : la copie de secours s'en va.
+                self.autosave_remove_slot();
+                self.quit_ready = true;
+            }
+            UnsavedGesture::OpenRecovery(path) => self.open_recovery(path),
         }
     }
 
@@ -7240,6 +7286,8 @@ impl AppState {
                 self.refresh();
                 self.saved_revision =
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));
+                self.autosave_remove_slot();
+                self.autosave_mark_clean();
                 self.notice(tr!("action-new-project"));
             }
             Err(err) => self.fail(errors::session::error_message(&err)),

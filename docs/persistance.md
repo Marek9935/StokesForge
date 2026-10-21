@@ -465,3 +465,12 @@ de l'enregistrement. Sans argument, la démonstration n'a pas de chemin.
 - Aucun enregistrement pendant l'exécution d'un script : `save` refuse
   (`error-save-script-running`) et abandonne le geste en attente ; le bouton et le
   menu sont grisés.
+## Copies de secours (#317)
+
+Le format ne change pas : une copie de secours est un `.stf` ordinaire, écrit par
+`SessionHandle::save` (donc par temporaire et renommage) dans `recovery/` du dossier
+de données, à côté d'une fiche `.json` (chemin d'origine, heure) et d'un verrou
+`.lock` qui n'appartiennent pas au format. Elle ne passe jamais par le repère
+« enregistré » : ni `saved_revision`, ni chemin de travail. Proposée au démarrage
+suivant seulement si elle est plus récente que son `.stf`. Détail :
+`docs/application/projet-et-import.md`, `stokesforge-app-state/src/recovery.rs`.

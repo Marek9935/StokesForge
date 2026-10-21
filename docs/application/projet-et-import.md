@@ -29,6 +29,28 @@ instantané est écrite dans `recovery/` du dossier de données (jamais sur le
 dialogue bloquant (`AlertKind::SessionLost`) ne laisse que Close, qui ferme
 l'application. Quit ne demande alors rien.
 
+**Sauvegarde automatique et récupération (#317)** — `state/autosave.rs`,
+`recovery.rs`. Activée par défaut, toutes les 5 minutes (préférences
+`autosave`, `autosave_minutes`, bornes 1 à 60 ; File › Preferences › General,
+section Files). `AppState::poll_autosave(now)`, appelé par `logic()` de la
+fenêtre racine, écrit par `SessionHandle::save` le projet dans **un seul
+fichier par processus** de `recovery/` (`<nom|Untitled>-<pid>.stf`, écrasé,
+avec sa fiche `.json` et son verrou `.lock`), seulement si le projet a changé
+depuis la dernière copie, le dernier enregistrement ou le démarrage. Ni
+historique, ni `saved_revision`, ni chemin, ni titre « modifié » ne bougent, et
+le `.stf` de l'utilisateur n'est jamais écrit. L'échéance saute (et
+recommence 5 s plus tard) pendant une macro, un script, un import ou un
+recalcul ; un échec d'écriture dit un seul avertissement. La copie est
+supprimée à l'enregistrement, à la fermeture propre et pour New, Open d'un
+autre projet et Discard ; une session perdue la garde. Au démarrage (`main`,
+fenêtre racine), `scan_recovery` liste les copies sans verrou tenu et plus
+récentes que leur `.stf` (copies de #310 comprises) dans la fenêtre de
+récupération (Open, Ignore, Delete avec confirmation ; `docs/fenetres.md`) :
+Open charge dans la fenêtre courante (derrière « Enregistrer ? » s'il y a du
+travail), sous le chemin d'origine (vide pour Untitled), comme travail non
+enregistré, et la liste reste ouverte ; Ignore laisse la copie, reproposée au
+démarrage suivant.
+
 Le remplacement passe par `SessionHandle::new_project`, vide l'historique et
 les géométries et change l'époque pour invalider les anciennes références
 Python. Les fenêtres de contenu, caches et sélections du projet précédent

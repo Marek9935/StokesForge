@@ -8720,10 +8720,15 @@ fn a_dead_session_raises_one_blocking_alert_with_a_recovery_copy() {
         alert.kind,
         stokesforge_app_state::state::AlertKind::SessionLost
     );
-    let copies: Vec<_> = std::fs::read_dir(&recovery)
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .collect();
+    // Seuls les `.stf` comptent : la copie a aussi sa fiche (#317).
+    let stf_files = |dir: &std::path::Path| -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|x| x == "stf"))
+            .collect()
+    };
+    let copies = stf_files(&recovery);
     assert_eq!(copies.len(), 1, "une copie de secours");
     assert!(alert.message.contains(&copies[0].display().to_string()));
     let back = stokesforge_persistence::load(&copies[0]).expect("la copie se relit");
@@ -8739,7 +8744,7 @@ fn a_dead_session_raises_one_blocking_alert_with_a_recovery_copy() {
     state.poll_recalc();
     state.refresh();
     assert!(state.alert().is_none());
-    assert_eq!(std::fs::read_dir(&recovery).unwrap().count(), 1);
+    assert_eq!(stf_files(&recovery).len(), 1);
 }
 
 /// Session morte : fermer la fenêtre n'ouvre pas « enregistrer ? » (il n'y a
@@ -12155,4 +12160,578 @@ fn le_chargement_du_demarrage_pose_le_repere_de_la_source() {
     assert_eq!(what, "1 correction record");
     assert_eq!(std::fs::read(&file).unwrap(), before);
     session.shutdown().unwrap();
+}
+
+// -- Sauvegarde automatique et récupération (#317) --
+
+mod autosave {
+    use super::*;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    const PERIOD: Duration = Duration::from_secs(300);
+
+    /// Session sur la démonstration, dossier de secours dans `dir/recovery`.
+    fn start_recovery(dir: &Path, project_file: &str) -> (Session, AppState, PathBuf) {
+        let path = if project_file.is_empty() {
+            Path::new("").to_path_buf()
+        } else {
+            dir.join(project_file)
+        };
+        let (session, mut state) = start(demo_project(), &path);
+        let recovery = dir.join("recovery");
+        state.set_recovery_dir(Some(recovery.clone()));
+        (session, state, recovery)
+    }
+
+    /// Les fichiers `.stf` du dossier de secours (la fiche et le verrou ne
+    /// comptent pas).
+    fn copies(recovery: &Path) -> Vec<PathBuf> {
+        let Ok(entries) = std::fs::read_dir(recovery) else {
+            return Vec::new();
+        };
+        let mut copies: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "stf"))
+            .collect();
+        copies.sort();
+        copies
+    }
+
+    fn change(state: &mut AppState) {
+        state.dispatch(Action::AddGraph);
+    }
+
+    // -- Préférences, via les actions --
+
+    #[test]
+    fn la_sauvegarde_est_active_par_defaut_avec_cinq_minutes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, _) = start_recovery(dir.path(), "a.stf");
+        assert!(state.autosave_enabled());
+        assert_eq!(state.autosave_minutes(), 5);
+        state.dispatch(Action::SetAutosaveMinutes(999));
+        assert_eq!(state.autosave_minutes(), 60);
+        state.dispatch(Action::SetAutosaveMinutes(0));
+        assert_eq!(state.autosave_minutes(), 1);
+        state.dispatch(Action::SetAutosave(false));
+        assert!(!state.autosave_enabled());
+    }
+
+    // -- L'écriture --
+
+    /// Une modification puis l'échéance : une copie relue égale au modèle, sans
+    /// aucune trace dans l'historique, le titre, le chemin, ni la question de
+    /// Quit ; le `.stf` de l'utilisateur n'est pas écrit.
+    #[test]
+    fn la_copie_relit_le_modele_sans_toucher_historique_titre_ni_quit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        assert_eq!(state.poll_autosave(t0), Some(PERIOD));
+        change(&mut state);
+        let undo_label = state.snapshot().history.undo_label.clone();
+        let revision = state.snapshot().revision;
+        let title = state.window_title();
+        assert!(undo_label.is_some());
+
+        state.poll_autosave(t0 + PERIOD);
+
+        let copies = copies(&recovery);
+        assert_eq!(copies.len(), 1);
+        let name = copies[0]
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(name.starts_with("a-"), "nom du projet : {name}");
+        let back = stokesforge_persistence::load(&copies[0]).expect("la copie se relit");
+        assert_eq!(back.tree(), state.tree());
+        assert!(
+            !dir.path().join("a.stf").exists(),
+            "le .stf n'est pas écrit"
+        );
+        assert_eq!(state.snapshot().history.undo_label, undo_label);
+        assert_eq!(state.snapshot().revision, revision);
+        assert_eq!(state.window_title(), title, "titre « modifié » inchangé");
+        assert_eq!(state.path(), dir.path().join("a.stf").display().to_string());
+
+        state.dispatch(Action::Quit {
+            pending_edits: false,
+        });
+        assert_eq!(
+            state.unsaved_pending(),
+            Some(&UnsavedGesture::Quit),
+            "la copie n'a pas enregistré le projet"
+        );
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
+        // Témoin : un vrai enregistrement, lui, lève la question.
+        state.dispatch(Action::Save);
+        state.dispatch(Action::Quit {
+            pending_edits: false,
+        });
+        assert!(state.take_quit_ready(), "enregistré : Quit direct");
+    }
+
+    #[test]
+    fn avant_l_echeance_rien_n_est_ecrit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        let almost = t0 + PERIOD - Duration::from_secs(1);
+        assert_eq!(state.poll_autosave(almost), Some(Duration::from_secs(1)));
+        assert!(copies(&recovery).is_empty());
+        state.poll_autosave(t0 + PERIOD);
+        assert_eq!(copies(&recovery).len(), 1);
+    }
+
+    /// Rien n'a changé depuis le démarrage, puis depuis la dernière copie :
+    /// aucune écriture (la copie effacée à la main ne revient pas).
+    #[test]
+    fn sans_changement_aucune_ecriture() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        state.poll_autosave(t0 + PERIOD);
+        assert!(copies(&recovery).is_empty(), "rien depuis le démarrage");
+
+        change(&mut state);
+        state.poll_autosave(t0 + 2 * PERIOD);
+        let copy = copies(&recovery).pop().expect("copie écrite");
+        std::fs::remove_file(&copy).unwrap();
+        state.poll_autosave(t0 + 3 * PERIOD);
+        assert!(
+            copies(&recovery).is_empty(),
+            "rien depuis la dernière copie"
+        );
+    }
+
+    /// Un enregistrement remet le repère : aucune copie tant que rien ne change.
+    #[test]
+    fn apres_un_enregistrement_rien_a_copier() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        state.dispatch(Action::Save);
+        state.poll_autosave(t0 + PERIOD);
+        assert!(copies(&recovery).is_empty());
+    }
+
+    /// Deux échéances avec des changements : un seul fichier, écrasé.
+    #[test]
+    fn deux_echeances_ecrasent_la_meme_copie() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        state.poll_autosave(t0 + PERIOD);
+        change(&mut state);
+        state.poll_autosave(t0 + 2 * PERIOD);
+        let copies = copies(&recovery);
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        let back = stokesforge_persistence::load(&copies[0]).unwrap();
+        assert_eq!(back.tree(), state.tree(), "la seconde écriture l'emporte");
+    }
+
+    #[test]
+    fn preference_coupee_rien_n_est_ecrit() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        state.dispatch(Action::SetAutosave(false));
+        let t0 = Instant::now();
+        assert_eq!(state.poll_autosave(t0), None);
+        change(&mut state);
+        assert_eq!(state.poll_autosave(t0 + 10 * PERIOD), None);
+        assert!(copies(&recovery).is_empty());
+    }
+
+    /// La période réglée s'applique, à partir du réglage.
+    #[test]
+    fn la_periode_reglee_est_celle_du_minuteur() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        // Réglée en cours de route : la nouvelle période compte dès l'image
+        // suivante, pas à l'ancienne échéance (5 minutes).
+        state.dispatch(Action::SetAutosaveMinutes(1));
+        change(&mut state);
+        let t1 = t0 + Duration::from_secs(10);
+        state.poll_autosave(t1);
+        state.poll_autosave(t1 + Duration::from_secs(59));
+        assert!(copies(&recovery).is_empty());
+        state.poll_autosave(t1 + Duration::from_secs(60));
+        assert_eq!(copies(&recovery).len(), 1);
+    }
+
+    #[test]
+    fn un_projet_sans_chemin_est_copie_sous_untitled() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, recovery) = start_recovery(dir.path(), "");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        state.poll_autosave(t0 + PERIOD);
+        let copies = copies(&recovery);
+        assert_eq!(copies.len(), 1);
+        let name = copies[0]
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(name.starts_with("Untitled-"), "{name}");
+    }
+
+    /// Macro ouverte : l'échéance est repoussée sans erreur ; fermée, la copie
+    /// part au nouvel essai.
+    #[test]
+    fn pendant_une_macro_l_echeance_saute_sans_erreur() {
+        let dir = tempfile::tempdir().unwrap();
+        let (session, mut state, recovery) = start_recovery(dir.path(), "a.stf");
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        let handle = session.handle();
+        handle.begin_macro(MacroKind::Import).unwrap();
+        state.refresh();
+        assert!(state.snapshot().history.in_macro);
+        let due = t0 + PERIOD;
+        let messages = state.status_history().count();
+        let retry = state.poll_autosave(due).expect("réarmé");
+        assert!(retry < PERIOD, "nouvel essai rapproché : {retry:?}");
+        assert!(copies(&recovery).is_empty());
+        assert_eq!(
+            state.status_history().count(),
+            messages,
+            "aucun message : sans avertissement ni erreur"
+        );
+        handle.end_macro().unwrap();
+        state.refresh();
+        state.poll_autosave(due + retry);
+        assert_eq!(copies(&recovery).len(), 1);
+    }
+
+    /// Un recalcul en cours : même saut.
+    #[test]
+    fn pendant_un_recalcul_l_echeance_saute() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state) = start(heavy_formula_project(), &dir.path().join("l.stf"));
+        let recovery = dir.path().join("recovery");
+        state.set_recovery_dir(Some(recovery.clone()));
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        state.dispatch(Action::AddGraph);
+        assert!(state.recalc_work().is_some(), "recalcul en cours");
+        let retry = state.poll_autosave(t0 + PERIOD).expect("réarmé");
+        assert!(retry < PERIOD);
+        assert!(copies(&recovery).is_empty());
+        finish_recalculation(&mut state);
+        state.poll_autosave(t0 + PERIOD + retry);
+        assert_eq!(copies(&recovery).len(), 1);
+    }
+
+    /// Dossier impossible : un seul avertissement tant que ça dure.
+    #[test]
+    fn un_dossier_impossible_ne_dit_qu_un_avertissement() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut state, _) = start_recovery(dir.path(), "a.stf");
+        let obstacle = dir.path().join("fichier");
+        std::fs::write(&obstacle, b"x").unwrap();
+        state.set_recovery_dir(Some(obstacle.join("recovery")));
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        let warnings = |state: &AppState| {
+            state
+                .status_history()
+                .filter(|m| m.level == StatusLevel::Warning)
+                .count()
+        };
+        let before = warnings(&state);
+        state.poll_autosave(t0 + PERIOD);
+        state.poll_autosave(t0 + 2 * PERIOD);
+        state.poll_autosave(t0 + 3 * PERIOD);
+        assert_eq!(warnings(&state), before + 1, "un seul avertissement");
+        assert!(state.status().is_some_and(|s| s.text
+            == stokesforge_app_state::tr!(
+                "status-autosave-failed",
+                cause = stokesforge_app_state::errors::io::error_message(
+                    &std::fs::create_dir_all(obstacle.join("recovery")).unwrap_err()
+                )
+            )));
+    }
+
+    // -- La suppression de la copie --
+
+    fn with_copy(dir: &Path, file: &str) -> (Session, AppState, PathBuf, Instant) {
+        let (session, mut state, recovery) = start_recovery(dir, file);
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        state.poll_autosave(t0 + PERIOD);
+        assert_eq!(copies(&recovery).len(), 1, "copie écrite");
+        (session, state, recovery, t0)
+    }
+
+    #[test]
+    fn enregistrer_supprime_la_copie() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_s, mut state, recovery, _) = with_copy(dir.path(), "a.stf");
+        state.dispatch(Action::Save);
+        assert!(copies(&recovery).is_empty());
+        assert_eq!(
+            std::fs::read_dir(&recovery).unwrap().count(),
+            0,
+            "fiche et verrou aussi"
+        );
+    }
+
+    #[test]
+    fn enregistrer_sous_supprime_la_copie() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_s, mut state, recovery, _) = with_copy(dir.path(), "");
+        state.dispatch(Action::SaveAs {
+            path: dir.path().join("neuf.stf").display().to_string(),
+        });
+        assert!(copies(&recovery).is_empty());
+    }
+
+    #[test]
+    fn fermer_en_abandonnant_supprime_la_copie() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_s, mut state, recovery, _) = with_copy(dir.path(), "a.stf");
+        state.dispatch(Action::Quit {
+            pending_edits: false,
+        });
+        assert_eq!(
+            copies(&recovery).len(),
+            1,
+            "la question est posée, rien n'est perdu"
+        );
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+        assert!(state.take_quit_ready());
+        assert!(copies(&recovery).is_empty());
+    }
+
+    #[test]
+    fn nouveau_projet_supprime_la_copie() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_s, mut state, recovery, _) = with_copy(dir.path(), "a.stf");
+        state.dispatch(Action::NewProject {
+            pending_edits: false,
+        });
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+        assert!(copies(&recovery).is_empty());
+    }
+
+    #[test]
+    fn ouvrir_un_autre_projet_supprime_la_copie() {
+        let dir = tempfile::tempdir().unwrap();
+        let other = dir.path().join("autre.stf");
+        {
+            let (_s, mut state) = start_demo(dir.path());
+            state.dispatch(Action::SaveAs {
+                path: other.display().to_string(),
+            });
+        }
+        let (_s, mut state, recovery, _) = with_copy(dir.path(), "a.stf");
+        state.dispatch(Action::OpenProject {
+            path: other.display().to_string(),
+            pending_edits: false,
+        });
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+        assert!(copies(&recovery).is_empty());
+    }
+
+    /// Annuler la question garde la copie.
+    #[test]
+    fn annuler_la_question_garde_la_copie() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_s, mut state, recovery, _) = with_copy(dir.path(), "a.stf");
+        state.dispatch(Action::Quit {
+            pending_edits: false,
+        });
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
+        assert_eq!(copies(&recovery).len(), 1);
+    }
+
+    /// Session perdue puis Close : la copie automatique est gardée.
+    #[test]
+    fn session_perdue_puis_close_garde_la_copie() {
+        let dir = tempfile::tempdir().unwrap();
+        let (session, mut state, recovery, _) = with_copy(dir.path(), "a.stf");
+        let automatic = copies(&recovery);
+        session.shutdown().unwrap();
+        state.poll_recalc();
+        assert!(state.session_lost());
+        state.dispatch(Action::DismissAlert);
+        assert!(state.take_quit_ready(), "Close ferme l'application");
+        for copy in automatic {
+            assert!(copy.exists(), "la copie automatique reste : {copy:?}");
+        }
+    }
+
+    // -- La récupération au démarrage --
+
+    /// Une copie d'un processus disparu : écrite sans verrou, comme #310.
+    fn dead_copy(recovery: &Path, project_path: &str, graphs: usize) -> (PathBuf, Tree) {
+        let dir = tempfile::tempdir().unwrap();
+        let (_session, mut source) = start_demo(dir.path());
+        for _ in 0..graphs {
+            source.dispatch(Action::AddGraph);
+        }
+        let path =
+            stokesforge_app_state::recovery::write_copy(recovery, project_path, source.snapshot())
+                .unwrap();
+        (path, source.tree().as_ref().clone())
+    }
+
+    #[test]
+    fn open_reprend_le_chemin_d_origine_et_un_historique_vide() {
+        let dir = tempfile::tempdir().unwrap();
+        let recovery = dir.path().join("recovery");
+        let origin = dir.path().join("travail.stf");
+        let (copy, tree) = dead_copy(&recovery, &origin.display().to_string(), 2);
+        // Un projet vide : rien à perdre, Open charge sans poser de question.
+        let (_s, mut state) = start(Project::new("Vide").unwrap(), Path::new(""));
+        state.set_recovery_dir(Some(recovery.clone()));
+        state.scan_recovery();
+        let rows = state.recovery_rows().expect("une copie proposée");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, copy);
+
+        state.dispatch(Action::RecoveryOpen(copy.clone()));
+
+        assert_eq!(state.tree().as_ref(), &tree);
+        assert_eq!(state.path(), origin.display().to_string());
+        assert!(!state.snapshot().history.can_undo, "historique vide");
+        assert!(
+            state.recovery_rows().is_none(),
+            "liste vide : fenêtre fermée"
+        );
+        assert!(!copy.exists(), "la copie ouverte est effacée");
+        assert_eq!(copies(&recovery).len(), 1, "recopiée dans l'emplacement");
+        // Travail non enregistré : fermer pose la question.
+        state.dispatch(Action::Quit {
+            pending_edits: false,
+        });
+        assert_eq!(state.unsaved_pending(), Some(&UnsavedGesture::Quit));
+    }
+
+    #[test]
+    fn open_d_une_copie_sans_chemin_laisse_le_chemin_vide() {
+        let dir = tempfile::tempdir().unwrap();
+        let recovery = dir.path().join("recovery");
+        let (copy, _) = dead_copy(&recovery, "", 1);
+        let (_s, mut state) = start(Project::new("Vide").unwrap(), &dir.path().join("x.stf"));
+        state.set_recovery_dir(Some(recovery));
+        state.scan_recovery();
+        state.dispatch(Action::RecoveryOpen(copy));
+        assert_eq!(state.path(), "");
+    }
+
+    /// Du travail en cours : la question « Enregistrer ? » d'abord ; la liste
+    /// reste ouverte pour les autres copies.
+    #[test]
+    fn open_demande_enregistrer_et_la_liste_reste_ouverte() {
+        let dir = tempfile::tempdir().unwrap();
+        let recovery = dir.path().join("recovery");
+        let (first, _) = dead_copy(&recovery, "", 1);
+        let (second, _) = dead_copy(&recovery, "/x/b.stf", 2);
+        let (_s, mut state) = start_demo(dir.path());
+        change(&mut state);
+        state.set_recovery_dir(Some(recovery.clone()));
+        state.scan_recovery();
+        assert_eq!(state.recovery_rows().unwrap().len(), 2);
+
+        state.dispatch(Action::RecoveryOpen(first.clone()));
+        assert_eq!(
+            state.unsaved_pending(),
+            Some(&UnsavedGesture::OpenRecovery(first.clone()))
+        );
+        assert!(first.exists(), "rien n'est chargé avant la réponse");
+        state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Discard));
+
+        assert!(!first.exists());
+        let rows = state.recovery_rows().expect("la liste reste ouverte");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].path, second);
+    }
+
+    #[test]
+    fn ignore_garde_le_fichier_et_il_revient_au_demarrage_suivant() {
+        let dir = tempfile::tempdir().unwrap();
+        let recovery = dir.path().join("recovery");
+        let (copy, _) = dead_copy(&recovery, "", 1);
+        let (_s, mut state) = start_demo(dir.path());
+        state.set_recovery_dir(Some(recovery.clone()));
+        state.scan_recovery();
+        state.dispatch(Action::RecoveryIgnore(copy.clone()));
+        assert!(state.recovery_rows().is_none());
+        assert!(copy.exists(), "Ignore garde le fichier");
+        let (_s2, mut next) = start_demo(dir.path());
+        next.set_recovery_dir(Some(recovery));
+        next.scan_recovery();
+        assert_eq!(next.recovery_rows().unwrap().len(), 1, "reproposée");
+    }
+
+    #[test]
+    fn delete_demande_confirmation_puis_efface_copie_fiche_et_verrou() {
+        let dir = tempfile::tempdir().unwrap();
+        let recovery = dir.path().join("recovery");
+        let (copy, _) = dead_copy(&recovery, "/x/b.stf", 1);
+        std::fs::write(copy.with_extension("lock"), b"").unwrap();
+        let (_s, mut state) = start_demo(dir.path());
+        state.set_recovery_dir(Some(recovery.clone()));
+        state.scan_recovery();
+
+        state.dispatch(Action::RecoveryDelete(copy.clone()));
+        assert!(copy.exists(), "rien n'est effacé avant la confirmation");
+        assert_eq!(state.pending_recovery_delete().as_deref(), Some("b.stf"));
+        assert!(state.blocking_dialog());
+        state.dispatch(Action::ConfirmRecoveryDelete(false));
+        assert!(copy.exists(), "Cancel garde la copie");
+        assert!(state.recovery_rows().is_some());
+
+        state.dispatch(Action::RecoveryDelete(copy.clone()));
+        state.dispatch(Action::ConfirmRecoveryDelete(true));
+        assert_eq!(std::fs::read_dir(&recovery).unwrap().count(), 0);
+        assert!(state.recovery_rows().is_none());
+    }
+
+    /// Close ignore tout : les fichiers restent.
+    #[test]
+    fn close_ignore_les_copies_restantes() {
+        let dir = tempfile::tempdir().unwrap();
+        let recovery = dir.path().join("recovery");
+        let (copy, _) = dead_copy(&recovery, "", 1);
+        let (_s, mut state) = start_demo(dir.path());
+        state.set_recovery_dir(Some(recovery));
+        state.scan_recovery();
+        state.dispatch(Action::CloseRecovery);
+        assert!(state.recovery_rows().is_none());
+        assert!(copy.exists());
+    }
+
+    /// Sans dossier de secours (tests, système sans dossier de données) : rien
+    /// n'est proposé, rien n'est écrit.
+    #[test]
+    fn sans_dossier_de_secours_rien_ne_se_passe() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_s, mut state) = start_demo(dir.path());
+        state.set_recovery_dir(None);
+        state.scan_recovery();
+        assert!(state.recovery_rows().is_none());
+        let t0 = Instant::now();
+        state.poll_autosave(t0);
+        change(&mut state);
+        state.poll_autosave(t0 + PERIOD);
+    }
 }

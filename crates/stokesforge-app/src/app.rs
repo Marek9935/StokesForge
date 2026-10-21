@@ -170,6 +170,7 @@ mod plot_settings;
 mod preferences_proto;
 mod preferences_window;
 mod project_manager;
+mod recovery;
 mod reorder_list;
 mod results_pane;
 mod script_console;
@@ -206,6 +207,7 @@ use keyboard_shortcuts_window::keyboard_shortcuts_window;
 use object_manager_ui::{select_manager_target, selected_manager_target};
 use plot_settings::{column_metadata_window, plot_settings_window};
 use preferences_window::preferences_window;
+use recovery::recovery_window;
 use shortcuts::{
     collect_undo_redo_shortcuts, SHORTCUT_DUPLICATE_SHEET, SHORTCUT_EXPORT_GRAPH, SHORTCUT_IMPORT,
     SHORTCUT_IMPORT_QWERTY, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT, SHORTCUT_OPEN,
@@ -894,6 +896,12 @@ impl eframe::App for StokesForgeApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.close_requested = true;
         }
+        // Sauvegarde automatique (#317) : ici et non dans `ui()`, qui ne tourne
+        // pas fenêtre réduite ; le réveil est programmé sur la prochaine
+        // échéance, aucun redessin périodique au repos.
+        if let Some(delay) = self.state.poll_autosave(Instant::now()) {
+            ctx.request_repaint_after(delay);
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
@@ -1196,6 +1204,7 @@ impl StokesForgeApp {
         stale_export_window(ctx, &self.state, actions);
         column_use_window(ctx, &self.state, actions);
         full_copy_window(ctx, &self.state, actions);
+        recovery_window(ctx, &self.state, actions);
         dialogs::sync_dialogs(ctx, &self.state, actions);
     }
 

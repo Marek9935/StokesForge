@@ -36,6 +36,9 @@ fn main() -> anyhow::Result<()> {
     if let Some(report) = &report {
         state.mark_loaded(report);
     }
+    // Copies de secours de processus disparus (#317) : la fenêtre racine seule
+    // les propose.
+    state.scan_recovery();
     state.set_script_source(EXAMPLE_SCRIPT.to_string());
     configure_script_engine(&mut state);
 

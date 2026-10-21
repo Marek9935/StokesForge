@@ -157,6 +157,23 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
             ConfirmOutcome::Cancel => actions.push(Action::ConfirmDiscardedSave(false)),
         }
     }
+    if let Some(name) = state.pending_recovery_delete() {
+        match modal_confirm(
+            ctx,
+            egui::Id::new("stokesforge_recovery_delete"),
+            &tr!("recovery-delete-title"),
+            PlainSize::Default,
+            &tr!("recovery-delete"),
+            &tr!("recovery-delete", "hint"),
+            |ui| {
+                ui.label(tr!("recovery-delete-confirm", name = name.as_str()));
+            },
+        ) {
+            ConfirmOutcome::Open => {}
+            ConfirmOutcome::Confirm => actions.push(Action::ConfirmRecoveryDelete(true)),
+            ConfirmOutcome::Cancel => actions.push(Action::ConfirmRecoveryDelete(false)),
+        }
+    }
     if state.pending_row_drop().is_some() {
         row_drop_dialog(ctx, actions);
     }
@@ -166,7 +183,7 @@ pub(super) fn show(ctx: &egui::Context, state: &AppState, actions: &mut Vec<Acti
 fn unsaved_dialog(ctx: &egui::Context, gesture: &UnsavedGesture, actions: &mut Vec<Action>) {
     let question = match gesture {
         UnsavedGesture::NewProject => tr!("unsaved-new"),
-        UnsavedGesture::Open(_) => tr!("unsaved-open"),
+        UnsavedGesture::Open(_) | UnsavedGesture::OpenRecovery(_) => tr!("unsaved-open"),
         UnsavedGesture::Quit => tr!("unsaved-quit"),
     };
     let choice = match modal_save_changes(

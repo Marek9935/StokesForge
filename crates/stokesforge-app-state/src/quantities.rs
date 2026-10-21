@@ -174,6 +174,15 @@ pub const MAX_FILE_MB: Quantity = Quantity::whole(64.0)
     )
     .with_presets(&[64.0, 128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0]);
 
+/// Période de la sauvegarde automatique, en minutes (#317) ; bornes de
+/// `preferences::{MIN,MAX}_AUTOSAVE_MINUTES`.
+pub const AUTOSAVE_MINUTES: Quantity = Quantity::whole(1.0)
+    .between(
+        crate::preferences::MIN_AUTOSAVE_MINUTES as f64,
+        crate::preferences::MAX_AUTOSAVE_MINUTES as f64,
+    )
+    .with_presets(&[1.0, 5.0, 10.0, 15.0, 30.0, 60.0]);
+
 /// Degré d'un polynôme.
 pub const POLYNOMIAL_DEGREE: Quantity =
     Quantity::whole(1.0).between(1.0, limits::MAX_DEGREE as f64);

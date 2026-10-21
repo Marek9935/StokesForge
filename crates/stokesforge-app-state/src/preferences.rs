@@ -174,6 +174,11 @@ pub const DEFAULT_MAX_FILE_BYTES: u64 = stokesforge_persistence::DEFAULT_MAX_FIL
 pub const MIN_MAX_FILE_MB: u32 = 16;
 pub const MAX_MAX_FILE_MB: u32 = 16384;
 
+/// Sauvegarde automatique (#317) : période par défaut et bornes, en minutes.
+pub const DEFAULT_AUTOSAVE_MINUTES: u32 = 5;
+pub const MIN_AUTOSAVE_MINUTES: u32 = 1;
+pub const MAX_AUTOSAVE_MINUTES: u32 = 60;
+
 /// Forme du fichier sur disque. Un champ inconnu est ignoré, un champ absent
 /// prend sa valeur par défaut : un fichier écrit par une version plus récente
 /// reste lisible.
@@ -194,6 +199,13 @@ struct PreferencesFile {
     /// bornes : ramené dans les bornes ; absent ou illisible : le défaut.
     #[serde(default, deserialize_with = "lenient")]
     max_file_mb: Option<u32>,
+    /// Sauvegarde automatique (#317) ; absent ou illisible : activée.
+    #[serde(default, deserialize_with = "lenient")]
+    autosave: Option<bool>,
+    /// Période de la sauvegarde automatique, en minutes ; hors bornes : ramenée
+    /// dans les bornes ; absente ou illisible : 5.
+    #[serde(default, deserialize_with = "lenient")]
+    autosave_minutes: Option<u32>,
     /// Gardée brute : c'est `toolbar::ToolbarLayout::from_json` qui la lit, en
     /// tolérant ce qu'une autre version y a écrit.
     #[serde(default)]
@@ -225,6 +237,10 @@ struct PreferencesFile {
     copy_formats: Option<serde_json::Value>,
 }
 
+fn clamp_autosave_minutes(minutes: u32) -> u32 {
+    minutes.clamp(MIN_AUTOSAVE_MINUTES, MAX_AUTOSAVE_MINUTES)
+}
+
 fn clamp_max_file_mb(megabytes: u32) -> u32 {
     megabytes.clamp(MIN_MAX_FILE_MB, MAX_MAX_FILE_MB)
 }
@@ -248,6 +264,8 @@ pub struct Preferences {
     object_manager_settings: ObjectManagerSettings,
     svg_text: SvgTextMode,
     max_file_mb: u32,
+    autosave: bool,
+    autosave_minutes: u32,
     toolbars: Option<serde_json::Value>,
     analysis_keep_results: bool,
     analysis_low_r2_dialog: bool,
@@ -296,6 +314,10 @@ impl Preferences {
             max_file_mb: file
                 .max_file_mb
                 .map_or(DEFAULT_MAX_FILE_MB, clamp_max_file_mb),
+            autosave: file.autosave.unwrap_or(true),
+            autosave_minutes: file
+                .autosave_minutes
+                .map_or(DEFAULT_AUTOSAVE_MINUTES, clamp_autosave_minutes),
             toolbars: file.toolbars,
             analysis_keep_results: file.analysis_keep_results.unwrap_or(false),
             analysis_low_r2_dialog: file.analysis_low_r2_dialog.unwrap_or(true),
@@ -398,6 +420,29 @@ impl Preferences {
     pub fn save_max_file_mb(&mut self, megabytes: u32) -> std::io::Result<()> {
         self.max_file_mb = clamp_max_file_mb(megabytes);
         self.save_field("max_file_mb", self.max_file_mb.into())
+    }
+
+    /// La sauvegarde automatique est-elle active ? Oui par défaut (#317).
+    pub fn autosave(&self) -> bool {
+        self.autosave
+    }
+
+    /// Mémorise l'activation sans remplacer les autres préférences.
+    pub fn save_autosave(&mut self, on: bool) -> std::io::Result<()> {
+        self.autosave = on;
+        self.save_field("autosave", on.into())
+    }
+
+    /// Période de la sauvegarde automatique, en minutes, toujours dans
+    /// `[MIN_AUTOSAVE_MINUTES, MAX_AUTOSAVE_MINUTES]` ; 5 par défaut.
+    pub fn autosave_minutes(&self) -> u32 {
+        self.autosave_minutes
+    }
+
+    /// Mémorise la période (ramenée dans les bornes).
+    pub fn save_autosave_minutes(&mut self, minutes: u32) -> std::io::Result<()> {
+        self.autosave_minutes = clamp_autosave_minutes(minutes);
+        self.save_field("autosave_minutes", self.autosave_minutes.into())
     }
 
     /// La sortie par défaut des analyses : garder les valeurs dans Results
@@ -1042,5 +1087,37 @@ mod object_manager_tests {
             Preferences::load_from(Some(path)).copy_formats(),
             default_copy_formats()
         );
+    }
+
+    /// Sauvegarde automatique (#317) : active et 5 minutes par défaut, période
+    /// ramenée à 1–60, valeur illisible : le défaut ; aller-retour.
+    #[test]
+    fn la_sauvegarde_automatique_a_ses_defauts_et_ses_bornes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        let lire = |json: &str| {
+            std::fs::write(&path, json).unwrap();
+            let prefs = Preferences::load_from(Some(path.clone()));
+            (prefs.autosave(), prefs.autosave_minutes())
+        };
+        assert_eq!(lire("{}"), (true, 5), "absent : activée, 5 minutes");
+        assert_eq!(lire(r#"{"autosave_minutes":0}"#), (true, 1));
+        assert_eq!(lire(r#"{"autosave_minutes":999}"#), (true, 60));
+        assert_eq!(
+            lire(r#"{"autosave_minutes":"x","autosave":"x"}"#),
+            (true, 5)
+        );
+        assert_eq!(lire(r#"{"autosave":false}"#), (false, 5));
+
+        let _ = std::fs::remove_file(&path);
+        let mut prefs = Preferences::load_from(Some(path.clone()));
+        prefs.save_autosave(false).unwrap();
+        prefs.save_autosave_minutes(15).unwrap();
+        let relues = Preferences::load_from(Some(path));
+        assert_eq!((relues.autosave(), relues.autosave_minutes()), (false, 15));
+        prefs.save_autosave_minutes(0).unwrap();
+        assert_eq!(prefs.autosave_minutes(), 1);
+        prefs.save_autosave_minutes(u32::MAX).unwrap();
+        assert_eq!(prefs.autosave_minutes(), 60);
     }
 }
