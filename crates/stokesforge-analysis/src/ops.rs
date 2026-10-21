@@ -544,7 +544,7 @@ impl Operation {
             Operation::Baseline {
                 method: BaselineMethod::Zones { degree, .. },
                 ..
-            } if !(1..=MAX_DEGREE).contains(degree) => bad("degree"),
+            } if *degree > MAX_DEGREE => bad("degree"),
             Operation::Fit { range, .. } if range.is_some_and(|r| !is_posed(r)) => bad("range"),
             Operation::Fit { spec, .. } => match spec.model {
                 Model::Polynomial { degree } if !(1..=MAX_DEGREE).contains(&degree) => {

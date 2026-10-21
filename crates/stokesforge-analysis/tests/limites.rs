@@ -142,7 +142,7 @@ fn validate_refuse_une_borne_de_zone_non_finie() {
 }
 
 #[test]
-fn validate_refuse_une_ancre_non_finie() {
+fn validate_ignore_une_ancre_non_finie() {
     let anchors = |points| {
         baseline(BaselineMethod::Anchors {
             points,
@@ -150,13 +150,14 @@ fn validate_refuse_une_ancre_non_finie() {
         })
     };
     assert_eq!(anchors(vec![(0.0, 1.0), (2.0, 3.0)]).validate(), Ok(()));
+    // #298 : une ancre non posée est ignorée, jamais une erreur de validation.
     assert_eq!(
         anchors(vec![(0.0, 1.0), (f64::NAN, 3.0)]).validate(),
-        invalid("points")
+        Ok(())
     );
     assert_eq!(
         anchors(vec![(0.0, 1.0), (2.0, 3.0), (4.0, f64::INFINITY)]).validate(),
-        invalid("points")
+        Ok(())
     );
 }
 
@@ -474,7 +475,7 @@ fn validate_refuse_chaque_champ_non_fini_et_accepte_le_fini_qui_fait_l_aller_ret
 }
 
 #[test]
-fn validate_refuse_toute_ancre_non_finie_et_l_accepte_finie() {
+fn validate_ignore_toute_ancre_non_finie_et_l_accepte_finie() {
     for interpolation in [Interpolation::Segments, Interpolation::Spline] {
         let anchors = |points| {
             baseline(BaselineMethod::Anchors {
@@ -484,18 +485,9 @@ fn validate_refuse_toute_ancre_non_finie_et_l_accepte_finie() {
         };
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             for p in [(bad, 3.0), (3.0, bad)] {
-                assert_eq!(
-                    anchors(vec![p, (0.0, 1.0), (5.0, 2.0)]).validate(),
-                    invalid("points")
-                );
-                assert_eq!(
-                    anchors(vec![(0.0, 1.0), p, (5.0, 2.0)]).validate(),
-                    invalid("points")
-                );
-                assert_eq!(
-                    anchors(vec![(0.0, 1.0), (5.0, 2.0), p]).validate(),
-                    invalid("points")
-                );
+                assert_eq!(anchors(vec![p, (0.0, 1.0), (5.0, 2.0)]).validate(), Ok(()));
+                assert_eq!(anchors(vec![(0.0, 1.0), p, (5.0, 2.0)]).validate(), Ok(()));
+                assert_eq!(anchors(vec![(0.0, 1.0), (5.0, 2.0), p]).validate(), Ok(()));
             }
         }
         assert_eq!(
@@ -506,7 +498,7 @@ fn validate_refuse_toute_ancre_non_finie_et_l_accepte_finie() {
 }
 
 #[test]
-fn run_des_ancres_refuse_le_non_fini_et_compte_les_ancres_posees() {
+fn run_des_ancres_ignore_le_non_fini_et_compte_les_ancres_posees() {
     let input = SeriesInput {
         x: vec![0.0, 1.0, 2.0, 3.0, 4.0],
         y: vec![1.0, 2.0, 3.0, 4.0, 5.0],
@@ -536,15 +528,16 @@ fn run_des_ancres_refuse_le_non_fini_et_compte_les_ancres_posees() {
     for c in corrected {
         assert!((c - 1.0).abs() < 1e-12);
     }
-    // Un NaN : refusé par `run`, jamais compté ni écarté en silence.
+    // Un NaN : ignoré par `run`, comme par `readiness` (#298) ; compté pour rien.
     let bad = anchors(vec![(0.0, 0.0), (2.0, 2.0), (f64::NAN, 1.0)]);
     assert_eq!(bad.readiness(), Readiness::Ready);
-    assert_eq!(
-        run(&bad, std::slice::from_ref(&input), None).unwrap_err(),
-        AnalysisError::InvalidParameter {
-            name: "points".into()
-        }
-    );
+    let out = run(&bad, std::slice::from_ref(&input), None).unwrap();
+    let used = out[0]
+        .values
+        .iter()
+        .find(|v| v.key == "baseline.points")
+        .unwrap();
+    assert_eq!(used.value, 2.0);
 }
 
 #[test]
@@ -939,7 +932,8 @@ fn validate_accepte_zone_degeneree_inversee_et_degres_extremes() {
     assert_eq!(with(vec![(3.0, 1.0)], 1), Ok(()));
     assert_eq!(with(vec![(0.0, 1.0)], MAX_DEGREE), Ok(()));
     assert_eq!(with(vec![(0.0, 1.0)], MAX_DEGREE + 1), invalid("degree"));
-    assert_eq!(with(vec![(0.0, 1.0)], 0), invalid("degree"));
+    // Degré 0 : la constante, permis (#298).
+    assert_eq!(with(vec![(0.0, 1.0)], 0), Ok(()));
     // Une zone non finie l'emporte sur le degré (erreur de zone d'abord).
     assert_eq!(with(vec![(f64::NAN, 1.0)], 0), invalid("zones"));
     assert_eq!(

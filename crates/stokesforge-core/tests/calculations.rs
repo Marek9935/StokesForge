@@ -188,7 +188,7 @@ fn une_operation_non_finie_est_refusee_a_l_ajout_et_a_la_mise_a_jour() {
 /// Une opération non finie par famille et par champ : `(nom attendu dans
 /// l'erreur, opération)`.
 fn operations_non_finies() -> Vec<(&'static str, Operation)> {
-    use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp, Interpolation};
+    use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
     use stokesforge_analysis::deconv::{DirectMethod, ReconvSpec};
     use stokesforge_analysis::fit::FitSpec;
     use stokesforge_analysis::integrate::{IntegrateSpec, Under};
@@ -233,13 +233,7 @@ fn operations_non_finies() -> Vec<(&'static str, Operation)> {
                 p2: (nan, 2.0),
             }),
         ),
-        (
-            "points",
-            base(BaselineMethod::Anchors {
-                points: vec![(0.0, 1.0), (1.0, f64::NEG_INFINITY)],
-                interpolation: Interpolation::Segments,
-            }),
-        ),
+        // Les ancres non posées sont ignorées, pas refusées (#298).
         (
             "zones",
             base(BaselineMethod::Zones {

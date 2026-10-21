@@ -174,9 +174,9 @@ impl BaselineMethod {
             BaselineMethod::Line { p1, p2 } => ("points", pair_finite(*p1) && pair_finite(*p2)),
             BaselineMethod::ConstantZone { zone } => ("zone", pair_finite(*zone)),
             BaselineMethod::Zones { zones, .. } => ("zones", zones.iter().all(|z| pair_finite(*z))),
-            BaselineMethod::Anchors { points, .. } => {
-                ("points", points.iter().all(|p| pair_finite(*p)))
-            }
+            // Une ancre non posée (non finie) est ignorée par `build`, comme par
+            // `readiness` (#298) : jamais une erreur.
+            BaselineMethod::Anchors { .. } => ("points", true),
         };
         if finite {
             Ok(())
@@ -307,13 +307,14 @@ pub fn build(method: &BaselineMethod, series: &Series) -> Result<Baseline, Analy
             points,
             interpolation,
         } => {
-            if points.len() < 2 {
+            let mut pts: Vec<(f64, f64)> =
+                points.iter().copied().filter(|p| pair_finite(*p)).collect();
+            if pts.len() < 2 {
                 return Err(AnalysisError::NotEnoughAnchors {
-                    found: points.len(),
+                    found: pts.len(),
                     needed: 2,
                 });
             }
-            let mut pts = points.clone();
             pts.sort_by(|a, b| a.0.total_cmp(&b.0));
             if pts.windows(2).any(|w| w[0].0 == w[1].0) {
                 return Err(AnalysisError::DuplicateAnchor);
@@ -514,31 +515,6 @@ mod tests {
     }
 
     #[test]
-    fn une_ancre_non_finie_est_refusee() {
-        let s = line_series();
-        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            for points in [
-                vec![(0.0, 1.0), (bad, 2.0), (4.0, 3.0)],
-                vec![(0.0, 1.0), (2.0, bad), (4.0, 3.0)],
-                vec![(0.0, 1.0), (4.0, bad)],
-            ] {
-                for interpolation in [Interpolation::Segments, Interpolation::Spline] {
-                    let method = BaselineMethod::Anchors {
-                        points: points.clone(),
-                        interpolation,
-                    };
-                    assert_eq!(
-                        build(&method, &s).unwrap_err(),
-                        AnalysisError::InvalidParameter {
-                            name: "points".into()
-                        }
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
     fn zones_x_tous_egaux_degre_0_reste_fini_loin_du_centre() {
         // #274 : l'échelle plancher MIN_POSITIVE rendait t énorme, `0·inf` = NaN.
         let s = Series::new(vec![0.0, 0.0], vec![1.0, 3.0]);
@@ -649,29 +625,30 @@ mod tests {
         }
     }
 
+    /// #298 : une ancre non posée (non finie) est ignorée, comme par
+    /// `readiness` ; seules les ancres posées comptent pour le minimum de 2.
     #[test]
-    fn une_ancre_non_finie_est_refusee_en_toute_position_et_coordonnee() {
+    fn une_ancre_non_finie_est_ignoree_en_toute_position_et_coordonnee() {
         let s = line_series();
-        let invalid = AnalysisError::InvalidParameter {
-            name: "points".into(),
-        };
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            // Fautive en X seul, en Y seul, ou les deux ; première, milieu,
-            // dernière ; même seule (le refus passe avant le décompte).
             for p in [(bad, 2.0), (2.0, bad), (bad, bad)] {
-                for points in [
-                    vec![p, (1.0, 1.0), (3.0, 2.0)],
-                    vec![(1.0, 1.0), p, (3.0, 2.0)],
-                    vec![(1.0, 1.0), (3.0, 2.0), p],
-                    vec![p],
-                ] {
-                    for interpolation in [Interpolation::Segments, Interpolation::Spline] {
-                        assert_eq!(
-                            build(&anchors(points.clone(), interpolation), &s).unwrap_err(),
-                            invalid,
-                            "{points:?}"
-                        );
+                for interpolation in [Interpolation::Segments, Interpolation::Spline] {
+                    for points in [
+                        vec![p, (1.0, 1.0), (3.0, 2.0)],
+                        vec![(1.0, 1.0), p, (3.0, 2.0)],
+                        vec![(1.0, 1.0), (3.0, 2.0), p],
+                    ] {
+                        let b = build(&anchors(points.clone(), interpolation), &s).unwrap();
+                        assert_eq!(b.points_used, 2, "{points:?}");
                     }
+                    // Une seule ancre posée sur deux : trop peu.
+                    assert_eq!(
+                        build(&anchors(vec![(1.0, 1.0), p], interpolation), &s).unwrap_err(),
+                        AnalysisError::NotEnoughAnchors {
+                            found: 1,
+                            needed: 2
+                        }
+                    );
                 }
             }
         }

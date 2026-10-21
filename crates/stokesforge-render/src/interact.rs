@@ -337,17 +337,19 @@ pub fn fit_range(values: &[f64], scale: AxisScale) -> (f64, f64) {
 /// Le cadre initial d'un axe d'un graphe : [`fit_range`] sur `values`,
 /// remplacé par les bornes mémorisées de l'axe quand son cadrage n'est pas
 /// automatique, puis mis dans le sens d'affichage (`(haut, bas)` si l'axe est
-/// inversé). Un cadrage explicite déjà décroissant sur un axe inversé est donc
-/// remis dans le sens croissant — comportement de l'aperçu d'analyse repris tel
-/// quel, qui diffère de celui du graphe (`pipeline::axis_range`).
+/// inversé). Même règle que le graphe (`pipeline::axis_range`, #269) : un seul
+/// retournement, que l'axe soit inversé par la case « Inversé », par des
+/// bornes `min > max`, ou par les deux.
 pub fn axis_frame(values: &[f64], axis: &AxisSpec) -> (f64, f64) {
     let mut range = fit_range(values, axis.scale);
+    let mut reversed = false;
     if !axis.auto_range {
         if let (Some(low), Some(high)) = (axis.range_min, axis.range_max) {
-            range = (low, high);
+            reversed = low > high;
+            range = (low.min(high), low.max(high));
         }
     }
-    if axis.inverted {
+    if axis.inverted || reversed {
         range = (range.1, range.0);
     }
     range
@@ -953,6 +955,27 @@ mod tests {
         axis.auto_range = true;
         axis.inverted = false;
         assert_eq!(axis_frame(&[0.0, 10.0], &axis), (-0.5, 10.5));
+    }
+
+    /// #269 : les quatre combinaisons « bornes dans l'ordre ou non » ×
+    /// « Inversé », comme le graphe (un seul retournement).
+    #[test]
+    fn le_cadre_d_un_axe_decroissant_n_est_retourne_qu_une_fois() {
+        let mut axis = AxisSpec {
+            auto_range: false,
+            ..AxisSpec::default()
+        };
+        for (min, max, inverted, attendu) in [
+            (400.0, 4000.0, false, (400.0, 4000.0)),
+            (4000.0, 400.0, false, (4000.0, 400.0)),
+            (400.0, 4000.0, true, (4000.0, 400.0)),
+            (4000.0, 400.0, true, (4000.0, 400.0)),
+        ] {
+            axis.range_min = Some(min);
+            axis.range_max = Some(max);
+            axis.inverted = inverted;
+            assert_eq!(axis_frame(&[500.0, 3000.0], &axis), attendu);
+        }
     }
 
     #[test]
