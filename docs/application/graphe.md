@@ -350,9 +350,9 @@ série sont composés par Typst et lus comme du **markup** (`docs/rendu.md`
 icône d'aide grisée (#197, `app/hover_help.rs`) dont la bulle, au survol, rappelle
 la syntaxe (`formula_help`, issue #33) : `$lambda$`, `$x_2$`, `$"cm"^(-1)$`,
 `*bold*`, `\$` pour un dollar, et nomme Typst avec l'adresse de sa référence.
-Elle remplace le mémo repliable « Formula syntax » : le lien avec le champ se
-voit et l'aide ne prend plus de hauteur. Tout champ futur qui accepte une
-formule passe par `formula_field` ; une autre aide au survol, par `hover_help`.
+Elle remplace le mémo repliable « Math syntax » : le lien avec le champ se
+voit et l'aide ne prend plus de hauteur. Tout champ futur qui accepte du
+texte Typst (côté interface : « Math », #322) passe par `formula_field` ; une autre aide au survol, par `hover_help`.
 Le test `chaque_exemple_du_memo_compile` vérifie que chaque exemple compile. Un
 nom de série laissé vide reprend celui de la colonne, affiché tel quel.
 

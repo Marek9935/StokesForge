@@ -532,7 +532,7 @@ fn formula_help(ui: &mut egui::Ui, hint: &str) {
         if !hint.is_empty() {
             ui.label(hint);
         }
-        ui.label(bold(tr!("plot-formula-memo-header")));
+        ui.label(bold(tr!("plot-math-memo-header")));
         egui::Grid::new("plot_formula_help")
             .num_columns(2)
             .spacing([12.0, 2.0])
@@ -544,7 +544,7 @@ fn formula_help(ui: &mut egui::Ui, hint: &str) {
                 }
             });
         ui.weak(tr!(
-            "plot-formula-footer",
+            "plot-math-footer",
             url = "typst.app/docs/reference/math"
         ));
     });
@@ -554,13 +554,13 @@ fn formula_help(ui: &mut egui::Ui, hint: &str) {
 /// Typst, jamais traduite), ce qu'on obtient (traduit).
 fn formula_memo_rows() -> [(&'static str, String); 7] {
     [
-        ("$lambda$  $Delta$", tr!("plot-formula-greek")),
-        ("$x_2$  $\"Ru(bpy)\"_3$", tr!("plot-formula-subscript")),
-        ("$x^2$  $\"cm\"^(-1)$", tr!("plot-formula-superscript")),
-        ("$Delta H = sum_i n_i$", tr!("plot-formula-full")),
-        ("$\"L mol\"^(-1)$", tr!("plot-formula-upright")),
-        ("*bold*  _italic_", tr!("plot-formula-format")),
-        ("\\$  \\_  \\*  \\#", tr!("plot-formula-escape")),
+        ("$lambda$  $Delta$", tr!("plot-math-greek")),
+        ("$x_2$  $\"Ru(bpy)\"_3$", tr!("plot-math-subscript")),
+        ("$x^2$  $\"cm\"^(-1)$", tr!("plot-math-superscript")),
+        ("$Delta H = sum_i n_i$", tr!("plot-math-full")),
+        ("$\"L mol\"^(-1)$", tr!("plot-math-upright")),
+        ("*bold*  _italic_", tr!("plot-math-format")),
+        ("\\$  \\_  \\*  \\#", tr!("plot-math-escape")),
     ]
 }
 
@@ -2245,7 +2245,7 @@ mod tests {
             });
         };
         let peints = textes(&image(&context, Vec::new(), &mut peindre));
-        let pied = tr!("plot-formula-footer", url = "typst.app/docs/reference/math");
+        let pied = tr!("plot-math-footer", url = "typst.app/docs/reference/math");
         for (source, effet) in formula_memo_rows() {
             assert!(!est_peint(&peints, source), "au repos : {source:?} peint");
             assert!(!est_peint(&peints, &effet));

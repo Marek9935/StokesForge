@@ -24,6 +24,7 @@ stokesforge-render-egui    stokesforge-render-svg
 Les deux backends ne diffèrent que par **la façon de poser des pixels**. Types
 de série, échelles, primitives, rognage, légende, décimation, interaction,
 formules : tout est dans `stokesforge-render`.
+Vocabulaire d'interface (#322) : le texte Typst entre `$…$` se dit « Math » / « Maths » à l'écran et dans les clés (`plot-math-*`, `format-math`) ; « Formula » est réservé au calcul d'une colonne. Les identifiants du code (`formula::`, `TextFormat::Formula`) gardent leur nom.
 
 `RenderError` (nœud inconnu, pas un graphe, échec de Plotters) vit dans
 `stokesforge-render` (#255) ; `stokesforge-render-egui` la réexporte. Ne pas la

@@ -886,15 +886,15 @@ plot-theme-note = Applies to all titles, axes, ticks and gridlines. Replaces col
 
 # Memo of the Typst syntax, under every title field
 
-plot-formula-memo-header = Formula syntax
-plot-formula-greek = Greek letters λ, Δ
-plot-formula-subscript = Subscript
-plot-formula-superscript = Superscript
-plot-formula-full = Full formula
-plot-formula-upright = Upright text in a formula
-plot-formula-format = Text formatting
-plot-formula-escape = The character itself
-plot-formula-footer = Text between $ … $ is a formula, the rest is plain text. This is Typst syntax; full reference: { $url }
+plot-math-memo-header = Math syntax
+plot-math-greek = Greek letters λ, Δ
+plot-math-subscript = Subscript
+plot-math-superscript = Superscript
+plot-math-full = Math with several terms
+plot-math-upright = Upright text in math
+plot-math-format = Text formatting
+plot-math-escape = The character itself
+plot-math-footer = Text between $ … $ is math, the rest is plain text. This is Typst syntax; full reference: { $url }
 
 # Text on the graph (editor in place) and view of the graph
 
@@ -909,7 +909,7 @@ plot-text-align-right = Right
 plot-text-ok =
     OK
     .hint = Applies the text (Enter)
-plot-text-placeholder = Text, $formula$
+plot-text-placeholder = Text, $math$
 plot-view-reset-zoom = Reset Zoom
 plot-layer-badge = { $n }
     .hint = Makes layer { $n } the target of additions to this graph
@@ -1086,8 +1086,8 @@ format-subscript = Subscript
     .hint = Lowers the selected text
 format-superscript = Superscript
     .hint = Raises the selected text
-format-formula = Formula
-    .hint = Writes the selected text as a math formula
+format-math = Math
+    .hint = Writes the selected text as math
 format-font = Font
     .hint = Sets the font of the whole text box, math included. A system font changes the figure on a computer that lacks it
 format-font-default = Graph font
@@ -1305,7 +1305,7 @@ analysis-fit-gaussian = Gaussian…
 analysis-fit-lorentzian = Lorentzian…
     .hint = Fits a Lorentzian peak
 analysis-fit-custom = Custom Model…
-    .hint = Fits a formula you write, with its own parameters
+    .hint = Fits a model expression you write, with its own parameters
 action-analysis-peaks = Decompose Peaks…
     .hint = Fits several peaks at once, found automatically or placed by hand
 action-analysis-reconvolution = Reconvolution…

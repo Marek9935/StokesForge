@@ -1093,8 +1093,8 @@ fn text_format_contents(ui: &mut egui::Ui, env: &BarEnv, requests: &mut Vec<Tool
             (
                 Icon::Formula,
                 TextFormat::Formula,
-                tr!("format-formula"),
-                tr!("format-formula", "hint"),
+                tr!("format-math"),
+                tr!("format-math", "hint"),
             ),
         ] {
             // Gras et italique agissent aussi sur tout un titre sélectionné (#243).

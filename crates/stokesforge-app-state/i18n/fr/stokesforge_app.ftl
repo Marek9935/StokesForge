@@ -882,15 +882,15 @@ plot-theme-note = S'applique à tous les titres, axes, graduations et quadrillag
 
 # Mémo de la syntaxe Typst, sous chaque champ de titre
 
-plot-formula-memo-header = Syntaxe des formules
-plot-formula-greek = Lettres grecques λ, Δ
-plot-formula-subscript = Indice
-plot-formula-superscript = Exposant
-plot-formula-full = Formule complète
-plot-formula-upright = Texte droit dans une formule
-plot-formula-format = Mise en forme du texte
-plot-formula-escape = Le caractère lui-même
-plot-formula-footer = Le texte entre $ … $ est une formule, le reste est du texte simple. C'est la syntaxe de Typst ; référence complète : { $url }
+plot-math-memo-header = Syntaxe mathématique
+plot-math-greek = Lettres grecques λ, Δ
+plot-math-subscript = Indice
+plot-math-superscript = Exposant
+plot-math-full = Maths à plusieurs termes
+plot-math-upright = Texte droit en mode mathématique
+plot-math-format = Mise en forme du texte
+plot-math-escape = Le caractère lui-même
+plot-math-footer = Le texte entre $ … $ est en mode mathématique, le reste est du texte simple. C'est la syntaxe de Typst ; référence complète : { $url }
 
 # Texte sur le graphique (éditeur en place) et vue du graphique
 
@@ -905,7 +905,7 @@ plot-text-align-right = Droite
 plot-text-ok =
     OK
     .hint = Applique le texte (Entrée)
-plot-text-placeholder = Texte, $formule$
+plot-text-placeholder = Texte, $maths$
 plot-view-reset-zoom = Réinitialiser le zoom
 plot-layer-badge = { $n }
     .hint = Fait du calque { $n } la cible des ajouts à ce graphique
@@ -1082,10 +1082,10 @@ format-subscript = Indice
     .hint = Abaisse le texte sélectionné
 format-superscript = Exposant
     .hint = Élève le texte sélectionné
-format-formula = Formule
-    .hint = Écrit le texte sélectionné comme une formule mathématique
+format-math = Maths
+    .hint = Écrit le texte sélectionné en mode mathématique
 format-font = Police
-    .hint = Règle la police de toute la zone de texte, formules comprises. Une police du système change la figure sur un ordinateur qui ne l'a pas
+    .hint = Règle la police de toute la zone de texte, maths comprises. Une police du système change la figure sur un ordinateur qui ne l'a pas
 format-font-default = Police du graphe
 format-font-embedded = Fournies avec StokesForge
 format-font-system = Installées sur cet ordinateur
@@ -1301,7 +1301,7 @@ analysis-fit-gaussian = Gaussienne…
 analysis-fit-lorentzian = Lorentzienne…
     .hint = Ajuste un pic lorentzien
 analysis-fit-custom = Modèle libre…
-    .hint = Ajuste une formule que vous écrivez, avec ses propres paramètres
+    .hint = Ajuste une expression de modèle que vous écrivez, avec ses propres paramètres
 action-analysis-peaks = Décomposer en pics…
     .hint = Ajuste plusieurs pics à la fois, trouvés automatiquement ou posés à la main
 action-analysis-reconvolution = Reconvolution…
