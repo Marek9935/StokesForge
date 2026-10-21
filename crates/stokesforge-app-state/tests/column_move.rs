@@ -206,3 +206,37 @@ fn la_selection_reste_sur_les_colonnes_deplacees() {
         .columns(s.state.tree(), s.sheet);
     assert_eq!(selected, vec![c[1], c[2]]);
 }
+
+fn status_text(s: &Setup) -> String {
+    s.state.status().expect("un message d'état").text.clone()
+}
+
+/// La barre d'état dit le libellé du **groupe** (« Move Columns »), comme
+/// l'annulation, et non celui de la dernière étape (« Move “B” ») que `execute`
+/// y avait posé. Une colonne seule garde son libellé nommé. Témoin : retirer le
+/// remplacement à la clôture du groupe (`end_grouped_macro`).
+#[test]
+fn la_barre_d_etat_dit_le_libelle_du_groupe_apres_un_deplacement_multiple() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    let c = s.cols.clone();
+    move_selection(&mut s, &[c[1], c[3]], ColumnMove::Left);
+    assert_eq!(status_text(&s), "Move Columns");
+    s.state.dispatch(Action::Undo);
+    move_selection(&mut s, &[c[1]], ColumnMove::Right);
+    assert_eq!(status_text(&s), "Move “B”");
+}
+
+/// Même règle pour tout groupe fermé par `end_grouped_macro`, pas seulement
+/// Move : ici le type de plusieurs colonnes. Témoin : le même.
+#[test]
+fn la_barre_d_etat_dit_le_libelle_du_groupe_pour_un_autre_groupe() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = setup(dir.path());
+    let c = s.cols.clone();
+    s.state.dispatch(Action::SetColumnsType {
+        columns: vec![c[0], c[1]],
+        column_type: stokesforge_core::ColumnType::Mixed,
+    });
+    assert_eq!(status_text(&s), "Change Column Types");
+}

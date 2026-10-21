@@ -8831,14 +8831,28 @@ impl AppState {
         }
     }
 
+    /// Ferme un groupe ouvert par `begin_macro` (voir la clôture commune
+    /// ci-dessus). La barre d'état dit alors le libellé **du groupe**, mis en phrase par
+    /// `history_text` comme le fait l'annulation (« Move Columns »), et non
+    /// celui de la dernière étape que `execute` y avait posé (« Move “B” »).
+    /// Un échec (de la clôture ou d'une étape) garde sa place. Le libellé est
+    /// celui de l'entrée d'historique qui vient d'être posée : un groupe vide
+    /// n'en pose pas, et ne remplace alors rien (seule une entrée de groupe
+    /// est reprise).
     fn end_grouped_macro(&mut self) {
-        if let Err(err) = self.handle.end_macro() {
+        let closed = self.handle.end_macro();
+        if let Err(err) = &closed {
             self.fail(tr!(
                 "error-group-close",
-                cause = errors::session::error_message(&err)
+                cause = errors::session::error_message(err)
             ));
         }
         self.refresh();
+        if closed.is_ok() && !self.last_action_failed() {
+            if let Some(label @ HistoryLabel::Macro(_)) = self.snapshot.history.undo_label.clone() {
+                self.notice(history_text(&label));
+            }
+        }
     }
 
     /// Ajoute à `sheet` une colonne X (rôle abscisse) puis une colonne Y.

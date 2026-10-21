@@ -697,6 +697,7 @@ Sous-menu `Move ▸` (First · Left · Right · Last). Chaque règle a son témo
 | un enfant `Unknown` garde sa place, index dans la liste complète | `an_unknown_child_keeps_its_place_*` (index = rang visible : rouge) |
 | un seul Undo pour plusieurs colonnes, libellé « Move Columns » ; une colonne : `Move “B”` | `app-state/tests/column_move.rs` `deux_colonnes_deplacees_*` (sans macro : rouge), `une_colonne_seule_*` |
 | aucune fenêtre « Colonne utilisée », valeurs de formule inchangées | `deplacer_une_colonne_lue_par_une_formule_*` (appeler `open_column_use` : rouge) |
+| la barre d'état dit le libellé du **groupe** (« Move Columns ») à la clôture, comme l'annulation, pour tout groupe fermé par `end_grouped_macro` (la dernière étape ne reste pas affichée) ; une colonne seule garde `Move “B”` | `la_barre_d_etat_dit_le_libelle_du_groupe_*` (retirer le remplacement dans `end_grouped_macro` : rouge) |
 | la sélection couvre les mêmes colonnes après le geste | `la_selection_reste_sur_les_colonnes_deplacees` (vider la sélection : rouge) |
 | `Move ▸` entre le presse-papiers et `Type ▸`, quatre entrées ; grisage tout ou rien (A seule, C seule, A et C, lignes entières) ; l'entrée active pousse `MoveColumns` | `grid::tests::move_est_place_*`, `les_entrees_de_move_sont_grisees_*`, `une_entree_de_move_pousse_*` (grisage supprimé, entrée retirée : rouge) |
 | même sous-menu et même grisage dans Workbook › Columns | `menus::tests::le_menu_colonnes_porte_move_*` (retirer `Move ▸` de la peinture partagée : rouge) |
