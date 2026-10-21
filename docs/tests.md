@@ -669,3 +669,7 @@ Limite : le cadre rouge, la bulle et le champ qui reste ouvert (grille) ne sont 
 ## Polynôme contraint sur un X décalé (#296)
 
 `fit::tests::polynome_contraint_sur_x_tres_decale_est_signale` : signalé (`shifted_x`) pour un polynôme fixé ou à valeur initiale sur X ≈ 1e4 ; témoins non signalés : X centré, décalage modéré (1e2), polynôme sans contrainte (QR centré). Transport `.stf` : `shifted_x` dans `persistence/src/calculations.rs` (tests d'aller-retour et de noms figés).
+
+## Projet de démonstration (`demo/`)
+
+`crates/stokesforge-app/src/demo/tests.rs` (module du **binaire** : `cargo test -p stokesforge-app --bin stokesforge-app`). Chaque test a son témoin, vérifié par mutation (graine changée, titre donné à un graphe, colonne supprimée sous un graphe, amplitude du jeu gaussien changée, `recalculate` retiré de `session_for_project`) : noms de fenêtre uniques dans tout le projet, aucun titre de graphe (#103), chaque graphe résolu sans référence brisée et dessiné, axes logarithmiques sur données strictement positives (invariant 10), chaque jeu d'analyse retrouve ses paramètres connus par `core::compute` (`Attendu`, tolérance), les sept familles d'`OperationKind::ALL` couvertes, bruit à graine fixe épinglé, colonnes à formule calculées dès le démarrage, aller-retour `.stf` par la session (rapport propre, mêmes specs), tous les `PlotType` (sans `Unknown`).

@@ -113,7 +113,20 @@ la barre sont grisés pendant l'exécution d'un script (`disabled-script-running
 Les colonnes du projet de démonstration utilisent les noms automatiques
 `A`, `B`, `C`… ; le script prérempli lit `[Book1]Sheet1!A`, la première
 colonne visible dans la grille. Les noms descriptifs ne sont pas utilisés
-comme clés cachées de la démonstration.
+comme clés cachées de la démonstration : les titres lisibles sont des noms
+longs de colonne.
+
+La démonstration vit dans le code, module `demo/` du binaire (pas de fichier) :
+`Book1` + `Graph1` inchangés, un dossier `Classeurs` (`Types` : un exemplaire de
+chaque type de colonne et des colonnes à formule ; `Mesures` : les données des
+graphes ; une matrice ; la note `Lisez-moi`), un dossier `Analyse` (un classeur
+par famille de calcul, dont `Integrate`, `FitPolynome` et `FitGaussienne` avec
+leur calcul déjà fait, visible dans le volet Results) et six graphes (`Panneaux`,
+`Axes`, `TypesTrace`, `Annotations`, `Groupes`, `Lignes`). Les noms de fenêtre y
+sont uniques dans tout le projet. `session_for_project` demande un recalcul
+complet juste après `Session::spawn` : les colonnes à formule ne portent que
+leur formule (invariant 11) et resteraient vides sans lui. Le bruit des mesures
+est à graine fixe : la démonstration est la même à chaque lancement.
 
 Le graphe de démonstration suit le même défaut que les créations par le menu,
 le tracé de colonnes et `pyst.plot` sans option `title` : aucun titre (#103).

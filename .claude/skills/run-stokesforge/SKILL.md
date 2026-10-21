@@ -41,7 +41,9 @@ python3 $D stop                    # tue l'app et Xwayland
 ```
 
 Coordonnées : pixels écran X, fenêtre de 1100x700 en (0,0), échelle 1.0.
-Sans argument, `start` ouvre le projet de démonstration (Book1 + Graph1).
+Sans argument, `start` ouvre le projet de démonstration (Book1 + Graph1, puis les dossiers
+Classeurs et Analyse et six graphes : Panneaux, Axes, TypesTrace, Annotations, Groupes, Lignes ;
+voir `crates/stokesforge-app/src/demo/`).
 Journaux : `/tmp/stokesforge-run/{app,xwayland}.log` (`SF_RUN_DIR` pour changer).
 
 Exemple vérifié de bout en bout : Préférences → bascule Français (toute
