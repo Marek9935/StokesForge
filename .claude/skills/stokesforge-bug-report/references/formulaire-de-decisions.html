@@ -110,6 +110,15 @@ nav.bar>div{max-width:780px;margin-inline:auto;display:flex;gap:8px;justify-cont
 .msl{display:inline-block;width:140px;height:8px;border-radius:4px;background:var(--line);position:relative;vertical-align:middle}
 .msl>i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--accent)}
 .msl>b{position:absolute;top:-5px;width:18px;height:18px;border-radius:50%;background:var(--panel);border:2px solid var(--accent);margin-left:-9px}
+.msh{display:inline-grid;grid-auto-flow:column;grid-auto-columns:minmax(56px,auto);border:2px solid var(--muted);border-radius:5px;overflow:hidden;font-size:.9rem;max-width:100%}
+.msc{display:flex;flex-direction:column;border-left:1px solid var(--line)}
+.msc:first-child{border-left:0}
+.msc b{padding:2px 8px;background:var(--line);text-align:center}
+.msc span{padding:3px 8px;background:var(--panel);white-space:nowrap}
+.msc.bad span{background:var(--bad-soft);color:var(--bad);font-weight:700}
+.msc.ok span{background:var(--ok-soft);color:var(--ok);font-weight:700}
+.msc.warn span{background:var(--warn-soft);color:var(--warn);font-weight:700}
+.msc.new span{background:var(--accent-soft);color:var(--accent);font-weight:700}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 <div class="wrap">
@@ -140,6 +149,8 @@ const grid=rows=>`<div class="mgrid">${rows.map(([k,v])=>`<span class="k">${k}</
 const win=(t,body,foot)=>`<div class="mwin"><div class="mwt">${t}</div><div class="mwb">${body}</div><div class="mwf">${foot}</div></div>`;
 const sbar=(...lines)=>`<div class="mbar">${lines.join('')}</div>`;
 const slider=p=>`<span class="msl"><i style="width:${p}%"></i><b style="left:${p}%"></b></span>`;
+// Feuille : colonnes [lettre, contenu, c] ; c = bad | ok | warn | new (colonne insérée)
+const sheet=cols=>`<div class="msh">${cols.map(([l,t,c=''])=>`<div class="msc ${c}"><b>${l}</b><span>${t}</span></div>`).join('')}</div>`;
 // Une option : nom, puces « après », schéma « après », avantage, défaut. La première est la recommandation.
 const O=(t,pts,m,plus,moins)=>({t,pts:pts||[],m:m||'',plus:plus||'',moins:moins||''});
 

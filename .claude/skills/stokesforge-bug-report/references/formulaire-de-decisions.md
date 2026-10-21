@@ -49,7 +49,8 @@ qu'ils apparaissent à l'écran.
   `err`, `ok`, `warn`, `off`, `ph`), `b` (bouton ; `pri`, `def`, `dan`,
   `off`), `tip` (bulle), `row`, `pair` (deux maquettes côte à côte), `grid`
   (table avant/après), `win` (dialogue avec pied), `sbar` (barre d'état),
-  `slider`. En ajouter une au gabarit plutôt que d'écrire du HTML à la main
+  `slider`, `sheet` (colonnes d'une feuille avec leur lettre ; `bad`, `ok`,
+  `warn`, `new`). En ajouter une au gabarit plutôt que d'écrire du HTML à la main
   dans les données.
 - Vérifier le script (`node --check`) avant de publier.
 - Publier avec `capabilities: {db: {}}` : les réponses vont dans la
