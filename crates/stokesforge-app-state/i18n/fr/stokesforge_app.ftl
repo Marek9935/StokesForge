@@ -1550,6 +1550,7 @@ error-io-other = { $detail }
 ## Messages de la barre d'état (#216)
 
 error-window-geometry = Impossible de mettre à jour la position de la fenêtre : { $cause }
+error-column-width = Impossible d'enregistrer la largeur de la colonne : { $cause }
 error-plot-settings-cancel = Impossible d'annuler les propriétés du graphe : { $cause }
 error-plot-settings-undo-group = Les modifications des propriétés du graphe ne pourront pas être annulées en une fois : { $cause }
 error-plot-settings-block-detached = Les propriétés du graphe sont ouvertes. Les valider ou les annuler avant de modifier une fenêtre détachée

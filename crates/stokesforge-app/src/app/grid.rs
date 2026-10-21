@@ -1636,15 +1636,39 @@ pub(super) fn grid_contents(
     let mut row_extents: Vec<RowExtent> = Vec::new();
     let header_rows = header_rows(ui.ctx(), book_of(state.tree(), sheet));
     let header_height = stacked_header_height(header_rows);
+    // #325 : la largeur d'une colonne est un fait de la **colonne** (`NodeId`,
+    // dans l'acteur et le `.stf`), non de sa position. egui_extras garde les
+    // siennes par position et les jette dès que le nombre de colonnes change
+    // (`TableState::load`) : on lui redonne donc, à chaque image, la largeur
+    // de chaque colonne, et on lui fait oublier son état quand la liste
+    // ordonnée des colonnes n'est plus celle de l'image précédente (ajout,
+    // suppression, annulation, déplacement, autre feuille, autre projet).
+    // Jamais un `id_salt` variable : l'identifiant de la zone de défilement
+    // verticale en dérive, et le défilement serait perdu.
+    let column_ids: Vec<NodeId> = columns.iter().map(|(id, _, _)| *id).collect();
+    let layout_key = (state.snapshot().epoch, column_ids.clone());
+    let layout_memory = ui.id().with("stokesforge_grid_layout");
+    let layout_changed = ui.data(|data| data.get_temp::<(u64, Vec<NodeId>)>(layout_memory))
+        != Some(layout_key.clone());
+    if layout_changed {
+        ui.data_mut(|data| data.insert_temp(layout_memory, layout_key));
+    }
     let mut table = TableBuilder::new(ui)
+        .id_salt(GRID_TABLE_SALT)
         .striped(true)
         .resizable(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(TableColumn::initial(ROW_NUMBER_COLUMN_WIDTH).at_least(MIN_ROW_NUMBER_COLUMN_WIDTH))
-        .columns(
-            TableColumn::initial(DEFAULT_COLUMN_WIDTH).at_least(MIN_COLUMN_WIDTH),
-            columns.len(),
-        )
+        .column(
+            TableColumn::initial(ROW_NUMBER_COLUMN_WIDTH).at_least(MIN_ROW_NUMBER_COLUMN_WIDTH),
+        );
+    for id in &column_ids {
+        let width = state.column_width(*id).unwrap_or(DEFAULT_COLUMN_WIDTH);
+        table = table.column(TableColumn::initial(width).at_least(MIN_COLUMN_WIDTH));
+    }
+    if layout_changed {
+        table.reset();
+    }
+    let mut table = table
         .min_scrolled_height(0.0)
         // La table occupe l'espace laissé par le panneau d'onglets, même
         // quand sa feuille contient peu de lignes : la grille garde ainsi
@@ -1675,6 +1699,14 @@ pub(super) fn grid_contents(
             );
         });
 
+    // Une largeur n'est poussée qu'à la **fin d'un redimensionnement fait à la
+    // main** : une colonne s'élargit aussi d'elle-même jusqu'à son contenu, et
+    // pousser la largeur rendue à chaque image marquerait le projet modifié à
+    // chaque ouverture (#325).
+    for (column, width) in finished_column_resizes(ui, &column_ids, &extents) {
+        actions.push(Action::SetColumnWidth { column, width });
+    }
+
     let last_column_right = extents
         .last()
         .map_or(grid_rect.left(), |&(_, _, right)| right);
@@ -1699,6 +1731,37 @@ pub(super) fn grid_contents(
         was_editing,
     );
     Some(table_output)
+}
+
+/// Sel de la table de la grille : fixe, donc sans effet sur l'identifiant de sa
+/// zone de défilement verticale. `finished_column_resizes` en reconstruit les
+/// identifiants des poignées de redimensionnement.
+const GRID_TABLE_SALT: &str = "stokesforge_grid_table";
+
+/// Les colonnes dont un redimensionnement à la main vient de se terminer
+/// (bouton relâché cette image), avec leur largeur rendue : `(colonne, largeur)`.
+/// La poignée de la colonne de données `k` est celle de rang `k + 1` de la table
+/// (la gouttière des numéros de ligne porte le rang 0) ; son identifiant est
+/// celui qu'egui_extras lui donne (`table.rs`, `state_id.with("resize_column")`).
+fn finished_column_resizes(
+    ui: &egui::Ui,
+    column_ids: &[NodeId],
+    extents: &[ColumnExtent],
+) -> Vec<(NodeId, f32)> {
+    let state_id = ui.id().with(egui::IdSalt::new(GRID_TABLE_SALT));
+    column_ids
+        .iter()
+        .enumerate()
+        .filter_map(|(index, id)| {
+            let handle = state_id.with("resize_column").with(index + 1);
+            let finished = ui
+                .ctx()
+                .read_response(handle)
+                .is_some_and(|response| response.drag_stopped());
+            let (_, left, right) = extents.iter().find(|(extent_id, _, _)| extent_id == id)?;
+            finished.then_some((*id, right - left))
+        })
+        .collect()
 }
 
 /// Prépare les espacements et l'ancrage focalisable, sans créer de nouvelle Ui.
@@ -2729,6 +2792,9 @@ mod tests {
         columns: Vec<NodeId>,
         voisin_focalise: bool,
         dernier: Option<egui::FullOutput>,
+        /// Combien d'`Action::SetColumnWidth` la grille a émises, toutes
+        /// images confondues (#325).
+        largeurs_envoyees: usize,
     }
 
     impl Banc {
@@ -2769,6 +2835,7 @@ mod tests {
                 columns,
                 voisin_focalise: false,
                 dernier: None,
+                largeurs_envoyees: 0,
             };
             for _ in 0..3 {
                 banc.image(Vec::new());
@@ -2786,6 +2853,11 @@ mod tests {
             });
             self.voisin_focalise = voisin;
             self.dernier = Some(sortie);
+            self.largeurs_envoyees += self
+                .actions
+                .iter()
+                .filter(|action| matches!(action, Action::SetColumnWidth { .. }))
+                .count();
         }
 
         fn touche(&mut self, key: egui::Key, modifiers: egui::Modifiers) {
@@ -4161,6 +4233,208 @@ mod tests {
             !charge_posee(&banc),
             "le bord dans la rangée des lettres redimensionne, il n'attrape pas"
         );
+    }
+
+    // --- Largeur des colonnes par identifiant (#325) ------------------------
+
+    /// La lettre de la colonne visible de rang `index` (la liste change avec
+    /// les ajouts et suppressions, `banc.columns` non).
+    fn lettre_visible(banc: &Banc, index: usize) -> String {
+        let (id, _, _) = banc.state.visible_columns(banc.sheet)[index].clone();
+        format!(
+            "{}({})",
+            column_letter(index),
+            role_label(banc.state.column_meta(id).role)
+        )
+    }
+
+    /// Largeur peinte de la colonne visible de rang `index` : l'aplat de sa
+    /// lettre, qui remplit toute la cellule.
+    fn largeur_peinte(banc: &Banc, index: usize) -> f32 {
+        let centre = banc
+            .centre_de(&lettre_visible(banc, index))
+            .expect("lettre peinte");
+        banc.dernier
+            .as_ref()
+            .unwrap()
+            .shapes
+            .iter()
+            .find_map(|peint| match &peint.shape {
+                egui::Shape::Rect(rect)
+                    if (rect.rect.height() - HEADER_SUBROW_HEIGHT).abs() < 0.5
+                        && rect.rect.contains(centre) =>
+                {
+                    Some(rect.rect.width())
+                }
+                _ => None,
+            })
+            .expect("aplat de la lettre")
+    }
+
+    fn largeurs_peintes(banc: &Banc, nombre: usize) -> Vec<f32> {
+        (0..nombre).map(|i| largeur_peinte(banc, i)).collect()
+    }
+
+    fn laisse_passer(banc: &mut Banc) {
+        for _ in 0..3 {
+            banc.image(Vec::new());
+        }
+    }
+
+    /// Applique les actions de la dernière image à l'état, comme l'application.
+    fn applique(banc: &mut Banc) {
+        for action in std::mem::take(&mut banc.actions) {
+            banc.state.dispatch(action);
+        }
+    }
+
+    fn largeurs_vues(banc: &Banc) -> Vec<Action> {
+        banc.actions
+            .iter()
+            .filter(|action| matches!(action, Action::SetColumnWidth { .. }))
+            .cloned()
+            .collect()
+    }
+
+    /// Redimensionne la colonne visible `index` de `delta` points en tirant
+    /// son bord droit, comme à la souris ; applique les actions de chaque
+    /// image. Rend les `SetColumnWidth` vues **pendant** le glisser, puis
+    /// celles de l'image du relâchement.
+    fn redimensionne(banc: &mut Banc, index: usize, delta: f32) -> (Vec<Action>, Vec<Action>) {
+        let centre = banc
+            .centre_de(&lettre_visible(banc, index))
+            .expect("lettre peinte");
+        let bord = centre.x
+            + largeur_peinte(banc, index) / 2.0
+            + banc.context.global_style().spacing.item_spacing.x / 2.0;
+        let depart = egui::pos2(bord, centre.y);
+        let mut pendant = Vec::new();
+        banc.image(vec![egui::Event::PointerMoved(depart)]);
+        banc.image(vec![egui::Event::PointerButton {
+            pos: depart,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        pendant.extend(largeurs_vues(banc));
+        for pas in 1..=3 {
+            let x = depart.x + delta * pas as f32 / 3.0;
+            banc.image(vec![egui::Event::PointerMoved(egui::pos2(x, depart.y))]);
+            pendant.extend(largeurs_vues(banc));
+            applique(banc);
+        }
+        banc.image(vec![egui::Event::PointerButton {
+            pos: egui::pos2(depart.x + delta, depart.y),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        let fin = largeurs_vues(banc);
+        applique(banc);
+        laisse_passer(banc);
+        (pendant, fin)
+    }
+
+    fn proches(a: f32, b: f32) -> bool {
+        (a - b).abs() <= 0.6
+    }
+
+    /// Le bord tiré d'une colonne ne pousse sa largeur qu'au relâchement, et
+    /// c'est la largeur peinte.
+    #[test]
+    fn un_redimensionnement_a_la_main_envoie_la_largeur_a_la_fin_seulement() {
+        let mut banc = Banc::new();
+        let avant = largeur_peinte(&banc, 1);
+        let (pendant, fin) = redimensionne(&mut banc, 1, 30.0);
+        assert!(pendant.is_empty(), "rien pendant le glisser : {pendant:?}");
+        let [Action::SetColumnWidth { column, width }] = fin.as_slice() else {
+            panic!("une largeur au relâchement, vu {fin:?}");
+        };
+        assert_eq!(*column, banc.columns[1]);
+        assert!(
+            proches(*width, avant + 30.0),
+            "{width} pour {}",
+            avant + 30.0
+        );
+        assert_eq!(banc.state.column_width(banc.columns[1]), Some(*width));
+    }
+
+    /// Ouvrir la feuille et la peindre : aucune largeur envoyée, le projet n'est
+    /// pas marqué modifié. Témoin : pousser la largeur rendue à chaque image.
+    #[test]
+    fn ouvrir_la_feuille_n_envoie_aucune_largeur() {
+        let mut banc = Banc::new();
+        laisse_passer(&mut banc);
+        assert_eq!(banc.largeurs_envoyees, 0);
+        let acteur = banc._session.handle().snapshot().unwrap();
+        assert!(acteur.column_widths.is_empty());
+        assert_eq!(acteur.geometry_revision, 0, "le projet n'est pas modifié");
+    }
+
+    /// Une largeur posée sur B, puis Add Column : A, B et C gardent la leur, la
+    /// neuve prend la largeur par défaut. Témoin : stockage par position.
+    #[test]
+    fn la_largeur_de_chaque_colonne_survit_a_l_ajout_d_une_colonne() {
+        let mut banc = Banc::new();
+        redimensionne(&mut banc, 1, 30.0);
+        let avant = largeurs_peintes(&banc, 3);
+        assert!(avant[1] > avant[0] + 20.0, "B est élargie : {avant:?}");
+
+        banc.state.dispatch(Action::AddColumn { sheet: banc.sheet });
+        laisse_passer(&mut banc);
+
+        let apres = largeurs_peintes(&banc, 4);
+        for i in 0..3 {
+            assert!(
+                proches(apres[i], avant[i]),
+                "colonne {i} : {apres:?} / {avant:?}"
+            );
+        }
+        assert!(
+            proches(apres[3], DEFAULT_COLUMN_WIDTH),
+            "la colonne neuve prend la largeur par défaut : {apres:?}"
+        );
+    }
+
+    /// Supprimer B puis Ctrl+Z : B et ses voisines retrouvent leur largeur ;
+    /// entre les deux, A et C gardent la leur, même quand une colonne neuve
+    /// ramène le même nombre de colonnes (la liste, elle, a changé).
+    #[test]
+    fn supprimer_puis_annuler_rend_la_colonne_et_ses_voisines_a_leur_largeur() {
+        let mut banc = Banc::new();
+        redimensionne(&mut banc, 0, 12.0);
+        redimensionne(&mut banc, 1, 30.0);
+        let avant = largeurs_peintes(&banc, 3);
+
+        banc.state.select_column(banc.sheet, banc.columns[1]);
+        banc.state
+            .dispatch(Action::DeleteSelectedCells { sheet: banc.sheet });
+        laisse_passer(&mut banc);
+        let apres = largeurs_peintes(&banc, 2);
+        assert!(proches(apres[0], avant[0]), "A : {apres:?} / {avant:?}");
+        assert!(proches(apres[1], avant[2]), "C : {apres:?} / {avant:?}");
+
+        // Une colonne neuve : deux colonnes devenues trois, la même quantité
+        // qu'avant la suppression, mais pas la même liste.
+        banc.state.dispatch(Action::AddColumn { sheet: banc.sheet });
+        laisse_passer(&mut banc);
+        let neuve = largeurs_peintes(&banc, 3);
+        assert!(
+            proches(neuve[0], avant[0]) && proches(neuve[1], avant[2]),
+            "{neuve:?}"
+        );
+        assert!(proches(neuve[2], DEFAULT_COLUMN_WIDTH), "{neuve:?}");
+
+        banc.state.dispatch(Action::Undo);
+        banc.state.dispatch(Action::Undo);
+        laisse_passer(&mut banc);
+        let rendu = largeurs_peintes(&banc, 3);
+        for i in 0..3 {
+            assert!(
+                proches(rendu[i], avant[i]),
+                "colonne {i} : {rendu:?} / {avant:?}"
+            );
+        }
     }
 
     // --- Glisser de lignes vers un graphe (#166) ------------------------------

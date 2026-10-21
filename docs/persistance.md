@@ -24,6 +24,18 @@ une table vide. L'application transmet les changements de géométrie à
 l'acteur et recharge cette table aussi bien depuis le menu Fichier qu'au
 démarrage avec un chemin de projet.
 
+Largeur des colonnes (#325) : la même fonction transporte une seconde table
+`NodeId -> f32` (points logiques), `FileBody::column_widths`, dans la struct
+`ViewTables { window_geometries, column_widths }` que rend `load_with_report` (et
+que prend `save_with_geometries`). Même statut que les géométries : hors de
+l'arbre annulable, `#[serde(default)]` (ancien fichier : table vide, les colonnes
+prennent la largeur par défaut), clés bornées par `MAX_NODE_ID`, placée avant
+`save_counter`. À la lecture, une clé sans nœud et une valeur qui n'est pas un
+réel fini strictement positif (NaN, ∞, ≤ 0) sont écartées **une à une**
+(invariant 10). L'acteur ne purge pas sa table à la mutation (Ctrl+Z doit
+retrouver la largeur) : c'est **l'écriture** qui n'émet pas la clé d'une colonne
+qui n'est plus dans l'arbre.
+
 Chaque `WindowGeometry` porte aussi, en option, un `WindowView` (issue #16) :
 mode `Open`/`Maximized`/`Closed`, repli, rang d'empilement parmi les fenêtres
 ouvertes. `x`/`y`/`width`/`height` y restent toujours la géométrie

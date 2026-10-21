@@ -1554,6 +1554,7 @@ error-io-other = { $detail }
 ## Messages de la barre d'état (#216)
 
 error-window-geometry = Could not update the window position: { $cause }
+error-column-width = Could not save the column width: { $cause }
 error-plot-settings-cancel = Could not cancel the graph properties: { $cause }
 error-plot-settings-undo-group = Changes to the graph properties cannot be undone together: { $cause }
 error-plot-settings-block-detached = Graph properties are open. Apply or cancel them before changing a detached window

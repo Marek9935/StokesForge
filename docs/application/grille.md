@@ -156,6 +156,34 @@ l'appui n'a **pas** commencé (`press_started_in`) : sinon un Ctrl+clic, qui
 bascule au relâchement, aurait déjà étendu la sélection pendant l'appui.
 
 
+### Largeur des colonnes : par colonne, pas par position (#325)
+
+La grille est une `egui_extras::TableBuilder`, dont la mémoire garde les
+largeurs **par position** et les jette dès que le nombre de colonnes change :
+supprimer ou ajouter une colonne remettait toute la feuille à zéro, et un
+déplacement ne l'aurait pas suivie. La largeur est donc un fait de la
+**colonne** : `NodeId -> f32` dans l'acteur (`SessionHandle::set_column_width`,
+`Snapshot::column_widths`, `AppState::column_width` / `Action::SetColumnWidth`),
+enregistrée dans le `.stf` (`docs/persistance.md`). Hors du modèle, hors de
+l'historique : redimensionner **ne s'annule pas**, mais Ctrl+Z qui ramène une
+colonne supprimée lui rend sa largeur (l'identifiant n'est jamais réutilisé,
+invariant 7, et la table n'est pas purgée à la mutation).
+
+`grid_contents` redonne à egui, à chaque image, `TableColumn::initial(largeur de
+la colonne ou DEFAULT_COLUMN_WIDTH)` par colonne, et appelle
+`TableBuilder::reset()` quand la liste ordonnée des identifiants (avec l'époque
+du projet) diffère de celle de l'image précédente — jamais un `id_salt`
+variable, dont dériverait l'identifiant de la zone de défilement verticale (le
+défilement serait perdu). Une colonne neuve (ajout, collage, import, analyse)
+prend la largeur par défaut. Pas d'ajustement au contenu par double-clic.
+
+La largeur n'est poussée qu'à la **fin d'un redimensionnement fait à la main**
+(`finished_column_resizes` : poignée relâchée, largeur lue sur l'étendue de
+l'en-tête). Une colonne s'élargit aussi d'elle-même jusqu'à son contenu :
+pousser la largeur rendue à chaque image marquerait le projet modifié à chaque
+ouverture. La vue détachée a son propre `AppState` ; sa largeur passe aussi par
+l'acteur, l'état principal la relit à son rafraîchissement.
+
 ### Une colonne a deux identités, une seule est visible
 
 Son **nom de nœud** (`Node::name` — « Temps », « Signal », ou le « A »/« B »

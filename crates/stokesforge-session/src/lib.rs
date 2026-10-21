@@ -112,10 +112,19 @@
 //! (rouvrir ce même `NodeId` un jour n'a pas de sens, les identifiants ne
 //! sont jamais réutilisés — invariant 7).
 //!
+//! **Largeur des colonnes (#325).** Une seconde table `NodeId -> f32`, à côté
+//! de la première, avec le même statut (hors `Project`, jamais dans
+//! l'historique, mutée par [`SessionHandle::set_column_width`], partage
+//! `geometry_revision`). **Exception à la purge** : elle n'est jamais purgée à
+//! la mutation. L'identifiant d'une colonne n'est jamais réutilisé (invariant 7)
+//! et Ctrl+Z la ressuscite sous le même `NodeId` : elle doit y retrouver sa
+//! largeur. C'est la sauvegarde qui écarte les clés dont le nœud n'existe plus.
+//!
 //! Persistée malgré tout : [`SessionHandle::save`]/[`SessionHandle::load`]
 //! passent par `stokesforge_persistence::save_with_geometries`/
 //! `load_with_geometries`, qui écrivent/lisent ce bloc **séparé de l'arbre
-//! annulable** dans le fichier `.stf` (`FileBody::window_geometries`,
+//! annulable** dans le fichier `.stf` (`FileBody::window_geometries` et
+//! `FileBody::column_widths`,
 //! `#[serde(default)]` — voir `docs/persistance.md`) — jamais mêlé aux
 //! `NodeRecord`, jamais par `convert.rs`.
 //!
@@ -392,6 +401,19 @@ impl SessionHandle {
         self.request(|reply| Request::SetWindowGeometry {
             node,
             geometry,
+            reply,
+        })
+    }
+
+    /// Pose (ou remplace) la largeur de la colonne `column`, en points logiques
+    /// (#325). Même statut que [`Self::set_window_geometry`] : ni `History` ni
+    /// `revision`, rien à annuler ; avance `geometry_revision` (rendu), sauf si
+    /// la largeur est inchangée ou invalide (pas un réel fini > 0), auquel cas
+    /// elle est ignorée. Rend la valeur courante de `geometry_revision`.
+    pub fn set_column_width(&self, column: NodeId, width: f32) -> SessionResult<u64> {
+        self.request(|reply| Request::SetColumnWidth {
+            column,
+            width,
             reply,
         })
     }

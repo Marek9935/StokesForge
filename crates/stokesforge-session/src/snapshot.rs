@@ -65,9 +65,17 @@ pub struct Snapshot {
     /// ouvertes, pas par la taille du modèle — sans commune mesure avec
     /// `tree`, qui n'est jamais recopié.
     pub window_geometries: Arc<HashMap<NodeId, WindowGeometry>>,
+    /// Largeur des colonnes de feuille (#325), en points logiques, par `NodeId`
+    /// de colonne — même statut que `window_geometries` : table de l'acteur
+    /// hors du `Project`, jamais dans l'historique. **Non purgée** à la
+    /// mutation : elle peut contenir la clé d'une colonne supprimée, dont la
+    /// largeur revient avec Ctrl+Z (invariant 7) ; seule la sauvegarde filtre.
+    /// Partage `geometry_revision`.
+    pub column_widths: Arc<HashMap<NodeId, f32>>,
     /// Compteur monotone **distinct** de `revision` : incrémenté à chaque
-    /// changement de `window_geometries` (une pose de géométrie, une purge
-    /// d'entrée orpheline, ou un `Load` qui remplace toute la table), jamais
+    /// changement de `window_geometries` ou de `column_widths` (une pose de
+    /// géométrie ou de largeur, une purge d'entrée orpheline de géométrie, ou
+    /// un `Load` qui remplace toute la table), jamais
     /// par `Execute`/`Undo`/`Redo`/une macro. Voir la doc de tête de crate
     /// pour la décision : dissocier ce compteur de `revision` est ce qui
     /// permet à un client de rendu de savoir qu'une fenêtre a bougé sans que

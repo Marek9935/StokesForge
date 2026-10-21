@@ -108,6 +108,23 @@ pub(crate) enum Request {
         /// le modèle a changé).
         reply: Sender<u64>,
     },
+    /// Pose (ou remplace) la largeur de la colonne `column` (#325). Même statut
+    /// que `SetWindowGeometry` : ni `History` ni `revision`, pas une mutation
+    /// du modèle, donc rien à annuler. Une largeur qui n'est pas un réel fini
+    /// strictement positif est **ignorée** (invariant 10) : la réponse rend
+    /// alors la valeur inchangée de `geometry_revision`. Un `NodeId` absent est
+    /// accepté, comme pour la géométrie : la table n'est **pas** purgée à la
+    /// mutation (la colonne supprimée puis restaurée par Ctrl+Z retrouve sa
+    /// largeur, invariant 7) ; la sauvegarde filtre les clés mortes.
+    SetColumnWidth {
+        /// Colonne redimensionnée.
+        column: NodeId,
+        /// Nouvelle largeur, en points logiques.
+        width: f32,
+        /// Réponse : valeur de `geometry_revision`, qui sert aussi aux
+        /// largeurs (un seul compteur de « vue »).
+        reply: Sender<u64>,
+    },
     /// Sauvegarde le projet courant vers `path`. Ne change pas la révision :
     /// sauvegarder ne modifie pas le modèle.
     Save {
@@ -194,6 +211,12 @@ pub(crate) fn run(
     // pourquoi.
     let mut geometries: HashMap<NodeId, WindowGeometry> = HashMap::new();
     let mut geometry_revision: u64 = 0;
+    // Largeur des colonnes (#325), par `NodeId` : même statut que les
+    // géométries — hors du `Project`, jamais dans l'historique, partage
+    // `geometry_revision` —, mais **jamais purgée** à la mutation : la largeur
+    // d'une colonne supprimée doit revenir quand Ctrl+Z la restaure
+    // (invariant 7). Les clés mortes tombent à la sauvegarde.
+    let mut column_widths: HashMap<NodeId, f32> = HashMap::new();
     // #193 — ce que le recalcul des formules a vu à son dernier passage
     // (voir `recalc`) : à côté du `Project`, comme les géométries, jamais
     // dans l'historique ni dans le `.stf`. Le projet reçu à la création n'a
@@ -376,6 +399,7 @@ pub(crate) fn run(
                     revision,
                     epoch,
                     &geometries,
+                    &column_widths,
                     geometry_revision,
                 );
                 let _ = reply.send(snapshot);
@@ -390,6 +414,19 @@ pub(crate) fn run(
                 // acceptée (voir la doc de `Request::SetWindowGeometry`).
                 geometries.insert(node, geometry);
                 geometry_revision += 1;
+                let _ = reply.send(geometry_revision);
+            }
+            Request::SetColumnWidth {
+                column,
+                width,
+                reply,
+            } => {
+                if stokesforge_persistence::is_valid_column_width(width)
+                    && column_widths.get(&column) != Some(&width)
+                {
+                    column_widths.insert(column, width);
+                    geometry_revision += 1;
+                }
                 let _ = reply.send(geometry_revision);
             }
             Request::Save { path, reply } => {
@@ -415,7 +452,11 @@ pub(crate) fn run(
                 let outcome = if history.in_macro() {
                     Err(SessionError::Command(CommandError::MacroOpen("save")))
                 } else {
-                    stokesforge_persistence::save_with_geometries(&project, &geometries, &path)
+                    let view = stokesforge_persistence::ViewTables {
+                        window_geometries: geometries.clone(),
+                        column_widths: column_widths.clone(),
+                    };
+                    stokesforge_persistence::save_with_geometries(&project, &view, &path)
                         .map_err(SessionError::from)
                 };
                 let _ = reply.send(outcome);
@@ -429,6 +470,7 @@ pub(crate) fn run(
                     &mut project,
                     &mut history,
                     &mut geometries,
+                    &mut column_widths,
                     &path,
                     max_bytes,
                 )
@@ -487,6 +529,7 @@ pub(crate) fn run(
                             project = empty;
                             let _ = history.clear();
                             geometries.clear();
+                            column_widths.clear();
                             formulas.forget();
                             revision += 1;
                             epoch += 1;
@@ -538,16 +581,17 @@ fn load_project(
     project: &mut Project,
     history: &mut History,
     geometries: &mut HashMap<NodeId, WindowGeometry>,
+    column_widths: &mut HashMap<NodeId, f32>,
     path: &Path,
     max_bytes: u64,
 ) -> SessionResult<LoadReport> {
     if history.in_macro() {
         return Err(SessionError::Command(CommandError::MacroOpen("load")));
     }
-    let (loaded, loaded_geometries, report) =
-        stokesforge_persistence::load_with_limit(path, max_bytes)?;
+    let (loaded, view, report) = stokesforge_persistence::load_with_limit(path, max_bytes)?;
     *project = loaded;
-    *geometries = loaded_geometries;
+    *geometries = view.window_geometries;
+    *column_widths = view.column_widths;
     // L'acteur est mono-thread et rien n'a pu rouvrir de macro entre la
     // vérification ci-dessus et cet appel : `clear()` ne peut pas échouer
     // ici. On ignore tout de même le résultat plutôt que d'appeler
@@ -584,6 +628,7 @@ fn build_snapshot(
     revision: Revision,
     epoch: u64,
     geometries: &HashMap<NodeId, WindowGeometry>,
+    column_widths: &HashMap<NodeId, f32>,
     geometry_revision: u64,
 ) -> Snapshot {
     Snapshot {
@@ -601,6 +646,7 @@ fn build_snapshot(
         },
         epoch,
         window_geometries: Arc::new(geometries.clone()),
+        column_widths: Arc::new(column_widths.clone()),
         geometry_revision,
     }
 }

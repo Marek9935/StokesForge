@@ -274,6 +274,17 @@ pub enum Action {
         /// Rôle demandé.
         role: ColumnRole,
     },
+    /// Fixe la largeur d'une colonne de la grille, en points logiques (#325),
+    /// à la **fin** d'un redimensionnement fait à la main. Réglage de vue,
+    /// comme la géométrie d'une fenêtre : ni historique ni `revision` (Ctrl+Z
+    /// ne l'annule pas), enregistré dans le `.stf` par colonne. N'émet pas de
+    /// commande ; voir [`AppState::set_column_width`].
+    SetColumnWidth {
+        /// Colonne redimensionnée.
+        column: NodeId,
+        /// Nouvelle largeur.
+        width: f32,
+    },
     /// Insère `count` lignes à `at` dans `sheet`.
     InsertRows {
         /// Feuille visée.
@@ -3076,6 +3087,40 @@ impl AppState {
         }
     }
 
+    /// Enregistre la largeur de la colonne `column` auprès de l'acteur (#325).
+    /// Même statut que [`AppState::set_window_geometry`] : un réglage de vue
+    /// qui ne passe pas par l'historique (rien à annuler) et que la
+    /// sauvegarde écrit dans le `.stf`, par `NodeId`.
+    ///
+    /// Ne rafraîchit pas l'instantané — un aller-retour de plus pour rien : la
+    /// copie locale de la table est seulement tenue à jour, pour que
+    /// [`AppState::column_width`] relise ce qui vient d'être posé avant le
+    /// prochain rafraîchissement (le compteur `geometry_revision`, lui, est
+    /// celui de l'acteur, lu au rafraîchissement : c'est lui qui marque alors
+    /// le projet modifié). Une largeur qui n'est pas un réel fini strictement
+    /// positif est ignorée par l'acteur.
+    pub fn set_column_width(&mut self, column: NodeId, width: f32) {
+        match self.handle.set_column_width(column, width) {
+            Ok(_) => {
+                if stokesforge_persistence::is_valid_column_width(width) {
+                    Arc::make_mut(&mut self.snapshot.column_widths).insert(column, width);
+                }
+            }
+            Err(err) => self.fail(tr!(
+                "error-column-width",
+                cause = errors::session::error_message(&err)
+            )),
+        }
+    }
+
+    /// La largeur retenue de la colonne `column`, en points logiques ; `None`
+    /// pour une colonne jamais redimensionnée (la grille applique alors sa
+    /// largeur par défaut). Lue sur l'instantané : voir
+    /// [`AppState::set_column_width`].
+    pub fn column_width(&self, column: NodeId) -> Option<f32> {
+        self.snapshot.column_widths.get(&column).copied()
+    }
+
     /// Dernier message destiné à l'utilisateur.
     pub fn status(&self) -> Option<&StatusMessage> {
         self.status.as_ref()
@@ -4788,6 +4833,7 @@ impl AppState {
             Action::SetColumnRole { column, role } => {
                 self.set_column_meta_field(column, |meta| meta.role = role);
             }
+            Action::SetColumnWidth { column, width } => self.set_column_width(column, width),
             Action::InsertRows { sheet, at, count } => self.rows(sheet, at, count, true),
             Action::DeleteRows { sheet, at, count } => self.rows(sheet, at, count, false),
             Action::SetNoteText { note, text } => self.set_note_text(note, text),

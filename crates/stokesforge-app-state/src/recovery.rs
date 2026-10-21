@@ -93,7 +93,11 @@ pub fn write_copy(
         n += 1;
     }
     let project = Project::from_tree(snapshot.tree.clone(), 0);
-    stokesforge_persistence::save_with_geometries(&project, &snapshot.window_geometries, &path)
+    let view = stokesforge_persistence::ViewTables {
+        window_geometries: (*snapshot.window_geometries).clone(),
+        column_widths: (*snapshot.column_widths).clone(),
+    };
+    stokesforge_persistence::save_with_geometries(&project, &view, &path)
         .map_err(RecoveryError::Save)?;
     write_sidecar(&path, project_path);
     Ok(path)

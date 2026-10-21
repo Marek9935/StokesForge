@@ -84,6 +84,16 @@ pub(crate) struct FileBody {
     /// tout dernier champ sérialisé.
     #[serde(default)]
     pub(crate) window_geometries: std::collections::HashMap<u64, crate::WindowGeometry>,
+    /// Largeur des colonnes d'une feuille (#325), en points logiques, par
+    /// identifiant de colonne — même statut que `window_geometries` : bloc
+    /// **hors de l'arbre annulable**, absent des fichiers antérieurs
+    /// (`#[serde(default)]` : table vide, les colonnes prennent la largeur par
+    /// défaut), clés `NodeId` brutes bornées par `check_node_id`. À la lecture,
+    /// une clé sans nœud et une valeur qui n'est pas un réel fini strictement
+    /// positif sont écartées une à une (invariant 10). Placé **avant**
+    /// `save_counter`, qui reste le dernier champ sérialisé (voir ci-dessus).
+    #[serde(default)]
+    pub(crate) column_widths: std::collections::HashMap<u64, f32>,
     /// Compteur de sauvegarde du fichier (B8,
     /// `guide-de-correction-robustesse.md` §F2) : incrémenté à chaque `save`
     /// réussi. C'est ce qui permet à `save` de détecter qu'un autre écrivain

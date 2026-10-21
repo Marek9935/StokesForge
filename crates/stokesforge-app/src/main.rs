@@ -225,6 +225,38 @@ mod startup_tests {
         loaded.shutdown().unwrap();
     }
 
+    /// #325 : une largeur de colonne enregistrée dans le `.stf` est celle de
+    /// l'instantané au démarrage (même chemin que les géométries).
+    #[test]
+    fn le_demarrage_restaure_les_largeurs_de_colonne_du_fichier() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("largeurs.stf");
+        let mut project = Project::new("Largeurs").unwrap();
+        let book = project.add_workbook(project.root(), None).unwrap();
+        let sheet = project.tree().children(book).unwrap()[0];
+        let column = project
+            .add_column(
+                sheet,
+                None,
+                Some("A"),
+                stokesforge_core::Column::from_f64(&[1.0]),
+            )
+            .unwrap();
+        let original = Session::spawn(project, None).unwrap();
+        original.handle().set_column_width(column, 91.5).unwrap();
+        original.handle().save(&path).unwrap();
+        original.shutdown().unwrap();
+
+        let (loaded, _, _) = session_for_project(
+            Some(path),
+            stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+        )
+        .unwrap();
+        let snapshot = loaded.handle().snapshot().unwrap();
+        assert_eq!(snapshot.column_widths.get(&column), Some(&91.5));
+        loaded.shutdown().unwrap();
+    }
+
     /// #315 : sans argument, la démonstration n'a pas de chemin et n'est pas
     /// « chargée » : un `demo.stf` du dossier courant ne doit être ni pris pour
     /// le projet ni écrasé sans contrôle.

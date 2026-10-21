@@ -733,3 +733,65 @@ fn b3_fichier_plus_gros_que_le_plafond_est_refuse_avant_lecture() {
         Err(PersistenceError::TooLarge { size: 4096, .. })
     ));
 }
+
+/// #325 : le bloc des largeurs de colonne d'un fichier hostile — NaN, ∞,
+/// zéro, négatif, clé orpheline, identifiant hors borne. Une entrée illisible
+/// est écartée seule (invariant 10), jamais le fichier ; un identifiant hors
+/// borne est refusé comme pour les géométries.
+#[test]
+fn b3_largeurs_de_colonne_hostiles() {
+    use std::collections::BTreeMap;
+    use stokesforge_core::NodeId;
+    use stokesforge_persistence::load_with_report;
+
+    #[derive(Serialize)]
+    struct FileBodyLargeurs {
+        root: u64,
+        next_id_hint: u64,
+        nodes: Vec<NodeRecord>,
+        column_widths: BTreeMap<u64, f32>,
+    }
+    let ecrire_largeurs = |dir: &TempDir, nom: &str, largeurs: &[(u64, f32)]| {
+        let body = FileBodyLargeurs {
+            root: 1,
+            next_id_hint: 3,
+            nodes: vec![
+                dossier(1, "R", None, vec![2]),
+                dossier(2, "A", Some(1), vec![]),
+            ],
+            column_widths: largeurs.iter().copied().collect(),
+        };
+        let payload = rmp_serde::to_vec_named(&body).unwrap();
+        let path = dir.path().join(nom);
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(b"STKF").unwrap();
+        f.write_all(&1u32.to_le_bytes()).unwrap();
+        f.write_all(&payload).unwrap();
+        path
+    };
+    let dir = TempDir::new().unwrap();
+    let path = ecrire_largeurs(
+        &dir,
+        "melange.stf",
+        &[
+            (1, f32::NAN),
+            (2, 48.5),
+            (3, 60.0), // sans nœud
+            (4, f32::INFINITY),
+            (5, 0.0),
+            (6, -12.0),
+        ],
+    );
+    let r = std::panic::catch_unwind(|| load_with_report(&path));
+    assert!(r.is_ok(), "panique sur des largeurs hostiles");
+    let (_, vue, _) = r
+        .unwrap()
+        .expect("des largeurs hostiles ne font pas échouer le fichier");
+    assert_eq!(
+        vue.column_widths,
+        [(NodeId::from_raw(2), 48.5)].into_iter().collect(),
+        "seule l'entrée saine voisine d'entrées hostiles doit rester"
+    );
+    let hors_borne = ecrire_largeurs(&dir, "hors_borne.stf", &[(u64::MAX, 50.0)]);
+    assert!(load_with_report(&hors_borne).is_err());
+}

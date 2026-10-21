@@ -666,6 +666,25 @@ Une formule retient ses colonnes par identifiant ; les lettres ne sont qu'aux fr
 
 Limite : le cadre rouge, la bulle et le champ qui reste ouvert (grille) ne sont pas testables sans fenêtre : la décision (`header_edit_refusal`, `inplace_edit::resolve`) l'est, la peinture est relue à l'écran.
 
+## Largeur des colonnes (#325)
+
+Table `NodeId -> f32` de l'acteur, hors modèle et hors historique, enregistrée dans le `.stf`. Chaque règle a son témoin, vérifié par mutation.
+
+| Règle | Témoin |
+|---|---|
+| poser une largeur n'avance que `geometry_revision` ; la même largeur, NaN, ≤ 0, ∞ : ignorées | `session/tests/largeurs.rs` `poser_une_largeur_n_avance_que_geometry_revision` (passer par `revision` : rouge) |
+| la largeur d'une colonne supprimée revient avec Ctrl+Z | `la_largeur_revient_avec_la_colonne_apres_annulation` (purger les largeurs à la mutation : rouge) |
+| aller-retour `.stf` ; `NewProject` vide | `les_largeurs_font_l_aller_retour_du_fichier` (ne pas écrire le champ : rouge) |
+| l'écriture n'émet pas la clé d'une colonne disparue | `la_sauvegarde_n_ecrit_pas_la_largeur_d_une_colonne_supprimee`, `persistence` `save_drops_dead_keys_and_invalid_widths` (retirer le filtre : rouge) |
+| fichier sans le champ → table vide ; clé orpheline, NaN, ∞, 0, négatif écartés un à un ; identifiant > `MAX_NODE_ID` refusé | `persistence` `a_file_without_the_widths_block_*`, `hostile_column_widths_*`, `a_column_width_key_above_the_id_ceiling_*`, `robustesse/b3` `b3_largeurs_de_colonne_hostiles` (lecture sans filtre, sans `check_node_id` : rouge) |
+| l'état pose la largeur par l'acteur sans historique, y compris une vue détachée | `app-state/tests/column_width.rs` |
+| le `.stf` donne sa largeur à l'instantané de démarrage | `main.rs` `le_demarrage_restaure_les_largeurs_de_colonne_du_fichier` |
+| la poignée tirée ne pousse la largeur qu'au relâchement | `grid::tests::un_redimensionnement_a_la_main_envoie_la_largeur_a_la_fin_seulement` |
+| ouvrir et peindre n'envoie rien, ne marque pas le projet modifié | `ouvrir_la_feuille_n_envoie_aucune_largeur` (pousser la largeur rendue à chaque image : rouge) |
+| Add Column : les largeurs gardées, la neuve à 54 ; Delete puis Ctrl+Z | `la_largeur_de_chaque_colonne_survit_a_l_ajout_d_une_colonne`, `supprimer_puis_annuler_rend_la_colonne_et_ses_voisines_a_leur_largeur` (largeur par position : rouge ; sans `reset()` quand la liste change à nombre égal : rouge) |
+
+La largeur se lit dans le banc sur l'aplat de la lettre de colonne (`largeur_peinte`).
+
 ## Polynôme contraint sur un X décalé (#296)
 
 `fit::tests::polynome_contraint_sur_x_tres_decale_est_signale` : signalé (`shifted_x`) pour un polynôme fixé ou à valeur initiale sur X ≈ 1e4 ; témoins non signalés : X centré, décalage modéré (1e2), polynôme sans contrainte (QR centré). Transport `.stf` : `shifted_x` dans `persistence/src/calculations.rs` (tests d'aller-retour et de noms figés).

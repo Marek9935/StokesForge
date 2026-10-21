@@ -43,6 +43,14 @@ Snapshot { tree: Arc<Tree>, revision, history: HistoryState, epoch }
 Le cloner est bon marché : deux `Arc` et une poignée de champs. **L'arbre n'est
 jamais recopié, seulement partagé.**
 
+L'instantané porte aussi, hors de l'arbre, `window_geometries` et
+`column_widths` (#325, largeur des colonnes de feuille par `NodeId`), avec
+`geometry_revision`, compteur commun de ces deux tables : une pose de largeur
+n'avance ni `revision` ni l'historique. Seule la table des géométries est purgée
+à la mutation ; celle des largeurs **ne l'est pas** (Ctrl+Z rend la colonne
+supprimée avec sa largeur, invariant 7), la sauvegarde filtre les clés mortes.
+`Load` et `NewProject` remplacent ou vident les deux.
+
 `HistoryState` donne à l'UI ce qu'il lui faut pour ses menus — `can_undo`,
 `can_redo`, les deux libellés, `in_macro` — sans exposer la pile.
 

@@ -179,6 +179,7 @@ fn decode_copy(mut nodes: Vec<NodeRecord>) -> PersistenceResult<NodeCopy> {
             calculations: Default::default(),
             correction_traces: Default::default(),
             window_geometries: Default::default(),
+            column_widths: Default::default(),
             save_counter: 0,
         },
         Path::new("clipboard"),

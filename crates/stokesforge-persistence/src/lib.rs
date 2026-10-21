@@ -223,6 +223,27 @@ pub enum WindowMode {
     Closed,
 }
 
+/// Les tables de **vue** qu'un `.stf` porte à côté de l'arbre annulable, par
+/// identifiant de nœud : jamais dans `Project`, jamais par une commande
+/// (invariant 1 ne les concerne pas, ce ne sont pas des données du modèle).
+/// Une struct plutôt qu'un n-uplet : une table de plus (#325) ne casse plus
+/// chaque appelant.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ViewTables {
+    /// Position, taille et état des fenêtres de contenu.
+    pub window_geometries: HashMap<NodeId, WindowGeometry>,
+    /// Largeur des colonnes de feuille (#325), en points logiques. Chaque
+    /// valeur est un réel fini strictement positif : la lecture écarte le
+    /// reste, l'écriture aussi.
+    pub column_widths: HashMap<NodeId, f32>,
+}
+
+/// Une largeur de colonne que le fichier peut porter : un réel fini
+/// strictement positif (invariant 10 : NaN, ∞ ou ≤ 0 écartés, jamais un échec).
+pub fn is_valid_column_width(width: f32) -> bool {
+    width.is_finite() && width > 0.0
+}
+
 /// Borne haute d'un identifiant de nœud ou de `next_id_hint` lu d'un fichier
 /// (B1, `guide-de-correction-robustesse.md` §F3) : largement au-dessus de
 /// tout projet réel, largement en dessous de `u64::MAX` — l'endroit où
@@ -260,24 +281,29 @@ const MAX_NODE_ID: u64 = 1_000_000_000_000;
 /// avant B8 — il ne peut détecter qu'un changement depuis qu'IL a vu le
 /// fichier, pas depuis l'origine des temps.
 ///
-/// Équivalent à [`save_with_geometries`] avec une table de géométries vide :
-/// n'écrit aucun bloc de géométrie de fenêtre. C'est la fonction qu'utilisent
+/// Équivalent à [`save_with_geometries`] avec des tables de vue vides :
+/// n'écrit aucun bloc de géométrie de fenêtre ni de largeur de colonne. C'est la fonction qu'utilisent
 /// les appelants qui ne connaissent pas cette notion (`stokesforge-app`) ;
 /// `stokesforge-session`, qui possède la table `NodeId -> WindowGeometry` à côté
 /// du `Project`, appelle `save_with_geometries` pour que le fichier retrouve
-/// la disposition des fenêtres à la réouverture.
+/// la disposition des fenêtres et la largeur des colonnes à la réouverture.
 pub fn save(project: &Project, path: &Path) -> PersistenceResult<()> {
-    save_with_geometries(project, &HashMap::new(), path)
+    save_with_geometries(project, &ViewTables::default(), path)
 }
 
-/// Comme [`save`], mais écrit en plus `geometries` dans un bloc **séparé de
-/// l'arbre annulable** (`FileBody::window_geometries`) — jamais mêlé aux
-/// `NodeRecord` de `nodes`, jamais passé par `convert.rs` (qui ne convertit
-/// que des `Node`). C'est la fonction qu'appelle `stokesforge-session::actor`
-/// pour que la position des fenêtres survive à un rechargement du projet.
+/// Comme [`save`], mais écrit en plus `view` dans des blocs **séparés de
+/// l'arbre annulable** (`FileBody::window_geometries`, `FileBody::column_widths`)
+/// — jamais mêlés aux `NodeRecord` de `nodes`, jamais passés par `convert.rs`
+/// (qui ne convertit que des `Node`). C'est la fonction qu'appelle
+/// `stokesforge-session::actor` pour que la position des fenêtres et la largeur
+/// des colonnes survivent à un rechargement du projet. Les largeurs dont la
+/// clé n'est plus un nœud de l'arbre, ou qui ne sont pas des réels finis
+/// strictement positifs, ne sont **pas écrites** : l'acteur ne purge pas sa
+/// table à la mutation (la largeur d'une colonne supprimée doit revenir par
+/// Ctrl+Z, invariant 7), c'est donc ici que les clés mortes tombent.
 pub fn save_with_geometries(
     project: &Project,
-    geometries: &HashMap<NodeId, WindowGeometry>,
+    view: &ViewTables,
     path: &Path,
 ) -> PersistenceResult<()> {
     // Un fichier que ce processus n'a jamais chargé ni écrit vers ce chemin :
@@ -310,9 +336,16 @@ pub fn save_with_geometries(
         .filter_map(|id| tree.node(id))
         .map(convert::node_to_record)
         .collect();
-    let window_geometries = geometries
+    let window_geometries = view
+        .window_geometries
         .iter()
         .map(|(id, geometry)| (id.raw(), *geometry))
+        .collect();
+    let column_widths = view
+        .column_widths
+        .iter()
+        .filter(|(id, width)| tree.node(**id).is_some() && is_valid_column_width(**width))
+        .map(|(id, width)| (id.raw(), *width))
         .collect();
     let body = FileBody {
         root: tree.root().raw(),
@@ -323,6 +356,7 @@ pub fn save_with_geometries(
         calculations: calculations::calculations_to_records(tree),
         correction_traces: calculations::corrections_to_records(tree),
         window_geometries,
+        column_widths,
     };
 
     // Encoder ne devrait jamais échouer pour nos propres types de transport
@@ -376,15 +410,13 @@ pub fn load(path: &Path) -> PersistenceResult<Project> {
 pub fn load_with_geometries(
     path: &Path,
 ) -> PersistenceResult<(Project, HashMap<NodeId, WindowGeometry>)> {
-    load_with_report(path).map(|(project, geometries, _report)| (project, geometries))
+    load_with_report(path).map(|(project, view, _report)| (project, view.window_geometries))
 }
 
 /// Comme [`load_with_geometries`], mais rend aussi le [`LoadReport`] de ce que
 /// la lecture a écarté (calculs illisibles, #278). C'est la fonction qu'appelle
 /// la session, pour que l'application le signale.
-pub fn load_with_report(
-    path: &Path,
-) -> PersistenceResult<(Project, HashMap<NodeId, WindowGeometry>, LoadReport)> {
+pub fn load_with_report(path: &Path) -> PersistenceResult<(Project, ViewTables, LoadReport)> {
     load_with_limit(path, DEFAULT_MAX_FILE_BYTES)
 }
 
@@ -397,7 +429,7 @@ pub fn load_with_report(
 pub fn load_with_limit(
     path: &Path,
     max_bytes: u64,
-) -> PersistenceResult<(Project, HashMap<NodeId, WindowGeometry>, LoadReport)> {
+) -> PersistenceResult<(Project, ViewTables, LoadReport)> {
     use std::io::Read;
     let io = |source| PersistenceError::Io {
         path: path.to_path_buf(),
@@ -456,7 +488,8 @@ pub fn load_with_limit(
 
     let save_counter = body.save_counter;
     let raw_geometries = std::mem::take(&mut body.window_geometries);
-    for &id in raw_geometries.keys() {
+    let raw_widths = std::mem::take(&mut body.column_widths);
+    for &id in raw_geometries.keys().chain(raw_widths.keys()) {
         check_node_id(id, path)?;
     }
     let (project, report) = build_project_reported(body, path)?;
@@ -477,8 +510,21 @@ pub fn load_with_limit(
             tree.node(node).is_some().then_some((node, geometry))
         })
         .collect();
+    // Même filtre pour les largeurs de colonne (#325), plus la valeur : un
+    // réel non fini ou ≤ 0 ferait peindre une grille absurde.
+    let column_widths = raw_widths
+        .into_iter()
+        .filter_map(|(id, width)| {
+            let node = NodeId::from_raw(id);
+            (tree.node(node).is_some() && is_valid_column_width(width)).then_some((node, width))
+        })
+        .collect();
 
-    Ok((project, geometries, report))
+    let view = ViewTables {
+        window_geometries: geometries,
+        column_widths,
+    };
+    Ok((project, view, report))
 }
 
 /// Classe une erreur de décodage du corps : une **variante d'énumération**
@@ -830,7 +876,9 @@ fn peek_save_counter(path: &Path, validate: bool) -> PersistenceResult<Option<u6
                     path: path.to_path_buf(),
                     detail: source.to_string(),
                 };
-                for &id in std::mem::take(&mut body.window_geometries).keys() {
+                let geometry_ids = std::mem::take(&mut body.window_geometries);
+                let width_ids = std::mem::take(&mut body.column_widths);
+                for &id in geometry_ids.keys().chain(width_ids.keys()) {
                     check_node_id(id, path).map_err(unreadable)?;
                 }
                 build_project_reported(body, path).map_err(unreadable)?;
@@ -879,6 +927,7 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
+            column_widths: std::collections::HashMap::new(),
         };
         let project = build_project(body, Path::new("test.plyx")).expect("modèle valide");
         assert_eq!(project.next_id_hint(), 6);
@@ -906,6 +955,7 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
+            column_widths: std::collections::HashMap::new(),
         };
         let mut bytes = MAGIC.to_vec();
         bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
@@ -950,6 +1000,7 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
+            column_widths: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -969,6 +1020,7 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
+            column_widths: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -997,6 +1049,7 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
+            column_widths: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -1043,6 +1096,7 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
+            column_widths: std::collections::HashMap::new(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(matches!(err, PersistenceError::Corrupt { .. }), "{err:?}");
@@ -1112,6 +1166,7 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             window_geometries: std::collections::HashMap::new(),
+            column_widths: std::collections::HashMap::new(),
         };
         let project = build_project(body, Path::new("legacy.plyx")).expect("modèle valide");
         let loaded = project
@@ -1402,7 +1457,11 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("répertoire temporaire");
         let path = dir.path().join("geometries.plyx");
-        save_with_geometries(&project, &geometries, &path).expect("sauvegarde réussie");
+        let view = ViewTables {
+            window_geometries: geometries.clone(),
+            column_widths: HashMap::new(),
+        };
+        save_with_geometries(&project, &view, &path).expect("sauvegarde réussie");
 
         let (loaded, loaded_geometries) = load_with_geometries(&path).expect("chargement réussi");
         assert_eq!(loaded.tree().len(), project.tree().len());
@@ -1446,5 +1505,146 @@ mod tests {
             load_with_geometries(&path).expect("un fichier sans bloc de géométries doit se relire");
         assert!(geometries.is_empty());
         assert_eq!(project.next_id_hint(), 2);
+    }
+    /// Écrit un corps à la main (schéma privé) vers un fichier de test.
+    fn write_body(dir: &tempfile::TempDir, name: &str, body: &FileBody) -> std::path::PathBuf {
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&rmp_serde::to_vec_named(body).expect("encodage"));
+        let path = dir.path().join(name);
+        std::fs::write(&path, &bytes).expect("écriture du fichier de test");
+        path
+    }
+
+    /// Un corps minimal (racine 1, feuille 2) portant ces largeurs brutes.
+    fn body_with_widths(widths: Vec<(u64, f32)>) -> FileBody {
+        FileBody {
+            root: 1,
+            next_id_hint: 3,
+            nodes: vec![
+                folder_record(1, "Racine", vec![2]),
+                folder_record(2, "Dossier", vec![]),
+            ],
+            save_counter: 0,
+            saved_colors: Default::default(),
+            calculations: Default::default(),
+            correction_traces: Default::default(),
+            window_geometries: std::collections::HashMap::new(),
+            column_widths: widths.into_iter().collect(),
+        }
+    }
+
+    /// #325 : les largeurs posées dans `ViewTables` se relisent identiques,
+    /// associées au bon nœud. Témoin : ne pas écrire le champ.
+    #[test]
+    fn column_widths_round_trip_through_save_and_load() {
+        let mut project = stokesforge_core::Project::new("Demo").expect("projet valide");
+        let root = project.root();
+        let book = project
+            .add_empty_workbook(root, Some("Book1"))
+            .expect("classeur créé");
+        let view = ViewTables {
+            window_geometries: HashMap::new(),
+            column_widths: HashMap::from([(book, 77.5), (root, 12.0)]),
+        };
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let path = dir.path().join("largeurs.stf");
+        save_with_geometries(&project, &view, &path).expect("sauvegarde réussie");
+        let (_, loaded, _) = load_with_report(&path).expect("chargement réussi");
+        assert_eq!(loaded.column_widths, view.column_widths);
+        // `load_with_geometries` garde sa signature et ne montre que les géométries.
+        let (_, geometries) = load_with_geometries(&path).expect("chargement réussi");
+        assert!(geometries.is_empty());
+    }
+
+    /// #325 : une clé qui n'est plus un nœud n'est pas écrite (l'acteur ne
+    /// purge pas sa table à la mutation, c'est la sauvegarde qui filtre), ni
+    /// une valeur non finie ou nulle. Témoin : retirer le filtre.
+    #[test]
+    fn save_drops_dead_keys_and_invalid_widths() {
+        let project = stokesforge_core::Project::new("Demo").expect("projet valide");
+        let root = project.root();
+        let dead = NodeId::from_raw(999);
+        let view = ViewTables {
+            window_geometries: HashMap::new(),
+            column_widths: HashMap::from([
+                (root, 40.0),
+                (dead, 50.0),
+                (NodeId::from_raw(1000), f32::NAN),
+            ]),
+        };
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let path = dir.path().join("filtre.stf");
+        save_with_geometries(&project, &view, &path).expect("sauvegarde réussie");
+        let (_, loaded, _) = load_with_report(&path).expect("chargement réussi");
+        assert_eq!(loaded.column_widths, HashMap::from([(root, 40.0)]));
+        // Le fichier lui-même ne porte pas la clé morte : lecture du corps brut.
+        let bytes = std::fs::read(&path).unwrap();
+        let body: FileBody = rmp_serde::from_slice(&bytes[MAGIC.len() + 4..]).unwrap();
+        assert_eq!(body.column_widths.len(), 1);
+        assert!(!body.column_widths.contains_key(&dead.raw()));
+    }
+
+    /// #325 : un fichier écrit avant le bloc se relit, table vide.
+    #[test]
+    fn a_file_without_the_widths_block_loads_with_an_empty_table() {
+        #[derive(Serialize)]
+        struct PreWidthsFileBody {
+            root: u64,
+            next_id_hint: u64,
+            nodes: Vec<NodeRecord>,
+            save_counter: u64,
+        }
+        let pre = PreWidthsFileBody {
+            root: 1,
+            next_id_hint: 2,
+            nodes: vec![folder_record(1, "Racine", vec![])],
+            save_counter: 0,
+        };
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
+        bytes.extend_from_slice(&rmp_serde::to_vec_named(&pre).expect("encodage"));
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let path = dir.path().join("sans_largeurs.stf");
+        std::fs::write(&path, &bytes).unwrap();
+        let (_, view, _) = load_with_report(&path).expect("un fichier sans bloc se relit");
+        assert!(view.column_widths.is_empty());
+    }
+
+    /// #325, invariant 10 : une clé orpheline, NaN, ∞, 0 ou négative sont
+    /// écartées une à une, sans échec ; la valeur saine voisine reste.
+    #[test]
+    fn hostile_column_widths_are_discarded_one_by_one() {
+        let body = body_with_widths(vec![
+            (2, 61.0),
+            (77, 30.0), // orpheline
+        ]);
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let path = write_body(&dir, "orpheline.stf", &body);
+        let (_, view, _) = load_with_report(&path).expect("chargement réussi");
+        assert_eq!(
+            view.column_widths,
+            HashMap::from([(NodeId::from_raw(2), 61.0)])
+        );
+        for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, -3.0] {
+            let body = body_with_widths(vec![(2, bad), (1, 20.0)]);
+            let path = write_body(&dir, "hostile.stf", &body);
+            let (_, view, _) = load_with_report(&path).expect("jamais un échec");
+            assert_eq!(
+                view.column_widths,
+                HashMap::from([(NodeId::from_raw(1), 20.0)]),
+                "largeur {bad:?} gardée"
+            );
+        }
+    }
+
+    /// #325 : un identifiant au-delà de `MAX_NODE_ID` dans le bloc des
+    /// largeurs est refusé, comme pour les géométries.
+    #[test]
+    fn a_column_width_key_above_the_id_ceiling_is_refused() {
+        let body = body_with_widths(vec![(MAX_NODE_ID + 1, 50.0)]);
+        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let path = write_body(&dir, "id_trop_grand.stf", &body);
+        assert!(load_with_report(&path).is_err());
     }
 }
