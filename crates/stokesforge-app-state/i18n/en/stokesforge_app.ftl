@@ -238,6 +238,19 @@ action-clear = Clear
 action-remove-formula-keep-data = Remove Formula, Keep Data
     .hint = Removes the formula and keeps the calculated values as ordinary data
     .disabled = Select a column that has a formula
+column-move = Move
+action-move-columns-first = Move to First
+    .hint = Moves the selected columns to the start of the sheet, keeping their order
+    .disabled = The selected columns are already first
+action-move-columns-left = Move Left
+    .hint = Moves each selected column one place to the left
+    .disabled = A selected column is already first
+action-move-columns-right = Move Right
+    .hint = Moves each selected column one place to the right
+    .disabled = A selected column is already last
+action-move-columns-last = Move to Last
+    .hint = Moves the selected columns to the end of the sheet, keeping their order
+    .disabled = The selected columns are already last
 action-delete-columns = Delete
     .hint = Removes the selected columns from the sheet. Undo brings them back with their values
 action-delete-shift-up = Delete and Shift Up
@@ -566,6 +579,7 @@ history-macro-set-columns-role = Change Column Roles
 history-macro-analysis-to-graph = Analyze and Plot
 history-macro-remove-formula = Remove Formula
 history-macro-delete-columns = Delete Columns
+history-macro-move-columns = Move Columns
 
 ## Undo and Redo
 

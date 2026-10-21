@@ -109,7 +109,9 @@ Dans cet ordre, en s'arrêtant aux maillons que la commande touche réellement :
    Ajouter la variante, sa ligne de `Display` (anglais, journaux et CLI), et
    l'exemple de `stokesforge-commands/tests/labels.rs` (le test exhaustif échoue
    sinon). Un groupe ouvert par `begin_macro` est un `MacroKind` fermé : une
-   nouvelle nature de groupe ajoute une variante, pas un texte.
+   nouvelle nature de groupe ajoute une variante, pas un texte (`MoveColumns`,
+   #319 : une colonne = un `execute` seul, plusieurs = une macro ; `MoveObjects`
+   reste celle du Project Manager).
    **Piège de libellé** : une colonne a deux identités, et une seule est
    visible. Son nom de nœud (« Temps ») est une clé du modèle ; la grille
    n'affiche que sa **lettre de position** (A, B, C…). Un libellé d'historique

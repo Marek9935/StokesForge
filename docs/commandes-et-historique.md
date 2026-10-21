@@ -166,7 +166,7 @@ Le crate ne met **rien** en phrase et ne dépend pas de Fluent :
 
 `begin_macro` prend un `MacroKind`, énumération **fermée** (coller, effacer la
 sélection, propriétés du graphe, actualiser, importer, créer un classeur ou une
-feuille, exécuter un script) : un groupe est une valeur qui se compare (`undo_label ==
+feuille, exécuter un script, supprimer ou déplacer des colonnes) : un groupe est une valeur qui se compare (`undo_label ==
 Some(HistoryLabel::Macro(MacroKind::Import))`), pas un texte à relire. Un
 nouveau groupe ajoute une variante de `MacroKind`, sa clé `history-macro-*` et
 sa ligne de `Display`. L'historique n'est pas écrit dans le `.stf`
@@ -245,7 +245,11 @@ Un échec restaure l'arbre ; le compteur d'identifiants ne recule jamais.
 juste après l'originale, y compris si des natures inconnues y sont conservées.
 
 Les gestes multiples sont groupés par `MacroKind::{PasteObjects,
-DuplicateObjects, DeleteObjects, RenameObjects, MoveObjects}` ; un échec
+DuplicateObjects, DeleteObjects, RenameObjects, MoveObjects}` (Project
+Manager) ; le déplacement de plusieurs colonnes d'une feuille a le sien,
+`MacroKind::MoveColumns` (#319 : une suite de `Command::Move` calculée par
+`stokesforge-app-state::column_move::plan`, index compté **après retrait**, un
+seul `execute` sans macro pour une colonne) ; un échec
 intermédiaire avorte le groupe entier. Ces libellés restent des données et ne
 sont pas enregistrés dans le `.stf`.
 

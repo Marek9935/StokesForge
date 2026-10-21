@@ -23,6 +23,7 @@ use stokesforge_core::{ColumnRole, ColumnType, NodeId};
 use stokesforge_plot::PlotType;
 
 use crate::icons;
+use stokesforge_app_state::column_move::{target_order, ColumnMove};
 use stokesforge_app_state::selection::{GridCursor, Selection};
 use stokesforge_app_state::state::{
     Action, AppState, ColumnDragPayload, GridMenu, GridZone, HeaderField, MoveDirection,
@@ -965,6 +966,77 @@ fn add_column_entry(ui: &mut egui::Ui, sheet: NodeId, actions: &mut Vec<Action>)
     }
 }
 
+/// Sous-menu `Move ▸` (#319) : quatre entrées qui déplacent les colonnes visées
+/// dans leur feuille (jamais ailleurs). Peint par `column_type_role_menus`, donc
+/// une seule écriture pour le clic droit des lettres et le menu Colonnes de la
+/// barre. Une entrée est **grisée**, raison en bulle, quand le geste ne
+/// changerait rien — tout ou rien : une seule colonne qui ne peut pas avancer
+/// grise Left ou Right pour toutes (`column_move::target_order`, la même
+/// décision que celle qui exécute).
+fn move_columns_menu(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    actions: &mut Vec<Action>,
+    target_columns: &[NodeId],
+) {
+    let sheet = target_columns
+        .first()
+        .and_then(|column| state.tree().node(*column)?.parent());
+    let order: Vec<NodeId> = sheet
+        .map(|sheet| {
+            state
+                .visible_columns(sheet)
+                .into_iter()
+                .map(|(id, _, _)| id)
+                .collect()
+        })
+        .unwrap_or_default();
+    ui.menu_button(tr!("column-move"), |ui| {
+        let entries = [
+            (
+                ColumnMove::First,
+                tr!("action-move-columns-first"),
+                tr!("action-move-columns-first", "hint"),
+                tr!("action-move-columns-first", "disabled"),
+            ),
+            (
+                ColumnMove::Left,
+                tr!("action-move-columns-left"),
+                tr!("action-move-columns-left", "hint"),
+                tr!("action-move-columns-left", "disabled"),
+            ),
+            (
+                ColumnMove::Right,
+                tr!("action-move-columns-right"),
+                tr!("action-move-columns-right", "hint"),
+                tr!("action-move-columns-right", "disabled"),
+            ),
+            (
+                ColumnMove::Last,
+                tr!("action-move-columns-last"),
+                tr!("action-move-columns-last", "hint"),
+                tr!("action-move-columns-last", "disabled"),
+            ),
+        ];
+        for (to, label, hint, disabled) in entries {
+            let available = target_order(&order, target_columns, to).is_some();
+            let clicked = ui
+                .add_enabled(available, egui::Button::new(label))
+                .on_hover_text(hint)
+                .on_disabled_hover_text(disabled)
+                .clicked();
+            if let (true, Some(sheet)) = (clicked, sheet) {
+                actions.push(Action::MoveColumns {
+                    sheet,
+                    columns: target_columns.to_vec(),
+                    to,
+                });
+                ui.close();
+            }
+        }
+    });
+}
+
 /// Type et rôle des colonnes visées : même cible et mêmes actions dans le
 /// menu Classeur et au clic droit. Une sélection hétérogène ne coche aucun
 /// choix.
@@ -986,6 +1058,7 @@ pub(super) fn column_type_role_menus(
         .map(|column| column.meta().role)
         .filter(|role| columns.iter().all(|column| column.meta().role == *role));
     ui.add_enabled_ui(!target_columns.is_empty(), |ui| {
+        move_columns_menu(ui, state, actions, target_columns);
         // Choix manuel du type de colonne — conversion destructrice
         // assumée (`Action::SetColumnType`/`Command::
         // SetColumnType`, `stokesforge-core::Column::set_column_type`) :
@@ -2795,6 +2868,9 @@ mod tests {
         /// Combien d'`Action::SetColumnWidth` la grille a émises, toutes
         /// images confondues (#325).
         largeurs_envoyees: usize,
+        /// Toutes les actions que la grille a poussées, images confondues
+        /// (`actions` ne garde que la dernière).
+        vues: Vec<Action>,
     }
 
     impl Banc {
@@ -2836,6 +2912,7 @@ mod tests {
                 voisin_focalise: false,
                 dernier: None,
                 largeurs_envoyees: 0,
+                vues: Vec::new(),
             };
             for _ in 0..3 {
                 banc.image(Vec::new());
@@ -2853,6 +2930,7 @@ mod tests {
             });
             self.voisin_focalise = voisin;
             self.dernier = Some(sortie);
+            self.vues.extend(self.actions.iter().cloned());
             self.largeurs_envoyees += self
                 .actions
                 .iter()
@@ -4435,6 +4513,205 @@ mod tests {
                 "colonne {i} : {rendu:?} / {avant:?}"
             );
         }
+    }
+
+    // --- Sous-menu Move ▸ des lettres de colonne (#319) -----------------------
+
+    /// Une entrée du menu peint, lue par accesskit : `(libellé, actif, centre)`.
+    type EntreeMenu = (String, bool, egui::Pos2);
+
+    fn menu_lu(banc: &Banc) -> Vec<EntreeMenu> {
+        let update = banc
+            .dernier
+            .as_ref()
+            .unwrap()
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("accesskit activé par `ouvre_move`");
+        update
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| {
+                let label = node.label()?.to_string();
+                let label = label.strip_suffix(" ⏵").unwrap_or(&label).to_string();
+                let bounds = node.bounds()?;
+                Some((
+                    label,
+                    !node.is_disabled(),
+                    egui::pos2(
+                        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                    ),
+                ))
+            })
+            .collect()
+    }
+
+    fn entree_menu<'a>(menu: &'a [EntreeMenu], label: &str) -> &'a EntreeMenu {
+        // Un raccourci est écrit à la suite du libellé (« Copy Ctrl+C »).
+        menu.iter()
+            .find(|(texte, _, _)| {
+                texte == label
+                    || texte
+                        .strip_prefix(label)
+                        .is_some_and(|reste| reste.starts_with(" Ctrl+"))
+            })
+            .unwrap_or_else(|| panic!("entrée {label:?} absente de {menu:#?}"))
+    }
+
+    /// Libellés des quatre entrées de `Move ▸`, dans l'ordre du menu.
+    fn entrees_move() -> [String; 4] {
+        [
+            tr!("action-move-columns-first"),
+            tr!("action-move-columns-left"),
+            tr!("action-move-columns-right"),
+            tr!("action-move-columns-last"),
+        ]
+    }
+
+    /// Clic droit sur la lettre de la colonne visible `index`, puis ouverture de
+    /// `Move ▸` : rend le menu peint (principal et sous-menu).
+    fn ouvre_move(banc: &mut Banc, index: usize) -> Vec<EntreeMenu> {
+        banc.context.enable_accesskit();
+        banc.image(Vec::new());
+        banc.clic_bouton(&lettre_visible(banc, index), egui::PointerButton::Secondary);
+        banc.clic_sur(&tr!("column-move"));
+        menu_lu(banc)
+    }
+
+    /// `Move ▸` entre le presse-papiers et `Type ▸`, avec ses quatre entrées
+    /// dans l'ordre du sous-menu.
+    #[test]
+    fn move_est_place_entre_le_presse_papiers_et_type_avec_quatre_entrees() {
+        let mut banc = Banc::new();
+        let menu = ouvre_move(&mut banc, 1);
+        let y = |label: String| entree_menu(&menu, &label).2.y;
+        assert!(y(tr!("action-copy")) < y(tr!("column-move")), "{menu:#?}");
+        assert!(y(tr!("action-paste")) < y(tr!("column-move")), "{menu:#?}");
+        assert!(y(tr!("column-move")) < y(tr!("column-type")), "{menu:#?}");
+        assert!(y(tr!("column-type")) < y(tr!("column-role")), "{menu:#?}");
+        let ys: Vec<f32> = entrees_move().into_iter().map(y).collect();
+        assert!(ys.windows(2).all(|paire| paire[0] < paire[1]), "{ys:?}");
+        assert_eq!(
+            menu.iter()
+                .filter(|(texte, _, _)| texte.starts_with("Move"))
+                .count(),
+            5,
+            "Move et ses quatre entrées, rien de plus : {menu:#?}"
+        );
+    }
+
+    /// Grisage : tout ou rien, par le même calcul que l'exécution.
+    #[test]
+    fn les_entrees_de_move_sont_grisees_quand_le_geste_ne_changerait_rien() {
+        let actives = |menu: &[EntreeMenu]| -> Vec<bool> {
+            entrees_move()
+                .iter()
+                .map(|label| entree_menu(menu, label).1)
+                .collect()
+        };
+        // A seule : déjà en tête, ni First ni Left.
+        let mut banc = Banc::new();
+        let menu = ouvre_move(&mut banc, 0);
+        assert_eq!(actives(&menu), [false, false, true, true], "A seule");
+        // B seule : tout est possible.
+        let mut banc = Banc::new();
+        let menu = ouvre_move(&mut banc, 1);
+        assert_eq!(actives(&menu), [true, true, true, true], "B seule");
+        // C seule : déjà en fin.
+        let mut banc = Banc::new();
+        let menu = ouvre_move(&mut banc, 2);
+        assert_eq!(actives(&menu), [true, true, false, false], "C seule");
+        // A et C (non contiguës) : A bloque Left, C bloque Right, tout ou rien.
+        let mut banc = Banc::new();
+        let (sheet, a, c) = (banc.sheet, banc.columns[0], banc.columns[2]);
+        banc.state.select_column(sheet, a);
+        banc.state.toggle_column_selection(sheet, c);
+        banc.image(Vec::new());
+        let menu = ouvre_move(&mut banc, 0);
+        assert_eq!(actives(&menu), [true, false, false, true], "A et C");
+        // Des lignes entières : toutes les colonnes, rien ne bouge.
+        let mut banc = Banc::new();
+        banc.context.enable_accesskit();
+        banc.state.select_row(banc.sheet, 1);
+        banc.image(Vec::new());
+        banc.clic_bouton("102", egui::PointerButton::Secondary);
+        banc.clic_sur(&tr!("column-move"));
+        let menu = menu_lu(&banc);
+        assert_eq!(actives(&menu), [false; 4], "lignes entières");
+    }
+
+    /// L'entrée active pousse `MoveColumns` sur la sélection, la grisée non.
+    #[test]
+    fn une_entree_de_move_pousse_l_action_sur_la_selection() {
+        let mut banc = Banc::new();
+        let (sheet, b) = (banc.sheet, banc.columns[1]);
+        ouvre_move(&mut banc, 1);
+        banc.clic_sur(&tr!("action-move-columns-left"));
+        assert_eq!(
+            banc.vues
+                .iter()
+                .filter(|action| matches!(action, Action::MoveColumns { .. }))
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec![Action::MoveColumns {
+                sheet,
+                columns: vec![b],
+                to: ColumnMove::Left
+            }]
+        );
+        // Une entrée grisée ne pousse rien.
+        let mut banc = Banc::new();
+        ouvre_move(&mut banc, 0);
+        banc.clic_sur(&tr!("action-move-columns-left"));
+        assert!(
+            !banc
+                .vues
+                .iter()
+                .any(|action| matches!(action, Action::MoveColumns { .. })),
+            "{:?}",
+            banc.vues
+        );
+    }
+
+    /// La largeur suit sa colonne : B (réglée) et A (réglée) échangent leur
+    /// place, chacune garde la sienne. Témoin : stockage par position.
+    #[test]
+    fn la_largeur_suit_la_colonne_deplacee() {
+        let mut banc = Banc::new();
+        redimensionne(&mut banc, 0, 12.0);
+        redimensionne(&mut banc, 1, 30.0);
+        let avant = largeurs_peintes(&banc, 3);
+        assert!(!proches(avant[0], avant[1]), "deux largeurs distinctes");
+
+        ouvre_move(&mut banc, 1);
+        banc.clic_sur(&tr!("action-move-columns-left"));
+        for action in std::mem::take(&mut banc.vues) {
+            banc.state.dispatch(action);
+        }
+        laisse_passer(&mut banc);
+
+        let ordre: Vec<NodeId> = banc
+            .state
+            .visible_columns(banc.sheet)
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        assert_eq!(
+            ordre,
+            vec![banc.columns[1], banc.columns[0], banc.columns[2]]
+        );
+        let apres = largeurs_peintes(&banc, 3);
+        assert!(
+            proches(apres[0], avant[1]),
+            "B en tête : {apres:?} / {avant:?}"
+        );
+        assert!(
+            proches(apres[1], avant[0]),
+            "A en second : {apres:?} / {avant:?}"
+        );
+        assert!(proches(apres[2], avant[2]), "C : {apres:?} / {avant:?}");
     }
 
     // --- Glisser de lignes vers un graphe (#166) ------------------------------

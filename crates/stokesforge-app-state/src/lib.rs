@@ -32,6 +32,7 @@
 
 pub mod analysis;
 pub mod analysis_recent;
+pub mod column_move;
 pub mod errors;
 pub mod file_picker;
 pub mod history_text;

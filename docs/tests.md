@@ -647,7 +647,7 @@ retour de la poignée originale et la macro Script avec `replace_original=True`.
 | Close ne rend rien | `supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_rien` |
 | Ctrl+Maj+C pose la question seulement si une colonne a une formule ; Valeurs vide la ligne Formule | `ctrl_maj_c_sur_une_colonne_formule_pose_la_question`, `ctrl_maj_c_sans_formule_copie_directement` |
 
-Limites : le geste de déplacement d'une colonne n'existe pas encore (#319) — ses effets sur les formules sont tenus au niveau de la session (`recalc_cible.rs`) ; la référence cachée d'une correction (`aux`) est exclue par construction, sans témoin dédié.
+Limites : le déplacement d'une colonne (#319) n'ouvre aucune fenêtre : le témoin est `column_move.rs` (« Déplacer des colonnes », plus bas) ; ses effets sur les formules sont aussi tenus au niveau de la session (`recalc_cible.rs`) ; la référence cachée d'une correction (`aux`) est exclue par construction, sans témoin dédié.
 
 ## Formules par identifiant (#321, #320)
 
@@ -684,6 +684,25 @@ Table `NodeId -> f32` de l'acteur, hors modèle et hors historique, enregistrée
 | Add Column : les largeurs gardées, la neuve à 54 ; Delete puis Ctrl+Z | `la_largeur_de_chaque_colonne_survit_a_l_ajout_d_une_colonne`, `supprimer_puis_annuler_rend_la_colonne_et_ses_voisines_a_leur_largeur` (largeur par position : rouge ; sans `reset()` quand la liste change à nombre égal : rouge) |
 
 La largeur se lit dans le banc sur l'aplat de la lettre de colonne (`largeur_peinte`).
+
+## Déplacer des colonnes (#319)
+
+Sous-menu `Move ▸` (First · Left · Right · Last). Chaque règle a son témoin, vérifié par mutation.
+
+| Règle | Témoin |
+|---|---|
+| Left/Right gardent l'écart (`A [B] C [D] E` → `B A D C E` / `A C B E D`), First/Last regroupent dans l'ordre | `column_move::tests::left_keeps_the_gap_*`, `first_and_last_gather_*` (resserrer le bloc : rouge) |
+| tout ou rien : `[A] C` et `[A] [C]` Left → `None` ; geste sans effet → `None` | `a_column_that_cannot_move_greys_*`, `a_gesture_that_changes_nothing_*` (ne bouger que C : rouge) |
+| la suite de `Move` rejouée (index après retrait) donne l'ordre cible, toutes sélections de six colonnes, quatre sens ; seules les colonnes sélectionnées bougent | `the_steps_reach_the_target_order_for_every_selection` (index +1 : rouge) |
+| un enfant `Unknown` garde sa place, index dans la liste complète | `an_unknown_child_keeps_its_place_*` (index = rang visible : rouge) |
+| un seul Undo pour plusieurs colonnes, libellé « Move Columns » ; une colonne : `Move “B”` | `app-state/tests/column_move.rs` `deux_colonnes_deplacees_*` (sans macro : rouge), `une_colonne_seule_*` |
+| aucune fenêtre « Colonne utilisée », valeurs de formule inchangées | `deplacer_une_colonne_lue_par_une_formule_*` (appeler `open_column_use` : rouge) |
+| la sélection couvre les mêmes colonnes après le geste | `la_selection_reste_sur_les_colonnes_deplacees` (vider la sélection : rouge) |
+| `Move ▸` entre le presse-papiers et `Type ▸`, quatre entrées ; grisage tout ou rien (A seule, C seule, A et C, lignes entières) ; l'entrée active pousse `MoveColumns` | `grid::tests::move_est_place_*`, `les_entrees_de_move_sont_grisees_*`, `une_entree_de_move_pousse_*` (grisage supprimé, entrée retirée : rouge) |
+| même sous-menu et même grisage dans Workbook › Columns | `menus::tests::le_menu_colonnes_porte_move_*` (retirer `Move ▸` de la peinture partagée : rouge) |
+| la largeur suit la colonne déplacée (#325) | `grid::tests::la_largeur_suit_la_colonne_deplacee` (stockage par position : rouge) |
+
+Limite : l'aspect du sous-menu et le texte des bulles se relisent à l'écran.
 
 ## Polynôme contraint sur un X décalé (#296)
 

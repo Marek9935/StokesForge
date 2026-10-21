@@ -87,11 +87,15 @@ pub enum MacroKind {
     RemoveFormula,
     /// Supprimer plusieurs colonnes entières d'une feuille.
     DeleteColumns,
+    /// Déplacer plusieurs colonnes d'une feuille d'un geste (#319) ; le
+    /// déplacement d'une seule colonne reste une entrée `Move`. Distinct de
+    /// `MoveObjects`, qui est celui du Project Manager.
+    MoveColumns,
 }
 
 impl MacroKind {
     /// Toutes les natures de groupe, pour les tests exhaustifs.
-    pub const ALL: [MacroKind; 18] = [
+    pub const ALL: [MacroKind; 19] = [
         MacroKind::PasteCells,
         MacroKind::PasteObjects,
         MacroKind::DuplicateObjects,
@@ -110,6 +114,7 @@ impl MacroKind {
         MacroKind::AnalysisToGraph,
         MacroKind::RemoveFormula,
         MacroKind::DeleteColumns,
+        MacroKind::MoveColumns,
     ];
 }
 
@@ -317,6 +322,7 @@ impl fmt::Display for MacroKind {
             MacroKind::AnalysisToGraph => "Analyze and Plot",
             MacroKind::RemoveFormula => "Remove Formula",
             MacroKind::DeleteColumns => "Delete Columns",
+            MacroKind::MoveColumns => "Move Columns",
         })
     }
 }

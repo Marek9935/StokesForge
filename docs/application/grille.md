@@ -43,9 +43,29 @@ Copier avec l'en-tête, Coller, Coller à l'identique), puis Vider et Supprimer
 et décaler. Undo et Redo n'y sont plus (Edit et le clavier, #158) ; chaque
 entrée garde son équivalent au clavier, miroir du bloc de raccourcis de
 `grid_contents`. La rangée des lettres y entoure ce bloc de ce qui lui est
-propre : Tracer ▸ et Ajouter une colonne avant, Type ▸ et Rôle ▸ après le
-presse-papiers (ils décrivent la colonne plutôt qu'ils n'agissent sur son
-contenu).
+propre : Tracer ▸ et Ajouter une colonne avant, Déplacer ▸, Type ▸ et Rôle ▸
+après le presse-papiers (ils décrivent la colonne plutôt qu'ils n'agissent sur
+son contenu).
+
+**Déplacer ▸** (#319, `grid::move_columns_menu`, peint par
+`column_type_role_menus` donc aussi dans Workbook › Columns) : quatre entrées,
+Move to First · Move Left · Move Right · Move to Last, qui font bouger les
+colonnes sélectionnées **dans leur feuille** (jamais d'une feuille à l'autre).
+Left et Right avancent chaque colonne d'une place, l'écart entre colonnes non
+contiguës reste (`A [B] C [D] E` → `B A D C E`) ; First et Last regroupent la
+sélection en tête ou en fin, dans son ordre. Tout ou rien : une entrée est
+**grisée**, raison en bulle, quand le geste ne changerait rien (Left si la
+première colonne sélectionnée est déjà en A, Right symétrique, First et Last si
+l'ordre ne change pas) ; une sélection de lignes entières, qui couvre toutes les
+colonnes, grise les quatre. Une colonne : une entrée `Move “B”` ; plusieurs : une
+macro `MacroKind::MoveColumns`, un seul Ctrl+Z. **Aucune** fenêtre « Colonne
+utilisée » : depuis #321 une formule suit sa colonne. Les graphes déjà tracés ne
+bougent pas ; seuls les tracés suivants apparient les Y aux X qui sont à leur
+nouvelle gauche. La logique d'ordre est pure (`stokesforge-app-state`,
+`column_move.rs`) et sert au grisage comme à l'exécution ; un enfant `Unknown`
+sous la feuille garde sa place (l'index se traduit dans la liste complète des
+enfants). La largeur d'une colonne suit son identifiant, donc sa colonne
+(#325).
 
 Les entrées sont des verbes **nus** : « Copier », pas « Copier la cellule » ;
 « Annuler », pas « Annuler Edit Cells in Column A ». Le clic droit vient de

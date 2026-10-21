@@ -274,6 +274,21 @@ pub enum Action {
         /// Rôle demandé.
         role: ColumnRole,
     },
+    /// Déplace des colonnes dans leur feuille (#319, sous-menu `Move ▸` du clic
+    /// droit des lettres et du menu Colonnes) : `columns` bouge vers `to`, en
+    /// un seul geste annulable (une entrée `Move` pour une colonne, une macro
+    /// `MoveColumns` pour plusieurs). Aucune fenêtre « colonne utilisée » : une
+    /// formule suit sa colonne (#321). Sans effet quand le geste ne changerait
+    /// rien (l'entrée du menu est alors grisée). La sélection reste sur les
+    /// colonnes déplacées.
+    MoveColumns {
+        /// Feuille des colonnes.
+        sheet: NodeId,
+        /// Colonnes à déplacer (la sélection).
+        columns: Vec<NodeId>,
+        /// Où elles vont.
+        to: crate::column_move::ColumnMove,
+    },
     /// Fixe la largeur d'une colonne de la grille, en points logiques (#325),
     /// à la **fin** d'un redimensionnement fait à la main. Réglage de vue,
     /// comme la géométrie d'une fenêtre : ni historique ni `revision` (Ctrl+Z
@@ -4833,6 +4848,7 @@ impl AppState {
             Action::SetColumnRole { column, role } => {
                 self.set_column_meta_field(column, |meta| meta.role = role);
             }
+            Action::MoveColumns { sheet, columns, to } => self.move_columns(sheet, &columns, to),
             Action::SetColumnWidth { column, width } => self.set_column_width(column, width),
             Action::InsertRows { sheet, at, count } => self.rows(sheet, at, count, true),
             Action::DeleteRows { sheet, at, count } => self.rows(sheet, at, count, false),
@@ -8031,6 +8047,53 @@ impl AppState {
             return;
         }
         self.execute(Command::DeleteCells { columns, at, count });
+    }
+
+    /// Voir [`Action::MoveColumns`] : la suite de `Command::Move` que calcule
+    /// [`crate::column_move::plan`], un seul `execute` pour une colonne, une macro
+    /// `MoveColumns` pour plusieurs. Ni `column_users_before` ni
+    /// `open_column_use` : un déplacement ne change pas ce que lit un calcul
+    /// (formules et analyses désignent leurs colonnes par identifiant).
+    fn move_columns(
+        &mut self,
+        sheet: NodeId,
+        columns: &[NodeId],
+        to: crate::column_move::ColumnMove,
+    ) {
+        let order: Vec<NodeId> = self
+            .visible_columns(sheet)
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect();
+        let children: Vec<NodeId> = self
+            .snapshot
+            .tree
+            .children(sheet)
+            .map(<[NodeId]>::to_vec)
+            .unwrap_or_default();
+        let Some(steps) = crate::column_move::plan(&children, &order, columns, to) else {
+            return;
+        };
+        let moved = columns.iter().filter(|id| order.contains(id)).count();
+        let step_command = |step: crate::column_move::MoveStep| Command::Move {
+            id: step.id,
+            new_parent: sheet,
+            index: step.index,
+        };
+        if moved <= 1 {
+            for step in steps {
+                self.execute(step_command(step));
+            }
+            return;
+        }
+        if self.handle.begin_macro(MacroKind::MoveColumns).is_err() {
+            self.fail(tr!("error-columns-group"));
+            return;
+        }
+        for step in steps {
+            self.execute(step_command(step));
+        }
+        self.end_grouped_macro();
     }
 
     /// Retire des colonnes entières de leur feuille (menu « Delete » des

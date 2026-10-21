@@ -665,7 +665,9 @@ Comment c'est tenu :
   « liste de moins de 4 options » étudiée et non posée : une `ComboBox` de
   données ne se distingue pas d'un choix fixe à la lecture du code.
 - **`menu_sections::menu_choice`** : coche dans la marge devant l'option
-  courante (Type ▸, Role ▸, Language ▸, SVG Text ▸, PNG Resolution ▸).
+  courante (Type ▸, Role ▸, Language ▸, SVG Text ▸, PNG Resolution ▸). `Move ▸` des
+  colonnes (#319) est un sous-menu d'actions, grisées avec leur raison, pas un choix
+  exclusif : pas de coche.
 - **`theme.rs`** : `SPACE_ITEM`, `SPACE_SECTION`, `FIELD_WIDTH_SHORT`
   (aussi `number_field::FIELD_WIDTH`), `FIELD_WIDTH_MEDIUM`, `FieldWidth`.
   Garde `aucun_add_space_litteral_hors_du_theme` (`tests/gardes.rs`), sans

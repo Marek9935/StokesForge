@@ -1708,6 +1708,70 @@ mod tests {
         session.shutdown().unwrap();
     }
 
+    /// #319 : `Move ▸` est dans Workbook › Columns comme au clic droit des
+    /// lettres (une seule peinture, `column_type_role_menus`), avec ses quatre
+    /// entrées et le même grisage ; entre Add Column et Type.
+    #[test]
+    fn le_menu_colonnes_porte_move_avec_ses_quatre_entrees_et_le_meme_grisage() {
+        let (session, mut app, _) = banc();
+        let book = app.state.books()[0].0;
+        app.open_tab(Tab::Book(book));
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        app.state.dispatch(Action::AddColumn { sheet });
+        let columns: Vec<_> = app
+            .state
+            .visible_columns(sheet)
+            .iter()
+            .map(|c| c.0)
+            .collect();
+        assert!(columns.len() >= 3, "une colonne au milieu : {columns:?}");
+        let tab = Some(Tab::Book(book));
+        let chemin = [
+            tr!("menu-workbook"),
+            tr!("menu-columns"),
+            tr!("column-move"),
+        ];
+        let quatre = [
+            tr!("action-move-columns-first"),
+            tr!("action-move-columns-left"),
+            tr!("action-move-columns-right"),
+            tr!("action-move-columns-last"),
+        ];
+
+        // Une colonne du milieu : tout est possible, dans l'ordre du menu.
+        app.state.select_column(sheet, columns[1]);
+        let (ctx, menu) = ouvre_chemin(&mut app, tab, &chemin);
+        let y = |label: &str| active(&menu, label).center.y;
+        assert!(y(&tr!("workbook-column-add")) < y(&tr!("column-move")));
+        assert!(y(&tr!("column-move")) < y(&tr!("column-type")));
+        assert!(y(&tr!("column-type")) < y(&tr!("column-role")));
+        for label in &quatre {
+            assert!(active(&menu, label).enabled, "{label} : {menu:#?}");
+        }
+        let ys: Vec<f32> = quatre.iter().map(|label| y(label)).collect();
+        assert!(ys.windows(2).all(|paire| paire[0] < paire[1]), "{ys:?}");
+        let pos = active(&menu, &tr!("action-move-columns-right")).center;
+        assert_eq!(
+            clique(&mut app, &ctx, tab, pos),
+            vec![Action::MoveColumns {
+                sheet,
+                columns: vec![columns[1]],
+                to: stokesforge_app_state::column_move::ColumnMove::Right
+            }]
+        );
+        assert_ferme(&mut app, &ctx, tab);
+
+        // La première colonne : ni First ni Left (même règle qu'au clic droit).
+        app.state.select_column(sheet, columns[0]);
+        let (_, menu) = ouvre_chemin(&mut app, tab, &chemin);
+        let actives: Vec<bool> = quatre
+            .iter()
+            .map(|label| active(&menu, label).enabled)
+            .collect();
+        assert_eq!(actives, [false, false, true, true], "{menu:#?}");
+        session.shutdown().unwrap();
+    }
+
     #[test]
     fn afficher_les_donnees_suit_les_references_du_graphique() {
         let (session, mut app, graph) = banc();

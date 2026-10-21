@@ -237,6 +237,19 @@ action-clear = Effacer
 action-remove-formula-keep-data = Retirer la formule, garder les données
     .hint = Retire la formule et garde les valeurs calculées comme données ordinaires
     .disabled = Sélectionnez une colonne qui a une formule
+column-move = Déplacer
+action-move-columns-first = Déplacer au début
+    .hint = Déplace les colonnes sélectionnées au début de la feuille, dans leur ordre
+    .disabled = Les colonnes sélectionnées sont déjà en tête
+action-move-columns-left = Déplacer vers la gauche
+    .hint = Déplace chaque colonne sélectionnée d'une place vers la gauche
+    .disabled = Une colonne sélectionnée est déjà la première
+action-move-columns-right = Déplacer vers la droite
+    .hint = Déplace chaque colonne sélectionnée d'une place vers la droite
+    .disabled = Une colonne sélectionnée est déjà la dernière
+action-move-columns-last = Déplacer à la fin
+    .hint = Déplace les colonnes sélectionnées à la fin de la feuille, dans leur ordre
+    .disabled = Les colonnes sélectionnées sont déjà en fin de feuille
 action-delete-columns = Supprimer
     .hint = Retire les colonnes sélectionnées de la feuille. Annuler les rend avec leurs valeurs
 action-delete-shift-up = Supprimer et remonter
@@ -563,6 +576,7 @@ history-macro-set-columns-role = Changer le rôle des colonnes
 history-macro-analysis-to-graph = Analyser et tracer
 history-macro-remove-formula = Retirer la formule
 history-macro-delete-columns = Supprimer des colonnes
+history-macro-move-columns = Déplacer des colonnes
 
 ## Annuler et rétablir
 

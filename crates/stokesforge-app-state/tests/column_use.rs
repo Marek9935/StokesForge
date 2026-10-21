@@ -1,6 +1,7 @@
 //! « Colonne utilisée par un calcul » (#306) : la fenêtre qui s'ouvre après
 //! la suppression de colonnes lues par une formule ou un calcul d'analyse
-//! (`Close` ne fait rien, `Undo` annule le geste), et la question de
+//! (`Close` ne fait rien, `Undo` annule le geste ; le déplacement d'une colonne,
+//! lui, n'ouvre rien : `column_move.rs`, #319), et la question de
 //! Ctrl+Maj+C sur des colonnes à formule (valeurs ou formules).
 
 use stokesforge_analysis::model::Model;

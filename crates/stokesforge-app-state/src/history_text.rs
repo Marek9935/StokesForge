@@ -185,6 +185,7 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             MacroKind::AnalysisToGraph => tr!("history-macro-analysis-to-graph"),
             MacroKind::RemoveFormula => tr!("history-macro-remove-formula"),
             MacroKind::DeleteColumns => tr!("history-macro-delete-columns"),
+            MacroKind::MoveColumns => tr!("history-macro-move-columns"),
         },
     }
 }

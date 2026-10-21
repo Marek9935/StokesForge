@@ -27,7 +27,7 @@ Une section vide disparaît avec ses séparateurs.
 1. **Action principale** de la cible : Show Data, Edit Text, Show / Hide d'une fenêtre…
 2. **Créer / insérer** : Add Text, Insert Object ▸, Add Column, Add Worksheet, Plot ▸.
 3. **Presse-papiers**, un seul groupe : Cut, Copy et variantes, Paste et variantes.
-4. **Organiser** : Rename, Duplicate, Move Up / Down, Bring to Front…, Hide, Type ▸, Role ▸.
+4. **Organiser** : Rename, Duplicate, Move Up / Down, Bring to Front…, Hide, Move ▸ (colonnes), Type ▸, Role ▸.
 5. **Supprimer** : Clear, Delete…
 6. **Sortie** : Export ▸.
 7. **Properties…**, toujours en dernier, action directe qui ouvre la fenêtre
@@ -49,9 +49,11 @@ Une section vide disparaît avec ses séparateurs.
   peint par `menu_sections::menu_choice`. Les cases à cocher restent aux
   bascules d'affichage.
 - **Profondeur 2** : le menu et un sous-menu. Au clic droit c'est strict ;
-  dans la barre, le menu du haut compte comme le menu (une seule exception
-  assumée : View › Object Manager › Expand by Default, enveloppe d'un contenu
-  partagé).
+  dans la barre, le menu du haut compte comme le menu. Écarts assumés, tous
+  l'enveloppe d'un contenu partagé qui garde sa profondeur 2 au clic droit :
+  View › Object Manager › Expand by Default, et Workbook › Columns › Move ▸ /
+  Type ▸ / Role ▸ (trois niveaux dans la barre : Workbook, Columns, le
+  sous-menu ; #319 pour Move ▸).
 - **Absent ou grisé** : sans objet pour cette cible → **absent** (Show Data
   hors d'une courbe, Copy sur un dossier) ; pertinent mais momentanément
   impossible → **grisé avec une info-bulle `.disabled`** qui dit pourquoi.
@@ -116,7 +118,7 @@ Selection ▸ ne subsiste que dans Edit.
 | Cible | Menu |
 |---|---|
 | Cellule, ligne, champ d'en-tête | Cut · Copy · Copy with Header · Paste · Paste in Place ─ Remove Formula, Keep Data (champ Formule portant une formule, #236 ; aussi Workbook › Columns) · Clear · Delete and Shift Up |
-| En-tête de colonne | Plot ▸ · Add Column ─ presse-papiers ─ Type ▸ · Role ▸ ─ Clear · Delete (retire les colonnes ; un seul Annuler les rend) |
+| En-tête de colonne | Plot ▸ · Add Column ─ presse-papiers ─ Move ▸ · Type ▸ · Role ▸ ─ Clear · Delete (retire les colonnes ; un seul Annuler les rend) ; Move ▸ = Move to First · Move Left · Move Right · Move to Last, grisées avec leur raison quand le geste ne changerait rien (#319) ; mêmes entrées dans Workbook › Columns |
 | Grille vide, zone blanche | Add Column |
 | Onglet de feuille, bande vide | Add Worksheet ─ Rename · Duplicate ─ Delete |
 
