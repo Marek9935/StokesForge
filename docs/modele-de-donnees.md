@@ -51,8 +51,14 @@ une référence rompue. **La ligne suit les insertions et suppressions de lignes
 de sa feuille (#307) : `InsertRows` pousse `r >= at` à `r + count`, `DeleteRows`
 ramène `r >= at + count` à `r - count`, dans le même delta (champ `plots`, donc
 annulable d'un bloc). Une ligne `r` dans la plage supprimée ne change pas : la
-série trace alors la ligne qui a pris sa place (cas ouvert, décision D1 de #307).
-`DeleteCells` ne déplace aucune ligne de feuille et ne touche pas aux séries.
+série trace alors la ligne qui a pris sa place. **Choix assumé (#307, G1,
+2026-10-21)** : une ligne n'a pas d'identité autre que son numéro, donc il n'y a
+ni suppression de la série ni état « référence rompue » ; un calcul déjà fait
+garde ses anciennes valeurs jusqu'à Recalculate. Le ré-import qui raccourcit une
+feuille relève du même choix. `DeleteCells` ne déplace aucune ligne de feuille et
+ne touche pas aux séries : supprimer des cellules sur une partie seulement des
+colonnes (G2) laisse une série « ligne » mêler des cellules de deux lignes
+d'origine, **laissé tel quel**, cas rare. Ne pas « corriger » sans rouvrir G1/G2.
 `NodeCopy::capture` embarque toutes les colonnes x' de la
 feuille quand un graphe copié a une telle série.
 
