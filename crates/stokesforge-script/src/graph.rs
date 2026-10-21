@@ -27,6 +27,13 @@ use crate::surface::{to_py_error, Handle, InvalidValueError};
 type Target = (NodeId, u64);
 
 /// Données Rust seulement : elles traversent Python::detach, jamais un objet Python.
+/// L'option `color=` : une chaîne (`scalar`, valable pour toutes les séries du
+/// lot) ou une liste d'une couleur par série.
+struct ColorOption {
+    list: Vec<String>,
+    scalar: bool,
+}
+
 struct Request {
     references: Vec<Target>,
     /// Une série par entrée : colonne y, colonne x propre (ou partagée) et nom.
@@ -36,7 +43,8 @@ struct Request {
     parent: Option<Target>,
     name: Option<String>,
     series: SeriesSpec,
-    color: Option<String>,
+    /// Une couleur par série (liste) ou une pour toutes (chaîne), #207.
+    color: Option<ColorOption>,
     title: Option<String>,
     x_title: Option<String>,
     y_title: Option<String>,
@@ -66,7 +74,7 @@ pub(crate) fn invalid(message: impl Into<String>) -> PyErr {
 /// séries, label est une liste (un nom par série) et group_name nomme le
 /// groupe ; x_error/y_error ne servent qu'à une série seule. Options : plot_type
 /// (line, scatter, line_scatter, bar, histogram, error_bar), color (#RRGGBB ou
-/// #RRGGBBAA), line_style (none, solid, dash, dot, dash_dot), line_width,
+/// #RRGGBBAA ; une liste donne une couleur par série, une chaîne vaut pour toutes), line_style (none, solid, dash, dot, dash_dot), line_width,
 /// symbol (none, circle, square, triangle, diamond, plus, cross), symbol_size,
 /// label, title, x_title, y_title, x_scale/y_scale (linear, log), x_from/x_to et
 /// y_from/y_to (les deux ensemble ; from > to trace l'axe à l'envers), axis (left, right), x_error/y_error (poignées), histogram_bins.
@@ -154,9 +162,12 @@ pub(crate) fn plot(
                     _ => return Err(invalid("unknown plot_type: use line, scatter, line_scatter, bar, histogram or error_bar")),
                 },
                 "color" => {
-                    let color = string()?;
-                    if stokesforge_plot::parse_hex(&color).is_none() { return Err(invalid("color must be a hexadecimal RGB or RGBA color")); }
-                    request.color = Some(color);
+                    let (list, scalar) = match value.extract::<Vec<String>>() {
+                        Ok(list) => (list, false),
+                        Err(_) => (vec![string()?], true),
+                    };
+                    if list.iter().any(|c| stokesforge_plot::parse_hex(c).is_none()) { return Err(invalid("color must be a hexadecimal RGB or RGBA color, or a list of them")); }
+                    request.color = Some(ColorOption { list, scalar });
                 }
                 "line_style" => request.series.line.style = parse_line_style(&string()?)?,
                 "line_width" => request.series.line.width = positive()?,
@@ -210,6 +221,13 @@ pub(crate) fn plot(
         }
         for (member, label) in request.members.iter_mut().zip(labels) {
             member.label = label;
+        }
+    }
+    if let Some(color) = &request.color {
+        if !color.scalar && color.list.len() != request.members.len() {
+            return Err(invalid(
+                "color must be one color, or a list with one color per series",
+            ));
         }
     }
     if request.group_name.is_some() && request.members.len() < 2 {
@@ -373,7 +391,12 @@ fn build_spec(
             // Sans `color=`, la couleur de palette du rang de la série dans le
             // panneau (`SeriesSpec::from_palette`, trait et marqueurs).
             let palette = SeriesSpec::from_palette(member.y, panel.series.len() + rank);
-            match &request.color {
+            let chosen =
+                request
+                    .color
+                    .as_ref()
+                    .map(|c| if c.scalar { &c.list[0] } else { &c.list[rank] });
+            match chosen {
                 Some(color) => {
                     series.line.color.clone_from(color);
                     series.symbol.color.clone_from(color);

@@ -332,7 +332,7 @@ sert à identifier sa fenêtre, pas à titrer la figure (#103).
 | Option | Valeurs |
 |---|---|
 | `plot_type` | `line`, `scatter`, `line_scatter`, `bar`, `histogram`, `error_bar` |
-| `color` | `#RRGGBB` ou `#RRGGBBAA`, trait et symbole ; palette partagée sinon |
+| `color` | `#RRGGBB` ou `#RRGGBBAA`, trait et symbole (liste : une couleur par série, chaîne : toutes) ; palette partagée sinon |
 | `line_style`, `line_width` | `none`, `solid`, `dash`, `dot`, `dash_dot` ; largeur finie positive |
 | `symbol`, `symbol_size` | `none`, `circle`, `square`, `triangle`, `diamond`, `plus`, `cross` ; taille finie positive |
 | `label`, `title`, `x_title`, `y_title` | chaînes avec markup Typst explicite |
@@ -387,6 +387,7 @@ même longueur que `y`. `label` est une chaîne pour
 une série, une liste (un nom par série) pour un lot ; `group_name` nomme le
 groupe (refusé pour une série seule) ; `x_error`/`y_error` ne servent qu'à une
 série seule. Les couleurs automatiques suivent la palette, série après série (`SeriesSpec::from_palette`, au rang de la série dans le panneau).
+`color` suit la même règle que `label` (#207) : une liste donne une couleur par série (`InvalidValueError` si sa longueur n'est pas celle du lot) ; une chaîne seule vaut pour **toutes** les séries du lot ; pour un dégradé, voir `apply_gradient`.
 
 | Appel | Effet |
 |---|---|

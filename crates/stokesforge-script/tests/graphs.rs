@@ -273,7 +273,7 @@ fn refus_ne_modifient_ni_graphe_ni_historique() {
     run(
         &b,
         r#"
-for opts in ({'plot_type':'inconnu'}, {'color':'red'}, {'symbol':'o'}, {'line_style':'--'}, {'line_width':float('nan')}, {'symbol_size':0}, {'histogram_bins':0}, {'histogram_bins':65537}, {'x_scale':'symlog'}, {'x_from':1.}, {'x_from':2.,'x_to':2.}, {'y_scale':'log','y_from':2.,'y_to':0.}, {'y_error':pyst.root()}, {'unknown':1}, {'parent':pyst.root()}, {'name':'Autre'}):
+for opts in ({'plot_type':'inconnu'}, {'color':'red'}, {'color':['#ff0000','red']}, {'symbol':'o'}, {'line_style':'--'}, {'line_width':float('nan')}, {'symbol_size':0}, {'histogram_bins':0}, {'histogram_bins':65537}, {'x_scale':'symlog'}, {'x_from':1.}, {'x_from':2.,'x_to':2.}, {'y_scale':'log','y_from':2.,'y_to':0.}, {'y_error':pyst.root()}, {'unknown':1}, {'parent':pyst.root()}, {'name':'Autre'}):
     try: pyst.plot(y, graph=g, **opts)
     except pyst.InvalidValueError: pass
     else: raise AssertionError('option invalide acceptée')
@@ -663,4 +663,39 @@ fn plot_sans_x_prend_la_colonne_x_a_gauche_par_role() {
         panel.series[1].symbol.color,
         stokesforge_plot::palette_color(1)
     );
+}
+
+/// #207 : `color` accepte une liste (une couleur par série) ; une chaîne vaut
+/// pour toutes les séries ; une liste de mauvaise longueur est refusée.
+#[test]
+fn color_en_liste_donne_une_couleur_par_serie() {
+    let b = banc();
+    run(
+        &b,
+        &format!("{HANDLES}g = pyst.plot([y, y, y], x, name='Graph1', color=['#ff0000', '#00ff00', '#0000ff80'])"),
+    );
+    let panel = &graph_spec(&b).panels[0];
+    let colors: Vec<&str> = panel.series.iter().map(|s| s.line.color.as_str()).collect();
+    assert_eq!(colors, ["#ff0000", "#00ff00", "#0000ff80"]);
+    assert_eq!(panel.series[1].symbol.color, "#00ff00");
+
+    // Une couleur seule vaut pour toutes les séries du lot.
+    run(&b, "pyst.plot([y, y], graph=g, color='#123456')");
+    let panel = &graph_spec(&b).panels[0];
+    assert_eq!(panel.series[3].line.color, "#123456");
+    assert_eq!(panel.series[4].line.color, "#123456");
+
+    // Mauvaise longueur : refus, rien n'est écrit.
+    let before = b.session.snapshot().unwrap();
+    run(
+        &b,
+        r#"
+for colors in (['#ff0000'], ['#ff0000', '#00ff00', '#0000ff'], []):
+    try: pyst.plot([y, y], graph=g, color=colors)
+    except pyst.InvalidValueError: pass
+    else: raise AssertionError('liste de mauvaise longueur acceptée')
+"#,
+    );
+    let after = b.session.snapshot().unwrap();
+    assert_eq!(*after.tree, *before.tree);
 }
