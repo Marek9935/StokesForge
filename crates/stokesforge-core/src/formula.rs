@@ -230,7 +230,7 @@ enum Expr {
 /// `a*b*c…` coûte 1. Le parseur, `eval_expr`/`combine`, `referenced_columns` et
 /// le `Drop` de l'arbre récursent d'autant : borné ici, aucun ne peut dépasser
 /// la pile d'un thread de 2 MiB, même en debug (`docs/archive/rustrewrite/
-/// questions-ouvertes.md` §11, #289). Admet 100 imbrications ou 1 000 termes.
+/// questions-ouvertes.md` §11, #289). Admet 100 imbrications ou environ 1 000 termes (1 001 passent).
 pub const MAX_DEPTH: usize = 1000;
 const NEST_COST: usize = 10;
 

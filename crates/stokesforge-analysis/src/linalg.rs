@@ -77,7 +77,6 @@ impl Matrix {
         g
     }
 
-    /// `selfᵀ · v`.
     /// `self · v`.
     pub fn mul_vec(&self, v: &[f64]) -> Vec<f64> {
         (0..self.rows)
@@ -99,6 +98,7 @@ impl Matrix {
         m
     }
 
+    /// `selfᵀ`.
     pub fn transpose(&self) -> Matrix {
         let mut m = Matrix::zeros(self.cols, self.rows);
         for i in 0..self.rows {
@@ -109,6 +109,7 @@ impl Matrix {
         m
     }
 
+    /// `selfᵀ · v`.
     pub fn transpose_mul(&self, v: &[f64]) -> Vec<f64> {
         let mut out = vec![0.0; self.cols];
         for (r, &vr) in v.iter().enumerate().take(self.rows) {
