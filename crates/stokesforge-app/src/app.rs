@@ -139,6 +139,7 @@ mod analysis_handles;
 mod analysis_menu;
 mod analysis_preview;
 mod busy;
+mod column_use;
 mod confirmations;
 mod contents;
 mod cursors;
@@ -190,6 +191,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use analysis_dialog::{analysis_replace_window, analysis_window, calculation_delete_window};
+use column_use::{column_use_window, full_copy_window};
 use file_drop::{
     begin_file_drop, finish_file_drop, open_project_in_new_window, remember_recent_imports,
 };
@@ -1192,6 +1194,8 @@ impl StokesForgeApp {
         calculation_delete_window(ctx, &self.state, actions);
         analysis_replace_window(ctx, &self.state, actions);
         stale_export_window(ctx, &self.state, actions);
+        column_use_window(ctx, &self.state, actions);
+        full_copy_window(ctx, &self.state, actions);
         dialogs::sync_dialogs(ctx, &self.state, actions);
     }
 

@@ -80,7 +80,9 @@ use crate::tr;
 use crate::user_colors::UserColors;
 
 mod analysis;
+mod column_use;
 pub use analysis::{CalculationDelete, StaleExport};
+pub use column_use::FullColumnsCopy;
 
 /// Durée pendant laquelle une commande attend la fin du recalcul de formules
 /// qu'elle a lancé avant de rendre la main à l'interface (#239) : un recalcul
@@ -570,6 +572,12 @@ pub enum Action {
     /// Réponse à la confirmation d'un export de graphe qui montre des séries
     /// pas à jour (#198, maquette M9 a).
     ConfirmStaleExport(StaleExport),
+    /// Ferme la fenêtre « colonne utilisée par un calcul » sans rien faire (#306).
+    CloseColumnUse,
+    /// Réponse à la question de Ctrl+Maj+C sur des colonnes à formule (#306).
+    ConfirmFullColumnsCopy(FullColumnsCopy),
+    /// Annule la suppression que la fenêtre « colonne utilisée » vient de signaler (#306).
+    UndoColumnUse,
     /// Crée un graphe à partir des colonnes sélectionnées d'une feuille de
     /// classeur — menu contextuel de l'en-tête de colonne. Le nouveau graphe
     /// est ajouté dans le même dossier parent que le classeur ([`Command::
@@ -2699,6 +2707,12 @@ pub struct AppState {
     /// L'export (ou la copie) d'un graphe qui montre des séries pas à jour, en
     /// attente de la réponse de l'utilisateur (#198).
     pending_stale_export: Option<Action>,
+    /// Fenêtre « colonne utilisée par un calcul » ouverte après une
+    /// suppression (#306).
+    column_use: Option<column_use::ColumnUseNotice>,
+    /// Feuille dont Ctrl+Maj+C attend la réponse « valeurs ou formules »
+    /// (#306) : posé seulement quand une colonne copiée porte une formule.
+    pending_full_copy: Option<NodeId>,
     /// Import en cours sur un fil de fond.
     import_job: Option<ImportJob>,
     /// Début du recalcul de formules que l'interface n'a pas attendu (#239) ;
@@ -2842,6 +2856,8 @@ impl AppState {
             pending_calculation_delete: None,
             pending_analysis_replacement: false,
             pending_stale_export: None,
+            column_use: None,
+            pending_full_copy: None,
             import_job: None,
             recalc_since: None,
             applied_revision: 0,
@@ -2914,6 +2930,10 @@ impl AppState {
             self.grid_clipboard = source.grid_clipboard.clone();
             self.clipboard_text = source.clipboard_text.clone();
             source.clipboard_dirty = false;
+        }
+        // La question de Ctrl+Maj+C se pose dans la fenêtre principale (#306).
+        if let Some(sheet) = source.pending_full_copy.take() {
+            self.pending_full_copy = Some(sheet);
         }
     }
 
@@ -3995,7 +4015,37 @@ impl AppState {
     /// promues en entier. `None` si `sheet` n'a pas de sélection ou si elle
     /// ne désigne plus de colonne valide. Voir la matrice de comportement en
     /// tête de ce module.
+    ///
+    /// Quand une des colonnes porte une formule, rien n'est copié encore : la
+    /// question « valeurs ou formules » est posée (#306,
+    /// [`AppState::pending_full_copy`]) et la copie suit la réponse
+    /// ([`Action::ConfirmFullColumnsCopy`]). `None` aussi dans ce cas.
     pub fn copy_full_columns(&mut self, sheet: NodeId) -> Option<String> {
+        let selection = self.selection.get(&sheet)?;
+        let tree = &self.snapshot.tree;
+        let columns = selection.columns(tree, sheet);
+        if columns.is_empty() {
+            return None;
+        }
+        if columns
+            .iter()
+            .any(|&c| self.column_meta(c).formula.is_some())
+        {
+            self.pending_full_copy = Some(sheet);
+            return None;
+        }
+        self.copy_full_columns_with(sheet, true)
+    }
+
+    /// La feuille dont Ctrl+Maj+C attend la réponse « valeurs ou formules ».
+    pub fn pending_full_copy(&self) -> Option<NodeId> {
+        self.pending_full_copy
+    }
+
+    /// Copie en entier les colonnes touchées par la sélection de `sheet`,
+    /// avec ou sans leur formule (`keep_formula`) ; l'en-tête est toujours
+    /// copié.
+    fn copy_full_columns_with(&mut self, sheet: NodeId, keep_formula: bool) -> Option<String> {
         let selection = self.selection.get(&sheet)?;
         let tree = &self.snapshot.tree;
         let columns = selection.columns(tree, sheet);
@@ -4019,7 +4069,7 @@ impl AppState {
                     long_name: meta.long_name,
                     unit: meta.unit,
                     comment: meta.comment,
-                    formula: meta.formula,
+                    formula: meta.formula.filter(|_| keep_formula),
                     data,
                 }
             })
@@ -4730,6 +4780,9 @@ impl AppState {
             Action::RequestDeleteCalculation(id) => self.request_delete_calculation(id),
             Action::ConfirmDeleteCalculation(choice) => self.confirm_delete_calculation(choice),
             Action::ConfirmStaleExport(choice) => self.confirm_stale_export(choice),
+            Action::CloseColumnUse => self.close_column_use(),
+            Action::ConfirmFullColumnsCopy(choice) => self.confirm_full_columns_copy(choice),
+            Action::UndoColumnUse => self.undo_column_use(),
             Action::PlotColumns {
                 sheet,
                 columns,
@@ -5200,6 +5253,8 @@ impl AppState {
                     self.pending_calculation_delete = None;
                     self.pending_analysis_replacement = false;
                     self.pending_stale_export = None;
+                    self.column_use = None;
+                    self.pending_full_copy = None;
                     self.pending_overwrite = None;
                     self.pending_discarded_save = None;
                     self.object_clipboard_output = None;
@@ -6557,7 +6612,7 @@ impl AppState {
         }
     }
 
-    fn undo(&mut self) {
+    pub(super) fn undo(&mut self) {
         // Le libellé disparaît de la pile dès que l'annulation est faite : il
         // faut le lire avant.
         let label = self.snapshot.history.undo_label.clone();
@@ -7373,6 +7428,7 @@ impl AppState {
             return;
         }
         let users = self.object_users(&targets);
+        let readers = self.column_users_before(&targets);
         let commands = targets
             .into_iter()
             .map(|id| Command::RemoveNode { id })
@@ -7381,6 +7437,7 @@ impl AppState {
         if !users.is_empty() && !self.last_action_failed() {
             self.notice(tr!("object-delete-used", graphs = users.join(", ")));
         }
+        self.open_column_use(readers);
     }
 
     fn move_objects(&mut self, ids: &[NodeId], parent: NodeId) {
@@ -7798,6 +7855,8 @@ impl AppState {
     /// qu'un seul Annuler les rende toutes. Les séries qui les citaient
     /// restent tracées en gris (invariant 10), rien d'autre à nettoyer.
     fn delete_columns(&mut self, columns: &[NodeId]) {
+        // La liste des lecteurs se calcule sur l'arbre d'avant (#306).
+        let users = self.column_users_before(columns);
         match columns {
             [] => {}
             [column] => self.execute(Command::DeleteColumn { column: *column }),
@@ -7812,6 +7871,7 @@ impl AppState {
                 self.end_grouped_macro();
             }
         }
+        self.open_column_use(users);
     }
 
     /// Colle `text` à partir de l'ancre de la sélection courante de `sheet`

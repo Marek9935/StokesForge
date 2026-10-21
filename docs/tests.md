@@ -630,3 +630,19 @@ remplacement et son annulation. `stokesforge-app-state/tests/analysis_state.rs` 
 confirmation des sources partagées ; `app::form::tests` refuse les options
 grisées dans les radios et les listes. `script/tests/analysis.rs` vérifie le
 retour de la poignée originale et la macro Script avec `replace_original=True`.
+
+## Colonne utilisée par un calcul (#306)
+
+`stokesforge-app-state/tests/column_use.rs`. Chaque règle a son témoin, vérifié par mutation.
+
+| Règle | Témoin |
+|---|---|
+| une formule dont une lettre est celle de la colonne supprimée **ou d'une suivante** est listée | `les_lettres_qui_glissent_comptent_et_les_formules_en_amont_non` (`i >= first` devenu `==` : rouge) |
+| une colonne sans lecteur n'ouvre rien | `une_colonne_sans_lecteur_n_ouvre_rien` |
+| un calcul d'analyse est nommé par sa famille et sa première sortie | `un_calcul_d_analyse_est_liste_par_sa_famille_et_sa_premiere_sortie` |
+| un calcul dont une sortie disparaît avec le geste n'est pas listé | `supprimer_un_classeur_emporte_ses_calculs_sans_rien_signaler` (sans l'exclusion : rouge) |
+| plusieurs colonnes, une liste, un seul Undo | `undo_rend_la_colonne_et_la_formule_en_un_pas_et_plusieurs_colonnes_font_une_liste` |
+| Close ne rend rien | `supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_rien` |
+| Ctrl+Maj+C pose la question seulement si une colonne a une formule ; Valeurs vide la ligne Formule | `ctrl_maj_c_sur_une_colonne_formule_pose_la_question`, `ctrl_maj_c_sans_formule_copie_directement` |
+
+Limites : le geste de déplacement d'une colonne n'existe pas encore (#319) ; la référence cachée d'une correction (`aux`) est exclue par construction, sans témoin dédié.

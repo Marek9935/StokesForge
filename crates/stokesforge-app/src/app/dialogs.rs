@@ -553,6 +553,31 @@ pub(super) fn modal_read_only(
     .dialog()
 }
 
+/// [`modal_read_only`] avec des boutons secondaires à gauche de Close
+/// (`[secondaires] [Close]`) : une lecture seule qui propose aussi un geste
+/// (#306 : « Undo »).
+pub(super) fn modal_read_only_with(
+    ctx: &egui::Context,
+    id: egui::Id,
+    title: &str,
+    size: PlainSize,
+    extra_buttons: impl FnOnce(&mut egui::Ui),
+    add_contents: impl FnOnce(&mut egui::Ui),
+) -> DialogOutcome {
+    let label = tr!("dialog-close");
+    let hint = tr!("dialog-close", "hint");
+    modal_frame(
+        ctx,
+        id,
+        title,
+        DialogNature::ReadOnly(size),
+        DialogFooter::always(&label, &hint),
+        extra_buttons,
+        add_contents,
+    )
+    .dialog()
+}
+
 /// Issue d'une image de [`modal_confirm`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ConfirmOutcome {

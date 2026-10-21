@@ -182,6 +182,7 @@ fn la_fenetre_des_proprietes_est_construite_comme_les_autres() {
         "modal_wizard",
         "modal_live_settings",
         "modal_read_only",
+        "modal_read_only_with",
         "modal_confirm",
         "modal_save_changes",
         "modal_alert",
@@ -1994,11 +1995,12 @@ fn la_garde_des_tailles_voit_une_taille_libre_nue() {
 
 /// Les fonctions de dialogue modal : un identifiant `stokesforge_…` passé à
 /// l'une d'elles est celui d'une fenêtre du catalogue.
-const APPELS_MODAUX: [&str; 8] = [
+const APPELS_MODAUX: [&str; 9] = [
     "modal_dialog_with",
     "modal_dialog",
     "modal_wizard",
     "modal_live_settings",
+    "modal_read_only_with",
     "modal_read_only",
     "modal_confirm",
     "modal_save_changes",

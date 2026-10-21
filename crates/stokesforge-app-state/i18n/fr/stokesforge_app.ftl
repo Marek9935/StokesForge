@@ -1793,3 +1793,21 @@ analysis-needs-column-curve = L’analyse demande une courbe tracée depuis une 
 
 # Glisser-déposer des séries, des groupes et des objets libres.
 object-drag-end = Fin de la liste
+
+# Colonne utilisée par un calcul (#306)
+column-use-title = Colonne utilisée
+column-use-message = Cette suppression touche { $count } calcul(s) :
+column-use-formula = { $name } (formule)
+column-use-calculation = { $kind } → { $output }
+column-use-calculation-bare = { $kind }
+dialog-undo =
+    Annuler
+    .hint = Annule la suppression
+
+# Copier avec l'en-tête sur des colonnes à formule (#306)
+full-copy-title = Copier avec l'en-tête
+full-copy-message = Les colonnes copiées contiennent des formules. Copier leurs valeurs ou leurs formules ?
+full-copy-values = Valeurs
+    .hint = Copie les valeurs ; la ligne Formule reste vide
+full-copy-formulas = Formules
+    .hint = Copie aussi les formules

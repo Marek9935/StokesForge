@@ -1797,3 +1797,21 @@ analysis-needs-column-curve = Analysis requires a curve drawn from a column
 
 # Glisser-déposer des séries, des groupes et des objets libres.
 object-drag-end = End of the list
+
+# Column in use by a calculation (#306)
+column-use-title = Column in use
+column-use-message = This deletion affects { $count } calculation(s):
+column-use-formula = { $name } (formula)
+column-use-calculation = { $kind } → { $output }
+column-use-calculation-bare = { $kind }
+dialog-undo =
+    Undo
+    .hint = Reverses the deletion
+
+# Copy with header on formula columns (#306)
+full-copy-title = Copy with Header
+full-copy-message = The copied columns contain formulas. Copy their values or their formulas?
+full-copy-values = Values
+    .hint = Copies the values; the Formula row stays empty
+full-copy-formulas = Formulas
+    .hint = Copies the formulas too
