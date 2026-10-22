@@ -421,7 +421,7 @@ fn settled(ui: &egui::Ui, id: egui::Id, form: &AnalysisForm) -> bool {
     true
 }
 
-//// Les crans de molette de cette image (positifs vers le haut), tous axes
+/// Les crans de molette de cette image (positifs vers le haut), tous axes
 /// confondus : un événement brut par cran, quel que soit le lissage d'egui.
 fn wheel_notches(ui: &egui::Ui) -> i32 {
     let total: f32 = ui.input(|input| {
