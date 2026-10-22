@@ -100,6 +100,7 @@ mod recipe_record;
 mod schema;
 mod transposes;
 mod unknown;
+mod version;
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -492,37 +493,37 @@ pub fn load_with_limits(
         return Err(too_large(bytes.len() as u64));
     }
 
-    if bytes.len() < MAGIC.len() || &bytes[..MAGIC.len()] != MAGIC.as_slice() {
-        return Err(PersistenceError::NotAStokesForgeFile {
-            path: path.to_path_buf(),
-        });
-    }
-    if bytes.len() < MAGIC.len() + 4 {
-        return Err(PersistenceError::Corrupt {
-            path: path.to_path_buf(),
-            detail: "header truncated before the version number".to_string(),
-        });
-    }
-    let mut version_bytes = [0u8; 4];
-    version_bytes.copy_from_slice(&bytes[MAGIC.len()..MAGIC.len() + 4]);
-    let version = u32::from_le_bytes(version_bytes);
-    if version == 0 {
-        return Err(PersistenceError::Corrupt {
-            path: path.to_path_buf(),
-            detail: "version number 0 in the header: it never existed, \
-                     the first real format version is 1"
-                .to_string(),
-        });
-    }
-    if version > FORMAT_VERSION {
-        return Err(PersistenceError::UnsupportedVersion {
-            path: path.to_path_buf(),
-            found: version,
-            supported: FORMAT_VERSION,
-        });
-    }
+    let version = match version::read_header(&bytes) {
+        version::Header::NotStokesForge => {
+            return Err(PersistenceError::NotAStokesForgeFile {
+                path: path.to_path_buf(),
+            })
+        }
+        version::Header::Truncated => {
+            return Err(PersistenceError::Corrupt {
+                path: path.to_path_buf(),
+                detail: "header truncated before the version number".to_string(),
+            })
+        }
+        version::Header::ZeroVersion => {
+            return Err(PersistenceError::Corrupt {
+                path: path.to_path_buf(),
+                detail: "version number 0 in the header: it never existed, \
+                         the first real format version is 1"
+                    .to_string(),
+            })
+        }
+        version::Header::TooNew(found) => {
+            return Err(PersistenceError::UnsupportedVersion {
+                path: path.to_path_buf(),
+                found,
+                supported: FORMAT_VERSION,
+            })
+        }
+        version::Header::Known(version) => version,
+    };
 
-    let mut body: FileBody = rmp_serde::from_slice(&bytes[MAGIC.len() + 4..])
+    let mut body: FileBody = version::decode_body(version, version::payload(&bytes))
         .map_err(|source| classify_body_error(source, path))?;
 
     let save_counter = body.save_counter;
@@ -572,7 +573,18 @@ pub fn load_with_limits(
 /// corrompu — `rmp_serde`/`serde` nomment ce cas dans le message d'erreur
 /// (« unknown variant … »), ce qui suffit à le distinguer sans avoir besoin
 /// d'inspecter les octets nous-mêmes.
-fn classify_body_error(source: rmp_serde::decode::Error, path: &Path) -> PersistenceError {
+fn classify_body_error(source: version::BodyError, path: &Path) -> PersistenceError {
+    let source = match source {
+        version::BodyError::Decode(source) => source,
+        // `read_header` a déjà refusé une version sans décodeur.
+        version::BodyError::UnknownVersion(found) => {
+            return PersistenceError::UnsupportedVersion {
+                path: path.to_path_buf(),
+                found,
+                supported: FORMAT_VERSION,
+            }
+        }
+    };
     let detail = source.to_string();
     if detail.contains("unknown variant") {
         PersistenceError::UnknownVariant {
@@ -895,34 +907,32 @@ fn peek_save_counter(path: &Path, validate: bool) -> PersistenceResult<Option<u6
             })
         }
     };
-    if bytes.len() < MAGIC.len() || &bytes[..MAGIC.len()] != MAGIC.as_slice() {
-        return Ok(None);
-    }
     // À partir d'ici la cible se dit StokesForge : si elle ne se lit pas, on
     // refuse de l'écraser (mêmes diagnostics que `load`, dans le même ordre).
-    if bytes.len() < MAGIC.len() + 4 {
-        return Err(PersistenceError::UnreadableTarget {
-            path: path.to_path_buf(),
-            detail: "header truncated before the version number".to_string(),
-        });
-    }
-    let mut version_bytes = [0u8; 4];
-    version_bytes.copy_from_slice(&bytes[MAGIC.len()..MAGIC.len() + 4]);
-    let version = u32::from_le_bytes(version_bytes);
-    if version == 0 {
-        return Err(PersistenceError::UnreadableTarget {
-            path: path.to_path_buf(),
-            detail: "version number 0 in the header".to_string(),
-        });
-    }
-    if version > FORMAT_VERSION {
-        return Err(PersistenceError::UnsupportedVersion {
-            path: path.to_path_buf(),
-            found: version,
-            supported: FORMAT_VERSION,
-        });
-    }
-    match rmp_serde::from_slice::<FileBody>(&bytes[MAGIC.len() + 4..]) {
+    let version = match version::read_header(&bytes) {
+        version::Header::NotStokesForge => return Ok(None),
+        version::Header::Truncated => {
+            return Err(PersistenceError::UnreadableTarget {
+                path: path.to_path_buf(),
+                detail: "header truncated before the version number".to_string(),
+            })
+        }
+        version::Header::ZeroVersion => {
+            return Err(PersistenceError::UnreadableTarget {
+                path: path.to_path_buf(),
+                detail: "version number 0 in the header".to_string(),
+            })
+        }
+        version::Header::TooNew(found) => {
+            return Err(PersistenceError::UnsupportedVersion {
+                path: path.to_path_buf(),
+                found,
+                supported: FORMAT_VERSION,
+            })
+        }
+        version::Header::Known(version) => version,
+    };
+    match version::decode_body(version, version::payload(&bytes)) {
         Ok(mut body) => {
             let save_counter = body.save_counter;
             if validate {

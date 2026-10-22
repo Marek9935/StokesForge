@@ -172,7 +172,7 @@ dans `stokesforge-robustesse/src/lib.rs`.
 - [ ] la primitive `core` existe (ou est ajoutée avec sa commande, sinon `b21` échoue)
 - [ ] classement structurelle/données assumé et cohérent avec le coût du delta
 - [ ] libellé d'historique : variante de `HistoryLabel` (+ `Display`, exemple de `tests/labels.rs`, clé `history-*`, branche de `history_text.rs`), colonne désignée par sa **position**, pas son nom de nœud
-- [ ] transport `.stf` ajouté si l'état doit survivre au rechargement
+- [ ] transport `.stf` ajouté si l'état doit survivre au rechargement ; **règle de version** (`docs/persistance.md`) : champ additif `#[serde(default)]` → régénérer le témoin `tests/temoins/v1/projet.stf` (avec une valeur hors défaut dans `projet_temoin`) ; retrait, renommage ou changement de sens → le numéro monte, bras migrateur
 - [ ] `Action` + `dispatch` + rafraîchissement de l'instantané côté UI
 - [ ] tests : undo/redo, macro LIFO, aller-retour `.stf`, `b21`
 - [ ] écriture de cellules : version neuve par `Project`, geste ajouté à `b14` et `b22`

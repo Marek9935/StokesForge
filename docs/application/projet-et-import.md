@@ -177,7 +177,8 @@ l'import crée une feuille par bloc (`fichier_1`, `fichier_2`…) ou les répart
 selon `FilesLayout`. L'aperçu montre le premier bloc et le nombre de blocs.
 
 **Actualiser.** Chaque colonne importée garde sa source
-(`ColumnMeta::import_source` : chemin, recette en JSON, index de colonne).
+(`ColumnMeta::import_source` : chemin, recette en JSON dans le modèle, index de colonne ;
+dans le fichier `.stf`, la recette a ses propres types, `docs/persistance.md`).
 « File › Import › Refresh from Source » (`Action::RefreshFromSource`)
 relit les fichiers et réécrit les valeurs **en place** : les colonnes gardent
 leur identité, les graphes restent valides. Les lignes de la feuille suivent le

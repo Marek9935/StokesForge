@@ -441,7 +441,8 @@ Rien n'y mute : l'appelant envoie le résultat par une commande annulable
   liste blanche — délibérément.
 - Ajouter un champ à un type du modèle ne suffit pas : le format `.stf` a ses
   **propres** structures de transport et des conversions écrites à la main
-  ([`persistance.md`](persistance.md)).
+  ([`persistance.md`](persistance.md)). Tout champ ou toute variante neuf suit
+  la « Règle de version » de ce document et met à jour le fichier témoin.
 - Certains plafonds ressemblent à des bugs et n'en sont pas (longueur de nom,
   nombre de classes d'histogramme, `MAX_NODE_ID`, `MAX_CELLS`…). Ils sont
   documentés à l'endroit où ils sont déclarés, en constante nommée, et

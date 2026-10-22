@@ -1,3 +1,6 @@
 # Les notices importées conservent les espaces et fins de texte des originaux.
 vendor/crate-license-notices/NOTICE.txt whitespace=-blank-at-eol,-blank-at-eof
 vendor/python/licenses/LICENSE.libX11.txt whitespace=-blank-at-eof
+
+# Les fichiers témoins du format .stf sont binaires.
+*.stf binary

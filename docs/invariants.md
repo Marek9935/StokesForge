@@ -21,6 +21,7 @@ tenue par la relecture se perd.
 | 9 | Aucun objet Python ne traverse le canal de l'acteur | le marqueur `Ungil` de PyO3, à la compilation |
 | 10 | Un défaut de donnée dégrade, il ne plante pas | des états de première classe, pas des erreurs |
 | 11 | Un recalcul ciblé rend exactement le recalcul complet | l'empreinte contient toute donnée du calcul ; `b22` (oracle jumeau) et `stokesforge-session/tests/recalc_cible.rs` |
+| 12 | Un fichier `.stf` écrit par la V1 se relit jusqu'en V3, et une version plus ancienne refuse un fichier plus récent | `version::decode_body` (un bras par version), les fichiers témoins (`stokesforge-persistence/tests/fichiers_temoins.rs`), `UnsupportedVersion` |
 
 ---
 
@@ -277,3 +278,18 @@ sort. Ce qu'il faut tester quand on étend le mécanisme :
 [`tests.md`](tests.md), « Recalcul ciblé ».
 
 **À lire** : `stokesforge-session/src/recalc.rs` (tête).
+
+## 12. Un fichier V1 se relit jusqu'en V3
+
+Deux choses ne se rattrapent pas après la sortie d'une version : **ce qu'elle
+écrit** et **ce qu'elle fait d'un fichier plus récent**. Le second point est
+tenu par `UnsupportedVersion` (aucune lecture dégradée, message « mettez à
+jour StokesForge ») ; le premier par les fichiers témoins : le fichier de la
+version se relit en rendant le projet attendu, et l'enregistrement redonne ses
+octets. Retirer, renommer ou changer le sens d'un champ **monte le numéro de
+version** et ajoute un bras migrateur à `version::decode_body` ; ajouter un champ
+`#[serde(default)]` reste additif et régénère le témoin. Règle complète :
+[`persistance.md`](persistance.md), « Règle de version ».
+
+**À lire** : `stokesforge-persistence/src/version.rs`,
+`stokesforge-persistence/tests/fichiers_temoins.rs`.

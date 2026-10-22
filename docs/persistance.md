@@ -43,14 +43,21 @@ ouvertes. `x`/`y`/`width`/`height` y restent toujours la géométrie
 est écrite `Open`) et la position d'une fenêtre OS détachée non plus. `view`
 absent = disposition initiale par défaut ; un mode inconnu se lit `Closed`.
 
-Les colonnes portent aussi `import_source` (issue #7) : le fichier d'où elles
-viennent, la recette qui l'a lu (JSON) et l'index de colonne, de quoi les
-actualiser après réouverture. Absent pour une colonne saisie à la main.
+Les colonnes portent aussi `import_source` (issue #7, S2 de #323) : un
+`ImportSourceRecord` à champs nommés — chemin du fichier, recette, index de
+colonne, rang de bloc —, de quoi actualiser la colonne après réouverture. La
+recette a ses propres types miroirs (`recipe_record.rs`, un par type de
+`stokesforge_import::recipe`, `match` exhaustifs sans `_`) : le format ne
+dépend pas de la forme interne de la recette, et la dépendance
+`persistence → import` est déclarée dans la liste blanche. Le modèle garde la
+recette en JSON (`ImportSource::recipe_json`) : la conversion le relit à
+l'écriture et le réécrit à la lecture. Une recette illisible (colonne
+fabriquée à la main) s'écrit **sans source** : l'enregistrement ne s'arrête pas
+là-dessus. Absent pour une colonne saisie à la main.
 
 Les colonnes portent aussi `file_metadata` (issue #5) : les lignes clé / valeur
 de l'en-tête du fichier importé (et du pied de page si la recette le demande),
-dans l'ordre, sections comprises. Absent = liste vide ; aucune rétrocompatibilité
-n'est exigée en développement.
+dans l'ordre, sections comprises. Absent = liste vide.
 
 ## Le format ne s'écrit pas dans le modèle
 
@@ -98,9 +105,12 @@ Les rajouter après coup coûterait une migration.
    processus n'a jamais chargée ni écrite. Une cible étrangère ou vide reste
    remplaçable.
 2. **Numéro de version en premier**, lu et vérifié **avant** de toucher au
-   corps. Fichier plus récent → `UnsupportedVersion` ; fichier qui n'est pas un
-   StokesForge → `NotAStokesForgeFile`. Jamais de tentative de décoder un corps
-   incompris.
+   corps (`version.rs` : `read_header`, puis `decode_body(version, octets)`,
+   un `match` par version, partagé par `load` et par la lecture du compteur
+   de `save`). Fichier plus récent → `UnsupportedVersion` (S1 : pas de lecture
+   dégradée, le message dit de mettre StokesForge à jour, clé
+   `error-file-too-new`) ; fichier qui n'est pas un StokesForge →
+   `NotAStokesForgeFile`. Jamais de tentative de décoder un corps incompris.
 3. **Valeur manquante ≠ chaîne vide.** `None` contre `Some("")` pour le texte ;
    les `NaN` numériques sont écrits et relus **bit à bit**
    (`to_le_bytes`/`from_le_bytes` conservent le motif binaire exact).
@@ -168,6 +178,40 @@ Le compromis est assumé et documenté : le détour par `rmpv::Value` copie les
 octets d'une colonne une ou deux fois de plus qu'un décodage direct. Rien ne
 mesure aujourd'hui le coût de `load`/`save` ; c'est un coût à surveiller si le
 format finit par porter des colonnes bien plus grandes.
+
+## Règle de version : tout fichier V1 se relit jusqu'en V3
+
+Un logiciel de version N relit tout fichier de version ≤ N et le **migre en
+mémoire** vers le modèle courant ; il l'écrit dans sa version, jamais dans une
+plus ancienne. Un fichier plus récent est refusé (S1). Ce qui ne se rattrape pas
+après la V1 : **ce que la V1 écrit**, et ce qu'elle fait d'un fichier plus récent.
+
+| Changement du schéma | Numéro de version |
+|---|---|
+| ajout d'un champ `#[serde(default)]`, d'une variante lue avec repli | reste (additif) ; régénérer le témoin courant |
+| retrait ou renommage d'un champ ou d'une variante, changement de sens d'une valeur, de l'unité, de l'ordre d'une liste positionnelle | **monte** |
+
+Quand le numéro monte (V → V+1) : copier le schéma de V en `schema/vV.rs`, y
+ajouter la fonction `vV → courant`, ajouter son bras dans `version::decode_body`,
+figer le témoin (`tests/temoins/vV/`, jamais modifié) et créer le témoin
+`vV+1/`. `FORMAT_VERSION` ne se change jamais « pour essayer ».
+
+**Fichiers témoins** (`tests/fichiers_temoins.rs`, `tests/temoins/v1/projet.stf`) :
+le projet témoin exerce tous les types de nœuds, de colonnes et de séries, avec
+des valeurs hors défaut partout. Deux gardes : le fichier se relit en rendant
+exactement le projet (arbre, tables de vue, rapport propre) ; enregistrer ce
+projet redonne exactement les octets du fichier (la dérive du format écrit exige
+une décision). Régénération explicite : `STOKESFORGE_REGENERER_TEMOINS=1 cargo
+test -p stokesforge-persistence --test fichiers_temoins regenerer -- --ignored`.
+
+**Ordre stable** : les tables de vue sont des `BTreeMap` dans le corps
+(`window_geometries`, `column_widths`) ; deux enregistrements du même projet
+donnent les mêmes octets (`tests/vues_deterministes.rs`).
+
+**Empreinte des entrées** (`inputs_digest`, S3) : partie du format. Son octet
+d'entrée et le FNV-1a sont figés par `the_digest_is_frozen_on_known_inputs`
+(valeurs littérales) ; la changer périmerait à la relecture tous les calculs des
+fichiers déjà écrits.
 
 ## Les colonnes à types mixtes : ajout additif, aucune migration
 
@@ -474,8 +518,9 @@ fait écarter uniquement sa trace, **comptée** dans `LoadReport::discarded_corr
 dans les colonnes ordinaires. Le compteur reprend au-delà des identifiants des
 traces, même si `next_id_hint` est trop bas. Les copies de colonnes ne transportent
 pas ces traces, comme elles ne transportent pas les calculs. Les colonnes
-remplacées (colonne, copie de son original) sont écrites comme sorties de clé
-`"original"` de l'enregistrement, sans changement de schéma ; la copie vit dans
+remplacées sont écrites dans `originals`, des paires nommées
+`OriginalRecord { column, copy }` du `CorrectionTraceRecord` (type dédié du
+champ, #323) ; la copie vit dans
 le classeur caché des copies d'analyse (#248), classeur ordinaire `hidden`
 marqué par son commentaire de fenêtre.
 
@@ -522,4 +567,4 @@ une feuille de l'arbre, ou dont un identifiant dépasse `MAX_NODE_ID`, est écar
 la feuille reste, ordinaire. Un identifiant de colonne qui n'existe plus est accepté
 (la colonne a pu être supprimée) : le lien la recrée à la remise à jour. Le presse-papiers
 d'objets ne porte pas les liens (une copie est ordinaire). Format provisoire : champ
-nouveau, pas de migration (rétrocompatibilité non requise en développement).
+nouveau, additif.

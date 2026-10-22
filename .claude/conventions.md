@@ -122,7 +122,7 @@ Règles sorties du skill `stokesforge-feature` (F1, #301) : le skill ne porte pl
 
 - Corrections définitives (#212) : `ReplaceAnalysisData` écrit les Y et leur
   `CorrectionRecord` dans le même pas d'historique. La trace est séparée des
-  calculs, persistée dans `correction_traces`, immuable et conservée après
+  calculs, persistée dans `correction_traces` (`CorrectionTraceRecord`, originaux en paires `OriginalRecord`), immuable et conservée après
   saisie ; une colonne corrigée plusieurs fois garde **une seule** donnée
   brute (celle d'avant la première correction, #308) et « Restore original
   data » la rend quelle que soit la trace, en retirant la colonne de toutes ; ne jamais créer un calcul dont la sortie est sa propre source.
