@@ -71,13 +71,13 @@ low-r2-summary-head = R² < 0,6 pour :
 low-r2-summary-see-results = Les valeurs sont dans le volet Résultats.
 low-r2-count-baseline =
     { $count ->
-        [one] { $count } ligne de base
-       *[other] { $count } lignes de base
+        [one] { $count } correction
+       *[other] { $count } corrections
     }
 low-r2-count-correct =
     { $count ->
-        [one] { $count } correction
-       *[other] { $count } corrections
+        [one] { $count } correction par référence
+       *[other] { $count } corrections par référence
     }
 low-r2-count-integrate =
     { $count ->
@@ -1206,8 +1206,8 @@ history-delete-calculation = Supprimer le calcul : { $kind }
 history-detach-calculation = Détacher le calcul : { $kind }
 history-delete-calculation-any = Supprimer le calcul
 history-detach-calculation-any = Détacher le calcul
-analysis-kind-baseline = Ligne de base
-analysis-kind-correct = Correction
+analysis-kind-baseline = Correction
+analysis-kind-correct = Référence
 analysis-kind-integrate = Intégration
 analysis-kind-fit = Ajustement
 analysis-kind-peaks = Décomposition en pics
@@ -1285,7 +1285,7 @@ analysis-issue-missing-column = Une colonne de ce calcul n'existe plus
 menu-analysis = Analyse
 analysis-block-type = Type d'analyse
 action-analysis-open-data-manipulation = Manipulation de données…
-    .hint = Ouvre la fenêtre Manipulation de données : lignes de base et correction par une référence, qui peuvent remplacer les données originales
+    .hint = Ouvre la fenêtre Manipulation de données : corrections de ligne de base, mathématiques ou par une référence, qui peuvent remplacer les données originales
 action-analysis-open-fitting = Ajustement…
     .hint = Ouvre la fenêtre Ajustement : ajuste un modèle aux données
 action-analysis-open-peaks = Pics et déconvolution…
@@ -1303,7 +1303,7 @@ analysis-baseline-polynomial = Polynôme…
     .hint = Ajuste un polynôme sur des zones de fond, puis le soustrait ou divise
 analysis-baseline-anchors = Points d'ancrage…
     .hint = Soustrait ou divise par une courbe passant par les points d'ancrage posés
-action-analysis-correct = Corriger par une référence…
+action-analysis-correct = Correction par référence…
     .hint = Divise, multiplie ou soustrait une colonne de référence, interpolée sur les données
 action-analysis-integrate = Intégrer…
     .hint = Calcule des aires sur une ou plusieurs plages, et l'intégrale cumulée
@@ -1345,7 +1345,7 @@ analysis-recent-baseline-constant = Ligne de base constante
 analysis-recent-baseline-linear = Ligne de base droite
 analysis-recent-baseline-polynomial = Ligne de base polynomiale
 analysis-recent-baseline-anchors = Ligne de base par points d'ancrage
-analysis-recent-correct = Corriger par une référence
+analysis-recent-correct = Correction par référence
 analysis-recent-integrate = Intégrer
 analysis-recent-fit = Ajustement { $model }
 analysis-recent-peaks = Décomposer en pics
@@ -1410,7 +1410,7 @@ analysis-block-output = Sortie
 analysis-series-previous = Série précédente
 analysis-series-next = Série suivante
 analysis-series-position = Série { $current } sur { $total }
-analysis-field-reference = Référence
+analysis-field-reference = Colonne de référence
 analysis-field-response = Réponse instrumentale
 analysis-field-choose-column = Choisir une colonne
 analysis-field-no-candidate = Aucune autre colonne Y dans ce classeur
@@ -1829,7 +1829,7 @@ action-restore-original-data = Restaurer les données originales
 analysis-reference-copy = copie de { $name }
 analysis-reference-line = Référence : { $reference }
 analysis-output-replace-hint = La correction remplace les valeurs sources. Ses réglages restent dans Résultats. Annuler restaure les données originales.
-disabled-analysis-replace-operation = Seule une nouvelle correction de ligne de base ou par référence peut remplacer les données originales.
+disabled-analysis-replace-operation = Seule une nouvelle correction ou référence peut remplacer les données originales.
 disabled-analysis-replace-readonly = Les colonnes calculées et les colonnes à formule ne peuvent pas être remplacées.
 analysis-replace-title = Remplacer les données originales
 analysis-replace-confirm = Plusieurs courbes utilisent ces données. Elles afficheront toutes les valeurs corrigées.

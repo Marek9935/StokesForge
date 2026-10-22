@@ -259,7 +259,7 @@ fn the_saved_batch_names_columns_after_their_source() {
         ]
     );
     assert!(draft.outputs.iter().all(|o| o.meta.unit == "counts"));
-    assert!(draft.outputs.iter().all(|o| o.meta.comment == "Baseline"));
+    assert!(draft.outputs.iter().all(|o| o.meta.comment == "Correction"));
     // La droite posée est exactement la courbe : la correction est nulle.
     assert!(draft.outputs[0].data.iter().all(|v| v.abs() < 1e-9));
     assert!(draft.keep_results);

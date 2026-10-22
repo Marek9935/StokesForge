@@ -381,7 +381,7 @@ fn calc_draft(w: &World) -> CalculationDraft {
 fn calculation_labels_display_in_english() {
     assert_eq!(
         HistoryLabel::AddCalculation(OperationKind::Baseline).to_string(),
-        "Add Baseline Calculation"
+        "Add Correction Calculation"
     );
     assert_eq!(
         HistoryLabel::UpdateCalculation(OperationKind::Peaks).to_string(),
@@ -399,7 +399,7 @@ fn calculation_labels_display_in_english() {
     assert_eq!(remove(None, false).to_string(), "Detach Calculation");
     assert_eq!(
         HistoryLabel::RestoreOriginalData(Some(OperationKind::Baseline)).to_string(),
-        "Restore Original Data (Baseline)"
+        "Restore Original Data (Correction)"
     );
     assert_eq!(
         HistoryLabel::RestoreOriginalData(None).to_string(),

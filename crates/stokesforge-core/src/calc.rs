@@ -1198,8 +1198,8 @@ pub fn output_unit(tree: &Tree, series: &SeriesRef, key: &str) -> String {
 /// catalogue `analysis-kind-*` de l'application en est la traduction.
 pub fn family_english(kind: OperationKind) -> &'static str {
     match kind {
-        OperationKind::Baseline => "Baseline",
-        OperationKind::Correct => "Correction",
+        OperationKind::Baseline => "Correction",
+        OperationKind::Correct => "Reference",
         OperationKind::Integrate => "Integration",
         OperationKind::Fit => "Fit",
         OperationKind::Peaks => "Peak Decomposition",
@@ -1395,8 +1395,8 @@ mod output_name_tests {
         assert_eq!(
             titles,
             [
-                "Baseline",
                 "Correction",
+                "Reference",
                 "Integration",
                 "Fit",
                 "Peak Decomposition",

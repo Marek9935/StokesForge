@@ -1446,7 +1446,7 @@ mod tests {
     }
 
     /// #248 : le menu Analysis a une entrée par catégorie, et les méthodes de
-    /// chaque catégorie sont dans son sous-menu — « Correct by Reference » est
+    /// chaque catégorie sont dans son sous-menu — « Reference Correction » est
     /// du ressort de Data Manipulation, pas de Fitting.
     #[test]
     fn le_menu_analyse_range_les_methodes_par_categorie() {

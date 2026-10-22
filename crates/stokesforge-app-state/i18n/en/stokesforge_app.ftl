@@ -75,13 +75,13 @@ low-r2-summary-head = R² < 0.6 for:
 low-r2-summary-see-results = See the Results pane for the values.
 low-r2-count-baseline =
     { $count ->
-        [one] { $count } baseline
-       *[other] { $count } baselines
+        [one] { $count } correction
+       *[other] { $count } corrections
     }
 low-r2-count-correct =
     { $count ->
-        [one] { $count } correction
-       *[other] { $count } corrections
+        [one] { $count } reference correction
+       *[other] { $count } reference corrections
     }
 low-r2-count-integrate =
     { $count ->
@@ -1210,8 +1210,8 @@ history-delete-calculation = Delete { $kind } Calculation
 history-detach-calculation = Detach { $kind } Calculation
 history-delete-calculation-any = Delete Calculation
 history-detach-calculation-any = Detach Calculation
-analysis-kind-baseline = Baseline
-analysis-kind-correct = Correction
+analysis-kind-baseline = Correction
+analysis-kind-correct = Reference
 analysis-kind-integrate = Integration
 analysis-kind-fit = Fit
 analysis-kind-peaks = Peak Decomposition
@@ -1289,7 +1289,7 @@ analysis-issue-missing-column = A column of this calculation no longer exists
 menu-analysis = Analysis
 analysis-block-type = Analysis type
 action-analysis-open-data-manipulation = Data Manipulation…
-    .hint = Opens the Data Manipulation window: baselines and correction by a reference, which can replace the original data
+    .hint = Opens the Data Manipulation window: baseline corrections, mathematical or by a reference, which can replace the original data
 action-analysis-open-fitting = Fitting…
     .hint = Opens the Fitting window: fits a model to the data
 action-analysis-open-peaks = Peaks and Deconvolution…
@@ -1307,7 +1307,7 @@ analysis-baseline-polynomial = Polynomial…
     .hint = Fits a polynomial on background zones, then subtracts or divides it
 analysis-baseline-anchors = Anchor Points…
     .hint = Subtracts or divides by a curve through anchor points you place
-action-analysis-correct = Correct by Reference…
+action-analysis-correct = Reference Correction…
     .hint = Divides, multiplies or subtracts a reference column, interpolated on the data
 action-analysis-integrate = Integrate…
     .hint = Computes areas over one or several ranges, and the cumulative integral
@@ -1349,7 +1349,7 @@ analysis-recent-baseline-constant = Constant Baseline
 analysis-recent-baseline-linear = Linear Baseline
 analysis-recent-baseline-polynomial = Polynomial Baseline
 analysis-recent-baseline-anchors = Anchor Points Baseline
-analysis-recent-correct = Correct by Reference
+analysis-recent-correct = Reference Correction
 analysis-recent-integrate = Integrate
 analysis-recent-fit = { $model } Fit
 analysis-recent-peaks = Decompose Peaks
@@ -1414,7 +1414,7 @@ analysis-block-output = Output
 analysis-series-previous = Previous series
 analysis-series-next = Next series
 analysis-series-position = Series { $current } of { $total }
-analysis-field-reference = Reference
+analysis-field-reference = Reference column
 analysis-field-response = Instrument response
 analysis-field-choose-column = Choose a column
 analysis-field-no-candidate = No other Y column in this workbook
@@ -1833,7 +1833,7 @@ action-restore-original-data = Restore Original Data
 analysis-reference-copy = copy of { $name }
 analysis-reference-line = Reference: { $reference }
 analysis-output-replace-hint = The correction replaces the source values. Its settings remain in Results. Undo restores the original data.
-disabled-analysis-replace-operation = Only a new baseline or reference correction can replace original data.
+disabled-analysis-replace-operation = Only a new correction or reference can replace original data.
 disabled-analysis-replace-readonly = Calculated columns and columns with a formula cannot be replaced.
 analysis-replace-title = Replace original data
 analysis-replace-confirm = Several curves use these data. They will all show the corrected values.

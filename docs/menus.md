@@ -126,7 +126,7 @@ Selection ▸ ne subsiste que dans Edit.
 
 Le menu du haut (`analysis_menu_contents`) range les méthodes en
 **catégories** (#248), une fenêtre par catégorie : Data Manipulation ▸
-(Constant… · Linear… · Polynomial… · Anchor Points… · Correct by Reference…,
+(Constant… · Linear… · Polynomial… · Anchor Points… · Reference Correction…,
 à plat) · Fitting ▸ (modèles, Custom Model…) · Peaks and Deconvolution ▸
 (Decompose Peaks… · Reconvolution… · Direct Deconvolution…) · Integrate… ─
 Recalculate Out of Date ─ les **trois dernières analyses lancées** (#249),

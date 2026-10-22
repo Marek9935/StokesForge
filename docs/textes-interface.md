@@ -242,6 +242,8 @@ grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
 | Replace original data | Remplacer les données originales | Correction définitive de la colonne source | Écraser | D (#212) |
 | Modified data | Données modifiées | Trace d’une correction définitive | Périmé | D (#212) |
 | Baseline† | Ligne de base | Signal de fond sous les pics | Fond continu | I |
+| Correction† | Correction | Type d'analyse : une ligne de base calculée (constante, droite, polynôme, points d'ancrage), soustraite ou divisée (#211) | Baseline seul, Mathematical Correction | D |
+| Reference† | Référence | Type d'analyse : une colonne de référence mesurée à part, interpolée sur les X des données, divisée, multipliée ou soustraite ; son entrée de menu est « Reference Correction… » | Correction (seul), Estimated Baseline | D |
 | Peak† | Pic | Maximum local du signal | Bande (sauf IR/Raman : *band*) | I |
 | Peak position† | Position du pic | Abscisse du maximum | Centre | D |
 | Height† | Hauteur | Ordonnée du maximum, ligne de base retirée | Amplitude | D |
@@ -251,7 +253,7 @@ grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
 | Smooth† | Lisser | Réduire le bruit d'un spectre | Filtrer | D |
 | Derivative† | Dérivée | Pente du spectre, d'ordre 1 ou 2 | Différentielle | D |
 | Integrate† | Intégrer | Calculer l'aire sous la courbe | — | D |
-| Data Manipulation† | Manipulation des données | Catégorie : lignes de base et correction | — | D (#248) |
+| Data Manipulation† | Manipulation des données | Catégorie : corrections de ligne de base (mathématiques ou par référence) | — | D (#248) |
 | Fitting† | Ajustement | Catégorie : modèles ajustés aux données | — | D (#248) |
 | Restore original data | Restaurer les données originales | Rend les valeurs d'avant un remplacement | Annuler la correction | D (#248) |
 | Fit† | Ajuster | Faire coller un modèle aux données | Fitter, Lisser | D |
