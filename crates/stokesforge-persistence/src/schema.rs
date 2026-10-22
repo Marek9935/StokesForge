@@ -588,13 +588,6 @@ pub(crate) enum TypeRecord {
     Numeric,
     /// Date-heure.
     DateTime,
-    /// Texte — **legacy, lecture seule**. Le modèle en mémoire n'a plus de
-    /// type `Text` homogène depuis son retrait au profit de `Mixed` ; cette
-    /// variante reste dans l'enum pour qu'un fichier `.stf` écrit avant ce
-    /// changement reste lisible (`convert::record_to_kind` la relit en
-    /// [`crate::ColumnType`]`::Mixed`, voir `From<TypeRecord> for ColumnType`
-    /// dans `convert.rs`), mais plus rien n'écrit cette étiquette.
-    Text,
     /// Types mixtes : le type est porté par la cellule.
     Mixed,
 }
@@ -638,12 +631,6 @@ pub(crate) enum ValuesRecord {
     /// MessagePack d'éléments — c'est ce qui garde la taille du fichier
     /// proportionnelle aux données plutôt qu'à leur encodage.
     Float(#[serde(with = "serde_bytes")] Vec<u8>),
-    /// Chaînes optionnelles, `None` = valeur manquante (distinct de
-    /// `Some(String::new())`) — **legacy, lecture seule**, pendant de
-    /// [`TypeRecord::Text`] : plus rien n'écrit cette variante, mais
-    /// `convert::record_to_kind` sait encore la relire (chaque `Option<String>`
-    /// devient la `MixedCell` équivalente, sans réanalyse).
-    Text(Vec<Option<String>>),
     /// Colonne à types mixtes, en **trois tableaux parallèles** plutôt qu'un
     /// tableau d'énumérations.
     ///

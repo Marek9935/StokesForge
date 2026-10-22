@@ -699,7 +699,6 @@ fn check_cell_budget(body: &FileBody, max_cells: u64, path: &Path) -> Persistenc
         if let schema::KindRecord::Column { values, .. } = &record.kind {
             let len = match values {
                 schema::ValuesRecord::Float(bytes) => bytes.len() / 8,
-                schema::ValuesRecord::Text(values) => values.len(),
                 schema::ValuesRecord::Mixed { tags, .. } => tags.len(),
             };
             cells = cells.saturating_add(len as u64);
@@ -1176,103 +1175,6 @@ mod tests {
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(matches!(err, PersistenceError::Corrupt { .. }), "{err:?}");
-    }
-
-    /// Migration de compatibilité : un fichier écrit avant le retrait du
-    /// type `Text` homogène (`ColumnType`) porte encore `TypeRecord::Text` /
-    /// `ValuesRecord::Text` au disque. Le charger doit produire une colonne
-    /// `Mixed`, où chaque `Option<String>` devient la cellule mixte
-    /// équivalente **telle quelle** : `None → Empty`, `Some(s) → Text(s)`,
-    /// jamais réanalysée en nombre — pas de corruption, pas de refus de
-    /// charger le fichier.
-    #[test]
-    fn a_legacy_text_column_migrates_to_mixed_on_load() {
-        let root = NodeRecord {
-            id: 1,
-            name: "Racine".to_string(),
-            parent: None,
-            kind: KindRecord::Folder { children: vec![2] },
-        };
-        let book = NodeRecord {
-            id: 2,
-            name: "Book1".to_string(),
-            parent: Some(1),
-            kind: KindRecord::Workbook {
-                hidden: false,
-                sheets: vec![3],
-                label: String::new(),
-                comment: String::new(),
-            },
-        };
-        let sheet = NodeRecord {
-            id: 3,
-            name: "Sheet1".to_string(),
-            parent: Some(2),
-            kind: KindRecord::Worksheet { columns: vec![4] },
-        };
-        let column = NodeRecord {
-            id: 4,
-            name: "A".to_string(),
-            parent: Some(3),
-            kind: KindRecord::Column {
-                column_type: TypeRecord::Text,
-                role: schema::RoleRecord::Y,
-                unit: String::new(),
-                long_name: String::new(),
-                comment: String::new(),
-                display_format: String::new(),
-                values: schema::ValuesRecord::Text(vec![
-                    Some(String::new()),
-                    None,
-                    Some("1.5".to_string()),
-                ]),
-                version: 3,
-                formula_parts: None,
-                file_metadata: Vec::new(),
-                import_source: None,
-                x_prime: None,
-            },
-        };
-        let body = FileBody {
-            root: 1,
-            next_id_hint: 5,
-            nodes: vec![root, book, sheet, column],
-            save_counter: 0,
-            saved_colors: Default::default(),
-            calculations: Default::default(),
-            correction_traces: Default::default(),
-            transposes: Default::default(),
-            window_geometries: std::collections::HashMap::new(),
-            column_widths: std::collections::HashMap::new(),
-        };
-        let project = build_project(body, Path::new("legacy.plyx")).expect("modèle valide");
-        let loaded = project
-            .tree()
-            .node(stokesforge_core::NodeId::from_raw(4))
-            .expect("colonne présente")
-            .as_column()
-            .expect("nœud colonne");
-
-        assert_eq!(loaded.column_type(), ColumnType::Mixed);
-        assert_eq!(
-            loaded.cell(0),
-            stokesforge_core::MixedCell::Text(String::new())
-        );
-        assert_eq!(loaded.cell(1), stokesforge_core::MixedCell::Empty);
-        // Pas réanalysée en nombre malgré l'allure numérique du texte : la
-        // migration copie la cellule, elle ne la réinterprète pas (même
-        // règle que `MixedCell::from_text`/`Column::set_column_type`
-        // documentent pour toute conversion délibérée, mais ici il n'y a
-        // même pas de conversion à faire, juste une relecture).
-        assert_eq!(
-            loaded.cell(2),
-            stokesforge_core::MixedCell::Text("1.5".to_string())
-        );
-        assert_eq!(
-            loaded.version(),
-            3,
-            "le compteur de version traverse le disque"
-        );
     }
 
     /// Copies locales étendues du schéma v1, avec un champ supplémentaire à

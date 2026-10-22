@@ -115,18 +115,11 @@ impl From<ColumnType> for TypeRecord {
     }
 }
 
-/// `TypeRecord::Text` — l'ancienne étiquette d'un type de colonne texte
-/// homogène, retiré du modèle en mémoire au profit de `Mixed` — se relit en
-/// [`ColumnType::Mixed`] : un fichier écrit avant ce changement reste
-/// lisible, voir la doc de tête de [`record_to_kind`] pour la migration des
-/// **valeurs** qui l'accompagne nécessairement (`ValuesRecord::Text` n'a pas
-/// de pendant direct en `ColumnValues`).
 impl From<TypeRecord> for ColumnType {
     fn from(value: TypeRecord) -> Self {
         match value {
             TypeRecord::Numeric => ColumnType::Numeric,
             TypeRecord::DateTime => ColumnType::DateTime,
-            TypeRecord::Text => ColumnType::Mixed,
             TypeRecord::Mixed => ColumnType::Mixed,
         }
     }
@@ -816,22 +809,6 @@ fn encode_floats(values: &[f64]) -> Vec<u8> {
 
 /// Décode un buffer d'octets bruts little-endian en `f64`. `Err` si la
 /// longueur n'est pas un multiple de 8.
-/// Ancien format `ValuesRecord::Text` : chaque `Option<String>` devient la
-/// cellule mixte équivalente, sans réanalyse (`None → Empty`).
-fn legacy_text_cells(
-    values: Vec<Option<String>>,
-    limit: usize,
-) -> Result<Vec<MixedCell>, ConvertError> {
-    check_rows(values.len(), limit)?;
-    Ok(values
-        .into_iter()
-        .map(|value| match value {
-            None => MixedCell::Empty,
-            Some(text) => MixedCell::Text(text),
-        })
-        .collect())
-}
-
 /// Refuse une colonne de plus de `limit` lignes, avant toute allocation.
 fn check_rows(len: usize, limit: usize) -> Result<(), ConvertError> {
     if len > limit {
@@ -1046,17 +1023,6 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                 ValuesRecord::Float(bytes) => {
                     ValueBlock::Float(decode_floats(&bytes, MAX_COLUMN_ROWS)?)
                 }
-                // Migration de compatibilité : un fichier écrit avant le
-                // retrait du type `Text` homogène porte encore cette
-                // étiquette. `TypeRecord::Text` s'est déjà relu en
-                // `ColumnType::Mixed` ci-dessus ; ici, chaque `Option<String>`
-                // devient la cellule mixte équivalente **telle quelle**, sans
-                // réanalyse numérique (`None → Empty`, `Some(s) → Text(s)`)
-                // — une colonne texte d'hier est, cellule pour cellule, une
-                // colonne mixte entièrement textuelle aujourd'hui.
-                ValuesRecord::Text(values) => {
-                    ValueBlock::Mixed(legacy_text_cells(values, MAX_COLUMN_ROWS)?)
-                }
                 ValuesRecord::Mixed {
                     tags,
                     numbers,
@@ -1182,11 +1148,6 @@ mod tests {
         assert!(decode_mixed(&[0, 0, 0], &[], vec![], 3).is_ok());
         assert!(matches!(
             decode_mixed(&[0, 0, 0, 0], &[], vec![], 3),
-            Err(ConvertError::TooManyRows { .. })
-        ));
-        assert!(legacy_text_cells(vec![None; 3], 3).is_ok());
-        assert!(matches!(
-            legacy_text_cells(vec![None; 4], 3),
             Err(ConvertError::TooManyRows { .. })
         ));
     }
