@@ -351,6 +351,23 @@ pub enum Command {
         /// Supprimer aussi les colonnes de sortie.
         with_columns: bool,
     },
+    /// Crée ou complète la feuille transposée liée de `source` (#253) avec les
+    /// lignes `rows` (0 = la première) : feuille « Sourceᵀ », colonne x' puis
+    /// une colonne par ligne, toutes lues dans la source. Une ligne déjà
+    /// présente réutilise sa colonne. Structurelle (feuille et colonnes
+    /// apparaissent) ; refus qui nomme la colonne sans x' ou de texte.
+    TransposeRows {
+        /// Feuille source.
+        source: NodeId,
+        /// Lignes demandées.
+        rows: Vec<usize>,
+    },
+    /// Remet à jour une feuille transposée depuis sa source (#253) : réécrit
+    /// les colonnes liées (les valeurs éditées sont perdues, annulable).
+    RecalculateTranspose {
+        /// Feuille transposée.
+        sheet: NodeId,
+    },
     /// Remplace les couleurs enregistrées dans le projet, en bloc (enregistrer
     /// ou retirer une couleur du sélecteur de couleur). Données, pas
     /// structure : aucun nœud ne bouge.
@@ -413,6 +430,8 @@ impl Command {
             Command::EditPlotSpec { kind, .. } => HistoryLabel::EditPlotSpec(*kind),
             Command::SetPlotSpec { graph, .. } => HistoryLabel::SetPlotSpec { name: name(*graph) },
             Command::SetSavedColors { .. } => HistoryLabel::SetSavedColors,
+            Command::TransposeRows { .. } => HistoryLabel::TransposeRows,
+            Command::RecalculateTranspose { .. } => HistoryLabel::RecalculateTranspose,
             Command::ReplaceAnalysisData { draft, .. } => {
                 HistoryLabel::ReplaceAnalysisData(draft.operation.kind())
             }
@@ -482,6 +501,8 @@ impl Command {
                 | Command::RestoreOriginalData { .. }
                 | Command::UpdateCalculation { .. }
                 | Command::RemoveCalculation { .. }
+                | Command::TransposeRows { .. }
+                | Command::RecalculateTranspose { .. }
         )
     }
 }

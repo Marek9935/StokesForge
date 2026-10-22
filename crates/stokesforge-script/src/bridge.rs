@@ -88,6 +88,11 @@ impl HostError {
             CoreError::CalculatedColumnReadOnly { .. } => {
                 HostError::InvalidValue(error.to_string())
             }
+            // #253 : une ligne ne se transpose que si toutes les colonnes de
+            // sa feuille sont numériques et portent un x'.
+            CoreError::TransposeNoXPrime { .. } | CoreError::TransposeNotNumeric { .. } => {
+                HostError::InvalidValue(error.to_string())
+            }
         }
     }
 

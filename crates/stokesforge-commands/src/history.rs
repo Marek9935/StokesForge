@@ -1120,6 +1120,14 @@ impl History {
                 project.remove_calculation(id, with_columns)?;
                 Ok(structural(before, project, label))
             }
+            Command::TransposeRows { source, rows } => {
+                project.transpose_rows(source, &rows)?;
+                Ok(structural(before, project, label))
+            }
+            Command::RecalculateTranspose { sheet } => {
+                project.recalculate_transpose(sheet)?;
+                Ok(structural(before, project, label))
+            }
             Command::SetCells { .. }
             | Command::SetCellsPromoting { .. }
             | Command::SetColumnType { .. }
@@ -1419,7 +1427,9 @@ impl History {
             | Command::AddCalculation { .. }
             | Command::RestoreOriginalData { .. }
             | Command::UpdateCalculation { .. }
-            | Command::RemoveCalculation { .. } => {
+            | Command::RemoveCalculation { .. }
+            | Command::TransposeRows { .. }
+            | Command::RecalculateTranspose { .. } => {
                 unreachable!("apply_data appelée avec une commande structurelle")
             }
         }
@@ -2135,6 +2145,8 @@ fn prior_columns(tree: &Tree, command: &Command) -> PriorColumns {
         | Command::RestoreOriginalData { .. }
         | Command::UpdateCalculation { .. }
         | Command::RemoveCalculation { .. }
+        | Command::TransposeRows { .. }
+        | Command::RecalculateTranspose { .. }
         | Command::SetWindowMeta { .. }
         | Command::SetNoteText { .. }
         | Command::SetColumnMeta { .. }

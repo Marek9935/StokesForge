@@ -77,6 +77,24 @@ pub enum CoreError {
         /// Calcul qui la produit.
         calculation: NodeId,
     },
+    /// Transposition refusée (#253) : la colonne n'est pas numérique (elle
+    /// contient du texte). `letter` est sa lettre de position, ce que la grille
+    /// affiche ; `name` son nom de nœud.
+    #[error("cannot transpose: column {letter} ({name}) is not numeric")]
+    TransposeNotNumeric {
+        /// Lettre de position de la colonne (A, B, …).
+        letter: String,
+        /// Nom de la colonne.
+        name: String,
+    },
+    /// Transposition refusée (#253) : la colonne n'a pas de x'.
+    #[error("cannot transpose: column {letter} ({name}) has no x' value")]
+    TransposeNoXPrime {
+        /// Lettre de position de la colonne (A, B, …).
+        letter: String,
+        /// Nom de la colonne.
+        name: String,
+    },
 }
 
 /// Alias de résultat du crate.

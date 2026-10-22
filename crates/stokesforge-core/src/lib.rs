@@ -65,6 +65,7 @@ pub mod number_format;
 pub mod path;
 pub mod project;
 pub mod resolve;
+pub mod transpose;
 pub mod tree;
 pub mod tsv;
 
@@ -92,5 +93,9 @@ pub use project::{spreadsheet_name, Project};
 pub use resolve::{
     bar_width, histogram, resolve_column, resolve_panel, resolve_series, resolve_spec,
     series_label, MissingRole, ResolvedPanel, ResolvedPlot, ResolvedSeries, ResolvedValues,
+};
+pub use transpose::{
+    content_stamp, transposed_name, TransposeLink, TransposeSourceColumn, TransposeState,
+    TransposedRow, TRANSPOSE_MARK, TRANSPOSE_X_NAME,
 };
 pub use tree::Tree;

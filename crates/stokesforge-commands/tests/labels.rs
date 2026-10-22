@@ -82,10 +82,12 @@ fn rank(command: &Command) -> usize {
         Command::RemoveCalculation { .. } => 28,
         Command::ReplaceAnalysisData { .. } => 29,
         Command::RestoreOriginalData { .. } => 30,
+        Command::TransposeRows { .. } => 31,
+        Command::RecalculateTranspose { .. } => 32,
     }
 }
 
-const VARIANTS: usize = 31;
+const VARIANTS: usize = 33;
 
 fn named(name: &str) -> Option<String> {
     Some(name.to_string())
@@ -309,6 +311,17 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
                 colors: SavedColors::default(),
             },
             HistoryLabel::SetSavedColors,
+        ),
+        (
+            Command::TransposeRows {
+                source: w.sheet,
+                rows: vec![0],
+            },
+            HistoryLabel::TransposeRows,
+        ),
+        (
+            Command::RecalculateTranspose { sheet: w.sheet },
+            HistoryLabel::RecalculateTranspose,
         ),
         (
             Command::AddCalculation {

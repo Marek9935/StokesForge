@@ -64,6 +64,11 @@ pub(crate) struct FileBody {
     pub(crate) calculations: Vec<crate::calculations::CalculationRecord>,
     #[serde(default)]
     pub(crate) correction_traces: Vec<crate::calculations::CalculationRecord>,
+    /// Feuilles transposées liées (#253). Absentes des fichiers antérieurs :
+    /// liste vide. Placé avant `window_geometries` et `save_counter`, pour la
+    /// même raison que `calculations`.
+    #[serde(default)]
+    pub(crate) transposes: Vec<crate::transposes::TransposeRecord>,
     /// Géométrie des fenêtres (position/taille), par identifiant de nœud —
     /// bloc **séparé de l'arbre annulable** (voir la doc de tête de
     /// `stokesforge-session` : la géométrie ne vit pas dans `Project`, ne passe
