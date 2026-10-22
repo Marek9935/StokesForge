@@ -277,13 +277,32 @@ fn map_to_records(
         .collect()
 }
 
-/// Clé de la « sortie » d'une trace de correction qui porte la copie de
-/// l'original d'une colonne remplacée (#248).
-const ORIGINAL_KEY: &str = "original";
+/// Trace d'une correction qui a remplacé ses données sources (#212, #248).
+/// Un champ de fichier à part : une trace ne devient jamais un calcul actif à
+/// la lecture. Elle porte l'opération, les séries, la référence figée et les
+/// résultats comme un calcul, mais ni sorties, ni drapeaux de recalcul, ni
+/// empreinte : une trace ne se périme pas.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct CorrectionTraceRecord {
+    pub(crate) id: u64,
+    pub(crate) operation: Value,
+    pub(crate) series: Vec<SeriesRefRecord>,
+    pub(crate) aux: Option<AuxRefRecord>,
+    pub(crate) results: Vec<SeriesResultRecord>,
+    /// Les colonnes remplacées et la copie de leur original.
+    pub(crate) originals: Vec<OriginalRecord>,
+}
 
-/// Même transport d'opération/résultats, avec un champ de fichier distinct :
-/// une trace ne devient jamais un calcul actif à la lecture.
-pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CalculationRecord> {
+/// Une colonne remplacée par une correction et la copie de son original
+/// (classeur caché des analyses), de quoi la restaurer (#248).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct OriginalRecord {
+    pub(crate) column: u64,
+    pub(crate) copy: u64,
+}
+
+/// Les traces de correction, vers leur champ de fichier.
+pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CorrectionTraceRecord> {
     let traces = tree
         .correction_traces()
         .iter()
@@ -294,22 +313,7 @@ pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CalculationRecord>
                     operation: trace.operation.clone(),
                     series: trace.series.clone(),
                     aux: trace.aux.clone(),
-                    // Les copies des originaux (#248) voyagent comme des
-                    // sorties de clé `original` : la série dit quelle colonne
-                    // fut remplacée. Aucun schéma de plus.
-                    outputs: trace
-                        .originals
-                        .iter()
-                        .filter_map(|(column, copy)| {
-                            let series = trace.series.iter().position(|s| s.y == *column)?;
-                            Some(OutputRef {
-                                series,
-                                key: ORIGINAL_KEY.to_string(),
-                                index: None,
-                                column: Some(*copy),
-                            })
-                        })
-                        .collect(),
+                    outputs: Vec::new(),
                     results: trace.results.clone(),
                     keep_results: true,
                     auto_recalc: false,
@@ -320,26 +324,83 @@ pub(crate) fn corrections_to_records(tree: &ModelTree) -> Vec<CalculationRecord>
         })
         .collect();
     map_to_records(&traces, None)
+        .into_iter()
+        .map(|r| CorrectionTraceRecord {
+            originals: tree
+                .correction_traces()
+                .get(&NodeId::from_raw(r.id))
+                .map(|trace| {
+                    trace
+                        .originals
+                        .iter()
+                        .map(|(column, copy)| OriginalRecord {
+                            column: column.raw(),
+                            copy: copy.raw(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            id: r.id,
+            operation: r.operation,
+            series: r.series,
+            aux: r.aux,
+            results: r.results,
+        })
+        .collect()
 }
 
 /// Rend les traces gardées et celles écartées : une trace illisible (ou qui
 /// échoue à la validation), ou dont l'opération n'est pas une correction,
 /// est comptée (#309) au lieu de disparaître sans bruit.
 pub(crate) fn records_to_corrections(
-    records: Vec<CalculationRecord>,
+    records: Vec<CorrectionTraceRecord>,
     max_id: u64,
 ) -> (
     BTreeMap<NodeId, Arc<CorrectionRecord>>,
     Vec<DiscardedCalculation>,
 ) {
+    // Une trace dont un original dépasse la borne des identifiants est écartée
+    // entière, comme un calcul dont une colonne la dépasse.
+    let (within, beyond): (Vec<_>, Vec<_>) = records.into_iter().partition(|r| {
+        r.originals
+            .iter()
+            .all(|o| o.column <= max_id && o.copy <= max_id)
+    });
+    let originals: BTreeMap<u64, Vec<OriginalRecord>> = {
+        let mut seen = BTreeMap::new();
+        for r in &within {
+            // Deux traces de même id : la première fait foi (#309, F4).
+            seen.entry(r.id).or_insert_with(|| r.originals.clone());
+        }
+        seen
+    };
     // Deux enregistrements de même id : le premier fait foi (#309, F4).
     let mut named: BTreeMap<u64, DiscardedCalculation> = BTreeMap::new();
-    for r in &records {
+    let as_calculation = |r: &CorrectionTraceRecord| CalculationRecord {
+        id: r.id,
+        operation: r.operation.clone(),
+        series: r.series.clone(),
+        aux: r.aux.clone(),
+        outputs: Vec::new(),
+        results: r.results.clone(),
+        keep_results: true,
+        auto_recalc: false,
+        low_r2_dialog: true,
+        stale: None,
+        inputs_digest: None,
+    };
+    let calculations: Vec<CalculationRecord> = within.iter().map(as_calculation).collect();
+    for r in &calculations {
         named
             .entry(r.id)
             .or_insert_with(|| discarded_calculation(r));
     }
-    let (kept, mut discarded) = records_to_calculations(records, max_id);
+    let (kept, mut discarded) = records_to_calculations(calculations, max_id);
+    discarded.extend(
+        beyond
+            .iter()
+            .map(|r| discarded_calculation(&as_calculation(r))),
+    );
     let mut out = BTreeMap::new();
     for (id, c) in kept {
         if !matches!(
@@ -358,12 +419,14 @@ pub(crate) fn records_to_corrections(
                 series: c.series.clone(),
                 aux: c.aux.clone(),
                 results: c.results.clone(),
-                originals: c
-                    .outputs
-                    .iter()
-                    .filter(|o| o.key == ORIGINAL_KEY)
-                    .filter_map(|o| Some((c.series.get(o.series)?.y, o.column?)))
-                    .collect(),
+                originals: originals
+                    .get(&id.raw())
+                    .map(|list| {
+                        list.iter()
+                            .map(|o| (NodeId::from_raw(o.column), NodeId::from_raw(o.copy)))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             }),
         );
     }
@@ -545,6 +608,48 @@ fn discarded_calculation(r: &CalculationRecord) -> DiscardedCalculation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn trace(r: CalculationRecord) -> CorrectionTraceRecord {
+        CorrectionTraceRecord {
+            id: r.id,
+            operation: r.operation,
+            series: r.series,
+            aux: r.aux,
+            results: r.results,
+            originals: Vec::new(),
+        }
+    }
+
+    /// Les originaux d'une trace traversent le fichier, y compris celui d'une
+    /// colonne qui n'est le Y d'aucune série ; un original au-delà de la borne
+    /// écarte la trace entière.
+    #[test]
+    fn les_originaux_d_une_trace_traversent_l_enregistrement() {
+        let mut r = trace(record(good_operation(), 7));
+        r.originals = vec![
+            OriginalRecord {
+                column: 7,
+                copy: 90,
+            },
+            OriginalRecord {
+                column: 40,
+                copy: 91,
+            },
+        ];
+        let (kept, discarded) = records_to_corrections(vec![r.clone()], 1000);
+        assert!(discarded.is_empty());
+        assert_eq!(
+            kept[&NodeId::from_raw(50)].originals,
+            vec![
+                (NodeId::from_raw(7), NodeId::from_raw(90)),
+                (NodeId::from_raw(40), NodeId::from_raw(91)),
+            ]
+        );
+        r.originals[1].copy = 5000;
+        let (kept, discarded) = records_to_corrections(vec![r], 1000);
+        assert!(kept.is_empty());
+        assert_eq!(discarded.len(), 1);
+    }
 
     fn record(operation: Value, y: u64) -> CalculationRecord {
         CalculationRecord {
@@ -731,7 +836,7 @@ mod tests {
         assert_eq!(kept[&NodeId::from_raw(70)].series[0].y, NodeId::from_raw(7));
         assert_eq!(discarded.iter().map(|d| d.id).collect::<Vec<_>>(), vec![70]);
         // Même règle pour les traces de correction : A gardée, B écartée.
-        let (kept, discarded) = records_to_corrections(vec![a, b], 1000);
+        let (kept, discarded) = records_to_corrections(vec![trace(a), trace(b)], 1000);
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[&NodeId::from_raw(70)].series[0].y, NodeId::from_raw(7));
         assert_eq!(discarded.len(), 1);
@@ -752,7 +857,7 @@ mod tests {
         first.id = 71;
         let mut second = record(good_operation(), 7);
         second.id = 71;
-        let (kept, discarded) = records_to_corrections(vec![first, second], 1000);
+        let (kept, discarded) = records_to_corrections(vec![trace(first), trace(second)], 1000);
         assert!(kept.is_empty());
         assert!(discarded
             .iter()
@@ -786,7 +891,10 @@ mod tests {
         let mut healthy = record(good_operation(), 7);
         healthy.id = 73;
         let (kept, discarded) = records_to_corrections(
-            vec![unreadable, out_of_bound, not_a_correction, healthy],
+            vec![unreadable, out_of_bound, not_a_correction, healthy]
+                .into_iter()
+                .map(trace)
+                .collect(),
             1000,
         );
         assert_eq!(kept.keys().map(|k| k.raw()).collect::<Vec<_>>(), vec![73]);

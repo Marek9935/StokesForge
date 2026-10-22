@@ -63,7 +63,7 @@ pub(crate) struct FileBody {
     #[serde(default)]
     pub(crate) calculations: Vec<crate::calculations::CalculationRecord>,
     #[serde(default)]
-    pub(crate) correction_traces: Vec<crate::calculations::CalculationRecord>,
+    pub(crate) correction_traces: Vec<crate::calculations::CorrectionTraceRecord>,
     /// Feuilles transposées liées (#253). Absentes des fichiers antérieurs :
     /// liste vide. Placé avant `window_geometries` et `save_counter`, pour la
     /// même raison que `calculations`.
