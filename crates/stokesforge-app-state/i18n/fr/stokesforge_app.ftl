@@ -577,6 +577,9 @@ history-macro-analysis-to-graph = Analyser et tracer
 history-macro-remove-formula = Retirer la formule
 history-macro-delete-columns = Supprimer des colonnes
 history-macro-move-columns = Déplacer des colonnes
+history-macro-analyze-rows = Analyser des lignes
+history-transpose-rows = Transposer les lignes
+history-recalculate-transpose = Recalculer la feuille transposée
 
 ## Annuler et rétablir
 
@@ -1205,6 +1208,8 @@ analysis-kind-peaks = Décomposition en pics
 analysis-kind-reconvolution = Reconvolution
 analysis-kind-direct-deconvolution = Déconvolution directe
 error-model-calculated-column-read-only = Cette colonne est produite par un calcul. La détacher du calcul pour modifier ses valeurs
+error-model-transpose-no-x-prime = La colonne { $letter } ({ $name }) n’a pas de x'. Lui en donner un pour analyser une ligne
+error-model-transpose-not-numeric = La colonne { $letter } ({ $name }) contient du texte. Seules des colonnes numériques permettent d’analyser une ligne
 
 ## Analysis — names of the columns an operation produces (#181)
 analysis-output-baseline-corrected = { $name } ({ $column }-corr.)
@@ -1825,7 +1830,6 @@ analysis-correction-trace = Données modifiées : { $kind }
 # Repère discret des corrections définitives (#212).
 grid-column-modified = Données originales remplacées par une correction. Voir Résultats pour les réglages de la correction
 
-analysis-needs-column-curve = L’analyse demande une courbe tracée depuis une colonne
 
 # Glisser-déposer des séries, des groupes et des objets libres.
 object-drag-end = Fin de la liste
@@ -1847,3 +1851,17 @@ full-copy-values = Valeurs
     .hint = Copie les valeurs ; la ligne Formule reste vide
 full-copy-formulas = Formules
     .hint = Copie aussi les formules
+
+## Feuilles transposées (#253)
+analysis-needs-same-curves = L’analyse demande des courbes de même nature : toutes tracées depuis des colonnes, ou toutes depuis des lignes
+status-analysis-mixed-curves = Sélectionnez des courbes toutes tracées depuis des colonnes, ou toutes depuis des lignes
+status-transpose-not-linked = Cette feuille n’est pas une feuille transposée
+transpose-banner = Transposée de { $source }
+transpose-state-stale = Pas à jour
+transpose-state-modified = Valeurs modifiées
+transpose-recalculate = Recalculer
+transpose-recalculate-hint = Réécrit les colonnes liées depuis { $source }
+transpose-relink = Relier de nouveau
+transpose-relink-hint = Réécrit les colonnes liées depuis { $source } et efface les valeurs qui y ont été modifiées
+transpose-relink-title = Relier de nouveau la feuille transposée
+transpose-relink-confirm = Les valeurs modifiées dans les colonnes liées de { $sheet } seront effacées. Annuler les rétablit

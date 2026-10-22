@@ -82,6 +82,7 @@ use crate::user_colors::UserColors;
 mod analysis;
 mod autosave;
 mod column_use;
+mod transpose;
 pub use analysis::{CalculationDelete, StaleExport};
 pub use autosave::{RecoveryRow, AUTOSAVE_RETRY};
 pub use column_use::FullColumnsCopy;
@@ -562,6 +563,24 @@ pub enum Action {
         series: Vec<stokesforge_plot::SeriesRef>,
         spec: Box<PlotSpec>,
     },
+    /// Ouvre l'analyse sur des **lignes** `(feuille, ligne)` (#253, 0 = la
+    /// première) : la feuille transposée liée est créée ou complétée, dans un
+    /// seul groupe annulable avec le calcul, puis la fenêtre s'ouvre sur ses
+    /// colonnes.
+    OpenRowAnalysis {
+        /// La famille d'opération et la méthode préchoisie.
+        preset: crate::analysis::Preset,
+        /// Les lignes visées.
+        rows: Vec<(NodeId, usize)>,
+    },
+    /// Remet à jour une feuille transposée depuis sa source (#253) ; demande
+    /// confirmation si des valeurs éditées seraient écrasées.
+    RecalculateTranspose {
+        /// La feuille transposée.
+        sheet: NodeId,
+    },
+    /// Réponse à cette confirmation (`true` : écraser et remettre à jour).
+    ConfirmTransposeRelink(bool),
     /// Rouvre une des dernières analyses lancées (#249) sur la sélection
     /// courante : la fenêtre s'ouvre avec ses réglages ; avec `run` (Ctrl+clic)
     /// elle est lancée tout de suite si rien ne manque.
@@ -2786,6 +2805,12 @@ pub struct AppState {
     /// Calcul dont la suppression attend confirmation (M8).
     pending_calculation_delete: Option<NodeId>,
     pending_analysis_replacement: bool,
+    /// Le groupe `AnalyzeRows` ouvert pour la fenêtre d'analyse en cours
+    /// (#253) : clos par Apply, avorté par Cancel.
+    analysis_rows_macro: bool,
+    /// Feuille transposée dont la remise à jour attend la confirmation
+    /// d'écraser des valeurs éditées (#253).
+    pending_transpose_relink: Option<NodeId>,
     /// L'export (ou la copie) d'un graphe qui montre des séries pas à jour, en
     /// attente de la réponse de l'utilisateur (#198).
     pending_stale_export: Option<Action>,
@@ -2939,6 +2964,8 @@ impl AppState {
             analysis_recent,
             pending_calculation_delete: None,
             pending_analysis_replacement: false,
+            analysis_rows_macro: false,
+            pending_transpose_relink: None,
             pending_stale_export: None,
             column_use: None,
             pending_full_copy: None,
@@ -4933,6 +4960,9 @@ impl AppState {
                 series,
                 spec,
             } => self.open_graph_analysis(&preset, graph, &series, *spec),
+            Action::OpenRowAnalysis { preset, rows } => self.open_row_analysis(&preset, &rows),
+            Action::RecalculateTranspose { sheet } => self.recalculate_transpose(sheet),
+            Action::ConfirmTransposeRelink(accept) => self.confirm_transpose_relink(accept),
             Action::OpenRecentAnalysis { index, run, target } => {
                 self.open_recent_analysis(index, run, target)
             }
@@ -4947,6 +4977,7 @@ impl AppState {
                 y,
             } => self.move_calculation_handle(calculation, slot, x, y),
             Action::CloseAnalysis => {
+                self.abort_row_macro();
                 self.analysis = None;
                 self.pending_analysis_replacement = false;
             }

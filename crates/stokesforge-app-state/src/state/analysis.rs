@@ -115,6 +115,26 @@ impl AppState {
         sources: &[stokesforge_plot::SeriesRef],
         spec: stokesforge_plot::PlotSpec,
     ) {
+        // Des courbes « ligne » (#253) : on analyse les colonnes de la feuille
+        // transposée liée, jamais la ligne elle-même.
+        let curves: Vec<_> = sources
+            .iter()
+            .filter_map(|source| spec.panels.get(source.panel)?.series.get(source.index))
+            .collect();
+        if curves.iter().any(|curve| curve.row.is_some()) {
+            let rows: Option<Vec<(NodeId, usize)>> = curves
+                .iter()
+                .map(|curve| {
+                    let sheet = self.snapshot.tree.parent(curve.y).ok().flatten()?;
+                    Some((sheet, curve.row?))
+                })
+                .collect();
+            match rows {
+                Some(rows) if rows.len() == sources.len() => self.open_row_analysis(preset, &rows),
+                _ => self.fail(tr!("status-analysis-mixed-curves")),
+            }
+            return;
+        }
         let series: Option<Vec<SeriesRef>> = sources
             .iter()
             .map(|source| {
@@ -167,6 +187,7 @@ impl AppState {
                 series,
                 spec,
             } => self.open_graph_analysis(&preset, graph, &series, *spec),
+            RecentTarget::Rows { rows } => self.open_row_analysis(&preset, &rows),
         }
         let tree = self.snapshot.tree.clone();
         let Some(form) = self.analysis.as_mut() else {
@@ -347,6 +368,7 @@ impl AppState {
                 .object_manager_preferences
                 .save_analysis_keep_results(form.keep_results);
             self.analysis = None;
+            self.end_row_macro();
             // Un calcul « Show » ne garde pas ses valeurs : le recalcul ne les
             // verra jamais, c'est donc ici qu'un R² très faible se dit (#288).
             // Un calcul qui garde ses valeurs est vu par `watch_low_r2`.

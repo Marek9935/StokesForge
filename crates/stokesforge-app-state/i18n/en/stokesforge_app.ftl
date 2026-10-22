@@ -580,6 +580,9 @@ history-macro-analysis-to-graph = Analyze and Plot
 history-macro-remove-formula = Remove Formula
 history-macro-delete-columns = Delete Columns
 history-macro-move-columns = Move Columns
+history-macro-analyze-rows = Analyze Rows
+history-transpose-rows = Transpose Rows
+history-recalculate-transpose = Recalculate Transposed Sheet
 
 ## Undo and Redo
 
@@ -1209,6 +1212,8 @@ analysis-kind-peaks = Peak Decomposition
 analysis-kind-reconvolution = Reconvolution
 analysis-kind-direct-deconvolution = Direct Deconvolution
 error-model-calculated-column-read-only = This column is produced by a calculation. Detach it from the calculation to edit its values
+error-model-transpose-no-x-prime = Column { $letter } ({ $name }) has no x' value. Set one to analyze a row
+error-model-transpose-not-numeric = Column { $letter } ({ $name }) contains text. Only numeric columns allow a row to be analyzed
 
 ## Analysis — names of the columns an operation produces (#181)
 analysis-output-baseline-corrected = { $name } ({ $column }-corr)
@@ -1829,7 +1834,6 @@ analysis-correction-trace = Modified data: { $kind }
 # Repère discret des corrections définitives (#212).
 grid-column-modified = Original data replaced by a correction. See Results for the correction settings
 
-analysis-needs-column-curve = Analysis requires a curve drawn from a column
 
 # Glisser-déposer des séries, des groupes et des objets libres.
 object-drag-end = End of the list
@@ -1851,3 +1855,17 @@ full-copy-values = Values
     .hint = Copies the values; the Formula row stays empty
 full-copy-formulas = Formulas
     .hint = Copies the formulas too
+
+## Transposed sheets (#253)
+analysis-needs-same-curves = Analysis needs curves of one kind: all drawn from columns, or all from rows
+status-analysis-mixed-curves = Select curves drawn all from columns, or all from rows
+status-transpose-not-linked = This sheet is not a transposed sheet
+transpose-banner = Transposed from { $source }
+transpose-state-stale = Out of date
+transpose-state-modified = Values edited
+transpose-recalculate = Recalculate
+transpose-recalculate-hint = Rewrites the linked columns from { $source }
+transpose-relink = Relink
+transpose-relink-hint = Rewrites the linked columns from { $source } and erases the values edited in them
+transpose-relink-title = Relink transposed sheet
+transpose-relink-confirm = Values edited in the linked columns of { $sheet } will be erased. Undo brings them back

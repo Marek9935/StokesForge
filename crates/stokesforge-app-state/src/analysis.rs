@@ -205,6 +205,10 @@ pub enum RecentTarget {
         series: Vec<stokesforge_plot::SeriesRef>,
         spec: Box<stokesforge_plot::PlotSpec>,
     },
+    /// Des lignes entières `(feuille, ligne)` (#253).
+    Rows {
+        rows: Vec<(NodeId, usize)>,
+    },
 }
 
 /// La forme d'une ligne de base (M10).
