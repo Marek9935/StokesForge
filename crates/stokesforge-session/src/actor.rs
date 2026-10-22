@@ -138,8 +138,8 @@ pub(crate) enum Request {
     Load {
         /// Chemin source.
         path: PathBuf,
-        /// Taille maximale du fichier, en octets (A2, #316).
-        max_bytes: u64,
+        /// Plafonds de lecture : taille (A2) et cellules (B1), #316.
+        limits: stokesforge_persistence::LoadLimits,
         /// Réponse : nouvelle révision, ou erreur (persistance, ou
         /// `Command(MacroOpen)` si une macro est ouverte).
         reply: Sender<SessionResult<(Revision, LoadReport)>>,
@@ -463,7 +463,7 @@ pub(crate) fn run(
             }
             Request::Load {
                 path,
-                max_bytes,
+                limits,
                 reply,
             } => {
                 let outcome = load_project(
@@ -472,7 +472,7 @@ pub(crate) fn run(
                     &mut geometries,
                     &mut column_widths,
                     &path,
-                    max_bytes,
+                    limits,
                 )
                 .map(|report| {
                     revision += 1;
@@ -583,12 +583,12 @@ fn load_project(
     geometries: &mut HashMap<NodeId, WindowGeometry>,
     column_widths: &mut HashMap<NodeId, f32>,
     path: &Path,
-    max_bytes: u64,
+    limits: stokesforge_persistence::LoadLimits,
 ) -> SessionResult<LoadReport> {
     if history.in_macro() {
         return Err(SessionError::Command(CommandError::MacroOpen("load")));
     }
-    let (loaded, view, report) = stokesforge_persistence::load_with_limit(path, max_bytes)?;
+    let (loaded, view, report) = stokesforge_persistence::load_with_limits(path, limits)?;
     *project = loaded;
     *geometries = view.window_geometries;
     *column_widths = view.column_widths;

@@ -366,7 +366,7 @@ const EPINGLE_MESURE: f64 = 94.427_690_068_6;
 fn le_demarrage_de_la_demo_recalcule_les_colonnes_a_formule() {
     let (session, _, _) = session_for_project(
         None,
-        stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+        stokesforge_app_state::preferences::default_load_limits(),
     )
     .unwrap();
     let instantane = session.handle().snapshot().unwrap();
@@ -413,7 +413,7 @@ fn la_demo_fait_l_aller_retour_stf_par_la_session() {
     let chemin = dossier.path().join("demo.stf");
     let (session, _, _) = session_for_project(
         None,
-        stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+        stokesforge_app_state::preferences::default_load_limits(),
     )
     .unwrap();
     let avant = session.handle().snapshot().unwrap();

@@ -103,6 +103,8 @@ fn general_page(
     let before = low_r2;
     let mut max_file_mb = state.max_file_mb();
     let max_file_before = max_file_mb;
+    let mut max_cells_m = state.max_cells_m();
+    let max_cells_before = max_cells_m;
     let mut autosave = state.autosave_enabled();
     let autosave_before = autosave;
     let mut autosave_minutes = state.autosave_minutes();
@@ -128,6 +130,15 @@ fn general_page(
             );
         });
         rows.note(tr!("preferences-max-file-size-note"));
+        rows.row(tr!("preferences-max-cells"), |ui| {
+            number_field(
+                ui,
+                "preferences_max_cells_m",
+                &mut max_cells_m,
+                &quantities::MAX_CELLS_M,
+            );
+        });
+        rows.note(tr!("preferences-max-cells-note"));
         // Sauvegarde automatique (#317) : la période se grise si elle est coupée.
         rows.checkbox(
             &mut autosave,
@@ -160,6 +171,9 @@ fn general_page(
     }
     if max_file_mb != max_file_before {
         actions.push(Action::SetMaxFileMb(max_file_mb));
+    }
+    if max_cells_m != max_cells_before {
+        actions.push(Action::SetMaxCellsM(max_cells_m));
     }
     if autosave != autosave_before {
         actions.push(Action::SetAutosave(autosave));

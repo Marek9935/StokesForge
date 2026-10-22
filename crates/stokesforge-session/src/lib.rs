@@ -451,9 +451,25 @@ impl SessionHandle {
         path: &Path,
         max_bytes: u64,
     ) -> SessionResult<(Revision, LoadReport)> {
+        self.load_with_limits(
+            path,
+            stokesforge_persistence::LoadLimits {
+                max_bytes,
+                ..Default::default()
+            },
+        )
+    }
+
+    /// Comme [`Self::load_with_limit`], avec aussi le budget global de cellules
+    /// (B1, #316) : au-delà, `Err(Persistence(TooManyCells))`, rien n'est touché.
+    pub fn load_with_limits(
+        &self,
+        path: &Path,
+        limits: stokesforge_persistence::LoadLimits,
+    ) -> SessionResult<(Revision, LoadReport)> {
         self.request(|reply| Request::Load {
             path: path.to_path_buf(),
-            max_bytes,
+            limits,
             reply,
         })?
     }

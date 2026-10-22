@@ -174,6 +174,20 @@ pub const DEFAULT_MAX_FILE_BYTES: u64 = stokesforge_persistence::DEFAULT_MAX_FIL
 pub const MIN_MAX_FILE_MB: u32 = 16;
 pub const MAX_MAX_FILE_MB: u32 = 16384;
 
+/// Budget global de cellules à l'ouverture (B1, #316), en millions : défaut
+/// (1000 = un milliard, `stokesforge_persistence::DEFAULT_MAX_CELLS`) et bornes.
+pub const DEFAULT_MAX_CELLS_M: u32 =
+    (stokesforge_persistence::DEFAULT_MAX_CELLS / 1_000_000) as u32;
+pub const MIN_MAX_CELLS_M: u32 = 1;
+pub const MAX_MAX_CELLS_M: u32 = 10_000;
+
+pub use stokesforge_persistence::LoadLimits;
+
+/// Les plafonds d'ouverture par défaut (CLI, scripts, tests).
+pub fn default_load_limits() -> LoadLimits {
+    stokesforge_persistence::LoadLimits::default()
+}
+
 /// Sauvegarde automatique (#317) : période par défaut et bornes, en minutes.
 pub const DEFAULT_AUTOSAVE_MINUTES: u32 = 5;
 pub const MIN_AUTOSAVE_MINUTES: u32 = 1;
@@ -199,6 +213,10 @@ struct PreferencesFile {
     /// bornes : ramené dans les bornes ; absent ou illisible : le défaut.
     #[serde(default, deserialize_with = "lenient")]
     max_file_mb: Option<u32>,
+    /// Budget global de cellules à l'ouverture, en millions (B1, #316) ; mêmes
+    /// règles que `max_file_mb`.
+    #[serde(default, deserialize_with = "lenient")]
+    max_cells_m: Option<u32>,
     /// Sauvegarde automatique (#317) ; absent ou illisible : activée.
     #[serde(default, deserialize_with = "lenient")]
     autosave: Option<bool>,
@@ -241,6 +259,10 @@ fn clamp_autosave_minutes(minutes: u32) -> u32 {
     minutes.clamp(MIN_AUTOSAVE_MINUTES, MAX_AUTOSAVE_MINUTES)
 }
 
+fn clamp_max_cells_m(millions: u32) -> u32 {
+    millions.clamp(MIN_MAX_CELLS_M, MAX_MAX_CELLS_M)
+}
+
 fn clamp_max_file_mb(megabytes: u32) -> u32 {
     megabytes.clamp(MIN_MAX_FILE_MB, MAX_MAX_FILE_MB)
 }
@@ -264,6 +286,7 @@ pub struct Preferences {
     object_manager_settings: ObjectManagerSettings,
     svg_text: SvgTextMode,
     max_file_mb: u32,
+    max_cells_m: u32,
     autosave: bool,
     autosave_minutes: u32,
     toolbars: Option<serde_json::Value>,
@@ -314,6 +337,9 @@ impl Preferences {
             max_file_mb: file
                 .max_file_mb
                 .map_or(DEFAULT_MAX_FILE_MB, clamp_max_file_mb),
+            max_cells_m: file
+                .max_cells_m
+                .map_or(DEFAULT_MAX_CELLS_M, clamp_max_cells_m),
             autosave: file.autosave.unwrap_or(true),
             autosave_minutes: file
                 .autosave_minutes
@@ -420,6 +446,25 @@ impl Preferences {
     pub fn save_max_file_mb(&mut self, megabytes: u32) -> std::io::Result<()> {
         self.max_file_mb = clamp_max_file_mb(megabytes);
         self.save_field("max_file_mb", self.max_file_mb.into())
+    }
+
+    /// Budget global de cellules à l'ouverture, en millions (B1, #316).
+    pub fn max_cells_m(&self) -> u32 {
+        self.max_cells_m
+    }
+
+    /// Les deux plafonds d'ouverture, tels que les passe la session.
+    pub fn load_limits(&self) -> stokesforge_persistence::LoadLimits {
+        stokesforge_persistence::LoadLimits {
+            max_bytes: self.max_file_bytes(),
+            max_cells: u64::from(self.max_cells_m) * 1_000_000,
+        }
+    }
+
+    /// Mémorise le budget (ramené dans les bornes).
+    pub fn save_max_cells_m(&mut self, millions: u32) -> std::io::Result<()> {
+        self.max_cells_m = clamp_max_cells_m(millions);
+        self.save_field("max_cells_m", self.max_cells_m.into())
     }
 
     /// La sauvegarde automatique est-elle active ? Oui par défaut (#317).
@@ -1011,6 +1056,29 @@ mod object_manager_tests {
             Preferences::load_from(Some(path)).svg_text_mode(),
             SvgTextMode::Text
         );
+    }
+
+    /// B1 (#316) : un milliard de cellules sans préférence, aller-retour,
+    /// bornes, et passage aux plafonds de la session.
+    #[test]
+    fn le_budget_de_cellules_vaut_un_milliard_par_defaut_et_se_retient() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("preferences.json");
+        std::fs::write(&path, r#"{"language":"fr"}"#).unwrap();
+        let mut prefs = Preferences::load_from(Some(path.clone()));
+        assert_eq!(prefs.max_cells_m(), 1000);
+        assert_eq!(prefs.load_limits().max_cells, 1_000_000_000);
+        prefs.save_max_cells_m(50).unwrap();
+        let relues = Preferences::load_from(Some(path.clone()));
+        assert_eq!(relues.max_cells_m(), 50);
+        assert_eq!(relues.load_limits().max_cells, 50_000_000);
+        assert_eq!(relues.language(), Some("fr"));
+        prefs.save_max_cells_m(0).unwrap();
+        assert_eq!(prefs.max_cells_m(), MIN_MAX_CELLS_M);
+        prefs.save_max_cells_m(u32::MAX).unwrap();
+        assert_eq!(prefs.max_cells_m(), MAX_MAX_CELLS_M);
+        std::fs::write(&path, r#"{"max_cells_m":"beaucoup"}"#).unwrap();
+        assert_eq!(Preferences::load_from(Some(path)).max_cells_m(), 1000);
     }
 
     /// A2 (#316) : 512 Mo sans préférence, aller-retour, bornes.

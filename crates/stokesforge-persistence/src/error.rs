@@ -32,6 +32,18 @@ pub enum PersistenceError {
         /// Plafond en vigueur, en octets.
         limit: u64,
     },
+    /// Les colonnes du fichier déclarent plus de cellules que le budget global
+    /// accepté à l'ouverture (B1, #316). Refusé avant toute allocation de
+    /// colonne ; `cells` est le cumul au moment du dépassement.
+    #[error("{path} declares too many cells ({cells} so far, limit {limit})")]
+    TooManyCells {
+        /// Chemin du fichier lu.
+        path: PathBuf,
+        /// Cellules cumulées quand le plafond a été franchi.
+        cells: u64,
+        /// Budget en vigueur.
+        limit: u64,
+    },
     /// Le fichier ne commence pas par la signature `STKF` : ce n'est pas un
     /// fichier StokesForge (ou il est vide / tronqué avant la signature).
     #[error("{path} is not a StokesForge file")]
