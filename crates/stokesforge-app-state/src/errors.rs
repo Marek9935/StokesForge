@@ -85,6 +85,16 @@ pub mod model {
             CoreError::CalculatedColumnReadOnly { .. } => {
                 tr!("error-model-calculated-column-read-only")
             }
+            CoreError::TransposeNoXPrime { letter, name } => tr!(
+                "error-model-transpose-no-x-prime",
+                letter = letter.as_str(),
+                name = name.as_str()
+            ),
+            CoreError::TransposeNotNumeric { letter, name } => tr!(
+                "error-model-transpose-not-numeric",
+                letter = letter.as_str(),
+                name = name.as_str()
+            ),
         }
     }
 
@@ -117,8 +127,16 @@ pub mod model {
                     column: NodeId::from_raw(7),
                     calculation: NodeId::from_raw(8),
                 },
+                CoreError::TransposeNoXPrime {
+                    letter: "D".into(),
+                    name: "Temps".into(),
+                },
+                CoreError::TransposeNotNumeric {
+                    letter: "B".into(),
+                    name: "Notes".into(),
+                },
             ];
-            let mut seen = [false; 11];
+            let mut seen = [false; 13];
             for sample in &samples {
                 let index = match sample {
                     CoreError::InvalidName(_) => 0,
@@ -132,6 +150,8 @@ pub mod model {
                     CoreError::ConcurrentModification { .. } => 8,
                     CoreError::FormulaColumnReadOnly { .. } => 9,
                     CoreError::CalculatedColumnReadOnly { .. } => 10,
+                    CoreError::TransposeNoXPrime { .. } => 11,
+                    CoreError::TransposeNotNumeric { .. } => 12,
                 };
                 seen[index] = true;
             }
@@ -158,6 +178,13 @@ pub mod model {
             assert_eq!(
                 error_message(&CoreError::UnknownNode(NodeId::from_raw(7))),
                 "This object no longer exists in the project"
+            );
+            assert_eq!(
+                error_message(&CoreError::TransposeNoXPrime {
+                    letter: "D".into(),
+                    name: "Temps".into()
+                }),
+                "Column D (Temps) has no x' value. Set one to analyze a row"
             );
         }
     }

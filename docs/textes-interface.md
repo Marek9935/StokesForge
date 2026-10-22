@@ -265,6 +265,8 @@ grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
 | Results | Résultats | Volet sous la grille : calculs conservés et leurs valeurs | Sorties | D |
 | Calculation | Calcul | Un traitement enregistré, avec ses colonnes de sortie | Opération | D |
 | Out of date | Pas à jour | Calcul dont une entrée a changé ou disparu | Périmé, Obsolète | D |
+| Transposed sheet | Feuille transposée | Feuille « Sheet1ᵀ » qui porte les lignes d'une feuille en colonnes (x' puis « Row N ») pour les analyser ; instantané recalculable (#253) | Feuille inversée, Pivot | — |
+| Relink | Relier de nouveau | Réécrire les colonnes liées d'une feuille transposée dont des valeurs ont été éditées (#253) | Reset, Resynchroniser | — |
 | Recalculate | Recalculer | Refaire un calcul sur les données actuelles | Rafraîchir | D |
 | Low R² warning | Avertir quand R² est faible | Case du calcul : boîte de dialogue quand le R² d'un ajustement est très faible (#288) | Alerte | D |
 | Low R² (badge) | R² faible(s) | Pastille de la barre d'état : nombre de séries à R² < 0,6 dans le projet ; un clic liste les types (#290) | Alerte | D |

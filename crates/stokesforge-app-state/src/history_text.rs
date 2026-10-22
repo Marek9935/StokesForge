@@ -115,6 +115,8 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
         HistoryLabel::SetPlotSpec { name: Some(name) } => {
             tr!("history-set-plot-spec-named", name = name.as_str())
         }
+        HistoryLabel::TransposeRows => tr!("history-transpose-rows"),
+        HistoryLabel::RecalculateTranspose => tr!("history-recalculate-transpose"),
         HistoryLabel::EditPlotSpec(kind) => match kind {
             PlotEditKind::Visibility => tr!("history-plot-visibility"),
             PlotEditKind::RenameSeries => tr!("history-plot-rename-series"),
@@ -186,6 +188,7 @@ pub fn history_text_in(loader: &FluentLanguageLoader, label: &HistoryLabel) -> S
             MacroKind::RemoveFormula => tr!("history-macro-remove-formula"),
             MacroKind::DeleteColumns => tr!("history-macro-delete-columns"),
             MacroKind::MoveColumns => tr!("history-macro-move-columns"),
+            MacroKind::AnalyzeRows => tr!("history-macro-analyze-rows"),
         },
     }
 }

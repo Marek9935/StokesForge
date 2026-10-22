@@ -639,6 +639,7 @@ impl Project {
         let tree = Arc::make_mut(&mut self.tree);
         let index = tree.remove(id)?;
         self.prune_orphaned_calculations();
+        self.prune_transposes();
         Ok(index)
     }
 
@@ -675,7 +676,18 @@ impl Project {
     }
 
     /// Renomme `id`. Rend l'ancien nom.
+    ///
+    /// Une feuille source d'une feuille transposée (#253) entraîne le nom de
+    /// celle-ci : « Nouveauᵀ ».
     pub fn rename(&mut self, id: NodeId, name: &str) -> CoreResult<String> {
+        let previous = self.rename_without_follow(id, name)?;
+        if previous != name {
+            self.follow_source_rename(id, &previous);
+        }
+        Ok(previous)
+    }
+
+    pub(crate) fn rename_without_follow(&mut self, id: NodeId, name: &str) -> CoreResult<String> {
         let previous = self.tree.validate_rename(id, name)?;
         if previous == name {
             return Ok(previous);

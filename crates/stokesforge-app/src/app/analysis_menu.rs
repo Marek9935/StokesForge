@@ -37,6 +37,9 @@ pub(super) enum AnalysisTarget<'a> {
         series: &'a [stokesforge_plot::SeriesRef],
         spec: &'a stokesforge_plot::PlotSpec,
     },
+    /// Des lignes entières `(feuille, ligne)` (#253) : l'analyse passe par la
+    /// feuille transposée liée.
+    Rows { rows: &'a [(NodeId, usize)] },
 }
 
 impl AnalysisTarget<'_> {
@@ -44,6 +47,7 @@ impl AnalysisTarget<'_> {
         match self {
             Self::Columns { columns, .. } => has_y(state, columns),
             Self::Graph { series, .. } => !series.is_empty(),
+            Self::Rows { rows } => !rows.is_empty(),
         }
     }
 }
@@ -86,6 +90,10 @@ fn open_entry(
                     graph,
                     series: series.to_vec(),
                     spec: Box::new(spec.clone()),
+                },
+                AnalysisTarget::Rows { rows } => Action::OpenRowAnalysis {
+                    preset,
+                    rows: rows.to_vec(),
                 },
             });
         }
@@ -166,6 +174,9 @@ fn recent_target(target: AnalysisTarget) -> RecentTarget {
             graph,
             series: series.to_vec(),
             spec: Box::new(spec.clone()),
+        },
+        AnalysisTarget::Rows { rows } => RecentTarget::Rows {
+            rows: rows.to_vec(),
         },
     }
 }
@@ -414,6 +425,10 @@ pub(super) fn analysis_entry(
                     graph,
                     series: series.to_vec(),
                     spec: Box::new(spec.clone()),
+                },
+                AnalysisTarget::Rows { rows } => Action::OpenRowAnalysis {
+                    preset: preset.clone(),
+                    rows: rows.to_vec(),
                 },
             })
         },

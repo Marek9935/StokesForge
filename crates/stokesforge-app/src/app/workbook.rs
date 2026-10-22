@@ -214,8 +214,16 @@ pub(super) fn book_contents(
     // résultat gardé sa hauteur est nulle et la disposition ne change pas.
     let results_height = results_pane::pane_height(ui, state, book)
         .min((upper_area.height() - tabs_height).max(0.0) / 2.0);
-    let (grid_rect, lower_area) =
+    let (grid_with_banner, lower_area) =
         upper_area.split_top_bottom_at_y(upper_area.bottom() - tabs_height - results_height);
+    // La bande d'une feuille transposée liée (#253) prend le haut de la grille.
+    let banner_height = if state.transpose_info(selected).is_some() {
+        super::transpose_ui::BANNER_HEIGHT.min(grid_with_banner.height())
+    } else {
+        0.0
+    };
+    let (banner_rect, grid_rect) =
+        grid_with_banner.split_top_bottom_at_y(grid_with_banner.top() + banner_height);
     let (results_rect, tabs_rect) =
         lower_area.split_top_bottom_at_y(lower_area.top() + results_height);
     // Avec la barre, les onglets descendent de la moitié de la bande : l'espace
@@ -233,6 +241,10 @@ pub(super) fn book_contents(
     };
     let mut tabs_ui = bounded(tabs_rect);
     let mut grid_ui = bounded(grid_rect);
+    if banner_height > 0.0 {
+        let mut banner_ui = bounded(banner_rect);
+        super::transpose_ui::transpose_banner(&mut banner_ui, state, selected, actions);
+    }
     if results_height > 0.0 {
         let mut results_ui = bounded(results_rect);
         results_pane::results_pane(&mut results_ui, state, actions, book, selected);

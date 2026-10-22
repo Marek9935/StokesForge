@@ -24,6 +24,7 @@ use crate::id::NodeId;
 use crate::name::check_name;
 use crate::node::{containment_message, Node, NodeKind};
 use crate::path::{format_path, parse_path, ObjectPath};
+use crate::transpose::TransposeLink;
 
 /// Forme lisible d'une suite de dossiers pour les messages d'erreur, `/` pour
 /// la racine. `pub(crate)` parce que `Project::resolve` s'appuyait dessus avant
@@ -51,6 +52,9 @@ pub struct Tree {
     /// voyager avec lui, comme les couleurs enregistrées.
     calculations: BTreeMap<NodeId, Arc<Calculation>>,
     correction_traces: BTreeMap<NodeId, Arc<CorrectionRecord>>,
+    /// Liens des feuilles transposées (#253), par feuille transposée — voir
+    /// [`crate::transpose`]. Portés par l'arbre comme les calculs.
+    transposes: BTreeMap<NodeId, Arc<TransposeLink>>,
 }
 
 impl Tree {
@@ -83,7 +87,36 @@ impl Tree {
             saved_colors: SavedColors::default(),
             calculations: BTreeMap::new(),
             correction_traces: BTreeMap::new(),
+            transposes: BTreeMap::new(),
         }
+    }
+
+    /// Les feuilles transposées liées, par feuille transposée (#253).
+    pub fn transposes(&self) -> &BTreeMap<NodeId, Arc<TransposeLink>> {
+        &self.transposes
+    }
+
+    /// Le lien de la feuille transposée `sheet`, si c'en est une.
+    pub fn transpose_link(&self, sheet: NodeId) -> Option<&TransposeLink> {
+        self.transposes.get(&sheet).map(Arc::as_ref)
+    }
+
+    /// La feuille transposée liée à la feuille `source`, avec son lien.
+    pub fn transposed_from(&self, source: NodeId) -> Option<(NodeId, &TransposeLink)> {
+        self.transposes
+            .iter()
+            .find(|(_, link)| link.source == source)
+            .map(|(sheet, link)| (*sheet, link.as_ref()))
+    }
+
+    /// Le même arbre, avec ces liens — pour la persistance.
+    pub fn with_transposes(mut self, transposes: BTreeMap<NodeId, Arc<TransposeLink>>) -> Self {
+        self.transposes = transposes;
+        self
+    }
+
+    pub(crate) fn transposes_mut(&mut self) -> &mut BTreeMap<NodeId, Arc<TransposeLink>> {
+        &mut self.transposes
     }
 
     /// Les corrections définitives des données sources, sans lien de calcul.
@@ -174,6 +207,7 @@ impl Tree {
             saved_colors: SavedColors::default(),
             calculations: BTreeMap::new(),
             correction_traces: BTreeMap::new(),
+            transposes: BTreeMap::new(),
         };
         tree.validate_loaded()?;
         Ok(tree)

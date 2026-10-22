@@ -130,7 +130,9 @@ pub(super) fn select_manager_target(
 }
 
 /// Séries analysables de la cible, dans leur ordre de tracé. Une série
-/// construite depuis une ligne de feuille ne désigne pas une colonne Y.
+/// « ligne » s'analyse par la feuille transposée liée à sa feuille (#253) ;
+/// un groupe qui mêle des courbes de colonnes et de lignes n'est pas
+/// analysable d'un coup (`analysis-needs-same-curves`).
 pub(super) fn analysis_sources(
     spec: &stokesforge_plot::PlotSpec,
     target: T,
@@ -140,7 +142,6 @@ pub(super) fn analysis_sources(
             .panels
             .get(source.panel)
             .and_then(|p| p.series.get(source.index))
-            .filter(|s| s.row.is_none())
             .map(|_| vec![source])
             .unwrap_or_default(),
         T::SeriesGroup(group) => spec
@@ -153,7 +154,8 @@ pub(super) fn analysis_sources(
                     .enumerate()
                     .filter(|(_, s)| s.group == Some(group.group))
                     .collect();
-                if members.iter().any(|(_, s)| s.row.is_some()) {
+                let rows = members.iter().filter(|(_, s)| s.row.is_some()).count();
+                if rows != 0 && rows != members.len() {
                     return Vec::new();
                 }
                 members
@@ -234,7 +236,7 @@ pub(super) fn object_node_menu(
                 super::analysis_menu::analysis_open_menu(
                     ui,
                     !analysis_sources(spec, target).is_empty(),
-                    tr!("analysis-needs-column-curve"),
+                    tr!("analysis-needs-same-curves"),
                     |category| requests.push(ObjectManagerRequest::Analysis(target, category)),
                 );
             }
@@ -1625,7 +1627,18 @@ mod tests {
         spec.panels.get_mut(0).unwrap().series[2].row = Some(0);
         assert!(
             analysis_sources(&spec, target).is_empty(),
-            "un lot de lignes n'analyse pas ses colonnes silencieusement"
+            "un groupe mêlant colonnes et lignes ne s'analyse pas d'un coup"
+        );
+        spec.panels.get_mut(0).unwrap().series[0].row = Some(1);
+        assert_eq!(
+            analysis_sources(&spec, target),
+            vec![SeriesRef::new(0, 0), SeriesRef::new(0, 2)],
+            "un groupe de lignes s'analyse par sa feuille transposée (#253)"
+        );
+        assert_eq!(
+            analysis_sources(&spec, T::Series(SeriesRef::new(0, 0))),
+            vec![SeriesRef::new(0, 0)],
+            "une courbe ligne est analysable"
         );
     }
 

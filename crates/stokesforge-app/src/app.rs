@@ -181,6 +181,7 @@ mod tab;
 mod tab_strip;
 #[cfg(test)]
 mod test_support;
+mod transpose_ui;
 mod window_chrome;
 mod window_detach;
 mod window_placement;
@@ -217,6 +218,7 @@ use stale_export::stale_export_window;
 use status_history::{low_r2_list_window, status_history_window};
 use stokesforge_app_state::file_picker::{FilePicker, PickRequest};
 use tab::{active_tab_kind, tab_for_window, tab_node, Tab};
+use transpose_ui::transpose_relink_window;
 use window_detach::{
     snapshot_stamp, DetachedProjectManagerRequests, DetachedTab, ProjectManagerViewModel,
 };
@@ -1201,6 +1203,7 @@ impl StokesForgeApp {
         analysis_window(ctx, &mut self.state, actions);
         calculation_delete_window(ctx, &self.state, actions);
         analysis_replace_window(ctx, &self.state, actions);
+        transpose_relink_window(ctx, &self.state, actions);
         stale_export_window(ctx, &self.state, actions);
         column_use_window(ctx, &self.state, actions);
         full_copy_window(ctx, &self.state, actions);

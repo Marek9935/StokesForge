@@ -264,6 +264,40 @@ couleurs enregistrées, avec un `NodeId` du même allocateur (jamais réutilisé
   recalcul ciblé par empreinte, comme les formules (invariant 11) ; fichier :
   [`persistance.md`](persistance.md).
 
+## Les feuilles transposées liées (#253)
+
+Analyser une **ligne** (série « ligne » d'un graphe, lignes entières de la
+gouttière) se fait sur une **feuille transposée** : le moteur d'analyse, les
+calculs et le recalcul ciblé restent en colonnes. `Tree::transposes()`
+(`BTreeMap<NodeId, Arc<TransposeLink>>`, `transpose.rs`), indexé par la feuille
+transposée, voyage avec l'arbre comme `calculations()` (instantané, retour
+arrière, `.stf`). Ce n'est pas un nœud.
+
+- La feuille se nomme « `<Source>ᵀ` » (`TRANSPOSE_MARK`), placée juste après la
+  source ; le nom pris par une feuille qui n'est pas liée à cette source donne
+  « `<Source>ᵀ 2` », « … 3 ». Elle porte une colonne « x' » (les x' des colonnes
+  de la source) puis une colonne « Row N » par ligne demandée, à la demande ;
+  une ligne redemandée réutilise sa colonne. Noms longs « Row N of Source » ;
+  l'unité des colonnes « Row N » est celle des colonnes de la source quand elle
+  est commune. Le modèle n'a pas d'unité de x' : la colonne x' n'en porte pas.
+- **Instantané recalculable, pas de lien vivant.** Le lien retient ce qu'il a lu
+  (`TransposeSourceColumn` : identifiant, version et x' de chaque colonne de la
+  source, dans l'ordre) et l'empreinte du contenu de chaque colonne qu'il a
+  écrite (`content_stamp`, FNV-1a, stable). Deux états se **dérivent** de l'arbre,
+  sans être stockés : *périmée* (la source ne vaut plus ce qui a été lu : valeur,
+  x', colonne ajoutée, supprimée ou déplacée) et *modifiée* (le contenu d'une
+  colonne créée par le lien n'a plus son empreinte : seule une édition de
+  valeurs compte ; renommer, typer sans changer les nombres, ajouter ses propres
+  colonnes ne coupent rien). Aucun des deux n'entre dans le recalcul ciblé.
+- Refus : une colonne de la source sans x' (`CoreError::TransposeNoXPrime`) ou
+  contenant du texte (`TransposeNotNumeric`) ; les deux nomment la colonne par sa
+  **lettre** et son nom. Une colonne plus courte donne `NaN`.
+- Vie du lien : source supprimée ou feuille transposée supprimée, le lien
+  disparaît (`Project::prune_transposes`) et la feuille qui reste est ordinaire,
+  sans perte ; source renommée, la transposée suit (« Nouveauᵀ »), sauf si
+  l'utilisateur l'a renommée à sa façon ; source ou transposée dupliquée ou
+  copiée, la copie est ordinaire.
+
 ## `PlotSpec` — ce qu'il faut tracer
 
 ```text

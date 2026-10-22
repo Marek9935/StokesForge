@@ -114,6 +114,7 @@ leur état est ouvert dans `AppState`, sauf les blocants (dernière section).
 | Copie avec en-tête de colonnes à formule | `Choice` | Petite | Values, Formulas (par défaut), Cancel | Ctrl+Maj+C ou Copy with Header quand une colonne copiée porte une formule (#306) | `stokesforge_full_copy`, `column_use.rs` |
 | Récupération de projets | `ReadOnly` | contenu 560 x 230 | une ligne par copie de secours (nom ou Untitled, date UTC) avec Open, Ignore, Delete ; message d'introduction ; liste défilante | au démarrage, s'il reste des copies de processus disparus plus récentes que leur `.stf` (`AppState::scan_recovery`, #317) ; se ferme d'elle-même quand la liste est vide | `stokesforge_recovery`, `recovery.rs` |
 | Remplacement d'une analyse partagée | `Confirm` | Petite | un message | appliquer une analyse dont la source nourrit d'autres courbes | `stokesforge_replace_analysis`, `analysis_dialog.rs` |
+| Remise à jour d'une feuille transposée modifiée | `Confirm` | Petite | un message | Relink (bande de la feuille transposée liée) quand une valeur d'une colonne créée par le lien a été éditée (#253) | `stokesforge_transpose_relink`, `transpose_ui.rs` |
 | Suppression d'un modèle d'import | `Confirm` | Petite | un message | bouton de suppression d'un modèle, à l'étape Files ; peinte **dans** l'assistant | `stokesforge_import_template_delete`, `import_wizard.rs` |
 
 Les identifiants « construits » sont choisis avant l'appel (un `&str`, pas un

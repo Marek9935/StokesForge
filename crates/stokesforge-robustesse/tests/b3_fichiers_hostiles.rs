@@ -825,3 +825,106 @@ fn b3_budget_global_de_cellules_refuse_le_cumul() {
         Err(PersistenceError::TooManyCells { .. })
     ));
 }
+
+/// #253 : le bloc des feuilles transposées liées d'un fichier hostile — lien
+/// vers une feuille absente, vers un classeur, vers lui-même, identifiant hors
+/// borne, colonne inexistante. Un lien illisible est écarté seul (invariant 10) :
+/// jamais le fichier, et la feuille reste, ordinaire ; le lien sain voisin vit.
+#[test]
+fn b3_feuilles_transposees_hostiles() {
+    use stokesforge_core::NodeId;
+
+    #[derive(Serialize)]
+    struct Ligne {
+        row: u64,
+        column: u64,
+        stamp: u64,
+    }
+    #[derive(Serialize)]
+    struct Lien {
+        sheet: u64,
+        source: u64,
+        x_column: u64,
+        x_stamp: u64,
+        rows: Vec<Ligne>,
+        inputs: Vec<u8>,
+    }
+    #[derive(Serialize)]
+    struct FileBodyLiens {
+        root: u64,
+        next_id_hint: u64,
+        nodes: Vec<NodeRecord>,
+        transposes: Vec<Lien>,
+    }
+    let lien = |sheet: u64, source: u64, colonne: u64| Lien {
+        sheet,
+        source,
+        x_column: colonne,
+        x_stamp: 7,
+        rows: vec![Ligne {
+            row: 0,
+            column: colonne,
+            stamp: 9,
+        }],
+        inputs: Vec::new(),
+    };
+    let dir = TempDir::new().unwrap();
+    let body = FileBodyLiens {
+        root: 1,
+        next_id_hint: 5,
+        nodes: vec![
+            dossier(1, "R", None, vec![2]),
+            NodeRecord {
+                id: 2,
+                name: "Book1".into(),
+                parent: Some(1),
+                kind: KindRecord::Workbook {
+                    sheets: vec![3, 4],
+                    label: String::new(),
+                    comment: String::new(),
+                },
+            },
+            NodeRecord {
+                id: 3,
+                name: "S1".into(),
+                parent: Some(2),
+                kind: KindRecord::Worksheet { columns: vec![] },
+            },
+            NodeRecord {
+                id: 4,
+                name: "S1T".into(),
+                parent: Some(2),
+                kind: KindRecord::Worksheet { columns: vec![] },
+            },
+        ],
+        transposes: vec![
+            lien(999, 3, 50),         // feuille absente
+            lien(2, 3, 50),           // « feuille » qui est un classeur
+            lien(3, 3, 50),           // une feuille liée à elle-même
+            lien(4, 3, u64::MAX / 2), // identifiant de colonne hors borne
+            lien(4, 3, 50),           // sain, colonne inexistante tolérée
+        ],
+    };
+    let payload = rmp_serde::to_vec_named(&body).unwrap();
+    let path = dir.path().join("liens.stf");
+    let mut f = std::fs::File::create(&path).unwrap();
+    f.write_all(b"STKF").unwrap();
+    f.write_all(&1u32.to_le_bytes()).unwrap();
+    f.write_all(&payload).unwrap();
+    drop(f);
+    let r = std::panic::catch_unwind(|| load(&path));
+    assert!(r.is_ok(), "panique sur des liens hostiles");
+    let projet = r
+        .unwrap()
+        .expect("des liens hostiles ne font pas échouer le fichier");
+    let liens = projet.tree().transposes();
+    assert_eq!(
+        liens.keys().copied().collect::<Vec<_>>(),
+        vec![NodeId::from_raw(4)],
+        "seul le lien sain survit"
+    );
+    assert!(
+        projet.tree().node(NodeId::from_raw(4)).is_some(),
+        "la feuille d'un lien écarté reste"
+    );
+}

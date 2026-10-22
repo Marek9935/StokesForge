@@ -114,6 +114,20 @@ types de tracé) et Send to envoie les lignes (même question d'axe qu'au dépô
 le menu des colonnes n'est plus proposé dans ce cas. Sans x', une sélection de
 lignes garde le menu des colonnes qu'elles traversent.
 
+**Analyser une ligne (#253).** `Analysis ▸` est actif sur une courbe « ligne » (clic
+droit de la courbe, Object Manager, Graph › Selection, même menu partout) et sur des
+lignes entières de la gouttière (menu Analysis du classeur, clic droit des numéros). Le
+geste n’analyse pas la ligne : il crée ou complète la **feuille transposée liée**
+(« Sheet1ᵀ ») puis ouvre la fenêtre sur sa colonne « Row N » ; le résultat suit une colonne
+(classeur des résultats, « Replace original data » agit sur la colonne de la transposée,
+aucune série n'est ajoutée au graphe de lignes). Un groupe qui mêle courbes de colonnes et
+de lignes est grisé (`analysis-needs-same-curves`). Une colonne de la feuille sans x', ou
+de texte, fait refuser le geste en la nommant par sa lettre. La feuille transposée porte
+une bande en haut de la grille (`app/transpose_ui.rs`) : origine, « Out of date » quand la
+source a changé, « Values edited » quand une valeur d'une colonne liée a été éditée, et
+Recalculate (Relink avec confirmation dans ce dernier cas). Détail du modèle :
+[`../modele-de-donnees.md`](../modele-de-donnees.md), « Feuilles transposées liées ».
+
 **Calques superposés (#167).** Graph › New Layer (Top X, Right Y, Top X Right Y)
 ajoute, par `Action::AddLayer`, un `PanelSpec::overlay_on` au calque de base du
 calque actif ; les colonnes de rôle **Y2** (apparié au **X2** le plus proche à

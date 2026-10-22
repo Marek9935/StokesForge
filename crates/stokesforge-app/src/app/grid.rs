@@ -892,6 +892,13 @@ fn row_properties_menu(
     sections.section(ui, true, |ui| {
         plot_rows_menu(ui, actions, payload);
         send_rows_to_graph_menu(ui, state.tree(), actions, payload);
+        let rows: Vec<(NodeId, usize)> = payload.rows.iter().map(|row| (sheet, *row)).collect();
+        super::analysis_menu::analysis_entry(
+            ui,
+            state,
+            actions,
+            super::analysis_menu::AnalysisTarget::Rows { rows: &rows },
+        );
     });
     if let Some(menu) = &menu {
         grid_clipboard_section(ui, &mut sections, state, actions, sheet, menu);

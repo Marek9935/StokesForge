@@ -97,6 +97,7 @@ pub mod clipboard;
 mod convert;
 mod error;
 mod schema;
+mod transposes;
 mod unknown;
 
 use std::collections::HashMap;
@@ -378,6 +379,7 @@ pub fn save_with_geometries(
         saved_colors: convert::saved_colors_to_record(tree.saved_colors()),
         calculations: calculations::calculations_to_records(tree),
         correction_traces: calculations::corrections_to_records(tree),
+        transposes: transposes::transposes_to_records(tree),
         window_geometries,
         column_widths,
     };
@@ -655,7 +657,8 @@ fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Pro
     // A1 (#316) : les entrées d'un calcul ont-elles changé depuis
     // l'enregistrement ? Comparé sur les valeurs du fichier, sans recalcul.
     calculations::mark_changed_inputs(&mut kept, &digests, &tree);
-    let tree = tree.with_calculations(kept);
+    let linked = transposes::records_to_transposes(body.transposes, &tree, MAX_NODE_ID);
+    let tree = tree.with_calculations(kept).with_transposes(linked);
     Ok((
         Project::from_tree(Arc::new(tree), body.next_id_hint),
         LoadReport {
@@ -993,6 +996,7 @@ mod tests {
             saved_colors: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
+            transposes: Default::default(),
             window_geometries: std::collections::HashMap::new(),
             column_widths: std::collections::HashMap::new(),
         };
@@ -1021,6 +1025,7 @@ mod tests {
             saved_colors: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
+            transposes: Default::default(),
             window_geometries: std::collections::HashMap::new(),
             column_widths: std::collections::HashMap::new(),
         };
@@ -1066,6 +1071,7 @@ mod tests {
             saved_colors: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
+            transposes: Default::default(),
             window_geometries: std::collections::HashMap::new(),
             column_widths: std::collections::HashMap::new(),
         };
@@ -1086,6 +1092,7 @@ mod tests {
             saved_colors: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
+            transposes: Default::default(),
             window_geometries: std::collections::HashMap::new(),
             column_widths: std::collections::HashMap::new(),
         };
@@ -1115,6 +1122,7 @@ mod tests {
             saved_colors: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
+            transposes: Default::default(),
             window_geometries: std::collections::HashMap::new(),
             column_widths: std::collections::HashMap::new(),
         };
@@ -1162,6 +1170,7 @@ mod tests {
             saved_colors: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
+            transposes: Default::default(),
             window_geometries: std::collections::HashMap::new(),
             column_widths: std::collections::HashMap::new(),
         };
@@ -1232,6 +1241,7 @@ mod tests {
             saved_colors: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
+            transposes: Default::default(),
             window_geometries: std::collections::HashMap::new(),
             column_widths: std::collections::HashMap::new(),
         };
@@ -1596,6 +1606,7 @@ mod tests {
             saved_colors: Default::default(),
             calculations: Default::default(),
             correction_traces: Default::default(),
+            transposes: Default::default(),
             window_geometries: std::collections::HashMap::new(),
             column_widths: widths.into_iter().collect(),
         }

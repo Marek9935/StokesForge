@@ -91,11 +91,14 @@ pub enum MacroKind {
     /// déplacement d'une seule colonne reste une entrée `Move`. Distinct de
     /// `MoveObjects`, qui est celui du Project Manager.
     MoveColumns,
+    /// Analyser des lignes : la feuille transposée liée (créée ou complétée)
+    /// et le calcul sur sa colonne, annulés d'un bloc (#253).
+    AnalyzeRows,
 }
 
 impl MacroKind {
     /// Toutes les natures de groupe, pour les tests exhaustifs.
-    pub const ALL: [MacroKind; 19] = [
+    pub const ALL: [MacroKind; 20] = [
         MacroKind::PasteCells,
         MacroKind::PasteObjects,
         MacroKind::DuplicateObjects,
@@ -115,6 +118,7 @@ impl MacroKind {
         MacroKind::RemoveFormula,
         MacroKind::DeleteColumns,
         MacroKind::MoveColumns,
+        MacroKind::AnalyzeRows,
     ];
 }
 
@@ -234,6 +238,10 @@ pub enum HistoryLabel {
         /// Ses colonnes de sortie sont supprimées avec lui.
         with_columns: bool,
     },
+    /// Création ou complément d'une feuille transposée liée (#253).
+    TransposeRows,
+    /// Remise à jour d'une feuille transposée depuis sa source (#253).
+    RecalculateTranspose,
     /// Édition ciblée du contenu du graphe, toujours par remplacement du spec.
     EditPlotSpec(PlotEditKind),
     /// Un groupe d'actions annulé d'un bloc.
@@ -323,6 +331,7 @@ impl fmt::Display for MacroKind {
             MacroKind::RemoveFormula => "Remove Formula",
             MacroKind::DeleteColumns => "Delete Columns",
             MacroKind::MoveColumns => "Move Columns",
+            MacroKind::AnalyzeRows => "Analyze Rows",
         })
     }
 }
@@ -404,6 +413,8 @@ impl fmt::Display for HistoryLabel {
                     None => write!(f, "{verb} Calculation"),
                 }
             }
+            HistoryLabel::TransposeRows => f.write_str("Transpose Rows"),
+            HistoryLabel::RecalculateTranspose => f.write_str("Recalculate Transposed Sheet"),
             HistoryLabel::Macro(kind) => kind.fmt(f),
         }
     }

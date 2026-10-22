@@ -50,10 +50,12 @@ fn rank(label: &HistoryLabel) -> usize {
         HistoryLabel::RemoveCalculation { .. } => 27,
         HistoryLabel::ReplaceAnalysisData(_) => 28,
         HistoryLabel::RestoreOriginalData(_) => 29,
+        HistoryLabel::TransposeRows => 30,
+        HistoryLabel::RecalculateTranspose => 31,
     }
 }
 
-const VARIANTS: usize = 30;
+const VARIANTS: usize = 32;
 
 /// Chaque variante, sous **chacune** de ses formes (cible connue ou non, 0, 1 et
 /// plusieurs lignes, chaque nature de groupe).
@@ -67,6 +69,8 @@ fn all_labels() -> Vec<HistoryLabel> {
             column: Some(ColumnRef(27)),
         },
         HistoryLabel::AddColumn,
+        HistoryLabel::TransposeRows,
+        HistoryLabel::RecalculateTranspose,
         HistoryLabel::DeleteColumn { column: None },
         HistoryLabel::DeleteColumn {
             column: Some(ColumnRef(1)),
