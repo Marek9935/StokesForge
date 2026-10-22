@@ -20,8 +20,9 @@ use crate::schema::{
     LineStyleRecord, NodeRecord, OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord,
     PlotTypeRecord, RoleRecord, SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord,
     SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord,
-    TextAlignRecord, TextAnchorRecord, TextFontRecord, TypeRecord, ValuesRecord, MIXED_TAG_EMPTY,
-    MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
+    TextAlignRecord, TextAnchorRecord, TextFontRecord, TypeRecord, ValuesRecord,
+    WindowGeometryRecord, WindowModeRecord, WindowViewRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER,
+    MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -1095,6 +1096,58 @@ pub(crate) fn node_to_record(node: &Node) -> NodeRecord {
         name: node.name().to_string(),
         parent: node.parent().map(NodeId::raw),
         kind: kind_to_record(node.kind()),
+    }
+}
+
+impl From<crate::WindowMode> for WindowModeRecord {
+    fn from(mode: crate::WindowMode) -> Self {
+        match mode {
+            crate::WindowMode::Open => WindowModeRecord::Open,
+            crate::WindowMode::Maximized => WindowModeRecord::Maximized,
+            crate::WindowMode::Closed => WindowModeRecord::Closed,
+        }
+    }
+}
+
+impl From<WindowModeRecord> for crate::WindowMode {
+    fn from(mode: WindowModeRecord) -> Self {
+        match mode {
+            WindowModeRecord::Open => crate::WindowMode::Open,
+            WindowModeRecord::Maximized => crate::WindowMode::Maximized,
+            WindowModeRecord::Closed => crate::WindowMode::Closed,
+        }
+    }
+}
+
+impl From<crate::WindowGeometry> for WindowGeometryRecord {
+    fn from(g: crate::WindowGeometry) -> Self {
+        WindowGeometryRecord {
+            x: g.x,
+            y: g.y,
+            width: g.width,
+            height: g.height,
+            view: g.view.map(|v| WindowViewRecord {
+                mode: v.mode.into(),
+                collapsed: v.collapsed,
+                stack: v.stack,
+            }),
+        }
+    }
+}
+
+impl From<WindowGeometryRecord> for crate::WindowGeometry {
+    fn from(g: WindowGeometryRecord) -> Self {
+        crate::WindowGeometry {
+            x: g.x,
+            y: g.y,
+            width: g.width,
+            height: g.height,
+            view: g.view.map(|v| crate::WindowView {
+                mode: v.mode.into(),
+                collapsed: v.collapsed,
+                stack: v.stack,
+            }),
+        }
     }
 }
 

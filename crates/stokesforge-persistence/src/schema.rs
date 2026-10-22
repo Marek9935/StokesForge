@@ -88,7 +88,7 @@ pub(crate) struct FileBody {
     /// sauvegardes successives, ce qui suppose que `save_counter` reste le
     /// tout dernier champ sérialisé.
     #[serde(default)]
-    pub(crate) window_geometries: std::collections::HashMap<u64, crate::WindowGeometry>,
+    pub(crate) window_geometries: std::collections::BTreeMap<u64, WindowGeometryRecord>,
     /// Largeur des colonnes d'une feuille (#325), en points logiques, par
     /// identifiant de colonne — même statut que `window_geometries` : bloc
     /// **hors de l'arbre annulable**, absent des fichiers antérieurs
@@ -98,7 +98,7 @@ pub(crate) struct FileBody {
     /// positif sont écartées une à une (invariant 10). Placé **avant**
     /// `save_counter`, qui reste le dernier champ sérialisé (voir ci-dessus).
     #[serde(default)]
-    pub(crate) column_widths: std::collections::HashMap<u64, f32>,
+    pub(crate) column_widths: std::collections::BTreeMap<u64, f32>,
     /// Compteur de sauvegarde du fichier (B8,
     /// `guide-de-correction-robustesse.md` §F2) : incrémenté à chaque `save`
     /// réussi. C'est ce qui permet à `save` de détecter qu'un autre écrivain
@@ -1338,4 +1338,39 @@ mod title_visibility_tests {
             assert!(side.title_visible);
         }
     }
+}
+
+/// Géométrie d'une fenêtre, telle qu'elle s'écrit dans le fichier
+/// (`crate::WindowGeometry` côté API).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct WindowGeometryRecord {
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+    pub(crate) width: f64,
+    pub(crate) height: f64,
+    /// `None` : jamais enregistré, l'application applique sa disposition par
+    /// défaut.
+    #[serde(default)]
+    pub(crate) view: Option<WindowViewRecord>,
+}
+
+/// État d'affichage d'une fenêtre (`crate::WindowView`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct WindowViewRecord {
+    pub(crate) mode: WindowModeRecord,
+    #[serde(default)]
+    pub(crate) collapsed: bool,
+    #[serde(default)]
+    pub(crate) stack: u32,
+}
+
+/// Mode d'une fenêtre (`crate::WindowMode`). Une valeur inconnue se lit
+/// `Closed` : dégradation gracieuse, jamais un échec de chargement
+/// (invariant 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) enum WindowModeRecord {
+    Open,
+    Maximized,
+    #[serde(other)]
+    Closed,
 }

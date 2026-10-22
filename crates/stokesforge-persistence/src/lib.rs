@@ -105,7 +105,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
-use serde::{Deserialize, Serialize};
 use stokesforge_core::{Node, NodeId, Project, Tree};
 
 use convert::ConvertError;
@@ -196,7 +195,7 @@ impl LoadReport {
 /// "le format ne s'écrit pas dans le modèle" concerne `stokesforge-core`, qui ne
 /// porte justement pas ce champ) : ce type public sert donc directement de
 /// représentation sur le disque, sans `Record` privé qui le mirorerait.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowGeometry {
     /// Abscisse du coin supérieur gauche.
     pub x: f64,
@@ -212,38 +211,34 @@ pub struct WindowGeometry {
     /// initiale par défaut. Ne change jamais `x`/`y`/`width`/`height`, qui
     /// restent la géométrie **flottante** quoi qu'il arrive à la fenêtre
     /// (issue #16).
-    #[serde(default)]
     pub view: Option<WindowView>,
 }
 
 /// État d'affichage d'une fenêtre de contenu, retenu avec sa
 /// [`WindowGeometry`] flottante. Une fenêtre détachée est enregistrée
 /// `Open` : le détachement ne se mémorise pas.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowView {
     /// Ouverte, maximisée ou fermée.
     pub mode: WindowMode,
     /// Fenêtre repliée sur sa barre de titre.
-    #[serde(default)]
     pub collapsed: bool,
     /// Rang d'empilement parmi les fenêtres ouvertes : 0 = tout en dessous,
     /// le plus grand rang est au premier plan. Un rang relatif, pas une
     /// valeur de calque egui.
-    #[serde(default)]
     pub stack: u32,
 }
 
 /// Mode d'une fenêtre de contenu. Une valeur inconnue (fichier d'une version
 /// plus récente) se lit `Closed` : dégradation gracieuse, jamais un échec de
 /// chargement (invariant 10).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowMode {
     /// Fenêtre flottante ouverte.
     Open,
     /// Fenêtre maximisée dans l'espace de travail.
     Maximized,
     /// Fenêtre fermée (sa géométrie flottante est conservée).
-    #[serde(other)]
     Closed,
 }
 
@@ -363,7 +358,7 @@ pub fn save_with_geometries(
     let window_geometries = view
         .window_geometries
         .iter()
-        .map(|(id, geometry)| (id.raw(), *geometry))
+        .map(|(id, geometry)| (id.raw(), (*geometry).into()))
         .collect();
     let column_widths = view
         .column_widths
@@ -551,7 +546,7 @@ pub fn load_with_limits(
         .into_iter()
         .filter_map(|(id, geometry)| {
             let node = NodeId::from_raw(id);
-            tree.node(node).is_some().then_some((node, geometry))
+            tree.node(node).is_some().then_some((node, geometry.into()))
         })
         .collect();
     // Même filtre pour les largeurs de colonne (#325), plus la valeur : un
@@ -989,8 +984,8 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
-            window_geometries: std::collections::HashMap::new(),
-            column_widths: std::collections::HashMap::new(),
+            window_geometries: Default::default(),
+            column_widths: Default::default(),
         };
         let project = build_project(body, Path::new("test.plyx")).expect("modèle valide");
         assert_eq!(project.next_id_hint(), 6);
@@ -1018,8 +1013,8 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
-            window_geometries: std::collections::HashMap::new(),
-            column_widths: std::collections::HashMap::new(),
+            window_geometries: Default::default(),
+            column_widths: Default::default(),
         };
         let mut bytes = MAGIC.to_vec();
         bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
@@ -1064,8 +1059,8 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
-            window_geometries: std::collections::HashMap::new(),
-            column_widths: std::collections::HashMap::new(),
+            window_geometries: Default::default(),
+            column_widths: Default::default(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -1085,8 +1080,8 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
-            window_geometries: std::collections::HashMap::new(),
-            column_widths: std::collections::HashMap::new(),
+            window_geometries: Default::default(),
+            column_widths: Default::default(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -1115,8 +1110,8 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
-            window_geometries: std::collections::HashMap::new(),
-            column_widths: std::collections::HashMap::new(),
+            window_geometries: Default::default(),
+            column_widths: Default::default(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(
@@ -1163,8 +1158,8 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
-            window_geometries: std::collections::HashMap::new(),
-            column_widths: std::collections::HashMap::new(),
+            window_geometries: Default::default(),
+            column_widths: Default::default(),
         };
         let err = build_project(body, Path::new("test.plyx")).unwrap_err();
         assert!(matches!(err, PersistenceError::Corrupt { .. }), "{err:?}");
@@ -1502,7 +1497,7 @@ mod tests {
             calculations: Default::default(),
             correction_traces: Default::default(),
             transposes: Default::default(),
-            window_geometries: std::collections::HashMap::new(),
+            window_geometries: Default::default(),
             column_widths: widths.into_iter().collect(),
         }
     }
