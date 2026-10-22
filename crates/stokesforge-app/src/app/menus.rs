@@ -365,6 +365,16 @@ impl StokesForgeApp {
                     .map(|selection| selection.columns(self.state.tree(), sheet))
             })
             .unwrap_or_default();
+        let row_pairs: Vec<(NodeId, usize)> = sheet
+            .and_then(|sheet| self.state.row_drag_payload(sheet))
+            .map(|payload| {
+                payload
+                    .rows
+                    .iter()
+                    .map(|row| (payload.sheet, *row))
+                    .collect()
+            })
+            .unwrap_or_default();
         let graph_target = graph.and_then(|graph| {
             let spec = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph)?;
             self.read_graph_view(graph, |view| {
@@ -382,6 +392,11 @@ impl StokesForgeApp {
                     spec,
                 }),
                 None if graph.is_some() => None,
+                // Des lignes entières d'une feuille à x' (#253) : on analyse
+                // des lignes, pas les colonnes qu'elles traversent.
+                None if !row_pairs.is_empty() => {
+                    Some(super::analysis_menu::AnalysisTarget::Rows { rows: &row_pairs })
+                }
                 None => sheet.map(|sheet| super::analysis_menu::AnalysisTarget::Columns {
                     sheet,
                     columns: &columns,
