@@ -27,6 +27,7 @@
 //! la fermeture du panneau. Aucun scope egui ne dépend du découpage Rust.
 
 use eframe::egui;
+use stokesforge_core::compose::overlays_full;
 use stokesforge_core::NodeId;
 use stokesforge_render_egui::DEFAULT_FIGURE_SIZE;
 use stokesforge_render_svg::SvgTextMode;
@@ -479,7 +480,14 @@ impl StokesForgeApp {
                             true,
                         ),
                     ] {
-                        if ui.button(label).on_hover_text(hint).clicked() {
+                        // Trois calques superposés au plus par case (#168).
+                        let full = spec.as_ref().is_some_and(|spec| overlays_full(spec, panel));
+                        if ui
+                            .add_enabled(!full, egui::Button::new(label))
+                            .on_hover_text(hint)
+                            .on_disabled_hover_text(tr!("menu-new-layer", "disabled"))
+                            .clicked()
+                        {
                             actions.push(Action::AddLayer {
                                 graph,
                                 panel,

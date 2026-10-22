@@ -935,6 +935,62 @@ fn a_non_trivial_plot_spec_round_trips_intact() {
     }
 }
 
+/// #168 : les rôles X3…Y4 et le numéro de calque d'un calque superposé
+/// reviennent à l'identique après `save`/`load`.
+#[test]
+fn roles_x3_to_y4_and_the_layer_number_survive_save_and_load() {
+    use stokesforge_core::ColumnRole;
+    use stokesforge_plot::{OverlaySpec, Panels};
+    let mut project = Project::new("Demo").expect("projet valide");
+    let root = project.root();
+    let book = project.add_empty_workbook(root, None).expect("classeur");
+    let sheet = project.add_worksheet(book, None).expect("feuille");
+    let roles = [
+        ColumnRole::X3,
+        ColumnRole::Y3,
+        ColumnRole::X4,
+        ColumnRole::Y4,
+    ];
+    let columns: Vec<_> = roles
+        .iter()
+        .map(|role| {
+            let id = project
+                .add_column(sheet, None, None, Column::from_f64(&[1.0, 2.0]))
+                .expect("colonne");
+            let mut meta = project
+                .tree()
+                .node(id)
+                .unwrap()
+                .as_column()
+                .unwrap()
+                .meta()
+                .clone();
+            meta.role = *role;
+            project.set_column_meta(id, meta).expect("rôle");
+            id
+        })
+        .collect();
+    let base = PanelSpec::at(0, 0);
+    let spec = PlotSpec::empty("").with_panels(Panels::new(vec![
+        base.clone(),
+        PanelSpec::overlay_on(&base, OverlaySpec::role_layer(3)),
+        PanelSpec::overlay_on(&base, OverlaySpec::role_layer(4)),
+    ]));
+    let graph = project.add_graph(root, None, spec.clone()).expect("graphe");
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("roles.stf");
+    save(&project, &path).expect("sauvegarde");
+    let loaded = load(&path).expect("chargement");
+    for (id, role) in columns.iter().zip(roles) {
+        let column = loaded.tree().node(*id).unwrap().as_column().unwrap();
+        assert_eq!(column.meta().role, role);
+    }
+    match loaded.tree().node(graph).unwrap().kind() {
+        NodeKind::Graph { spec: reloaded, .. } => assert_eq!(*reloaded, spec),
+        other => panic!("attendu Graph, obtenu {other:?}"),
+    }
+}
+
 /// `ColumnMeta::formula` (colonnes calculées) survit à `save`/`load`, `None`
 /// comme `Some(_)` : mêmes fragments, mêmes identifiants (#321), et les lettres
 /// affichées sont celles d'avant.

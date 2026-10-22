@@ -610,6 +610,14 @@ pub(crate) enum RoleRecord {
     X2,
     /// Ordonnée du second calque (#167).
     Y2,
+    /// Abscisse du troisième calque (#168).
+    X3,
+    /// Ordonnée du troisième calque (#168).
+    Y3,
+    /// Abscisse du quatrième calque (#168).
+    X4,
+    /// Ordonnée du quatrième calque (#168).
+    Y4,
     /// Troisième axe.
     Z,
     /// Barre d'erreur en X.
@@ -819,6 +827,10 @@ pub(crate) struct GroupNameRecord {
 pub(crate) struct OverlaySpecRecord {
     pub(crate) x_top: bool,
     pub(crate) y_right: bool,
+    /// Numéro du calque de rôle (#168) ; absent des fichiers plus anciens :
+    /// 0, calque sans rôle.
+    #[serde(default)]
+    pub(crate) layer: u8,
 }
 
 /// [`stokesforge_plot::ShapeKind`], à plat.

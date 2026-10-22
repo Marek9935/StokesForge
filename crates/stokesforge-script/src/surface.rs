@@ -219,6 +219,10 @@ fn info<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyDict>> {
                 ColumnRole::Y => "y",
                 ColumnRole::X2 => "x2",
                 ColumnRole::Y2 => "y2",
+                ColumnRole::X3 => "x3",
+                ColumnRole::Y3 => "y3",
+                ColumnRole::X4 => "x4",
+                ColumnRole::Y4 => "y4",
                 ColumnRole::Z => "z",
                 ColumnRole::XError => "x_error",
                 ColumnRole::YError => "y_error",
@@ -595,7 +599,7 @@ fn set_values(
         .map_err(to_py_error)
 }
 
-/// Modifie les seuls champs nommés : role (x, y, x2, y2, z, x_error, y_error,
+/// Modifie les seuls champs nommés : role (x, y, x2, y2, x3, y3, x4, y4, z, x_error, y_error,
 /// label, none), long_name, unit, comment, display_format, formula.
 /// Les valeurs sont des str ; formula=None retire la formule. La formule se
 /// saisit en lettres : une lettre qui ne désigne aucune colonne de la feuille,

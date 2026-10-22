@@ -170,10 +170,14 @@ Trois décisions structurent le module :
   entre l'instantané qu'un script a lu et la commande qu'il envoie.
 
 Types : `Numeric`, `DateTime` (timestamp POSIX en secondes, affiché et édité en ISO 8601 par `datetime::format_datetime`, #218), `Text`, `Mixed`. Rôles de tracé : `X`, `Y`
-(défaut), `X2`, `Y2`, `Z`, `XError`, `YError`, `Label`, aucun. `X2`/`Y2` (#167)
-alimentent un **second calque superposé** (`PanelSpec::overlay`,
-`OverlaySpec { x_top, y_right }`) : chaque Y2 s'apparie au X2 le plus proche à
-sa gauche, comme Y avec X (`stokesforge_core::compose::series_from_columns`, `PlannedSeries`).
+(défaut), `X2`, `Y2`, `X3`, `Y3`, `X4`, `Y4`, `Z`, `XError`, `YError`, `Label`, aucun
+(`ColumnRole::ALL` : l'ordre du menu ; `layer()` : le numéro de calque ;
+`paired_x()` : le X d'un Yn). `X2`…`Y4` (#167, #168) alimentent chacun un
+**calque superposé** à lui (`PanelSpec::overlay`, `OverlaySpec { x_top,
+y_right, layer }` où `layer` vaut 2, 3 ou 4 : le numéro, pas la position, dit où
+va une colonne ; 0 pour un calque sans rôle) : chaque Yn s'apparie au Xn le plus
+proche à sa gauche, comme Y avec X (`stokesforge_core::compose::series_from_columns`,
+`PlannedSeries::overlays`).
 Un calque identifie par son **indice** dans `PlotSpec::panels` ; `(row, column)`
 ne sert qu'à la grille, plusieurs calques pouvant partager une case.
 
@@ -406,14 +410,17 @@ l'interface (`AppState::plot_columns`, dans `stokesforge-app-state`, `add_series
 
 - **appariement** (`series_from_columns`, `x_for`) : chaque Y est apparié au X
   le plus proche à sa **gauche** dans la feuille, X non sélectionné compris ; un
-  Y2 prend de même un X2 et va au second calque (`PlannedSeries::secondary`).
+  Yn (Y2…Y4) prend de même un Xn et va au calque de son numéro
+  (`PlannedSeries::overlays`).
   Sans X à gauche, l'abscisse reste implicite (numéro de ligne) ;
 - **palette** : toute série passe par `SeriesSpec::from_palette(y, rang)` (trait
   et marqueurs), le rang étant celui de la série dans son calque ; jamais
   `palette_color` écrit à la main ;
 - **calques** : `overlay_base` (le calque ordinaire que recouvre un calque
-  superposé), `second_layer_of` (le calque X2/Y2, `OverlaySpec::SECOND_AXES`) ;
-  les calques se nomment dans `stokesforge-plot` (`OverlaySpec::SECOND_AXES`,
+  superposé), `role_layer_of` (le calque de numéro 2 à 4, `OverlaySpec::role_layer`),
+  `overlays_full` / `free_role_layer` (au plus trois calques superposés par
+  case pour « New Layer », #168) ;
+  les calques se nomment dans `stokesforge-plot` (`OverlaySpec::role_layer`, `SECOND_AXES`,
   `TOP_X`, `new`) ;
 - **lignes** (`row_series`, `x_prime_columns`, `spec_has_x`) : le nom de la série
   est un paramètre (une phrase d'interface que ce crate ne sait pas écrire).

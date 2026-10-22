@@ -52,10 +52,7 @@ fn exporte(overlay: Option<OverlaySpec>) -> String {
 fn le_calque_superpose_trace_ses_graduations_en_haut() {
     let sans = exporte(None);
     assert!(!sans.contains("\n800\n"), "témoin : pas de graduation 800");
-    let avec = exporte(Some(OverlaySpec {
-        x_top: true,
-        y_right: true,
-    }));
+    let avec = exporte(Some(OverlaySpec::new(true, true)));
     assert!(avec.contains("\n800\n"), "graduation X2 absente : {avec}");
 }
 
@@ -120,10 +117,7 @@ fn les_axes_se_rejoignent_aux_coins() {
             .count()
     };
     assert_eq!(coins(&exporte(None)), 1, "bas-gauche seul");
-    let avec = exporte(Some(OverlaySpec {
-        x_top: true,
-        y_right: true,
-    }));
+    let avec = exporte(Some(OverlaySpec::new(true, true)));
     assert_eq!(coins(&avec), 4);
 }
 

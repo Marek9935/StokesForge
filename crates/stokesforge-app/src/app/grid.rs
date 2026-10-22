@@ -373,6 +373,10 @@ pub(super) fn role_label(role: ColumnRole) -> String {
         ColumnRole::Y => tr!("workbook-role-y"),
         ColumnRole::X2 => tr!("workbook-role-x2"),
         ColumnRole::Y2 => tr!("workbook-role-y2"),
+        ColumnRole::X3 => tr!("workbook-role-x3"),
+        ColumnRole::Y3 => tr!("workbook-role-y3"),
+        ColumnRole::X4 => tr!("workbook-role-x4"),
+        ColumnRole::Y4 => tr!("workbook-role-y4"),
         ColumnRole::Z => tr!("workbook-role-z"),
         ColumnRole::XError => tr!("column-role-x-error"),
         ColumnRole::YError => tr!("column-role-y-error"),
@@ -1088,17 +1092,7 @@ pub(super) fn column_type_role_menus(
         // Le rôle décrit les colonnes, et reste partagé avec le
         // menu Classeur comme le type.
         ui.menu_button(tr!("column-role"), |ui| {
-            for candidate in [
-                ColumnRole::X,
-                ColumnRole::Y,
-                ColumnRole::X2,
-                ColumnRole::Y2,
-                ColumnRole::Z,
-                ColumnRole::XError,
-                ColumnRole::YError,
-                ColumnRole::Label,
-                ColumnRole::None,
-            ] {
+            for candidate in ColumnRole::ALL {
                 if menu_choice(ui, role == Some(candidate), role_label(candidate)).clicked() {
                     if Some(candidate) != role {
                         actions.push(Action::SetColumnsRole {
@@ -3783,20 +3777,7 @@ mod tests {
             .into_iter()
             .map(type_label)
             .collect();
-        let roles: Vec<String> = [
-            ColumnRole::X,
-            ColumnRole::Y,
-            ColumnRole::X2,
-            ColumnRole::Y2,
-            ColumnRole::Z,
-            ColumnRole::XError,
-            ColumnRole::YError,
-            ColumnRole::Label,
-            ColumnRole::None,
-        ]
-        .into_iter()
-        .map(role_label)
-        .collect();
+        let roles: Vec<String> = ColumnRole::ALL.into_iter().map(role_label).collect();
         for libelles in [&types, &roles] {
             let distincts: std::collections::HashSet<&String> = libelles.iter().collect();
             assert_eq!(distincts.len(), libelles.len(), "{libelles:?}");

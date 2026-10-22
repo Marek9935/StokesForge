@@ -51,8 +51,8 @@ use std::thread;
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind, PlotEditKind};
 use stokesforge_core::compose::{
-    current_plot_spec, overlay_base, panel_plot_type, row_series, second_layer_of,
-    series_from_columns, spec_has_x, x_prime_columns,
+    current_plot_spec, free_role_layer, overlay_base, overlays_full, panel_plot_type,
+    role_layer_of, row_series, series_from_columns, spec_has_x, x_prime_columns, OVERLAY_ROLES,
 };
 use stokesforge_core::node::NodeKind;
 use stokesforge_core::number_format::{format_exact, format_grid};
@@ -9288,7 +9288,14 @@ impl AppState {
     /// dans `columns` : cette action de tracé ne crée rien sans Y. Un graphique
     /// vide se crée explicitement par [`Action::AddGraph`].
     fn plot_columns(&mut self, sheet: NodeId, columns: Vec<NodeId>, plot_type: PlotType) {
-        let planned = series_from_columns(&self.snapshot.tree, sheet, &columns, &plot_type, 0, 0);
+        let planned = series_from_columns(
+            &self.snapshot.tree,
+            sheet,
+            &columns,
+            &plot_type,
+            0,
+            [0; OVERLAY_ROLES],
+        );
         if planned.is_empty() {
             self.fail(tr!("error-plot-no-y"));
             return;
@@ -9304,12 +9311,18 @@ impl AppState {
         // Des courbes tracées ensemble forment un groupe (#177).
         let mut panel = PanelSpec::default();
         panel.push_series_batch(planned.primary);
-        // Les colonnes Y2 vont sur un second calque superposé : axe X en
-        // haut, axe Y à droite, échelles propres (#167).
+        // Les colonnes Y2, Y3 et Y4 vont chacune sur son calque superposé :
+        // axe X en haut, axe Y à droite, échelles propres (#167, #168).
         let mut panels = vec![panel.clone()];
-        if !planned.secondary.is_empty() {
-            let mut layer = PanelSpec::overlay_on(&panel, OverlaySpec::SECOND_AXES);
-            layer.push_series_batch(planned.secondary);
+        for (slot, series) in planned.overlays.into_iter().enumerate() {
+            if series.is_empty() {
+                continue;
+            }
+            let mut layer = PanelSpec::overlay_on(
+                &panel,
+                OverlaySpec::role_layer(OverlaySpec::FIRST_ROLE_LAYER + slot as u8),
+            );
+            layer.push_series_batch(series);
             panels.push(layer);
         }
         let spec = PlotSpec {
@@ -9358,13 +9371,17 @@ impl AppState {
             return;
         };
         let plot_type = plot_type.unwrap_or_else(|| panel_plot_type(target));
-        // Le second calque des colonnes Y2 : celui qui recouvre déjà le
-        // calque visé, à créer sinon (#167).
+        // Le calque de chaque rôle Y2, Y3, Y4 : celui de ce numéro qui
+        // recouvre déjà le calque visé, à créer sinon (#167, #168).
         let base = overlay_base(&spec, panel);
-        let second = second_layer_of(&spec, base);
-        let secondary_start = second
-            .and_then(|index| spec.panels.get(index))
-            .map_or(0, |layer| layer.series.len());
+        let existing: [Option<usize>; OVERLAY_ROLES] = std::array::from_fn(|slot| {
+            role_layer_of(&spec, base, OverlaySpec::FIRST_ROLE_LAYER + slot as u8)
+        });
+        let overlay_starts: [usize; OVERLAY_ROLES] = std::array::from_fn(|slot| {
+            existing[slot]
+                .and_then(|index| spec.panels.get(index))
+                .map_or(0, |layer| layer.series.len())
+        });
         let Some(target) = spec.panels.get(panel) else {
             return;
         };
@@ -9374,7 +9391,7 @@ impl AppState {
             &columns,
             &plot_type,
             target.series.len(),
-            secondary_start,
+            overlay_starts,
         );
         if planned.is_empty() {
             self.fail(tr!("error-add-no-y"));
@@ -9383,20 +9400,25 @@ impl AppState {
         if let Some(target) = spec.panels.get_mut(panel) {
             target.push_series_batch(planned.primary);
         }
-        if !planned.secondary.is_empty() {
-            let index = match second {
+        for (slot, series) in planned.overlays.into_iter().enumerate() {
+            if series.is_empty() {
+                continue;
+            }
+            let index = match existing[slot] {
                 Some(index) => index,
                 None => {
                     let Some(base_panel) = spec.panels.get(base).cloned() else {
                         return;
                     };
-                    spec.panels
-                        .push(PanelSpec::overlay_on(&base_panel, OverlaySpec::SECOND_AXES));
+                    spec.panels.push(PanelSpec::overlay_on(
+                        &base_panel,
+                        OverlaySpec::role_layer(OverlaySpec::FIRST_ROLE_LAYER + slot as u8),
+                    ));
                     spec.panels.len() - 1
                 }
             };
             if let Some(layer) = spec.panels.get_mut(index) {
-                layer.push_series_batch(planned.secondary);
+                layer.push_series_batch(series);
             }
         }
         self.execute(Command::SetPlotSpec { graph, spec });
@@ -9415,10 +9437,17 @@ impl AppState {
             self.fail(tr!("error-layer-gone"));
             return;
         };
-        spec.panels.push(PanelSpec::overlay_on(
-            &base_panel,
-            OverlaySpec::new(x_top, y_right),
-        ));
+        if overlays_full(&spec, base) {
+            self.fail(tr!("error-layers-full"));
+            return;
+        }
+        // Un calque à deux axes prend le premier numéro de rôle libre : les
+        // colonnes Xn/Yn de ce numéro s'y rangent ensuite (#168).
+        let axes = match free_role_layer(&spec, base) {
+            Some(layer) if x_top && y_right => OverlaySpec::role_layer(layer),
+            _ => OverlaySpec::new(x_top, y_right),
+        };
+        spec.panels.push(PanelSpec::overlay_on(&base_panel, axes));
         self.execute(Command::SetPlotSpec { graph, spec });
     }
 

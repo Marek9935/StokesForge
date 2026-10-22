@@ -416,19 +416,13 @@ mod tests {
     #[test]
     fn un_geste_cadre_les_calques_de_la_case_et_pas_les_autres_cases() {
         let mut recouvre = panel(1, 0, 0);
-        recouvre.overlay = Some(OverlaySpec {
-            x_top: false,
-            y_right: true,
-        });
+        recouvre.overlay = Some(OverlaySpec::new(false, true));
         recouvre.y_range = (0.0, 10.0);
         let mut base = panel(0, 0, 0);
         base.y2_range = Some((0.0, 1.0));
         let voisin = panel(2, 0, 1);
         let mut abscisse_propre = panel(3, 0, 0);
-        abscisse_propre.overlay = Some(OverlaySpec {
-            x_top: true,
-            y_right: false,
-        });
+        abscisse_propre.overlay = Some(OverlaySpec::new(true, false));
         let panels = [base, recouvre, voisin, abscisse_propre];
 
         let mut view = ViewState::new();

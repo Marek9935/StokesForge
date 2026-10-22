@@ -207,6 +207,15 @@ pub enum ColumnRole {
     /// Ordonnée du second calque (#167), appariée à la colonne X2 la plus
     /// proche à sa gauche : axe Y à droite du graphique.
     Y2,
+    /// Abscisse du troisième calque (#168), au-dessus de celui de X2.
+    X3,
+    /// Ordonnée du troisième calque (#168), appariée à la colonne X3 la plus
+    /// proche à sa gauche.
+    Y3,
+    /// Abscisse du quatrième calque (#168).
+    X4,
+    /// Ordonnée du quatrième calque (#168).
+    Y4,
     /// Troisième axe (surfaces, matrices affichées en colonnes).
     Z,
     /// Barre d'erreur en X.
@@ -217,6 +226,49 @@ pub enum ColumnRole {
     Label,
     /// Aucun rôle de tracé (colonne auxiliaire).
     None,
+}
+
+impl ColumnRole {
+    /// Tous les rôles, dans l'ordre où le menu « Set as » les propose.
+    pub const ALL: [ColumnRole; 13] = [
+        ColumnRole::X,
+        ColumnRole::Y,
+        ColumnRole::X2,
+        ColumnRole::Y2,
+        ColumnRole::X3,
+        ColumnRole::Y3,
+        ColumnRole::X4,
+        ColumnRole::Y4,
+        ColumnRole::Z,
+        ColumnRole::XError,
+        ColumnRole::YError,
+        ColumnRole::Label,
+        ColumnRole::None,
+    ];
+
+    /// Le numéro du calque que ce rôle alimente (#168) : 1 pour X/Y, 2 à 4
+    /// pour Xn/Yn, `None` pour les autres rôles.
+    pub fn layer(self) -> Option<u8> {
+        match self {
+            ColumnRole::X | ColumnRole::Y => Some(1),
+            ColumnRole::X2 | ColumnRole::Y2 => Some(2),
+            ColumnRole::X3 | ColumnRole::Y3 => Some(3),
+            ColumnRole::X4 | ColumnRole::Y4 => Some(4),
+            _ => None,
+        }
+    }
+
+    /// Le rôle d'abscisse qui accompagne un rôle d'ordonnée (Y → X, Y3 → X3…),
+    /// `None` pour tout autre rôle.
+    pub fn paired_x(self) -> Option<ColumnRole> {
+        match self {
+            ColumnRole::Y => Some(ColumnRole::X),
+            ColumnRole::Y2 => Some(ColumnRole::X2),
+            ColumnRole::Y3 => Some(ColumnRole::X3),
+            ColumnRole::Y4 => Some(ColumnRole::X4),
+            _ => None,
+        }
+    }
 }
 
 /// Métadonnées d'affichage et de tracé d'une colonne (hors nom et type).

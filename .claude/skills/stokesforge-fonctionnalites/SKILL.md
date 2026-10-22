@@ -117,7 +117,7 @@ Ce qui existe et qu'on croirait absent : un **sélecteur de couleur** (palette,
 couleurs enregistrées, nuancier, opacité) sur tout réglage de couleur ; des
 **calques superposés** à la manière d'Origin — « Graph » → « New Layer » →
 « Top X (Linked Y) », « Right Y (Linked X) » ou « Top X, Right Y » (#167),
-avec les rôles de colonne X2/Y2 ; les propriétés s'ouvrent sur le calque
+avec les rôles de colonne X2/Y2, X3/Y3 et X4/Y4 (trois calques superposés au plus) ; les propriétés s'ouvrent sur le calque
 visé.
 
 **Langue de l'interface** : l'application démarre en **anglais** ; le français

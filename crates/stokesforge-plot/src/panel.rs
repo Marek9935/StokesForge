@@ -24,12 +24,33 @@ pub struct OverlaySpec {
     pub x_top: bool,
     /// L'axe Y du calque est affiché à droite, avec son échelle propre.
     pub y_right: bool,
+    /// Numéro du calque de rôle (#168) : 2 pour les colonnes X2/Y2, 3 pour
+    /// X3/Y3, 4 pour X4/Y4 ; 0 pour un calque qu'aucun rôle n'alimente
+    /// (séries « ligne », calque sans axe). C'est ce numéro, et non la
+    /// position du calque, qui dit où va une colonne de rôle Xn/Yn.
+    pub layer: u8,
 }
 
 impl OverlaySpec {
     /// Calque superposé dont les deux axes sont affichés, chacun à l'échelle
     /// propre : le second calque des rôles X2/Y2 (#167).
-    pub const SECOND_AXES: Self = Self::new(true, true);
+    pub const SECOND_AXES: Self = Self::role_layer(Self::FIRST_ROLE_LAYER);
+
+    /// Numéro du premier calque de rôle (X2/Y2) et du dernier (X4/Y4, #168).
+    pub const FIRST_ROLE_LAYER: u8 = 2;
+    /// Dernier numéro de calque de rôle.
+    pub const LAST_ROLE_LAYER: u8 = 4;
+
+    /// Calque superposé des rôles Xn/Yn : les deux axes affichés, chacun à
+    /// l'échelle propre (#168). `layer` va de [`Self::FIRST_ROLE_LAYER`] à
+    /// [`Self::LAST_ROLE_LAYER`].
+    pub const fn role_layer(layer: u8) -> Self {
+        Self {
+            x_top: true,
+            y_right: true,
+            layer,
+        }
+    }
 
     /// Calque superposé dont seul l'axe X est affiché, en haut : celui des
     /// séries « ligne » (#166). Son axe Y suit celui du calque recouvert, donc
@@ -39,7 +60,11 @@ impl OverlaySpec {
     /// Calque superposé affichant (`true`) ou non son axe X en haut et son
     /// axe Y à droite.
     pub const fn new(x_top: bool, y_right: bool) -> Self {
-        Self { x_top, y_right }
+        Self {
+            x_top,
+            y_right,
+            layer: 0,
+        }
     }
 }
 
@@ -781,7 +806,8 @@ mod group_tests {
             OverlaySpec::new(false, true),
             OverlaySpec {
                 x_top: false,
-                y_right: true
+                y_right: true,
+                layer: 0
             }
         );
         assert_ne!(OverlaySpec::SECOND_AXES, OverlaySpec::TOP_X);

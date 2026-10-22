@@ -1290,21 +1290,9 @@ fn trois_calques() -> (Session, NodeId) {
     let y2 = colonne("Y2", xs.iter().map(|v| v / 100.0).collect());
     let mut base = PanelSpec::at(0, 0);
     base.series.push(SeriesSpec::new_xy(x, y));
-    let mut propre = PanelSpec::overlay_on(
-        &base,
-        OverlaySpec {
-            x_top: true,
-            y_right: true,
-        },
-    );
+    let mut propre = PanelSpec::overlay_on(&base, OverlaySpec::new(true, true));
     propre.series.push(SeriesSpec::new_xy(x2, y2));
-    let mut lie = PanelSpec::overlay_on(
-        &base,
-        OverlaySpec {
-            x_top: false,
-            y_right: true,
-        },
-    );
+    let mut lie = PanelSpec::overlay_on(&base, OverlaySpec::new(false, true));
     lie.series.push(SeriesSpec::new_xy(x, y2));
     let spec = PlotSpec::empty("").with_panels(Panels::new(vec![base, propre, lie]));
     let graph = project.add_graph(root, None, spec).expect("graphe");

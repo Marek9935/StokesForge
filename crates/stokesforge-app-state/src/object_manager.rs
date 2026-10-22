@@ -722,20 +722,8 @@ mod tests {
         use crate::object_manager::{axis_label, axis_sides, VisibilityTarget as T};
         use stokesforge_plot::{AxisSide, OverlaySpec, PanelSpec, Panels};
         let base = PanelSpec::at(0, 0);
-        let both = PanelSpec::overlay_on(
-            &base,
-            OverlaySpec {
-                x_top: true,
-                y_right: true,
-            },
-        );
-        let only_y = PanelSpec::overlay_on(
-            &base,
-            OverlaySpec {
-                x_top: false,
-                y_right: true,
-            },
-        );
+        let both = PanelSpec::overlay_on(&base, OverlaySpec::new(true, true));
+        let only_y = PanelSpec::overlay_on(&base, OverlaySpec::new(false, true));
         let linked = PanelSpec::overlay_on(&base, OverlaySpec::default());
         assert_eq!(axis_sides(&base), crate::object_manager::AXIS_SIDES);
         assert_eq!(axis_sides(&both), [AxisSide::Bottom, AxisSide::Left]);
@@ -778,13 +766,7 @@ mod tests {
         assert!(panel.mirrors_top() && panel.mirrors_right());
         assert!(top.visibility(&spec).checked);
         // Un calque superposé aux axes propres prime : cases grisées.
-        let haut = PanelSpec::overlay_on(
-            &base,
-            OverlaySpec {
-                x_top: true,
-                y_right: false,
-            },
-        );
+        let haut = PanelSpec::overlay_on(&base, OverlaySpec::new(true, false));
         spec.panels = Panels::new(vec![spec.panels[0].clone(), haut]);
         assert!(!top.visibility(&spec).enabled);
         assert!(right.visibility(&spec).enabled);

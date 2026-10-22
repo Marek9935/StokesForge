@@ -366,6 +366,12 @@ fn metadonnees_relues_et_roles_de_colonne_stables() {
     for (role, expected) in [
         (ColumnRole::X, "x"),
         (ColumnRole::Y, "y"),
+        (ColumnRole::X2, "x2"),
+        (ColumnRole::Y2, "y2"),
+        (ColumnRole::X3, "x3"),
+        (ColumnRole::Y3, "y3"),
+        (ColumnRole::X4, "x4"),
+        (ColumnRole::Y4, "y4"),
         (ColumnRole::Z, "z"),
         (ColumnRole::XError, "x_error"),
         (ColumnRole::YError, "y_error"),
@@ -387,6 +393,27 @@ fn metadonnees_relues_et_roles_de_colonne_stables() {
             .unwrap();
         executer(&banc, &format!("meta = pyst.info(pyst.resolve('[Book1]Sheet1!A'))['column']\nassert meta['role'] == {expected:?}\nassert meta['unit'] == 'K'\nassert meta['formula'] == '2+3'"));
     }
+}
+
+/// #168 : `set_column_meta(role='y4')` se relit `'y4'` ; un rôle hors liste
+/// (`'x5'`) est refusé.
+#[test]
+fn les_roles_x3_a_y4_s_ecrivent_et_x5_est_refuse() {
+    let banc = banc();
+    executer(
+        &banc,
+        r#"
+a = pyst.resolve('[Book1]Sheet1!A')
+pyst.set_column_meta(a, role='y4')
+assert pyst.info(a)['column']['role'] == 'y4'
+try:
+    pyst.set_column_meta(a, role='x5')
+except pyst.InvalidValueError:
+    pass
+else:
+    raise AssertionError('rôle x5 accepté')
+"#,
+    );
 }
 
 /// Formules en lettres côté `pyst` (#321) : `info` lit des lettres, une lettre

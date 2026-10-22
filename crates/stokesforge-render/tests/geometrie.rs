@@ -705,13 +705,7 @@ fn un_calque_superpose_partage_la_zone_de_trace_et_garde_son_echelle() {
         }
     };
 
-    let drawn = geometrie(
-        &colonnes,
-        construire(OverlaySpec {
-            x_top: true,
-            y_right: true,
-        }),
-    );
+    let drawn = geometrie(&colonnes, construire(OverlaySpec::new(true, true)));
     assert_eq!(drawn.panels.len(), 2);
     let (base, haut) = (&drawn.panels[0], &drawn.panels[1]);
     assert_eq!((haut.index, haut.row, haut.column), (1, 0, 0));
@@ -734,13 +728,7 @@ fn un_calque_superpose_partage_la_zone_de_trace_et_garde_son_echelle() {
     assert!(base.x_range.1 < 10.0, "{:?}", base.x_range);
 
     // Axes non affichés : l'échelle est celle du calque recouvert.
-    let lie = geometrie(
-        &colonnes,
-        construire(OverlaySpec {
-            x_top: false,
-            y_right: false,
-        }),
-    );
+    let lie = geometrie(&colonnes, construire(OverlaySpec::new(false, false)));
     assert_eq!(lie.panels[1].x_range, lie.panels[0].x_range);
     assert_eq!(lie.panels[1].y_range, lie.panels[0].y_range);
     assert_eq!(lie.panels[1].pixel_size, lie.panels[0].pixel_size);
@@ -766,13 +754,7 @@ fn les_echelles_d_un_calque_superpose_sont_jointes_a_celles_du_calque_recouvert(
     let drawn = geometrie(&colonnes, |ids: &[NodeId]| {
         let mut base = PanelSpec::at(0, 0);
         base.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
-        let mut haut = PanelSpec::overlay_on(
-            &base,
-            OverlaySpec {
-                x_top: true,
-                y_right: true,
-            },
-        );
+        let mut haut = PanelSpec::overlay_on(&base, OverlaySpec::new(true, true));
         haut.series.push(SeriesSpec::new_xy(ids[2], ids[3]));
         PlotSpec::empty("Test").with_panels(Panels::new(vec![base, haut]))
     });
@@ -811,13 +793,7 @@ fn la_legende_du_calque_ordinaire_liste_les_courbes_des_calques_superposes() {
         move |ids: &[NodeId]| {
             let mut base = PanelSpec::at(0, 0);
             base.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
-            let mut haut = PanelSpec::overlay_on(
-                &base,
-                OverlaySpec {
-                    x_top: false,
-                    y_right: true,
-                },
-            );
+            let mut haut = PanelSpec::overlay_on(&base, OverlaySpec::new(false, true));
             haut.legend.visible = legende_haut;
             haut.series.push(SeriesSpec::new_xy(ids[0], ids[2]));
             PlotSpec::empty("Test").with_panels(Panels::new(vec![base, haut]))

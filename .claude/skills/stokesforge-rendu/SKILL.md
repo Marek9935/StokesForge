@@ -135,7 +135,8 @@ l'**union** des aires de graduation de la case (`CellPlan`) pour que tous ses
 calques partagent la même zone de tracé. Un calque s'identifie par son
 **indice dans `PlotSpec::panels`** (`DrawnPanel::index`), jamais par son rang
 dans `DrawnPlot::panels` (qui saute les calques trop petits) ni par
-`(row, column)`. Zoom et déplacement cadrent tous les calques de la case ; la
+`(row, column)`. Plusieurs calques peuvent afficher un axe du même côté : leurs
+axes s'empilent par **bandes** dans l'ordre des calques (#168, `AxisArea::offset`). Zoom et déplacement cadrent tous les calques de la case ; la
 molette ou le glisser sur un axe ne cadrent que cette échelle. Détail :
 `docs/rendu.md` (paragraphe « Calques superposés ») ; tests `geometrie.rs`,
 `stokesforge-render-svg/tests/calques.rs`.

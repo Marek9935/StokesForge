@@ -14,7 +14,7 @@ use stokesforge_commands::{Command, MacroKind};
 use stokesforge_core::{Node, NodeId, NodeKind, SeriesRef};
 use stokesforge_plot::PlotType;
 
-use stokesforge_core::compose::{current_plot_spec, series_from_columns};
+use stokesforge_core::compose::{current_plot_spec, series_from_columns, OVERLAY_ROLES};
 
 use super::{history_text, Action, AppState};
 use crate::analysis::{issue_message, AnalysisForm, Preset, RecentTarget};
@@ -84,12 +84,12 @@ impl AppState {
             columns,
             &PlotType::default(),
             0,
-            0,
+            [0; OVERLAY_ROLES],
         );
         let series: Vec<SeriesRef> = planned
             .primary
             .iter()
-            .chain(&planned.secondary)
+            .chain(planned.overlay_series())
             .map(|spec| SeriesRef {
                 x: spec.x,
                 y: spec.y,

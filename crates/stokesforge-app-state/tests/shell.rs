@@ -6394,6 +6394,116 @@ fn plot_columns_sends_y2_to_a_second_layer_paired_with_x2() {
     );
 }
 
+/// #168 : Y3 et Y4 s'apparient à X3 et X4, chacun sur son calque numéroté ;
+/// un Y3 déposé plus tard retrouve le sien ; un Y3 sans Y2 ne crée pas de
+/// calque 2 vide.
+#[test]
+fn plot_columns_sends_y3_and_y4_to_their_own_numbered_layers() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let mut project = Project::new("X3Y4").expect("projet");
+    let root = project.root();
+    let book = project.add_workbook(root, Some("Book1")).expect("classeur");
+    let sheet = project
+        .tree()
+        .child_by_name(book, "Sheet1")
+        .expect("lecture")
+        .expect("feuille");
+    let mut add = |name: &str| {
+        project
+            .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0, 3.0]))
+            .expect("colonne")
+    };
+    let c: Vec<NodeId> = ["X", "Y", "X3", "Y3", "X4", "Y4"].map(&mut add).to_vec();
+    let (_session, mut state) = start(project, &dir.path().join("projet.stf"));
+    for (column, role) in c.iter().copied().zip([
+        ColumnRole::X,
+        ColumnRole::Y,
+        ColumnRole::X3,
+        ColumnRole::Y3,
+        ColumnRole::X4,
+        ColumnRole::Y4,
+    ]) {
+        state.dispatch(Action::SetColumnRole { column, role });
+    }
+    state.dispatch(Action::PlotColumns {
+        sheet,
+        columns: c.clone(),
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graphe créé");
+    let spec = state.plot_spec(graph).expect("spec");
+    let calques: Vec<(u8, NodeId, Option<NodeId>)> = spec
+        .panels
+        .iter()
+        .skip(1)
+        .map(|p| {
+            (
+                p.overlay.expect("superposé").layer,
+                p.series[0].y,
+                p.series[0].x,
+            )
+        })
+        .collect();
+    assert_eq!(
+        calques,
+        [(3, c[3], Some(c[2])), (4, c[5], Some(c[4]))],
+        "pas de calque 2 vide, X3/X4 et non X"
+    );
+
+    // Un Y3 redéposé rejoint le calque 3, sans en créer un autre.
+    state.dispatch(Action::AddSeriesToGraph {
+        graph,
+        panel: 0,
+        columns: vec![c[3]],
+        plot_type: None,
+    });
+    let after = state.plot_spec(graph).expect("spec");
+    assert_eq!(after.panels.len(), 3);
+    assert_eq!(after.panels[1].series.len(), 2);
+    assert_eq!(after.panels[2].series.len(), 1);
+}
+
+/// #168 : « New Layer » refuse un quatrième calque superposé ; un calque à
+/// deux axes prend le premier numéro de rôle libre.
+#[test]
+fn add_layer_numbers_two_axes_layers_and_stops_at_three_overlays() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let sheet1 = sheet_named(state.tree(), "Sheet1");
+    let signal = column_id(&state, sheet1, "Signal");
+    let root = state.tree().root();
+    state.dispatch(Action::PlotColumns {
+        sheet: sheet1,
+        columns: vec![signal],
+        plot_type: PlotType::Line,
+    });
+    let graph = state
+        .tree()
+        .node(root)
+        .and_then(|node| node.children().last().copied())
+        .expect("graphe créé");
+    for _ in 0..4 {
+        state.dispatch(Action::AddLayer {
+            graph,
+            panel: 0,
+            x_top: true,
+            y_right: true,
+        });
+    }
+    let spec = state.plot_spec(graph).expect("spec");
+    let numeros: Vec<u8> = spec
+        .panels
+        .iter()
+        .skip(1)
+        .map(|p| p.overlay.unwrap().layer)
+        .collect();
+    assert_eq!(numeros, [2, 3, 4], "le quatrième est refusé");
+}
+
 /// #167 : `AddLayer` pose un calque superposé sur le calque de base du calque
 /// visé, en un pas d'annulation ; un calque inexistant ne change rien.
 #[test]

@@ -17,7 +17,7 @@
 
 use eframe::egui;
 use stokesforge_analysis::model::Model;
-use stokesforge_core::{ColumnRole, NodeId};
+use stokesforge_core::NodeId;
 
 use super::menu_sections::MenuSections;
 use stokesforge_app_state::analysis::{Category, Preset, RecentTarget};
@@ -56,7 +56,7 @@ impl AnalysisTarget<'_> {
 fn has_y(state: &AppState, columns: &[NodeId]) -> bool {
     columns
         .iter()
-        .any(|c| matches!(state.column_meta(*c).role, ColumnRole::Y | ColumnRole::Y2))
+        .any(|c| state.column_meta(*c).role.paired_x().is_some())
 }
 
 /// Une entrée qui ouvre la fenêtre sur `preset`.

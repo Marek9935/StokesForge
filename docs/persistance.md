@@ -304,10 +304,11 @@ remplace « Enregistré » et dit comment la relever.
 **À lire** : `stokesforge-persistence/src/lib.rs`, `src/schema.rs`,
 `src/unknown.rs` (têtes).
 
-## Calques superposés et rôles X2/Y2 (#167)
+## Calques superposés et rôles X2…Y4 (#167, #168)
 
-`PanelSpecRecord::overlay` (`OverlaySpecRecord { x_top, y_right }`, absent =
-calque ordinaire) et `RoleRecord::X2`/`Y2` s'ajoutent au schéma ; les fichiers
+`PanelSpecRecord::overlay` (`OverlaySpecRecord { x_top, y_right, layer }`,
+absent = calque ordinaire ; `layer` `#[serde(default)]` = 0, calque sans rôle)
+et `RoleRecord::X2`…`Y4` s'ajoutent au schéma ; les fichiers
 sans eux se relisent comme avant. Les adresses runtime (`AnnotationRef`,
 `ShapeRef`, `TextTarget`) portent l'indice du calque, rien n'en est écrit :
 seuls les textes ancrés restent rangés dans leur calque.

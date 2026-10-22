@@ -317,7 +317,7 @@ cellules exactes, undo/redo, refus, époques, interruption et imports).
 
 `pyst.plot(y, x)` référence les colonnes du modèle et crée un graphe à la
 racine. Sans `x`, chaque `y` prend la colonne de rôle X la plus proche à sa
-gauche dans sa feuille (X2 pour un `y` de rôle Y2), comme la fenêtre
+gauche dans sa feuille (Xn pour un `y` de rôle Yn : X2 pour Y2, X3 pour Y3…), comme la fenêtre
 (`stokesforge_core::compose::x_for`, #257) ; l'abscisse n'est l'indice de ligne
 que si la feuille n'a pas de colonne X à gauche. **Changement de #257** : avant,
 `plot(y)` sans `x=` donnait toujours l'indice de ligne, même quand une colonne
@@ -450,7 +450,7 @@ poignée rendue conserve l'époque de cet instantané.
 `values` et `set_values` d'une colonne `datetime` restent des nombres (timestamps POSIX, secondes) : seule la grille affiche et lit les dates (#218).
 
 Les métadonnées `column` portent `type` (`numeric`, `datetime`, `mixed`),
-`role` (`x`, `y`, `x2`, `y2`, `z`, `x_error`, `y_error`, `label`, `none`), `long_name`,
+`role` (`x`, `y`, `x2`, `y2`, `x3`, `y3`, `x4`, `y4`, `z`, `x_error`, `y_error`, `label`, `none`), `long_name`,
 `unit`, `comment`, `x_prime` (nombre ou `None`, #164, lecture seule), `display_format`,
 `formula` (lettres de colonne, `#REF` pour une colonne lue qui a disparu, ou `None`) et `version`
 (compteur de modification). Modifier ce dictionnaire ne touche jamais au

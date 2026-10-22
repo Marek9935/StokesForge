@@ -130,10 +130,12 @@ Recalculate (Relink avec confirmation dans ce dernier cas). Détail du modèle :
 
 **Calques superposés (#167).** Graph › New Layer (Top X, Right Y, Top X Right Y)
 ajoute, par `Action::AddLayer`, un `PanelSpec::overlay_on` au calque de base du
-calque actif ; les colonnes de rôle **Y2** (apparié au **X2** le plus proche à
+calque actif ; les colonnes de rôle **Y2, Y3, Y4** (appariées au **X2, X3, X4** le plus proche à
 sa gauche) partent, à la création du graphe (Plot) comme au dépôt ou à « Send
-to », sur le second calque (axe X en haut, axe Y à droite, échelles propres),
-réutilisé s'il existe. Le zoom, le déplacement et le rectangle de zoom portent sur les
+to », chacune sur son calque numéroté (axe X en haut, axe Y à droite, échelles
+propres ; les axes s'empilent vers l'extérieur, le plus ancien contre la zone de
+tracé, #168), réutilisé s'il existe. « New Layer » est grisé à trois calques
+superposés par case ; un calque à deux axes prend le premier numéro libre. Le zoom, le déplacement et le rectangle de zoom portent sur les
 **échelles** : le geste, exprimé en pixels de la zone de tracé (commune aux
 calques d'une case), s'applique à toutes les échelles propres de tous les
 calques de la case (X, Y et y2 du calque ordinaire ; X en haut / Y à droite

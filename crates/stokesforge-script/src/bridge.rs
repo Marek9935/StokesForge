@@ -829,13 +829,17 @@ pub(crate) fn set_column_meta(
                     Some("y") => stokesforge_core::ColumnRole::Y,
                     Some("x2") => stokesforge_core::ColumnRole::X2,
                     Some("y2") => stokesforge_core::ColumnRole::Y2,
+                    Some("x3") => stokesforge_core::ColumnRole::X3,
+                    Some("y3") => stokesforge_core::ColumnRole::Y3,
+                    Some("x4") => stokesforge_core::ColumnRole::X4,
+                    Some("y4") => stokesforge_core::ColumnRole::Y4,
                     Some("z") => stokesforge_core::ColumnRole::Z,
                     Some("x_error") => stokesforge_core::ColumnRole::XError,
                     Some("y_error") => stokesforge_core::ColumnRole::YError,
                     Some("label") => stokesforge_core::ColumnRole::Label,
                     Some("none") => stokesforge_core::ColumnRole::None,
                     _ => return Err(HostError::InvalidValue(
-                        "unknown column role: use x, y, x2, y2, z, x_error, y_error, label or none"
+                        "unknown column role: use x, y, x2, y2, x3, y3, x4, y4, z, x_error, y_error, label or none"
                             .into(),
                     )),
                 }
