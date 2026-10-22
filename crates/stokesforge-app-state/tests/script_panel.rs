@@ -341,3 +341,70 @@ fn save_est_refuse_pendant_un_script() {
         "le geste en attente a été abandonné"
     );
 }
+
+// --- Enregistrement depuis un script (#331) ----------------------------------
+
+/// `pyst.save_as` enregistre le projet : le titre de la fenêtre ne reste pas
+/// « modifié » (`saved_revision` suit), et l'application adopte le chemin.
+#[test]
+fn a_script_save_clears_the_modified_mark_and_adopts_the_path() {
+    let (_session, mut state, _sheet) = start();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("par_script.stf");
+    run_and_wait(
+        &mut state,
+        &format!(
+            "a = pyst.resolve(\"[Book1]Sheet1!Temps\")\n\
+             pyst.set_values(a, [1.0, 2.0])\n\
+             pyst.save_as({file:?})\n"
+        ),
+    );
+    assert!(file.exists());
+    assert_eq!(state.path(), file.to_str().unwrap());
+    assert!(
+        !state.window_title().contains('•'),
+        "titre : {}",
+        state.window_title()
+    );
+    // Témoin : une écriture sans enregistrement marque bien le projet modifié.
+    run_and_wait(
+        &mut state,
+        "a = pyst.resolve(\"[Book1]Sheet1!Temps\")\npyst.set_values(a, [5.0])\n",
+    );
+    assert!(state.window_title().contains('•'));
+}
+
+/// Garde #309 : `pyst.save()` refuse d'écraser la source d'une lecture qui a
+/// écarté des données ; `save_as` reste permis.
+#[test]
+fn a_script_save_refuses_to_overwrite_a_source_that_lost_data() {
+    let (_session, mut state, _sheet) = start();
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source.stf");
+    std::fs::write(&source, b"original").unwrap();
+    state.set_path(source.to_str().unwrap().to_string());
+    state.mark_loaded(&stokesforge_session::LoadReport {
+        discarded_calculations: vec![stokesforge_session::DiscardedCalculation {
+            id: 1,
+            kind: None,
+        }],
+        discarded_corrections: Vec::new(),
+    });
+    run_and_wait(
+        &mut state,
+        "try:\n    pyst.save()\nexcept pyst.InvalidValueError as e:\n    print('REFUSED', e)\n",
+    );
+    let output = state.script_output().unwrap();
+    assert!(output.stdout.contains("REFUSED"), "{:?}", output);
+    assert!(output.stdout.contains("save_as"));
+    assert_eq!(std::fs::read(&source).unwrap(), b"original");
+
+    let elsewhere = dir.path().join("ailleurs.stf");
+    run_and_wait(
+        &mut state,
+        &format!("pyst.save_as({elsewhere:?})\npyst.save()\n"),
+    );
+    assert!(state.script_output().unwrap().error.is_none());
+    assert!(elsewhere.exists());
+    assert_eq!(std::fs::read(&source).unwrap(), b"original");
+}

@@ -65,6 +65,34 @@ pub(crate) fn invalid(message: impl Into<String>) -> PyErr {
     InvalidValueError::new_err(message.into())
 }
 
+/// Les options que `plot` accepte (`**options`), en un seul endroit : le message
+/// d'erreur d'une option inconnue et le test de surface (`tests/surface_figee.rs`,
+/// #331) partent de cette liste. Une option ajoutée au `match` de `plot` y entre
+/// aussi, et dans « API figée V1 » (`docs/python-et-script.md`).
+pub(crate) const PLOT_OPTIONS: &[&str] = &[
+    "plot_type",
+    "color",
+    "line_style",
+    "line_width",
+    "symbol",
+    "symbol_size",
+    "label",
+    "group_name",
+    "title",
+    "x_title",
+    "y_title",
+    "x_scale",
+    "y_scale",
+    "x_from",
+    "x_to",
+    "y_from",
+    "y_to",
+    "axis",
+    "x_error",
+    "y_error",
+    "histogram_bins",
+];
+
 /// Crée un graphe natif et rend sa poignée ; graph= ajoute au premier panneau.
 /// y est une colonne, ou une liste d'au moins deux colonnes qui forment un
 /// groupe de séries (#196) ; sans x, chaque y prend la colonne de rôle X la plus
@@ -209,7 +237,12 @@ pub(crate) fn plot(
                     let count = value.extract::<u32>().map_err(|_| invalid("histogram_bins must be a positive integer"))?;
                     request.series.histogram_bins = BinCount::new(count).ok_or_else(|| invalid(format!("histogram_bins must be between 1 and {}", stokesforge_plot::MAX_HISTOGRAM_BINS)))?;
                 }
-                _ => return Err(invalid(format!("unknown plot option: {key}"))),
+                _ => {
+                    return Err(invalid(format!(
+                        "unknown plot option: {key} (accepted: {})",
+                        PLOT_OPTIONS.join(", ")
+                    )))
+                }
             }
         }
     }
@@ -287,7 +320,7 @@ fn column_handles(value: &Bound<'_, PyAny>, what: &str) -> PyResult<Vec<Target>>
 
 /// Les bornes `de … à …` d'un axe : les deux ou aucune, différentes ; `from >
 /// to` est permis et trace l'axe à l'envers.
-fn axis_range(
+pub(crate) fn axis_range(
     axis: &str,
     (from, to): (Option<f64>, Option<f64>),
 ) -> Result<Option<(f64, f64)>, HostError> {
@@ -303,7 +336,7 @@ fn axis_range(
     }
 }
 
-fn update_axis(
+pub(crate) fn update_axis(
     axis: &mut AxisSpec,
     title: &Option<String>,
     scale: Option<AxisScale>,

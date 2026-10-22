@@ -28,7 +28,7 @@ stokesforge-session       l'acteur : le &mut Project de la session
 (commands, persistence, core)
    ↑            ↑
 stokesforge-script   stokesforge-render-egui (core, plot, render, session)
-(analysis, commands, core, import, importer, plot, python, session)
+(analysis, commands, core, import, importer, plot, python, render-svg, session)
 + stokesforge-python (aucune dépendance stokesforge)
 
 stokesforge-cli    (core, commands, import, importer, persistence)

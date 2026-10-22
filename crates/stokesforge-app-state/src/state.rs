@@ -5528,6 +5528,19 @@ impl AppState {
             };
             self.pending_script = None;
             if let Some(engine) = engine {
+                // `pyst.save_as(path)` a pu changer le chemin du projet : la
+                // fenêtre l'adopte, comme après un « Save as ».
+                if let Some(path) = engine.project_path() {
+                    if Path::new(&self.path) != path {
+                        self.path = path.to_string_lossy().into_owned();
+                    }
+                }
+                // Un `save`/`save_as` du script a enregistré le projet : sans
+                // cela le titre resterait « modifié ».
+                if let Some(saved) = engine.take_saved_revision() {
+                    self.saved_revision = Some(saved);
+                    self.autosave_mark_clean();
+                }
                 self.engine = Some(engine);
             }
             match result {
@@ -9626,6 +9639,14 @@ impl AppState {
         // (propriétés du graphe) ne l'absorbe pas et ne l'annule pas (#21).
         let handle = self.handle.with_new_identity();
         let source = self.script_source.clone();
+        // Le chemin que `pyst.save()` écrira : celui du projet, s'il en a un.
+        let project_path = (!self.path.is_empty()).then(|| PathBuf::from(&self.path));
+        // Garde #309 : `pyst.save()` n'écrase pas la source d'une lecture qui a
+        // écarté des données (`save_as` reste permis).
+        let protected_path = self
+            .discarded_source
+            .as_ref()
+            .map(|source| source.path.clone());
         let (reply_tx, reply_rx) = mpsc::channel();
 
         let spawned = thread::Builder::new()
@@ -9637,6 +9658,8 @@ impl AppState {
                 };
                 let reply = match engine {
                     Ok(engine) => {
+                        engine.set_project_path(project_path);
+                        engine.set_protected_path(protected_path);
                         let outcome = engine.run(&source);
                         (Some(engine), outcome)
                     }

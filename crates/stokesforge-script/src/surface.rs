@@ -127,13 +127,13 @@ impl Handle {
 /// Lève `UnknownPathError` si le chemin est mal formé **ou** s'il ne désigne
 /// rien : les deux cas sont pour un script la même impasse.
 #[pyfunction]
-#[pyo3(text_signature = "(chemin)")]
-fn resolve(py: Python<'_>, chemin: &str) -> PyResult<Handle> {
+#[pyo3(text_signature = "(path)")]
+fn resolve(py: Python<'_>, path: &str) -> PyResult<Handle> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
     let session = context.session();
     let (id, epoch) = py
-        .detach(|| bridge::resolve(session, chemin))
+        .detach(|| bridge::resolve(session, path))
         .map_err(to_py_error)?;
     Ok(Handle { id, epoch })
 }
@@ -295,13 +295,13 @@ fn values<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyTuple>
 /// `InvalidValueError` si elle ne désigne pas une colonne numérique (une
 /// feuille, un classeur, une colonne texte).
 #[pyfunction]
-#[pyo3(text_signature = "(poignee)")]
-fn column<'py>(py: Python<'py>, poignee: &Handle) -> PyResult<Bound<'py, PyArray1<f64>>> {
+#[pyo3(text_signature = "(handle)")]
+fn column<'py>(py: Python<'py>, handle: &Handle) -> PyResult<Bound<'py, PyArray1<f64>>> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
     let session = context.session();
-    let id = poignee.id;
-    let epoch = poignee.epoch;
+    let id = handle.id;
+    let epoch = handle.epoch;
     let (buffer, version) = py
         .detach(|| bridge::float_buffer(session, id, epoch))
         .map_err(to_py_error)?;
@@ -309,11 +309,11 @@ fn column<'py>(py: Python<'py>, poignee: &Handle) -> PyResult<Bound<'py, PyArray
     borrowed_readonly_array(py, &buffer)
 }
 
-/// Écrit `valeurs` dans la colonne, **par le bus de commandes** : l'écriture
+/// Écrit `values` dans la colonne, **par le bus de commandes** : l'écriture
 /// entre dans l'historique et s'annule par `pyst.undo()` comme par le `Ctrl+Z`
 /// de la fenêtre.
 ///
-/// `valeurs` doit être un tableau numpy de `float64` à une dimension ; les
+/// `values` doit être un tableau numpy de `float64` à une dimension ; les
 /// tableaux non contigus (`v[::2]`) sont acceptés. Les valeurs sont
 /// **copiées** vers Rust : le modèle possède ses buffers et ne dépend jamais
 /// de la durée de vie d'un objet Python.
@@ -329,26 +329,26 @@ fn column<'py>(py: Python<'py>, poignee: &Handle) -> PyResult<Bound<'py, PyArray
 /// colonne jamais lue par le script n'est pas protégée. `undo()` oublie les
 /// versions lues.
 #[pyfunction]
-#[pyo3(signature = (poignee, valeurs, *, expected_version=None))]
+#[pyo3(signature = (handle, values, *, expected_version=None))]
 fn set_column(
     py: Python<'_>,
-    poignee: &Handle,
-    valeurs: &Bound<'_, PyAny>,
+    handle: &Handle,
+    values: &Bound<'_, PyAny>,
     expected_version: Option<u64>,
 ) -> PyResult<()> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
-    let id = poignee.id;
-    let epoch = poignee.epoch;
+    let id = handle.id;
+    let epoch = handle.epoch;
     // La copie se fait GIL en main ; le `Vec<f64>` obtenu est du Rust pur, il
     // peut traverser l'attente de l'acteur et se détruire sur n'importe quel
     // fil.
-    if let Ok(array) = valeurs.cast::<numpy::PyUntypedArray>() {
+    if let Ok(array) = values.cast::<numpy::PyUntypedArray>() {
         use numpy::PyUntypedArrayMethods;
         check_value_count(array.len())?;
     }
-    let values = copy_array_to_vec(valeurs)
-        .map_err(|error| InvalidValueError::new_err(error.to_string()))?;
+    let values =
+        copy_array_to_vec(values).map_err(|error| InvalidValueError::new_err(error.to_string()))?;
     py.detach(move || bridge::set_column(&context, id, epoch, values, expected_version))
         .map_err(to_py_error)
 }
@@ -368,6 +368,76 @@ fn undo(py: Python<'_>) -> PyResult<bool> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
     py.detach(|| bridge::undo(&context)).map_err(to_py_error)
+}
+
+/// Rétablit l'entrée annulée la plus récente, symétrique de `undo`.
+///
+/// Rend `True` si quelque chose a été rétabli, `False` s'il n'y avait rien
+/// (jamais une exception). Un groupe d'écritures ouvert par le script est
+/// d'abord validé, ce qui vide la pile de rétablissement : `redo()` placé
+/// directement après des écritures rend donc `False`. Il rétablit aussi bien
+/// une commande venue de l'interface qu'une commande du script.
+#[pyfunction]
+#[pyo3(text_signature = "()")]
+fn redo(py: Python<'_>) -> PyResult<bool> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    py.detach(|| bridge::redo(&context)).map_err(to_py_error)
+}
+
+/// Enregistre le projet au chemin courant (celui du fichier ouvert dans
+/// l'application, ou du dernier `save_as`).
+///
+/// Le groupe d'écritures du script est d'abord **validé** (comme `undo`) : ce
+/// qui précède l'enregistrement n'est plus annulé si le script échoue ensuite.
+/// L'enregistrement n'est pas une commande annulable et ne touche pas à
+/// l'historique. Les poignées restent valides.
+///
+/// Lève `InvalidValueError` si le projet n'a pas encore de chemin (utiliser
+/// `save_as`), ou si l'écriture échoue.
+#[pyfunction]
+#[pyo3(text_signature = "()")]
+fn save(py: Python<'_>) -> PyResult<()> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    py.detach(|| bridge::save(&context, None))
+        .map_err(to_py_error)
+}
+
+/// Enregistre le projet sous `path` (texte ou `pathlib.Path`), qui devient le
+/// chemin courant de `save()`. Même validation du groupe d'écritures et mêmes
+/// erreurs que `save`. Les poignées restent valides.
+#[pyfunction]
+#[pyo3(text_signature = "(path)")]
+fn save_as(py: Python<'_>, path: std::path::PathBuf) -> PyResult<()> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    py.detach(|| bridge::save(&context, Some(&path)))
+        .map_err(to_py_error)
+}
+
+/// Exporte un graphe dans un fichier, avec le même rendu que l'export de
+/// l'application (Typst compris). Le format vient de l'extension de `path`
+/// (texte ou `pathlib.Path`) : `.svg` (texte conservé en texte), `.pdf` ou
+/// `.png` (`png_scale` : facteur appliqué à la taille de la figure, 4 par
+/// défaut comme l'application). Ne change pas le projet.
+///
+/// Lève `InvalidValueError` pour une extension inconnue, un `png_scale` non
+/// positif, une poignée qui n'est pas un graphe, ou une écriture impossible ;
+/// `BrokenReferenceError` pour une poignée périmée.
+#[pyfunction]
+#[pyo3(signature = (graph, path, *, png_scale=bridge::DEFAULT_PNG_SCALE))]
+fn export_graph(
+    py: Python<'_>,
+    graph: &Handle,
+    path: std::path::PathBuf,
+    png_scale: f32,
+) -> PyResult<()> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let (id, epoch) = (graph.id, graph.epoch);
+    py.detach(|| bridge::export_graph(context.session(), id, epoch, &path, png_scale))
+        .map_err(to_py_error)
 }
 
 /// Importe un fichier dans un classeur neuf et rend les poignées de ses
@@ -435,6 +505,18 @@ fn create_worksheet(py: Python<'_>, workbook: &Handle, name: Option<String>) -> 
     Ok(Handle { id, epoch })
 }
 
+/// Le type de colonne nommé côté script : `numeric`, `datetime` ou `mixed`.
+pub(crate) fn parse_column_type(name: &str) -> PyResult<ColumnType> {
+    match name {
+        "numeric" => Ok(ColumnType::Numeric),
+        "datetime" => Ok(ColumnType::DateTime),
+        "mixed" => Ok(ColumnType::Mixed),
+        _ => Err(InvalidValueError::new_err(
+            "unknown column type: use numeric, datetime or mixed",
+        )),
+    }
+}
+
 /// Crée une colonne vide en fin de feuille, de type numeric, datetime ou
 /// mixed. Les colonnes texte utilisent mixed. Sans nom, utilise A, B, C…
 #[pyfunction]
@@ -447,16 +529,7 @@ fn create_column(
 ) -> PyResult<Handle> {
     let context = engine::current_context()?;
     context.check_interrupt()?;
-    let column_type = match column_type {
-        "numeric" => ColumnType::Numeric,
-        "datetime" => ColumnType::DateTime,
-        "mixed" => ColumnType::Mixed,
-        _ => {
-            return Err(InvalidValueError::new_err(
-                "unknown column type: use numeric, datetime or mixed",
-            ))
-        }
-    };
+    let column_type = parse_column_type(column_type)?;
     let parent = (worksheet.id, worksheet.epoch);
     let (id, epoch) = py
         .detach(|| {
@@ -599,6 +672,18 @@ fn set_values(
         .map_err(to_py_error)
 }
 
+/// Les champs que `set_column_meta` accepte, en un seul endroit : le message
+/// d'erreur d'un champ inconnu et le test de surface (`tests/surface_figee.rs`,
+/// #331) partent de cette liste.
+pub(crate) const COLUMN_META_FIELDS: &[&str] = &[
+    "role",
+    "long_name",
+    "unit",
+    "comment",
+    "display_format",
+    "formula",
+];
+
 /// Modifie les seuls champs nommés : role (x, y, x2, y2, x3, y3, x4, y4, z, x_error, y_error,
 /// label, none), long_name, unit, comment, display_format, formula.
 /// Les valeurs sont des str ; formula=None retire la formule. La formule se
@@ -618,12 +703,10 @@ fn set_column_meta(
     if let Some(metadata) = metadata {
         for (key, value) in metadata.iter() {
             let key = key.extract::<String>()?;
-            if !matches!(
-                key.as_str(),
-                "role" | "long_name" | "unit" | "comment" | "display_format" | "formula"
-            ) {
+            if !COLUMN_META_FIELDS.contains(&key.as_str()) {
                 return Err(InvalidValueError::new_err(format!(
-                    "unknown column metadata field: {key}"
+                    "unknown column metadata field: {key} (accepted: {})",
+                    COLUMN_META_FIELDS.join(", ")
                 )));
             }
             let value =
@@ -703,15 +786,16 @@ fn remove_shape(
 
 /// Documentation du module telle qu'un script la voit (`help(pyst)`).
 const MODULE_DOC: &str = "\
-Surface de script de StokesForge : navigation, lecture, écriture, annulation et import.
+Surface de script de StokesForge : navigation, lecture, écriture, annulation, import,
+enregistrement et export de figure.
 
     pyst.root()                     -> Handle (dossier racine)
     pyst.children(handle=None)      -> list[Handle] (enfants directs ordonnés)
     pyst.info(handle)               -> dict (nom, nature, parent, lignes, métadonnées)
     pyst.values(handle)             -> tuple (copie des cellules float/str/None)
-    pyst.resolve(chemin)            -> Handle
-    pyst.column(poignee)            -> numpy.ndarray (lecture seule, sans copie)
-    pyst.set_column(poignee, tab)   -> None (passe par l'historique)
+    pyst.resolve(path)              -> Handle
+    pyst.column(handle)             -> numpy.ndarray (lecture seule, sans copie)
+    pyst.set_column(handle, values) -> None (passe par l'historique)
     pyst.create_workbook(name=None, parent=None) -> Handle (classeur vide)
     pyst.create_worksheet(workbook, name=None) -> Handle
     pyst.create_column(worksheet, name=None, column_type=\"numeric\") -> Handle
@@ -722,6 +806,14 @@ Surface de script de StokesForge : navigation, lecture, écriture, annulation et
     pyst.plot(y, x=None, *, graph=None, name=None, parent=None, **options) -> Handle
                   (y : une colonne, ou une liste de colonnes = un groupe de séries ;
                    label=[...] un nom par série, group_name='...')
+    pyst.set_graph(graph, *, panel=(0, 0), axis='left', **options) -> None (titres, échelles,
+                  bornes, légende… ; une entrée d'historique ; clés dans help(pyst.set_graph))
+    pyst.insert_rows(worksheet, at, count=1) -> None
+    pyst.delete_rows(worksheet, at, count=1) -> None
+    pyst.set_column_type(column, column_type) -> None ('numeric', 'datetime', 'mixed')
+    pyst.move(handle, parent, index=None) -> None (index parmi les autres enfants ; défaut : en dernier)
+    pyst.duplicate(handle, name=None) -> Handle (la copie, dans le même parent)
+    pyst.set_note(note, text) -> None
     pyst.series(graph, *, panel=(0, 0)) -> list[dict] (index, name, group, color, visible, y)
     pyst.series_groups(graph, *, panel=(0, 0)) -> list[dict] (id, name, members)
     pyst.group_series(graph, indices, *, name=None, panel=(0, 0)) -> int (numéro du groupe)
@@ -738,9 +830,14 @@ Surface de script de StokesForge : navigation, lecture, écriture, annulation et
                   line_color='', line_width=1.5, fill_color='') -> int
     pyst.remove_shape(graph, index, *, panel=(0, 0)) -> None
     pyst.undo()                     -> bool (False si rien à annuler)
+    pyst.redo()                     -> bool (False si rien à rétablir)
+    pyst.save()                     -> None (au chemin courant du projet)
+    pyst.save_as(path)              -> None (et path devient le chemin courant)
+    pyst.export_graph(graph, path, *, png_scale=4.0) -> None (.svg, .pdf ou .png)
     pyst.import_file(path, recipe=None) -> list[Handle] (feuilles d'un nouveau classeur)
     pyst.analysis.baseline / correct / integrate / fit / peaks / reconvolve /
         deconvolve(y, x=None, ...) -> dict (voir help(pyst.analysis))
+    pyst.analysis.readiness(kind, **options) -> dict (ce qui manque avant un calcul)
 
 Erreurs : UnknownPathError, BrokenReferenceError, InvalidValueError,
           ConcurrentWriteError.
@@ -802,7 +899,22 @@ pub(crate) fn install(py: Python<'_>) -> PyResult<()> {
         module.add_function(function)?;
     }
     module.add_function(wrap_pyfunction!(undo, &module)?)?;
+    module.add_function(wrap_pyfunction!(redo, &module)?)?;
+    module.add_function(wrap_pyfunction!(save, &module)?)?;
+    module.add_function(wrap_pyfunction!(save_as, &module)?)?;
+    module.add_function(wrap_pyfunction!(export_graph, &module)?)?;
     module.add_function(wrap_pyfunction!(import_file, &module)?)?;
+    module.add_function(wrap_pyfunction!(crate::set_graph::set_graph, &module)?)?;
+    for function in [
+        wrap_pyfunction!(crate::sheet_edit::insert_rows, &module)?,
+        wrap_pyfunction!(crate::sheet_edit::delete_rows, &module)?,
+        wrap_pyfunction!(crate::sheet_edit::set_column_type, &module)?,
+        wrap_pyfunction!(crate::sheet_edit::move_node, &module)?,
+        wrap_pyfunction!(crate::sheet_edit::duplicate, &module)?,
+        wrap_pyfunction!(crate::sheet_edit::set_note, &module)?,
+    ] {
+        module.add_function(function)?;
+    }
     module.add("UnknownPathError", py.get_type::<UnknownPathError>())?;
     module.add(
         "BrokenReferenceError",
