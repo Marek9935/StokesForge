@@ -204,14 +204,10 @@ modifié à chaque ouverture. La vue détachée a son propre `AppState` ; sa
 largeur passe aussi par l'acteur, l'état principal la relit à son
 rafraîchissement.
 
-**Colonnes rognées (#330).** Les colonnes de données sont déclarées
-`.clip(true)` : sans cela egui_extras fait grandir une colonne non rognée
-jusqu'au contenu mesuré de ses cellules (`table.rs`, `max_used_widths`), et la
-largeur par défaut (54) dépendait de ce qui était peint. Elle vaut désormais 54
-partout, un contenu trop large est coupé. Le test
-`une_colonne_jamais_reglee_garde_54_quelle_que_soit_la_fenetre` garde ce
-comportement ; le « 57 puis 62 px au maximisage » remonté sous #330 n'a pas pu
-être reproduit dans le banc (voir le message du commit).
+**Largeur par défaut variable (#337).** Remonté sous #330 : maximisée, la
+fenêtre du classeur ferait passer les colonnes jamais réglées de 57 à 62 px.
+Non reproduit dans le banc ; suivi par #337, aucune coupe du contenu n'est
+posée en attendant.
 
 **Remettre au défaut (#330).** Clic droit sur une lettre ou Workbook ▸ Columns :
 « Reset Width » (après Role ▸), sur toute la sélection ; Workbook ▸ Sheet et

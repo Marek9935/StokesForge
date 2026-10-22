@@ -1799,14 +1799,7 @@ pub(super) fn grid_contents(
         .column(TableColumn::initial(gutter_width).at_least(MIN_ROW_NUMBER_COLUMN_WIDTH));
     for id in &column_ids {
         let width = state.column_width(*id).unwrap_or(DEFAULT_COLUMN_WIDTH);
-        // `clip(true)` : sans lui une colonne non rognée grandit jusqu'au
-        // contenu mesuré de ses cellules ; la largeur par défaut vaut alors
-        // 54 partout, un contenu trop large est coupé.
-        table = table.column(
-            TableColumn::initial(width)
-                .at_least(MIN_COLUMN_WIDTH)
-                .clip(true),
-        );
+        table = table.column(TableColumn::initial(width).at_least(MIN_COLUMN_WIDTH));
     }
     if layout_changed {
         table.reset();
@@ -1844,9 +1837,7 @@ pub(super) fn grid_contents(
 
     // Une largeur n'est poussée qu'à la **fin d'un redimensionnement fait à la
     // main** : pousser la largeur rendue à chaque image marquerait le projet
-    // modifié à chaque ouverture (#325). Les colonnes de données sont rognées
-    // (`clip(true)`, #330) : elles ne grandissent pas d'elles-mêmes jusqu'à leur
-    // contenu, la largeur par défaut est la même quelle que soit la fenêtre.
+    // modifié à chaque ouverture (#325).
     for (column, width) in finished_column_resizes(ui, &column_ids, &extents) {
         actions.push(Action::SetColumnWidth { column, width });
     }
@@ -4598,38 +4589,6 @@ mod tests {
             assert!(
                 proches(rendu[i], avant[i]),
                 "colonne {i} : {rendu:?} / {avant:?}"
-            );
-        }
-    }
-
-    /// Bug 57 -> 62 px (remarque de #330) : une colonne jamais réglée garde la
-    /// largeur par défaut quelle que soit la taille de la fenêtre. Agrandir la
-    /// fenêtre peint davantage de lignes (la table les virtualise) ; une valeur
-    /// large, loin sous la première image, faisait grandir la colonne jusqu'à
-    /// son contenu. Le contenu trop large est coupé. Témoin : retirer
-    /// `.clip(true)` des colonnes de données.
-    #[test]
-    fn une_colonne_jamais_reglee_garde_54_quelle_que_soit_la_fenetre() {
-        let mut banc = Banc::avec_valeurs(80, |c, r| {
-            if r > 50 {
-                -123_456.789 * f64::from(c)
-            } else {
-                f64::from(c * 100 + r)
-            }
-        });
-        laisse_passer(&mut banc);
-        let petite = largeurs_peintes(&banc, 3);
-        banc.taille = egui::vec2(1600.0, 1700.0);
-        laisse_passer(&mut banc);
-        let grande = largeurs_peintes(&banc, 3);
-        for (i, (p, g)) in petite.iter().zip(&grande).enumerate() {
-            assert!(
-                proches(*p, DEFAULT_COLUMN_WIDTH),
-                "petite, colonne {i} : {petite:?}"
-            );
-            assert!(
-                proches(*g, DEFAULT_COLUMN_WIDTH),
-                "grande, colonne {i} : {grande:?}"
             );
         }
     }
