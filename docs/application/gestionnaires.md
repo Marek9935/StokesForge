@@ -7,13 +7,16 @@ Suite du sommaire [`README.md`](README.md). Contenu : Project Manager et fenêtr
 Le menu contextuel des fenêtres (à plat) et le menu *Edit* › Selection proposent
 Copier, Coller, Renommer, Dupliquer et Supprimer (#105) ; un dossier propose
 Coller, Renommer (sur place) et Supprimer (#157). Un clic sélectionne et ouvre l'objet ; Ctrl
-bascule une cible sans ouvrir, Maj sélectionne une plage parmi les lignes visibles.
+bascule une cible sans ouvrir, Maj sélectionne une plage dans l'ordre de
+l'arbre, y compris les fenêtres des dossiers repliés (#327).
 F2, Ctrl+D, Ctrl+C, Ctrl+V et Suppr s'appliquent à cette sélection quand le
 Project Manager a le focus, aussi en fenêtre détachée. Les renommages multiples
 saisissent les noms successivement, puis valident une seule entrée annulable ;
 Échap abandonne l'ensemble. Le champ se valide par Entrée ou perte du focus.
-Afficher et Masquer sont dans le menu contextuel d'une entrée et agissent sur
-toute la sélection. L'arbre commence directement sous l'en-tête du panneau,
+Open et Close sont dans le menu contextuel d'une entrée et agissent sur
+toute la sélection : Open ouvre ou active (comme un clic), Close ferme par le
+même chemin que la croix (fenêtres flottantes et détachées). Une fenêtre
+fermée est atténuée dans l'arbre ; un clic sur sa ligne l'ouvre. L'arbre commence directement sous l'en-tête du panneau,
 sans bandeau de compteur ni boutons intermédiaires.
 
 La sélection utilise la forme arrondie des boutons, sans fond rectangulaire

@@ -1,7 +1,7 @@
 //! Arbre du Project Manager : une seule écriture pour le panneau fixe et la
 //! fenêtre OS détachée, sur un arbre déjà construit
 //! ([`stokesforge_app_state::state::ProjectTreeNode`]). Ce que les clics demandent (ouvrir,
-//! fermer, sélectionner, afficher, masquer) s'accumule dans
+//! fermer, sélectionner) s'accumule dans
 //! [`PmInteraction`], appliqué par `StokesForgeApp` après la peinture.
 //!
 //! Le titre appartient au cadre partagé `panel_header`, pas à l'arbre :
@@ -9,7 +9,7 @@
 //! Une sélection reprise par la fenêtre active doit aussi déplacer l'ancre
 //! de Maj-clic dans les deux viewports : le seul fond sélectionné ne suffit
 //! pas à définir la prochaine plage après un clic dans le workspace (#154).
-//! Afficher et Masquer vivent dans le menu contextuel d'une entrée et portent
+//! Open et Close vivent dans le menu contextuel d'une entrée et portent
 //! sur la sélection entière ; l'arbre commence directement sous l'en-tête.
 
 use std::collections::HashSet;
@@ -43,10 +43,12 @@ pub(super) struct PmInteraction<'a> {
     /// Sélection courante dans l'arbre — Ctrl/Cmd-clic en bascule
     /// l'appartenance sans ouvrir l'onglet.
     pub(super) selection: &'a mut HashSet<Tab>,
-    /// Onglets actuellement masqués (voir [`StokesForgeApp::hidden_tabs`]) —
-    /// affichés atténués dans l'arbre, et ce que « Afficher »/« Masquer »
-    /// modifient pour la sélection courante.
-    pub(super) hidden: &'a mut HashSet<Tab>,
+    /// Onglets actuellement ouverts (flottants ou détachés) : les autres
+    /// lignes sont atténuées dans l'arbre (#327).
+    pub(super) open: &'a HashSet<Tab>,
+    /// Onglets que « Close » demande de fermer, par le même chemin que la
+    /// croix de la fenêtre (flottante ou détachée).
+    pub(super) close_requests: &'a mut Vec<Tab>,
 }
 
 /// La sélection est partagée avec le viewport ; l'éditeur et le focus restent
@@ -62,8 +64,19 @@ struct PmMemory {
     /// pas suivi d'un second clic avant [`SLOW_CLICK_SECONDS`], c'est un clic
     /// lent, donc un renommage (S-K4, #224).
     slow_click: Option<(Tab, f64)>,
+    /// Les fenêtres de l'arbre dans l'ordre de lecture, dossiers repliés
+    /// compris (#327) : la plage Maj et les ids agissants en dépendent.
     order: Vec<Tab>,
-    next_order: Vec<Tab>,
+}
+
+/// Les onglets des fenêtres de `tree`, en parcours en profondeur.
+fn tree_order(tree: &[ProjectTreeNode], out: &mut Vec<Tab>) {
+    for node in tree {
+        match node {
+            ProjectTreeNode::Folder { children, .. } => tree_order(children, out),
+            ProjectTreeNode::Window { id, kind, .. } => out.push(tab_for_window(*id, *kind)),
+        }
+    }
 }
 
 pub(super) fn viewport_id() -> egui::ViewportId {
@@ -128,7 +141,7 @@ pub(super) enum ObjectMenuTarget {
 /// tel quel, Edit › Selection l'enveloppe. Sections de `docs/menus.md` —
 /// presse-papiers (Copy · Paste), organiser (Rename · Duplicate), supprimer.
 /// `sections` est celui du menu appelant : les entrées propres au panneau
-/// (Show · Hide) se peignent avant, sous le même compte de séparateurs.
+/// (Open · Close) se peignent avant, sous le même compte de séparateurs.
 /// Le collage déclenche une demande de lecture à egui-winit, donc utilise
 /// aussi le récepteur Wayland.
 pub(super) fn object_menu(
@@ -317,7 +330,8 @@ pub(super) fn project_manager_contents_from_tree(
     object_shortcuts(ui, interaction);
     ui.ctx().data_mut(|data| {
         let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
-        memory.next_order.clear();
+        memory.order.clear();
+        tree_order(tree, &mut memory.order);
         data.insert_temp(memory_key, memory);
     });
     let response = egui::ScrollArea::vertical().show(ui, |ui| {
@@ -325,11 +339,6 @@ pub(super) fn project_manager_contents_from_tree(
         for node in tree {
             project_tree_node_ui(ui, node, tree, interaction);
         }
-    });
-    ui.ctx().data_mut(|data| {
-        let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
-        memory.order = std::mem::take(&mut memory.next_order);
-        data.insert_temp(memory_key, memory);
     });
     if ui.input(|input| input.pointer.any_pressed()) {
         let inside = ui
@@ -483,11 +492,6 @@ fn project_tree_node_ui(
                 WindowKind::Note => (Icon::Note, IconRole::Note),
             };
             let tab = tab_for_window(*id, *kind);
-            ui.ctx().data_mut(|data| {
-                let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
-                memory.next_order.push(tab);
-                data.insert_temp(memory_key, memory);
-            });
             if is_renaming(ui.ctx(), memory_key, *id) {
                 return rename_editor(ui, interaction, memory_key, *id, name, siblings)
                     .rect
@@ -495,7 +499,7 @@ fn project_tree_node_ui(
                     .y;
             }
             let selected = interaction.selection.contains(&tab);
-            let is_hidden = interaction.hidden.contains(&tab);
+            let is_closed = !interaction.open.contains(&tab);
             // Le salt par onglet évite que toutes les lignes partagent le même Id.
             let response = ui
                 .push_id(tab, |ui| {
@@ -505,7 +509,7 @@ fn project_tree_node_ui(
                         Some(icon_image(icon.0, icon.1)),
                         name,
                         selected,
-                        is_hidden,
+                        is_closed,
                     )
                 })
                 .inner;
@@ -560,23 +564,22 @@ fn project_tree_node_ui(
                 let mut sections = MenuSections::new();
                 sections.section(ui, true, |ui| {
                     if ui
-                        .button(tr!("project-manager-show"))
-                        .on_hover_text(tr!("project-manager-show", "hint"))
+                        .button(tr!("project-manager-open"))
+                        .on_hover_text(tr!("project-manager-open", "hint"))
                         .clicked()
                     {
                         for &tab in interaction.selection.iter() {
-                            interaction.hidden.remove(&tab);
                             interaction.open_requests.push(tab);
                         }
                         ui.close();
                     }
                     if ui
-                        .button(tr!("project-manager-hide"))
-                        .on_hover_text(tr!("project-manager-hide", "hint"))
+                        .button(tr!("project-manager-close"))
+                        .on_hover_text(tr!("project-manager-close", "hint"))
                         .clicked()
                     {
                         for &tab in interaction.selection.iter() {
-                            interaction.hidden.insert(tab);
+                            interaction.close_requests.push(tab);
                         }
                         ui.close();
                     }
@@ -604,7 +607,7 @@ fn project_tree_node_ui(
                 });
             }
             // S-K3 : un double-clic active ou restaure la fenêtre, il ne la
-            // ferme jamais (fermer se fait par Masquer ou l'en-tête).
+            // ferme jamais (fermer se fait par Close ou l'en-tête).
             if response.double_clicked() && ui.input(|input| input.modifiers.is_none()) {
                 interaction.open_requests.push(tab);
             }
@@ -657,6 +660,7 @@ impl StokesForgeApp {
         &mut self,
         ui: &mut egui::Ui,
         open_requests: &mut Vec<Tab>,
+        close_requests: &mut Vec<Tab>,
         actions: &mut Vec<Action>,
     ) {
         if self.pm_collapsed {
@@ -693,12 +697,14 @@ impl StokesForgeApp {
                     self.detach_project_manager();
                 }
                 let tree = self.state.project_tree();
+                let open = self.open_tabs();
                 let mut interaction = PmInteraction {
                     actions,
                     root: self.state.tree().root(),
                     open_requests,
                     selection: &mut self.pm_selection,
-                    hidden: &mut self.hidden_tabs,
+                    open: &open,
+                    close_requests,
                 };
                 project_manager_contents_from_tree(ui, &tree, &mut interaction);
             });
@@ -823,7 +829,8 @@ pub(super) mod tests {
         actions: RefCell<Vec<Action>>,
         open_requests: RefCell<Vec<Tab>>,
         selection: RefCell<HashSet<Tab>>,
-        hidden: RefCell<HashSet<Tab>>,
+        open: RefCell<HashSet<Tab>>,
+        close_requests: RefCell<Vec<Tab>>,
     }
 
     impl Banc {
@@ -832,7 +839,8 @@ pub(super) mod tests {
                 actions: RefCell::new(Vec::new()),
                 open_requests: RefCell::new(Vec::new()),
                 selection: RefCell::new(selection),
-                hidden: RefCell::new(HashSet::new()),
+                open: RefCell::new(HashSet::new()),
+                close_requests: RefCell::new(Vec::new()),
             }
         }
 
@@ -868,7 +876,8 @@ pub(super) mod tests {
                 root: NodeId::from_raw(1),
                 open_requests: &mut self.open_requests.borrow_mut(),
                 selection: &mut self.selection.borrow_mut(),
-                hidden: &mut self.hidden.borrow_mut(),
+                open: &self.open.borrow(),
+                close_requests: &mut self.close_requests.borrow_mut(),
             };
             let mut output = context.run_ui(input, |ui| {
                 project_manager_contents_from_tree(ui, tree, &mut interaction);
@@ -1042,7 +1051,8 @@ pub(super) mod tests {
                                 root: app.state.tree().root(),
                                 open_requests: &mut Vec::new(),
                                 selection: &mut app.pm_selection,
-                                hidden: &mut HashSet::new(),
+                                open: &HashSet::new(),
+                                close_requests: &mut Vec::new(),
                             };
                             project_manager_contents_from_tree(ui, &tree, &mut interaction);
                         });
@@ -1223,8 +1233,12 @@ pub(super) mod tests {
                 ..Default::default()
             };
             let mut output = context.run_ui(input, |ui| {
-                app.borrow_mut()
-                    .project_manager_panel(ui, &mut open.borrow_mut(), &mut Vec::new());
+                app.borrow_mut().project_manager_panel(
+                    ui,
+                    &mut open.borrow_mut(),
+                    &mut Vec::new(),
+                    &mut Vec::new(),
+                );
             });
             output.textures_delta.clear();
             output
@@ -1318,14 +1332,11 @@ pub(super) mod tests {
     }
 
     #[test]
-    fn masquer_et_afficher_agissent_sur_toute_la_selection() {
+    fn close_et_open_agissent_sur_toute_la_selection() {
         let (_session, book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
         // Sélection posée directement plutôt que reconstruite par deux
-        // Ctrl-clics successifs (voir `ctrl_clic_selectionne_sans_ouvrir`
-        // pour ce comportement-là, testé isolément) : ce test porte sur ce
-        // que « Masquer »/« Afficher » font d'une sélection déjà en place,
-        // pas sur la façon dont elle s'est constituée.
+        // Ctrl-clics successifs (voir `ctrl_clic_selectionne_sans_ouvrir`).
         let banc = Banc::new(HashSet::from([graph_tab, book_tab]));
         let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
 
@@ -1337,36 +1348,147 @@ pub(super) mod tests {
             *banc.selection.borrow(),
             HashSet::from([graph_tab, book_tab])
         );
-        let hide_pos = find_text_center(&menu.shapes, &tr!("project-manager-hide"));
-        click_at(&context, hide_pos, egui::Modifiers::NONE, paint);
+        let close_pos = find_text_center(&menu.shapes, &tr!("project-manager-close"));
+        click_at(&context, close_pos, egui::Modifiers::NONE, paint);
+        let closed: HashSet<Tab> = banc.close_requests.borrow().iter().copied().collect();
         assert_eq!(
-            *banc.hidden.borrow(),
+            closed,
             HashSet::from([graph_tab, book_tab]),
-            "« Masquer » doit s'appliquer à toute la sélection, hidden={:?}",
-            banc.hidden.borrow()
+            "« Close » doit s'appliquer à toute la sélection"
         );
         assert!(
-            !painted(&paint(&context, Vec::new()), &tr!("project-manager-hide")),
-            "Masquer ferme le menu contextuel"
+            banc.open_requests.borrow().is_empty(),
+            "« Close » n'ouvre rien"
+        );
+        assert!(
+            !painted(&paint(&context, Vec::new()), &tr!("project-manager-close")),
+            "Close ferme le menu contextuel"
         );
 
         let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
-        let show_pos = find_text_center(&menu.shapes, &tr!("project-manager-show"));
-        click_at(&context, show_pos, egui::Modifiers::NONE, paint);
-        assert!(
-            banc.hidden.borrow().is_empty(),
-            "« Afficher » doit vider le masquage de toute la sélection, hidden={:?}",
-            banc.hidden.borrow()
-        );
+        let open_pos = find_text_center(&menu.shapes, &tr!("project-manager-open"));
+        click_at(&context, open_pos, egui::Modifiers::NONE, paint);
         assert!(
             banc.open_requests.borrow().contains(&graph_tab)
                 && banc.open_requests.borrow().contains(&book_tab),
-            "« Afficher » doit aussi garantir que chaque onglet est ouvert, open_requests={:?}",
+            "« Open » garantit que chaque onglet est ouvert, open_requests={:?}",
             banc.open_requests.borrow()
         );
         assert!(
-            !painted(&paint(&context, Vec::new()), &tr!("project-manager-show")),
-            "Afficher ferme le menu contextuel"
+            !painted(&paint(&context, Vec::new()), &tr!("project-manager-open")),
+            "Open ferme le menu contextuel"
+        );
+    }
+
+    /// #327 : un arbre dont le dossier (replié par défaut) cache deux fenêtres
+    /// entre la première et la dernière ligne visibles.
+    fn arbre_avec_dossier_replie() -> (Vec<ProjectTreeNode>, [Tab; 4]) {
+        let fenetre = |raw, name: &str, kind| ProjectTreeNode::Window {
+            id: NodeId::from_raw(raw),
+            name: name.into(),
+            kind,
+        };
+        let tree = vec![
+            fenetre(2, "Alpha", WindowKind::Book),
+            ProjectTreeNode::Folder {
+                id: NodeId::from_raw(3),
+                name: "Dossier".into(),
+                children: vec![
+                    fenetre(4, "Beta", WindowKind::Graph),
+                    fenetre(5, "Gamma", WindowKind::Note),
+                ],
+            },
+            fenetre(6, "Delta", WindowKind::Matrix),
+        ];
+        let tabs = [
+            Tab::Book(NodeId::from_raw(2)),
+            Tab::Graph(NodeId::from_raw(4)),
+            Tab::Note(NodeId::from_raw(5)),
+            Tab::Matrix(NodeId::from_raw(6)),
+        ];
+        (tree, tabs)
+    }
+
+    /// #327 : la plage Maj traverse un dossier replié, et Copier, Supprimer,
+    /// Open et Close agissent sur toute la plage, fenêtres cachées comprises.
+    #[test]
+    fn la_plage_maj_traverse_un_dossier_replie_et_les_actions_la_suivent() {
+        let (tree, [alpha, beta, gamma, delta]) = arbre_avec_dossier_replie();
+        let context = egui::Context::default();
+        let banc = Banc::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        assert!(!painted(&first, "Beta"), "témoin : le dossier est replié");
+        let alpha_pos = find_text_center(&first.shapes, "Alpha");
+        let delta_pos = find_text_center(&first.shapes, "Delta");
+        // Du bas vers le haut, puis du haut vers le bas.
+        click_at(&context, delta_pos, egui::Modifiers::NONE, paint);
+        click_at(&context, alpha_pos, egui::Modifiers::SHIFT, paint);
+        let tout = HashSet::from([alpha, beta, gamma, delta]);
+        assert_eq!(*banc.selection.borrow(), tout);
+        click_at(&context, alpha_pos, egui::Modifiers::NONE, paint);
+        click_at(&context, delta_pos, egui::Modifiers::SHIFT, paint);
+        assert_eq!(*banc.selection.borrow(), tout);
+
+        let ids: Vec<NodeId> = [alpha, beta, gamma, delta]
+            .into_iter()
+            .map(tab_node)
+            .collect();
+        banc.actions.borrow_mut().clear();
+        paint(&context, vec![egui::Event::Copy]);
+        assert_eq!(banc.actions.take(), vec![Action::CopyObjects(ids.clone())]);
+        paint(
+            &context,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+                egui::Event::Key {
+                    key: egui::Key::Delete,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        assert_eq!(banc.actions.take(), vec![Action::DeleteObjects(ids)]);
+
+        banc.open_requests.borrow_mut().clear();
+        let menu = ouvrir_menu_contextuel(&context, alpha_pos, paint);
+        let close_pos = find_text_center(&menu.shapes, &tr!("project-manager-close"));
+        click_at(&context, close_pos, egui::Modifiers::NONE, paint);
+        let closed: HashSet<Tab> = banc.close_requests.borrow().iter().copied().collect();
+        assert_eq!(
+            closed, tout,
+            "Close ferme aussi les fenêtres du dossier replié"
+        );
+        let menu = ouvrir_menu_contextuel(&context, alpha_pos, paint);
+        let open_pos = find_text_center(&menu.shapes, &tr!("project-manager-open"));
+        click_at(&context, open_pos, egui::Modifiers::NONE, paint);
+        let opened: HashSet<Tab> = banc.open_requests.borrow().iter().copied().collect();
+        assert_eq!(opened, tout, "Open ouvre aussi celles du dossier replié");
+    }
+
+    /// #327 : une borne de la plage peut elle-même être dans un dossier replié
+    /// (l'ancre vient de la fenêtre active, dont la ligne n'est pas peinte).
+    #[test]
+    fn une_borne_de_plage_maj_dans_un_dossier_replie_compte() {
+        let (tree, [_alpha, beta, gamma, delta]) = arbre_avec_dossier_replie();
+        let context = egui::Context::default();
+        let banc = Banc::new(HashSet::from([beta]));
+        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        follow_selection_anchor(&context, Some(beta));
+        click_at(
+            &context,
+            find_text_center(&first.shapes, "Delta"),
+            egui::Modifiers::SHIFT,
+            paint,
+        );
+        assert_eq!(
+            *banc.selection.borrow(),
+            HashSet::from([beta, gamma, delta])
         );
     }
 
@@ -1401,8 +1523,8 @@ pub(super) mod tests {
 
         let first = paint(&context, Vec::new());
         assert!(
-            !painted(&first, &tr!("project-manager-hide"))
-                && !painted(&first, &tr!("project-manager-show")),
+            !painted(&first, &tr!("project-manager-close"))
+                && !painted(&first, &tr!("project-manager-open")),
             "sans sélection, aucun bouton groupé à regarder"
         );
         let graph_pos = find_text_center(&first.shapes, "Graph1");
@@ -1416,18 +1538,18 @@ pub(super) mod tests {
 
         // La sélection ne déplace pas les entrées sous la souris.
         let with_selection = paint(&context, Vec::new());
-        assert!(!painted(&with_selection, &tr!("project-manager-hide")));
-        assert!(!painted(&with_selection, &tr!("project-manager-show")));
+        assert!(!painted(&with_selection, &tr!("project-manager-close")));
+        assert!(!painted(&with_selection, &tr!("project-manager-open")));
         assert_eq!(
             find_text_center(&with_selection.shapes, "Graph1"),
             graph_pos
         );
         let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
-        assert!(painted(&menu, &tr!("project-manager-hide")));
-        assert!(painted(&menu, &tr!("project-manager-show")));
+        assert!(painted(&menu, &tr!("project-manager-close")));
+        assert!(painted(&menu, &tr!("project-manager-open")));
     }
 
-    /// #157 : le clic droit d'une fenêtre est **à plat** — Show · Hide ─ Copy ·
+    /// #157 : le clic droit d'une fenêtre est **à plat** — Open · Close ─ Copy ·
     /// Paste ─ Rename · Duplicate ─ Delete, sans « Selection ▸ ».
     #[test]
     fn le_clic_droit_d_une_fenetre_est_a_plat_dans_l_ordre_des_sections() {
@@ -1440,8 +1562,8 @@ pub(super) mod tests {
         click_at(&context, graph_pos, egui::Modifiers::NONE, paint);
         let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
         let ordre = [
-            tr!("project-manager-show"),
-            tr!("project-manager-hide"),
+            tr!("project-manager-open"),
+            tr!("project-manager-close"),
             tr!("action-copy"),
             tr!("action-paste"),
             tr!("action-rename-project-object"),
@@ -1489,8 +1611,8 @@ pub(super) mod tests {
         for absent in [
             tr!("action-copy"),
             tr!("action-duplicate-project-object"),
-            tr!("project-manager-show"),
-            tr!("project-manager-hide"),
+            tr!("project-manager-open"),
+            tr!("project-manager-close"),
         ] {
             assert!(!painted(&menu, &absent), "{absent} n'a pas de sens ici");
         }
@@ -1516,27 +1638,34 @@ pub(super) mod tests {
         );
     }
 
-    /// Une entrée masquée reste listée, atténuée : sa couleur diffère de celle
-    /// de la même entrée affichée, et ses voisines ne changent pas.
+    /// Une fenêtre fermée reste listée, atténuée : sa couleur diffère de celle
+    /// de la même fenêtre ouverte, et ses voisines ne changent pas ; un clic
+    /// sur la ligne atténuée l'ouvre (#327).
     #[test]
-    fn une_entree_masquee_reste_listee_mais_attenuee() {
-        let (_session, _book_tab, graph_tab, tree) = project_manager_fixture();
+    fn une_fenetre_fermee_reste_listee_mais_attenuee_et_un_clic_l_ouvre() {
+        let (_session, book_tab, graph_tab, tree) = project_manager_fixture();
         let context = egui::Context::default();
         let banc = Banc::new(HashSet::new());
+        banc.open.borrow_mut().extend([book_tab, graph_tab]);
         banc.paint(&context, &tree, Vec::new());
-        let shown = banc.paint(&context, &tree, Vec::new());
-        banc.hidden.borrow_mut().insert(graph_tab);
-        let hidden = banc.paint(&context, &tree, Vec::new());
+        let ouverte = banc.paint(&context, &tree, Vec::new());
+        banc.open.borrow_mut().remove(&graph_tab);
+        let fermee = banc.paint(&context, &tree, Vec::new());
         assert_ne!(
-            text_color(&hidden.shapes, "Graph1"),
-            text_color(&shown.shapes, "Graph1"),
-            "l'entrée masquée doit se distinguer de l'entrée affichée"
+            text_color(&fermee.shapes, "Graph1"),
+            text_color(&ouverte.shapes, "Graph1"),
+            "la fenêtre fermée doit se distinguer de l'ouverte"
         );
         assert_eq!(
-            text_color(&hidden.shapes, "Book"),
-            text_color(&shown.shapes, "Book"),
+            text_color(&fermee.shapes, "Book"),
+            text_color(&ouverte.shapes, "Book"),
             "les autres entrées ne changent pas"
         );
+        let pos = find_text_center(&fermee.shapes, "Graph1");
+        click_at(&context, pos, egui::Modifiers::NONE, |ctx, events| {
+            banc.paint(ctx, &tree, events)
+        });
+        assert_eq!(*banc.open_requests.borrow(), vec![graph_tab]);
     }
 
     /// Un dossier est replié par défaut : ses enfants ne sont pas peints.

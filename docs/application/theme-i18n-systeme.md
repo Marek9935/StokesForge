@@ -61,7 +61,7 @@ en phrase (#46, #47). Le pourquoi du choix de Fluent (clé et arguments vérifi�
 
 **`tr!` est l'unique point d'entrée** : `tr!("menu-file")`, ou avec arguments
 nommés `tr!("history-insert-rows", count = n)`. Il enveloppe `fl!` ; une clé ou un
-argument inconnu de `en` ne compile pas. Aucun littéral dans un libellé. Pour l'infobulle d'un contrôle (attribut `.hint` de sa clé) : `tr!("project-manager-show", "hint")`. Un test
+argument inconnu de `en` ne compile pas. Aucun littéral dans un libellé. Pour l'infobulle d'un contrôle (attribut `.hint` de sa clé) : `tr!("project-manager-open", "hint")`. Un test
 qui compare une langue précise passe son chargeur : `tr!(in loader; "clé")`
 (`build_loader`), pour ne pas dépendre de `STOKESFORGE_LANG` ; un test qui cherche un texte peint le demande à `tr!`, jamais un littéral.
 

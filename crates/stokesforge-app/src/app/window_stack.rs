@@ -238,7 +238,6 @@ struct Workspace<'a> {
     window_positions: &'a mut HashMap<Tab, egui::Pos2>,
     window_sizes: &'a mut HashMap<Tab, egui::Vec2>,
     workspace_scroll: &'a mut egui::Vec2,
-    hidden_tabs: &'a mut HashSet<Tab>,
     floating_rects: &'a mut HashMap<NodeId, egui::Rect>,
     actions: &'a mut Vec<Action>,
     detach_requests: &'a mut Vec<Tab>,
@@ -387,12 +386,6 @@ impl Workspace<'_> {
         active_tab: Option<Tab>,
         viewport_rect: egui::Rect,
     ) {
-        if self.hidden_tabs.contains(&tab) {
-            // Masqué depuis le Project Manager (§6) : l'onglet
-            // reste dans `self.floating_tabs` (cascade/position/
-            // géométrie conservées), seul son rendu est sauté.
-            return;
-        }
         let id = egui::Id::new(tab);
         if *self.focus_next == Some(tab) {
             ui.ctx()
@@ -608,7 +601,6 @@ impl StokesForgeApp {
             window_positions,
             window_sizes,
             workspace_scroll,
-            hidden_tabs,
             floating_rects,
             ..
         } = self;
@@ -627,7 +619,6 @@ impl StokesForgeApp {
             window_positions,
             window_sizes,
             workspace_scroll,
-            hidden_tabs,
             floating_rects,
             actions,
             detach_requests,
@@ -791,67 +782,6 @@ mod tests {
             );
             session.shutdown().unwrap();
         }
-    }
-
-    #[test]
-    fn une_fenetre_masquee_ne_peint_rien_et_conserve_sa_place_dans_la_pile() {
-        let (session, graph) = crate::app::graph_window::tests::graphe();
-        let state = AppState::new(session.handle(), String::new()).unwrap();
-        let mut app = StokesForgeApp::new(state);
-        let tab = Tab::Graph(graph);
-        app.floating_tabs = vec![tab];
-        app.hidden_tabs.insert(tab);
-        let context = egui::Context::default();
-        context.set_fonts(stokesforge_render_egui::font_definitions());
-        crate::theme::install(&context);
-        egui_extras::install_image_loaders(&context);
-        let mut actions = Vec::new();
-        let mut detach = Vec::new();
-        let mut close = Vec::new();
-        let mut geometries = Vec::new();
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1400.0, 900.0),
-            )),
-            ..Default::default()
-        };
-        for hidden in [true, false] {
-            if !hidden {
-                app.hidden_tabs.remove(&tab);
-            }
-            geometries.clear();
-            for _ in 0..4 {
-                context
-                    .run_ui(input.clone(), |ui| {
-                        app.show_workspace(
-                            ui,
-                            Some(tab),
-                            &mut actions,
-                            &mut detach,
-                            &mut close,
-                            &mut geometries,
-                        );
-                    })
-                    .textures_delta
-                    .clear();
-            }
-            assert_eq!(app.floating_tabs, vec![tab], "le masquage garde la pile");
-            assert_eq!(
-                geometries.is_empty(),
-                hidden,
-                "témoin : visible, la fenêtre publie sa géométrie"
-            );
-            assert_eq!(
-                app.graph_views.contains_key(&graph),
-                !hidden,
-                "le contenu n'est peint que visible"
-            );
-        }
-        assert!(actions.is_empty());
-        assert!(detach.is_empty());
-        assert!(close.is_empty());
-        session.shutdown().unwrap();
     }
 
     #[test]
