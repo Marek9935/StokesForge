@@ -30,7 +30,7 @@ qu'entre deux sections présentes. Les peintures partagées peignent le
 cible, le clic droit l'affiche à plat.
 
 Clics droits : le Project Manager réutilise `object_menu` à plat (une fenêtre :
-Show · Hide ─ Copy · Paste ─ Rename · Duplicate ─ Delete ; un dossier : Paste ─
+Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete ; un dossier : Paste ─
 Rename ─ Delete, le renommage s'éditant sur place). Un onglet de feuille
 propose Add Worksheet ─ Rename · Duplicate ─ Delete, la bande vide Add
 Worksheet. Les lettres de colonnes : Plot ▸ · Add Column ─ presse-papiers ─

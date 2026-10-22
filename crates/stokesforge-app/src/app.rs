@@ -374,11 +374,6 @@ pub struct StokesForgeApp {
     pm_selection: HashSet<Tab>,
     /// Dernier contenu actif observé pour suivre la sélection simple (#146).
     pm_last_active_tab: Option<Tab>,
-    /// Onglets masqués sans être fermés (§6) — même patron que
-    /// `collapsed_tabs`, mais l'onglet entier n'est plus peint du tout
-    /// (au lieu de replier seulement son contenu). Reste dans
-    /// `floating_tabs` : cascade/position/géométrie survivent au masquage.
-    hidden_tabs: HashSet<Tab>,
     /// Fichier où déposer une capture de la fenêtre, s'il en est demandé une
     /// (mécanisme de vérification, voir [`StokesForgeApp::screenshot`]).
     screenshot: Option<std::path::PathBuf>,
@@ -513,7 +508,6 @@ impl StokesForgeApp {
             floating_rects,
             pm_selection: HashSet::new(),
             pm_last_active_tab: None,
-            hidden_tabs: HashSet::new(),
             autoquit,
             first_frame: None,
             close_requested: false,
@@ -941,7 +935,14 @@ impl eframe::App for StokesForgeApp {
         self.show_toolbars(ui, &ctx, active_tab, &mut actions);
         self.status_bar(ui, &mut actions);
         self.script_panel(ui, &ctx, &mut actions);
-        self.show_project_manager(ui, &ctx, active_tab, &mut open_requests, &mut actions);
+        self.show_project_manager(
+            ui,
+            &ctx,
+            active_tab,
+            &mut open_requests,
+            &mut close_requests,
+            &mut actions,
+        );
         self.object_manager_panel(ui, active_tab, &mut actions);
         self.drain_detached_tabs(&ctx, &mut actions);
         self.show_workspace(
@@ -1063,6 +1064,7 @@ impl StokesForgeApp {
         ctx: &egui::Context,
         active_tab: Option<Tab>,
         open_requests: &mut Vec<Tab>,
+        close_requests: &mut Vec<Tab>,
         actions: &mut Vec<Action>,
     ) {
         if self.pm_detached {
@@ -1072,7 +1074,7 @@ impl StokesForgeApp {
             // `show_detached_project_manager`) — même moment que le reste de
             // `open_requests`, avant de peindre le panneau fixe (qui ne sera
             // de toute façon pas peint cette image-ci) et le `CentralPanel`.
-            let (should_reattach, new_selection, new_hidden) = {
+            let (should_reattach, new_selection, mut new_close) = {
                 let mut requests = self
                     .pm_requests
                     .lock()
@@ -1082,15 +1084,13 @@ impl StokesForgeApp {
                 (
                     std::mem::take(&mut requests.reattach),
                     requests.selection.take(),
-                    requests.hidden.take(),
+                    std::mem::take(&mut requests.close),
                 )
             };
             if let Some(selection) = new_selection {
                 self.pm_selection = selection;
             }
-            if let Some(hidden) = new_hidden {
-                self.hidden_tabs = hidden;
-            }
+            close_requests.append(&mut new_close);
             if should_reattach {
                 self.reattach_project_manager();
                 ctx.request_repaint();
@@ -1107,7 +1107,7 @@ impl StokesForgeApp {
             // construction qu'il n'est jamais recouvert par lui ni ne le
             // recouvre, comme la barre de menu (`egui::Panel::top`) peinte
             // plus haut.
-            self.project_manager_panel(ui, open_requests, actions);
+            self.project_manager_panel(ui, open_requests, close_requests, actions);
         }
     }
 
@@ -1236,7 +1236,20 @@ impl StokesForgeApp {
             // sans jamais créer le viewport différé et appeler son callback.
             ctx.request_repaint();
         }
+        // Même chemin que la croix : la fenêtre flottante ou détachée se ferme.
+        for tab in &close_requests {
+            self.close_detached_tab(*tab);
+        }
         self.close_floating_tabs(close_requests);
+    }
+
+    /// Les onglets ouverts, flottants ou détachés (#327).
+    fn open_tabs(&self) -> HashSet<Tab> {
+        self.floating_tabs
+            .iter()
+            .chain(self.detached_tabs.keys())
+            .copied()
+            .collect()
     }
 
     /// Une confirmation remplace toutes les actions déjà récoltées dans cette image.
@@ -1436,7 +1449,7 @@ impl StokesForgeApp {
                 .floating_tabs
                 .iter()
                 .chain(self.detached_tabs.keys())
-                .any(|tab| tab_node(*tab) == source && !self.hidden_tabs.contains(tab));
+                .any(|tab| tab_node(*tab) == source);
             if !duplicate || source_open {
                 if let Some((id, kind)) = window_nodes(&self.state.project_tree())
                     .into_iter()
@@ -1464,7 +1477,6 @@ impl StokesForgeApp {
                     egui::ViewportCommand::Close,
                 );
             }
-            self.hidden_tabs.remove(tab);
             self.pm_selection.remove(tab);
             self.collapsed_tabs.remove(tab);
             self.graph_views.remove(&tab_node(*tab));
@@ -1580,7 +1592,6 @@ impl StokesForgeApp {
         self.pm_selection.clear();
         self.pm_last_active_tab = None;
         self.pm_requests = Arc::new(Mutex::new(DetachedProjectManagerRequests::default()));
-        self.hidden_tabs.clear();
         ctx.memory_mut(|memory| {
             // Les éditeurs sur place et formats différés ne doivent
             // pas survivre à la fenêtre qu'ils visaient. Garder les

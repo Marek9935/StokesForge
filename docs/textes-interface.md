@@ -118,6 +118,7 @@ l'interface, mais son mot est déjà fixé.
 | Move to First / Move Left / Move Right / Move to Last | Déplacer au début / Déplacer vers la gauche / Déplacer vers la droite / Déplacer à la fin | Entrées du sous-menu **Move ▸** (Déplacer ▸) d'une colonne ; l'historique dit « Move “B” » (une colonne) ou « Move Columns » / « Déplacer des colonnes » (plusieurs) (#319) | Avancer, Reculer | O |
 | Edit | Modifier | Changer le contenu ou les réglages d'un objet existant (libellés d'historique) ; *Change* seulement dans « Change Type of Column A » | Éditer, Changer | G |
 | Show / Hide | Afficher / Masquer | Rendre visible / invisible | Cacher | G |
+| Open / Close (fenêtre du Project Manager) | Ouvrir / Fermer | Ouvre ou active / ferme la fenêtre, comme la croix (#327) | Afficher / Masquer | G |
 | Grid | Grille | Cellules d'une feuille (jamais le quadrillage d'un graphique) | — | G |
 
 ### 2.4 Import

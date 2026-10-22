@@ -107,7 +107,7 @@ Sources : `app/object_manager_ui.rs`, `app/list_row.rs`, `app/reorder_list.rs`,
 | Clic | ligne (OM) | sélectionne l'objet (et l'active, pour un calque) |
 | Clic | ligne (PM) | sélectionne et ouvre la fenêtre |
 | Ctrl + clic | ligne (PM) | bascule la ligne dans la sélection |
-| Maj + clic | ligne (PM) | plage ancre → cible (Ctrl + Maj : ajoute la plage) |
+| Maj + clic | ligne (PM) | plage ancre → cible dans l'ordre de l'arbre, dossiers repliés compris : leurs fenêtres entrent dans la sélection et dans l'action (Copy, Delete, Open, Close) (Ctrl + Maj : ajoute la plage) |
 | Clic lent (clic sur l'entrée déjà seule sélectionnée, puis délai écoulé sans second clic) | ligne (PM) | renomme, comme F2 ; un double-clic rapide ne renomme pas |
 | Double-clic | ligne (OM) | ouvre les paramètres de l'objet |
 | Double-clic | ligne (PM) | active ou restaure la fenêtre, jamais ne la ferme (sans modificateur) |

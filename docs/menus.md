@@ -24,10 +24,10 @@ figure ou dans l'Object Manager ; Graph › Selection l'enveloppe.
 
 Une section vide disparaît avec ses séparateurs.
 
-1. **Action principale** de la cible : Show Data, Edit Text, Show / Hide d'une fenêtre…
+1. **Action principale** de la cible : Show Data, Edit Text, Open / Close d'une fenêtre…
 2. **Créer / insérer** : Add Text, Insert Object ▸, Add Column, Add Worksheet, Plot ▸.
 3. **Presse-papiers**, un seul groupe : Cut, Copy et variantes, Paste et variantes.
-4. **Organiser** : Rename, Duplicate, Move Up / Down, Bring to Front…, Hide, Move ▸ (colonnes), Type ▸, Role ▸.
+4. **Organiser** : Rename, Duplicate, Move Up / Down, Bring to Front…, Hide (objets de graphe), Move ▸ (colonnes), Type ▸, Role ▸.
 5. **Supprimer** : Clear, Delete…
 6. **Sortie** : Export ▸.
 7. **Properties…**, toujours en dernier, action directe qui ouvre la fenêtre
@@ -108,7 +108,7 @@ Les cases gardent le menu ouvert (#114).
 
 | Cible | Menu |
 |---|---|
-| Fenêtre(s) | Show · Hide ─ Copy · Paste ─ Rename · Duplicate ─ Delete |
+| Fenêtre(s) | Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete |
 | Dossier | Paste (dans ce dossier) ─ Rename (sur place) ─ Delete |
 
 Selection ▸ ne subsiste que dans Edit.

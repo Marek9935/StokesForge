@@ -208,11 +208,12 @@ pub(super) struct ProjectManagerViewModel {
     pub(super) root: Option<NodeId>,
     /// Copie de [`StokesForgeApp::pm_selection`], même resynchronisation que
     /// `tree` — nécessaire pour que la fenêtre détachée du Project Manager
-    /// affiche elle aussi la sélection courante et le fond « Masquer » à
+    /// affiche elle aussi la sélection courante et les fenêtres fermées atténuées à
     /// jour (§6).
     pub(super) selected: HashSet<Tab>,
-    /// Copie de [`StokesForgeApp::hidden_tabs`], même resynchronisation.
-    pub(super) hidden: HashSet<Tab>,
+    /// Copie des onglets ouverts ([`StokesForgeApp::open_tabs`]), même
+    /// resynchronisation : les autres lignes sont atténuées.
+    pub(super) open: HashSet<Tab>,
     /// Copie de l'onglet au premier plan, même resynchronisation.
     pub(super) active_tab: Option<Tab>,
 }
@@ -240,7 +241,8 @@ pub(super) struct DetachedProjectManagerRequests {
     /// encore tourné depuis la dernière vidange. Remplacés en bloc plutôt
     /// qu'en delta, comme `DetachedTabRequests::geometry` (§6).
     pub(super) selection: Option<HashSet<Tab>>,
-    pub(super) hidden: Option<HashSet<Tab>>,
+    /// Onglets que « Close » a demandé de fermer depuis la dernière vidange.
+    pub(super) close: Vec<Tab>,
 }
 
 /// L'OM détaché reçoit la projection du graphe actif, même sans événement
@@ -648,6 +650,7 @@ impl StokesForgeApp {
         ctx: &egui::Context,
         active_tab: Option<Tab>,
     ) {
+        let open = self.open_tabs();
         let changed = {
             let mut model = self
                 .pm_view_model
@@ -656,13 +659,13 @@ impl StokesForgeApp {
             let stamp = snapshot_stamp(self.state.snapshot());
             let changed = model.snapshot_stamp != Some(stamp)
                 || model.selected != self.pm_selection
-                || model.hidden != self.hidden_tabs
+                || model.open != open
                 || model.active_tab != active_tab;
             model.snapshot_stamp = Some(stamp);
             model.tree = self.state.project_tree();
             model.root = Some(self.state.tree().root());
             model.selected = self.pm_selection.clone();
-            model.hidden = self.hidden_tabs.clone();
+            model.open = open;
             model.active_tab = active_tab;
             changed
         };
@@ -679,26 +682,27 @@ impl StokesForgeApp {
             move |ui, _class| {
                 begin_file_drop(ui.ctx());
                 let mut opened = Vec::new();
+                let mut closed = Vec::new();
                 let mut actions = Vec::new();
                 // Lecture d'une copie plutôt que du verrou tenu pendant
                 // toute la peinture : `project_manager_contents_from_tree`
                 // ne doit pas retenir `view_model` verrouillé le temps
                 // d'un `ScrollArea` entier. La sélection/le masquage sont
                 // mutés sur ces copies puis renvoyés en bloc après coup
-                // (`selection`/`hidden` sur `DetachedProjectManagerRequests`).
+                // (`selection`/`close` sur `DetachedProjectManagerRequests`).
                 let mut model = view_model
                     .lock()
                     .unwrap_or_else(|err| err.into_inner())
                     .clone();
                 let selected_before = model.selected.clone();
-                let hidden_before = model.hidden.clone();
                 let reattach = detached_panel_contents(ui, &tr!("project-manager-title"), |ui| {
                     let mut interaction = PmInteraction {
                         actions: &mut actions,
                         root: model.root.unwrap_or(NodeId::from_raw(1)),
                         open_requests: &mut opened,
                         selection: &mut model.selected,
-                        hidden: &mut model.hidden,
+                        open: &model.open,
+                        close_requests: &mut closed,
                     };
                     project_manager_contents_from_tree(ui, &model.tree, &mut interaction);
                 });
@@ -707,7 +711,7 @@ impl StokesForgeApp {
                     if reattach
                         || !opened.is_empty()
                         || model.selected != selected_before
-                        || model.hidden != hidden_before
+                        || !closed.is_empty()
                     {
                         root_context.request_repaint_of(egui::ViewportId::ROOT);
                     }
@@ -720,9 +724,7 @@ impl StokesForgeApp {
                     if model.selected != selected_before {
                         requests.selection = Some(model.selected);
                     }
-                    if model.hidden != hidden_before {
-                        requests.hidden = Some(model.hidden);
-                    }
+                    requests.close.append(&mut closed);
                     if let Some(action) = finish_file_drop(ui.ctx()) {
                         requests.actions.push(action);
                         root_context.request_repaint_of(egui::ViewportId::ROOT);

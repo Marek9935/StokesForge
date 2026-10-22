@@ -937,10 +937,10 @@ export-dialog-title = Export Graph
 
 # Project Manager
 project-manager-title = Project Manager
-project-manager-show = Show
-    .hint = Opens or unhides the selected windows
-project-manager-hide = Hide
-    .hint = Hides the selected windows without closing them
+project-manager-open = Open
+    .hint = Opens the selected windows, or brings them to the front if already open
+project-manager-close = Close
+    .hint = Closes the selected windows, like the close button of their title bar
 project-folder-empty = (empty)
 
 # Workbook: stacked column header (left gutter)

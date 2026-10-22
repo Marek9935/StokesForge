@@ -933,10 +933,10 @@ export-dialog-title = Exporter le graphique
 
 # Gestionnaire de projet
 project-manager-title = Gestionnaire de projet
-project-manager-show = Afficher
-    .hint = Ouvre ou réaffiche les fenêtres sélectionnées
-project-manager-hide = Masquer
-    .hint = Masque les fenêtres sélectionnées sans les fermer
+project-manager-open = Ouvrir
+    .hint = Ouvre les fenêtres sélectionnées, ou les amène au premier plan si elles sont déjà ouvertes
+project-manager-close = Fermer
+    .hint = Ferme les fenêtres sélectionnées, comme la croix de leur barre de titre
 project-folder-empty = (vide)
 
 # Classeur : en-tête de colonne empilé (gouttière de gauche)
