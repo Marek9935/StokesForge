@@ -280,6 +280,25 @@ d'opération est une donnée, `OperationKind`).
 - Le recalcul automatique (`Project::refresh_calculation`, côté session) ne passe pas
   par l'historique : c'est une mise à jour dérivée, comme le recalcul des formules.
 
+## Feuilles transposées liées (#253)
+
+`TransposeRows { source, rows }` crée ou complète la feuille transposée liée (feuille,
+colonne x', colonnes « Row N », lien) et `RecalculateTranspose { sheet }` réécrit ses
+colonnes liées depuis la source. Les deux sont **structurelles** (instantané de
+l'arbre : des nœuds apparaissent, le lien est porté par l'arbre) et atomiques — un refus
+(colonne sans x', colonne de texte) restaure l'arbre et n'empile rien. Libellés :
+`HistoryLabel::TransposeRows`, `RecalculateTranspose` ; groupe `MacroKind::AnalyzeRows`.
+
+- **Un seul groupe annulable** : le geste d'analyse d'une ligne ouvre le groupe
+  `AnalyzeRows` (`state/transpose.rs`), exécute `TransposeRows` puis ouvre la fenêtre
+  d'analyse, qui est modale : Apply clôt le groupe avec le calcul, Cancel l'avorte et la
+  feuille n'a jamais existé. Un seul Ctrl+Z défait feuille, colonnes, lien et calcul.
+- Une feuille périmée et intacte est d'abord remise à jour quand on la complète ; une
+  feuille modifiée n'est jamais écrasée sauf par `RecalculateTranspose` (l'interface
+  demande confirmation avant).
+- Toute écriture de valeurs passe par `Project::restore_column` / `add_column` : version
+  neuve par colonne (« Pièges connus » de `CLAUDE.md`).
+
 ## Retirer une formule (#236)
 
 Vider le champ Formule d'une colonne **supprime aussi ses valeurs** : une

@@ -486,3 +486,22 @@ de données, à côté d'une fiche `.json` (chemin d'origine, heure) et d'un ver
 « enregistré » : ni `saved_revision`, ni chemin de travail. Proposée au démarrage
 suivant seulement si elle est plus récente que son `.stf`. Détail :
 `docs/application/projet-et-import.md`, `stokesforge-app-state/src/recovery.rs`.
+
+## Feuilles transposées liées (#253)
+
+`FileBody::transposes` (`#[serde(default)]`, placé après `correction_traces` et
+avant `window_geometries`) porte les liens de `Tree::transposes()` : un
+`TransposeRecord` par feuille transposée (`crates/stokesforge-persistence/src/transposes.rs`) —
+la feuille, sa source, la colonne x', son empreinte, les lignes demandées
+(ligne, colonne, empreinte) et les colonnes de la source telles que le lien les a
+lues (colonne, version, x' en bits). « Périmée » et « modifiée » ne sont **pas**
+écrites : elles se dérivent à la lecture, d'où l'importance des versions de colonnes
+(écrites par le fichier) et des empreintes de contenu (FNV-1a écrit en dur, stable
+d'une version de Rust à l'autre).
+
+Lecture tolérante (invariant 10) : un lien dont la feuille ou la source n'est pas
+une feuille de l'arbre, ou dont un identifiant dépasse `MAX_NODE_ID`, est écarté seul ;
+la feuille reste, ordinaire. Un identifiant de colonne qui n'existe plus est accepté
+(la colonne a pu être supprimée) : le lien la recrée à la remise à jour. Le presse-papiers
+d'objets ne porte pas les liens (une copie est ordinaire). Format provisoire : champ
+nouveau, pas de migration (rétrocompatibilité non requise en développement).

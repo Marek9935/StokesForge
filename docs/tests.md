@@ -712,3 +712,26 @@ Limite : l'aspect du sous-menu et le texte des bulles se relisent à l'écran.
 ## Projet de démonstration (`demo/`)
 
 `crates/stokesforge-app/src/demo/tests.rs` (module du **binaire** : `cargo test -p stokesforge-app --bin stokesforge-app`). Chaque test a son témoin, vérifié par mutation (graine changée, titre donné à un graphe, colonne supprimée sous un graphe, amplitude du jeu gaussien changée, `recalculate` retiré de `session_for_project`) : noms de fenêtre uniques dans tout le projet, aucun titre de graphe (#103), chaque graphe résolu sans référence brisée et dessiné, axes logarithmiques sur données strictement positives (invariant 10), chaque jeu d'analyse retrouve ses paramètres connus par `core::compute` (`Attendu`, tolérance), les sept familles d'`OperationKind::ALL` couvertes, bruit à graine fixe épinglé, colonnes à formule calculées dès le démarrage, aller-retour `.stf` par la session (rapport propre, mêmes specs), tous les `PlotType` (sans `Unknown`).
+
+## Analyser des lignes (#253)
+
+Une couche, un fichier, un témoin éprouvé par mutation :
+
+- `stokesforge-core/tests/transpose.rs` : création (nom, place, colonnes, métadonnées),
+  réutilisation d'une ligne, colonne courte, refus nommant la lettre sans rien créer,
+  texte, collision de nom, états dérivés (périmée : valeur, x', colonne ajoutée ou
+  supprimée ; modifiée : seulement une édition de valeurs), remise à jour (version neuve,
+  colonne supprimée recréée), vie du lien (renommage, suppression, copie). Mutants :
+  `stale` forcé à faux, empreinte des lignes ignorée, `prune_transposes` retiré.
+- `stokesforge-commands/tests/transpose.rs` : une entrée annulable par commande, refus sans
+  entrée, groupe `AnalyzeRows` défait d'un bloc ; `tests/labels.rs` et
+  `stokesforge-app-state/tests/history_text.rs` : les deux libellés.
+- `stokesforge-persistence/tests/transposes.rs` : aller-retour des liens et des états dérivés ;
+  `hostile_links_are_dropped_one_by_one` (lien orphelin, hors borne).
+- `stokesforge-app-state/tests/row_analysis.rs` : un seul Ctrl+Z défait feuille et calcul,
+  Cancel n'en laisse rien (et aucun groupe resté ouvert), refus par lettre, deuxième ligne
+  dans la même feuille, courbe de graphe, confirmation avant d'écraser. Mutants : l'avortement
+  du groupe à Close et sa clôture à Apply.
+- `stokesforge-app/src/app/transpose_ui.rs` : la police embarquée porte « ᵀ »
+  (proportionnelle seulement : la chasse fixe ne l'a pas), la bande et ses boutons, la
+  confirmation.

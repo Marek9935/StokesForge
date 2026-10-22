@@ -60,6 +60,7 @@ n'éprouve que l'orchestration. Les gardes qui lisent le code parcourent tout
 | `app/menus.rs` | barre de menu (`menu_bar` appelle `file_menu`, `edit_menu`, `workbook_menu`, `graph_menu`, `view_menu`, `window_menu`) et barre d'état (`status_bar`, `status_line`) |
 | `app/status_history.rs` | fenêtre en lecture seule des 50 derniers messages de la barre d'état, horodatés en UTC (#230) |
 | `app/analysis_menu.rs` | menu Analysis (#181) : `analysis_menu_contents` (barre de menus), `analysis_open_menu` / `analysis_entry` (clic droit : sous-menu `Analysis ▸`, une entrée par catégorie, #248), `recent_entries` (trois dernières analyses, #249 ; état dans `analysis_recent.rs`), `calculation_section` (Edit / Recalculate / Detach / Delete sur une colonne calculée) |
+| `app/transpose_ui.rs` | feuille transposée liée (#253) : la bande en haut de la grille (origine, état, Recalculate / Relink) et la confirmation avant d'écraser des valeurs éditées |
 | `app/stale_export.rs` | confirmation d'un export ou d'une copie de figure qui montre des séries pas à jour (#198) |
 | `app/analysis_dialog.rs` | fenêtre d'analyse (`modal_dialog_with`, deux colonnes : formulaire + aperçu) et confirmation de suppression d'un calcul (`calculation_delete_window`) |
 | `app/analysis_forms.rs` | les formulaires par famille (`form_body`, `value_row`, tableau des paramètres) |
