@@ -1279,7 +1279,11 @@ analysis-title = { $kind } of { $column }
 analysis-issue-no-series = Select at least one Y column
 analysis-issue-needs-reference = Choose a reference column
 analysis-issue-needs-response = Choose the instrument response column
-analysis-issue-needs-points = Place at least { $needed } points ({ $have } placed)
+analysis-issue-needs-points =
+    { $needed ->
+        [one] Place at least { $needed } point ({ $have } placed)
+       *[other] Place at least { $needed } points ({ $have } placed)
+    }
 analysis-issue-needs-zone = Draw at least one background zone
 analysis-issue-no-parameter = The model has no parameter
 analysis-issue-bad-model = The model is invalid: { $detail }

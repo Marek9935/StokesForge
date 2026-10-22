@@ -301,6 +301,9 @@ pub(super) fn choice_by<T: Clone>(
         }
         layout => {
             let radios = |ui: &mut egui::Ui| {
+                // Un libellé qui ne tient pas passe à la ligne (#335), il n'est
+                // pas rogné par le bord de la colonne.
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                 ui.push_id(id_salt, |ui| {
                     for (index, option) in options.iter().enumerate() {
                         let radio = |ui: &mut egui::Ui| {
@@ -324,7 +327,7 @@ pub(super) fn choice_by<T: Clone>(
                 });
             };
             if layout == ChoiceLayout::RadiosRow {
-                ui.horizontal(radios);
+                ui.horizontal_wrapped(radios);
             } else {
                 ui.vertical(radios);
             }
@@ -536,6 +539,39 @@ mod tests {
         peindre(vec![clic(false)], &mut valeur);
         assert!(!change.get(), "l'option déjà choisie ne change rien");
     }
+    /// #335 : dans une colonne étroite, des radios côte à côte ou l'un sous
+    /// l'autre passent à la ligne au lieu de dépasser (et d'être rognés).
+    #[test]
+    fn des_radios_dans_une_colonne_etroite_ne_depassent_pas() {
+        let context = contexte();
+        let mut valeur = 1;
+        let options = [
+            ChoiceOption::new(1, "Mathematical Correction"),
+            ChoiceOption::new(2, "Constant (point)"),
+        ];
+        let largeur = 120.0;
+        let formes = image(&context, Vec::new(), |ui| {
+            ui.allocate_ui(egui::vec2(largeur, 400.0), |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_space(20.0);
+                    ui.vertical(|ui| {
+                        choice(ui, "etroit", &mut valeur, &options);
+                    });
+                });
+            });
+        });
+        for forme in &formes {
+            if let egui::Shape::Text(texte) = &forme.shape {
+                let droite = texte.pos.x + texte.galley.rect.right();
+                assert!(
+                    droite <= largeur + 1.0,
+                    "{:?} dépasse la colonne ({droite} > {largeur})",
+                    texte.galley.job.text
+                );
+            }
+        }
+    }
+
     /// Le même refus doit tenir dans les radios et dans une liste déroulante.
     #[test]
     fn une_option_grisee_ne_se_choisit_ni_en_radio_ni_en_liste() {

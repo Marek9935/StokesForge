@@ -1275,7 +1275,11 @@ analysis-title = { $kind } de { $column }
 analysis-issue-no-series = Sélectionnez au moins une colonne Y
 analysis-issue-needs-reference = Choisissez une colonne de référence
 analysis-issue-needs-response = Choisissez la colonne de la réponse instrumentale
-analysis-issue-needs-points = Placez au moins { $needed } points ({ $have } placés)
+analysis-issue-needs-points =
+    { $needed ->
+        [one] Placez au moins { $needed } point ({ $have } placé)
+       *[other] Placez au moins { $needed } points ({ $have } placés)
+    }
 analysis-issue-needs-zone = Tracez au moins une zone de fond
 analysis-issue-no-parameter = Le modèle n'a aucun paramètre
 analysis-issue-bad-model = Le modèle est invalide : { $detail }
