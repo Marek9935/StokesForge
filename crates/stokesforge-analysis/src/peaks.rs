@@ -206,7 +206,7 @@ fn shape_value(shape: PeakShape, h: f64, c: f64, w: &[f64], x: f64) -> f64 {
     match shape {
         PeakShape::Gaussian => {
             let u = (x - c) / w[0];
-            h * (-4.0 * std::f64::consts::LN_2 * u * u).exp()
+            h * libm::exp(-4.0 * std::f64::consts::LN_2 * u * u)
         }
         PeakShape::Lorentzian => {
             let u = (x - c) / w[0];
@@ -451,7 +451,7 @@ mod tests {
     }
 
     fn gauss(x: f64, h: f64, c: f64, w: f64) -> f64 {
-        h * (-4.0 * std::f64::consts::LN_2 * ((x - c) / w).powi(2)).exp()
+        h * libm::exp(-4.0 * std::f64::consts::LN_2 * ((x - c) / w).powi(2))
     }
 
     fn two_gaussians() -> Series {

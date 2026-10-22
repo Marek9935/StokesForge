@@ -994,7 +994,7 @@ fn pic_gaussien() -> SeriesInput {
     let x: Vec<f64> = (0..300).map(|i| f64::from(i) * 0.1).collect();
     let y = x
         .iter()
-        .map(|v| 5.0 * (-4.0 * std::f64::consts::LN_2 * ((v - 15.0) / 2.0).powi(2)).exp())
+        .map(|v| 5.0 * libm::exp(-4.0 * std::f64::consts::LN_2 * ((v - 15.0) / 2.0).powi(2)))
         .collect();
     SeriesInput { x, y, sigma: None }
 }

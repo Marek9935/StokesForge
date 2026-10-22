@@ -102,7 +102,7 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 | Python embarqué et scripts `pyst` | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
 | Tests et robustesse | `docs/tests.md` | tests du crate ; index `stokesforge-robustesse/src/lib.rs`, puis batterie `bN` concernée |
 | Distribution | `crates/stokesforge-python/README.md`, `docs/application/etat-et-console.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
-| Licence, contributions et interfaces d'extension | `docs/licence-et-extensions.md`, `CONTRIBUTING.md` | `LICENSE`, `LICENSE-EXCEPTION`, `deny.toml`, `about.toml`, `scripts/licenses-{tools.env,rust.sh,dist.sh,test.sh}`, `scripts/licenses.hbs`, `vendor/{crate-license-notices,epaint-default-fonts,python/licenses}/` |
+| Licence, contributions et interfaces d'extension | `docs/licence-et-extensions.md`, `CONTRIBUTING.md` | `LICENSE`, `LICENSE-EXCEPTION`, `deny.toml`, `about.toml`, `scripts/licenses-{tools.env,rust.sh,dist.sh,test.sh}`, `scripts/licenses.hbs`, `vendor/{crate-license-notices,epaint-default-fonts,python/licenses-{linux,windows}}/` |
 
 Les noms de crates désignent `crates/<nom>/`. Le manifeste racine inclut
 `stokesforge-import`, même si certaines anciennes pages ne le recensent pas.
@@ -247,7 +247,7 @@ dans une copie distincte du runtime ; voir `docs/python-matplotlib-spike.md`.
   Le travail CI `licenses` génère aussi les notices avec `cargo-about`, toutes
   plateformes et features. Les distributions appellent `scripts/licenses-dist.sh`
   et refusent des notices Python périmées ou un runtime privé de ses textes.
-  Une mise à jour de `vendor/python/lock.env` actualise `vendor/python/licenses/`
+  Une mise à jour de `vendor/python/lock.env` actualise `vendor/python/licenses-{linux,windows}/`
   depuis l'archive complète correspondante, et les notices numpy viennent de
   la roue réellement empaquetée. Conserver `deny.toml` et `about.toml` en accord.
   `scripts/licenses-rust.sh` ajoute les copyrights amont manquants conservés

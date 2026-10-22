@@ -130,21 +130,21 @@ impl Func {
 
     fn apply(self, a: f64, b: f64) -> f64 {
         match self {
-            Func::Exp => a.exp(),
-            Func::Ln => a.ln(),
-            Func::Log10 => a.log10(),
-            Func::Log2 => a.log2(),
+            Func::Exp => libm::exp(a),
+            Func::Ln => libm::log(a),
+            Func::Log10 => libm::log10(a),
+            Func::Log2 => libm::log2(a),
             Func::Sqrt => a.sqrt(),
             Func::Abs => a.abs(),
-            Func::Sin => a.sin(),
-            Func::Cos => a.cos(),
-            Func::Tan => a.tan(),
-            Func::Asin => a.asin(),
-            Func::Acos => a.acos(),
-            Func::Atan => a.atan(),
-            Func::Sinh => a.sinh(),
-            Func::Cosh => a.cosh(),
-            Func::Tanh => a.tanh(),
+            Func::Sin => libm::sin(a),
+            Func::Cos => libm::cos(a),
+            Func::Tan => libm::tan(a),
+            Func::Asin => libm::asin(a),
+            Func::Acos => libm::acos(a),
+            Func::Atan => libm::atan(a),
+            Func::Sinh => libm::sinh(a),
+            Func::Cosh => libm::cosh(a),
+            Func::Tanh => libm::tanh(a),
             Func::Erf => erf(a),
             Func::Erfc => erfc(a),
             // `f64::min`/`max` ignorent un NaN et `sign` le lirait comme 0 :
@@ -162,16 +162,16 @@ impl Func {
             }
             Func::Floor => a.floor(),
             Func::Ceil => a.ceil(),
-            Func::Pow => a.powf(b),
+            Func::Pow => libm::pow(a, b),
             Func::Min if a.is_nan() || b.is_nan() => f64::NAN,
             Func::Max if a.is_nan() || b.is_nan() => f64::NAN,
             Func::Min => a.min(b),
             Func::Max => a.max(b),
-            Func::Atan2 => a.atan2(b),
+            Func::Atan2 => libm::atan2(a, b),
             // Base ≤ 0 ou = 1 : NaN (ln b = 0 donnerait ±inf ou 0/0) ; x ≤ 0 :
             // `ln` donne déjà NaN (−inf pour 0, que l'on garde comme `ln`).
             Func::Logx if b.is_nan() || b <= 0.0 || b == 1.0 => f64::NAN,
-            Func::Logx => a.ln() / b.ln(),
+            Func::Logx => libm::log(a) / libm::log(b),
         }
     }
 }
@@ -196,7 +196,7 @@ pub fn erfc(x: f64) -> f64 {
     for k in (1..=60).rev() {
         f = (k as f64 / 2.0) / (x + f);
     }
-    (-x * x).exp() / (std::f64::consts::PI.sqrt() * (x + f))
+    libm::exp(-x * x) / (std::f64::consts::PI.sqrt() * (x + f))
 }
 
 /// Fonction d'erreur (Abramowitz & Stegun 7.1.26 raffinée par une série pour
@@ -230,7 +230,7 @@ pub fn erf(x: f64) -> f64 {
         for k in (1..=60).rev() {
             f = (k as f64 / 2.0) / (ax + f);
         }
-        1.0 - (-ax * ax).exp() / (std::f64::consts::PI.sqrt() * (ax + f))
+        1.0 - libm::exp(-ax * ax) / (std::f64::consts::PI.sqrt() * (ax + f))
     };
     if x < 0.0 {
         -v
@@ -567,7 +567,7 @@ fn eval_node(n: &Node, x: f64, p: &[f64]) -> f64 {
                 '-' => a - b,
                 '*' => a * b,
                 '/' => a / b,
-                _ => a.powf(b),
+                _ => libm::pow(a, b),
             }
         }
         Node::Call(f, args) => {
@@ -602,7 +602,7 @@ mod tests {
         let e = Expr::parse("a * exp(-x / tau) + y0 + a").unwrap();
         assert_eq!(e.params(), ["a", "tau", "y0"]);
         let v = e.eval(2.0, &[3.0, 2.0, 1.0]);
-        assert!((v - (3.0 * (-1.0_f64).exp() + 1.0 + 3.0)).abs() < 1e-15);
+        assert!((v - (3.0 * libm::exp(-1.0_f64) + 1.0 + 3.0)).abs() < 1e-15);
     }
 
     #[test]
@@ -964,7 +964,7 @@ mod tests {
         let v = lire_evaluer(imbrique("sin(", ")", 100)).unwrap();
         let mut attendu = 1.0_f64;
         for _ in 0..100 {
-            attendu = attendu.sin();
+            attendu = libm::sin(attendu);
         }
         assert_eq!(v, attendu);
         // x^x^…^x à 1 : toujours 1.
@@ -1102,14 +1102,14 @@ mod tests {
     fn formules_ordinaires_inchangees() {
         let (x, a, b) = (0.7_f64, 2.0_f64, 0.3_f64);
         let cas: [(&str, f64); 6] = [
-            ("a*exp(-x/b) + 1", a * (-x / b).exp() + 1.0),
+            ("a*exp(-x/b) + 1", a * libm::exp(-x / b) + 1.0),
             ("a + b*x + x^2", a + b * x + x * x),
             (
                 "a*sin(2*pi*x)^2",
-                a * (2.0 * std::f64::consts::PI * x).sin().powi(2),
+                a * libm::sin(2.0 * std::f64::consts::PI * x).powi(2),
             ),
             ("-(x - a)^2 / (2*b^2)", -((x - a).powi(2)) / (2.0 * b * b)),
-            ("a / (1 + exp(-(x - b)))", a / (1.0 + (-(x - b)).exp())),
+            ("a / (1 + exp(-(x - b)))", a / (1.0 + libm::exp(-(x - b)))),
             ("2^3^2 - -x", 512.0 + x),
         ];
         for (src, attendu) in cas {
@@ -1181,13 +1181,13 @@ mod tests {
             assert!(proche(v, attendu), "{src} = {v}, attendu {attendu}");
         }
         // `log` n'est pas le logarithme naturel : log(e) = 1/ln 10.
-        assert!(proche(ev("log(e)", 0.0, &[]), 1.0 / 10f64.ln()));
+        assert!(proche(ev("log(e)", 0.0, &[]), 1.0 / libm::log(10f64)));
         assert!((ev("log(e)", 0.0, &[]) - 1.0).abs() > 0.5);
         // logx(x, b) = ln x / ln b sur une grille de bases et de x.
         for b in [0.1, 0.5, 2.0, e, 3.0, 10.0, 1e3] {
             for x in [1e-9, 0.01, 0.5, 1.0, 2.0, 7.5, 1e4, 1e12] {
                 let v = ev(&format!("logx(x, {b:e})"), x, &[]);
-                let attendu = x.ln() / b.ln();
+                let attendu = libm::log(x) / libm::log(b);
                 // La base peut aussi être un paramètre libre.
                 assert_eq!(ev("logx(x, b)", x, &[b]), v);
                 assert!(proche(v, attendu), "logx({x}, {b}) = {v} vs {attendu}");
@@ -1280,8 +1280,8 @@ mod tests {
             assert!(proche(log2, ev("logx(x, 2)", x, &[])), "x = {x}");
             assert!(proche(ln, ev("logx(x, e)", x, &[])), "x = {x}");
             // Relations entre bases.
-            assert!(proche(ln, log * 10f64.ln()), "x = {x}");
-            assert!(proche(log2, ln / 2f64.ln()), "x = {x}");
+            assert!(proche(ln, log * libm::log(10f64)), "x = {x}");
+            assert!(proche(log2, ln / libm::log(2f64)), "x = {x}");
         }
         // logx est antisymétrique en échangeant x et la base : logx(x,b)*logx(b,x) = 1.
         for (x, b) in [(8.0, 2.0), (5.0, 3.0), (0.2, 7.0)] {

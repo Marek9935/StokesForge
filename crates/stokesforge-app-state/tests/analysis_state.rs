@@ -1213,11 +1213,14 @@ fn the_badge_list_opens_closes_and_never_touches_the_alert() {
 fn the_badge_groups_two_types_in_the_fixed_order_of_the_types() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup_points(dir.path(), 40);
+    // Des paliers de cinq lignes à 0 puis à 100 : un bruit à R² faible (< 0,6)
+    // dont la décomposition en pics converge. La dent de scie (0, 100, 0, 100…)
+    // ne converge pas en 400 itérations, sur aucune plateforme (#332).
     for row in 0..40 {
         s.state.dispatch(Action::CommitCell {
             column: s.y,
             row,
-            text: if row % 2 == 0 { "0" } else { "100" }.to_string(),
+            text: if (row / 5) % 2 == 0 { "0" } else { "100" }.to_string(),
         });
     }
     // Les pics d'abord, l'ajustement ensuite : l'ordre d'apparition ne compte pas.

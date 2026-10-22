@@ -168,14 +168,14 @@ impl CompiledModel {
         match &self.model {
             Model::Linear => p[0] + p[1] * x,
             Model::Polynomial { .. } => p.iter().rev().fold(0.0, |acc, c| acc * x + c),
-            Model::Exponential => p[0] * (-x / p[1]).exp(),
-            Model::ExponentialOffset => p[0] + p[1] * (-x / p[2]).exp(),
-            Model::Exponential2 => p[0] + p[1] * (-x / p[2]).exp() + p[3] * (-x / p[4]).exp(),
-            Model::Logarithm => p[0] + p[1] * x.ln(),
-            Model::Power => p[0] * x.powf(p[1]),
+            Model::Exponential => p[0] * libm::exp(-x / p[1]),
+            Model::ExponentialOffset => p[0] + p[1] * libm::exp(-x / p[2]),
+            Model::Exponential2 => p[0] + p[1] * libm::exp(-x / p[2]) + p[3] * libm::exp(-x / p[4]),
+            Model::Logarithm => p[0] + p[1] * libm::log(x),
+            Model::Power => p[0] * libm::pow(x, p[1]),
             Model::Gaussian => {
                 let u = (x - p[2]) / p[3];
-                p[0] + p[1] * (-4.0 * std::f64::consts::LN_2 * u * u).exp()
+                p[0] + p[1] * libm::exp(-4.0 * std::f64::consts::LN_2 * u * u)
             }
             Model::Lorentzian => {
                 let u = (x - p[2]) / p[3];
@@ -205,7 +205,7 @@ impl CompiledModel {
                 }
                 Model::Logarithm => {
                     a.set(i, 0, 1.0);
-                    a.set(i, 1, xi.ln());
+                    a.set(i, 1, libm::log(xi));
                 }
                 _ => return None,
             }
@@ -318,8 +318,8 @@ impl CompiledModel {
                 let (mut lx, mut ly) = (Vec::new(), Vec::new());
                 for (&xv, &yv) in x.iter().zip(y) {
                     if xv > 0.0 && yv > 0.0 {
-                        lx.push(xv.ln());
-                        ly.push(yv.ln());
+                        lx.push(libm::log(xv));
+                        ly.push(libm::log(yv));
                     }
                 }
                 if lx.len() >= 2 {
@@ -329,7 +329,7 @@ impl CompiledModel {
                         a.set(i, 1, *v);
                     }
                     if let Some(ls) = least_squares(&a, &ly) {
-                        return vec![ls.coefficients[0].exp(), ls.coefficients[1]];
+                        return vec![libm::exp(ls.coefficients[0]), ls.coefficients[1]];
                     }
                 }
                 vec![1.0, 1.0]
@@ -418,7 +418,7 @@ fn log_linear_decay(x: &[f64], y: &[f64], y0: f64, span: f64) -> (f64, f64) {
     for (&xv, &d) in x.iter().zip(&shifted) {
         if sign * d > 0.0 {
             lx.push(xv);
-            ly.push((sign * d).ln());
+            ly.push(libm::log(sign * d));
         }
     }
     let fallback = (shifted.first().copied().unwrap_or(1.0), span / 3.0);
@@ -433,7 +433,7 @@ fn log_linear_decay(x: &[f64], y: &[f64], y0: f64, span: f64) -> (f64, f64) {
     match least_squares(&a, &ly) {
         Some(ls) if ls.coefficients[1].abs() > 1e-300 => {
             let tau = -1.0 / ls.coefficients[1];
-            let amp = sign * ls.coefficients[0].exp();
+            let amp = sign * libm::exp(ls.coefficients[0]);
             if amp.is_finite() && tau.is_finite() && tau > 0.0 {
                 (amp, tau)
             } else {
@@ -547,7 +547,7 @@ mod tests {
         }
         .compile()
         .unwrap();
-        let s = series(|x| 500.0 * (-x / 40.0).exp() + 30.0, 0.0, 200.0, 120);
+        let s = series(|x| 500.0 * libm::exp(-x / 40.0) + 30.0, 0.0, 200.0, 120);
         let sse = |p: &[f64]| -> f64 {
             s.x.iter()
                 .zip(&s.y)
@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn la_valeur_initiale_exponentielle_est_proche() {
-        let s = series(|x| 3.0 + 5.0 * (-x / 2.0).exp(), 0.0, 10.0, 200);
+        let s = series(|x| 3.0 + 5.0 * libm::exp(-x / 2.0), 0.0, 10.0, 200);
         let m = Model::ExponentialOffset.compile().unwrap();
         let g = m.guess(&s);
         // Un point de départ à un facteur 2 près suffit à Levenberg-Marquardt.
@@ -630,7 +630,7 @@ mod tests {
     #[test]
     fn la_valeur_initiale_d_un_pic_negatif_est_negative() {
         let s = series(
-            |x| 10.0 - 4.0 * (-(x - 5.0).powi(2) / 2.0).exp(),
+            |x| 10.0 - 4.0 * libm::exp(-(x - 5.0).powi(2) / 2.0),
             0.0,
             10.0,
             201,
@@ -644,7 +644,7 @@ mod tests {
 
     #[test]
     fn la_valeur_initiale_de_puissance_vient_du_log_log() {
-        let s = series(|x| 2.0 * x.powf(1.5), 1.0, 10.0, 50);
+        let s = series(|x| 2.0 * libm::pow(x, 1.5), 1.0, 10.0, 50);
         let g = Model::Power.compile().unwrap().guess(&s);
         assert!((g[0] - 2.0).abs() < 1e-9 && (g[1] - 1.5).abs() < 1e-9);
     }
@@ -834,7 +834,7 @@ mod tests {
         // eval(T·c, x) == eval(c, x - s) : la matrice change d'axe, pas de courbe.
         for d in 0..=5u32 {
             let m = poly(d);
-            let c: Vec<f64> = (0..=d).map(|j| (f64::from(j) * 1.3).cos()).collect();
+            let c: Vec<f64> = (0..=d).map(|j| libm::cos(f64::from(j) * 1.3)).collect();
             let s = 2.5;
             let a = m.unshift_matrix(s).unwrap().mul_vec(&c);
             for x in [-3.0, 0.0, 1.0, 4.5, 10.0] {

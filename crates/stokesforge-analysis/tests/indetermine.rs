@@ -31,7 +31,7 @@ fn un_modele_dont_un_parametre_est_sans_effet_avertit_sans_taire_les_autres() {
     let x: Vec<f64> = (0..40).map(f64::from).collect();
     let y: Vec<f64> = x
         .iter()
-        .map(|v| 1.0 + 0.5 * v + 0.01 * (v * 7.0).sin())
+        .map(|v| 1.0 + 0.5 * v + 0.01 * libm::sin(v * 7.0))
         .collect();
     let op = fit_op(Model::Custom {
         formula: "a + b*x + 0*c".into(),
@@ -78,7 +78,7 @@ fn un_ajustement_bien_pose_n_avertit_pas() {
     let x: Vec<f64> = (0..30).map(f64::from).collect();
     let y: Vec<f64> = x
         .iter()
-        .map(|v| 2.0 + 0.3 * v + 0.01 * (v * 3.0).sin())
+        .map(|v| 2.0 + 0.3 * v + 0.01 * libm::sin(v * 3.0))
         .collect();
     let o = run_one(&fit_op(Model::Linear), SeriesInput { x, y, sigma: None }).unwrap();
     assert!(o.warnings.is_empty());
@@ -125,7 +125,7 @@ fn gaussian_input(noise: f64) -> SeriesInput {
         .enumerate()
         .map(|(i, v)| {
             let z = (v - 8.0) / (3.0 / 2.354_820_045);
-            5.0 * (-0.5 * z * z).exp()
+            5.0 * libm::exp(-0.5 * z * z)
                 + noise * (((i as f64 * 0.618_033_988_7).fract() - 0.5) * 2.0)
         })
         .collect();

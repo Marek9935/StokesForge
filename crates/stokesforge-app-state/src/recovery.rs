@@ -46,16 +46,16 @@ pub enum RecoveryError {
     Save(PersistenceError),
 }
 
-/// Dossier des copies de secours : `recovery/` dans le dossier de données de
-/// l'application. `None` sous `cfg(test)` ou la feature `test-support` : un
+/// Dossier des copies de secours (`stokesforge_import::config_dir::recovery_dir`,
+/// #332) : `recovery/` dans le dossier de données de l'application, ou, quand
+/// `STOKESFORGE_CONFIG_DIR` est posée, `<ce dossier>/recovery`. `None` sous `cfg(test)` ou la feature `test-support` : un
 /// test n'écrit jamais dans les vraies données de la machine (comme les
 /// préférences, #250).
 pub(crate) fn default_dir() -> Option<PathBuf> {
     if cfg!(any(test, feature = "test-support")) {
         return None;
     }
-    directories::ProjectDirs::from("", "", "StokesForge")
-        .map(|dirs| dirs.data_dir().join("recovery"))
+    stokesforge_import::config_dir::recovery_dir()
 }
 
 /// Le nom de copie d'un projet : son nom de fichier sans extension, `Untitled`

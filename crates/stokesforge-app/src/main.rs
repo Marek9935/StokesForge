@@ -13,6 +13,13 @@
 //! graphes qui éprouvent le tracé. Ses colonnes à formule n'ont leurs valeurs
 //! qu'après le recalcul demandé par `session_for_project`.
 
+// Windows, release : sous-système fenêtré, pas de console noire derrière la
+// fenêtre (#332). `console_windows::attach_parent` rend les messages au terminal
+// qui a lancé l'application, s'il y en a un.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
+#[cfg(all(windows, not(debug_assertions)))]
+mod console_windows;
 mod demo;
 
 use std::path::PathBuf;
@@ -33,6 +40,8 @@ v = pyst.column(a)\n\
 print(\"longueur :\", len(v), \"premier :\", v[0])\n";
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(all(windows, not(debug_assertions)))]
+    console_windows::attach_parent();
     let requested = std::env::args().nth(1).map(PathBuf::from);
     let (session, path, report) = session_for_project(
         requested,

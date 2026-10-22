@@ -1511,27 +1511,30 @@ mod tests {
     // -- Outillage --------------------------------------------------------
 
     /// Sérialise les tests de ce module qui ouvrent l'assistant :
-    /// `XDG_CONFIG_HOME` est un état du *processus*, et `cargo test` fait
+    /// Le dossier de config est un état du *processus*, et `cargo test` fait
     /// tourner les tests en parallèle (même motif que
     /// `tests/shell.rs::isolate_recipe_store`).
     static CONFIG_ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    /// Redirige `XDG_CONFIG_HOME` vers un dossier temporaire tant que la
-    /// valeur vit : `AppState::open_import` lit les modèles et les fichiers
-    /// récents de la machine (`RecipeStore`, `RecentFiles`), ce qui rendrait
-    /// le test dépendant du poste. `Drop` restaure la valeur d'avant, même
-    /// sur panique.
+    /// Redirige le dossier de config (`STOKESFORGE_CONFIG_DIR`, #332, et
+    /// `XDG_CONFIG_HOME`) vers un dossier temporaire tant que la valeur vit :
+    /// `AppState::open_import` lit les modèles et les fichiers récents de la
+    /// machine (`RecipeStore`, `RecentFiles`), ce qui rendrait le test
+    /// dépendant du poste. `Drop` restaure les valeurs d'avant, même sur
+    /// panique.
     struct ConfigIsolee {
-        avant: Option<std::ffi::OsString>,
+        avant: [(&'static str, Option<std::ffi::OsString>); 2],
         _dossier: tempfile::TempDir,
         _verrou: MutexGuard<'static, ()>,
     }
 
     impl Drop for ConfigIsolee {
         fn drop(&mut self) {
-            match self.avant.take() {
-                Some(valeur) => std::env::set_var("XDG_CONFIG_HOME", valeur),
-                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            for (nom, valeur) in self.avant.iter_mut() {
+                match valeur.take() {
+                    Some(valeur) => std::env::set_var(nom, valeur),
+                    None => std::env::remove_var(nom),
+                }
             }
         }
     }
@@ -1541,8 +1544,14 @@ mod tests {
             .lock()
             .unwrap_or_else(|empoisonne| empoisonne.into_inner());
         let dossier = tempfile::tempdir().unwrap();
-        let avant = std::env::var_os("XDG_CONFIG_HOME");
-        std::env::set_var("XDG_CONFIG_HOME", dossier.path());
+        let noms = [
+            stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
+            "XDG_CONFIG_HOME",
+        ];
+        let avant = noms.map(|nom| (nom, std::env::var_os(nom)));
+        for nom in noms {
+            std::env::set_var(nom, dossier.path());
+        }
         ConfigIsolee {
             avant,
             _dossier: dossier,

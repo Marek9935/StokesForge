@@ -18,10 +18,25 @@ fn run(args: &[&str]) -> (Result<(), String>, String) {
 }
 
 /// Isole le dossier de config : les modèles de la machine n'y sont pas.
+///
+/// Les dix tests tournent en parallèle dans un processus : la variable est un
+/// état du *processus*, posée **une seule fois**, vers un dossier gardé
+/// jusqu'à la fin du binaire (aucun test ne s'appuie sur les modèles
+/// enregistrés). `STOKESFORGE_CONFIG_DIR` (#332) est la variable que
+/// `directories` n'ignore pas hors Linux ; `XDG_CONFIG_HOME` reste posée pour
+/// les anciens lecteurs. Le dossier retourné est propre à chaque test (sortie).
 fn isolated() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path().join("config"));
-    dir
+    static CONFIG: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    CONFIG.get_or_init(|| {
+        let config = tempfile::tempdir().unwrap();
+        std::env::set_var(
+            stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
+            config.path().join("config"),
+        );
+        std::env::set_var("XDG_CONFIG_HOME", config.path().join("config"));
+        config
+    });
+    tempfile::tempdir().unwrap()
 }
 
 fn load(path: &Path) -> stokesforge_core::Project {

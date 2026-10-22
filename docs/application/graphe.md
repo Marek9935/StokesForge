@@ -415,8 +415,9 @@ damier (dans l'échantillon du sélecteur). **Une palette par usage** (`stokesfo
 **Couleurs enregistrées** : « Enregistrer » garde la couleur courante
 **dans le projet** (par défaut — commande annulable `SetSavedColors`,
 enregistrée dans le `.stf`) ou **pour l'utilisateur** (fichier
-`couleurs.json` du dossier de configuration de StokesForge, à côté des recettes
-d'import, hors historique — `stokesforge_app_state::user_colors`), au choix
+`couleurs.json` du dossier de configuration de StokesForge (`STOKESFORGE_CONFIG_DIR`
+ou le dossier du système, `docs/application/theme-i18n-systeme.md`), à côté des
+recettes d'import, hors historique — `stokesforge_app_state::user_colors`), au choix
 (`state::SaveTarget`). Une couleur enregistrée ne réapparaît que dans la
 palette de son usage ; clic droit dessus pour la retirer
 (`Action::SaveColor`/`RemoveSavedColor`). Le sélecteur ne touche ni au

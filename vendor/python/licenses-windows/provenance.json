@@ -1,0 +1,20 @@
+{
+  "python_version": "3.12.14",
+  "target_triple": "x86_64-pc-windows-msvc",
+  "release": "20260901",
+  "archive": "cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+  "derived_from": "licenses-linux (meme release, memes composants amont)",
+  "verified_against_windows_full_archive": false,
+  "components": {
+    "_bz2": "LICENSE.bzip2.txt",
+    "_ctypes": "LICENSE.libffi.txt",
+    "_decimal": "LICENSE.mpdecimal.txt",
+    "pyexpat/_elementtree": "LICENSE.expat.txt",
+    "_hashlib/_ssl": "LICENSE.openssl-3.txt",
+    "_lzma": "LICENSE.liblzma.txt",
+    "_sqlite3": "LICENSE.sqlite.txt",
+    "zlib": "LICENSE.zlib.txt",
+    "core": "LICENSE.cpython.txt",
+    "vcruntime140/msvcp140": "LICENSE.msvc-runtime.txt"
+  }
+}

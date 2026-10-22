@@ -20,8 +20,8 @@ stages:
 
 # Runners : seuls les runners perso servent (partagés désactivés dans GitLab).
 # Les travaux Linux portent `tags: [linux]` et restent en attente tant qu'aucun
-# runner Linux n'est enregistré ; seul `dist-windows` (`tags: [windows]`, manuel)
-# tourne pour l'instant, sur le runner Windows.
+# runner Linux n'est enregistré ; seuls `dist-windows` et `test-python-windows`
+# (`tags: [windows]`) tournent pour l'instant, sur le runner Windows.
 
 variables:
   CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
@@ -175,21 +175,35 @@ test-python:
     - scripts/python-vendor.sh
     - scripts/python-test.sh
 
-# #332 : distribution Windows, PREMIÈRE PASSE non vérifiée. Manuelle et non
-# bloquante : exige un runner Windows (étiquette `windows`, Git Bash, Rust MSVC,
-# cargo-deny/cargo-about) que le dépôt ne fournit pas encore. Les notices du
-# runtime Python Windows manquent : le script est lancé avec
-# STOKESFORGE_DIST_SKIP_LICENSES=1, donc le paquet n'est pas publiable.
+# #332 : distribution Windows (installeur Inno Setup). Automatique et bloquante
+# sur un tag de version (vX.Y.Z), manuelle et non bloquante ailleurs. Prérequis
+# du runner `windows` (service ou session ouverte) : Git Bash, Rust MSVC,
+# cargo-deny et cargo-about aux versions de scripts/licenses-tools.env, Inno
+# Setup 6 (ISCC.exe, cherché par $ISCC puis dans Program Files). Un runner en
+# service Windows n'a pas de bureau : si la fenêtre ne s'y ouvre pas, poser
+# STOKESFORGE_DIST_SKIP_WINDOW=1 (le selftest, lui, reste exigé).
 dist-windows:
   stage: check
   tags: [windows]
-  when: manual
-  allow_failure: true
-  variables:
-    STOKESFORGE_DIST_SKIP_LICENSES: "1"
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+/'
+    - when: manual
+      allow_failure: true
   script:
+    - if [ -n "$CI_COMMIT_TAG" ]; then export STOKESFORGE_VERSION="${CI_COMMIT_TAG#v}"; fi
     - bash scripts/python-vendor.sh
     - bash scripts/app-dist-windows.sh
   artifacts:
     paths:
-      - dist/stokesforge-app-windows/
+      - dist/StokesForge-*-windows-setup.exe
+
+# Pendant Windows de `test-python` : pont, scripts, robustesse, application et
+# CLI contre l'interpréteur vendorisé. Manuel, lancé avant une version.
+test-python-windows:
+  stage: check
+  tags: [windows]
+  when: manual
+  allow_failure: true
+  script:
+    - bash scripts/python-vendor.sh
+    - bash scripts/python-test.sh

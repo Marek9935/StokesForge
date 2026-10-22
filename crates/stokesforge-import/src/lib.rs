@@ -25,6 +25,7 @@
 
 pub mod builtin;
 pub mod choose;
+pub mod config_dir;
 mod data_end;
 mod datetime;
 

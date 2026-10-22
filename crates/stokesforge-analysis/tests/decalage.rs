@@ -15,7 +15,7 @@ fn t_grid() -> Vec<f64> {
 
 /// Bruit déterministe d'amplitude `amp`.
 fn bruit(i: usize, amp: f64) -> f64 {
-    amp * ((i as f64) * 1.7).sin()
+    amp * libm::sin((i as f64) * 1.7)
 }
 
 fn libre() -> Model {
@@ -186,7 +186,7 @@ fn gaussienne_decalee(off: f64) -> Vec<f64> {
         .iter()
         .map(|x| {
             let u = x - (off + 0.5);
-            1.0 + 5.0 * (-4.0 * 2f64.ln() * u * u / 0.09).exp()
+            1.0 + 5.0 * libm::exp(-4.0 * libm::log(2f64) * u * u / 0.09)
         })
         .collect();
     let r = ajuste(
@@ -229,7 +229,7 @@ fn gaussienne_bruitee(off: f64) -> stokesforge_analysis::fit::FittedSeries {
         .enumerate()
         .map(|(i, x)| {
             let u = x - (off + 0.5);
-            1.0 + 5.0 * (-4.0 * 2f64.ln() * u * u / 0.09).exp() + bruit(i, 0.02)
+            1.0 + 5.0 * libm::exp(-4.0 * libm::log(2f64) * u * u / 0.09) + bruit(i, 0.02)
         })
         .collect();
     let input = FitInput {
@@ -263,7 +263,7 @@ fn une_exponentielle_sur_un_x_decale_retrouve_ses_parametres() {
     for (off, tau) in [(100.0, 50.0), (1e3, 500.0)] {
         let x: Vec<f64> = (0..80).map(|i| off + 4.0 * f64::from(i) / 79.0).collect();
         let a = 7.0;
-        let y: Vec<f64> = x.iter().map(|x| a * (-x / tau).exp()).collect();
+        let y: Vec<f64> = x.iter().map(|x| a * libm::exp(-x / tau)).collect();
         let r = ajuste(
             &[FitInput {
                 series: Series::new(x, y),

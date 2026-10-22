@@ -431,43 +431,86 @@ fn unused(_: &SessionHandle) {}
 /// tourner les tests de ce fichier sur plusieurs threads par défaut.
 static IMPORT_RECIPES_ENV_LOCK: Mutex<()> = Mutex::new(());
 
-/// Redirige `XDG_CONFIG_HOME` vers un répertoire temporaire propre à l'appel,
-/// pour la durée de vie de la valeur rendue : `stokesforge_import::RecipeStore::
-/// load`/`save` (donc `AppState::open_import`/`save_import_recipe`/
-/// `delete_import_recipe`) passent par `directories::ProjectDirs`, qui
-/// respecte cette variable sur Linux. Sans ceci, ces méthodes liraient et
-/// écriraient le vrai dossier de config de la machine qui exécute les
-/// tests — non hermétique, et potentiellement pollué par un modèle laissé
-/// par une session interactive antérieure.
+/// Redirige le dossier de config vers un répertoire temporaire propre à
+/// l'appel, pour la durée de vie de la valeur rendue : `stokesforge_import::
+/// RecipeStore::load`/`save` (donc `AppState::open_import`/`save_import_recipe`/
+/// `delete_import_recipe`) passent par `stokesforge_import::config_dir::
+/// config_dir`, qui lit `STOKESFORGE_CONFIG_DIR` (#332). `XDG_CONFIG_HOME`
+/// est posée aussi : c'est la seule que `directories` respecte, et sur
+/// Linux seulement. Sans `STOKESFORGE_CONFIG_DIR`, ces méthodes lisaient et
+/// écrivaient le vrai profil de la machine sous Windows — non hermétique,
+/// et en course entre tests (« Access is denied »).
 ///
 /// Garde le verrou et le répertoire temporaire vivants jusqu'à ce que la
 /// valeur rendue soit abandonnée (fin du test, y compris en cas de panique :
-/// `Drop` restaure `XDG_CONFIG_HOME` à sa valeur d'avant).
-fn isolate_recipe_store() -> impl Drop {
-    struct Guard {
-        previous: Option<std::ffi::OsString>,
-        _lock: std::sync::MutexGuard<'static, ()>,
-        _dir: tempfile::TempDir,
-    }
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            match self.previous.take() {
-                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
-                None => std::env::remove_var("XDG_CONFIG_HOME"),
-            }
-        }
-    }
+/// `Drop` restaure les deux variables à leur valeur d'avant).
+fn isolate_recipe_store() -> RecipeStoreIsolation {
     let lock = IMPORT_RECIPES_ENV_LOCK
         .lock()
         .unwrap_or_else(|err| err.into_inner());
     let dir = tempfile::tempdir().expect("répertoire temporaire pour les recettes d'import");
-    let previous = std::env::var_os("XDG_CONFIG_HOME");
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-    Guard {
+    let names = [
+        stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
+        "XDG_CONFIG_HOME",
+    ];
+    let previous = names.map(|name| (name, std::env::var_os(name)));
+    for name in names {
+        std::env::set_var(name, dir.path());
+    }
+    RecipeStoreIsolation {
         previous,
         _lock: lock,
-        _dir: dir,
+        dir,
     }
+}
+
+/// Ce que [`isolate_recipe_store`] rend : le verrou, le dossier temporaire et
+/// les valeurs d'avant des variables, restaurées à la chute.
+struct RecipeStoreIsolation {
+    previous: [(&'static str, Option<std::ffi::OsString>); 2],
+    _lock: std::sync::MutexGuard<'static, ()>,
+    dir: tempfile::TempDir,
+}
+
+impl RecipeStoreIsolation {
+    /// Le dossier de config temporaire.
+    fn path(&self) -> &std::path::Path {
+        self.dir.path()
+    }
+}
+
+impl Drop for RecipeStoreIsolation {
+    fn drop(&mut self) {
+        for (name, value) in self.previous.iter_mut() {
+            match value.take() {
+                Some(value) => std::env::set_var(name, value),
+                None => std::env::remove_var(name),
+            }
+        }
+    }
+}
+
+/// #332 : sous l'isolation, le dossier de config est le dossier temporaire
+/// (`Path` égal, pas une chaîne), et un enregistrement de modèle d'import y
+/// écrit son fichier. Sous Windows, `XDG_CONFIG_HOME` seule ne suffit pas :
+/// `directories` l'ignore, et le modèle partait dans le vrai profil.
+#[test]
+fn l_isolation_redirige_le_dossier_de_config_et_l_enregistrement_y_ecrit() {
+    let isolation = isolate_recipe_store();
+    assert_eq!(
+        stokesforge_import::config_dir::config_dir().as_deref(),
+        Some(isolation.path()),
+        "le dossier de config est le dossier temporaire"
+    );
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    state.open_import(None::<NodeId>);
+    state.import_state_mut().unwrap().save_as_name = "Témoin".to_string();
+    state.save_import_recipe();
+    assert!(!state.status().unwrap().is_error());
+    let file = isolation.path().join("import_recipes.json");
+    assert!(file.is_file(), "le modèle est écrit dans {file:?}");
+    assert!(std::fs::read_to_string(&file).unwrap().contains("Témoin"));
 }
 
 // -- 1. État initial --
@@ -4451,6 +4494,7 @@ fn new_book_import_creates_nothing_for_an_unreadable_file() {
 
 #[test]
 fn import_without_an_active_book_defaults_to_one_new_book_for_the_batch() {
+    let _recipes = isolate_recipe_store();
     let dir = tempfile::tempdir().unwrap();
     let (_session, mut state) = start_demo(dir.path());
     state.open_import(None::<NodeId>);
@@ -8384,8 +8428,9 @@ fn un_echec_d_enregistrement_garde_le_modele_d_import_modifie() {
     assert!(!state.status().unwrap().is_error());
     state.import_state_mut().unwrap().recipe.skip_chars = 3;
 
-    let config = directories::ProjectDirs::from("", "", "StokesForge").unwrap();
-    let file = config.config_dir().join("import_recipes.json");
+    let file = stokesforge_import::config_dir::config_dir()
+        .unwrap()
+        .join("import_recipes.json");
     std::fs::remove_file(&file).unwrap();
     std::fs::create_dir(&file).unwrap();
     state.save_import_recipe();
@@ -8415,8 +8460,9 @@ fn un_echec_d_enregistrement_d_un_modele_importe_le_garde_modifie() {
     let json = dir.path().join("modele.json");
     std::fs::write(&json, recipe.to_json()).unwrap();
 
-    let config = directories::ProjectDirs::from("", "", "StokesForge").unwrap();
-    let file = config.config_dir().join("import_recipes.json");
+    let file = stokesforge_import::config_dir::config_dir()
+        .unwrap()
+        .join("import_recipes.json");
     let _ = std::fs::remove_file(&file);
     std::fs::create_dir_all(&file).unwrap();
     state.import_import_recipe(&json);

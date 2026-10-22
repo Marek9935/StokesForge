@@ -58,7 +58,8 @@ locales décrites dans [`vendor/winit/STOKESFORGE.md`](../vendor/winit/STOKESFOR
 La politique [`deny.toml`](../deny.toml) contrôle toutes les plateformes et
 features Cargo, y compris `python` et les dépendances de test, sans compiler
 l'interpréteur. Les licences
-admises sont explicites. MPL-2.0 (`option-ext` 0.2.0) et Ubuntu-font-1.0
+admises sont explicites. MPL-2.0 (`option-ext` 0.2.0, et `colored` 2.2.0, tirée seulement par les tests
+d'interface `egui_kittest` → `dify` et jamais livrée) et Ubuntu-font-1.0
 (`epaint_default_fonts` 0.36.2) sont autorisées seulement pour ces versions.
 Les six familles de polices de `vendor/fonts` portent chacune leur OFL-1.1 ;
 la paire Noto Sans inclut aussi sa face italique. Phosphor porte sa notice MIT.
@@ -74,7 +75,7 @@ Installation des outils figés, depuis la racine :
 ```sh
 source scripts/licenses-tools.env
 cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
-cargo install cargo-about --locked --version "$CARGO_ABOUT_VERSION"
+cargo install cargo-about --locked --features cli --version "$CARGO_ABOUT_VERSION"
 cargo deny --locked check licenses
 ```
 
@@ -117,7 +118,10 @@ Chaque distribution contient :
 
 Les notices natives de Python viennent de l'archive complète correspondant au
 verrou, sont versionnées et leur mise à jour est décrite dans
-[`vendor/python/licenses/README.md`](../vendor/python/licenses/README.md).
+[`vendor/python/licenses-linux/README.md`](../vendor/python/licenses-linux/README.md)
+(Windows, #332 : [`licenses-windows/`](../vendor/python/licenses-windows/README.md),
+notices dérivées de celles de Linux tant que l'archive complète Windows n'est
+pas recoupée, ce que son README dit).
 Le packaging refuse un jeu de notices qui ne correspond plus au verrou, ou
 un runtime sans les textes de CPython, numpy et scipy. Une livraison doit également
 fournir les sources correspondantes selon les licences applicables ; le

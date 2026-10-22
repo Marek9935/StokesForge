@@ -113,6 +113,15 @@ impl EmbeddedPython {
         &self.home
     }
 
+    /// Vrai si `entry` (une entrée de `sys.path`) est sous le préfixe.
+    /// Comparaison par composants, pas par préfixe de chaîne : sous Windows,
+    /// le préfixe peut arriver en `C:/…` (Git Bash) quand `sys.path` porte
+    /// `C:\…` (#332).
+    #[must_use]
+    pub fn contains_path(&self, entry: &str) -> bool {
+        Path::new(entry).starts_with(&self.home)
+    }
+
     /// La bibliothèque standard : `<home>/lib/python3.12` sous Unix,
     /// `<home>/Lib` dans la distribution python-build-standalone de Windows.
     fn stdlib_dir(&self) -> PathBuf {

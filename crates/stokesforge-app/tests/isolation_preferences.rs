@@ -12,28 +12,31 @@
 //! feature `test-support`, que la dev-dependency de `Cargo.toml` active. Retirer
 //! cette feature fait échouer ce test.
 //!
-//! Un seul test, dans son propre binaire : il pose `XDG_CONFIG_HOME` (état
-//! global du processus) et lit la langue du chargeur global.
+//! Un seul test, dans son propre binaire : il pose `STOKESFORGE_CONFIG_DIR`
+//! (état global du processus ; la seule variable que `directories` n'ignore
+//! pas hors Linux, #332) et lit la langue du chargeur global.
 
 use stokesforge_app_state::i18n::{self, Language, LANGUAGE_VARIABLE};
 use stokesforge_app_state::preferences::Preferences;
 use stokesforge_app_state::state::{Action, AppState};
 use stokesforge_core::Project;
+use stokesforge_import::config_dir::{config_dir, CONFIG_DIR_VARIABLE};
 use stokesforge_session::Session;
 
 #[test]
 fn un_etat_bati_par_new_n_atteint_pas_le_vrai_fichier_des_preferences() {
     // Le « vrai » dossier de configuration est celui-ci, le temps du test.
     let config = tempfile::tempdir().expect("dossier temporaire");
+    std::env::set_var(CONFIG_DIR_VARIABLE, config.path());
     std::env::set_var("XDG_CONFIG_HOME", config.path());
     std::env::remove_var(LANGUAGE_VARIABLE);
-    let dirs = directories::ProjectDirs::from("", "", "StokesForge").expect("dossiers");
-    assert!(
-        dirs.config_dir().starts_with(config.path()),
-        "témoin : le dossier de configuration suit XDG_CONFIG_HOME ({:?})",
-        dirs.config_dir()
+    let dossier = config_dir().expect("dossier de configuration");
+    assert_eq!(
+        dossier,
+        config.path(),
+        "témoin : le dossier de configuration suit STOKESFORGE_CONFIG_DIR"
     );
-    let fichier = dirs.config_dir().join("preferences.json");
+    let fichier = dossier.join("preferences.json");
 
     // Une préférence « de l'utilisateur » : français, écrite au vrai chemin.
     let mut reelles = Preferences::load_from(Some(fichier.clone()));

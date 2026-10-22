@@ -23,7 +23,11 @@ source scripts/licenses-tools.env
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 TEMP_FILE="$(mktemp "$(dirname "$OUTPUT_FILE")/.licenses-rust-XXXXXX")"
 trap 'rm -f "$TEMP_FILE"' EXIT
+# cargo-about est un exécutable natif : sous Git Bash (conversion des chemins
+# coupée par app-dist-windows.sh), il lui faut un chemin Windows.
+ABOUT_OUT="$TEMP_FILE"
+if command -v cygpath >/dev/null 2>&1; then ABOUT_OUT="$(cygpath -m "$TEMP_FILE")"; fi
 cargo about generate --workspace --all-features --locked --fail \
-    scripts/licenses.hbs -o "$TEMP_FILE"
+    scripts/licenses.hbs -o "$ABOUT_OUT"
 cat vendor/crate-license-notices/NOTICE.txt >> "$TEMP_FILE"
 mv "$TEMP_FILE" "$OUTPUT_FILE"

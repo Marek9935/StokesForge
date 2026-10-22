@@ -83,7 +83,9 @@ else
 fi
 
 # --- 5. Vérification finale -------------------------------------------------
-"$PY" -I -c "
+# `-X utf8` : sous Windows, Python écrirait en cp1252 dans le tube (« chargé »
+# illisible dans Git Bash) ; `-I` ignorerait PYTHONIOENCODING (#332).
+"$PY" -I -X utf8 -c "
 import numpy, scipy, sys
 assert numpy.__version__ == '$NUMPY_VERSION', numpy.__version__
 assert scipy.__version__ == '$SCIPY_VERSION', scipy.__version__

@@ -7,6 +7,7 @@
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
     "thiserror", // erreurs typées, sans surface UI
+    "libm",      // fonctions transcendantes en Rust pur : mêmes bits partout (#332)
 ];
 
 #[test]

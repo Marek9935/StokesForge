@@ -4,8 +4,8 @@
 //! applications énumèrent et prennent le plus riche qu'elles comprennent.
 //! `PNG` est le format enregistré qu'Office, les navigateurs et GIMP lisent ;
 //! le SVG et le PDF gardent leur type MIME comme nom (convention d'Inkscape
-//! pour le SVG). **Non exécuté** : ce module est compilé pour Windows par
-//! `cargo check --target x86_64-pc-windows-gnu`, rien de plus.
+//! pour le SVG). Vérifié contre le vrai presse-papiers par `tests/windows.rs` (#332, `--ignored`) ; compilé aussi par
+//! `cargo check --target x86_64-pc-windows-gnu`.
 
 use clipboard_win::{raw, Clipboard};
 

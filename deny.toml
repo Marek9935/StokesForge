@@ -32,6 +32,13 @@ allow = ["Ubuntu-font-1.0"]
 crate = "option-ext@0.2.0"
 allow = ["MPL-2.0"]
 
+# Dépendance de test seulement (egui_kittest → dify), jamais livrée : aucune
+# notice à fournir. MPL-2.0 est compatible GPL et ne s'applique qu'aux fichiers
+# de la crate, que l'on ne modifie pas.
+[[licenses.exceptions]]
+crate = "colored@2.2.0"
+allow = ["MPL-2.0"]
+
 # Le manifeste 5.0.3 annonce MIT mais son fichier LICENSE est BSD-3-Clause.
 # Conserver le texte de Dropbox ; le hash lie la clarification à ce fichier.
 [[licenses.clarify]]

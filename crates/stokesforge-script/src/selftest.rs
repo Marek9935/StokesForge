@@ -272,10 +272,9 @@ fn step_interpreter(
     match interpreter::sys_path() {
         Ok(paths) => {
             environment.push(("entrées de sys.path".to_owned(), paths.len().to_string()));
-            let prefix = python.home().to_string_lossy().into_owned();
             let intrus: Vec<&str> = paths
                 .iter()
-                .filter(|entry| !entry.starts_with(&prefix))
+                .filter(|entry| !python.contains_path(entry))
                 .map(String::as_str)
                 .collect();
             if !intrus.is_empty() {

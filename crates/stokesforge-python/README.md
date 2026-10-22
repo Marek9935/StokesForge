@@ -33,7 +33,8 @@ Avant les scripts de distribution, installer les outils de licence figés
 selon [`docs/licence-et-extensions.md`](../../docs/licence-et-extensions.md).
 Ils livrent aussi les notices du code, des ressources, de CPython et de
 numpy. Une mise à jour du verrou Python actualise
-[`vendor/python/licenses/`](../../vendor/python/licenses/README.md).
+[`vendor/python/licenses-linux/`](../../vendor/python/licenses-linux/README.md) et
+[`licenses-windows/`](../../vendor/python/licenses-windows/README.md).
 
 ```bash
 scripts/python-vendor.sh     # interpréteur + numpy épinglé dans vendor/python/extracted/python

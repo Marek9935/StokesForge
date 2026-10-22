@@ -161,7 +161,7 @@ fn une_plage_vide_est_une_erreur() {
 fn l_ajustement_global_partage_un_parametre_entre_les_series() {
     let mk = |a: f64| {
         let x: Vec<f64> = (0..80).map(|i| i as f64 * 0.1).collect();
-        let y = x.iter().map(|v| a * (-v / 2.0).exp()).collect();
+        let y = x.iter().map(|v| a * libm::exp(-v / 2.0)).collect();
         SeriesInput { x, y, sigma: None }
     };
     let op = Operation::Fit {
@@ -304,7 +304,7 @@ fn validate_et_readiness_de_l_integrale_se_tiennent_independamment() {
 fn les_pics_detectes_automatiquement_donnent_une_colonne_par_composante() {
     let x: Vec<f64> = (0..400).map(|i| i as f64 * 0.1).collect();
     let g = |v: f64, h: f64, c: f64, w: f64| {
-        h * (-4.0 * std::f64::consts::LN_2 * ((v - c) / w).powi(2)).exp()
+        h * libm::exp(-4.0 * std::f64::consts::LN_2 * ((v - c) / w).powi(2))
     };
     let y = x
         .iter()
@@ -367,7 +367,7 @@ fn reconvolution_et_deconvolution_directe_de_bout_en_bout() {
     let x: Vec<f64> = (0..n).map(|i| i as f64 * step).collect();
     let irf_y: Vec<f64> = x
         .iter()
-        .map(|t| (-(t - 1.0_f64).powi(2) / (2.0 * 0.1 * 0.1)).exp())
+        .map(|t| libm::exp(-(t - 1.0_f64).powi(2) / (2.0 * 0.1 * 0.1)))
         .collect();
     let aux = AuxInput {
         x: x.clone(),
@@ -376,7 +376,7 @@ fn reconvolution_et_deconvolution_directe_de_bout_en_bout() {
     let sum: f64 = irf_y.iter().sum();
     let h: Vec<f64> = irf_y.iter().map(|v| v / sum).collect();
     // Signal : convolution directe de h avec 50·exp(−t/1.5).
-    let u: Vec<f64> = x.iter().map(|t| 50.0 * (-t / 1.5).exp()).collect();
+    let u: Vec<f64> = x.iter().map(|t| 50.0 * libm::exp(-t / 1.5)).collect();
     let y: Vec<f64> = (0..n)
         .map(|k| (0..=k).map(|j| h[j] * u[k - j]).sum::<f64>())
         .collect();
@@ -515,7 +515,7 @@ fn deconvolution_signal_non_uniforme_leve_l_avertissement_et_couvre_le_dernier_x
     let aux = AuxInput {
         x: (0..40).map(|i| i as f64 * 0.1).collect(),
         y: (0..40)
-            .map(|i| (-(i as f64 * 0.1 - 1.0).powi(2) / 0.18).exp())
+            .map(|i| libm::exp(-(i as f64 * 0.1 - 1.0).powi(2) / 0.18))
             .collect(),
     };
     let dir = Operation::DirectDeconvolution {

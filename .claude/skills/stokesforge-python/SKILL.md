@@ -11,7 +11,7 @@ description: Travailler sur le pont Python de StokesForge — interpréteur CPyt
 commit explicite dans la liste fermée de `docs/licence-et-extensions.md` ;
 ne pas étendre la permission aux API Rust ou à une future liaison par analogie.
 Une modification du runtime Python impose aussi de mettre à jour ses notices
-dans `vendor/python/licenses/` avant de livrer une distribution.
+dans `vendor/python/licenses-linux/` et `licenses-windows/` avant de livrer une distribution.
 
 Deux crates, derrière la feature `python`, **absente de `default`** :
 
@@ -24,6 +24,19 @@ La pile embarquée porte numpy **et scipy** (#191), versions épinglées dans
 `vendor/python/lock.env` ; scipy sert aux scripts seulement, jamais à l'interface.
 Changer une version : `scripts/python-vendor.sh`, `scripts/python-test.sh`, notices
 (`scripts/licenses-dist.sh`).
+
+**Windows (#332).** `scripts/app-dist-windows.sh` (Git Bash) assemble le
+staging, le valide (fenêtre, `stokesforge-selftest` en environnement vidé et
+piégé, deux témoins : sans `python312.dll` ou sans `lib/python` il doit
+échouer), compile l'installeur `scripts/stokesforge.iss` (Inno Setup 6,
+`ISCC.exe`) puis l'installe dans un dossier à espace et accent, relance le
+selftest et désinstalle. Différences avec Linux : pas de rpath (la DLL est
+cherchée dans le dossier de l'exécutable), DLL Visual C++ livrées à côté de
+l'exe, tkinter/tcl/tests retirés, `PATH` réduit à `System32` (`env -i` sans
+`SYSTEMROOT` casse Windows), `MSYS2_ARG_CONV_EXCL='*'` pour les `/DIR=…`, et
+`python -X utf8` pour lire une sortie Python depuis Git Bash. `stokesforge-app`
+est du sous-système fenêtré en release (pas de console noire) et se rattache au
+terminal parent (`console_windows.rs`) ; `stokesforge-selftest` reste console.
 
 Lire `docs/python-et-script.md` et `crates/stokesforge-python/README.md` avant de
 commencer.

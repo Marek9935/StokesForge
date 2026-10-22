@@ -681,8 +681,8 @@ fn read_recent_analyses(
         .collect()
 }
 
-/// `directories::ProjectDirs::from("", "", "StokesForge")`, dossier de
-/// configuration, fichier `preferences.json` — le même dossier que
+/// Fichier `preferences.json` du dossier de configuration
+/// (`stokesforge_import::config_dir::config_dir`, #332) — le même dossier que
 /// `couleurs.json` et `import_recipes.json`.
 ///
 /// Sous `cfg(test)` **ou** la feature `test-support` : `None`. Un test unitaire
@@ -696,8 +696,7 @@ fn default_path() -> Option<PathBuf> {
     if cfg!(any(test, feature = "test-support")) {
         return None;
     }
-    directories::ProjectDirs::from("", "", "StokesForge")
-        .map(|dirs| dirs.config_dir().join("preferences.json"))
+    stokesforge_import::config_dir::config_dir().map(|dir| dir.join("preferences.json"))
 }
 
 #[cfg(test)]

@@ -544,7 +544,8 @@ de l'enregistrement. Sans argument, la démonstration n'a pas de chemin.
 
 Le format ne change pas : une copie de secours est un `.stf` ordinaire, écrit par
 `SessionHandle::save` (donc par temporaire et renommage) dans `recovery/` du dossier
-de données, à côté d'une fiche `.json` (chemin d'origine, heure) et d'un verrou
+de données (ou `<STOKESFORGE_CONFIG_DIR>/recovery` quand la variable est posée,
+#332), à côté d'une fiche `.json` (chemin d'origine, heure) et d'un verrou
 `.lock` qui n'appartiennent pas au format. Elle ne passe jamais par le repère
 « enregistré » : ni `saved_revision`, ni chemin de travail. Proposée au démarrage
 suivant seulement si elle est plus récente que son `.stf`. Détail :

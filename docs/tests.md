@@ -9,9 +9,21 @@ toutes les plateformes et features, y compris `python`, sans compilation :
 ce contrôle ne valide pas le pont Python. L'artefact conserve les textes
 générés à partir du verrou de ce pipeline.
 `scripts/licenses-test.sh` vérifie les témoins de refus : runtime sans notice,
-jeu de notices Python périmé, compléments pour un autre verrou Cargo et
+jeu de notices Python périmé ou d'une autre plateforme (Linux et Windows,
+`STOKESFORGE_LICENSES_PLATFORM`), compléments pour un autre verrou Cargo et
 dépendance GPL-2.0-only hors politique. Ces
 sondes utilisent des répertoires temporaires, sans modifier les sources.
+
+**Distribution Windows (#332).** `scripts/app-dist-windows.sh` est son propre
+test : fenêtre empaquetée ouverte puis fermée, `stokesforge-selftest` en
+environnement vidé (PATH réduit à System32) et piégé (`PYTHONPATH`,
+`PYTHONHOME`), puis deux témoins de refus (un exécutable seul sans
+`python312.dll`, et `lib/python` déplacé, doivent échouer), l'installeur compilé
+puis installé dans un dossier à espace et accent, selftest relancé depuis
+l'installation, clés `.stf` vérifiées, désinstallation complète. Ce que ces
+épreuves ne prouvent pas : le démarrage sur un poste sans runtime Visual C++
+installé (le poste de développement en a un dans System32) ni, sans terminal
+parent, l'affichage des messages de `console_windows::attach_parent`.
 
 Les distributions appellent `scripts/licenses-dist.sh`, qui ajoute les textes
 de StokesForge, les notices Rust, OFL et Phosphor, celles des patches, ainsi
@@ -40,6 +52,7 @@ par inadvertance, et ce sont eux qu'il faut comprendre avant de les modifier.
 | `stokesforge-persistence/tests/fichiers_temoins.rs` (S4, #323) | le fichier `tests/temoins/v1/projet.stf` se relit en rendant exactement le projet témoin (tous les types de nœuds, de colonnes et de séries, valeurs hors défaut), et l'enregistrement du projet redonne ses octets : le format écrit ne dérive pas sans décision. Témoin : renommer un champ de `schema.rs` ou de `recipe_record.rs` fait échouer les deux tests. Régénération : voir `persistance.md`, « Règle de version » |
 | `stokesforge-arch-guard/tests/renvois_fiches.rs` (F1, #301) | les fiches `.claude/skills/stokesforge-feature/references/*.md` ne portent que des renvois « `fichier.md` § Titre » : chaque fichier et chaque titre cité doit exister, un `§` sans chemin est refusé, et le `SKILL.md` liste exactement les fiches présentes |
 | `stokesforge-arch-guard/tests/codes_standard.rs` (#301) | tout code `S-XN` cité (docs, skills, commentaires, tests) figure dans l'index des règles de `docs/standard-interface.md` ; témoin sur un code inconnu |
+| `stokesforge-arch-guard/tests/config_dir.rs` (#332) | `ProjectDirs::from` n'est appelé que par `stokesforge-import/src/config_dir.rs` (lignes de commentaire ignorées) : tout chemin du profil passe par `config_dir()`, que les tests redirigent par `STOKESFORGE_CONFIG_DIR`. Témoin : une source factice qui l'appelle est refusée, un commentaire non ; mutant éprouvé : l'appel ajouté à `recent.rs` fait échouer la garde |
 | `stokesforge-render-svg/tests/frontiere.rs` | l'export ne voit ni `egui`, ni `eframe`, ni `winit` — donc se teste sans serveur graphique |
 | `stokesforge-render/tests/mesure.rs` | la source unique de mesure de texte (invariant 4) |
 | `stokesforge-render/src/{view,interact}.rs` (modules `tests`) | interaction sans egui (#262) : cadrage d'un geste (zoom, pan, échelle log, axe inversé, calques superposés, axe seul, panneau inconnu), réinitialisation, point le plus proche (courbe, hors de portée, série masquée ou de droite, calque du spec) ; mutants éprouvés (signe du pan, filtre de case, calque lié, rayon, série masquée) ; géométrie de l'aperçu d'analyse (#261) : `PanelTransform::new` (origine fractionnaire, log inversé, zoom, rectangle), cadre initial (`fit_range`, `axis_frame`), `snap_to_curve` (n, bord, `ys` trop court) et `snap_to_curve_zone` (zone moyennée : n impair et pair, bord tronqué, abscisses non triées, #334) et `scale::axis_ticks` (mêmes points que le pipeline, décades, virgule, borne sans image) ; mutants éprouvés (origine arrondie, `1 - fy`, filtre `> 0` en log, demi-fenêtre, `label_count` figé à 5, virgule oubliée, `abs` de la tolérance du clic droit, `.min(ys.len())`, demi-fenêtre de la zone, bornes de la zone prises aux extrémités) ; rond d'aimantation (#334) : `snap_radius` (un point = 6 px, demi-côté, zone asymétrique, axe X inversé, plafond, pixel non fini) et banc de l'aperçu (le rond grandit avec N, texte = nombre réel de points au bord) ; mutants éprouvés (`abs`, `max` → `min`, plancher, plafond, rayon 6.0 en dur, N au lieu du nombre réel) ; `app/analysis_preview.rs` (`zone_tests`) : glisser de zone, clic droit sur axe X inversé ; navigation de l'aperçu (#270, banc `Banc` image par image) : molette seule sans effet, Ctrl + molette et pincement (donnée sous le pointeur gardée), zoom par axe, Maj + molette = moyenne sans zoom, Ctrl + glisser (cadre translaté, aucune zone, axe X inversé, par axe), Ctrl + clic sans point, double-clic recadre, pics (clic = graine, glisser = plage) ; mutants éprouvés (signe du pan, molette seule, `!command` du clic, bornes d'axe, mode du glisser, lecture de la molette sous Maj, facteur inversé, double-clic) ; `app/form.rs` : textes entourés (`toggle_texts` : fond plein de l'option courante, bascule, clic sur la courante) ; `stokesforge-app-state/tests/analysis.rs` : `tool_choices` (seuls les pics ont le choix) |
@@ -235,6 +248,10 @@ d'indétermination (1e-6), `le_cas_de_l_issue_donne_les_incertitudes_du_modele_l
 échoue. Au-delà de X ≈ 3e7, la pente d'une droite libre est déclarée indéterminée
 (incertitude omise, avertissement) : le bruit des différences finies (≈ 2e-10)
 n'y sépare plus la direction faible.
+
+### Déterminisme numérique d'analyse (#332)
+
+`stokesforge-analysis/tests/determinisme.rs` : résultats figés **au bit près** (`to_bits()`) pour toutes les plateformes, parce que les fonctions transcendantes passent par le crate `libm` ; la CI Linux les confirme. Décomposition en pics de la série en paliers de cinq lignes (20 valeurs, R² compris) ; la dent de scie de #290 ne converge sur aucune plateforme (`NotConverged { iterations: 400 }`) ; cinq valeurs d'expression (`exp`, `ln`, `sin`, `pow`, `atan2`) et un balayage de 256 abscisses par fonction (empreinte FNV-1a des bits). Garde : `crates/stokesforge-analysis/clippy.toml` (`disallowed-methods`, vérifié par `cargo clippy -p stokesforge-analysis --all-targets -- -D warnings`). Mutants éprouvés : `x.exp()` réintroduit dans `peaks.rs` (clippy échoue) ; `Func::Exp` calculé par `exp2(a * LOG2_E)` (les cinq valeurs isolées ne le voyaient pas, le balayage oui : d'où le balayage).
 
 ### Bornes, prérequis et réglages d'analyse (#260)
 
@@ -454,6 +471,17 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
   plafonds et compteurs déjà arbitrés sont documentés à l'endroit de leur
   constante, et recensés dans
   `docs/archive/rustrewrite/questions-ouvertes.md` §11.
+- **Captures d'écran** (`harness.snapshot`, `egui_kittest`, références dans
+  `crates/*/tests/snapshots/`) : les références viennent de **Linux**. Un autre
+  pilote graphique rasterise le texte fin au pixel près différemment (constaté
+  sous Windows : `preferences_proto_analysis`, 1 pixel hors seuil sur 573
+  écarts). `kittest.toml` à la racine règle la tolérance par système : Linux
+  garde le défaut strict (seuil 0.6, 0 pixel hors seuil), Windows et macOS
+  tolèrent `max_failed_pixels = 10`. Une vraie régression en touche des
+  centaines. Ne **jamais** régénérer une référence (`UPDATE_SNAPSHOTS=1`) hors
+  Linux : elle cesserait de correspondre à la CI. Un échec de capture est un
+  `panicked` au `Drop` du banc, pas un plantage ; le test laisse `*.new.png` et
+  `*.diff.png` à côté de la référence (à ne pas committer).
 - La langue de l'interface est un état **global** du processus
   (`i18n::set_language`) : un test unitaire qui doit peindre dans une langue
   précise (`en`, `en-XA`) se relance en sous-processus avec `STOKESFORGE_LANG`
@@ -499,11 +527,26 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
 - Un test ne lit pas non plus les modèles d'import ni les fichiers récents de
   la machine (`import_recipes.json`, `import_recent.json`) : un modèle
   enregistré « Jasco » passait devant le modèle intégré et faisait échouer le
-  choix automatique (#195). Il redirige `XDG_CONFIG_HOME` vers un dossier
-  temporaire — sous verrou si le test restaure la valeur
-  (`stokesforge-import/src/store.rs`), ou une seule fois par processus avant
-  tout banc (`configuration_hermetique`, `stokesforge-script/tests/script.rs`).
-- `stokesforge-clipboard` (#149) : la décision des réponses X11 (`x11::answer`) et les noms de formats Windows/macOS se testent sans serveur ; l'offre X11 se teste contre un **vrai serveur** (`tests/x11.rs`, `#[ignore]`, `DISPLAY` requis, XWayland suffit : `cargo test -p stokesforge-clipboard --test x11 -- --ignored`). Wayland, Windows et macOS n'ont pas de test automatique : Wayland exige un compositeur et une entrée réelle (serial), les deux autres ne sont que compilés (`cargo check --target …`). Un test X11 d'un destinataire ne teste pas `response_type` d'un `SelectionNotify` : un événement venu de `SendEvent` porte le bit 0x80.
+  choix automatique (#195). Il redirige le dossier de configuration vers un
+  dossier temporaire en posant `STOKESFORGE_CONFIG_DIR` **et**
+  `XDG_CONFIG_HOME` (#332 : `directories` n'honore que la seconde, et
+  seulement sous Linux ; sous Windows les tests écrivaient dans le vrai
+  `%APPDATA%\StokesForge\config\` et se disputaient le fichier, « Access is
+  denied ») — sous verrou si le test restaure les valeurs
+  (`stokesforge-import/src/store.rs`, `tests/builtin.rs`,
+  `stokesforge-app-state/tests/shell.rs`), ou une seule fois par processus
+  avant tout banc (`configuration_hermetique`,
+  `stokesforge-script/tests/script.rs` ; `isolated`,
+  `stokesforge-cli/tests/import.rs`). Règle unique `config_dir` ; formes pures
+  `config_dir_from`/`recovery_dir_from` testées sans `set_var`
+  (`stokesforge-import/src/config_dir.rs`, mutants éprouvés : filtre du vide,
+  suffixe `recovery`, variable ignorée, `data_dir` remplacé par `config_dir`) ;
+  de bout en bout, `l_isolation_redirige_le_dossier_de_config_et_l_enregistrement_y_ecrit`
+  (`shell.rs`, mutant éprouvé : `ProjectDirs` remis dans `store.rs`).
+  Limite connue : `UserColors::load()` (`state.rs`) n'a pas d'isolation
+  `cfg(test)`, un test qui enregistre une couleur d'utilisateur écrirait dans
+  le vrai `couleurs.json`.
+- `stokesforge-clipboard` (#149) : la décision des réponses X11 (`x11::answer`) et les noms de formats Windows/macOS se testent sans serveur ; l'offre X11 se teste contre un **vrai serveur** (`tests/x11.rs`, `#[ignore]`, `DISPLAY` requis, XWayland suffit : `cargo test -p stokesforge-clipboard --test x11 -- --ignored`). Windows se teste de même contre le **vrai presse-papiers** (`tests/windows.rs`, `#[ignore]`, bureau interactif requis : `cargo test -p stokesforge-clipboard --test windows -- --ignored` ; témoin : un `windows_format_name` qui rend le MIME pour PNG fait échouer la relecture du format « PNG »). Wayland et macOS n'ont pas de test automatique : Wayland exige un compositeur et une entrée réelle (serial), macOS n'est que compilé (`cargo check --target …`). Un test X11 d'un destinataire ne teste pas `response_type` d'un `SelectionNotify` : un événement venu de `SendEvent` porte le bit 0x80.
 - Les tests et leurs commentaires sont en français, comme le reste.
 
 **À lire** : `stokesforge-robustesse/src/lib.rs` (l'index des batteries), puis la

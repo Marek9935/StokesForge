@@ -60,6 +60,24 @@ fn prepare() -> EmbeddedPython {
     embedded
 }
 
+/// #332 : l'appartenance au préfixe se juge par composants — ni un voisin
+/// au nom prolongé, ni (sous Windows) une différence de séparateur.
+#[test]
+fn contains_path_compare_par_composants() {
+    let embedded = EmbeddedPython::with_home(PathBuf::from("/opt/sf/python"));
+    assert!(embedded.contains_path("/opt/sf/python"));
+    assert!(embedded.contains_path("/opt/sf/python/lib/site-packages"));
+    assert!(!embedded.contains_path("/opt/sf/python3/lib"));
+    assert!(!embedded.contains_path("/usr/lib/python3.12"));
+
+    #[cfg(windows)]
+    {
+        let embedded = EmbeddedPython::with_home(PathBuf::from("C:/dev/sf/python"));
+        assert!(embedded.contains_path(r"C:\dev\sf\python\Lib\site-packages"));
+        assert!(!embedded.contains_path(r"C:\dev\sf\python3\Lib"));
+    }
+}
+
 #[test]
 fn initialisation_idempotente() {
     let embedded = prepare();
@@ -129,7 +147,15 @@ fn sys_path_ne_contient_que_le_prefixe_embarque() {
         .home()
         .canonicalize()
         .expect("le préfixe embarqué doit exister");
-    let prefixe = prefixe.to_string_lossy().into_owned();
+    // Comparaison de chemins canoniques, pas de chaînes : sous Windows,
+    // `canonicalize` rend la forme `\\?\C:\…` alors que `sys.path` porte
+    // `C:\…` (#332). Une entrée introuvable ne se canonicalise pas et reste
+    // donc étrangère.
+    let dans_le_prefixe = |chemin: &str| {
+        std::path::Path::new(chemin)
+            .canonicalize()
+            .is_ok_and(|c| c.starts_with(&prefixe))
+    };
 
     let chemins = interpreter::sys_path().expect("sys.path");
     assert!(!chemins.is_empty());
@@ -143,7 +169,7 @@ fn sys_path_ne_contient_que_le_prefixe_embarque() {
             "sys.path contient un site utilisateur : {chemin}"
         );
         assert!(
-            !chemin.contains("site-packages") || chemin.starts_with(&prefixe),
+            !chemin.contains("site-packages") || dans_le_prefixe(chemin),
             "sys.path contient un site-packages étranger : {chemin}"
         );
     }

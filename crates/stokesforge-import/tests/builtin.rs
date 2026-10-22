@@ -92,12 +92,20 @@ fn automatic_choice_proposes_the_right_model_or_none() {
     assert_eq!(auto_name("proprietary_binary.dat"), None);
 }
 
+/// Protège les tests de ce binaire qui redirigent le dossier de config
+/// (état du *processus*, partagé par les threads de `cargo test`).
+static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn builtins_are_listed_but_never_written_to_the_user_file() {
+    let _lock = CONFIG_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|err| err.into_inner());
     let dir = tempfile::tempdir().unwrap();
-    // `directories` lit XDG_CONFIG_HOME : un dossier neuf, donc aucune recette
-    // utilisateur.
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
+    // Un dossier neuf, donc aucune recette utilisateur : `config_dir` lit
+    // `STOKESFORGE_CONFIG_DIR` (#332), `directories` ignore `XDG_CONFIG_HOME`
+    // hors Linux. Les valeurs d'avant sont restaurées, même sur panique.
+    let _restauration = ConfigRestauree::redirige(dir.path());
     let store = RecipeStore::load_with_builtins();
     assert!(store.recipes().len() >= builtin_recipes().len());
     assert!(RecipeStore::load().recipes().is_empty());
@@ -121,7 +129,34 @@ fn builtins_are_listed_but_never_written_to_the_user_file() {
         "la version modifiée remplace celle du programme"
     );
     assert_eq!(rpe[0].skip_chars, 3);
-    std::env::remove_var("XDG_CONFIG_HOME");
+}
+
+/// Pose `STOKESFORGE_CONFIG_DIR` et `XDG_CONFIG_HOME`, restaure les deux.
+struct ConfigRestauree([(&'static str, Option<std::ffi::OsString>); 2]);
+
+impl ConfigRestauree {
+    fn redirige(dossier: &std::path::Path) -> Self {
+        let noms = [
+            stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
+            "XDG_CONFIG_HOME",
+        ];
+        let avant = noms.map(|nom| (nom, std::env::var_os(nom)));
+        for nom in noms {
+            std::env::set_var(nom, dossier);
+        }
+        Self(avant)
+    }
+}
+
+impl Drop for ConfigRestauree {
+    fn drop(&mut self) {
+        for (nom, valeur) in self.0.iter_mut() {
+            match valeur.take() {
+                Some(valeur) => std::env::set_var(nom, valeur),
+                None => std::env::remove_var(nom),
+            }
+        }
+    }
 }
 
 #[test]

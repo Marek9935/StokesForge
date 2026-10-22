@@ -125,6 +125,15 @@ const STALL_COSINE: f64 = 1e-6;
 /// pente à lire, son cosinus vaut ~0,05 sans rien vouloir dire.
 const EXACT_FIT_FRACTION: f64 = 1e-20;
 
+/// Part de l'énergie des Y sous laquelle le χ² ne peut plus baisser que par
+/// l'arrondi : un résidu de l'ordre de l'epsilon de `f64` (~1e-16 de Y, soit
+/// ~1e-32 en carré) sur des données sans bruit. Au-delà de ce plancher
+/// (1e-28, quelques epsilons) chaque pas « améliore » le χ² de quelques ulp sans
+/// que les critères relatifs (`drop`, `moved`) ne se déclenchent, et la
+/// convergence dépendait du dernier ulp de `exp`/`ln` de la plateforme (#332).
+/// Le solveur est alors arrivé : ce n'est pas un plateau, le résidu est nul.
+const ROUNDING_FLOOR_FRACTION: f64 = 1e-28;
+
 /// λ du pas de vérification (#293) : l'amortissement de Marquardt suit la
 /// diagonale de `JᵀJ`, qui vaut 1e15 et plus pour un X décalé de 1e7 ; sous ce
 /// plancher il bride encore la direction faible, donc on le coupe presque.
@@ -191,6 +200,21 @@ pub fn solve_problem(
         return Err(AnalysisError::NonFiniteModel);
     }
 
+    // Énergie des Y, pondérée comme le résidu : l'échelle des deux seuils
+    // d'ajustement exact (`ROUNDING_FLOOR_FRACTION`, `EXACT_FIT_FRACTION`).
+    let energy: f64 = terms
+        .iter()
+        .map(|t| {
+            t.y.iter()
+                .enumerate()
+                .map(|(i, y)| {
+                    let w = t.sigma.map_or(1.0, |s| 1.0 / s[i]);
+                    (y * w) * (y * w)
+                })
+                .sum::<f64>()
+        })
+        .sum();
+
     let mut lambda = 1e-3;
     let mut iterations = 0;
     let mut converged = false;
@@ -224,7 +248,7 @@ pub fn solve_problem(
                 acc
             }
         });
-        if residual_norm == 0.0 || cosine < 1e-9 {
+        if residual_norm == 0.0 || cosine < 1e-9 || chi2 <= ROUNDING_FLOOR_FRACTION * energy {
             converged = true;
             break;
         }
@@ -302,18 +326,6 @@ pub fn solve_problem(
             // l'arrêt `moved < 1e-11` le déclare convergé, sans avertissement.
             // Un résidu au niveau de l'arrondi (ajustement exact) n'a pas de
             // pente lisible : son cosinus n'est que du bruit, jamais un blocage.
-            let energy: f64 = terms
-                .iter()
-                .map(|t| {
-                    t.y.iter()
-                        .enumerate()
-                        .map(|(i, y)| {
-                            let w = t.sigma.map_or(1.0, |s| 1.0 / s[i]);
-                            (y * w) * (y * w)
-                        })
-                        .sum::<f64>()
-                })
-                .sum();
             let exact = chi2 <= EXACT_FIT_FRACTION * energy;
             stalled = !exact
                 && (0..free.len()).any(|k| {
@@ -587,14 +599,14 @@ mod tests {
     #[test]
     fn retrouve_une_exponentielle_avec_decalage() {
         let x = xs(200, 0.0, 10.0);
-        let y: Vec<f64> = x.iter().map(|v| 1.0 + 4.0 * (-v / 2.5).exp()).collect();
+        let y: Vec<f64> = x.iter().map(|v| 1.0 + 4.0 * libm::exp(-v / 2.5)).collect();
         let term = Term {
             x: &x,
             y: &y,
             sigma: None,
             eval: Box::new(|p, out| {
                 for (o, v) in out.iter_mut().zip(&x) {
-                    *o = p[0] + p[1] * (-v / p[2]).exp();
+                    *o = p[0] + p[1] * libm::exp(-v / p[2]);
                 }
             }),
         };
@@ -619,7 +631,7 @@ mod tests {
             eval: Box::new(move |p, out| {
                 for (o, v) in out.iter_mut().zip(x) {
                     let z = (v - p[1]) / (p[3] / 2.354_820_045);
-                    *o = p[0] + p[2] * (-0.5 * z * z).exp();
+                    *o = p[0] + p[2] * libm::exp(-0.5 * z * z);
                 }
             }),
         }
@@ -632,7 +644,7 @@ mod tests {
             .enumerate()
             .map(|(i, v)| {
                 let z = (v - 8.0) / (3.0 / 2.354_820_045);
-                5.0 * (-0.5 * z * z).exp() + noise_amp * noise(i)
+                5.0 * libm::exp(-0.5 * z * z) + noise_amp * noise(i)
             })
             .collect();
         (x, y)
@@ -912,7 +924,7 @@ mod tests {
         let y: Vec<f64> = t
             .iter()
             .enumerate()
-            .map(|(i, t)| 2.0 + 3.0 * t + 0.01 * (i as f64 * 1.7).sin())
+            .map(|(i, t)| 2.0 + 3.0 * t + 0.01 * libm::sin(i as f64 * 1.7))
             .collect();
         let slots = vec![Slot::new("a", -off), Slot::new("b", 1.0)];
         let sol = solve_problem(&slots, &[droite_sur(&x, &y)], Options::default());

@@ -104,12 +104,11 @@ impl UserColors {
     }
 }
 
-/// `directories::ProjectDirs::from("", "", "StokesForge")`, dossier de
-/// configuration, fichier `couleurs.json` — le même dossier que
+/// Fichier `couleurs.json` du dossier de configuration
+/// (`stokesforge_import::config_dir::config_dir`, #332) — le même dossier que
 /// `import_recipes.json`.
 fn default_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "StokesForge")
-        .map(|dirs| dirs.config_dir().join("couleurs.json"))
+    stokesforge_import::config_dir::config_dir().map(|dir| dir.join("couleurs.json"))
 }
 
 #[cfg(test)]

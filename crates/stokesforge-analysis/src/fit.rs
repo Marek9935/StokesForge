@@ -427,13 +427,13 @@ mod tests {
         // (naturel), a = 2 / ln 10 ; avec `logx(x, 10)`, a = 2. Si `log`
         // redevenait naturel (#287), a vaudrait 2 ln 10 ≈ 4,6.
         let x = grid(30, 0.5, 200.0);
-        let vrai = |v: f64| 2.0 * v.log10() + 1.0;
+        let vrai = |v: f64| 2.0 * libm::log10(v) + 1.0;
         for (formule, a_attendu) in [
             ("a*log(x)+b", 2.0),
             ("a*log10(x)+b", 2.0),
             ("a*logx(x, 10)+b", 2.0),
-            ("a*ln(x)+b", 2.0 / 10f64.ln()),
-            ("a*log2(x)+b", 2.0 * 2f64.ln() / 10f64.ln()),
+            ("a*ln(x)+b", 2.0 / libm::log(10f64)),
+            ("a*log2(x)+b", 2.0 * libm::log(2f64) / libm::log(10f64)),
         ] {
             let r = fit(
                 &[input(vrai, x.clone())],
@@ -479,7 +479,7 @@ mod tests {
         let x = vec![0.0, 1.0];
         let lin = fit(&[input(|v| 3.0 - 0.5 * v, x.clone())], &spec(Model::Linear)).unwrap();
         let exp = fit(
-            &[input(|v| 3.0 * (-v / 2.0).exp(), x.clone())],
+            &[input(|v| 3.0 * libm::exp(-v / 2.0), x.clone())],
             &spec(Model::Exponential),
         )
         .unwrap();
@@ -498,7 +498,7 @@ mod tests {
             },
             ParamSetting::default(),
         ];
-        let r = fit(&[input(|v| 3.0 * (-v / 2.0).exp(), x)], &sp).unwrap();
+        let r = fit(&[input(|v| 3.0 * libm::exp(-v / 2.0), x)], &sp).unwrap();
         assert_eq!(r.dof, 1);
         assert!(r.series[0].errors[0].is_none() && r.series[0].errors[1].is_some());
     }
@@ -533,7 +533,7 @@ mod tests {
         // a1 = c1 (même erreur), a0 = c0 - S c1, var(a0) = var(c0) + S² var(c1)
         // (colonnes orthogonales, t de moyenne nulle).
         let t = grid(11, -5.0, 5.0);
-        let noise = |i: usize| 0.3 * ((i as f64) * 1.7).sin();
+        let noise = |i: usize| 0.3 * libm::sin((i as f64) * 1.7);
         let mk = |off: f64| {
             let x: Vec<f64> = t.iter().map(|v| off + v).collect();
             let y: Vec<f64> = t
@@ -606,7 +606,7 @@ mod tests {
             };
             let lin = fit(&[mk(&|v| 3.0 - 0.5 * v)], &spec(Model::Linear)).unwrap();
             let exp = fit(
-                &[mk(&|v| 3.0 * (-v / 2.0).exp())],
+                &[mk(&|v| 3.0 * libm::exp(-v / 2.0))],
                 &spec(Model::Exponential),
             )
             .unwrap();
@@ -633,7 +633,7 @@ mod tests {
         let y: Vec<f64> = x
             .iter()
             .enumerate()
-            .map(|(i, &v): (usize, &f64)| 3.0 * (-v / 2.0).exp() + 1e-2 * bruit(i + 1))
+            .map(|(i, &v): (usize, &f64)| 3.0 * libm::exp(-v / 2.0) + 1e-2 * bruit(i + 1))
             .collect();
         let inp = FitInput {
             series: Series::new(x, y),
@@ -649,7 +649,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(i, v)| {
-                2.0 * (-4.0 * 2f64.ln() * (v - 0.3) * (v - 0.3) / 1.5f64.powi(2)).exp()
+                2.0 * libm::exp(-4.0 * libm::log(2f64) * (v - 0.3) * (v - 0.3) / 1.5f64.powi(2))
                     + 1e-2 * bruit(i + 1)
             })
             .collect();
@@ -682,7 +682,7 @@ mod tests {
         let y: Vec<f64> = x
             .iter()
             .enumerate()
-            .map(|(i, &v): (usize, &f64)| 2.0 * (-0.7 * v).exp() + 1e-2 * bruit(i + 1))
+            .map(|(i, &v): (usize, &f64)| 2.0 * libm::exp(-0.7 * v) + 1e-2 * bruit(i + 1))
             .collect();
         let mut sp = spec(Model::Custom {
             formula: "a*exp(-b*x)".into(),
@@ -728,7 +728,7 @@ mod tests {
         ];
         let r = fit(
             &[input(
-                |v| 2.0 * (-4.0 * 2f64.ln() * (v - 0.3).powi(2) / 2.25).exp(),
+                |v| 2.0 * libm::exp(-4.0 * libm::log(2f64) * (v - 0.3).powi(2) / 2.25),
                 x,
             )],
             &sp,
@@ -753,7 +753,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let r = fit(&[input(|v| 2.0 * (-0.7 * v).exp(), vec![0.0, 1.0])], &sp).unwrap();
+        let r = fit(&[input(|v| 2.0 * libm::exp(-0.7 * v), vec![0.0, 1.0])], &sp).unwrap();
         assert_eq!(r.dof, 0);
         assert!(r.series[0].errors.iter().all(Option::is_none));
         assert!(r.reduced_chi2.is_nan());
@@ -761,7 +761,7 @@ mod tests {
 
     #[test]
     fn zero_ddl_avec_ponderation_sigma_sans_incertitude() {
-        let mut i = input(|v| 3.0 * (-v / 2.0).exp(), vec![0.0, 1.0]);
+        let mut i = input(|v| 3.0 * libm::exp(-v / 2.0), vec![0.0, 1.0]);
         i.sigma = Some(vec![0.1, 0.2]);
         let r = fit(&[i], &spec(Model::Exponential)).unwrap();
         assert_eq!(r.dof, 0);
@@ -790,7 +790,7 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let r = fit(&[input(|v| 3.0 * (-v / 2.0).exp(), vec![1.0])], &sp).unwrap();
+        let r = fit(&[input(|v| 3.0 * libm::exp(-v / 2.0), vec![1.0])], &sp).unwrap();
         assert_eq!(r.dof, 0);
         assert!(r.series[0].errors.iter().all(Option::is_none));
         // Cubique sur 3 points : 4 libres > 3.
@@ -816,7 +816,7 @@ mod tests {
             let y: Vec<f64> = x
                 .iter()
                 .enumerate()
-                .map(|(i, &v): (usize, &f64)| a * (-v / 3.0).exp() + 1e-2 * bruit(i + s))
+                .map(|(i, &v): (usize, &f64)| a * libm::exp(-v / 3.0) + 1e-2 * bruit(i + s))
                 .collect();
             FitInput {
                 series: Series::new(x.clone(), y),
@@ -883,8 +883,8 @@ mod tests {
         ];
         let e = fit(
             &[
-                input(|v| 3.0 * (-v).exp(), vec![0.0]),
-                input(|v| 4.0 * (-v).exp(), vec![1.0]),
+                input(|v| 3.0 * libm::exp(-v), vec![0.0]),
+                input(|v| 4.0 * libm::exp(-v), vec![1.0]),
             ],
             &sp,
         )
@@ -915,9 +915,9 @@ mod tests {
     fn logarithme_refuse_les_x_negatifs_puis_ajuste_sans_cheminer_par_le_lineaire() {
         // x ≤ 0 présent : le chemin exact est écarté, Levenberg-Marquardt
         // échoue proprement (modèle non fini au départ).
-        let i = input(|x| 2.0 + 3.0 * x.abs().ln(), grid(11, -5.0, 5.0));
+        let i = input(|x| 2.0 + 3.0 * libm::log(x.abs()), grid(11, -5.0, 5.0));
         assert!(fit(&[i], &spec(Model::Logarithm)).is_err());
-        let ok = input(|x| 2.0 + 3.0 * x.ln(), grid(30, 0.5, 20.0));
+        let ok = input(|x| 2.0 + 3.0 * libm::log(x), grid(30, 0.5, 20.0));
         let r = fit(&[ok], &spec(Model::Logarithm)).unwrap();
         assert!((r.series[0].values[1] - 3.0).abs() < 1e-10);
     }
@@ -929,7 +929,7 @@ mod tests {
         let y: Vec<f64> = x
             .iter()
             .enumerate()
-            .map(|(i, v)| 1.0 + 4.0 * (-v / 2.0).exp() + noise(i))
+            .map(|(i, v)| 1.0 + 4.0 * libm::exp(-v / 2.0) + noise(i))
             .collect();
         let i = FitInput {
             series: Series::new(x, y),
@@ -952,7 +952,7 @@ mod tests {
     fn gaussienne_avec_parametre_fixe_et_bornes() {
         let x = grid(200, 0.0, 20.0);
         let i = input(
-            |v| 1.0 + 5.0 * (-4.0 * std::f64::consts::LN_2 * ((v - 8.0) / 3.0).powi(2)).exp(),
+            |v| 1.0 + 5.0 * libm::exp(-4.0 * std::f64::consts::LN_2 * ((v - 8.0) / 3.0).powi(2)),
             x,
         );
         let mut sp = spec(Model::Gaussian);
@@ -981,7 +981,7 @@ mod tests {
     #[test]
     fn modele_libre() {
         let x = grid(100, 0.0, 5.0);
-        let i = input(|v| 2.0 * (v * 1.3).sin() + 0.5, x);
+        let i = input(|v| 2.0 * libm::sin(v * 1.3) + 0.5, x);
         let r = fit(
             &[i],
             &FitSpec {
@@ -1014,7 +1014,7 @@ mod tests {
         let amplitudes = [2.0, 5.0, 9.0];
         let inputs: Vec<FitInput> = amplitudes
             .iter()
-            .map(|a| input(|v| a * (-v / 3.0).exp(), x.clone()))
+            .map(|a| input(|v| a * libm::exp(-v / 3.0), x.clone()))
             .collect();
         let mut sp = spec(Model::Exponential);
         sp.params = vec![
@@ -1044,7 +1044,7 @@ mod tests {
             let y: Vec<f64> = x
                 .iter()
                 .enumerate()
-                .map(|(i, v)| a * (-v / 2.0).exp() + 0.05 * ((i as f64 * phase).fract() - 0.5))
+                .map(|(i, v)| a * libm::exp(-v / 2.0) + 0.05 * ((i as f64 * phase).fract() - 0.5))
                 .collect();
             FitInput {
                 series: Series::new(x.clone(), y),
@@ -1234,7 +1234,7 @@ mod tests {
         // même en X - S : coefficients = développement, erreurs = diag(T·cov·Tᵀ)
         // calculée à la main (cov inversée par Gauss-Jordan sur la base de t).
         let t = grid(25, -2.0, 2.0);
-        let noise = |i: usize| 0.05 * ((i as f64) * 1.7).sin();
+        let noise = |i: usize| 0.05 * libm::sin((i as f64) * 1.7);
         for d in 1..=5usize {
             let c = &COEFFS[..=d];
             let model = Model::Polynomial { degree: d as u32 };
@@ -1306,7 +1306,7 @@ mod tests {
         // Écart-type de l'ordonnée à l'origine = s·sqrt(1/n + x̄²/Sxx) : le terme
         // x̄² est précisément ce que la propagation T·cov·Tᵀ doit restituer.
         let t = grid(15, -3.0, 3.0);
-        let noise = |i: usize| 0.2 * ((i as f64) * 2.3).cos();
+        let noise = |i: usize| 0.2 * libm::cos((i as f64) * 2.3);
         for off in [0.0, 5.0, 1e3, 1e5, 1e6] {
             let (i, tt) = serie_decalee(off, &t, |k, v| 3.0 - 0.4 * v + noise(k));
             let x = i.series.x.clone();
@@ -1346,7 +1346,7 @@ mod tests {
     fn droite_ponderee_par_sigma_sur_x_decale() {
         let t = grid(12, -3.0, 3.0);
         let sig: Vec<f64> = (0..12).map(|i| 0.1 + 0.05 * i as f64).collect();
-        let noise = |i: usize| 0.2 * ((i as f64) * 1.1).sin();
+        let noise = |i: usize| 0.2 * libm::sin((i as f64) * 1.1);
         let w: Vec<f64> = sig.iter().map(|s| 1.0 / (s * s)).collect();
         for off in [0.0, 1e4, 1e6] {
             let (mut i, tt) = serie_decalee(off, &t, |k, v| 1.0 + 0.5 * v + noise(k));
@@ -1388,7 +1388,7 @@ mod tests {
     fn polynome_pondere_sur_x_decale_memes_coefficients_que_centre() {
         let t = grid(14, -2.0, 2.0);
         let sig: Vec<f64> = (0..14).map(|i| 0.05 + 0.02 * i as f64).collect();
-        let noise = |i: usize| 0.04 * ((i as f64) * 0.9).sin();
+        let noise = |i: usize| 0.04 * libm::sin((i as f64) * 0.9);
         let c = &COEFFS[..=3];
         let m = Model::Polynomial { degree: 3 };
         let (mut i0, _) = serie_decalee(0.0, &t, |k, v| horner(c, v) + noise(k));
@@ -1411,7 +1411,7 @@ mod tests {
         let t = grid(15, -3.0, 3.0);
         let mk = |off: f64, c0: f64| {
             serie_decalee(off, &t, |k, v| {
-                c0 + 0.5 * v - 0.2 * v * v + 0.01 * (k as f64).sin()
+                c0 + 0.5 * v - 0.2 * v * v + 0.01 * libm::sin(k as f64)
             })
             .0
         };
@@ -1459,7 +1459,7 @@ mod tests {
         // χ² dépasse 100 fois celui du jeu centré porte toujours un
         // avertissement (plateau ou paramètres indéterminés), jamais silencieux.
         let t = grid(21, -5.0, 5.0);
-        let noise = |i: usize| 0.01 * ((i as f64) * 1.7).sin();
+        let noise = |i: usize| 0.01 * libm::sin((i as f64) * 1.7);
         for d in 2..=4usize {
             let c: Vec<f64> = (0..=d).map(|j| 1.0 / (1.0 + j as f64)).collect();
             let top = c[d];

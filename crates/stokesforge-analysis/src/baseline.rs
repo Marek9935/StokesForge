@@ -361,7 +361,7 @@ mod tests {
         // Fond : 2 + 0.05 x ; un pic large au milieu.
         let y = x
             .iter()
-            .map(|&v| 2.0 + 0.05 * v + 10.0 * (-(v - 50.0).powi(2) / 20.0).exp())
+            .map(|&v| 2.0 + 0.05 * v + 10.0 * libm::exp(-(v - 50.0).powi(2) / 20.0))
             .collect();
         Series::new(x, y)
     }

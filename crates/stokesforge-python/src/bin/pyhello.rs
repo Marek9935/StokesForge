@@ -52,8 +52,7 @@ fn run() -> Result<(), PythonError> {
     // Auto-contrôle : la distribution se déclare cassée si une seule entrée de
     // `sys.path` sort du préfixe embarqué. C'est ce test, exécuté depuis un
     // environnement piégé, qui fait la preuve d'isolation.
-    let prefixe = embedded.home().to_string_lossy().into_owned();
-    if let Some(intrus) = path.iter().find(|entry| !entry.starts_with(&prefixe)) {
+    if let Some(intrus) = path.iter().find(|entry| !embedded.contains_path(entry)) {
         return Err(PythonError::InitFailed(format!(
             "sys.path contient une entrée hors du préfixe embarqué : {intrus}"
         )));

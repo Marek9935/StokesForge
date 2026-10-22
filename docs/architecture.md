@@ -59,7 +59,7 @@ dépendances.
 | Crate | Rôle | Page |
 |---|---|---|
 | `stokesforge-id` | `NodeId`, et rien d'autre | [modèle](modele-de-donnees.md) |
-| `stokesforge-analysis` | traitement mathématique pur (#181) : lignes de base, correction par référence, intégrales, ajustements, pics, déconvolution ; `f64` où `NaN` dit « vide », résultats à clés stables ; ni UI, ni Python, ni autre crate du workspace | [modèle](modele-de-donnees.md) |
+| `stokesforge-analysis` | traitement mathématique pur (#181) : lignes de base, correction par référence, intégrales, ajustements, pics, déconvolution ; `f64` où `NaN` dit « vide », résultats à clés stables ; fonctions transcendantes par `libm`, mêmes bits sur toutes les plateformes (#332) ; ni UI, ni Python, ni autre crate du workspace | [modèle](modele-de-donnees.md) |
 | `stokesforge-plot` | `PlotSpec` : la description d'un graphe, neutre vis-à-vis du renderer | [modèle](modele-de-donnees.md) |
 | `stokesforge-core` | `Project` / `Tree` / `Node` / `Column`, plus `resolve` (spec → données) et `compose` (colonnes → séries d'un graphe, #257 : appariement X/Y, palette par rang, calques ; lecture du `PlotSpec` ; aucune phrase, aucune mutation) | [modèle](modele-de-donnees.md) |
 | `stokesforge-commands` | les commandes, la pile d'undo hybride, les macros | [commandes](commandes-et-historique.md) |
@@ -158,16 +158,26 @@ ou en texte brut), détaillé dans [`rendu.md`](rendu.md#typst-r8).
 Les `scripts/*.sh` de la racine assemblent et relancent les distributions
 (`dist/`) dans un environnement nettoyé.
 
-**Windows (#332, première passe non vérifiée sous Windows).**
-`scripts/app-dist-windows.sh` (Git Bash) est le pendant de `app-dist.sh` ;
+**Windows (#332).**
+`scripts/app-dist-windows.sh` (Git Bash) est le pendant de `app-dist.sh` : il
+assemble un dossier de staging, l'éprouve, puis le livre en **installeur Inno
+Setup** (`scripts/stokesforge.iss`, `ISCC.exe` requis ; par utilisateur sans
+droits d'administrateur, association « Ouvrir avec » des `.stf`, désinstallation
+complète). Pas de signature de code pour l'instant : Windows affiche « éditeur
+inconnu ». Les DLL Visual C++ sont livrées à côté de l'exécutable ;
+tkinter/Tcl/Tk, les tests et pip sont retirés du Python embarqué. Notices par
+plateforme (`vendor/python/licenses-linux`, `licenses-windows`). La tâche CI
+`dist-windows` est automatique sur un tag `vX.Y.Z`, manuelle sinon ;
+`test-python-windows` est manuelle. En release, `stokesforge-app` est du
+sous-système fenêtré. Les scripts
 `python-vendor.sh`, `python-config.sh` (gabarit
 `pyo3-config.windows.template.txt`) et `python-test.sh` détectent Windows.
 Le préfixe embarqué y a la disposition python-build-standalone
 (`lib/python/{Lib,DLLs}`, `python312.dll` à côté de l'exécutable), prise en
-charge par `EmbeddedPython` (`cfg(windows)`). Reste : exécuter le tout sous
-Windows, établir les notices du runtime Windows (`licenses-dist.sh` refuse
-tant que `vendor/python/licenses` est celui de Linux) et fournir un runner
-(tâche CI `dist-windows`, manuelle).
+charge par `EmbeddedPython` (`cfg(windows)`). Reste à lever avant la V1 :
+recouper les notices Windows avec l'archive complète python-build-standalone
+Windows (`licenses-windows/README.md`), et prouver la distribution sur le runner
+CI (outils : Git Bash, Rust MSVC, cargo-deny, cargo-about, Inno Setup).
 
 ## Vocabulaire
 

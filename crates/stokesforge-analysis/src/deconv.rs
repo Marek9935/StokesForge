@@ -58,7 +58,7 @@ fn fft(re: &mut [f64], im: &mut [f64], inverse: bool) {
     let mut len = 2;
     while len <= n {
         let ang = 2.0 * std::f64::consts::PI / len as f64 * if inverse { 1.0 } else { -1.0 };
-        let (wr, wi) = (ang.cos(), ang.sin());
+        let (wr, wi) = (libm::cos(ang), libm::sin(ang));
         for start in (0..n).step_by(len) {
             let (mut cr, mut ci) = (1.0, 0.0);
             for k in 0..len / 2 {
@@ -526,7 +526,7 @@ pub fn reconvolve(
         let mut out = vec![v[0]; gn];
         for i in 0..nc {
             let (a, tau) = (v[1 + 2 * i], v[2 + 2 * i]);
-            let decay = (-step / tau).exp();
+            let decay = libm::exp(-step / tau);
             let mut c = 0.0;
             for (k, o) in out.iter_mut().enumerate() {
                 c = decay * c + h[k];
@@ -592,7 +592,7 @@ mod tests {
         let x = grid(n, step);
         let y = x
             .iter()
-            .map(|t| (-(t - c).powi(2) / (2.0 * sigma * sigma)).exp())
+            .map(|t| libm::exp(-(t - c).powi(2) / (2.0 * sigma * sigma)))
             .collect();
         Series::new(x, y)
     }
@@ -605,7 +605,7 @@ mod tests {
         let u: Vec<f64> = (0..n)
             .map(|i| {
                 a.iter()
-                    .map(|(am, tau)| am * (-(i as f64) * step / tau).exp())
+                    .map(|(am, tau)| am * libm::exp(-(i as f64) * step / tau))
                     .sum()
             })
             .collect();
@@ -736,7 +736,7 @@ mod tests {
         let u = &r.values;
         let (i0, i1) = (0, (2.0 / step) as usize);
         let ratio = u[i1] / u[i0];
-        assert!((ratio - (-1.0_f64).exp()).abs() < 0.08, "ratio {ratio}");
+        assert!((ratio - libm::exp(-1.0_f64)).abs() < 0.08, "ratio {ratio}");
         assert!(u.iter().all(|v| *v >= 0.0), "positivité de Richardson-Lucy");
         assert!(r.noise_ratio.is_none());
     }
@@ -755,7 +755,7 @@ mod tests {
             )
             .unwrap();
             (0..200)
-                .map(|i| (r.values[i] - 100.0 * (-(i as f64) * step / 2.0).exp()).powi(2))
+                .map(|i| (r.values[i] - 100.0 * libm::exp(-(i as f64) * step / 2.0)).powi(2))
                 .sum::<f64>()
         };
         assert!(err(200) < err(5), "{} vs {}", err(200), err(5));
@@ -782,7 +782,7 @@ mod tests {
         let u = &fixed.values;
         let (i0, i1) = ((1.0 / step) as usize, (3.0 / step) as usize);
         assert!(
-            (u[i1] / u[i0] - (-1.0_f64).exp()).abs() < 0.1,
+            (u[i1] / u[i0] - libm::exp(-1.0_f64)).abs() < 0.1,
             "{}",
             u[i1] / u[i0]
         );
@@ -1052,7 +1052,7 @@ mod tests {
             .map(|i| i as f64 * 0.1)
             .collect();
         x.push(4.04);
-        let y: Vec<f64> = x.iter().map(|t| 0.2 + 3.0 * (-t / 1.2).exp()).collect();
+        let y: Vec<f64> = x.iter().map(|t| 0.2 + 3.0 * libm::exp(-t / 1.2)).collect();
         let signal = Series::new(x.clone(), y);
         let spec = ReconvSpec {
             components: 1,
@@ -1149,7 +1149,7 @@ mod tests {
             }
             let y: Vec<f64> = x
                 .iter()
-                .map(|t| 0.5 + (-t / 1.5).exp() + 0.1 * alea())
+                .map(|t| 0.5 + libm::exp(-t / 1.5) + 0.1 * alea())
                 .collect();
             let signal = Series::new(x.clone(), y);
             let g = grid_of(&x, &mut warns()).unwrap();
@@ -1231,7 +1231,7 @@ mod tests {
         let irf = irf_with_edges(0.0, 0.05);
         let signal = Series::new(
             grid(64, step),
-            (0..64).map(|i| (-(i as f64) / 8.0).exp()).collect(),
+            (0..64).map(|i| libm::exp(-(i as f64) / 8.0)).collect(),
         );
         let m = DirectMethod::Wiener { noise: Some(0.01) };
         let d = deconvolve(&signal, &irf, 0.0, m).unwrap();

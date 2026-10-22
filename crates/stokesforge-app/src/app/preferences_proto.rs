@@ -557,18 +557,29 @@ impl eframe::App for Demo {
 
 /// Ouvre la fenêtre de démonstration (bloque jusqu'à sa fermeture). winit veut
 /// d'ordinaire le fil principal ; un test tourne dans un autre, d'où
-/// `with_any_thread`.
+/// `with_any_thread` (une extension par plateforme : Wayland et X11, Windows).
 fn run() -> eframe::Result {
     eframe::run_native(
         "Preferences prototype",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default().with_inner_size([900.0, 640.0]),
             event_loop_builder: Some(Box::new(|builder| {
-                use winit::platform::{
-                    wayland::EventLoopBuilderExtWayland, x11::EventLoopBuilderExtX11,
-                };
-                EventLoopBuilderExtWayland::with_any_thread(builder, true);
-                EventLoopBuilderExtX11::with_any_thread(builder, true);
+                #[cfg(target_os = "linux")]
+                {
+                    use winit::platform::{
+                        wayland::EventLoopBuilderExtWayland, x11::EventLoopBuilderExtX11,
+                    };
+                    EventLoopBuilderExtWayland::with_any_thread(builder, true);
+                    EventLoopBuilderExtX11::with_any_thread(builder, true);
+                }
+                #[cfg(windows)]
+                {
+                    use winit::platform::windows::EventLoopBuilderExtWindows;
+                    EventLoopBuilderExtWindows::with_any_thread(builder, true);
+                }
+                // Autre plateforme (macOS) : rien à poser, `builder` reste utilisé.
+                #[cfg(not(any(target_os = "linux", windows)))]
+                let _ = builder;
             })),
             ..Default::default()
         },

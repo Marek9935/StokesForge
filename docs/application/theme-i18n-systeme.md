@@ -56,6 +56,7 @@ en phrase (#46, #47). Le pourquoi du choix de Fluent (clé et arguments vérifi�
 | `crates/stokesforge-app-state/i18n.toml`, `crates/stokesforge-app/i18n.toml` | `fallback_language = "en"`, dossier des catalogues ; `fl!` lit l'`i18n.toml` du crate **appelant**, donc les deux fixent `domain = "stokesforge_app"` et celui de l'app pointe le catalogue d'`app-state` |
 | `stokesforge-app-state/src/i18n.rs` | chargeur, langue courante, macro `tr!` ; `src/i18n/pseudo.rs` : la pseudo-langue |
 | `stokesforge-app-state/src/preferences.rs` | `preferences.json`, même dossier de configuration que `couleurs.json` |
+| `stokesforge-import/src/config_dir.rs` | la règle unique du dossier de configuration (`STOKESFORGE_CONFIG_DIR`, #332) |
 | `stokesforge-app-state/src/history_text.rs` | les libellés d'historique (`HistoryLabel`) en phrases, clés `history-*` (#46) |
 | `stokesforge-app/tests/libelles.rs` | la garde `aucun_libelle_en_dur` (absolue : aucune dérogation), qui lit les sources des deux crates, et les clés mortes |
 
@@ -85,6 +86,16 @@ un fichier corrompu passe au niveau suivant, sans panique (invariant 10).
 Menu **Fichier › Langue** : change la langue tout de suite (`set_language`, les
 textes se redessinent à l'image suivante) et l'écrit dans `preferences.json` ;
 `STOKESFORGE_LANG` l'emporte encore au prochain démarrage.
+
+**Dossier de configuration** (#332) : la variable `STOKESFORGE_CONFIG_DIR`,
+si elle est posée et non vide, désigne le dossier tel quel (sans suffixe) ;
+sinon le dossier du système (`directories::ProjectDirs`, `…\StokesForge\config`
+sous Windows). `preferences.json`, `couleurs.json`, `import_recipes.json` et
+`import_recent.json` y vivent ; les copies de secours dans
+`<STOKESFORGE_CONFIG_DIR>/recovery`, sinon `recovery/` du dossier de données.
+Utile pour une installation portable, et c'est ce par quoi les tests
+s'isolent du vrai profil (`docs/tests.md`, « Règle (#250) »). Règle et fonctions :
+`stokesforge_import::config_dir`.
 
 **Pseudo-langue `en-XA`** : fabriquée à la volée depuis `en` (accents, `[[ ]]`,
 +30 %), sans fichier. `STOKESFORGE_LANG=en-XA` : un texte sans `[[ ]]` n'est pas passé

@@ -10,7 +10,7 @@ use stokesforge_analysis::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec
 
 fn gaussian(x: f64, xc: f64, a: f64, fwhm: f64) -> f64 {
     let z = (x - xc) / (fwhm / 2.354_820_045);
-    a * (-0.5 * z * z).exp()
+    a * libm::exp(-0.5 * z * z)
 }
 
 /// 200 points sur [0, 20], un pic xc = 8, A = 5, fwhm = 3 (l'exemple de #281).
@@ -201,7 +201,7 @@ fn signal_et_reponse() -> (AuxInput, SeriesInput) {
     };
     let sum: f64 = irf_y.iter().sum();
     let h: Vec<f64> = irf_y.iter().map(|v| v / sum).collect();
-    let u: Vec<f64> = x.iter().map(|t| 50.0 * (-t / 1.5).exp()).collect();
+    let u: Vec<f64> = x.iter().map(|t| 50.0 * libm::exp(-t / 1.5)).collect();
     let y = (0..x.len())
         .map(|k| (0..=k).map(|j| h[j] * u[k - j]).sum::<f64>())
         .collect();
@@ -384,4 +384,39 @@ fn un_modele_sans_pente_au_depart_est_une_erreur_modele_non_evaluable() {
         err,
         stokesforge_analysis::error::AnalysisError::ModelNotEvaluable
     );
+}
+
+/// 21 points x = 0..20, gaussienne xc = 8, A = 5, fwhm = 3, **sans bruit** : le
+/// banc `pyst` de #281 (`stokesforge-script/tests/analysis.rs`, colonne G).
+fn pic_sans_bruit_a_21_points() -> SeriesInput {
+    let x: Vec<f64> = (0..21).map(f64::from).collect();
+    let y = x.iter().map(|&v| gaussian(v, 8.0, 5.0, 3.0)).collect();
+    SeriesInput { x, y, sigma: None }
+}
+
+/// #332 : sur des données exactes, le χ² tombe à ~1e-31 (l'arrondi) puis ne
+/// bougeait plus que de quelques ulp par pas, sans qu'aucun critère relatif ne
+/// s'en aperçoive : la convergence dépendait du dernier ulp de `exp` de la
+/// plateforme (MSVC convergeait, `libm` non, 400 itérations). Un χ² au plancher
+/// d'arrondi est un résidu nul : le solveur est arrivé, sans avertissement.
+/// Le départ hors des données (xc = 1000) reste, lui, un plateau.
+#[test]
+fn des_donnees_exactes_convergent_au_plancher_d_arrondi_et_le_plateau_reste_un_plateau() {
+    let plateau = run_one(
+        &gaussian_fit(1000.0, 1.0),
+        pic_sans_bruit_a_21_points(),
+        None,
+    );
+    assert_eq!(
+        plateau.warnings,
+        vec![Warning::Undetermined(3), Warning::NotConverged]
+    );
+
+    let sain = run_one(&gaussian_fit(7.0, 2.0), pic_sans_bruit_a_21_points(), None);
+    assert_eq!(sain.warnings, vec![], "converge sans avertissement");
+    let valeur = |cle: &str| sain.values.iter().find(|v| v.key == cle).unwrap().value;
+    assert!((valeur("param.A") - 5.0).abs() < 1e-9);
+    assert!((valeur("param.xc") - 8.0).abs() < 1e-9);
+    assert!((valeur("param.fwhm") - 3.0).abs() < 1e-6);
+    assert!(valeur("stat.r_squared") > 1.0 - 1e-12);
 }

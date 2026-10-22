@@ -1481,7 +1481,7 @@ fn la_garde_des_espacements_voit_un_nombre_ecrit_sur_place() {
 /// `AppState` par `new` : `tests/isolation_preferences.rs` tient que cela
 /// n'atteint pas le vrai fichier.) Seul `isolation_preferences.rs` appelle
 /// `AppState::new` : c'est le test qui prouve que l'appel est sans danger,
-/// `XDG_CONFIG_HOME` redirigé vers un dossier temporaire.
+/// `STOKESFORGE_CONFIG_DIR` redirigé vers un dossier temporaire.
 #[test]
 fn aucun_test_d_integration_n_utilise_appstate_new() {
     let manifeste = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));

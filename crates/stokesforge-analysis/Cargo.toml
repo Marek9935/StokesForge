@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 thiserror = "2"
+libm = "0.2.16"
 
 [dev-dependencies]
 stokesforge-arch-guard = { path = "../stokesforge-arch-guard" }

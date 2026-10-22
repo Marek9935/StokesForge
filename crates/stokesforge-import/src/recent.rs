@@ -65,8 +65,7 @@ impl RecentFiles {
 }
 
 fn recent_path() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "StokesForge")
-        .map(|dirs| dirs.config_dir().join("import_recent.json"))
+    crate::config_dir::config_dir().map(|dir| dir.join("import_recent.json"))
 }
 
 #[cfg(test)]

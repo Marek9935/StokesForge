@@ -112,13 +112,19 @@ fn banc_exclusif() -> Banc {
 /// `pyst.import_file` lit `import_recipes.json` du dossier de configuration de
 /// l'utilisateur ; un modèle enregistré nommé « Jasco » passait devant le
 /// modèle intégré « Jasco (point-virgule) » et faisait échouer le choix
-/// automatique (#195). `XDG_CONFIG_HOME` est un état du *processus* : on le
-/// pose une seule fois, vers un dossier vide gardé jusqu'à la fin du binaire,
+/// automatique (#195). Le dossier de config est un état du *processus*
+/// (`STOKESFORGE_CONFIG_DIR`, la seule variable que `directories` n'ignore pas
+/// hors Linux, #332 ; `XDG_CONFIG_HOME` reste posée aussi) : on le pose une
+/// seule fois, vers un dossier vide gardé jusqu'à la fin du binaire,
 /// avant tout banc, donc sans course entre tests parallèles ni restauration.
 fn configuration_hermetique() {
     static DOSSIER: OnceLock<tempfile::TempDir> = OnceLock::new();
     DOSSIER.get_or_init(|| {
         let dossier = tempfile::tempdir().expect("dossier de configuration temporaire");
+        std::env::set_var(
+            stokesforge_import::config_dir::CONFIG_DIR_VARIABLE,
+            dossier.path(),
+        );
         std::env::set_var("XDG_CONFIG_HOME", dossier.path());
         dossier
     });

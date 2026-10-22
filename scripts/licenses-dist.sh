@@ -12,33 +12,42 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PACKAGE_DIR="$(cd "$1" && pwd)"
 # shellcheck source=../vendor/python/lock.env
 source "$REPO_ROOT/vendor/python/lock.env"
-# shellcheck source=../vendor/python/licenses/versions.env
-source "$REPO_ROOT/vendor/python/licenses/versions.env"
+# Plateforme du paquet : celle de la machine, sauf STOKESFORGE_LICENSES_PLATFORM
+# (linux|windows), pour que licenses-test.sh éprouve aussi les refus de l'autre.
+case "${STOKESFORGE_LICENSES_PLATFORM:-$(uname -s)}" in
+    MINGW*|MSYS*|CYGWIN*|windows) PLATFORM=windows ;;
+    *) PLATFORM=linux ;;
+esac
+NOTICES_DIR="$REPO_ROOT/vendor/python/licenses-$PLATFORM"
+# shellcheck source=../vendor/python/licenses-linux/versions.env
+source "$NOTICES_DIR/versions.env"
 # shellcheck source=licenses-tools.env
 source "$REPO_ROOT/scripts/licenses-tools.env"
 
+if [[ "$PLATFORM" == windows ]]; then
+    EXPECTED_TRIPLE="$PBS_TRIPLE_WINDOWS"
+else
+    EXPECTED_TRIPLE="$PBS_TRIPLE"
+fi
 if [[ "$PYTHON_VERSION" != "$LICENSE_PYTHON_VERSION" ||
       "$PBS_RELEASE" != "$LICENSE_PBS_RELEASE" ||
-      "$PBS_TRIPLE" != "$LICENSE_PBS_TRIPLE" ]]; then
-    echo "[licences] ERREUR : actualiser vendor/python/licenses pour le verrou Python" >&2
+      "$EXPECTED_TRIPLE" != "$LICENSE_PBS_TRIPLE" ]]; then
+    echo "[licences] ERREUR : actualiser vendor/python/licenses-$PLATFORM pour le verrou Python" >&2
     exit 1
 fi
 
-PYTHON_LIB="$PACKAGE_DIR/lib/python/lib/python${PYTHON_XY}"
-case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*)
-        # Windows (#332) : disposition lib/python/Lib. Les notices du runtime
-        # (vendor/python/licenses) sont celles de Linux : tant qu'elles ne sont
-        # pas établies pour x86_64-pc-windows-msvc, on refuse de les livrer.
-        PYTHON_LIB="$PACKAGE_DIR/lib/python/Lib"
-        [[ "$LICENSE_PBS_TRIPLE" == "$PBS_TRIPLE_WINDOWS" ]] || {
-            echo "[licences] ERREUR : notices Python Windows à établir (vendor/python/licenses, triplet $PBS_TRIPLE_WINDOWS)" >&2
-            exit 1
-        } ;;
-esac
+if [[ "$PLATFORM" == windows ]]; then
+    # Disposition lib/python/{Lib,DLLs} (scripts/app-dist-windows.sh) ; le
+    # LICENSE.txt de CPython est à la racine du préfixe, copié dans lib/python.
+    PYTHON_LIB="$PACKAGE_DIR/lib/python/Lib"
+    PYTHON_RUNTIME_LICENSE="$PACKAGE_DIR/lib/python/LICENSE.txt"
+else
+    PYTHON_LIB="$PACKAGE_DIR/lib/python/lib/python${PYTHON_XY}"
+    PYTHON_RUNTIME_LICENSE="$PYTHON_LIB/LICENSE.txt"
+fi
 NUMPY_LICENSES="$PYTHON_LIB/site-packages/numpy-${NUMPY_VERSION}.dist-info/licenses"
 SCIPY_LICENSE="$PYTHON_LIB/site-packages/scipy-${SCIPY_VERSION}.dist-info/LICENSE.txt"
-for notice in "$PYTHON_LIB/LICENSE.txt" "$NUMPY_LICENSES/LICENSE.txt" "$SCIPY_LICENSE"; do
+for notice in "$PYTHON_RUNTIME_LICENSE" "$NUMPY_LICENSES/LICENSE.txt" "$SCIPY_LICENSE"; do
     [[ -s "$notice" ]] || {
         echo "[licences] ERREUR : notice absente du paquet : $notice" >&2
         exit 1
@@ -76,8 +85,8 @@ cp crates/stokesforge-app/assets/icons/LICENSE "$PACKAGE_DIR/licenses/phosphor/L
 cp -a vendor/epaint-default-fonts/. "$PACKAGE_DIR/licenses/epaint-default-fonts/"
 cp vendor/winit/LICENSE vendor/winit/STOKESFORGE.md "$PACKAGE_DIR/licenses/winit/"
 cp vendor/smithay-clipboard/LICENSE "$PACKAGE_DIR/licenses/smithay-clipboard/"
-cp -a vendor/python/licenses/. "$PACKAGE_DIR/licenses/python/"
-cp "$PYTHON_LIB/LICENSE.txt" "$PACKAGE_DIR/licenses/python/LICENSE-runtime.txt"
+cp -a "$NOTICES_DIR/." "$PACKAGE_DIR/licenses/python/"
+cp "$PYTHON_RUNTIME_LICENSE" "$PACKAGE_DIR/licenses/python/LICENSE-runtime.txt"
 cp -a "$NUMPY_LICENSES/." "$PACKAGE_DIR/licenses/numpy/"
 cp "$SCIPY_LICENSE" "$PACKAGE_DIR/licenses/scipy/LICENSE.txt"
 mv "$TEMP_DIR/THIRD-PARTY-LICENSES.txt" "$PACKAGE_DIR/THIRD-PARTY-LICENSES.txt"

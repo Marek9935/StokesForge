@@ -55,8 +55,8 @@ fn coefficients() -> &'static [f64; N + 1] {
         for (idx, slot) in f.iter_mut().enumerate().skip(1) {
             let k = idx as f64 - m as f64;
             let theta = k * std::f64::consts::PI / m as f64;
-            let t = l * (theta / 2.0).tan();
-            *slot = (-t * t).exp() * (l * l + t * t);
+            let t = l * libm::tan(theta / 2.0);
+            *slot = libm::exp(-t * t) * (l * l + t * t);
         }
         // fftshift : décalage d'une demi-longueur.
         let shifted: Vec<f64> = (0..m2).map(|j| f[(j + m2 / 2) % m2]).collect();
@@ -64,7 +64,7 @@ fn coefficients() -> &'static [f64; N + 1] {
         for (n, slot) in a.iter_mut().enumerate().skip(1) {
             let mut re = 0.0;
             for (j, v) in shifted.iter().enumerate() {
-                re += v * (2.0 * std::f64::consts::PI * (j * n) as f64 / m2 as f64).cos();
+                re += v * libm::cos(2.0 * std::f64::consts::PI * (j * n) as f64 / m2 as f64);
             }
             *slot = re / m2 as f64;
         }
@@ -116,7 +116,7 @@ pub fn profile(x: f64, fwhm_g: f64, fwhm_l: f64) -> f64 {
         return gamma / (std::f64::consts::PI * (x * x + gamma * gamma));
     }
     if gamma <= 0.0 {
-        return (-x * x / (2.0 * sigma * sigma)).exp()
+        return libm::exp(-x * x / (2.0 * sigma * sigma))
             / (sigma * (2.0 * std::f64::consts::PI).sqrt());
     }
     let s2 = sigma * std::f64::consts::SQRT_2;
@@ -145,7 +145,7 @@ mod tests {
         assert!((re - 1.0).abs() < 1e-12 && im.abs() < 1e-12);
         // w(1) = e⁻¹ + i·(2/√π)·D(1), D(1) = 0.5380795069127684 (Dawson).
         let (re, im) = faddeeva(1.0, 0.0);
-        assert!((re - (-1.0_f64).exp()).abs() < 1e-12, "re {re}");
+        assert!((re - libm::exp(-1.0_f64)).abs() < 1e-12, "re {re}");
         assert!((im - 0.607_157_705_841_2).abs() < 1e-10, "im {im}");
         // w(i) = erfcx(1) = 0.4275835761558070.
         let (re, im) = faddeeva(0.0, 1.0);
@@ -165,7 +165,8 @@ mod tests {
         let fg = 2.0;
         let sigma = fg / (2.0 * (2.0 * std::f64::consts::LN_2).sqrt());
         let gauss = |x: f64| {
-            (-x * x / (2.0 * sigma * sigma)).exp() / (sigma * (2.0 * std::f64::consts::PI).sqrt())
+            libm::exp(-x * x / (2.0 * sigma * sigma))
+                / (sigma * (2.0 * std::f64::consts::PI).sqrt())
         };
         for x in [0.0, 0.5, 1.7, 4.0] {
             // γ tout petit : retrouve la gaussienne.
@@ -225,7 +226,7 @@ mod tests {
     const FG_UNITE: f64 = 2.354_820_045_030_949_3; // σ = 1
     fn gauss_ref(x: f64, fg: f64) -> f64 {
         let s = fg / (2.0 * (2.0 * std::f64::consts::LN_2).sqrt());
-        (-x * x / (2.0 * s * s)).exp() / (s * (2.0 * std::f64::consts::PI).sqrt())
+        libm::exp(-x * x / (2.0 * s * s)) / (s * (2.0 * std::f64::consts::PI).sqrt())
     }
     fn lorentz_ref(x: f64, fl: f64) -> f64 {
         let g = fl / 2.0;

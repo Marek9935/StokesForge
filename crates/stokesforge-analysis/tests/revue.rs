@@ -134,7 +134,7 @@ fn l_ajustement_ne_depend_pas_de_l_echelle_des_y() {
         let x: Vec<f64> = (0..60).map(|i| f64::from(i) * 0.25).collect();
         let y: Vec<f64> = x
             .iter()
-            .map(|&v| scale * (0.3 + 2.0 * (-v / 2.0).exp()))
+            .map(|&v| scale * (0.3 + 2.0 * libm::exp(-v / 2.0)))
             .collect();
         let op = Operation::Fit {
             spec: FitSpec {
