@@ -121,7 +121,7 @@ geste n’analyse pas la ligne : il crée ou complète la **feuille transposée 
 (« Sheet1ᵀ ») puis ouvre la fenêtre sur sa colonne « Row N » ; le résultat suit une colonne
 (classeur des résultats, « Replace original data » agit sur la colonne de la transposée,
 aucune série n'est ajoutée au graphe de lignes). Un groupe qui mêle courbes de colonnes et
-de lignes est grisé (`analysis-needs-same-curves`). Une colonne de la feuille sans x', ou
+de lignes est grisé (`analysis-needs-same-curves`). Une colonne Y de la feuille sans x', ou
 de texte, fait refuser le geste en la nommant par sa lettre. La feuille transposée porte
 une bande en haut de la grille (`app/transpose_ui.rs`) : origine, « Out of date » quand la
 source a changé, « Values edited » quand une valeur d'une colonne liée a été éditée, et

@@ -289,7 +289,11 @@ arrière, `.stf`). Ce n'est pas un nœud.
   colonne créée par le lien n'a plus son empreinte : seule une édition de
   valeurs compte ; renommer, typer sans changer les nombres, ajouter ses propres
   colonnes ne coupent rien). Aucun des deux n'entre dans le recalcul ciblé.
-- Refus : une colonne de la source sans x' (`CoreError::TransposeNoXPrime`) ou
+- Seules les colonnes de rôle **Y** se transposent (validé le 2026-10-22) : une
+  colonne X, une barre d'erreur ou une étiquette est sautée, sans x' requis ; une
+  feuille sans colonne Y est refusée. Changer le rôle d'une colonne rend la
+  transposée périmée.
+- Refus : une colonne Y de la source sans x' (`CoreError::TransposeNoXPrime`) ou
   contenant du texte (`TransposeNotNumeric`) ; les deux nomment la colonne par sa
   **lettre** et son nom. Une colonne plus courte donne `NaN`.
 - Vie du lien : source supprimée ou feuille transposée supprimée, le lien

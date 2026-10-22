@@ -2,7 +2,7 @@
 //! dérivés (périmée, modifiée), remise à jour et vie du lien.
 
 use stokesforge_core::{
-    Column, ColumnMeta, ColumnType, CoreError, MixedCell, NodeId, Project, ValueBlock,
+    Column, ColumnMeta, ColumnRole, ColumnType, CoreError, MixedCell, NodeId, Project, ValueBlock,
     TRANSPOSE_MARK,
 };
 
@@ -145,6 +145,24 @@ fn refuses_a_column_without_x_prime_and_names_its_letter() {
         before.as_ref(),
         "rien n'est créé"
     );
+}
+
+#[test]
+fn only_y_columns_are_transposed_and_an_x_column_without_x_prime_is_skipped() {
+    let mut f = fixture();
+    let mut x = Column::from_f64(&[0.0, 1.0, 2.0]);
+    x.set_meta(ColumnMeta {
+        role: ColumnRole::X,
+        ..ColumnMeta::default()
+    });
+    f.project
+        .add_column(f.sheet, Some(0), Some("Temps"), x)
+        .unwrap();
+    let sheet = f.project.transpose_rows(f.sheet, &[0]).unwrap();
+    let cols = children(&f.project, sheet);
+    assert_eq!(values(&f.project, cols[0]), vec![0.0, 10.0, 20.0]);
+    assert_eq!(values(&f.project, cols[1]), vec![1.0, 4.0, 7.0]);
+    assert_eq!(state(&f.project, sheet), (false, false));
 }
 
 #[test]

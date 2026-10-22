@@ -149,6 +149,11 @@ fn read_inputs(tree: &Tree, source: NodeId) -> Vec<TransposeSourceColumn> {
         .iter()
         .filter_map(|id| {
             let column = tree.node(*id)?.as_column()?;
+            // Seules les colonnes Y se transposent (#253) : un X, une barre
+            // d'erreur ou une étiquette n'est pas une courbe de la ligne.
+            if column.meta().role != ColumnRole::Y {
+                return None;
+            }
             Some(TransposeSourceColumn {
                 column: *id,
                 version: column.version(),
@@ -182,7 +187,8 @@ impl Project {
     ///   une feuille déjà liée à `source` est réutilisée.
     /// - Une ligne déjà présente réutilise sa colonne ; sinon une colonne
     ///   « Row N » est ajoutée en fin de feuille.
-    /// - Chaque colonne de `source` doit être numérique et porter un x' : sinon
+    /// - Seules les colonnes de rôle Y se transposent (les autres sont sautées).
+    /// - Chaque colonne Y de `source` doit être numérique et porter un x' : sinon
     ///   le refus nomme la colonne (`CoreError::TransposeNotNumeric`,
     ///   `TransposeNoXPrime`). Une colonne plus courte que la ligne donne
     ///   `NaN`.
@@ -313,6 +319,9 @@ impl Project {
             let Some(column) = child.as_column() else {
                 continue;
             };
+            if column.meta().role != ColumnRole::Y {
+                continue;
+            }
             let letter = spreadsheet_name(position);
             let name = child.name().to_string();
             if !is_numeric(column) {
@@ -322,7 +331,13 @@ impl Project {
                 return Err(CoreError::TransposeNoXPrime { letter, name });
             }
         }
-        Ok(read_inputs(self.tree(), source))
+        let inputs = read_inputs(self.tree(), source);
+        if inputs.is_empty() {
+            return Err(CoreError::Structure(
+                "the worksheet has no Y column to transpose".to_string(),
+            ));
+        }
+        Ok(inputs)
     }
 
     /// Crée la feuille transposée de `source`, vide, juste après elle.
