@@ -199,10 +199,36 @@ prend la largeur par défaut. Pas d'ajustement au contenu par double-clic.
 
 La largeur n'est poussée qu'à la **fin d'un redimensionnement fait à la main**
 (`finished_column_resizes` : poignée relâchée, largeur lue sur l'étendue de
-l'en-tête). Une colonne s'élargit aussi d'elle-même jusqu'à son contenu :
-pousser la largeur rendue à chaque image marquerait le projet modifié à chaque
-ouverture. La vue détachée a son propre `AppState` ; sa largeur passe aussi par
-l'acteur, l'état principal la relit à son rafraîchissement.
+l'en-tête) : pousser la largeur rendue à chaque image marquerait le projet
+modifié à chaque ouverture. La vue détachée a son propre `AppState` ; sa
+largeur passe aussi par l'acteur, l'état principal la relit à son
+rafraîchissement.
+
+**Colonnes rognées (#330).** Les colonnes de données sont déclarées
+`.clip(true)` : sans cela egui_extras fait grandir une colonne non rognée
+jusqu'au contenu mesuré de ses cellules (`table.rs`, `max_used_widths`), et la
+largeur par défaut (54) dépendait de ce qui était peint. Elle vaut désormais 54
+partout, un contenu trop large est coupé. Le test
+`une_colonne_jamais_reglee_garde_54_quelle_que_soit_la_fenetre` garde ce
+comportement ; le « 57 puis 62 px au maximisage » remonté sous #330 n'a pas pu
+être reproduit dans le banc (voir le message du commit).
+
+**Remettre au défaut (#330).** Clic droit sur une lettre ou Workbook ▸ Columns :
+« Reset Width » (après Role ▸), sur toute la sélection ; Workbook ▸ Sheet et
+clic droit de l'onglet : « Reset Column Widths », toutes les colonnes de la
+feuille. `Action::ResetColumnWidths { columns }` →
+`SessionHandle::reset_column_widths` **retire les clés** de la table (le défaut
+est la constante `DEFAULT_COLUMN_WIDTH` de l'application, rien n'est écrit dans
+le `.stf`). Non annulable, sans confirmation, comme la pose. Entrée grisée
+(« Columns are already at the default width ») quand aucune colonne visée n'a de
+largeur retenue. La clé de mise en page de `grid_contents` contient les
+largeurs retenues des colonnes visibles : sans elles, `TableColumn::initial`
+n'est lu qu'après un `reset` et la remise ne changerait rien à l'écran.
+`TableBuilder::reset` remet **toutes** les colonnes, gouttière comprise : la
+largeur rendue de la gouttière est mémorisée par feuille en mémoire temporaire
+d'egui (`gutter_width_id`) et redonnée en `initial`, sinon chaque glisser la
+ramènerait à 90. La remise d'une colonne n'y touche pas ; celle de toute la
+feuille l'oublie (`forget_gutter_width`) : retour à 90, jamais enregistré.
 
 ### Une colonne a deux identités, une seule est visible
 

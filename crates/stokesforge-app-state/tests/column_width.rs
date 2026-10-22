@@ -78,3 +78,27 @@ fn la_vue_detachee_envoie_sa_largeur_a_l_acteur() {
     main.refresh();
     assert_eq!(main.column_width(column), Some(120.0));
 }
+
+/// L'action de remise (#330) retire la largeur de l'acteur et de la copie
+/// locale sans attendre un rafraîchissement ; ni révision ni historique ne bougent. Témoin éprouvé : ne pas retirer
+/// la clé de la copie locale.
+#[test]
+fn l_action_de_remise_retire_la_largeur_sans_historique() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state, column) = setup(dir.path());
+    let revision = state.revision();
+    state.dispatch(Action::SetColumnWidth {
+        column,
+        width: 88.0,
+    });
+    assert_eq!(state.column_width(column), Some(88.0));
+
+    state.dispatch(Action::ResetColumnWidths {
+        columns: vec![column],
+    });
+
+    assert_eq!(state.column_width(column), None);
+    assert_eq!(state.revision(), revision);
+    let acteur = session.handle().snapshot().unwrap();
+    assert!(!acteur.column_widths.contains_key(&column));
+}

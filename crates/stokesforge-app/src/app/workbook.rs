@@ -21,8 +21,9 @@ use super::empty_state::empty_state;
 use super::file_drop::claim_file_drop;
 use super::graph_targets::{send_rows_to_graph_menu, send_to_graph_menu};
 use super::grid::{
-    columns_menu_contents, grid_contents, plot_menu, plot_rows_menu, show_grid_horizontal_bar,
-    show_grid_vertical_bar, show_horizontally_scrollable_grid, toggle_header_row_menu,
+    columns_menu_contents, forget_gutter_width, grid_contents, plot_menu, plot_rows_menu,
+    reset_sheet_widths_entry, show_grid_horizontal_bar, show_grid_vertical_bar,
+    show_horizontally_scrollable_grid, toggle_header_row_menu,
 };
 use super::menu_sections::MenuSections;
 use super::results_pane;
@@ -108,6 +109,7 @@ fn sheet_menu(
             actions.push(Action::DuplicateSheet(sheet));
             ui.close();
         }
+        reset_sheet_widths_entry(ui, state, actions, sheet);
     });
     sections.section(ui, true, |ui| {
         let can_delete = state.can_delete_sheet(sheet);
@@ -184,6 +186,7 @@ pub(super) fn book_contents(
     // au lieu de le combiner, et dessinait les onglets sous la vue quand la
     // fenêtre y était coupée (`show_floating_window`). Deux sous-`Ui` bornés,
     // chacun rogné à l'intersection de son rectangle et du rognage parent.
+    let ctx = ui.ctx().clone();
     let area = ui.available_rect_before_wrap();
     // Le bord droit de la fenêtre est réservé, sur toute sa hauteur, à la
     // barre de défilement verticale (B10) : la zone de défilement
@@ -252,6 +255,15 @@ pub(super) fn book_contents(
     let sheet_ops = TabOps {
         renaming: state.renaming_sheet(),
         can_delete: sheets.len() > 1,
+        resettable: sheets
+            .iter()
+            .map(|(id, _)| *id)
+            .filter(|id| {
+                !state
+                    .columns_with_width(&state.sheet_column_ids(*id))
+                    .is_empty()
+            })
+            .collect(),
     };
     sheet_tabs(
         &mut tabs_ui,
@@ -266,6 +278,12 @@ pub(super) fn book_contents(
                 TabEvent::CommitRename(sheet, name) => Action::CommitRenameSheet { sheet, name },
                 TabEvent::CancelRename => Action::CancelRenameSheet,
                 TabEvent::Duplicate(sheet) => Action::DuplicateSheet(sheet),
+                TabEvent::ResetColumnWidths(sheet) => {
+                    forget_gutter_width(&ctx, sheet);
+                    Action::ResetColumnWidths {
+                        columns: state.sheet_column_ids(sheet),
+                    }
+                }
                 TabEvent::Delete(sheet) => Action::DeleteSheet(sheet),
             })
         },

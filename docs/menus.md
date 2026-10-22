@@ -118,9 +118,9 @@ Selection ▸ ne subsiste que dans Edit.
 | Cible | Menu |
 |---|---|
 | Cellule, ligne, champ d'en-tête | Cut · Copy · Copy with Header · Paste · Paste in Place ─ Remove Formula, Keep Data (champ Formule portant une formule, #236 ; aussi Workbook › Columns) · Clear · Delete and Shift Up |
-| En-tête de colonne | Plot ▸ · Add Column ─ presse-papiers ─ Move ▸ · Type ▸ · Role ▸ ─ Clear · Delete (retire les colonnes ; un seul Annuler les rend) ; Move ▸ = Move to First · Move Left · Move Right · Move to Last, grisées avec leur raison quand le geste ne changerait rien (#319) ; mêmes entrées dans Workbook › Columns |
+| En-tête de colonne | Plot ▸ · Add Column ─ presse-papiers ─ Move ▸ · Type ▸ · Role ▸ · Reset Width (largeur par défaut de la sélection, grisée sans largeur retenue, #330) ─ Clear · Delete (retire les colonnes ; un seul Annuler les rend) ; Move ▸ = Move to First · Move Left · Move Right · Move to Last, grisées avec leur raison quand le geste ne changerait rien (#319) ; mêmes entrées dans Workbook › Columns |
 | Grille vide, zone blanche | Add Column |
-| Onglet de feuille, bande vide | Add Worksheet ─ Rename · Duplicate ─ Delete |
+| Onglet de feuille, bande vide | Add Worksheet ─ Rename · Duplicate · Reset Column Widths (toute la feuille, grisée sans largeur retenue, #330) ─ Delete |
 
 ### Colonnes et courbes : Analysis (#181, #210)
 
@@ -156,7 +156,7 @@ son calque et son groupe.
 Les menus du haut rangent leurs sections dans le même ordre ; ce qu'ils
 enveloppent est le contenu des clics droits : Edit › Selection (menu des
 fenêtres du Project Manager), Graph › Selection (menu de l'objet),
-Workbook › Sheet / Columns / Plot, View › Object Manager.
+Workbook › Sheet (dont Reset Column Widths) / Columns (dont Reset Width) / Plot, View › Object Manager.
 
 ## Ajouter une entrée
 

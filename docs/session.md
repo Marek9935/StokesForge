@@ -50,6 +50,10 @@ n'avance ni `revision` ni l'historique. Seule la table des géométries est purg
 à la mutation ; celle des largeurs **ne l'est pas** (Ctrl+Z rend la colonne
 supprimée avec sa largeur, invariant 7), la sauvegarde filtre les clés mortes.
 `Load` et `NewProject` remplacent ou vident les deux.
+`Request::ResetColumnWidths { columns }` (#330, `SessionHandle::reset_column_widths`)
+**retire les clés** des colonnes (le défaut est une constante de l'application,
+la session n'écrit rien) ; `geometry_revision` n'avance que si une clé a
+vraiment été retirée ; ni `revision` ni historique.
 
 `HistoryState` donne à l'UI ce qu'il lui faut pour ses menus — `can_undo`,
 `can_redo`, les deux libellés, `in_macro` — sans exposer la pile.

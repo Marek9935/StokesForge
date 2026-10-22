@@ -688,6 +688,19 @@ Table `NodeId -> f32` de l'acteur, hors modèle et hors historique, enregistrée
 
 La largeur se lit dans le banc sur l'aplat de la lettre de colonne (`largeur_peinte`).
 
+### Remettre au défaut (#330)
+
+| Garde | Test (témoin) |
+|---|---|
+| remise : clé retirée, `geometry_revision` +1 seulement si elle existait, ni `revision` ni historique | `session/tests/largeurs.rs` `remettre_au_defaut_retire_la_cle_et_n_avance_que_si_elle_existait` (`+= 1` inconditionnel : rouge) |
+| remise puis enregistrement : plus de clé dans le fichier | `une_colonne_remise_au_defaut_n_est_plus_dans_le_fichier` (poser 54 au lieu de retirer : rouge) |
+| l'action retire la largeur de la copie locale avant rafraîchissement | `app-state/tests/column_width.rs` `l_action_de_remise_retire_la_largeur_sans_historique` (clé gardée dans la copie locale : rouge) |
+| B remise à 54, A et C gardent la leur | `grid::tests::remettre_une_colonne_au_defaut_ne_touche_pas_les_autres` (largeurs hors clé de mise en page : rouge) |
+| la gouttière garde sa largeur après un glisser et une remise de colonne, revient à 90 pour la feuille | `un_glisser_de_colonne_garde_la_largeur_de_la_gouttiere` (gouttière non mémorisée : rouge) |
+| entrée après Role ▸, grisée sans largeur, sélection entière | `l_entree_de_remise_suit_role_et_se_grise_sans_largeur`, `la_remise_traite_toute_la_selection` (`add_enabled(true)` : rouge ; ne viser que la colonne cliquée : rouge) |
+| entrée de feuille : onglet, Workbook ▸ Sheet, Workbook ▸ Columns | `le_clic_droit_de_l_onglet_remet_toute_la_feuille`, `menus::tests::la_remise_des_largeurs_est_dans_workbook_sheet_et_columns` (entrée toujours active, ou une seule colonne visée pour la feuille ou l'onglet : rouge) |
+| 54 quelle que soit la fenêtre | `une_colonne_jamais_reglee_garde_54_quelle_que_soit_la_fenetre` (**témoin non obtenu** : le « 57 puis 62 » n'est pas reproduit dans le banc, `.clip(false)` reste vert) |
+
 ## Déplacer des colonnes (#319)
 
 Sous-menu `Move ▸` (First · Left · Right · Last). Chaque règle a son témoin, vérifié par mutation.

@@ -95,6 +95,8 @@ Ctrl + molette n'est pas pris.
 | Clic | case du coin « # » | sélectionne tout |
 | Glisser | bord gauche ou droit d'une sélection de colonnes, sous la rangée des lettres (ou bord haut ou bas d'un bloc de lignes, si la feuille porte une ligne x') | dépose un tracé sur un graphe |
 | Clic droit | cellule, en-tête, lettre, ligne | si hors sélection, la remplace par la cible ; ouvre le menu de la sélection |
+| Clic droit › Reset Width | lettre de colonne (ou Workbook › Columns) | remet les colonnes sélectionnées à la largeur par défaut (54) ; non annulable, grisé sans largeur retenue (#330) |
+| Clic droit › Reset Column Widths | onglet de feuille (ou Workbook › Sheet) | remet toutes les colonnes de la feuille, et la gouttière des numéros, à leur largeur par défaut (#330) |
 | Clic droit › Move ▸ | lettre de colonne (ou Workbook › Columns) | déplace les colonnes sélectionnées dans leur feuille : au début, à la fin, ou d'une place à gauche ou à droite chacune (l'écart entre colonnes non contiguës reste) ; un seul Ctrl+Z ; pas de glisser (le glisser sur les lettres sélectionne déjà) |
 
 ## Les arbres : Object Manager et Project Manager
