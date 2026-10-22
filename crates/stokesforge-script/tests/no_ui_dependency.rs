@@ -14,9 +14,10 @@ const ALLOWED_DEPENDENCIES: &[&str] = &[
     "stokesforge-python", // l'interpréteur embarqué et le pont de tableaux
     "stokesforge-import", // recettes et choix du modèle, sans interface
     "stokesforge-importer", // conversion fichiers → colonnes commune au CLI et à l'application
-    "pyo3",             // liaison CPython, version verrouillée avec stokesforge-python
-    "numpy",            // liaison de la C-API numpy, liée à celle de pyo3
-    "thiserror",        // erreurs typées, sans surface UI
+    "stokesforge-render-svg", // export de figure (`pyst.export_graph`) : SVG/PDF/PNG, ni egui ni winit
+    "pyo3",                   // liaison CPython, version verrouillée avec stokesforge-python
+    "numpy",                  // liaison de la C-API numpy, liée à celle de pyo3
+    "thiserror",              // erreurs typées, sans surface UI
 ];
 
 #[test]

@@ -19,7 +19,7 @@ par un juriste reste recommandée avant publication.
 
 | Interface d'extension documentée | Contrat public | Utilisation |
 |---|---|---|
-| `pyst`, API de script Python fournie par StokesForge | [`python-et-script.md`](python-et-script.md) | Scripts exécutés dans la console de l'application ou par `stokesforge-cli run` |
+| `pyst`, API de script Python fournie par StokesForge | [`python-et-script.md`](python-et-script.md), liste figée « API figée V1 » (noms, signatures, clés, valeurs ; tout changement est une décision explicite, #331) | Scripts exécutés dans la console de l'application ou par `stokesforge-cli run` |
 
 Un script ou module qui utilise uniquement cette interface, sans compiler,
 incorporer ni lier du code source ou objet de StokesForge dans son propre

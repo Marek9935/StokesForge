@@ -53,6 +53,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::c_long;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -90,6 +91,17 @@ struct Shared {
     /// Identifiant Python (`threading.get_ident()`) du fil de script, `0` tant
     /// que l'interpréteur n'a pas démarré.
     py_thread_ident: AtomicU64,
+    /// Chemin courant du projet, pour `pyst.save()` : posé par l'hôte
+    /// ([`ScriptEngine::set_project_path`]) et mis à jour par `pyst.save_as`.
+    /// Donnée Rust pure ; la session, elle, ne connaît aucun chemin.
+    project_path: Mutex<Option<PathBuf>>,
+    /// Chemin que `pyst.save()` (sans argument) refuse d'écraser : la source
+    /// d'une lecture qui a écarté des données (garde #309 de l'application).
+    /// `save_as` reste permis.
+    protected_path: Mutex<Option<PathBuf>>,
+    /// Révision `(modèle, géométrie)` du dernier enregistrement du script, que
+    /// l'hôte relève ([`ScriptEngine::take_saved_revision`]).
+    saved_revision: Mutex<Option<(u64, u64)>>,
 }
 
 /// Ce dont la surface `pyst` a besoin pour servir un appel : la session, et de
@@ -129,6 +141,38 @@ impl ScriptContext {
     pub(crate) fn forget_versions(&self) {
         if let Ok(mut table) = self.read_versions.lock() {
             table.clear();
+        }
+    }
+
+    /// Chemin courant du projet (`None` : pas encore enregistré).
+    pub(crate) fn project_path(&self) -> Option<PathBuf> {
+        self.shared
+            .project_path
+            .lock()
+            .ok()
+            .and_then(|path| path.clone())
+    }
+
+    /// Chemin que `save()` sans argument refuse d'écraser.
+    pub(crate) fn protected_path(&self) -> Option<PathBuf> {
+        self.shared
+            .protected_path
+            .lock()
+            .ok()
+            .and_then(|path| path.clone())
+    }
+
+    /// Retient la révision enregistrée par le script.
+    pub(crate) fn record_saved(&self, revision: (u64, u64)) {
+        if let Ok(mut saved) = self.shared.saved_revision.lock() {
+            *saved = Some(revision);
+        }
+    }
+
+    /// Retient le chemin du projet après un `pyst.save_as`.
+    pub(crate) fn set_project_path(&self, path: PathBuf) {
+        if let Ok(mut current) = self.shared.project_path.lock() {
+            *current = Some(path);
         }
     }
 
@@ -325,6 +369,45 @@ impl ScriptEngine {
             script_thread: Some(script_thread),
             interrupt_thread: Some(interrupt_thread),
         })
+    }
+
+    /// Dit au moteur sous quel chemin le projet est enregistré (`None` : il ne
+    /// l'est pas encore). C'est ce que `pyst.save()` écrit ; l'hôte l'appelle
+    /// avant chaque exécution. Ne touche ni à la session ni à Python.
+    pub fn set_project_path(&self, path: Option<PathBuf>) {
+        if let Ok(mut current) = self.shared.project_path.lock() {
+            *current = path;
+        }
+    }
+
+    /// Interdit à `pyst.save()` (sans argument) d'écraser `path` : l'hôte y
+    /// met la source d'une lecture qui a écarté des données. `pyst.save_as`
+    /// reste permis. À reposer avant chaque exécution.
+    pub fn set_protected_path(&self, path: Option<PathBuf>) {
+        if let Ok(mut current) = self.shared.protected_path.lock() {
+            *current = path;
+        }
+    }
+
+    /// Révision `(modèle, géométrie)` du dernier `save`/`save_as` du script
+    /// depuis le dernier appel, une seule fois : l'hôte la prend pour ne pas
+    /// laisser le projet « modifié ».
+    pub fn take_saved_revision(&self) -> Option<(u64, u64)> {
+        self.shared
+            .saved_revision
+            .lock()
+            .ok()
+            .and_then(|mut saved| saved.take())
+    }
+
+    /// Le chemin courant du projet tel que le script le voit : celui posé par
+    /// [`Self::set_project_path`], ou celui d'un `pyst.save_as` depuis.
+    pub fn project_path(&self) -> Option<PathBuf> {
+        self.shared
+            .project_path
+            .lock()
+            .ok()
+            .and_then(|path| path.clone())
     }
 
     /// Exécute une source Python et **bloque** jusqu'à son terme.

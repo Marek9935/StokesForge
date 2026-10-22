@@ -184,16 +184,16 @@ pub(crate) fn children(
     Ok(node.children().iter().map(|id| (*id, epoch)).collect())
 }
 
+/// Ce que rend [`info`] : le nœud partagé, son nombre de lignes éventuel et la
+/// formule de la colonne en lettres.
+pub(crate) type NodeInfo = (Arc<Node>, Option<usize>, Option<String>);
+
 /// Description du nœud, nombre de lignes éventuel et formule d'une colonne
 /// **en lettres** (celles d'aujourd'hui, `#REF` pour une colonne lue qui n'est
 /// plus dans la feuille), sur un seul instantané. Partager le nœud évite de
 /// recopier ses buffers ou ses métadonnées de fichier pour en extraire quelques
 /// champs, une fois le GIL repris.
-pub(crate) fn info(
-    session: &SessionHandle,
-    id: NodeId,
-    epoch: u64,
-) -> Result<(Arc<Node>, Option<usize>, Option<String>), HostError> {
+pub(crate) fn info(session: &SessionHandle, id: NodeId, epoch: u64) -> Result<NodeInfo, HostError> {
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     let node = checked_node(&snapshot, id, epoch)?;
     let row_count = if node.kind().is_worksheet() {
@@ -339,7 +339,7 @@ pub(crate) fn set_column(
 /// macro) : le script connaît ce qu'il vient d'écrire, ses écritures suivantes
 /// ne se refusent pas elles-mêmes. Une colonne jamais lue reste non retenue
 /// (limite documentée : écriture non protégée).
-fn retain_written_version(
+pub(crate) fn retain_written_version(
     context: &ScriptContext,
     id: NodeId,
     epoch: u64,
@@ -372,6 +372,98 @@ pub(crate) fn undo(context: &ScriptContext) -> Result<bool, HostError> {
         .undo()
         .map(|revision| revision.is_some())
         .map_err(HostError::from_session)
+}
+
+/// `pyst.redo` : symétrique de [`undo`]. Un groupe d'écritures ouvert est
+/// d'abord validé, ce qui vide la pile de rétablissement : un `redo()` qui suit
+/// des écritures du script rend donc `false`.
+pub(crate) fn redo(context: &ScriptContext) -> Result<bool, HostError> {
+    context.finish_write(true)?;
+    context.forget_versions();
+    context
+        .session()
+        .redo()
+        .map(|revision| revision.is_some())
+        .map_err(HostError::from_session)
+}
+
+/// `pyst.save` / `pyst.save_as`. L'enregistrement n'est pas une commande
+/// (il ne change pas le modèle) : il passe par `SessionHandle::save`, comme
+/// l'application. Un groupe d'écritures ouvert est d'abord **validé** (point de
+/// validation, comme `undo`) : la session refuse d'écrire un état qu'un
+/// abandon de macro pourrait défaire. Sans `path`, écrit au chemin courant du
+/// moteur ; avec, l'enregistre et en fait le chemin courant.
+pub(crate) fn save(context: &ScriptContext, path: Option<&Path>) -> Result<(), HostError> {
+    let target = match path {
+        Some(path) => path.to_path_buf(),
+        None => context.project_path().ok_or_else(|| {
+            HostError::InvalidValue(
+                "the project has no path yet: use pyst.save_as(path) first".to_owned(),
+            )
+        })?,
+    };
+    if context.protected_path().as_deref() == Some(target.as_path()) {
+        return Err(HostError::InvalidValue(
+            "the project file was read with some data left out (calculations that could not \
+             be read): saving over it would delete them for good; use pyst.save_as(path) with \
+             another path"
+                .to_owned(),
+        ));
+    }
+    context.finish_write(true)?;
+    context
+        .session()
+        .save(&target)
+        .map_err(HostError::from_session)?;
+    if let Ok(snapshot) = context.session().snapshot() {
+        context.record_saved((snapshot.revision, snapshot.geometry_revision));
+    }
+    if path.is_some() {
+        context.set_project_path(target);
+    }
+    Ok(())
+}
+
+/// Facteur de rastérisation PNG par défaut de `pyst.export_graph` : celui de
+/// l'application (`DEFAULT_PNG_EXPORT_SCALE` de `stokesforge-app-state`, que ce
+/// crate ne peut pas lire).
+pub(crate) const DEFAULT_PNG_SCALE: f32 = 4.0;
+
+/// `pyst.export_graph` : le même rendu que l'export de l'application (taille
+/// `DEFAULT_SIZE`, polices par défaut, Typst), le format venant de l'extension.
+/// Le texte d'un SVG reste du texte (le défaut de l'application).
+pub(crate) fn export_graph(
+    session: &SessionHandle,
+    id: NodeId,
+    epoch: u64,
+    path: &Path,
+    png_scale: f32,
+) -> Result<(), HostError> {
+    use stokesforge_render_svg::{ExportFormat, SvgTextMode};
+    let format = ExportFormat::from_path(path, png_scale, SvgTextMode::Text).ok_or_else(|| {
+        HostError::InvalidValue(format!(
+            "unknown export format for {}: use a .svg, .png or .pdf extension",
+            path.display()
+        ))
+    })?;
+    if !png_scale.is_finite() || png_scale <= 0.0 {
+        return Err(HostError::InvalidValue(
+            "png_scale must be a positive number".to_owned(),
+        ));
+    }
+    let snapshot = session.snapshot().map_err(HostError::from_session)?;
+    let spec = graph_spec(&snapshot, id, epoch)?;
+    let plot = stokesforge_core::resolve::resolve_spec(&snapshot.tree, &spec);
+    let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
+    stokesforge_render_svg::export_to_file(
+        path,
+        &plot,
+        stokesforge_render_svg::DEFAULT_SIZE,
+        &measurer,
+        &stokesforge_render_svg::FontChoice::default(),
+        format,
+    )
+    .map_err(|error| HostError::InvalidValue(error.to_string()))
 }
 
 /// Les arguments de `pyst.add_shape`, tels qu'un script les écrit : du texte et
@@ -666,7 +758,11 @@ pub(crate) fn add_created_node(
 /// Instantané de mutation : vérifier avant la réservation, puis revérifier
 /// sous la macro. Un Load entre ces deux gestes ne réhabilite jamais une
 /// poignée d'une ancienne époque, même si son identifiant existe à nouveau.
-fn write_snapshot(context: &ScriptContext, id: NodeId, epoch: u64) -> Result<Snapshot, HostError> {
+pub(crate) fn write_snapshot(
+    context: &ScriptContext,
+    id: NodeId,
+    epoch: u64,
+) -> Result<Snapshot, HostError> {
     let session = context.session();
     let snapshot = session.snapshot().map_err(HostError::from_session)?;
     checked_node(&snapshot, id, epoch)?;

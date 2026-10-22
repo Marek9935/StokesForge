@@ -317,7 +317,7 @@ pyst.analysis.baseline(y, x, method='line', points=[(0, 1), (20, 41)], keep_base
     assert_eq!(colonne("baseline").1, "Baseline of Y");
     for cle in ["corrected", "baseline"] {
         assert_eq!(colonne(cle).2, "counts", "{cle}");
-        assert_eq!(colonne(cle).3, "Baseline", "{cle}");
+        assert_eq!(colonne(cle).3, "Correction", "{cle}");
     }
     assert_eq!(sorties.len(), 2);
 }

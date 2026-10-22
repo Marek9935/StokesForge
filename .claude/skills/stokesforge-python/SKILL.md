@@ -119,6 +119,17 @@ projet aux mêmes identifiants).
 L'ancienne API v1 de l'archive n'est plus la cible : le chantier #65 reformule
 la surface à partir du code. Étendre le pont existant, toujours GIL relâché.
 
+**La surface est figée (#331).** Ajouter ou modifier un appel `pyst`, un
+paramètre ou son défaut, une exception, une clé d'option (`PLOT_OPTIONS`,
+`SET_GRAPH_OPTIONS`, `COLUMN_META_FIELDS`), une clé de dictionnaire rendu ou une
+valeur énumérée est une **décision explicite**, pas un détail de code : mettre à
+jour les blocs `pyst-api` de « API figée V1 » (`docs/python-et-script.md`) dans
+le même commit. `stokesforge-script/tests/surface_figee.rs` lit ces blocs et
+échoue sur toute différence ; un nouvel appel est donc aussi une ligne
+`function nom(signature)` (telle que rend `inspect.signature`), une option neuve
+entre dans sa constante *et* son bloc `options`. Docstrings en français,
+messages d'erreur en anglais. Une `Handle` n'expose rien.
+
 ## L'isolation de l'interpréteur
 
 `PYTHONHOME` seul **n'isole rien** : il laisse entrer `PYTHONPATH`, le

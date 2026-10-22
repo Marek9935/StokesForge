@@ -151,7 +151,9 @@ v1 de l'archive est historique. Les lots #66 à #68 ajoutent navigation,
 lecture des cellules, manipulation du projet et graphes natifs par commandes
 annulables. Aucun
 appel ne dépend d'une feuille active ni d'une fenêtre : la surface s'emploie
-avec toute session, y compris une session sans interface.
+avec toute session, y compris une session sans interface. La liste qui fait
+foi (noms, signatures, clés, valeurs) est « API figée V1 » plus bas ; le
+tableau ci-dessous en décrit les effets.
 
 | Appel | Résultat / effet |
 |---|---|
@@ -159,9 +161,9 @@ avec toute session, y compris une session sans interface.
 | `children(handle=None)` | liste des poignées des enfants directs, dans l'ordre du modèle ; sans poignée, enfants de la racine |
 | `info(handle)` | dictionnaire détaché : nom, nature, parent, nombre de lignes et métadonnées de colonne |
 | `values(handle)` | tuple copié des cellules stockées, en `float`, `str` ou `None` |
-| `resolve(chemin)` | poignée opaque résolue par la grammaire de chemins du modèle |
-| `column(poignee)` | tableau numpy numérique/date-heure, sans copie et en lecture seule |
-| `set_column(poignee, tab)` | écriture numérique de même longueur par les commandes, annulable |
+| `resolve(path)` | poignée opaque résolue par la grammaire de chemins du modèle |
+| `column(handle)` | tableau numpy numérique/date-heure, sans copie et en lecture seule |
+| `set_column(handle, values)` | écriture numérique de même longueur par les commandes, annulable |
 | `create_workbook(name=None, parent=None)` | classeur vide dans le dossier demandé, racine par défaut ; poignée |
 | `create_worksheet(workbook, name=None)` | feuille vide en fin de classeur ; poignée |
 | `create_column(worksheet, name=None, column_type="numeric")` | colonne vide en fin de feuille ; poignée ; types `numeric`, `datetime`, `mixed` |
@@ -173,9 +175,43 @@ avec toute session, y compris une session sans interface.
 | `add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis="left", line_color="", line_width=1.5, fill_color="")` | ajoute un objet graphique en coordonnées de données ; rang dans le panneau |
 | `remove_shape(graph, index, *, panel=(0, 0))` | retire l'objet graphique de ce rang |
 | `undo()` | termine puis annule le groupe courant, ou annule le dernier groupe déjà terminé ; `False` si l'historique est vide |
+| `redo()` | symétrique d'`undo()` : rétablit la dernière entrée annulée ; `False` si rien à rétablir (et après des écritures du même script, qui vident la pile de rétablissement) |
+| `save()` | enregistre au chemin courant du projet ; `InvalidValueError` s'il n'en a pas (utiliser `save_as`) |
+| `save_as(path)` | enregistre sous ce chemin (texte ou `pathlib.Path`), qui devient le chemin courant |
+| `export_graph(graph, path, *, png_scale=4.0)` | exporte un graphe en `.svg`, `.pdf` ou `.png` (extension inconnue : `InvalidValueError`), même rendu que l'export de l'application |
 | `import_file(path, recipe=None)` | import dans un classeur neuf, une macro annulable ; poignées des feuilles créées |
+| `set_graph(graph, *, panel=(0, 0), axis="left", **options)` | règle un graphe existant par les clés de Graph Properties (tableau « `set_graph` » plus bas) ; **une seule entrée d'historique** ; clé inconnue ou valeur refusée : `InvalidValueError`, rien n'est écrit |
+| `insert_rows(worksheet, at, count=1)` | insère des lignes vides à la ligne `at` (0 = en tête) dans toutes les colonnes de la feuille ; `at` au-delà de la dernière ligne : `InvalidValueError` |
+| `delete_rows(worksheet, at, count=1)` | supprime `count` lignes à partir de `at` dans les colonnes de la feuille ; `undo()` rend les cellules |
+| `set_column_type(column, column_type)` | `numeric`, `datetime` ou `mixed` ; **conversion destructrice** des valeurs que le nouveau type ne représente pas (annulable) ; une colonne-formule refuse |
+| `move(handle, parent, index=None)` | déplace sous `parent` à `index` parmi les autres enfants (défaut : en dernier ; même parent = réordonner) ; la poignée reste valide ; parent inadapté, cycle, nom pris ou index hors limites : `InvalidValueError` |
+| `duplicate(handle, name=None)` | copie l'objet et ses descendants dans le même parent ; poignée de la copie ; une feuille juste après l'originale (`DuplicateWorksheet`), tout autre objet en fin de parent (`InsertCopy`) ; sans `name`, « `<nom> copy N` » (premier N libre, anglais : le script n'est pas traduit) ; la racine se refuse |
+| `set_note(note, text)` | remplace le texte entier d'une note |
+
+**Enregistrement (#331).** `save` et `save_as` passent par `SessionHandle::save`,
+comme l'application : l'enregistrement n'est pas une commande, ne touche ni à
+la révision ni à l'historique, et les poignées restent valides. Le groupe
+d'écritures du script est d'abord **validé** (point de validation, comme
+`undo`) : la session refuse d'écrire pendant une macro ouverte, et ce qui a été
+enregistré n'est plus défait par une erreur ultérieure du script. Le chemin
+courant n'est pas dans la session : le moteur le porte
+(`ScriptEngine::set_project_path`, posé par l'application avant chaque
+exécution avec le chemin du fichier ouvert ; `pyst.save_as` le change, et
+l'application l'adopte à la fin de l'exécution). Sans hôte qui le pose
+(CLI), le projet n'a pas de chemin avant le premier `save_as`.
+`export_graph` lit le spec du graphe dans un instantané et écrit avec
+`stokesforge-render-svg` (taille, polices et Typst de l'application, texte SVG
+laissé en texte) ; `stokesforge-script` dépend donc de `render-svg`, qui ne
+tire ni egui ni winit.
 
 ### `pyst.analysis` (#181)
+
+`readiness(kind, **options)` (#331) dit, sans lire de donnée ni rien écrire, ce
+qui manque avant un calcul (`Operation::readiness`) : dict `ready`, `reason`
+(`needs_points`, `needs_zone`, `bad_expression`, `no_parameter`, `invalid`) et
+`message` anglais ; `kind` est `baseline`, `integrate` ou `fit` avec les options
+de la fonction du même nom (un `nan` = pas encore posé), les autres calculs
+étant toujours prêts.
 
 Sous-module des calculs du menu Analysis : `baseline`, `correct`, `smooth`,
 `integrate`, `fit`, `peaks`, `reconvolve`, `deconvolve`. `smooth(y, x=None, *,
@@ -381,6 +417,40 @@ réservation ; aucun client concurrent ne peut écraser le spec pendant cette
 écriture. Des coordonnées non finies, un type, axe, style ou rang invalide
 sont refusés sans mutation. Contrat : `tests/script.rs` et `tests/graphs.rs`.
 
+### `set_graph` et édition de classeur (#331, lot 2)
+
+`set_graph` écrit le `PlotSpec` par un `SetPlotSpec` (comme `plot`, groupes de
+séries et `add_shape`) : **une seule entrée d'historique** quel que soit le
+nombre de clés, et un appel qui ne change rien n'écrit rien. Toutes les clés
+sont lues et validées avant l'écriture. La liste vit en un seul endroit,
+`SET_GRAPH_OPTIONS` (`stokesforge-script/src/set_graph.rs`), que le test de
+surface lira. Les clés Y visent l'axe `axis` (`left` par défaut, `right`).
+
+| Clé | Valeur |
+|---|---|
+| `title`, `panel_title`, `x_title`, `y_title`, `x_unit`, `y_unit` | chaînes (markup Typst pour les titres) |
+| `title_visible`, `stale_warning`, `decimal_comma` | booléens (graphe) |
+| `title_color`, `background` | `#RRGGBB` ou `#RRGGBBAA` ; `""` = automatique (titre) ou blanc (fond) |
+| `x_scale`, `y_scale` | `linear` ou `log` |
+| `x_from`/`x_to`, `y_from`/`y_to` | les deux ensemble, finies et différentes, positives sur un axe log ; `from > to` trace l'axe à l'envers ; passent le cadrage en manuel |
+| `x_auto_range`, `y_auto_range` | `True` rend le cadrage automatique (contradictoire avec des bornes données dans le même appel) |
+| `x_inverted`, `y_inverted`, `x_grid`, `y_grid`, `x_visible`, `y_visible` | booléens |
+| `legend_visible`, `legend_position` | booléen ; `top_left`, `top_right`, `bottom_left`, `bottom_right` (légende du panneau `panel`) |
+
+Hors de `set_graph` pour l'instant (rien ne les empêche techniquement, ils
+n'ont pas été jugés assez sûrs pour ce lot) : polices et ancrages des titres,
+couleurs des axes et de la légende, axe miroir et libellés de graduations,
+axe du haut, thèmes, et tout réglage de série (`plot`, `set_group_style`).
+
+Le lot d'édition de classeur envoie les commandes que l'interface emploie
+(`InsertRows`, `DeleteRows`, `SetColumnType`, `Move`, `DuplicateWorksheet` ou
+`InsertCopy`, `SetNoteText`), dans le groupe annulable du script. Une écriture
+de colonne par le script (`insert_rows`, `delete_rows`, `set_column_type`)
+met à jour la version qu'il avait lue de ces colonnes (voir « Version de
+lecture ») : ses écritures suivantes ne se refusent pas elles-mêmes. Le calcul
+(`update_calculation`, `remove_calculation`) et la transposition ne sont pas
+exposés.
+
 ### Groupes de séries (#196)
 
 `pyst.plot([y1, y2, …], x)` crée **un groupe**, comme les séries ajoutées
@@ -524,6 +594,413 @@ changé depuis sa lecture (#312, sans retentative) des autres refus.
 Toute erreur de l'hôte — `SessionError`, `CommandError`, `CoreError` — est
 **traduite** en l'une d'elles, jamais transportée telle quelle à travers le
 canal.
+
+## API figée V1 (#331)
+
+C'est la **liste de référence** de la surface `pyst` : les noms, les
+signatures, les exceptions, les clés d'options, les clés des dictionnaires
+rendus et leurs valeurs énumérées. Un script écrit contre elle doit continuer à
+marcher ; les tableaux des sections voisines la **commentent** (effets,
+exemples) mais ne la remplacent pas. Docstrings et messages d'erreur restent
+hors de la liste (S8 : les docstrings restent en français, les messages
+d'erreur en anglais).
+
+**Règle de changement.** Toute modification de cette liste — appel, paramètre,
+défaut, exception, clé d'option, clé ou valeur d'un retour — est une **décision
+explicite** (issue ou demande de l'utilisateur), prise **dans le même commit**
+que le code : on met à jour le bloc concerné ici, et seulement ensuite le code.
+Un ajout est une évolution de l'API, pas un détail ; un retrait ou un renommage
+casse des scripts. Le test `crates/stokesforge-script/tests/surface_figee.rs`
+lit les blocs ci-dessous (il n'en garde aucune copie) et échoue sur toute
+différence avec le module réellement construit, en disant laquelle.
+
+Format (lu par le test) : un bloc ```` ```pyst-api <genre> <nom> ```` par
+liste, une entrée par ligne.
+
+- `module <nom>` : `function nom(signature)` (la signature est celle que rend
+  `inspect.signature`, valeurs par défaut comprises ; deux défauts que PyO3 ne
+  sait pas écrire, `panel=(0, 0)` et `png_scale=4.0`, y figurent en clair et le
+  test les rapproche de l'`Ellipsis` que Python rend), `class nom`,
+  `exception nom` ou `module nom` (sous-module). Les noms qui commencent par `_`
+  ne sont pas publics et ne sont pas listés.
+- `options <appel>` : les clés acceptées par `**options` / `**metadata`. Pour
+  `set_graph`, la liste est la constante `SET_GRAPH_OPTIONS`
+  (`stokesforge-script/src/set_graph.rs`) ; pour `plot`, `PLOT_OPTIONS`
+  (`graph.rs`) ; pour `set_column_meta`, `COLUMN_META_FIELDS` (`surface.rs`).
+  Le message de « clé inconnue » de chacun les énumère, et le test compare ce
+  message à ce bloc.
+- `returns <nom>` : les clés du dictionnaire rendu (l'ordre n'est pas figé).
+- `enum <nom>` : les valeurs énumérées, en entrée (acceptées) et/ou en sortie
+  (rendues). Toute autre valeur est refusée par `InvalidValueError`, sauf le
+  `model` de `fit`, où un texte inconnu est lu comme une formule.
+
+### Module `pyst`
+
+```pyst-api module pyst
+exception BrokenReferenceError
+exception ConcurrentWriteError
+class Handle
+exception InvalidValueError
+exception UnknownPathError
+function add_shape(graph, kind, x1, y1, x2, y2, *, panel=(0, 0), axis='left', line_color='', line_width=1.5, fill_color='')
+module analysis
+function apply_gradient(graph, group, gradient, *, panel=(0, 0))
+function children(handle=None)
+function column(handle)
+function create_column(worksheet, name=None, column_type='numeric')
+function create_workbook(name=None, parent=None)
+function create_worksheet(workbook, name=None)
+function delete_rows(worksheet, at, count=1)
+function duplicate(handle, name=None)
+function export_graph(graph, path, *, png_scale=4.0)
+function group_series(graph, indices, *, name=None, panel=(0, 0))
+function import_file(path, recipe=None)
+function info(handle)
+function insert_rows(worksheet, at, count=1)
+function move(handle, parent, index=None)
+function plot(y, x=None, *, graph=None, name=None, parent=None, **options)
+function redo()
+function remove(handle)
+function remove_group(graph, group, *, panel=(0, 0))
+function remove_shape(graph, index, *, panel=(0, 0))
+function rename(handle, name)
+function rename_group(graph, group, name, *, panel=(0, 0))
+function resolve(path)
+function root()
+function save()
+function save_as(path)
+function series(graph, *, panel=(0, 0))
+function series_groups(graph, *, panel=(0, 0))
+function set_column(handle, values, *, expected_version=None)
+function set_column_meta(handle, **metadata)
+function set_column_type(column, column_type)
+function set_graph(graph, *, panel=(0, 0), axis='left', **options)
+function set_group_style(graph, group, *, panel=(0, 0), line_style=None, line_width=None, symbol=None, symbol_size=None)
+function set_note(note, text)
+function set_series_group(graph, index, group, *, panel=(0, 0))
+function set_values(handle, values, *, expected_version=None)
+function undo()
+function ungroup(graph, group, *, panel=(0, 0))
+function values(handle)
+```
+
+Une `Handle` n'a aucun attribut ni méthode publics (pas de constructeur, aucun
+entier exposé) : `dir(pyst.Handle)` sans les noms en `_` est vide. Les quatre
+exceptions dérivent d'`Exception`.
+
+### Module `pyst.analysis`
+
+```pyst-api module pyst.analysis
+function baseline(y, x=None, *, method='anchors', points=None, zones=None, degree=1, interpolation='segments', op='subtract', keep_baseline=False, keep_results=False, auto_recalc=True, replace_original=False)
+function correct(y, reference, x=None, reference_x=None, *, op='divide', keep_results=False, auto_recalc=True, replace_original=False)
+function deconvolve(y, response, x=None, response_x=None, *, method='richardson-lucy', iterations=50, noise=None, shift=0.0, keep_results=False, auto_recalc=False)
+function fit(y, x=None, *, model='linear', degree=3, initial=None, bounds=None, fixed=None, shared=None, fit_range=None, residuals=False, sigma=None, keep_results=False, auto_recalc=True)
+function integrate(y, x=None, *, ranges=None, under='zero', cumulative=False, normalize=False, keep_results=False, auto_recalc=True)
+function peaks(y, x=None, *, shape='gaussian', background='constant', centers=None, link_widths=False, center_window=None, prominence=0.05, max_peaks=6, fit_range=None, residuals=False, peak_columns=True, sum_column=True, keep_results=False, auto_recalc=True)
+function readiness(kind, **options)
+function reconvolve(y, response, x=None, response_x=None, *, components=1, shift=0.0, fit_shift=True, window=None, residuals=False, keep_results=False, auto_recalc=False)
+function smooth(y, x=None, *, method='adjacent', window=5.0, window_unit='points', order=2, keep_results=False, auto_recalc=True, replace_original=False)
+```
+
+### Clés d'options
+
+```pyst-api options plot
+plot_type
+color
+line_style
+line_width
+symbol
+symbol_size
+label
+group_name
+title
+x_title
+y_title
+x_scale
+y_scale
+x_from
+x_to
+y_from
+y_to
+axis
+x_error
+y_error
+histogram_bins
+```
+
+```pyst-api options set_graph
+title
+title_visible
+title_color
+background
+stale_warning
+decimal_comma
+panel_title
+x_title
+y_title
+x_unit
+y_unit
+x_scale
+y_scale
+x_from
+x_to
+y_from
+y_to
+x_auto_range
+y_auto_range
+x_inverted
+y_inverted
+x_grid
+y_grid
+x_visible
+y_visible
+legend_visible
+legend_position
+```
+
+```pyst-api options set_column_meta
+role
+long_name
+unit
+comment
+display_format
+formula
+```
+
+### Formes de retour
+
+```pyst-api returns info
+name
+kind
+parent
+row_count
+column
+```
+
+```pyst-api returns info.column
+type
+role
+long_name
+unit
+comment
+x_prime
+display_format
+formula
+version
+```
+
+```pyst-api returns series.item
+index
+name
+group
+color
+visible
+y
+```
+
+```pyst-api returns series_groups.item
+id
+name
+members
+```
+
+Un calcul de `pyst.analysis` rend `{columns, values, errors, warnings}` ; pour
+une liste de `y`, `{series: [ce dictionnaire, …]}`. Les clés de `values`
+(`"area.total"`, `"param.tau"`…) sont celles du crate de calcul, hors de cette
+liste. Les clés de `columns` ci-dessous sont figées pour les trois opérations
+qui écrivent toujours les mêmes colonnes.
+
+```pyst-api returns analysis
+columns
+values
+errors
+warnings
+```
+
+```pyst-api returns analysis.batch
+series
+```
+
+```pyst-api returns analysis.baseline.columns
+corrected
+baseline
+```
+
+```pyst-api returns analysis.correct.columns
+corrected
+```
+
+```pyst-api returns analysis.smooth.columns
+smoothed
+```
+
+```pyst-api returns readiness
+ready
+reason
+message
+```
+
+`readiness` ajoute `needed` et `have` quand `reason` vaut `needs_points`.
+
+```pyst-api returns readiness.needs_points
+ready
+reason
+message
+needed
+have
+```
+
+### Valeurs énumérées
+
+```pyst-api enum kind
+folder
+workbook
+worksheet
+column
+graph
+matrix
+note
+unknown
+```
+
+```pyst-api enum type
+numeric
+datetime
+mixed
+```
+
+```pyst-api enum column_type
+numeric
+datetime
+mixed
+```
+
+```pyst-api enum role
+x
+y
+x2
+y2
+x3
+y3
+x4
+y4
+z
+x_error
+y_error
+label
+none
+```
+
+```pyst-api enum plot_type
+line
+scatter
+line_scatter
+bar
+histogram
+error_bar
+```
+
+```pyst-api enum line_style
+none
+solid
+dash
+dot
+dash_dot
+```
+
+```pyst-api enum symbol
+none
+circle
+square
+triangle
+diamond
+plus
+cross
+```
+
+```pyst-api enum scale
+linear
+log
+```
+
+```pyst-api enum axis
+left
+right
+```
+
+```pyst-api enum legend_position
+top_left
+top_right
+bottom_left
+bottom_right
+```
+
+```pyst-api enum shape_kind
+rectangle
+ellipse
+line
+arrow
+```
+
+```pyst-api enum export_extension
+svg
+pdf
+png
+```
+
+```pyst-api enum analysis_kind
+baseline
+correct
+smooth
+integrate
+fit
+peaks
+reconvolve
+deconvolve
+```
+
+```pyst-api enum readiness_reason
+needs_points
+needs_zone
+bad_expression
+no_parameter
+invalid
+```
+
+```pyst-api enum baseline_method
+constant
+anchors
+line
+zones
+```
+
+```pyst-api enum baseline_op
+subtract
+divide
+```
+
+```pyst-api enum integrate_under
+zero
+line
+```
+
+```pyst-api enum smooth_method
+adjacent
+savitzky-golay
+median
+```
+
+```pyst-api enum fit_model
+linear
+polynomial
+exponential
+exponential_offset
+exponential2
+logarithm
+power
+gaussian
+lorentzian
+```
 
 ## Le GIL — la partie que le compilateur tient
 

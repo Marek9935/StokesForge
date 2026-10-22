@@ -41,7 +41,7 @@ use stokesforge_analysis::deconv::{DirectMethod, ReconvSpec};
 use stokesforge_analysis::fit::{FitSpec, ParamSetting};
 use stokesforge_analysis::integrate::{IntegrateSpec, Under};
 use stokesforge_analysis::model::Model;
-use stokesforge_analysis::ops::{AutoDetect, Operation, Warning};
+use stokesforge_analysis::ops::{AutoDetect, Operation, Readiness, Warning};
 use stokesforge_analysis::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec};
 use stokesforge_analysis::smooth::{SmoothMethod, SmoothSpec, SmoothWindow};
 use stokesforge_commands::Command;
@@ -438,29 +438,17 @@ fn run(
     Ok(result.unbind())
 }
 
-/// Ligne de base : `method` = `"anchors"` (avec `points=[(x, y), …]`),
-/// `"constant"` (un point ou une zone), `"line"` (deux `points`) ou
-/// `"zones"` (avec `zones=[(de, à), …]` et
-/// `degree`). `op` : `"subtract"` ou `"divide"`.
-#[pyfunction]
-#[pyo3(signature = (y, x=None, *, method="anchors", points=None, zones=None, degree=1, interpolation="segments", op="subtract", keep_baseline=false, keep_results=false, auto_recalc=true, replace_original=false))]
-#[allow(clippy::too_many_arguments)]
-fn baseline(
-    py: Python<'_>,
-    y: &Bound<'_, PyAny>,
-    x: Option<&Bound<'_, PyAny>>,
+/// L'opération « ligne de base » décrite par les arguments de `baseline`
+/// (partagée avec `readiness`).
+fn baseline_operation(
     method: &str,
-    points: Option<Vec<(f64, f64)>>,
+    points: Vec<(f64, f64)>,
     zones: Option<Vec<(f64, f64)>>,
     degree: u32,
     interpolation: &str,
     op: &str,
     keep_baseline: bool,
-    keep_results: bool,
-    auto_recalc: bool,
-    replace_original: bool,
-) -> PyResult<Py<PyDict>> {
-    let points = points.unwrap_or_default();
+) -> PyResult<Operation> {
     let method = match method {
         "constant" => {
             let zones = zones.unwrap_or_default();
@@ -514,6 +502,146 @@ fn baseline(
         op,
         keep_baseline,
     };
+    Ok(operation)
+}
+
+/// L'opération « intégrale » décrite par les arguments de `integrate`
+/// (partagée avec `readiness`).
+fn integrate_operation(
+    ranges: Option<Vec<(f64, f64)>>,
+    under: &str,
+    cumulative: bool,
+    normalize: bool,
+) -> PyResult<Operation> {
+    let under = choice(
+        "under",
+        under,
+        &[("zero", Under::Zero), ("line", Under::Line)],
+    )?;
+    let spec = IntegrateSpec {
+        ranges: ranges.unwrap_or_default(),
+        under,
+        cumulative,
+        normalize,
+    };
+    Ok(Operation::Integrate { spec })
+}
+
+/// L'opération « ajustement » décrite par les arguments de `fit` (partagée
+/// avec `readiness`).
+#[allow(clippy::too_many_arguments)]
+fn fit_operation(
+    model: &str,
+    degree: u32,
+    initial: Option<std::collections::HashMap<String, f64>>,
+    bounds: Option<std::collections::HashMap<String, (f64, f64)>>,
+    fixed: Option<Vec<String>>,
+    shared: Option<Vec<String>>,
+    fit_range: Option<(f64, f64)>,
+    residuals: bool,
+    lenient: bool,
+) -> PyResult<Operation> {
+    let model = match model {
+        "linear" => Model::Linear,
+        "polynomial" => Model::Polynomial { degree },
+        "exponential" => Model::Exponential,
+        "exponential_offset" => Model::ExponentialOffset,
+        "exponential2" => Model::Exponential2,
+        "logarithm" => Model::Logarithm,
+        "power" => Model::Power,
+        "gaussian" => Model::Gaussian,
+        "lorentzian" => Model::Lorentzian,
+        formula => Model::Custom {
+            formula: formula.to_string(),
+        },
+    };
+    let range = finite_range("fit_range", fit_range)?;
+    let compiled = match model.compile() {
+        Ok(compiled) => compiled,
+        // `readiness` doit pouvoir *dire* qu'une expression est illisible :
+        // l'opération est alors rendue sans paramètre, et c'est elle qui
+        // porte le refus (`Operation::readiness`).
+        Err(_) if lenient => {
+            return Ok(Operation::Fit {
+                spec: FitSpec {
+                    model,
+                    params: Vec::new(),
+                },
+                range,
+                residuals,
+            })
+        }
+        Err(error) => return host(Err(error)),
+    };
+    let names: Vec<String> = compiled.params().iter().map(|p| p.name.clone()).collect();
+    let (initial, bounds, fixed, shared) = (
+        initial.unwrap_or_default(),
+        bounds.unwrap_or_default(),
+        fixed.unwrap_or_default(),
+        shared.unwrap_or_default(),
+    );
+    for name in initial
+        .keys()
+        .chain(bounds.keys())
+        .chain(fixed.iter())
+        .chain(shared.iter())
+    {
+        if !names.contains(name) {
+            return Err(invalid(format!(
+                "the model has no parameter \"{name}\": its parameters are {}",
+                names.join(", ")
+            )));
+        }
+    }
+    let params = names
+        .iter()
+        .map(|name| ParamSetting {
+            initial: initial.get(name).copied(),
+            fixed: fixed.contains(name),
+            min: bounds.get(name).map(|b| b.0),
+            max: bounds.get(name).map(|b| b.1),
+            shared: shared.contains(name),
+        })
+        .collect();
+    let operation = Operation::Fit {
+        spec: FitSpec { model, params },
+        range,
+        residuals,
+    };
+    Ok(operation)
+}
+
+/// Ligne de base : `method` = `"anchors"` (avec `points=[(x, y), …]`),
+/// `"constant"` (un point ou une zone), `"line"` (deux `points`) ou
+/// `"zones"` (avec `zones=[(de, à), …]` et
+/// `degree`). `op` : `"subtract"` ou `"divide"`.
+#[pyfunction]
+#[pyo3(signature = (y, x=None, *, method="anchors", points=None, zones=None, degree=1, interpolation="segments", op="subtract", keep_baseline=false, keep_results=false, auto_recalc=true, replace_original=false))]
+#[allow(clippy::too_many_arguments)]
+fn baseline(
+    py: Python<'_>,
+    y: &Bound<'_, PyAny>,
+    x: Option<&Bound<'_, PyAny>>,
+    method: &str,
+    points: Option<Vec<(f64, f64)>>,
+    zones: Option<Vec<(f64, f64)>>,
+    degree: u32,
+    interpolation: &str,
+    op: &str,
+    keep_baseline: bool,
+    keep_results: bool,
+    auto_recalc: bool,
+    replace_original: bool,
+) -> PyResult<Py<PyDict>> {
+    let operation = baseline_operation(
+        method,
+        points.unwrap_or_default(),
+        zones,
+        degree,
+        interpolation,
+        op,
+        keep_baseline,
+    )?;
     run(
         py,
         operation,
@@ -630,20 +758,10 @@ fn integrate(
     keep_results: bool,
     auto_recalc: bool,
 ) -> PyResult<Py<PyDict>> {
-    let under = choice(
-        "under",
-        under,
-        &[("zero", Under::Zero), ("line", Under::Line)],
-    )?;
-    let spec = IntegrateSpec {
-        ranges: ranges.unwrap_or_default(),
-        under,
-        cumulative,
-        normalize,
-    };
+    let operation = integrate_operation(ranges, under, cumulative, normalize)?;
     run(
         py,
-        Operation::Integrate { spec },
+        operation,
         Inputs::new(y, x, None, None)?,
         keep_results,
         auto_recalc,
@@ -676,56 +794,9 @@ fn fit(
     keep_results: bool,
     auto_recalc: bool,
 ) -> PyResult<Py<PyDict>> {
-    let model = match model {
-        "linear" => Model::Linear,
-        "polynomial" => Model::Polynomial { degree },
-        "exponential" => Model::Exponential,
-        "exponential_offset" => Model::ExponentialOffset,
-        "exponential2" => Model::Exponential2,
-        "logarithm" => Model::Logarithm,
-        "power" => Model::Power,
-        "gaussian" => Model::Gaussian,
-        "lorentzian" => Model::Lorentzian,
-        formula => Model::Custom {
-            formula: formula.to_string(),
-        },
-    };
-    let compiled = host(model.compile())?;
-    let names: Vec<String> = compiled.params().iter().map(|p| p.name.clone()).collect();
-    let (initial, bounds, fixed, shared) = (
-        initial.unwrap_or_default(),
-        bounds.unwrap_or_default(),
-        fixed.unwrap_or_default(),
-        shared.unwrap_or_default(),
-    );
-    for name in initial
-        .keys()
-        .chain(bounds.keys())
-        .chain(fixed.iter())
-        .chain(shared.iter())
-    {
-        if !names.contains(name) {
-            return Err(invalid(format!(
-                "the model has no parameter \"{name}\": its parameters are {}",
-                names.join(", ")
-            )));
-        }
-    }
-    let params = names
-        .iter()
-        .map(|name| ParamSetting {
-            initial: initial.get(name).copied(),
-            fixed: fixed.contains(name),
-            min: bounds.get(name).map(|b| b.0),
-            max: bounds.get(name).map(|b| b.1),
-            shared: shared.contains(name),
-        })
-        .collect();
-    let operation = Operation::Fit {
-        spec: FitSpec { model, params },
-        range: finite_range("fit_range", fit_range)?,
-        residuals,
-    };
+    let operation = fit_operation(
+        model, degree, initial, bounds, fixed, shared, fit_range, residuals, false,
+    )?;
     run(
         py,
         operation,
@@ -901,6 +972,152 @@ fn deconvolve(
     )
 }
 
+/// Ce qui manque à une analyse avant de la lancer, **sans lire de donnée** et
+/// sans rien écrire : la même règle que le bouton Apply de la fenêtre
+/// d'analyse (`Operation::readiness`).
+///
+/// `kind` : `"baseline"`, `"integrate"`, `"fit"` (avec les mêmes options que la
+/// fonction du même nom : `method`, `points`, `zones`, `ranges`, `model`…, un
+/// point ou une zone `nan` étant « pas encore posé »), ou `"correct"`,
+/// `"smooth"`, `"peaks"`, `"reconvolve"`, `"deconvolve"` (sans option, toujours
+/// prêts). Rend un dict `ready` (bool), `reason` (`None`, `"needs_points"`,
+/// `"needs_zone"`, `"bad_expression"`, `"no_parameter"` ou `"invalid"`) et
+/// `message` (anglais, `None` si prêt) ; `needs_points` ajoute `needed` et
+/// `have`. Une option inconnue ou mal typée lève `InvalidValueError`.
+#[pyfunction]
+#[pyo3(signature = (kind, **options))]
+fn readiness(
+    py: Python<'_>,
+    kind: &str,
+    options: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Py<PyDict>> {
+    let context = engine::current_context()?;
+    context.check_interrupt()?;
+    let mut options = Options::new(options)?;
+    let operation = match kind {
+        "baseline" => baseline_operation(
+            &options.take("method", "anchors".to_string())?,
+            options.take("points", Vec::new())?,
+            options.take_opt("zones")?,
+            options.take("degree", 1)?,
+            &options.take("interpolation", "segments".to_string())?,
+            &options.take("op", "subtract".to_string())?,
+            options.take("keep_baseline", false)?,
+        )?,
+        "integrate" => integrate_operation(
+            options.take_opt("ranges")?,
+            &options.take("under", "zero".to_string())?,
+            options.take("cumulative", false)?,
+            options.take("normalize", false)?,
+        )?,
+        "fit" => fit_operation(
+            &options.take("model", "linear".to_string())?,
+            options.take("degree", 3)?,
+            options.take_opt("initial")?,
+            options.take_opt("bounds")?,
+            options.take_opt("fixed")?,
+            options.take_opt("shared")?,
+            options.take_opt("fit_range")?,
+            options.take("residuals", false)?,
+            true,
+        )?,
+        "correct" | "smooth" | "peaks" | "reconvolve" | "deconvolve" => {
+            options.expect_empty()?;
+            let result = PyDict::new(py);
+            result.set_item("ready", true)?;
+            result.set_item("reason", py.None())?;
+            result.set_item("message", py.None())?;
+            return Ok(result.unbind());
+        }
+        other => {
+            return Err(invalid(format!(
+                "unknown analysis \"{other}\": use \"baseline\", \"correct\", \"smooth\", \
+                 \"integrate\", \"fit\", \"peaks\", \"reconvolve\" or \"deconvolve\""
+            )))
+        }
+    };
+    options.expect_empty()?;
+    let result = PyDict::new(py);
+    let (reason, message) = match operation.readiness() {
+        Readiness::Ready => (None, None),
+        Readiness::NeedsPoints { needed, have } => {
+            result.set_item("needed", needed)?;
+            result.set_item("have", have)?;
+            (
+                Some("needs_points"),
+                Some(format!("{needed} point(s) are needed, {have} placed")),
+            )
+        }
+        Readiness::NeedsZone => (
+            Some("needs_zone"),
+            Some("at least one zone must be placed".to_string()),
+        ),
+        Readiness::BadExpression(error) => (Some("bad_expression"), Some(error.to_string())),
+        Readiness::NoParameter => (
+            Some("no_parameter"),
+            Some("the model has no parameter to fit".to_string()),
+        ),
+        Readiness::Invalid(error) => (Some("invalid"), Some(error.to_string())),
+    };
+    result.set_item("ready", reason.is_none())?;
+    result.set_item("reason", reason)?;
+    result.set_item("message", message)?;
+    Ok(result.unbind())
+}
+
+/// Les options de `readiness` : extraites une à une, puis plus rien ne doit
+/// rester (une faute de frappe lève au lieu d'être ignorée).
+struct Options<'a, 'py> {
+    dict: Option<&'a Bound<'py, PyDict>>,
+    seen: Vec<String>,
+}
+
+impl<'a, 'py> Options<'a, 'py> {
+    fn new(dict: Option<&'a Bound<'py, PyDict>>) -> PyResult<Self> {
+        Ok(Self {
+            dict,
+            seen: Vec::new(),
+        })
+    }
+
+    fn take_opt<T: for<'x> FromPyObject<'x, 'py, Error = PyErr>>(
+        &mut self,
+        key: &str,
+    ) -> PyResult<Option<T>> {
+        self.seen.push(key.to_string());
+        let Some(value) = self.dict.map(|d| d.get_item(key)).transpose()?.flatten() else {
+            return Ok(None);
+        };
+        if value.is_none() {
+            return Ok(None);
+        }
+        value
+            .extract::<T>()
+            .map(Some)
+            .map_err(|_| invalid(format!("option \"{key}\" has the wrong type")))
+    }
+
+    fn take<T: for<'x> FromPyObject<'x, 'py, Error = PyErr>>(
+        &mut self,
+        key: &str,
+        default: T,
+    ) -> PyResult<T> {
+        Ok(self.take_opt(key)?.unwrap_or(default))
+    }
+
+    fn expect_empty(&self) -> PyResult<()> {
+        if let Some(dict) = self.dict {
+            for key in dict.keys() {
+                let key = key.extract::<String>()?;
+                if !self.seen.contains(&key) {
+                    return Err(invalid(format!("unknown option \"{key}\"")));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Documentation du module `pyst.analysis`.
 const MODULE_DOC: &str = "\
 Calculs d'analyse de StokesForge : un appel, un calcul du projet. y peut être une poignée ou une liste
@@ -919,6 +1136,8 @@ Calculs d'analyse de StokesForge : un appel, un calcul du projet. y peut être u
     pyst.analysis.reconvolve(y, response, x=None, response_x=None, *, components=1, shift=0.0, ...)
     pyst.analysis.deconvolve(y, response, x=None, response_x=None, *, method='richardson-lucy', ...)
 
+    pyst.analysis.readiness(kind, **options)   # ce qui manque avant un calcul, sans rien écrire
+
 Chaque fonction accepte aussi keep_results=False et auto_recalc=True (False pour
 reconvolve et deconvolve). Elle rend un dict : columns (clé de sortie -> Handle),
 values, errors et warnings.
@@ -936,6 +1155,7 @@ pub(crate) fn install(py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<
     module.add_function(wrap_pyfunction!(peaks, &module)?)?;
     module.add_function(wrap_pyfunction!(reconvolve, &module)?)?;
     module.add_function(wrap_pyfunction!(deconvolve, &module)?)?;
+    module.add_function(wrap_pyfunction!(readiness, &module)?)?;
     parent.add("analysis", &module)?;
     py.import("sys")?
         .getattr("modules")?
