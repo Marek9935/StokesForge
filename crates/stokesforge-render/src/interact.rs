@@ -365,6 +365,29 @@ pub fn axis_frame(values: &[f64], axis: &AxisSpec) -> (f64, f64) {
 /// la fenêtre se tronque au lieu de déborder. Nommée `snap_to_curve` pour ne
 /// pas se confondre avec [`crate::scale::snap_to_decades`].
 pub fn snap_to_curve(xs: &[f64], ys: &[f64], x: f64, n: usize) -> Option<(f64, f64)> {
+    snap_to_curve_zone(xs, ys, x, n).map(|snap| (snap.x, snap.y))
+}
+
+/// L'aimantation de [`snap_to_curve`] avec la zone qui entre dans la moyenne
+/// (#334) : de quoi montrer à l'écran ce que N moyenne.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SnapZone {
+    /// Abscisse du point de la courbe le plus proche.
+    pub x: f64,
+    /// Ordonnée moyenne de la fenêtre.
+    pub y: f64,
+    /// Plus petite abscisse finie de la fenêtre (abscisses non triées : le
+    /// minimum de la fenêtre, pas son premier point).
+    pub x_min: f64,
+    /// Plus grande abscisse finie de la fenêtre.
+    pub x_max: f64,
+    /// Nombre réel de points moyennés : la fenêtre tronquée au bord, sans les
+    /// ordonnées non finies.
+    pub count: usize,
+}
+
+/// [`snap_to_curve`] et la zone moyennée. Mêmes règles, mêmes `None`.
+pub fn snap_to_curve_zone(xs: &[f64], ys: &[f64], x: f64, n: usize) -> Option<SnapZone> {
     if ys.len() < xs.len() {
         return None;
     }
@@ -384,7 +407,23 @@ pub fn snap_to_curve(xs: &[f64], ys: &[f64], x: f64, n: usize) -> Option<(f64, f
         .fold((0.0, 0_usize), |(sum, count), value| {
             (sum + value, count + 1)
         });
-    (count > 0).then(|| (xs[nearest], sum / count as f64))
+    if count == 0 {
+        return None;
+    }
+    let (x_min, x_max) = xs[low..high]
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite())
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), value| {
+            (lo.min(value), hi.max(value))
+        });
+    Some(SnapZone {
+        x: xs[nearest],
+        y: sum / count as f64,
+        x_min,
+        x_max,
+        count,
+    })
 }
 
 /// Un point désigné sur une courbe : ce que [`nearest_point`] rend, en
@@ -1008,5 +1047,31 @@ mod tests {
         assert_eq!(snap_to_curve(&xs, &ys, 1.1, 3), Some((1.0, 6.0)));
         assert_eq!(snap_to_curve(&[f64::NAN], &[1.0], 0.0, 1), None);
         assert_eq!(snap_to_curve(&[1.0], &[f64::NAN], 1.0, 1), None);
+    }
+
+    #[test]
+    fn la_zone_d_aimantation_suit_la_fenetre_moyennee() {
+        let xs = [0.0, 1.0, 2.0, 3.0, 4.0];
+        let ys = [10.0, 20.0, 60.0, 20.0, 10.0];
+        let zone = |x, n| {
+            let s = snap_to_curve_zone(&xs, &ys, x, n).unwrap();
+            (s.x_min, s.x_max, s.count)
+        };
+        assert_eq!(zone(2.2, 1), (2.0, 2.0, 1));
+        assert_eq!(zone(2.2, 3), (1.0, 3.0, 3));
+        // n pair : le surplus à droite.
+        assert_eq!(zone(2.2, 4), (1.0, 4.0, 4));
+        // Au bord, la zone suit la fenêtre tronquée, pas n.
+        assert_eq!(zone(-5.0, 3), (0.0, 1.0, 2));
+        assert_eq!(zone(10.0, 3), (3.0, 4.0, 2));
+        // Abscisses non triées : minimum et maximum de la fenêtre.
+        let xs = [5.0, 1.0, 3.0, 9.0, 2.0];
+        let s = snap_to_curve_zone(&xs, &ys, 3.1, 5).unwrap();
+        assert_eq!((s.x_min, s.x_max, s.count), (1.0, 9.0, 5));
+        // Fenêtre 3, 9, 2 : ni son premier ni son dernier point ne sont les bornes.
+        let s = snap_to_curve_zone(&xs, &ys, 9.1, 3).unwrap();
+        assert_eq!((s.x_min, s.x_max), (2.0, 9.0));
+        let s = snap_to_curve_zone(&xs, &ys, 3.1, 1).unwrap();
+        assert_eq!((s.x_min, s.x_max), (3.0, 3.0));
     }
 }

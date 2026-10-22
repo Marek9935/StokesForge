@@ -124,7 +124,8 @@ pub use decimate::lttb;
 pub use fonts::{available_families, FamilyEntry, FontChoice, FontSet, FontSource, ResolvedFonts};
 pub use hit::{component_at, AxisSide, PlotComponent};
 pub use interact::{
-    axis_frame, fit_range, nearest_on_curve, snap_to_curve, Gesture, PanelTransform,
+    axis_frame, fit_range, nearest_on_curve, snap_to_curve, snap_to_curve_zone, Gesture,
+    PanelTransform, SnapZone,
 };
 pub use pipeline::{
     draw, draw_on, AxisArea, AxisAreas, DrawnAnnotation, DrawnLegendRow, DrawnPanel, DrawnPlot,

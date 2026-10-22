@@ -73,7 +73,7 @@ plus d'outil Zoom ni de bouton de recadrage.
 | Ctrl + glisser | tracé | déplace la vue (le contenu suit le curseur, axe inversé compris) ; ne trace pas de zone ; le modificateur est lu au début du glisser |
 | Ctrl + glisser | un axe | ne déplace que cette échelle |
 | Ctrl + clic | — | — (rien) |
-| Maj + molette | tracé, quel que soit le geste | change la moyenne de l'aimant (1 point par cran, un événement de molette brut par cran) ; le cadre ne bouge pas |
+| Maj + molette | tracé, quel que soit le geste | change la moyenne de l'aimant (1 point par cran, un événement de molette brut par cran) ; le rond d'aimantation grandit avec la zone moyennée ; le cadre ne bouge pas |
 | Clic droit | aperçu | retire le point ou la zone le plus proche |
 | Glisser | une poignée sur le graphe (`app/analysis_handles.rs`) | déplace la poignée du calcul ; aperçu immédiat |
 

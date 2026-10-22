@@ -21,7 +21,8 @@
 //! - **double clic** : cadrage d'origine ;
 //! - **Maj + molette** : règle la moyenne N de l'aimant (M4 b) ;
 //! - outil *Points* : un clic pose un point ; **Maj** l'aimante sur la courbe
-//!   avec une moyenne locale de N points ;
+//!   avec une moyenne locale de N points ; le rond d'aimantation grandit avec
+//!   la zone moyennée (largeur en X convertie en pixels, #334) ;
 //! - outil *Zone* : glisser trace une zone ou une plage ;
 //! - clic droit : retire le repère visé.
 //!
@@ -53,7 +54,9 @@ use eframe::egui;
 use stokesforge_core::{Computed, Tree};
 use stokesforge_plot::{AxisScale, AxisSpec};
 use stokesforge_render::scale::axis_ticks;
-use stokesforge_render::{axis_frame, fit_range, snap_to_curve, Gesture, PanelTransform};
+use stokesforge_render::{
+    axis_frame, fit_range, snap_to_curve, snap_to_curve_zone, Gesture, PanelTransform,
+};
 
 use crate::theme;
 use stokesforge_app_state::analysis::{
@@ -101,6 +104,24 @@ fn transform_for(
 fn to_screen(transform: &PanelTransform, x: f64, y: f64) -> Option<egui::Pos2> {
     let (px, py) = transform.data_to_pixel(x, y)?;
     Some(egui::pos2(px as f32, py as f32))
+}
+
+/// Rayon minimal du rond d'aimantation : celui d'une moyenne d'un seul point.
+const SNAP_RADIUS_MIN: f32 = 6.0;
+
+/// Rayon en pixels du rond d'aimantation (#334) : le plus grand des deux
+/// demi-côtés de la zone moyennée, mesurés depuis le point aimanté `center` (en
+/// X, écran) jusqu'aux bords `edge_a` et `edge_b`. Il ne descend pas sous
+/// [`SNAP_RADIUS_MIN`] ni ne dépasse `max` ; un pixel non fini donne le
+/// minimum (invariant 10 : ni panique ni NaN). Les distances sont absolues :
+/// un axe X inversé donne le même rayon.
+fn snap_radius(center: f32, edge_a: f32, edge_b: f32, max: f32) -> f32 {
+    // `f32::max` avale un NaN : on teste chaque pixel avant de comparer.
+    if ![center, edge_a, edge_b, max].iter().all(|v| v.is_finite()) {
+        return SNAP_RADIUS_MIN;
+    }
+    let half = (edge_a - center).abs().max((edge_b - center).abs());
+    half.min(max).max(SNAP_RADIUS_MIN)
 }
 
 /// La donnée sous un pixel.
@@ -800,15 +821,21 @@ pub(super) fn preview(
     if let Some((hx, hy)) = hover_data {
         let mut label = format!("x = {hx:.6}\ny = {hy:.6}");
         if shift && form.tool == PreviewTool::Points {
-            if let Some((sx, sy)) = snap_to_curve(&xs, &ys, hx, form.average) {
+            if let Some(snap) = snap_to_curve_zone(&xs, &ys, hx, form.average) {
+                let (sx, sy) = (snap.x, snap.y);
                 if let Some(p) = to_screen(&transform, sx, sy) {
-                    plot.circle_stroke(p, 6.0, egui::Stroke::new(1.5, marker));
+                    // Le rond couvre la zone moyennée (#334) ; un bord sans
+                    // image (échelle log, valeur négative) : rayon minimal.
+                    let edge = |x: f64| to_screen(&transform, x, sy).map_or(f32::NAN, |q| q.x);
+                    let max = plot_rect.size().length();
+                    let radius = snap_radius(p.x, edge(snap.x_min), edge(snap.x_max), max);
+                    plot.circle_stroke(p, radius, egui::Stroke::new(1.5, marker));
                 }
                 label = format!(
                     "x = {sx:.6}\ny = {sy:.6}\n{}",
                     tr!(
                         "analysis-preview-average",
-                        count = i64::try_from(form.average).unwrap_or(i64::MAX)
+                        count = i64::try_from(snap.count).unwrap_or(i64::MAX)
                     )
                 );
             }
@@ -1266,8 +1293,29 @@ mod zone_tests {
 
     impl Banc {
         fn new(preset: Preset, inverted: bool) -> Self {
+            Self::sur_serie(preset, inverted, None)
+        }
+
+        /// Comme `new`, sur une série de `points` points (x = 0, 1, 2…).
+        fn sur_serie(preset: Preset, inverted: bool, points: Option<usize>) -> Self {
             let mut project = stokesforge_core::Project::new("Navigation").unwrap();
-            let (x, y) = colonnes_xy(&mut project);
+            let (x, y) = match points {
+                None => colonnes_xy(&mut project),
+                Some(n) => {
+                    let root = project.root();
+                    let book = project.add_empty_workbook(root, None).unwrap();
+                    let sheet = project.add_worksheet(book, None).unwrap();
+                    let xs: Vec<f64> = (0..n).map(|i| i as f64).collect();
+                    let ys: Vec<f64> = xs.iter().map(|x| (x / 7.0).sin()).collect();
+                    let x = project
+                        .add_column(sheet, None, None, stokesforge_core::Column::from_f64(&xs))
+                        .unwrap();
+                    let y = project
+                        .add_column(sheet, None, None, stokesforge_core::Column::from_f64(&ys))
+                        .unwrap();
+                    (x, y)
+                }
+            };
             let series = vec![SeriesRef {
                 x: Some(x),
                 y,
@@ -1297,7 +1345,7 @@ mod zone_tests {
         }
 
         /// Une image où la souris est en `pointer` et les modificateurs ceux du banc.
-        fn image(&mut self, mut events: Vec<egui::Event>) {
+        fn image(&mut self, mut events: Vec<egui::Event>) -> Vec<egui::epaint::ClippedShape> {
             let mut all = vec![
                 egui::Event::ModifiersChanged(self.modifiers),
                 egui::Event::PointerMoved(self.pointer),
@@ -1306,7 +1354,7 @@ mod zone_tests {
             let (id, form, tree) = (self.id, &mut self.form, &self.tree);
             image(&self.context, all, |ui| {
                 preview(ui, id, form, tree, 0);
-            });
+            })
         }
 
         fn deplacer(&mut self, pointer: egui::Pos2) {
@@ -1464,6 +1512,82 @@ mod zone_tests {
         assert_eq!(banc.form.average, moyenne + 1);
         banc.molette(egui::vec2(50.0, 0.0));
         assert_eq!(banc.form.average, moyenne + 2, "axe horizontal sous Maj");
+    }
+
+    /// Les cercles de la couleur de l'aimant peints dans une image.
+    fn ronds_d_aimant(shapes: &[egui::epaint::ClippedShape]) -> Vec<f32> {
+        let marker = theme::preview_marker_color();
+        shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Circle(c) if c.stroke.color == marker => Some(c.radius),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Le texte peint, mis bout à bout.
+    fn textes(shapes: &[egui::epaint::ClippedShape]) -> String {
+        shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Le rond d'aimantation grandit avec N (#334) : 6 px pour un point,
+    /// strictement plus pour 21 points d'une série de 101.
+    #[test]
+    fn le_rond_d_aimantation_grandit_avec_la_moyenne() {
+        let mut banc = Banc::sur_serie(Preset::BaselineAnchors, false, Some(101));
+        banc.avec(egui::Modifiers::SHIFT);
+        banc.form.average = 1;
+        let seul = ronds_d_aimant(&banc.image(vec![]));
+        banc.form.average = 21;
+        let large = ronds_d_aimant(&banc.image(vec![]));
+        assert_eq!(seul.len(), 1, "un rond d'aimant");
+        assert_eq!(large.len(), 1, "un rond d'aimant");
+        assert_eq!(seul[0], SNAP_RADIUS_MIN);
+        assert!(large[0] > seul[0], "{} > {}", large[0], seul[0]);
+    }
+
+    /// Au bord, le texte dit le nombre réel de points moyennés, pas N.
+    #[test]
+    fn le_texte_de_la_moyenne_dit_le_nombre_reel_de_points_au_bord() {
+        let mut banc = Banc::sur_serie(Preset::BaselineAnchors, false, Some(101));
+        banc.avec(egui::Modifiers::SHIFT);
+        banc.pointer = egui::pos2(rect_du_trace().left() + 1.0, 400.0);
+        banc.form.average = 21;
+        let texte = textes(&banc.image(vec![]));
+        assert!(texte.contains("11 points"), "{texte}");
+        assert!(!texte.contains("21 points"), "{texte}");
+    }
+
+    /// Le rayon du rond : demi-côté le plus grand, borné, jamais NaN.
+    #[test]
+    fn le_rayon_du_rond_est_le_plus_grand_demi_cote_borne() {
+        let max = 1000.0;
+        // Un point : le minimum.
+        assert_eq!(snap_radius(300.0, 300.0, 300.0, max), SNAP_RADIUS_MIN);
+        // Zone de 200 px centrée : 100 px.
+        assert_eq!(snap_radius(300.0, 200.0, 400.0, max), 100.0);
+        // Asymétrique : 20 à gauche, 60 à droite, et l'inverse.
+        assert_eq!(snap_radius(300.0, 280.0, 360.0, max), 60.0);
+        assert_eq!(snap_radius(300.0, 240.0, 320.0, max), 60.0);
+        // Axe X inversé : bords échangés, même rayon.
+        assert_eq!(snap_radius(300.0, 400.0, 200.0, max), 100.0);
+        // Plafond.
+        assert_eq!(snap_radius(300.0, -5000.0, 400.0, max), max);
+        // Non fini : le minimum, y compris si un seul pixel l'est.
+        assert_eq!(snap_radius(300.0, f32::NAN, 500.0, max), SNAP_RADIUS_MIN);
+        assert_eq!(
+            snap_radius(300.0, 100.0, f32::INFINITY, max),
+            SNAP_RADIUS_MIN
+        );
+        assert_eq!(snap_radius(f32::NAN, 100.0, 500.0, max), SNAP_RADIUS_MIN);
     }
 
     /// Ctrl + glisser déplace la vue : le cadre se translate (largeur gardée,
