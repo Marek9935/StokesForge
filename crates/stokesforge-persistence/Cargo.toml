@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 stokesforge-analysis = { path = "../stokesforge-analysis" }
 stokesforge-core = { path = "../stokesforge-core" }
+stokesforge-import = { path = "../stokesforge-import" }
 stokesforge-plot = { path = "../stokesforge-plot" }
 rmp-serde = "1.3.1"
 rmpv = { version = "1.3.1", features = ["with-serde"] }

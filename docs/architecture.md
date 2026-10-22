@@ -22,7 +22,7 @@ stokesforge-plot          PlotSpec : quoi tracer, sans savoir comment
 stokesforge-core          arbre de projet, colonnes, résolution d'un spec
    ↑            ↑            ↑
 stokesforge-commands  stokesforge-persistence  stokesforge-render ← stokesforge-render-svg
-(core, plot)     (core, plot)        (core, plot)     (core, plot, render)
+(core, plot)     (core, plot, import)  (core, plot)     (core, plot, render)
    ↑       ↑
 stokesforge-session       l'acteur : le &mut Project de la session
 (commands, persistence, core)
@@ -34,7 +34,8 @@ stokesforge-script   stokesforge-render-egui (core, plot, render, session)
 stokesforge-cli    (core, commands, import, importer, persistence)
                import : un `Project` neuf construit directement, puis `.stf`
                run (python) : script, python, session ; même acteur que la console
-stokesforge-import (aucune dépendance stokesforge) — lecture des fichiers d'appareil
+stokesforge-import (aucune dépendance stokesforge) — lecture des fichiers d'appareil ;
+               lu par persistence : le miroir de la recette dans le `.stf` (S2, #323)
 stokesforge-importer (core, import) — plan de feuilles et colonnes du modèle, sans
                commandes : partagé par l'application, le CLI et les scripts
 stokesforge-clipboard (aucune dépendance stokesforge) — offre multi-format au

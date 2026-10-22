@@ -1490,9 +1490,60 @@ fn column_file_metadata_survives_save_and_load() {
     assert_eq!(column.meta().file_metadata, lines);
 }
 
-/// `ColumnMeta::import_source` (chemin, recette JSON, index de colonne) survit à
-/// `save`/`load` : c'est ce qui permet d'actualiser une colonne après
-/// réouverture du projet (issue #7).
+/// Une recette dont chaque champ s'écarte de sa valeur par défaut : un champ
+/// oublié par le miroir du fichier reviendrait à sa valeur par défaut et
+/// ferait échouer l'égalité (S2, #323).
+fn recipe_hors_defaut() -> stokesforge_import::recipe::ImportRecipe {
+    use stokesforge_import::recipe::*;
+    ImportRecipe {
+        name: "Spectro".into(),
+        separator: Separator::FixedWidth(vec![4, 9, 15]),
+        decimal: DecimalStyle::Comma,
+        header: HeaderSkip::UntilMarker("[DATA]".into()),
+        footer_skip_lines: 3,
+        has_column_header_row: false,
+        name_source: NameSource::HeaderKey("TITLE".into()),
+        header_layout: HeaderLayout {
+            main_header_lines: 2,
+            subheader_lines: 4,
+            auto_detect: true,
+        },
+        subheader_roles: SubheaderRoles {
+            long_name: Some(SubheaderLineRange { from: 1, to: 2 }),
+            unit: Some(SubheaderLineRange::single(3)),
+            comment: Some(SubheaderLineRange { from: 4, to: 5 }),
+            x_prime: Some(SubheaderLineRange::single(6)),
+            same_line_name_unit: true,
+        },
+        skip_chars: 5,
+        preview_lines: 33,
+        data_end: DataEnd::Marker("END".into()),
+        keep_header_metadata: false,
+        keep_footer_metadata: true,
+        excluded_metadata: vec!["SERIAL".into(), "DATE".into()],
+        column_roles: vec![ColumnRoleChoice::X, ColumnRoleChoice::YError],
+        thousands: Some('\''),
+        date_order: DateOrder::MonthFirst,
+        missing_tokens: vec!["n/a".into()],
+        comment_prefix: "#".into(),
+        skip_data_rows: 7,
+        encoding: Encoding::Utf16Be,
+        auto_match: AutoMatch {
+            extensions: vec!["asc".into()],
+            name_contains: "sp".into(),
+            content_contains: "JASCO".into(),
+        },
+        column_kinds: vec![ColumnKind::Text, ColumnKind::DateTime],
+        import_mode: ImportMode::AddRows,
+        files_layout: FilesLayout::SharedX,
+        block_split: BlockSplit::BeforeLine("XYDATA".into()),
+    }
+}
+
+/// `ColumnMeta::import_source` (chemin, recette, index de colonne et de bloc)
+/// survit à `save`/`load` : c'est ce qui permet d'actualiser une colonne après
+/// réouverture du projet (issue #7). Chaque champ de la recette est hors
+/// défaut.
 #[test]
 fn column_import_source_survives_save_and_load() {
     use stokesforge_core::ImportSource;
@@ -1507,9 +1558,12 @@ fn column_import_source_survives_save_and_load() {
     let a = project
         .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0]))
         .expect("colonne A");
+    let b = project
+        .add_column(sheet, None, Some("B"), Column::from_f64(&[1.0]))
+        .expect("colonne B");
     let source = ImportSource {
         path: "/data/mesure.csv".into(),
-        recipe_json: "{\"name\":\"x\"}".into(),
+        recipe_json: recipe_hors_defaut().to_json(),
         column: 3,
         block: 2,
     };
@@ -1522,12 +1576,27 @@ fn column_import_source_survives_save_and_load() {
             },
         )
         .expect("source posée");
+    // Une recette illisible (colonne fabriquée à la main) s'écrit sans source.
+    project
+        .set_column_meta(
+            b,
+            ColumnMeta {
+                import_source: Some(ImportSource {
+                    recipe_json: "{\"name\":\"x\"}".into(),
+                    ..source.clone()
+                }),
+                ..Default::default()
+            },
+        )
+        .expect("source illisible posée");
     let dir = tempfile::tempdir().expect("répertoire temporaire");
     let path = dir.path().join("source.plyx");
     save(&project, &path).expect("sauvegarde réussie");
     let loaded = load(&path).expect("chargement réussi");
     let column = loaded.tree().node(a).unwrap().as_column().unwrap();
     assert_eq!(column.meta().import_source, Some(source));
+    let column = loaded.tree().node(b).unwrap().as_column().unwrap();
+    assert_eq!(column.meta().import_source, None);
 }
 
 /// Un fichier qui porte la signature `STKF` mais ne se lit pas (copie

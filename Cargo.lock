@@ -5279,6 +5279,7 @@ dependencies = [
  "stokesforge-analysis",
  "stokesforge-arch-guard",
  "stokesforge-core",
+ "stokesforge-import",
  "stokesforge-plot",
  "tempfile",
  "thiserror 2.0.20",

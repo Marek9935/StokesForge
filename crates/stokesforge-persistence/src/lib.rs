@@ -96,6 +96,7 @@ mod calculations;
 pub mod clipboard;
 mod convert;
 mod error;
+mod recipe_record;
 mod schema;
 mod transposes;
 mod unknown;

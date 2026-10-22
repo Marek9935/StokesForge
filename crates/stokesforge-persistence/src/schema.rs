@@ -27,6 +27,7 @@
 use serde::{Deserialize, Serialize};
 use stokesforge_plot::RawVariant;
 
+use crate::recipe_record::ImportSourceRecord;
 use crate::unknown::{deserialize_with_fallback, serialize_raw_variant};
 
 /// Signature de fichier : les quatre premiers octets, avant même le numéro
@@ -220,9 +221,9 @@ pub(crate) enum KindRecord {
         /// paires clé / valeur dans l'ordre. Absentes des fichiers écrits
         /// avant ce champ : `KindRecordKnown` les ramène à une liste vide.
         file_metadata: Vec<(String, String)>,
-        /// Source d'import (`ColumnMeta::import_source`) : chemin, recette en
-        /// JSON, index de colonne. Absente des fichiers antérieurs.
-        import_source: Option<(String, String, u64, u64)>,
+        /// Source d'import (`ColumnMeta::import_source`) : chemin, recette, index
+        /// de colonne et de bloc. Absente des fichiers antérieurs.
+        import_source: Option<Box<ImportSourceRecord>>,
         /// Valeur de la ligne spéciale x' (`ColumnMeta::x_prime`, #164).
         /// Absente des fichiers antérieurs : `None`.
         x_prime: Option<f64>,
@@ -300,7 +301,7 @@ enum KindRecordKnown {
         #[serde(default)]
         file_metadata: Vec<(String, String)>,
         #[serde(default)]
-        import_source: Option<(String, String, u64, u64)>,
+        import_source: Option<Box<ImportSourceRecord>>,
         #[serde(default)]
         x_prime: Option<f64>,
     },
@@ -459,7 +460,7 @@ enum KindRecordRef<'a> {
         version: u64,
         formula_parts: &'a Option<Vec<FormulaPartRecord>>,
         file_metadata: &'a Vec<(String, String)>,
-        import_source: &'a Option<(String, String, u64, u64)>,
+        import_source: &'a Option<Box<ImportSourceRecord>>,
         x_prime: Option<f64>,
     },
     Graph {

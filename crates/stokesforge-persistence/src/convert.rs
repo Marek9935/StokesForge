@@ -14,6 +14,9 @@ use stokesforge_plot::{
     SymbolSpec,
 };
 
+use stokesforge_import::recipe::ImportRecipe;
+
+use crate::recipe_record::ImportSourceRecord;
 use crate::schema::{
     AnnotationSpecRecord, AxisScaleRecord, AxisSpecRecord, FormulaPartRecord, GroupGradientRecord,
     GroupNameRecord, KindRecord, LegendPositionRecord, LegendSpecRecord, LineSpecRecord,
@@ -921,13 +924,16 @@ pub(crate) fn kind_to_record(kind: &NodeKind) -> KindRecord {
                     .map(|line| (line.key.clone(), line.value.clone()))
                     .collect(),
                 x_prime: meta.x_prime,
-                import_source: meta.import_source.as_ref().map(|source| {
-                    (
-                        source.path.clone(),
-                        source.recipe_json.clone(),
-                        source.column as u64,
-                        source.block as u64,
-                    )
+                // Une recette illisible (colonne fabriquée à la main) s'écrit
+                // sans source : l'enregistrement ne s'arrête jamais là-dessus.
+                import_source: meta.import_source.as_ref().and_then(|source| {
+                    let recipe = ImportRecipe::from_json(&source.recipe_json).ok()?;
+                    Some(Box::new(ImportSourceRecord {
+                        path: source.path.clone(),
+                        recipe: (&recipe).into(),
+                        column: source.column as u64,
+                        block: source.block as u64,
+                    }))
                 }),
             }
         }
@@ -1033,12 +1039,13 @@ pub(crate) fn record_to_kind(record: KindRecord) -> Result<NodeKind, ConvertErro
                     .into_iter()
                     .map(|(key, value)| stokesforge_core::MetaLine { key, value })
                     .collect(),
-                import_source: import_source.map(|(path, recipe_json, column, block)| {
+                import_source: import_source.map(|source| {
+                    let source = *source;
                     stokesforge_core::ImportSource {
-                        path,
-                        recipe_json,
-                        column: usize::try_from(column).unwrap_or(usize::MAX),
-                        block: usize::try_from(block).unwrap_or(usize::MAX),
+                        path: source.path,
+                        recipe_json: ImportRecipe::from(source.recipe).to_json(),
+                        column: usize::try_from(source.column).unwrap_or(usize::MAX),
+                        block: usize::try_from(source.block).unwrap_or(usize::MAX),
                     }
                 }),
             };
