@@ -71,6 +71,10 @@ Une section vide disparaît avec ses séparateurs.
   « Settings ▸ ».
 - **Rien n'est atteignable seulement au clic droit** : toute entrée a son
   équivalent dans la barre de menus, un raccourci ou une barre d'outils.
+  **Exception assumée (#326)** : *Add Folder* au clic droit d'un dossier crée
+  *dans* ce dossier, destination que File ▸ New ▸ Add Folder et le bouton de la
+  barre File (qui créent à la racine, comme Add Workbook et Add Graph) ne
+  peuvent pas viser. Créer dans un sous-dossier ne passe que par le clic droit.
 - **Fenêtres détachées** : mêmes peintures, mêmes cibles ; les actions
   remontent à la racine comme les autres.
 
@@ -109,7 +113,7 @@ Les cases gardent le menu ouvert (#114).
 | Cible | Menu |
 |---|---|
 | Fenêtre(s) | Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete |
-| Dossier | Paste (dans ce dossier) ─ Rename (sur place) ─ Delete |
+| Dossier | Add Folder (dans ce dossier) ─ Paste (dans ce dossier) ─ Rename (sur place) ─ Delete |
 
 Selection ▸ ne subsiste que dans Edit.
 

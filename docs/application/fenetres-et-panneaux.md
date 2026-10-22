@@ -76,8 +76,8 @@ Chaque fenêtre flottante peut aussi être maximisée (plein cadre du
 `CentralPanel`, `StokesForgeApp::maximized_tab`) ou détachée dans une vraie fenêtre
 OS séparée (`StokesForgeApp::detach_tab`/`reattach_tab`, pour le multi-écran).
 
-Le menu File propose la création d'un nouveau classeur (Add Workbook) et l'import de
-fichiers. La position et
+Le menu File propose la création d'un nouveau classeur (Add Workbook), d'un dossier
+à la racine (Add Folder, #326) et l'import de fichiers. La position et
 la taille des fenêtres de contenu sont enregistrées dans le projet (voir
 « Géométrie des fenêtres »). L'éditeur de matrice reste un espace réservé.
 

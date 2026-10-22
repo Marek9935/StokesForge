@@ -67,6 +67,9 @@ struct PmMemory {
     /// Les fenêtres de l'arbre dans l'ordre de lecture, dossiers repliés
     /// compris (#327) : la plage Maj et les ids agissants en dépendent.
     order: Vec<Tab>,
+    /// Dossiers à déplier à leur prochaine peinture (#326) : le parent d'un
+    /// dossier qu'on vient de créer doit montrer son nouvel enfant.
+    reveal: Vec<NodeId>,
 }
 
 /// Les onglets des fenêtres de `tree`, en parcours en profondeur.
@@ -113,6 +116,36 @@ pub(super) fn follow_selection_anchor(ctx: &egui::Context, tab: Option<Tab>) {
     });
 }
 
+/// Après *Add Folder* (#326) : déplie `parent` et ouvre le champ de nom sur
+/// `folder`, dans le panneau qui est à l'écran (`viewport`).
+pub(super) fn begin_rename_of_new_folder(
+    ctx: &egui::Context,
+    viewport: egui::ViewportId,
+    folder: NodeId,
+    parent: NodeId,
+) {
+    let key = egui::Id::new(("project_manager_gestures", viewport));
+    ctx.data_mut(|data| {
+        let mut memory = data.get_temp::<PmMemory>(key).unwrap_or_default();
+        memory.rename = vec![folder];
+        memory.renamed.clear();
+        memory.text = None;
+        memory.focus = true;
+        memory.reveal.push(parent);
+        data.insert_temp(key, memory);
+    });
+    ctx.request_repaint_of(viewport);
+}
+
+/// Les noms en cours d'édition dans le panneau de `viewport` (tests).
+#[cfg(test)]
+pub(super) fn renaming_in(ctx: &egui::Context, viewport: egui::ViewportId) -> Vec<NodeId> {
+    let key = egui::Id::new(("project_manager_gestures", viewport));
+    ctx.data(|data| data.get_temp::<PmMemory>(key))
+        .map(|memory| memory.rename)
+        .unwrap_or_default()
+}
+
 pub(super) fn has_focus(ctx: &egui::Context) -> bool {
     let memory_key = memory_id(ctx);
     ctx.data(|data| {
@@ -157,6 +190,19 @@ pub(super) fn object_menu(
     let paste_key = egui::Id::new(("project_paste_parent", ui.ctx().viewport_id()));
     let windows = target == ObjectMenuTarget::Windows;
     let enabled = !ids.is_empty();
+    if target == ObjectMenuTarget::Folder {
+        // Seul geste qui crée dans un sous-dossier (#326, `docs/menus.md`).
+        sections.section(ui, true, |ui| {
+            if ui
+                .button(tr!("action-add-folder"))
+                .on_hover_text(tr!("action-add-folder", "hint"))
+                .clicked()
+            {
+                actions.push(Action::AddFolder { parent });
+                ui.close();
+            }
+        });
+    }
     sections.section(ui, true, |ui| {
         if windows
             && ui
@@ -447,41 +493,51 @@ fn project_tree_node_ui(
     match node {
         ProjectTreeNode::Folder { id, name, children } => {
             let state_id = ui.make_persistent_id(("project_tree_folder", id));
-            let (toggle, _, _) = egui::collapsing_header::CollapsingState::load_with_default_open(
+            let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
                 ui.ctx(),
                 state_id,
                 false,
-            )
-            .show_header(ui, |ui| {
-                ui.add(icon_image(Icon::Folder, IconRole::Folder));
-                if is_renaming(ui.ctx(), memory_key, *id) {
-                    rename_editor(ui, interaction, memory_key, *id, name, siblings);
-                    return;
-                }
-                let response = ui.label(name);
-                response.context_menu(|ui| {
-                    let viewport = ui.ctx().viewport_id();
-                    object_menu(
-                        ui,
-                        &mut MenuSections::new(),
-                        ObjectMenuTarget::Folder,
-                        &[*id],
-                        *id,
-                        interaction.actions,
-                        viewport,
-                    )
-                });
-            })
-            .body(|ui| {
-                crate::tree_lines::tree_children(ui, |ui, branch| {
-                    if children.is_empty() {
-                        branch.mark(ui.weak(tr!("project-folder-empty")).rect.center().y);
-                    }
-                    for child in children {
-                        branch.mark(project_tree_node_ui(ui, child, children, interaction));
-                    }
-                });
+            );
+            let revealed = ui.ctx().data_mut(|data| {
+                let memory = data.get_temp_mut_or_default::<PmMemory>(memory_key);
+                let before = memory.reveal.len();
+                memory.reveal.retain(|folder| folder != id);
+                memory.reveal.len() != before
             });
+            if revealed {
+                state.set_open(true);
+            }
+            let (toggle, _, _) = state
+                .show_header(ui, |ui| {
+                    ui.add(icon_image(Icon::Folder, IconRole::Folder));
+                    if is_renaming(ui.ctx(), memory_key, *id) {
+                        rename_editor(ui, interaction, memory_key, *id, name, siblings);
+                        return;
+                    }
+                    let response = ui.label(name);
+                    response.context_menu(|ui| {
+                        let viewport = ui.ctx().viewport_id();
+                        object_menu(
+                            ui,
+                            &mut MenuSections::new(),
+                            ObjectMenuTarget::Folder,
+                            &[*id],
+                            *id,
+                            interaction.actions,
+                            viewport,
+                        )
+                    });
+                })
+                .body(|ui| {
+                    crate::tree_lines::tree_children(ui, |ui, branch| {
+                        if children.is_empty() {
+                            branch.mark(ui.weak(tr!("project-folder-empty")).rect.center().y);
+                        }
+                        for child in children {
+                            branch.mark(project_tree_node_ui(ui, child, children, interaction));
+                        }
+                    });
+                });
             toggle.rect.center().y
         }
         ProjectTreeNode::Window { id, name, kind } => {
@@ -1584,10 +1640,10 @@ pub(super) mod tests {
         );
     }
 
-    /// #157 : un dossier propose Paste, Rename et Delete seulement, et son
-    /// renommage s'édite sur place comme celui d'une fenêtre.
+    /// #157, #326 : un dossier propose Add Folder, Paste, Rename et Delete
+    /// seulement, et son renommage s'édite sur place comme celui d'une fenêtre.
     #[test]
-    fn le_clic_droit_d_un_dossier_propose_coller_renommer_supprimer() {
+    fn le_clic_droit_d_un_dossier_propose_ajouter_coller_renommer_supprimer() {
         let dossier = NodeId::from_raw(7);
         let tree = vec![ProjectTreeNode::Folder {
             id: dossier,
@@ -1602,12 +1658,18 @@ pub(super) mod tests {
         let pos = find_text_center(&first.shapes, "Mesures");
         let menu = ouvrir_menu_contextuel(&context, pos, paint);
         for present in [
+            tr!("action-add-folder"),
             tr!("action-paste"),
             tr!("action-rename-project-object"),
             tr!("action-delete-project-object"),
         ] {
             assert!(painted(&menu, &present), "{present} sur un dossier");
         }
+        assert!(
+            find_text_center(&menu.shapes, &tr!("action-add-folder")).y
+                < find_text_center(&menu.shapes, &tr!("action-paste")).y,
+            "la création vient en tête"
+        );
         for absent in [
             tr!("action-copy"),
             tr!("action-duplicate-project-object"),
@@ -1666,6 +1728,87 @@ pub(super) mod tests {
             banc.paint(ctx, &tree, events)
         });
         assert_eq!(*banc.open_requests.borrow(), vec![graph_tab]);
+    }
+
+    /// #326 : « Add Folder » au clic droit d'un dossier crée *dans* ce dossier,
+    /// et le clic droit d'une fenêtre ne propose pas la création.
+    #[test]
+    fn le_clic_droit_d_un_dossier_ajoute_un_dossier_dedans() {
+        let dossier = NodeId::from_raw(7);
+        let tree = vec![ProjectTreeNode::Folder {
+            id: dossier,
+            name: "Mesures".into(),
+            children: Vec::new(),
+        }];
+        let context = egui::Context::default();
+        let banc = Banc::new(HashSet::new());
+        let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
+        paint(&context, Vec::new());
+        let first = paint(&context, Vec::new());
+        let pos = find_text_center(&first.shapes, "Mesures");
+        let menu = ouvrir_menu_contextuel(&context, pos, paint);
+        let add = find_text_center(&menu.shapes, &tr!("action-add-folder"));
+        click_at(&context, add, egui::Modifiers::NONE, paint);
+        assert_eq!(
+            *banc.actions.borrow(),
+            vec![Action::AddFolder { parent: dossier }],
+            "dans le dossier cliqué, pas à la racine"
+        );
+
+        let fenetre = vec![ProjectTreeNode::Window {
+            id: NodeId::from_raw(8),
+            name: "Graph1".into(),
+            kind: WindowKind::Graph,
+        }];
+        let context = egui::Context::default();
+        let banc = Banc::new(HashSet::new());
+        let paint = |context: &egui::Context, events| banc.paint(context, &fenetre, events);
+        paint(&context, Vec::new());
+        let first = paint(&context, Vec::new());
+        let pos = find_text_center(&first.shapes, "Graph1");
+        let menu = ouvrir_menu_contextuel(&context, pos, paint);
+        assert!(
+            painted(&menu, &tr!("action-delete-project-object")),
+            "témoin"
+        );
+        assert!(!painted(&menu, &tr!("action-add-folder")));
+    }
+
+    /// #326 : après la création, le parent se déplie et le nom du dossier neuf
+    /// s'édite sur place ; sans la demande (témoin), le parent reste replié.
+    #[test]
+    fn un_dossier_neuf_deplie_son_parent_et_s_edite_sur_place() {
+        let parent = NodeId::from_raw(1);
+        let neuf = NodeId::from_raw(5);
+        let tree = vec![ProjectTreeNode::Folder {
+            id: parent,
+            name: "Mesures".into(),
+            children: vec![ProjectTreeNode::Folder {
+                id: neuf,
+                name: "Folder1".into(),
+                children: Vec::new(),
+            }],
+        }];
+        let temoin = egui::Context::default();
+        let banc = Banc::new(HashSet::new());
+        banc.paint(&temoin, &tree, Vec::new());
+        let sortie = banc.paint(&temoin, &tree, Vec::new());
+        assert!(
+            !painted(&sortie, "Folder1"),
+            "témoin : le parent est replié"
+        );
+
+        let context = egui::Context::default();
+        banc.paint(&context, &tree, Vec::new());
+        begin_rename_of_new_folder(&context, egui::ViewportId::ROOT, neuf, parent);
+        banc.paint(&context, &tree, Vec::new());
+        let sortie = banc.paint(&context, &tree, Vec::new());
+        assert!(painted(&sortie, "Folder1"), "le parent est déplié");
+        let memoire = context
+            .data(|data| data.get_temp::<PmMemory>(memory_id(&context)))
+            .expect("mémoire du panneau");
+        assert_eq!(memoire.rename, vec![neuf], "le nom est en édition");
+        assert!(memoire.reveal.is_empty(), "la demande est consommée");
     }
 
     /// Un dossier est replié par défaut : ses enfants ne sont pas peints.

@@ -108,7 +108,7 @@ l'interface, mais son mot est déjà fixé.
 | Paste in Place | Coller à l'identique | Coller à la position d'origine de la copie | Coller en absolu | G |
 | Copy with Header | Copier avec l'en-tête | Copier les valeurs et l'en-tête de colonne | — | O |
 | Clipboard | Presse-papiers | Mémoire de copie du système | Presse-papier, Tampon | G |
-| Add | Ajouter | Créer un objet **à la fin** (colonne, feuille, texte) | Nouveau, Créer | O |
+| Add | Ajouter | Créer un objet **à la fin** (colonne, feuille, texte, dossier) | Nouveau, Créer | O |
 | Insert | Insérer | Créer **à une position** (lignes) | Ajouter | G |
 | Delete | Supprimer | Détruire un objet, des lignes ou des cellules | Effacer, Enlever | G |
 | Delete and Shift Up | Supprimer et remonter | Supprimer des cellules et remonter celles du dessous | Supprimer et décaler | G |

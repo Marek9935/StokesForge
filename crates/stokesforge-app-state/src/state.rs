@@ -153,6 +153,14 @@ pub enum Action {
     /// Le menu Fichier ne porte pas de destination ambiguë : un nouveau
     /// classeur appartient toujours au dossier racine du projet ouvert.
     AddWorkbook,
+    /// Ajoute un dossier vide dans `parent`, sous le premier nom « FolderN »
+    /// libre parmi ses enfants (#326). Le menu Fichier et la barre d'outils
+    /// visent la racine ; le clic droit sur un dossier du Project Manager vise
+    /// ce dossier — seul geste qui crée dans un sous-dossier.
+    AddFolder {
+        /// Dossier d'accueil.
+        parent: NodeId,
+    },
     /// Sélectionne la feuille affichée dans la grille du classeur qui la
     /// contient (le classeur est déduit du parent de `id` dans l'arbre) — un
     /// classeur affiché dans son propre onglet `stokesforge_app::app`, la sélection
@@ -4827,6 +4835,7 @@ impl AppState {
                 spec: PlotSpec::empty(""),
             }),
             Action::AddWorkbook => self.add_workbook(),
+            Action::AddFolder { parent } => self.add_folder(parent),
             Action::SelectSheet(id) => self.select_sheet(id),
             Action::BeginRenameSheet(sheet) => self.begin_rename_sheet(sheet),
             Action::CommitRenameSheet { sheet, name } => self.commit_rename_sheet(sheet, &name),
@@ -8799,6 +8808,28 @@ impl AppState {
             self.add_xy_columns(sheet);
         }
         self.end_creation_macro();
+    }
+
+    /// Nouveau dossier de l'utilisateur (#326) : « FolderN » est le premier nom
+    /// libre parmi les enfants de `parent` (l'unicité est fraternelle). Un
+    /// parent disparu échoue dans la barre d'état, sans entrée d'historique.
+    fn add_folder(&mut self, parent: NodeId) {
+        let tree = &self.snapshot.tree;
+        let taken = |name: &str| {
+            tree.node(parent).is_some_and(|node| {
+                node.children()
+                    .iter()
+                    .filter_map(|child| tree.node(*child))
+                    .any(|child| child.name() == name)
+            })
+        };
+        let mut n = 1u64;
+        let mut name = format!("Folder{n}");
+        while taken(&name) {
+            n += 1;
+            name = format!("Folder{n}");
+        }
+        self.execute(Command::AddFolder { parent, name });
     }
 
     /// Nouvelle feuille de l'utilisateur : comme [`AppState::add_workbook`],

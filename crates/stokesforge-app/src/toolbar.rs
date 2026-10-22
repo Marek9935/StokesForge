@@ -336,6 +336,8 @@ pub enum ToolsContext {
 /// Ce que les barres lisent de l'application, calculé une fois par image.
 #[derive(Debug, Clone, Default)]
 pub struct BarEnv {
+    /// Le dossier racine du projet : destination d'*Add Folder* (#326).
+    pub root: Option<NodeId>,
     /// Même garde que File > New Project et Ctrl+N.
     /// Libellé d'historique (« Undo Rename ») ; `None` = pile vide (grisé).
     pub undo_label: Option<String>,
@@ -416,6 +418,21 @@ pub fn bar_contents(
                 true,
             ) {
                 requests.push(ToolbarRequest::Action(Box::new(Action::AddGraph)));
+            }
+            if button(
+                ui,
+                Icon::Folder,
+                IconRole::Folder,
+                tr!("action-add-folder"),
+                Some(tr!("action-add-folder", "hint")),
+                "",
+                env.root.is_some(),
+            ) {
+                if let Some(parent) = env.root {
+                    requests.push(ToolbarRequest::Action(Box::new(Action::AddFolder {
+                        parent,
+                    })));
+                }
             }
             if button(
                 ui,
@@ -1217,6 +1234,80 @@ mod tests {
         assert!(over_format_bar(&ctx, rect.center()));
         assert!(requests.is_empty());
         assert_eq!(BarEnv::default().text_format, FormatTarget::None);
+    }
+
+    /// Clique, à chaque pas le long de la barre *File*, et rend ce que les
+    /// boutons demandent : le bouton d'un dossier se trouve par ce qu'il pousse.
+    fn clics_le_long_de_la_barre_file(env: &BarEnv) -> Vec<ToolbarRequest> {
+        let ctx = egui::Context::default();
+        egui_extras::install_image_loaders(&ctx);
+        let mut requests = Vec::new();
+        let frame = |events: Vec<egui::Event>, requests: &mut Vec<ToolbarRequest>| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1200.0, 600.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.horizontal(|ui| bar_contents(ui, ToolbarId::File, env, requests));
+                },
+            );
+            output.textures_delta.clear();
+        };
+        frame(Vec::new(), &mut requests);
+        frame(Vec::new(), &mut requests);
+        requests.clear();
+        for x in (0..700).step_by(4) {
+            let pos = Pos2::new(x as f32, 16.0);
+            for pressed in [None, Some(true), Some(false)] {
+                let event = match pressed {
+                    None => egui::Event::PointerMoved(pos),
+                    Some(pressed) => egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                };
+                frame(vec![event], &mut requests);
+            }
+        }
+        requests
+    }
+
+    /// #326 : le bouton Add Folder pousse `AddFolder` sur la racine du projet.
+    #[test]
+    fn le_bouton_add_folder_vise_la_racine() {
+        let root = NodeId::from_raw(1);
+        let env = BarEnv {
+            root: Some(root),
+            ..Default::default()
+        };
+        let dossiers: Vec<_> = clics_le_long_de_la_barre_file(&env)
+            .into_iter()
+            .filter_map(|request| match request {
+                ToolbarRequest::Action(action) => Some(*action),
+                _ => None,
+            })
+            .filter(|action| matches!(action, Action::AddFolder { .. }))
+            .collect();
+        assert!(!dossiers.is_empty(), "le bouton existe");
+        assert!(dossiers
+            .iter()
+            .all(|action| *action == Action::AddFolder { parent: root }));
+    }
+
+    /// Témoin : sans racine connue, le bouton est grisé et ne pousse rien.
+    #[test]
+    fn le_bouton_add_folder_est_grise_sans_racine() {
+        let env = BarEnv::default();
+        assert!(clics_le_long_de_la_barre_file(&env)
+            .into_iter()
+            .all(|request| !matches!(
+                request,
+                ToolbarRequest::Action(action) if matches!(*action, Action::AddFolder { .. })
+            )));
     }
 
     #[test]
