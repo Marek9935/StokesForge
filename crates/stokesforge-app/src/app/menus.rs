@@ -142,6 +142,16 @@ impl StokesForgeApp {
                         actions.push(Action::AddGraph);
                         ui.close();
                     }
+                    if ui
+                        .button(tr!("action-add-folder"))
+                        .on_hover_text(tr!("action-add-folder", "hint"))
+                        .clicked()
+                    {
+                        actions.push(Action::AddFolder {
+                            parent: self.state.tree().root(),
+                        });
+                        ui.close();
+                    }
                 });
                 ui.menu_button(tr!("menu-import"), |ui| {
                     if ui
@@ -1246,6 +1256,7 @@ mod tests {
         assert!(entree(&menu, &tr!("action-refresh-from-source")).is_none());
         let (_, nouveau) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-new")]);
         assert!(active(&nouveau, &tr!("action-add-workbook")).enabled);
+        assert!(active(&nouveau, &tr!("action-add-folder")).enabled);
         assert_eq!(
             active(&nouveau, &tr!("action-new-project")).enabled,
             app.state.can_new_project()
@@ -1280,6 +1291,16 @@ mod tests {
         let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-new")]);
         let pos = active(&menu, &tr!("action-add-workbook")).center;
         assert_eq!(clique(&mut app, &ctx, tab, pos), vec![Action::AddWorkbook]);
+        assert_ferme(&mut app, &ctx, tab);
+
+        // #326 : Add Folder vise la racine du projet.
+        let racine = app.state.tree().root();
+        let (ctx, menu) = ouvre_chemin(&mut app, tab, &[tr!("menu-file"), tr!("menu-new")]);
+        let pos = active(&menu, &tr!("action-add-folder")).center;
+        assert_eq!(
+            clique(&mut app, &ctx, tab, pos),
+            vec![Action::AddFolder { parent: racine }]
+        );
         assert_ferme(&mut app, &ctx, tab);
         session.shutdown().unwrap();
     }

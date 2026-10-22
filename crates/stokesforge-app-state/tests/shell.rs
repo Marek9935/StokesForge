@@ -1417,6 +1417,117 @@ fn creating_a_workbook_is_undoable_and_redoable() {
     assert_eq!(**state.tree(), *after);
 }
 
+/// Les enfants directs de `parent`, avec leur nom.
+fn child_names(
+    state: &AppState,
+    parent: stokesforge_core::NodeId,
+) -> Vec<(stokesforge_core::NodeId, String)> {
+    state
+        .tree()
+        .node(parent)
+        .expect("parent")
+        .children()
+        .iter()
+        .map(|id| {
+            (
+                *id,
+                state.tree().node(*id).expect("enfant").name().to_string(),
+            )
+        })
+        .collect()
+}
+
+/// #326 : Add Folder crée un dossier nommé, annulable et rétablissable.
+#[test]
+fn creating_a_folder_is_undoable_and_redoable() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let root = state.tree().root();
+    let before = std::sync::Arc::clone(state.tree());
+
+    state.dispatch(Action::AddFolder { parent: root });
+
+    let after = std::sync::Arc::clone(state.tree());
+    assert_eq!(after.len(), before.len() + 1);
+    let (folder, name) = child_names(&state, root).pop().expect("dossier créé");
+    assert_eq!(name, "Folder1");
+    assert!(matches!(
+        state.tree().node(folder).unwrap().kind(),
+        stokesforge_core::NodeKind::Folder { .. }
+    ));
+    assert_eq!(
+        state.undo_label(),
+        Some(undo_entry(&HistoryLabel::AddFolder { name }))
+    );
+
+    state.dispatch(Action::Undo);
+    assert_eq!(**state.tree(), *before);
+
+    state.dispatch(Action::Redo);
+    assert_eq!(**state.tree(), *after);
+}
+
+/// #326 : deux créations de suite ne se heurtent pas (unicité fraternelle).
+#[test]
+fn two_folders_get_distinct_names() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let root = state.tree().root();
+
+    state.dispatch(Action::AddFolder { parent: root });
+    state.dispatch(Action::AddFolder { parent: root });
+
+    assert!(state.status().is_none_or(|status| !status.is_error()));
+    let names: Vec<_> = child_names(&state, root)
+        .into_iter()
+        .map(|(_, name)| name)
+        .filter(|name| name.starts_with("Folder"))
+        .collect();
+    assert_eq!(names, ["Folder1", "Folder2"]);
+}
+
+/// #326 : le nom se cherche parmi les enfants du dossier visé, pas de la racine.
+#[test]
+fn a_folder_is_created_inside_the_chosen_parent() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let root = state.tree().root();
+    state.dispatch(Action::AddFolder { parent: root });
+    let (outer, _) = child_names(&state, root).pop().expect("Folder1");
+    let root_children = child_names(&state, root).len();
+
+    state.dispatch(Action::AddFolder { parent: outer });
+
+    assert!(state.status().is_none_or(|status| !status.is_error()));
+    let inner = child_names(&state, outer);
+    assert_eq!(
+        inner.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>(),
+        ["Folder1"],
+        "libre dans le sous-dossier, même si la racine porte déjà Folder1"
+    );
+    assert_eq!(child_names(&state, root).len(), root_children);
+}
+
+/// #326 : un parent disparu échoue en barre d'état, sans entrée d'historique.
+#[test]
+fn a_folder_in_a_removed_parent_fails_without_history() {
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let (_session, mut state) = start_demo(dir.path());
+    let root = state.tree().root();
+    state.dispatch(Action::AddFolder { parent: root });
+    let (gone, _) = child_names(&state, root).pop().expect("dossier");
+    state.dispatch(Action::DeleteObjects(vec![gone]));
+    assert!(state.tree().node(gone).is_none(), "le dossier est supprimé");
+    let label = state.undo_label();
+    let revision = state.snapshot().revision;
+
+    state.dispatch(Action::AddFolder { parent: gone });
+
+    assert!(state.status().is_some_and(|status| status.is_error()));
+    assert_eq!(state.undo_label(), label);
+    assert_eq!(state.snapshot().revision, revision);
+}
+
 #[test]
 fn row_actions_on_something_that_is_not_a_sheet_are_refused() {
     let dir = tempfile::tempdir().expect("répertoire temporaire");

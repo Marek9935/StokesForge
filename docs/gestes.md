@@ -114,6 +114,7 @@ Sources : `app/object_manager_ui.rs`, `app/list_row.rs`, `app/reorder_list.rs`,
 | Glisser | ligne (OM) | réordonne ; sur un graphe, déplace l'objet |
 | Glisser | ligne (PM) | — (les lignes du PM ne se glissent pas : clic seul) |
 | Clic droit | ligne | si hors sélection, la remplace ; menu de l'objet (un seul menu, `menus.md`) |
+| Clic droit › Add Folder | dossier (PM) | crée un dossier « FolderN » dans ce dossier, le déplie et met le nom du dossier neuf en édition sur place (création et nom = deux entrées d'historique) |
 | Clic droit | fond de l'OM | réglages du panneau |
 | Molette, Ctrl + molette | — | défile la liste ; Ctrl + molette n'est pas pris |
 

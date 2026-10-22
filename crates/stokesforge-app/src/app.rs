@@ -1029,6 +1029,7 @@ impl StokesForgeApp {
         actions: &mut Vec<Action>,
     ) {
         let bar_env = BarEnv {
+            root: Some(self.state.tree().root()),
             undo_label: self.state.undo_label(),
             redo_label: self.state.redo_label(),
             new_project_enabled: self.state.can_new_project(),
@@ -1365,6 +1366,18 @@ impl StokesForgeApp {
             None
         };
         let creates_workbook = matches!(action, Action::AddWorkbook);
+        // *Add Folder* (#326) : même motif que `plotted_from` — le dossier neuf
+        // est le dernier enfant de son parent, et son nom s'édite sur place.
+        let folder_parent = if let Action::AddFolder { parent } = &action {
+            Some(*parent)
+        } else {
+            None
+        };
+        let pm_viewport = if self.pm_detached {
+            project_manager::viewport_id()
+        } else {
+            egui::ViewportId::ROOT
+        };
         let new_import_books_after = if matches!(
             action,
             Action::ImportFiles {
@@ -1525,6 +1538,18 @@ impl StokesForgeApp {
                 .filter(|id| self.state.worksheets_of(*id).len() == 1)
             {
                 self.open_tab(Tab::Book(book));
+            }
+        }
+        if let Some(parent) = folder_parent {
+            if self.state.revision() != revision_before {
+                if let Some(folder) = self
+                    .state
+                    .tree()
+                    .node(parent)
+                    .and_then(|node| node.children().last().copied())
+                {
+                    project_manager::begin_rename_of_new_folder(ctx, pm_viewport, folder, parent);
+                }
             }
         }
         if let Some(before) = new_import_books_after {
@@ -2087,6 +2112,57 @@ mod tests {
         let spec = app.state.plot_spec(graph).unwrap();
         assert_eq!(spec.panels.len(), 2, "nouveau calque à axe X propre");
         assert_eq!(spec.panels[1].series[0].row, Some(0));
+        session.shutdown().unwrap();
+    }
+
+    /// #326 : Add Folder ouvre le nom du dossier neuf en édition dans le
+    /// panneau à l'écran (fixe ou détaché) ; un échec n'ouvre rien.
+    #[test]
+    fn add_folder_ouvre_le_nom_du_dossier_neuf_en_edition() {
+        let (session, _) = graphe();
+        let state = AppState::new(session.handle(), String::new()).unwrap();
+        let mut app = StokesForgeApp::new(state);
+        let context = egui::Context::default();
+        let root = app.state.tree().root();
+        let fixe = egui::ViewportId::ROOT;
+        let detache = project_manager::viewport_id();
+
+        app.dispatch_actions(&context, vec![Action::AddFolder { parent: root }]);
+        let folder = *app
+            .state
+            .tree()
+            .node(root)
+            .unwrap()
+            .children()
+            .last()
+            .unwrap();
+        assert_eq!(app.state.tree().node(folder).unwrap().name(), "Folder1");
+        assert_eq!(project_manager::renaming_in(&context, fixe), vec![folder]);
+        assert!(project_manager::renaming_in(&context, detache).is_empty());
+
+        // Panneau détaché : c'est lui qui reçoit l'édition.
+        app.pm_detached = true;
+        app.dispatch_actions(&context, vec![Action::AddFolder { parent: folder }]);
+        let inner = *app
+            .state
+            .tree()
+            .node(folder)
+            .unwrap()
+            .children()
+            .last()
+            .unwrap();
+        assert_eq!(project_manager::renaming_in(&context, detache), vec![inner]);
+        assert_eq!(
+            project_manager::renaming_in(&context, fixe),
+            vec![folder],
+            "le panneau fixe garde son édition d'avant"
+        );
+
+        // Témoin : un parent disparu n'ouvre aucune édition.
+        let ghost = egui::Context::default();
+        app.dispatch_actions(&ghost, vec![Action::DeleteObjects(vec![folder])]);
+        app.dispatch_actions(&ghost, vec![Action::AddFolder { parent: folder }]);
+        assert!(project_manager::renaming_in(&ghost, detache).is_empty());
         session.shutdown().unwrap();
     }
 

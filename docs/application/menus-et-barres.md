@@ -15,7 +15,7 @@ par `Ui::close`, dont egui propage la demande aux menus parents.
 
 | Menu | Organisation |
 |---|---|
-| File | New → New Project, Add Workbook, Add Graph ; Import → Import…, Refresh from Source, Reopen Last Import… ; Open…, Save, Save As… ; Language ; Quit |
+| File | New → New Project, Add Workbook, Add Graph, Add Folder (#326, à la racine) ; Import → Import…, Refresh from Source, Reopen Last Import… ; Open…, Save, Save As… ; Language ; Quit |
 | Edit | Undo, Redo ; Selection → Copy, Paste, Rename, Duplicate, Delete des objets du Project Manager |
 | Workbook (classeur actif) | Sheet → Add Worksheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row, Show x' Row (ce classeur seul) |
 | Graph (graphique actif) | Show Data ; Add Text ; Selection → le menu de l'objet sélectionné (grisé sans sélection) ; Reset Text Positions ; Top / Right Mirror Axis (cases, calque actif ordinaire, #176) ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
@@ -30,8 +30,9 @@ qu'entre deux sections présentes. Les peintures partagées peignent le
 cible, le clic droit l'affiche à plat.
 
 Clics droits : le Project Manager réutilise `object_menu` à plat (une fenêtre :
-Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete ; un dossier : Paste ─
-Rename ─ Delete, le renommage s'éditant sur place). Un onglet de feuille
+Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete ; un dossier : Add Folder ─
+Paste ─ Rename ─ Delete, le renommage s'éditant sur place ; Add Folder crée dans
+ce dossier, le déplie et ouvre le nom du dossier neuf en édition, #326). Un onglet de feuille
 propose Add Worksheet ─ Rename · Duplicate ─ Delete, la bande vide Add
 Worksheet. Les lettres de colonnes : Plot ▸ · Add Column ─ presse-papiers ─
 Type ▸ · Role ▸ ─ Clear · Delete (les colonnes elles-mêmes, `AppState::delete_columns`), au premier niveau (`column_properties_menu`),
@@ -62,7 +63,7 @@ l'issue #148 ; cette refonte n'ajoute pas cette fenêtre.
 contenu et leur place sont figés dans le logiciel, dans le panneau
 `stokesforge_toolbars` sous la barre de menu. Ni poignée, ni glisser-déposer,
 ni barre flottante ou verticale, ni logique de fenêtre étroite. Disposition en
-dur (`ToolbarId::row`) : rangée 0 = Fichier, Édition (Undo/Redo, #238 : libellé d'historique et raccourci en info-bulle, grisé = « Nothing to undo/redo »), Outils ; rangée 1 = Texte, large,
+dur (`ToolbarId::row`) : rangée 0 = Fichier (nouveau projet, classeur, graphique, dossier, ouvrir…), Édition (Undo/Redo, #238 : libellé d'historique et raccourci en info-bulle, grisé = « Nothing to undo/redo »), Outils ; rangée 1 = Texte, large,
 seule sur sa rangée. La barre Object Manager est supprimée (#109) : le panneau
 se commande par View et son en-tête. Chaque barre se
 masque par le menu View ; seule cette **visibilité** est une préférence
