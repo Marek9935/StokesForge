@@ -99,6 +99,7 @@ fn rang(kind: OperationKind) -> usize {
         OperationKind::Peaks => 4,
         OperationKind::Reconvolution => 5,
         OperationKind::DirectDeconvolution => 6,
+        OperationKind::Smooth => 7,
     }
 }
 
@@ -119,7 +120,7 @@ fn nom(kind: OperationKind, count: usize) -> String {
 fn tous_les_types_ont_un_nom_singulier_et_pluriel_distincts_en_fr_et_en() {
     for language in [Language::English, Language::French] {
         avec_langue(language, || {
-            assert_eq!(OperationKind::ALL.len(), 7);
+            assert_eq!(OperationKind::ALL.len(), 8);
             let mut singuliers = Vec::new();
             let mut pluriels = Vec::new();
             for (i, kind) in OperationKind::ALL.into_iter().enumerate() {
@@ -213,10 +214,10 @@ fn le_message_de_la_boite_pour_un_type_deux_types_et_tous_les_types() {
                 .rev()
                 .map(|k| (k, rang(k) + 1)),
         );
-        assert_eq!(tous.len(), 7);
+        assert_eq!(tous.len(), 8);
         let texte = summary_text(&tous);
         let lignes: Vec<&str> = texte.lines().collect();
-        assert_eq!(lignes.len(), 9, "tête + 7 types + renvoi : {texte}");
+        assert_eq!(lignes.len(), 10, "tête + 8 types + renvoi : {texte}");
         assert_eq!(lignes[0], "R² < 0.6 for:");
         for kind in OperationKind::ALL {
             assert_eq!(
@@ -225,7 +226,7 @@ fn le_message_de_la_boite_pour_un_type_deux_types_et_tous_les_types() {
                 "{kind:?}"
             );
         }
-        assert_eq!(total(&tous), 28);
+        assert_eq!(total(&tous), 36);
     });
 }
 

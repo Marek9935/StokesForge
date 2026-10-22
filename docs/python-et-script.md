@@ -177,8 +177,12 @@ avec toute session, y compris une session sans interface.
 
 ### `pyst.analysis` (#181)
 
-Sous-module des calculs du menu Analysis : `baseline`, `correct`, `integrate`,
-`fit`, `peaks`, `reconvolve`, `deconvolve`. Chaque appel décrit une opération
+Sous-module des calculs du menu Analysis : `baseline`, `correct`, `smooth`,
+`integrate`, `fit`, `peaks`, `reconvolve`, `deconvolve`. `smooth(y, x=None, *,
+method="adjacent"|"savitzky-golay"|"median", window=5, window_unit="points"|"x",
+order=2, replace_original=False)` (#324) : `window` est un nombre entier impair
+de points ou, avec `window_unit="x"`, une largeur en unités de X ; la colonne
+écrite est `columns["smoothed"]`. Chaque appel décrit une opération
 sur **une** colonne Y (poignée, X facultatif) et l'enregistre comme un calcul du
 projet par `Command::AddCalculation`, dans le groupe d'écritures du script : un
 seul `pyst.undo()` l'annule avec ses colonnes. Même `compute` que l'interface,
@@ -567,9 +571,10 @@ hors script continue d'aller sur la sortie du processus.
 ### Remplacer une correction dans sa source (#212)
 
 `pyst.analysis.baseline(..., replace_original=True)` et
-`pyst.analysis.correct(..., replace_original=True)` écrivent dans les Y sources
-au lieu d'ajouter des colonnes. `columns['corrected']` désigne alors la source
-originale. Exemple :
+`pyst.analysis.correct(..., replace_original=True)` (et `smooth`, #324)
+écrivent dans les Y sources au lieu d'ajouter des colonnes.
+`columns['corrected']` (`columns['smoothed']` pour `smooth`) désigne alors la
+source originale. Exemple :
 
 ```python
 r = pyst.analysis.baseline(y, x, method="constant", points=[(0., 1.)],

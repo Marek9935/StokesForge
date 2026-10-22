@@ -1872,3 +1872,33 @@ transpose-relink = Relink
 transpose-relink-hint = Rewrites the linked columns from { $source } and erases the values edited in them
 transpose-relink-title = Relink transposed sheet
 transpose-relink-confirm = Values edited in the linked columns of { $sheet } will be erased. Undo brings them back
+
+# Lissage (#324)
+analysis-kind-smooth = Smoothing
+analysis-output-smoothed = { $name } (smoothed)
+analysis-recent-smooth-adjacent = Adjacent Averaging
+analysis-recent-smooth-savitzky-golay = Savitzky-Golay
+analysis-recent-smooth-median = Rolling Median
+analysis-recent-window-points = { $points } points
+analysis-recent-window-x = { $width } X units
+low-r2-count-smooth =
+    { $count ->
+        [one] { $count } smoothing
+       *[other] { $count } smoothings
+    }
+analysis-value-window = Width used (points)
+analysis-smooth-adjacent = Adjacent Averaging…
+    .hint = Replaces each point by the mean of its neighbors
+analysis-smooth-savitzky-golay = Savitzky-Golay…
+    .hint = Fits a polynomial over a sliding window; keeps the peak heights better than an average
+analysis-smooth-median = Rolling Median…
+    .hint = Replaces each point by the median of its neighbors; removes isolated spikes
+analysis-smooth-hint = Each point is rebuilt from its neighbors in X order; the curve ends are mirrored
+analysis-smooth-choice-adjacent = Adjacent averaging
+analysis-smooth-choice-savitzky-golay = Savitzky-Golay
+analysis-smooth-choice-median = Rolling median
+analysis-smooth-unit-points = Width in points
+analysis-smooth-unit-x = Width in X units
+analysis-smooth-window-points = Width (points)
+analysis-smooth-window-x = Width (X units)
+analysis-smooth-order = Polynomial order

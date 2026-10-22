@@ -1,7 +1,7 @@
 //! Traitement mathématique des données de StokesForge (chantier #181).
 //!
 //! Crate de **calcul pur** : lignes de base, correction par une référence,
-//! intégrales, ajustements, décomposition en pics, déconvolution. Il ne dépend
+//! intégrales, ajustements, décomposition en pics, déconvolution, lissage. Il ne dépend
 //! d'aucun crate du workspace (comme `stokesforge-import`), ni d'une interface,
 //! ni de Python : tout ce que les menus proposent fonctionne sans interpréteur
 //! (décision du 2026-10-08). Le vocabulaire est celui des données brutes : des
@@ -29,6 +29,7 @@ pub mod model;
 pub mod ops;
 pub mod peaks;
 pub mod series;
+pub mod smooth;
 pub mod solver;
 pub mod tree;
 pub mod voigt;

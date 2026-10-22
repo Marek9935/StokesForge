@@ -34,6 +34,7 @@ pub fn kind_title(loader: &FluentLanguageLoader, kind: OperationKind) -> String 
     match kind {
         OperationKind::Baseline => tr!("analysis-kind-baseline"),
         OperationKind::Correct => tr!("analysis-kind-correct"),
+        OperationKind::Smooth => tr!("analysis-kind-smooth"),
         OperationKind::Integrate => tr!("analysis-kind-integrate"),
         OperationKind::Fit => tr!("analysis-kind-fit"),
         OperationKind::Peaks => tr!("analysis-kind-peaks"),

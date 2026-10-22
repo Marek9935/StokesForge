@@ -765,3 +765,73 @@ fn changer_de_forme_constante_conserve_les_ancrages_et_les_zones() {
         })
     ));
 }
+
+/// #324 : le lissage est de la catégorie « Data Manipulation », sa fenêtre en
+/// points est toujours impaire, son brouillon décrit l'opération des réglages
+/// et se rouvre sur la même méthode.
+#[test]
+fn a_smoothing_form_keeps_an_odd_window_and_round_trips() {
+    use stokesforge_analysis::smooth::{SmoothMethod, SmoothWindow};
+    use stokesforge_app_state::analysis::{Category, SmoothUnit};
+    let mut f = fixture();
+    assert_eq!(
+        Category::of(OperationKind::Smooth),
+        Category::DataManipulation
+    );
+    assert!(Category::DataManipulation
+        .kinds()
+        .contains(&OperationKind::Smooth));
+
+    let mut form = AnalysisForm::new(&Preset::SmoothSavitzkyGolay, series(&f), true);
+    assert_eq!(form.kind, OperationKind::Smooth);
+    form.setup.smooth.set_points(10);
+    assert_eq!(
+        form.setup.smooth.points, 11,
+        "une fenêtre paire est relevée"
+    );
+    form.setup.smooth.set_points(2);
+    assert_eq!(form.setup.smooth.points, 3, "bornée au minimum");
+    form.setup.smooth.set_points(10_000);
+    assert_eq!(form.setup.smooth.points, 1001, "bornée au plafond");
+    form.setup.smooth.set_points(9);
+
+    let op = form.operation().unwrap();
+    let Operation::Smooth { spec } = &op else {
+        panic!("{op:?}");
+    };
+    assert_eq!(spec.method, SmoothMethod::SavitzkyGolay { order: 2 });
+    assert_eq!(spec.window, SmoothWindow::Points(9));
+    assert_eq!(preset_of(&op), Preset::SmoothSavitzkyGolay);
+
+    // En unités de X, la fenêtre est celle du champ de largeur.
+    form.setup.smooth.unit = SmoothUnit::XUnits;
+    form.setup.smooth.x_width = 4.0;
+    let Some(Operation::Smooth { spec }) = form.operation() else {
+        panic!("lissage attendu");
+    };
+    assert_eq!(spec.window, SmoothWindow::XUnits(4.0));
+    form.setup.smooth.unit = SmoothUnit::Points;
+
+    // Le lot écrit la colonne lissée, nommée d'après sa source, de l'unité de
+    // celle-ci ; une droite lissée par SG reste la droite.
+    let draft = form.draft(f.project.tree()).unwrap();
+    assert_eq!(draft.outputs.len(), 1);
+    assert_eq!(draft.outputs[0].key, "smoothed");
+    assert_eq!(draft.outputs[0].meta.long_name, "Intensity (smoothed)");
+    assert_eq!(draft.outputs[0].meta.unit, "counts");
+    assert_eq!(draft.outputs[0].meta.comment, "Smoothing");
+    let ys: Vec<f64> = (0..21).map(|x| 2.0 * f64::from(x) + 1.0).collect();
+    for (row, y) in ys.iter().enumerate().take(17).skip(4) {
+        assert!((draft.outputs[0].data[row] - y).abs() < 1e-9, "ligne {row}");
+    }
+
+    let id = f.project.add_calculation(draft).unwrap();
+    let calc = f.project.tree().calculation(id).unwrap().clone();
+    let again = AnalysisForm::from_calculation(id, &calc);
+    assert_eq!(again.operation(), Some(op));
+    assert_eq!(again.setup.smooth.points, 9);
+
+    // Un lissage peut remplacer les données, comme une correction.
+    let fresh = AnalysisForm::new(&Preset::SmoothMedian, series(&f), false);
+    assert_eq!(fresh.replacement_disabled(f.project.tree()), None);
+}

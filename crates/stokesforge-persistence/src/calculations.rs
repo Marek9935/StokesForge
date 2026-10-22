@@ -344,7 +344,7 @@ pub(crate) fn records_to_corrections(
     for (id, c) in kept {
         if !matches!(
             c.operation,
-            Operation::Baseline { .. } | Operation::Correct { .. }
+            Operation::Baseline { .. } | Operation::Correct { .. } | Operation::Smooth { .. }
         ) {
             if let Some(d) = named.get(&id.raw()) {
                 discarded.push(d.clone());

@@ -18,6 +18,7 @@
 //! fichier.
 
 use stokesforge_analysis::ops as limits;
+use stokesforge_analysis::smooth as smoothing;
 
 /// Ce qu'une grandeur fait du mot `auto` et d'un champ vidé (#221, S-C4/S-R10).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,6 +208,21 @@ pub const COMPONENTS: Quantity = Quantity::whole(1.0).between(1.0, limits::MAX_C
 
 /// Nombre d'itérations d'un solveur.
 pub const ITERATIONS: Quantity = Quantity::whole(100.0).between(1.0, limits::MAX_ITERATIONS as f64);
+
+/// Fenêtre d'un lissage, en points : impaire, donc le pas est de 2 (le réglage
+/// relève une saisie paire, `SmoothSetup::set_points`).
+pub const SMOOTH_WINDOW_POINTS: Quantity = Quantity {
+    step: 2.0,
+    ..Quantity::whole(10.0).between(smoothing::MIN_WINDOW as f64, smoothing::MAX_WINDOW as f64)
+};
+
+/// Largeur de la fenêtre d'un lissage, en unités de X : strictement positive.
+pub const SMOOTH_WINDOW_X: Quantity =
+    Quantity::real(0.1, 1.0, 6).between(f64::MIN_POSITIVE, f64::INFINITY);
+
+/// Ordre du polynôme d'un Savitzky-Golay.
+pub const SMOOTH_ORDER: Quantity =
+    Quantity::whole(1.0).between(smoothing::MIN_ORDER as f64, smoothing::MAX_ORDER as f64);
 
 /// Un nombre de lignes ou de caractères à sauter à l'import (0 et plus).
 pub const COUNT: Quantity = Quantity::whole(10.0).between(0.0, 9_007_199_254_740_991.0);

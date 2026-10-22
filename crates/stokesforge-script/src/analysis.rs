@@ -43,6 +43,7 @@ use stokesforge_analysis::integrate::{IntegrateSpec, Under};
 use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::{AutoDetect, Operation, Warning};
 use stokesforge_analysis::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec};
+use stokesforge_analysis::smooth::{SmoothMethod, SmoothSpec, SmoothWindow};
 use stokesforge_commands::Command;
 use stokesforge_core::{
     compute, family_english, output_unit, wants_output, AuxRef, CalculationDraft, ColumnMeta,
@@ -389,7 +390,12 @@ fn run(
                         .enumerate()
                         .map(|(rank, s)| stokesforge_core::OutputRef {
                             series: rank,
-                            key: "corrected".into(),
+                            key: if matches!(op, Operation::Smooth { .. }) {
+                                "smoothed"
+                            } else {
+                                "corrected"
+                            }
+                            .into(),
                             index: None,
                             column: Some(s.y),
                         })
@@ -549,6 +555,58 @@ fn correct(
         py,
         Operation::Correct { op },
         Inputs::new(y, x, None, Some((reference, reference_x)))?,
+        keep_results,
+        auto_recalc,
+        replace_original,
+        PeakOutputs::default(),
+    )
+}
+
+/// Lissage : `method` = `"adjacent"` (moyenne adjacente), `"savitzky-golay"`
+/// (`order`, 2 à 5) ou `"median"` (médiane glissante). `window` est un nombre de
+/// points impair (`window_unit="points"`, défaut) ou une largeur en unités de X
+/// (`window_unit="x"`, convertie par le pas médian de X).
+#[pyfunction]
+#[pyo3(signature = (y, x=None, *, method="adjacent", window=5.0, window_unit="points", order=2, keep_results=false, auto_recalc=true, replace_original=false))]
+#[allow(clippy::too_many_arguments)]
+fn smooth(
+    py: Python<'_>,
+    y: &Bound<'_, PyAny>,
+    x: Option<&Bound<'_, PyAny>>,
+    method: &str,
+    window: f64,
+    window_unit: &str,
+    order: usize,
+    keep_results: bool,
+    auto_recalc: bool,
+    replace_original: bool,
+) -> PyResult<Py<PyDict>> {
+    let method = match choice(
+        "method",
+        method,
+        &[("adjacent", 0), ("savitzky-golay", 1), ("median", 2)],
+    )? {
+        0 => SmoothMethod::AdjacentAverage,
+        1 => SmoothMethod::SavitzkyGolay { order },
+        _ => SmoothMethod::Median,
+    };
+    let window = match choice(
+        "window_unit",
+        window_unit,
+        &[("points", true), ("x", false)],
+    )? {
+        true if window.is_finite() && window.fract() == 0.0 && window >= 0.0 => {
+            SmoothWindow::Points(window as usize)
+        }
+        true => return Err(invalid("window must be a whole number of points")),
+        false => SmoothWindow::XUnits(window),
+    };
+    run(
+        py,
+        Operation::Smooth {
+            spec: SmoothSpec { method, window },
+        },
+        Inputs::new(y, x, None, None)?,
         keep_results,
         auto_recalc,
         replace_original,
@@ -851,6 +909,7 @@ Calculs d'analyse de StokesForge : un appel, un calcul du projet. y peut être u
     pyst.analysis.baseline(y, x=None, *, method='anchors', points=None, zones=None, degree=1,
                            interpolation='segments', op='subtract', keep_baseline=False)
     pyst.analysis.correct(y, reference, x=None, reference_x=None, *, op='divide')
+    pyst.analysis.smooth(y, x=None, *, method='adjacent', window=5, window_unit='points', order=2)
     pyst.analysis.integrate(y, x=None, *, ranges=None, under='zero', cumulative=False, normalize=False)
     pyst.analysis.fit(y, x=None, *, model='linear', degree=3, initial=None, bounds=None, fixed=None,
                       shared=None, fit_range=None, residuals=False, sigma=None)
@@ -871,6 +930,7 @@ pub(crate) fn install(py: Python<'_>, parent: &Bound<'_, PyModule>) -> PyResult<
     module.add("__doc__", MODULE_DOC)?;
     module.add_function(wrap_pyfunction!(baseline, &module)?)?;
     module.add_function(wrap_pyfunction!(correct, &module)?)?;
+    module.add_function(wrap_pyfunction!(smooth, &module)?)?;
     module.add_function(wrap_pyfunction!(integrate, &module)?)?;
     module.add_function(wrap_pyfunction!(fit, &module)?)?;
     module.add_function(wrap_pyfunction!(peaks, &module)?)?;

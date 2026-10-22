@@ -25,7 +25,7 @@ use crate::theme;
 use crate::theme::FieldWidth;
 use stokesforge_app_state::analysis::{
     aux_candidates, aux_for, kind_title, reference_label, series_label, with_unit, AnalysisForm,
-    BaselineShape, Category, DirectAlgorithm, Preset,
+    BaselineShape, Category, DirectAlgorithm, Preset, SmoothAlgorithm, SmoothUnit,
 };
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::r_squared::RSquaredLevel;
@@ -444,6 +444,7 @@ fn family_block(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm, tree
         OperationKind::Peaks => peaks_form(rows, id, form, tree),
         OperationKind::Reconvolution => reconv_form(rows, id, form, tree),
         OperationKind::DirectDeconvolution => direct_form(rows, id, form),
+        OperationKind::Smooth => smooth_form(rows, id, form),
     }
 }
 
@@ -903,6 +904,67 @@ fn direct_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
     rows.row(tr!("analysis-reconv-shift"), |ui| number(ui, &mut d.shift));
 }
 
+fn smooth_form(rows: &mut Form<'_>, id: egui::Id, form: &mut AnalysisForm) {
+    let s = &mut form.setup.smooth;
+    rows.note(tr!("analysis-smooth-hint"));
+    rows.field(|ui| {
+        choice(
+            ui,
+            id.with("smooth-algorithm"),
+            &mut s.algorithm,
+            &[
+                ChoiceOption::new(
+                    SmoothAlgorithm::AdjacentAverage,
+                    tr!("analysis-smooth-choice-adjacent"),
+                ),
+                ChoiceOption::new(
+                    SmoothAlgorithm::SavitzkyGolay,
+                    tr!("analysis-smooth-choice-savitzky-golay"),
+                ),
+                ChoiceOption::new(
+                    SmoothAlgorithm::Median,
+                    tr!("analysis-smooth-choice-median"),
+                ),
+            ],
+        )
+    });
+    rows.field(|ui| {
+        choice(
+            ui,
+            id.with("smooth-unit"),
+            &mut s.unit,
+            &[
+                ChoiceOption::new(SmoothUnit::Points, tr!("analysis-smooth-unit-points")),
+                ChoiceOption::new(SmoothUnit::XUnits, tr!("analysis-smooth-unit-x")),
+            ],
+        )
+    });
+    match s.unit {
+        SmoothUnit::Points => {
+            rows.row(tr!("analysis-smooth-window-points"), |ui| {
+                let mut points = s.points;
+                let changed = whole(ui, &mut points, &quantities::SMOOTH_WINDOW_POINTS);
+                if changed {
+                    s.set_points(points);
+                }
+                changed
+            });
+        }
+        SmoothUnit::XUnits => {
+            rows.row(tr!("analysis-smooth-window-x"), |ui| {
+                let salt = ui.next_auto_id();
+                ui.skip_ahead_auto_ids(1);
+                number_field(ui, salt, &mut s.x_width, &quantities::SMOOTH_WINDOW_X).changed
+            });
+        }
+    }
+    if s.algorithm == SmoothAlgorithm::SavitzkyGolay {
+        rows.row(tr!("analysis-smooth-order"), |ui| {
+            whole(ui, &mut s.order, &quantities::SMOOTH_ORDER)
+        });
+    }
+}
+
 fn output_block(
     rows: &mut Form<'_>,
     id: egui::Id,
@@ -911,8 +973,10 @@ fn output_block(
     tree: &Tree,
 ) {
     rows.section(tr!("analysis-block-output"));
-    if matches!(form.kind, OperationKind::Baseline | OperationKind::Correct)
-        && form.editing.is_none()
+    if matches!(
+        form.kind,
+        OperationKind::Baseline | OperationKind::Correct | OperationKind::Smooth
+    ) && form.editing.is_none()
     {
         let disabled = form.replacement_disabled(tree);
         if disabled.is_some() {

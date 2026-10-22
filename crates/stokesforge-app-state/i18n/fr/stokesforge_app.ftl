@@ -1868,3 +1868,33 @@ transpose-relink = Relier de nouveau
 transpose-relink-hint = Réécrit les colonnes liées depuis { $source } et efface les valeurs qui y ont été modifiées
 transpose-relink-title = Relier de nouveau la feuille transposée
 transpose-relink-confirm = Les valeurs modifiées dans les colonnes liées de { $sheet } seront effacées. Annuler les rétablit
+
+# Lissage (#324)
+analysis-kind-smooth = Lissage
+analysis-output-smoothed = { $name } (lissé)
+analysis-recent-smooth-adjacent = Moyenne adjacente
+analysis-recent-smooth-savitzky-golay = Savitzky-Golay
+analysis-recent-smooth-median = Médiane glissante
+analysis-recent-window-points = { $points } points
+analysis-recent-window-x = { $width } unités de X
+low-r2-count-smooth =
+    { $count ->
+        [one] { $count } lissage
+       *[other] { $count } lissages
+    }
+analysis-value-window = Largeur utilisée (points)
+analysis-smooth-adjacent = Moyenne adjacente…
+    .hint = Remplace chaque point par la moyenne de ses voisins
+analysis-smooth-savitzky-golay = Savitzky-Golay…
+    .hint = Ajuste un polynôme sur une fenêtre glissante ; garde mieux la hauteur des pics qu’une moyenne
+analysis-smooth-median = Médiane glissante…
+    .hint = Remplace chaque point par la médiane de ses voisins ; supprime les pointes isolées
+analysis-smooth-hint = Chaque point est reconstruit depuis ses voisins dans l’ordre des X ; les extrémités de la courbe sont reflétées
+analysis-smooth-choice-adjacent = Moyenne adjacente
+analysis-smooth-choice-savitzky-golay = Savitzky-Golay
+analysis-smooth-choice-median = Médiane glissante
+analysis-smooth-unit-points = Largeur en points
+analysis-smooth-unit-x = Largeur en unités de X
+analysis-smooth-window-points = Largeur (points)
+analysis-smooth-window-x = Largeur (unités de X)
+analysis-smooth-order = Ordre du polynôme

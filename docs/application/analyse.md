@@ -118,8 +118,21 @@ L'interface du traitement mathématique est répartie ainsi :
   de X. Une nouvelle zone remplace la précédente ; seuls les couples X/Y finis
   entrent dans sa moyenne. Subtract et Divide réutilisent les mêmes opérations
   que les autres lignes de base.
-- Remplacement des données originales (#212) : la sortie d’une ligne de base
-  ou d’une correction par référence peut écraser ses colonnes Y ordinaires.
+- Lissage (#324) : trois méthodes dans la catégorie Data Manipulation —
+  moyenne adjacente, Savitzky-Golay (ordre 2 à 5) et médiane glissante —,
+  `stokesforge-analysis/src/smooth.rs` (l'en-tête `//!` dit pourquoi : voisins
+  **par rang** après tri par X, bords réfléchis, fenêtre impaire). La fenêtre se
+  règle en points (impaire : le champ avance de 2, `SmoothSetup::set_points`
+  relève une saisie paire) ou en unités de X (convertie par le pas **médian**) ;
+  plafonds `MAX_WINDOW`, `MIN_ORDER`/`MAX_ORDER` lus par `quantities` et par
+  `Operation::validate`. La sortie est la colonne `smoothed` (`OutputName::Smoothed`),
+  de la longueur de la source, et peut **remplacer** les Y comme une correction
+  (`replacement_key` dans `core::calc`). Un pas de X irrégulier à plus de 1 %
+  n'avertit (`SignalStepNotUniform`) que pour Savitzky-Golay, dont les
+  coefficients supposent un pas régulier. Pas de filtre FFT (écarté : une FFT à
+  écrire sans dépendance, et le traitement des bords et des pas irréguliers).
+- Remplacement des données originales (#212) : la sortie d’une ligne de base,
+  d’une correction par référence ou d’un lissage peut écraser ses colonnes Y ordinaires.
   La colonne conserve sa longueur et ses cellules non exploitables ; les
   courbes qui la tracent suivent les nouvelles valeurs. Les colonnes à formule
   ou calculées restent protégées. Plusieurs courbes qui partagent une source

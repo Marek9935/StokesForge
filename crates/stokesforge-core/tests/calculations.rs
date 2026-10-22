@@ -891,3 +891,56 @@ fn le_remplacement_avec_y_plus_long_que_x_garde_les_cellules_au_dela_de_x() {
     // Les trois premières lignes sont corrigées, les deux autres gardent l'original.
     assert_eq!(got, vec![1.0, 2.0, 3.0, 8.0, 10.0]);
 }
+
+/// #324 : un lissage remplace les Y par sa sortie `smoothed` (comme une
+/// correction par `corrected`) ; une sortie `corrected` ne lui convient pas.
+#[test]
+fn un_lissage_remplace_les_y_par_sa_sortie_lissee() {
+    use stokesforge_analysis::smooth::{SmoothMethod, SmoothSpec, SmoothWindow};
+    let mut f = fixture();
+    let versions: Vec<(NodeId, u64)> = [f.x, f.y1]
+        .into_iter()
+        .map(|c| {
+            (
+                c,
+                f.project
+                    .tree()
+                    .get(c)
+                    .unwrap()
+                    .as_column()
+                    .unwrap()
+                    .version(),
+            )
+        })
+        .collect();
+    let smooth = |key: &str| CalculationDraft {
+        operation: Operation::Smooth {
+            spec: SmoothSpec {
+                method: SmoothMethod::AdjacentAverage,
+                window: SmoothWindow::Points(3),
+            },
+        },
+        series: vec![SeriesRef {
+            x: Some(f.x),
+            y: f.y1,
+            sigma: None,
+        }],
+        aux: None,
+        outputs: vec![out(0, key, vec![12.0, 20.0, 28.0], "Y1 (smoothed)")],
+        results: vec![SeriesResult::default()],
+        keep_results: false,
+        auto_recalc: false,
+        low_r2_dialog: false,
+    };
+    assert!(matches!(
+        f.project
+            .replace_analysis_data(smooth("corrected"), &versions),
+        Err(CoreError::Structure(_))
+    ));
+    f.project
+        .replace_analysis_data(smooth("smoothed"), &versions)
+        .unwrap();
+    let column = f.project.tree().get(f.y1).unwrap().as_column().unwrap();
+    let got: Vec<f64> = (0..3).map(|r| column.values().number_at(r)).collect();
+    assert_eq!(got, vec![12.0, 20.0, 28.0]);
+}

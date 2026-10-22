@@ -20,6 +20,7 @@ use crate::integrate::{IntegrateSpec, Under};
 use crate::model::Model;
 use crate::ops::{AutoDetect, Operation};
 use crate::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec};
+use crate::smooth::{SmoothMethod, SmoothSpec, SmoothWindow};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tree {
@@ -273,6 +274,23 @@ impl Operation {
                     .put("method", m)
                     .num("shift", *shift)
                     .done()
+            }
+            Operation::Smooth { spec } => {
+                let (unit, width) = match spec.window {
+                    SmoothWindow::Points(n) => ("points", n as f64),
+                    SmoothWindow::XUnits(w) => ("x", w),
+                };
+                let w = W::kind("smooth")
+                    .text("window_unit", unit)
+                    .num("window", width);
+                match spec.method {
+                    SmoothMethod::AdjacentAverage => w.text("method", "adjacent_average"),
+                    SmoothMethod::SavitzkyGolay { order } => w
+                        .text("method", "savitzky_golay")
+                        .num("order", order as f64),
+                    SmoothMethod::Median => w.text("method", "median"),
+                }
+                .done()
             }
         }
     }
@@ -549,6 +567,25 @@ impl Operation {
                     shift: r.num("shift")?,
                 }
             }
+            "smooth" => {
+                let width = r.num("window")?;
+                let window = match r.text("window_unit")? {
+                    "points" => SmoothWindow::Points(r.usize("window")?),
+                    "x" => SmoothWindow::XUnits(width),
+                    _ => return Err(bad("window_unit")),
+                };
+                let method = match r.text("method")? {
+                    "adjacent_average" => SmoothMethod::AdjacentAverage,
+                    "savitzky_golay" => SmoothMethod::SavitzkyGolay {
+                        order: r.usize("order")?,
+                    },
+                    "median" => SmoothMethod::Median,
+                    _ => return Err(bad("method")),
+                };
+                Operation::Smooth {
+                    spec: SmoothSpec { method, window },
+                }
+            }
             _ => return Err(bad("kind")),
         })
     }
@@ -682,6 +719,18 @@ mod tests {
         ];
         for c in [CorrectOp::Divide, CorrectOp::Multiply, CorrectOp::Subtract] {
             v.push(Operation::Correct { op: c });
+        }
+        for (method, window) in [
+            (SmoothMethod::AdjacentAverage, SmoothWindow::Points(5)),
+            (
+                SmoothMethod::SavitzkyGolay { order: 3 },
+                SmoothWindow::Points(11),
+            ),
+            (SmoothMethod::Median, SmoothWindow::XUnits(2.5)),
+        ] {
+            v.push(Operation::Smooth {
+                spec: SmoothSpec { method, window },
+            });
         }
         for m in [
             Model::Linear,

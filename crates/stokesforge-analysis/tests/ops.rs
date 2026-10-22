@@ -647,3 +647,52 @@ fn une_ligne_de_base_passant_par_zero_compte_la_division() {
     let o = &run(&subtract, &[line(11, |x| x + 1.0)], None).unwrap()[0];
     assert_eq!(o.warnings, vec![]);
 }
+
+/// #324 : le lissage garde la longueur de la source (lignes écartées vides et
+/// comptées), écrit `smoothed` et la fenêtre employée ; un pas non uniforme
+/// n'avertit que pour Savitzky-Golay.
+#[test]
+fn le_lissage_aligne_sa_sortie_sur_les_lignes_et_avertit_d_un_pas_irregulier() {
+    use stokesforge_analysis::smooth::{SmoothMethod, SmoothSpec, SmoothWindow};
+    let smooth = |method| Operation::Smooth {
+        spec: SmoothSpec {
+            method,
+            window: SmoothWindow::Points(5),
+        },
+    };
+    let mut inp = line(12, |x| x * x);
+    inp.y[3] = f64::NAN;
+    let o = &run(&smooth(SmoothMethod::AdjacentAverage), &[inp.clone()], None).unwrap()[0];
+    assert_eq!(o.skipped, 1);
+    let sortie = &col(o, "smoothed").data;
+    assert_eq!(sortie.len(), 12);
+    assert!(sortie[3].is_nan(), "la ligne écartée reste vide");
+    assert!(sortie[5].is_finite());
+    assert_eq!(val(o, "count.window").value, 5.0);
+    assert!(o.warnings.is_empty());
+
+    inp.x[6] = 6.4; // pas irrégulier
+    let sg = &run(
+        &smooth(SmoothMethod::SavitzkyGolay { order: 2 }),
+        &[inp.clone()],
+        None,
+    )
+    .unwrap()[0];
+    assert!(sg.warnings.contains(&Warning::SignalStepNotUniform));
+    let med = &run(&smooth(SmoothMethod::Median), &[inp], None).unwrap()[0];
+    assert!(
+        med.warnings.is_empty(),
+        "la médiane n'a pas besoin d'un pas régulier"
+    );
+
+    let hors = Operation::Smooth {
+        spec: SmoothSpec {
+            method: SmoothMethod::AdjacentAverage,
+            window: SmoothWindow::Points(4),
+        },
+    };
+    assert!(matches!(
+        run(&hors, &[line(8, |x| x)], None),
+        Err(AnalysisError::InvalidParameter { .. })
+    ));
+}

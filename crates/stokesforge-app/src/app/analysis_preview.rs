@@ -516,7 +516,7 @@ pub(super) fn preview(
         .map(|s| s.frame)
         .unwrap_or_else(|| {
             let mut all_y = ys.clone();
-            for k in ["corrected", "deconvolved"] {
+            for k in ["corrected", "smoothed", "deconvolved"] {
                 if let Some(c) = column(k, None) {
                     all_y.extend(c.iter().copied());
                 }
@@ -664,7 +664,7 @@ pub(super) fn preview(
             curve(&plot, c, helper);
         }
     }
-    for k in ["fit", "corrected", "peaks_sum", "deconvolved"] {
+    for k in ["fit", "corrected", "smoothed", "peaks_sum", "deconvolved"] {
         if let Some(c) = column(k, None) {
             curve(&plot, c, result);
         }
