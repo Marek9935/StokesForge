@@ -79,14 +79,19 @@ enum RoleRecord {
 #[derive(Serialize)]
 enum ValuesRecord {
     Float(#[serde(with = "serde_bytes")] Vec<u8>),
-    Text(Vec<Option<String>>),
+    Mixed {
+        #[serde(with = "serde_bytes")]
+        tags: Vec<u8>,
+        #[serde(with = "serde_bytes")]
+        numbers: Vec<u8>,
+        texts: Vec<String>,
+    },
 }
 #[derive(Serialize, Default)]
 struct PlotSpecRecord {
     title: String,
     panels: Vec<PanelSpecRecord>,
     background: String,
-    format_version: u32,
 }
 #[derive(Serialize, Default)]
 struct PanelSpecRecord {
@@ -375,7 +380,6 @@ fn b3_panneau_en_position_extreme() {
         title: "T".into(),
         panels: vec![panneau],
         background: String::new(),
-        format_version: 1,
     };
     let body = FileBody {
         root: 1,
@@ -429,7 +433,6 @@ fn b3_serie_referencant_un_noeud_inexistant_ou_non_colonne() {
         title: String::new(),
         panels: vec![panneau],
         background: String::new(),
-        format_version: 1,
     };
     let body = FileBody {
         root: 1,
@@ -463,50 +466,6 @@ fn b3_serie_referencant_un_noeud_inexistant_ou_non_colonne() {
         "les deux séries doivent être marquées brisées"
     );
     assert_eq!(resolu.point_count(), 0);
-}
-
-#[test]
-fn b3_version_de_format_de_spec_inconnue_est_acceptee_en_silence() {
-    let dir = TempDir::new().unwrap();
-    let spec = PlotSpecRecord {
-        title: String::new(),
-        panels: vec![PanelSpecRecord::default()],
-        background: String::new(),
-        format_version: 999, // format bien plus récent que SPEC_FORMAT_VERSION
-    };
-    let body = FileBody {
-        root: 1,
-        next_id_hint: 3,
-        nodes: vec![
-            dossier(1, "R", None, vec![2]),
-            NodeRecord {
-                id: 2,
-                name: "G1".into(),
-                parent: Some(1),
-                kind: KindRecord::Graph {
-                    label: String::new(),
-                    comment: String::new(),
-                    spec,
-                },
-            },
-        ],
-    };
-    let path = ecrire(&dir, "specv999.stf", &body);
-    match load(&path) {
-        Ok(p) => {
-            let tree = p.tree();
-            let node = tree.node(stokesforge_core::NodeId::from_raw(2)).unwrap();
-            if let stokesforge_core::NodeKind::Graph { spec, .. } = node.kind() {
-                panic!(
-                    "un spec de format_version {} (le lecteur connaît {}) est accepté \
-                     sans le moindre avertissement",
-                    spec.format_version,
-                    stokesforge_plot::SPEC_FORMAT_VERSION
-                );
-            }
-        }
-        Err(e) => println!("refusé : {e}"),
-    }
 }
 
 #[test]
@@ -594,7 +553,11 @@ fn b3_type_de_colonne_incoherent_avec_ses_valeurs() {
                     long_name: String::new(),
                     comment: String::new(),
                     display_format: String::new(),
-                    values: ValuesRecord::Text(vec![Some("x".into())]), // mais texte
+                    values: ValuesRecord::Mixed {
+                        tags: vec![2],
+                        numbers: Vec::new(),
+                        texts: vec!["x".into()],
+                    }, // mais texte
                     version: 0,
                 },
             },

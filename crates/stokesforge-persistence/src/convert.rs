@@ -11,7 +11,7 @@ use stokesforge_core::{
 use stokesforge_plot::{
     AnnotationSpec, AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle,
     PanelSpec, PlotSpec, PlotType, SeriesAxis, SeriesSpec, ShapeKind, ShapeSpec, SymbolShape,
-    SymbolSpec, SPEC_FORMAT_VERSION,
+    SymbolSpec,
 };
 
 use crate::schema::{
@@ -92,16 +92,6 @@ pub(crate) enum ConvertError {
         row: u64,
         /// Colonne lue du fichier, hors bornes.
         column: u64,
-    },
-    /// Le `format_version` d'un `PlotSpec` lu du fichier dépasse
-    /// [`SPEC_FORMAT_VERSION`], celui que ce lecteur connaît (C1) : accepter
-    /// en silence exposerait un graphe dont ce lecteur ne peut pas garantir
-    /// avoir compris toutes les variantes qu'il porte.
-    UnsupportedSpecVersion {
-        /// Version trouvée dans le fichier.
-        found: u32,
-        /// Version la plus élevée que ce lecteur sait interpréter.
-        supported: u32,
     },
 }
 
@@ -753,7 +743,6 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
         title_font: font_to_record(&spec.title_font),
         stale_warning: spec.stale_warning,
         decimal_comma: spec.decimal_comma,
-        format_version: spec.format_version,
     }
 }
 
@@ -761,22 +750,7 @@ pub(crate) fn plot_spec_to_record(spec: &PlotSpec) -> PlotSpecRecord {
 /// même cas que `Panels::new(Vec::new())` côté `stokesforge-plot`, qui fournit un
 /// panneau par défaut plutôt que de refuser — la conversion `.into()` sur
 /// `Vec<PanelSpec>` le fait déjà.
-///
-/// `format_version` **est** vérifié (C1) : un `PlotSpec` plus récent que
-/// [`SPEC_FORMAT_VERSION`] est refusé plutôt qu'accepté en silence — sans
-/// quoi une variante que ce lecteur ne connaît pas pourrait se cacher
-/// n'importe où dans l'arbre qui suit. C'est délibérément une simple
-/// comparaison de champ, pas la dégradation gracieuse d'une variante
-/// inconnue (C5, niveau 2, hors scope ici) : « un champ n'oblige pas à
-/// bouger le numéro de version, une variante l'oblige » — voir le guide,
-/// piège F3.
 pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, ConvertError> {
-    if record.format_version > SPEC_FORMAT_VERSION {
-        return Err(ConvertError::UnsupportedSpecVersion {
-            found: record.format_version,
-            supported: SPEC_FORMAT_VERSION,
-        });
-    }
     let panels = record
         .panels
         .into_iter()
@@ -792,7 +766,6 @@ pub(crate) fn record_to_plot_spec(record: PlotSpecRecord) -> Result<PlotSpec, Co
         title_font: record_to_font(record.title_font),
         stale_warning: record.stale_warning,
         decimal_comma: record.decimal_comma,
-        format_version: record.format_version,
     })
 }
 

@@ -356,7 +356,7 @@ pub fn axis_frame(values: &[f64], axis: &AxisSpec) -> (f64, f64) {
 }
 
 /// Le point de la courbe le plus proche de `x` en abscisse, avec l'ordonnée
-/// moyennée sur `n` points centrés sur lui (l'aimantation de l'aperçu
+/// moyennée sur `n` points centrés sur lui (pour `n` pair, un de plus à droite) (l'aimantation de l'aperçu
 /// d'analyse, #181 M4 b). `None` pour une courbe vide, ou si `ys` est plus
 /// court que `xs`.
 ///
@@ -374,9 +374,10 @@ pub fn snap_to_curve(xs: &[f64], ys: &[f64], x: f64, n: usize) -> Option<(f64, f
         .filter(|(_, value)| value.is_finite())
         .min_by(|a, b| (a.1 - x).abs().total_cmp(&(b.1 - x).abs()))?
         .0;
-    let half = n.max(1) / 2;
-    let low = nearest.saturating_sub(half);
-    let high = (nearest + half + 1).min(ys.len());
+    // Fenêtre de `n` points ; pour `n` pair, le point en trop est à droite.
+    let n = n.max(1);
+    let low = nearest.saturating_sub((n - 1) / 2);
+    let high = (nearest + n / 2 + 1).min(ys.len());
     let (sum, count) = ys[low..high]
         .iter()
         .filter(|value| value.is_finite())
@@ -986,9 +987,11 @@ mod tests {
         let (x, y) = snap_to_curve(&xs, &ys, 2.2, 3).unwrap();
         assert_eq!(x, 2.0);
         assert!((y - 100.0 / 3.0).abs() < 1e-12);
-        // n = 2 : la demi-fenêtre vaut 1, soit trois points.
+        // n pair : n points exactement, le surplus à droite.
         let (_, y) = snap_to_curve(&xs, &ys, 2.2, 2).unwrap();
-        assert!((y - 100.0 / 3.0).abs() < 1e-12);
+        assert!((y - 40.0).abs() < 1e-12);
+        let (_, y) = snap_to_curve(&xs, &ys, 2.2, 4).unwrap();
+        assert!((y - 110.0 / 4.0).abs() < 1e-12);
         // Au bord, la fenêtre se tronque au lieu de déborder.
         assert_eq!(snap_to_curve(&xs, &ys, -5.0, 3), Some((0.0, 15.0)));
         assert_eq!(snap_to_curve(&[], &[], 1.0, 3), None);

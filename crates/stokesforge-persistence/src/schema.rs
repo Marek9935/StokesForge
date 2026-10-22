@@ -708,7 +708,6 @@ pub(crate) struct PlotSpecRecord {
     /// ancien, donc le point.
     #[serde(default)]
     pub(crate) decimal_comma: bool,
-    pub(crate) format_version: u32,
 }
 
 /// [`stokesforge_plot::TextFont`], à plat.
@@ -745,7 +744,6 @@ impl Default for PlotSpecRecord {
             title_font: TextFontRecord::default(),
             stale_warning: true,
             decimal_comma: false,
-            format_version: 1, // stokesforge_plot::SPEC_FORMAT_VERSION
         }
     }
 }
@@ -1203,7 +1201,6 @@ mod tests {
             title: String,
             panels: Vec<PanelSpecRecord>,
             background: String,
-            format_version: u32,
         }
         let axe = AncienAxe {
             label: "Temps".to_string(),
@@ -1227,7 +1224,6 @@ mod tests {
             title: "Ancien".to_string(),
             panels: vec![PanelSpecRecord::default()],
             background: "#000000".to_string(),
-            format_version: 1,
         };
         let octets = rmp_serde::to_vec_named(&spec).expect("encodage");
         let relu: PlotSpecRecord = rmp_serde::from_slice(&octets).expect("relecture");

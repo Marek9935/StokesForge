@@ -9,11 +9,6 @@ use crate::series::SeriesSpec;
 use crate::text_anchor::TextAnchor;
 use crate::text_font::TextFont;
 
-/// Version du *format* du spec, indépendante de la version de schéma du
-/// fichier projet : un [`PlotSpec`] peut aussi voyager par presse-papiers ou
-/// par modèle sans passer par un fichier.
-pub const SPEC_FORMAT_VERSION: u32 = 1;
-
 /// Les panneaux d'un graphe : **au moins un, toujours**.
 ///
 /// C'est le seul invariant du crate que le système de types ne donne pas
@@ -172,8 +167,6 @@ pub struct PlotSpec {
     /// (#223, S-N4 → S-R9). Réglage **du graphe**, indépendant de la langue de
     /// l'interface ; vaut pour l'écran et les exports.
     pub decimal_comma: bool,
-    /// Version du format de ce spec.
-    pub format_version: u32,
 }
 
 impl PlotSpec {
@@ -282,7 +275,6 @@ impl Default for PlotSpec {
             title_font: TextFont::default(),
             stale_warning: true,
             decimal_comma: false,
-            format_version: SPEC_FORMAT_VERSION,
         }
     }
 }

@@ -37,7 +37,7 @@ use stokesforge_id::NodeId;
 use stokesforge_plot::{
     palette_color, AxisScale, AxisSide, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle,
     PanelSpec, Panels, PlotSpec, PlotType, SeriesAxis, SeriesRef, SeriesSpec, SymbolShape,
-    SymbolSpec, DEFAULT_HISTOGRAM_BINS, DEFAULT_PALETTE, SPEC_FORMAT_VERSION,
+    SymbolSpec, DEFAULT_HISTOGRAM_BINS, DEFAULT_PALETTE,
 };
 
 /// Colonnes du décor. Un `NodeId` se fabrique sans arbre : le spec ne sait pas
@@ -60,7 +60,6 @@ fn an_empty_spec_always_has_one_panel() {
     assert_eq!(spec.series_count(), 0);
     assert_eq!(spec.rows(), 1);
     assert_eq!(spec.columns(), 1);
-    assert_eq!(spec.format_version, SPEC_FORMAT_VERSION);
 }
 
 #[test]

@@ -76,7 +76,6 @@ struct PlotSpecRecord {
     title: String,
     panels: Vec<PanelSpecRecord>,
     background: String,
-    format_version: u32,
 }
 
 #[derive(Serialize, Default)]
@@ -411,7 +410,6 @@ fn b19_un_type_de_trace_inconnu_ne_perd_pas_les_donnees() {
             series: vec![serie],
             ..PanelSpecRecord::default()
         }],
-        format_version: 1,
         ..PlotSpecRecord::default()
     };
 

@@ -73,7 +73,7 @@ plus d'outil Zoom ni de bouton de recadrage.
 | Ctrl + glisser | tracé | déplace la vue (le contenu suit le curseur, axe inversé compris) ; ne trace pas de zone ; le modificateur est lu au début du glisser |
 | Ctrl + glisser | un axe | ne déplace que cette échelle |
 | Ctrl + clic | — | — (rien) |
-| Maj + molette | tracé, quel que soit le geste | change la moyenne de l'aimant (2 points par cran) ; le cadre ne bouge pas |
+| Maj + molette | tracé, quel que soit le geste | change la moyenne de l'aimant (1 point par cran, un événement de molette brut par cran) ; le cadre ne bouge pas |
 | Clic droit | aperçu | retire le point ou la zone le plus proche |
 | Glisser | une poignée sur le graphe (`app/analysis_handles.rs`) | déplace la poignée du calcul ; aperçu immédiat |
 
@@ -198,7 +198,7 @@ outil Zoom, Ctrl + glisser = zone) décrivent le comportement **d'avant #270** ;
 le tableau de l'aperçu plus haut est celui d'aujourd'hui, couvert par les tests
 de `app/analysis_preview.rs` (`zone_tests`) et vérifié dans l'application après
 #270. Maj + molette : egui range la molette sous Maj dans l'axe horizontal
-(`smooth_scroll_delta.x`) ; l'aperçu lit les deux axes, sinon la moyenne ne
+(`smooth_scroll_delta.x`) ; l'aperçu lit les deux axes des événements bruts (un par cran ; `smooth_scroll_delta` étalait un cran sur plusieurs images), sinon la moyenne ne
 changeait jamais en vrai.
 
 - **Confirmés** : clic sur une fenêtre derrière ; graphe : Molette seule sans

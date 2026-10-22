@@ -421,7 +421,33 @@ fn settled(ui: &egui::Ui, id: egui::Id, form: &AnalysisForm) -> bool {
     true
 }
 
-/// Peint l'aperçu dans l'espace restant de `ui` et applique ses gestes au
+//// Les crans de molette de cette image (positifs vers le haut), tous axes
+/// confondus : un événement brut par cran, quel que soit le lissage d'egui.
+fn wheel_notches(ui: &egui::Ui) -> i32 {
+    let total: f32 = ui.input(|input| {
+        input
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::MouseWheel { unit, delta, .. } => {
+                    let amount = delta.x + delta.y;
+                    Some(match unit {
+                        egui::MouseWheelUnit::Line => amount,
+                        egui::MouseWheelUnit::Page => amount * 10.0,
+                        egui::MouseWheelUnit::Point => amount / 50.0,
+                    })
+                }
+                _ => None,
+            })
+            .sum()
+    });
+    if total == 0.0 {
+        return 0;
+    }
+    total.abs().round().max(1.0) as i32 * total.signum() as i32
+}
+
+// Peint l'aperçu dans l'espace restant de `ui` et applique ses gestes au
 /// formulaire.
 pub(super) fn preview(
     ui: &mut egui::Ui,
@@ -794,16 +820,15 @@ pub(super) fn preview(
             font.clone(),
             text_color,
         );
-        // Maj + molette règle la moyenne. egui range la molette sous Maj dans
-        // l'axe horizontal (`smooth_scroll_delta.x`), et sous Ctrl dans
-        // `zoom_delta`, jamais dans `smooth_scroll_delta` : on lit donc les deux
-        // axes de `smooth_scroll_delta`, et pas `zoom_delta` ici.
+        // Maj + molette règle la moyenne, d'un point par cran. On compte les
+        // événements bruts, un par cran : `smooth_scroll_delta` étale un cran
+        // sur plusieurs images et ajoutait des dizaines de points. Sous Maj,
+        // egui range le défilement dans l'axe horizontal, mais l'événement brut
+        // garde le sens de l'appareil : on additionne donc les deux axes.
         if shift {
-            let wheel = ui.input(|i| i.smooth_scroll_delta);
-            let scroll = wheel.x + wheel.y;
-            if scroll != 0.0 {
-                let step = if scroll > 0.0 { 2 } else { -2 };
-                let next = (form.average as i64 + step)
+            let notches = wheel_notches(ui);
+            if notches != 0 {
+                let next = (form.average as i64 + i64::from(notches))
                     .clamp(*AVERAGE_RANGE.start() as i64, *AVERAGE_RANGE.end() as i64);
                 form.average = next as usize;
             }
@@ -1411,7 +1436,7 @@ mod zone_tests {
         assert!(largeur(apres_y.1) < largeur(avant.1), "Y resserré");
     }
 
-    /// Maj + molette règle la moyenne de l'aimant, de 2 par cran, sans toucher
+    /// Maj + molette règle la moyenne de l'aimant, de 1 par cran, sans toucher
     /// au cadre.
     #[test]
     fn maj_molette_regle_la_moyenne_sans_zoomer() {
@@ -1419,10 +1444,26 @@ mod zone_tests {
         let (moyenne, cadre) = (banc.form.average, banc.cadre());
         banc.avec(egui::Modifiers::SHIFT)
             .molette(egui::vec2(0.0, 40.0));
-        assert_eq!(banc.form.average, moyenne + 2);
+        assert_eq!(banc.form.average, moyenne + 1);
         banc.molette(egui::vec2(0.0, -40.0));
         assert_eq!(banc.form.average, moyenne);
         assert_eq!(banc.cadre(), cadre, "le cadre ne bouge pas");
+    }
+
+    /// Un cran = un point, même si egui étale le défilement : les images
+    /// suivantes, sans événement de molette, ne changent plus rien.
+    #[test]
+    fn un_cran_de_molette_vaut_un_point_meme_sur_plusieurs_images() {
+        let mut banc = Banc::new(Preset::BaselineAnchors, false);
+        let moyenne = banc.form.average;
+        banc.avec(egui::Modifiers::SHIFT)
+            .molette(egui::vec2(0.0, 50.0));
+        for _ in 0..5 {
+            banc.image(vec![]);
+        }
+        assert_eq!(banc.form.average, moyenne + 1);
+        banc.molette(egui::vec2(50.0, 0.0));
+        assert_eq!(banc.form.average, moyenne + 2, "axe horizontal sous Maj");
     }
 
     /// Ctrl + glisser déplace la vue : le cadre se translate (largeur gardée,

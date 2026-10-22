@@ -157,7 +157,6 @@ mod hostile {
         pub title: String,
         pub panels: Vec<PanelSpecRecord>,
         pub background: String,
-        pub format_version: u32,
     }
     #[derive(Serialize, Default)]
     pub(super) struct PanelSpecRecord {
@@ -327,7 +326,6 @@ mod hostile {
             ..PanelSpecRecord::default()
         };
         let spec = PlotSpecRecord {
-            format_version: 1,
             panels: vec![panneau],
             ..PlotSpecRecord::default()
         };

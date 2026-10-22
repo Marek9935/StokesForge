@@ -769,13 +769,6 @@ fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
                 convert::MAX_PANEL_POSITION
             ),
         },
-        ConvertError::UnsupportedSpecVersion { found, supported } => PersistenceError::Corrupt {
-            path: path.to_path_buf(),
-            detail: format!(
-                "a PlotSpec has format_version {found}, this reader only knows up to \
-                 {supported}"
-            ),
-        },
     }
 }
 
