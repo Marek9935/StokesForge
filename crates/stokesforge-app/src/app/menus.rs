@@ -1620,6 +1620,61 @@ mod tests {
         session.shutdown().unwrap();
     }
 
+    /// #330 : la remise des largeurs est dans Workbook > Sheet (toute la
+    /// feuille) et Workbook > Columns (la sélection), grisée sans largeur
+    /// retenue. Témoins éprouvés : entrée toujours active, ou une seule colonne
+    /// visée pour la feuille (rouges).
+    #[test]
+    fn la_remise_des_largeurs_est_dans_workbook_sheet_et_columns() {
+        let (session, mut app, _) = banc();
+        let book = app.state.books()[0].0;
+        app.open_tab(Tab::Book(book));
+        let sheet = app.state.selected_sheet_in(book).unwrap();
+        let columns: Vec<_> = app
+            .state
+            .visible_columns(sheet)
+            .iter()
+            .map(|c| c.0)
+            .collect();
+        let tab = Some(Tab::Book(book));
+        let chemin_feuille = [tr!("menu-workbook"), tr!("menu-sheet")];
+        let chemin_colonnes = [tr!("menu-workbook"), tr!("menu-columns")];
+        let feuille = tr!("action-reset-sheet-column-widths");
+        let colonne = tr!("action-reset-column-widths");
+
+        app.state.select_column(sheet, columns[0]);
+        let (_, menu) = ouvre_chemin(&mut app, tab, &chemin_feuille);
+        assert!(!active(&menu, &feuille).enabled, "aucune largeur retenue");
+        let (_, menu) = ouvre_chemin(&mut app, tab, &chemin_colonnes);
+        assert!(!active(&menu, &colonne).enabled, "aucune largeur retenue");
+
+        app.state.dispatch(Action::SetColumnWidth {
+            column: columns[0],
+            width: 80.0,
+        });
+        let (ctx, menu) = ouvre_chemin(&mut app, tab, &chemin_feuille);
+        let entry = active(&menu, &feuille);
+        assert!(entry.enabled);
+        assert_eq!(
+            clique(&mut app, &ctx, tab, entry.center),
+            vec![Action::ResetColumnWidths {
+                columns: columns.clone()
+            }]
+        );
+        assert_ferme(&mut app, &ctx, tab);
+
+        let (ctx, menu) = ouvre_chemin(&mut app, tab, &chemin_colonnes);
+        let entry = active(&menu, &colonne);
+        assert!(entry.enabled);
+        assert_eq!(
+            clique(&mut app, &ctx, tab, entry.center),
+            vec![Action::ResetColumnWidths {
+                columns: vec![columns[0]]
+            }]
+        );
+        session.shutdown().unwrap();
+    }
+
     #[test]
     fn le_classeur_range_feuilles_colonnes_et_metadata_sans_changer_les_actions() {
         use stokesforge_core::{ColumnRole, ColumnType};

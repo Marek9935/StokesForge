@@ -125,6 +125,17 @@ pub(crate) enum Request {
         /// largeurs (un seul compteur de « vue »).
         reply: Sender<u64>,
     },
+    /// Remet les colonnes `columns` à la largeur par défaut (#330) : retire
+    /// leur clé de la table (le défaut est une constante de l'application, la
+    /// session n'écrit aucune valeur). Même statut que `SetColumnWidth` : ni
+    /// `History` ni `revision`. `geometry_revision` n'avance que si au moins
+    /// une clé a réellement été retirée ; un `NodeId` sans largeur est ignoré.
+    ResetColumnWidths {
+        /// Colonnes à remettre au défaut.
+        columns: Vec<NodeId>,
+        /// Réponse : valeur de `geometry_revision`.
+        reply: Sender<u64>,
+    },
     /// Sauvegarde le projet courant vers `path`. Ne change pas la révision :
     /// sauvegarder ne modifie pas le modèle.
     Save {
@@ -425,6 +436,16 @@ pub(crate) fn run(
                     && column_widths.get(&column) != Some(&width)
                 {
                     column_widths.insert(column, width);
+                    geometry_revision += 1;
+                }
+                let _ = reply.send(geometry_revision);
+            }
+            Request::ResetColumnWidths { columns, reply } => {
+                let mut removed = false;
+                for column in columns {
+                    removed |= column_widths.remove(&column).is_some();
+                }
+                if removed {
                     geometry_revision += 1;
                 }
                 let _ = reply.send(geometry_revision);

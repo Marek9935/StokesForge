@@ -268,7 +268,7 @@ fn tab_strip_add_menu(ui: &mut egui::Ui, add_label: Option<&str>, requested_add:
 
 /// Menu d'un onglet (#152) : Add ─ Rename · Duplicate ─ Delete, à plat — le
 /// clic droit désigne déjà la feuille, pas de sous-menu « Sheet ▸ ».
-fn tab_strip_tab_menu<K: Copy>(
+fn tab_strip_tab_menu<K: Copy + PartialEq>(
     ui: &mut egui::Ui,
     id: K,
     config: &TabStripConfig<'_, K>,
@@ -300,6 +300,18 @@ fn tab_strip_tab_menu<K: Copy>(
             .clicked()
         {
             requests.events.push(TabEvent::Duplicate(id));
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                ops.resettable.contains(&id),
+                egui::Button::new(tr!("action-reset-sheet-column-widths")),
+            )
+            .on_hover_text(tr!("action-reset-sheet-column-widths", "hint"))
+            .on_disabled_hover_text(tr!("action-reset-sheet-column-widths", "disabled"))
+            .clicked()
+        {
+            requests.events.push(TabEvent::ResetColumnWidths(id));
             ui.close();
         }
     });
@@ -607,6 +619,8 @@ pub(super) enum TabEvent<K> {
     CommitRename(K, String),
     CancelRename,
     Duplicate(K),
+    /// Remettre toutes les colonnes de la feuille à la largeur par défaut (#330).
+    ResetColumnWidths(K),
     Delete(K),
 }
 
@@ -617,6 +631,9 @@ pub(super) struct TabOps<K> {
     pub(super) renaming: Option<K>,
     /// Faux sur la dernière feuille d'un classeur : « Supprimer » grisé.
     pub(super) can_delete: bool,
+    /// Onglets dont au moins une colonne a une largeur retenue (#330) : pour
+    /// les autres, « Réinitialiser les largeurs » est grisé.
+    pub(super) resettable: Vec<K>,
 }
 
 /// Défilement automatique de la bande d'onglets quand la feuille
@@ -1231,6 +1248,7 @@ mod tests {
         let ops = TabOps {
             renaming: None,
             can_delete: true,
+            resettable: Vec::new(),
         };
         let (choisis, demandes) = gestes(Some(&ops), double_clic());
         assert_eq!(demandes, vec![TabEvent::BeginRename(1)]);
@@ -1259,6 +1277,7 @@ mod tests {
         let ops = TabOps {
             renaming: None,
             can_delete: true,
+            resettable: Vec::new(),
         };
         let appels = std::cell::RefCell::new(Vec::new());
         let paint = |events| {
@@ -1319,6 +1338,7 @@ mod tests {
         let ops = TabOps {
             renaming: Some(1),
             can_delete: true,
+            resettable: Vec::new(),
         };
         let touche = |key| egui::Event::Key {
             key,
@@ -1360,6 +1380,7 @@ mod tests {
         let ops = TabOps {
             renaming: Some(1),
             can_delete: true,
+            resettable: Vec::new(),
         };
         let (_, demandes) = gestes(
             Some(&ops),

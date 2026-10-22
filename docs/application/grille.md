@@ -199,10 +199,32 @@ prend la largeur par défaut. Pas d'ajustement au contenu par double-clic.
 
 La largeur n'est poussée qu'à la **fin d'un redimensionnement fait à la main**
 (`finished_column_resizes` : poignée relâchée, largeur lue sur l'étendue de
-l'en-tête). Une colonne s'élargit aussi d'elle-même jusqu'à son contenu :
-pousser la largeur rendue à chaque image marquerait le projet modifié à chaque
-ouverture. La vue détachée a son propre `AppState` ; sa largeur passe aussi par
-l'acteur, l'état principal la relit à son rafraîchissement.
+l'en-tête) : pousser la largeur rendue à chaque image marquerait le projet
+modifié à chaque ouverture. La vue détachée a son propre `AppState` ; sa
+largeur passe aussi par l'acteur, l'état principal la relit à son
+rafraîchissement.
+
+**Largeur par défaut variable (#337).** Remonté sous #330 : maximisée, la
+fenêtre du classeur ferait passer les colonnes jamais réglées de 57 à 62 px.
+Non reproduit dans le banc ; suivi par #337, aucune coupe du contenu n'est
+posée en attendant.
+
+**Remettre au défaut (#330).** Clic droit sur une lettre ou Workbook ▸ Columns :
+« Reset Width » (après Role ▸), sur toute la sélection ; Workbook ▸ Sheet et
+clic droit de l'onglet : « Reset Column Widths », toutes les colonnes de la
+feuille. `Action::ResetColumnWidths { columns }` →
+`SessionHandle::reset_column_widths` **retire les clés** de la table (le défaut
+est la constante `DEFAULT_COLUMN_WIDTH` de l'application, rien n'est écrit dans
+le `.stf`). Non annulable, sans confirmation, comme la pose. Entrée grisée
+(« Columns are already at the default width ») quand aucune colonne visée n'a de
+largeur retenue. La clé de mise en page de `grid_contents` contient les
+largeurs retenues des colonnes visibles : sans elles, `TableColumn::initial`
+n'est lu qu'après un `reset` et la remise ne changerait rien à l'écran.
+`TableBuilder::reset` remet **toutes** les colonnes, gouttière comprise : la
+largeur rendue de la gouttière est mémorisée par feuille en mémoire temporaire
+d'egui (`gutter_width_id`) et redonnée en `initial`, sinon chaque glisser la
+ramènerait à 90. La remise d'une colonne n'y touche pas ; celle de toute la
+feuille l'oublie (`forget_gutter_width`) : retour à 90, jamais enregistré.
 
 ### Une colonne a deux identités, une seule est visible
 

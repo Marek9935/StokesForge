@@ -140,3 +140,62 @@ fn la_sauvegarde_n_ecrit_pas_la_largeur_d_une_colonne_supprimee() {
     assert_eq!(raw[at + needle.len()], 0x81, "une seule largeur écrite");
     session.shutdown().unwrap();
 }
+
+/// Remettre une largeur posée au défaut (#330) : la clé disparaît,
+/// `geometry_revision` avance de 1, ni `revision` ni l'historique ne bougent.
+/// Une colonne sans largeur : rien ne change. Témoin éprouvé : `+= 1`
+/// inconditionnel (rouge).
+#[test]
+fn remettre_au_defaut_retire_la_cle_et_n_avance_que_si_elle_existait() {
+    let (project, a, b) = fixture();
+    let session = Session::spawn(project, None).unwrap();
+    let handle = session.handle();
+    handle.set_column_width(a, 61.0).unwrap();
+    handle.set_column_width(b, 99.0).unwrap();
+    let before = handle.snapshot().unwrap();
+
+    handle.reset_column_widths(&[b]).unwrap();
+    let after = handle.snapshot().unwrap();
+    assert!(!after.column_widths.contains_key(&b));
+    assert_eq!(
+        after.column_widths.get(&a),
+        Some(&61.0),
+        "A garde la sienne"
+    );
+    assert_eq!(after.geometry_revision, before.geometry_revision + 1);
+    assert_eq!(after.revision, before.revision, "revision intacte");
+    assert!(!after.history.can_undo, "aucune entrée d'historique");
+
+    // Déjà au défaut : inchangé.
+    handle.reset_column_widths(&[b]).unwrap();
+    handle.reset_column_widths(&[]).unwrap();
+    let still = handle.snapshot().unwrap();
+    assert_eq!(still.geometry_revision, after.geometry_revision);
+
+    // Plusieurs colonnes d'un coup : une seule avance.
+    handle.reset_column_widths(&[a, b]).unwrap();
+    let all = handle.snapshot().unwrap();
+    assert!(all.column_widths.is_empty());
+    assert_eq!(all.geometry_revision, after.geometry_revision + 1);
+    session.shutdown().unwrap();
+}
+
+/// Remise puis enregistrement : le fichier ne porte plus la clé (la session
+/// n'écrit pas 54). Témoin éprouvé : poser 54 au lieu de retirer, ou ne rien
+/// retirer (rouge).
+#[test]
+fn une_colonne_remise_au_defaut_n_est_plus_dans_le_fichier() {
+    let (project, a, b) = fixture();
+    let session = Session::spawn(project, None).unwrap();
+    let handle = session.handle();
+    handle.set_column_width(a, 61.0).unwrap();
+    handle.set_column_width(b, 99.0).unwrap();
+    handle.reset_column_widths(&[b]).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("remise.stf");
+    handle.save(&path).unwrap();
+    let (_, view, _) = stokesforge_persistence::load_with_report(&path).unwrap();
+    assert_eq!(view.column_widths.get(&a), Some(&61.0));
+    assert!(!view.column_widths.contains_key(&b));
+    session.shutdown().unwrap();
+}

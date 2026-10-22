@@ -418,6 +418,17 @@ impl SessionHandle {
         })
     }
 
+    /// Remet les colonnes `columns` à la largeur par défaut (#330) : retire
+    /// leur clé de la table. Même statut que [`Self::set_column_width`] ; avance
+    /// `geometry_revision` seulement si une clé a été retirée. Rend la valeur
+    /// courante de `geometry_revision`.
+    pub fn reset_column_widths(&self, columns: &[NodeId]) -> SessionResult<u64> {
+        self.request(|reply| Request::ResetColumnWidths {
+            columns: columns.to_vec(),
+            reply,
+        })
+    }
+
     /// Sauvegarde le projet courant vers `path`. Ne change pas la révision :
     /// sauvegarder ne modifie pas le modèle.
     pub fn save(&self, path: &Path) -> SessionResult<()> {

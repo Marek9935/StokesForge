@@ -1104,7 +1104,53 @@ pub(super) fn column_type_role_menus(
                 }
             }
         });
+        // Réglage de vue (#330) : non annulable, sans confirmation, comme la
+        // pose d'une largeur. Grisé quand aucune colonne visée n'a de largeur
+        // retenue — la sélection est traitée en entier.
+        let resettable = !state.columns_with_width(target_columns).is_empty();
+        if ui
+            .add_enabled(
+                resettable,
+                egui::Button::new(tr!("action-reset-column-widths")),
+            )
+            .on_hover_text(tr!("action-reset-column-widths", "hint"))
+            .on_disabled_hover_text(tr!("action-reset-column-widths", "disabled"))
+            .clicked()
+        {
+            actions.push(Action::ResetColumnWidths {
+                columns: target_columns.to_vec(),
+            });
+            ui.close();
+        }
     });
+}
+
+/// Entrée « Reset Column Widths » d'une feuille (#330) : Workbook ▸ Sheet et
+/// clic droit de l'onglet (côté onglet, la bande d'onglets n'a pas l'état : voir
+/// `TabEvent::ResetColumnWidths`). Toutes les colonnes de la feuille ; la
+/// gouttière des numéros de ligne revient aussi à sa largeur par défaut, sans
+/// être enregistrée.
+pub(super) fn reset_sheet_widths_entry(
+    ui: &mut egui::Ui,
+    state: &AppState,
+    actions: &mut Vec<Action>,
+    sheet: NodeId,
+) {
+    let columns = state.sheet_column_ids(sheet);
+    let resettable = !state.columns_with_width(&columns).is_empty();
+    if ui
+        .add_enabled(
+            resettable,
+            egui::Button::new(tr!("action-reset-sheet-column-widths")),
+        )
+        .on_hover_text(tr!("action-reset-sheet-column-widths", "hint"))
+        .on_disabled_hover_text(tr!("action-reset-sheet-column-widths", "disabled"))
+        .clicked()
+    {
+        forget_gutter_width(ui.ctx(), sheet);
+        actions.push(Action::ResetColumnWidths { columns });
+        ui.close();
+    }
 }
 
 /// Créer un graphe depuis les colonnes visées — chantier « tracer depuis un
@@ -1720,21 +1766,37 @@ pub(super) fn grid_contents(
     // Jamais un `id_salt` variable : l'identifiant de la zone de défilement
     // verticale en dérive, et le défilement serait perdu.
     let column_ids: Vec<NodeId> = columns.iter().map(|(id, _, _)| *id).collect();
-    let layout_key = (state.snapshot().epoch, column_ids.clone());
+    // #330 : les largeurs retenues des colonnes visibles entrent dans la clé,
+    // sinon remettre une colonne au défaut (sa clé quitte la table) ne
+    // changerait rien à l'écran — `TableColumn::initial` n'est lu qu'après un
+    // `reset`. Leur valeur, pas leur seul état : une largeur posée à la main
+    // refait la mise en page avec la valeur envoyée.
+    let widths: Vec<Option<u32>> = column_ids
+        .iter()
+        .map(|id| state.column_width(*id).map(f32::to_bits))
+        .collect();
+    let layout_key = (state.snapshot().epoch, column_ids.clone(), widths);
     let layout_memory = ui.id().with("stokesforge_grid_layout");
-    let layout_changed = ui.data(|data| data.get_temp::<(u64, Vec<NodeId>)>(layout_memory))
+    let layout_changed = ui
+        .data(|data| data.get_temp::<(u64, Vec<NodeId>, Vec<Option<u32>>)>(layout_memory))
         != Some(layout_key.clone());
     if layout_changed {
         ui.data_mut(|data| data.insert_temp(layout_memory, layout_key));
     }
+    // `TableBuilder::reset` remet **toutes** les colonnes, gouttière comprise,
+    // à leur largeur initiale : la gouttière redonne celle qu'elle avait à
+    // l'image précédente (mémoire temporaire, par feuille), sinon chaque
+    // glisser d'une colonne la ramènerait à 90.
+    let gutter_width = ui
+        .ctx()
+        .data(|data| data.get_temp::<f32>(gutter_width_id(sheet)))
+        .unwrap_or(ROW_NUMBER_COLUMN_WIDTH);
     let mut table = TableBuilder::new(ui)
         .id_salt(GRID_TABLE_SALT)
         .striped(true)
         .resizable(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(
-            TableColumn::initial(ROW_NUMBER_COLUMN_WIDTH).at_least(MIN_ROW_NUMBER_COLUMN_WIDTH),
-        );
+        .column(TableColumn::initial(gutter_width).at_least(MIN_ROW_NUMBER_COLUMN_WIDTH));
     for id in &column_ids {
         let width = state.column_width(*id).unwrap_or(DEFAULT_COLUMN_WIDTH);
         table = table.column(TableColumn::initial(width).at_least(MIN_COLUMN_WIDTH));
@@ -1774,9 +1836,8 @@ pub(super) fn grid_contents(
         });
 
     // Une largeur n'est poussée qu'à la **fin d'un redimensionnement fait à la
-    // main** : une colonne s'élargit aussi d'elle-même jusqu'à son contenu, et
-    // pousser la largeur rendue à chaque image marquerait le projet modifié à
-    // chaque ouverture (#325).
+    // main** : pousser la largeur rendue à chaque image marquerait le projet
+    // modifié à chaque ouverture (#325).
     for (column, width) in finished_column_resizes(ui, &column_ids, &extents) {
         actions.push(Action::SetColumnWidth { column, width });
     }
@@ -1805,6 +1866,18 @@ pub(super) fn grid_contents(
         was_editing,
     );
     Some(table_output)
+}
+
+/// Où la grille retient, en mémoire temporaire d'egui, la largeur rendue de la
+/// gouttière des numéros de ligne de `sheet` (#330).
+fn gutter_width_id(sheet: NodeId) -> egui::Id {
+    egui::Id::new(("stokesforge_gutter_width", sheet.raw()))
+}
+
+/// Oublie la largeur de la gouttière de `sheet` : la prochaine mise en page la
+/// ramène à sa largeur par défaut (remise de toute la feuille, #330).
+pub(super) fn forget_gutter_width(ctx: &egui::Context, sheet: NodeId) {
+    ctx.data_mut(|data| data.remove::<f32>(gutter_width_id(sheet)));
 }
 
 /// Sel de la table de la grille : fixe, donc sans effet sur l'identifiant de sa
@@ -1890,6 +1963,11 @@ fn grid_table_header(
     extents: &mut Vec<ColumnExtent>,
 ) {
     header.col(|ui| {
+        let width = ui.max_rect().width();
+        if width > 0.0 {
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(gutter_width_id(sheet), width));
+        }
         row_number_header_widget(ui, state, actions, sheet);
     });
     for (index, (id, _, _)) in columns.iter().enumerate() {
@@ -2872,17 +2950,28 @@ mod tests {
         /// Toutes les actions que la grille a poussées, images confondues
         /// (`actions` ne garde que la dernière).
         vues: Vec<Action>,
+        /// Taille de la fenêtre simulée (700 x 420 par défaut) ; la changer
+        /// agrandit le classeur à l'image suivante.
+        taille: egui::Vec2,
     }
 
     impl Banc {
         fn new() -> Self {
+            Self::avec_valeurs(4, |c, r| f64::from(c * 100 + r))
+        }
+
+        /// Comme `new`, avec `lignes` lignes dont la valeur de la ligne `r`
+        /// (1..=lignes) de la colonne `c` (1..=3) est donnée par `valeur` :
+        /// des nombres larges font grandir le contenu mesuré d'une cellule
+        /// au-delà de la largeur par défaut.
+        fn avec_valeurs(lignes: u32, valeur: impl Fn(u32, u32) -> f64) -> Self {
             let mut project = Project::new("Clavier").unwrap();
             let root = project.root();
             let book = project.add_empty_workbook(root, None).unwrap();
             let sheet = project.add_worksheet(book, None).unwrap();
             let columns = (1..=3)
                 .map(|c| {
-                    let valeurs: Vec<f64> = (1..=4).map(|r| f64::from(c * 100 + r)).collect();
+                    let valeurs: Vec<f64> = (1..=lignes).map(|r| valeur(c, r)).collect();
                     project
                         .add_column(sheet, None, None, Column::from_f64(&valeurs))
                         .unwrap()
@@ -2914,6 +3003,7 @@ mod tests {
                 dernier: None,
                 largeurs_envoyees: 0,
                 vues: Vec::new(),
+                taille: egui::vec2(700.0, 420.0),
             };
             for _ in 0..3 {
                 banc.image(Vec::new());
@@ -2925,7 +3015,7 @@ mod tests {
             self.actions.clear();
             let (state, actions, book) = (&mut self.state, &mut self.actions, self.book);
             let mut voisin = false;
-            let sortie = image_de(&self.context, egui::vec2(700.0, 420.0), events, |ui| {
+            let sortie = image_de(&self.context, self.taille, events, |ui| {
                 voisin = ui.button("avant").has_focus();
                 book_contents(ui, state, actions, book);
             });
@@ -4501,6 +4591,204 @@ mod tests {
                 "colonne {i} : {rendu:?} / {avant:?}"
             );
         }
+    }
+
+    // --- Remise à la largeur par défaut (#330) ------------------------------
+
+    /// Largeur peinte de la gouttière : l'aplat du « # ».
+    fn largeur_gouttiere(banc: &Banc) -> f32 {
+        let centre = banc.centre_de("#").expect("« # » peint");
+        banc.dernier
+            .as_ref()
+            .unwrap()
+            .shapes
+            .iter()
+            .find_map(|peint| match &peint.shape {
+                egui::Shape::Rect(rect)
+                    if (rect.rect.height() - HEADER_SUBROW_HEIGHT).abs() < 0.5
+                        && rect.rect.contains(centre) =>
+                {
+                    Some(rect.rect.width())
+                }
+                _ => None,
+            })
+            .expect("aplat du « # »")
+    }
+
+    /// Tire le bord droit de la gouttière de `delta` points, comme à la souris.
+    fn redimensionne_gouttiere(banc: &mut Banc, delta: f32) {
+        let centre = banc.centre_de("#").expect("« # » peint");
+        let bord = centre.x
+            + largeur_gouttiere(banc) / 2.0
+            + banc.context.global_style().spacing.item_spacing.x / 2.0;
+        let depart = egui::pos2(bord, centre.y);
+        banc.image(vec![egui::Event::PointerMoved(depart)]);
+        banc.image(vec![egui::Event::PointerButton {
+            pos: depart,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        for pas in 1..=3 {
+            let x = depart.x + delta * pas as f32 / 3.0;
+            banc.image(vec![egui::Event::PointerMoved(egui::pos2(x, depart.y))]);
+            applique(banc);
+        }
+        banc.image(vec![egui::Event::PointerButton {
+            pos: egui::pos2(depart.x + delta, depart.y),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        applique(banc);
+        laisse_passer(banc);
+    }
+
+    /// B élargie de 40 puis remise : elle revient à 54, A et C gardent la leur.
+    /// Témoin : laisser les largeurs retenues hors de la clé de mise en page
+    /// (`TableColumn::initial` est alors ignoré, B reste large).
+    #[test]
+    fn remettre_une_colonne_au_defaut_ne_touche_pas_les_autres() {
+        let mut banc = Banc::new();
+        redimensionne(&mut banc, 0, 12.0);
+        redimensionne(&mut banc, 1, 40.0);
+        redimensionne(&mut banc, 2, 20.0);
+        let avant = largeurs_peintes(&banc, 3);
+        assert!(avant[1] > 90.0, "B est élargie : {avant:?}");
+
+        banc.state.dispatch(Action::ResetColumnWidths {
+            columns: vec![banc.columns[1]],
+        });
+        laisse_passer(&mut banc);
+
+        let apres = largeurs_peintes(&banc, 3);
+        assert!(proches(apres[1], DEFAULT_COLUMN_WIDTH), "B : {apres:?}");
+        assert!(proches(apres[0], avant[0]), "A : {apres:?} / {avant:?}");
+        assert!(proches(apres[2], avant[2]), "C : {apres:?} / {avant:?}");
+    }
+
+    /// Élargir une colonne à la main ne ramène pas la gouttière à 90 : elle
+    /// garde la largeur qu'on lui avait donnée. Témoin : ne pas mémoriser la
+    /// largeur rendue de la gouttière.
+    #[test]
+    fn un_glisser_de_colonne_garde_la_largeur_de_la_gouttiere() {
+        let mut banc = Banc::new();
+        redimensionne_gouttiere(&mut banc, 30.0);
+        let large = largeur_gouttiere(&banc);
+        assert!(
+            proches(large, ROW_NUMBER_COLUMN_WIDTH + 30.0),
+            "gouttière tirée : {large}"
+        );
+        redimensionne(&mut banc, 1, 40.0);
+        assert!(
+            proches(largeur_gouttiere(&banc), large),
+            "gouttière après le glisser : {}",
+            largeur_gouttiere(&banc)
+        );
+        // Remettre une colonne n'y touche pas non plus.
+        banc.state.dispatch(Action::ResetColumnWidths {
+            columns: vec![banc.columns[1]],
+        });
+        laisse_passer(&mut banc);
+        assert!(proches(largeur_gouttiere(&banc), large));
+        // Toute la feuille la ramène à 90, sans l'enregistrer.
+        redimensionne(&mut banc, 1, 40.0);
+        forget_gutter_width(&banc.context, banc.sheet);
+        banc.state.dispatch(Action::ResetColumnWidths {
+            columns: banc.columns.clone(),
+        });
+        laisse_passer(&mut banc);
+        assert!(proches(largeur_gouttiere(&banc), ROW_NUMBER_COLUMN_WIDTH));
+        assert!(banc.state.snapshot().column_widths.is_empty());
+    }
+
+    /// Ouvre le clic droit de la lettre `index` et rend le menu peint.
+    fn ouvre_menu_lettre(banc: &mut Banc, index: usize) -> Vec<EntreeMenu> {
+        banc.context.enable_accesskit();
+        banc.image(Vec::new());
+        banc.clic_bouton(&lettre_visible(banc, index), egui::PointerButton::Secondary);
+        menu_lu(banc)
+    }
+
+    /// L'entrée suit Role ▸ ; grisée tant qu'aucune colonne visée n'a de
+    /// largeur retenue, active ensuite, et pousse l'action sur la cible.
+    /// Témoin éprouvé : `add_enabled(true, …)` (rouge).
+    #[test]
+    fn l_entree_de_remise_suit_role_et_se_grise_sans_largeur() {
+        let mut banc = Banc::new();
+        let menu = ouvre_menu_lettre(&mut banc, 1);
+        let (_, actif, _) = entree_menu(&menu, &tr!("action-reset-column-widths"));
+        assert!(!actif, "rien à remettre : grisée");
+        let y = |label: String| entree_menu(&menu, &label).2.y;
+        assert!(
+            y(tr!("column-role")) < y(tr!("action-reset-column-widths")),
+            "{menu:#?}"
+        );
+
+        let mut banc = Banc::new();
+        redimensionne(&mut banc, 1, 30.0);
+        let b = banc.columns[1];
+        let menu = ouvre_menu_lettre(&mut banc, 1);
+        assert!(entree_menu(&menu, &tr!("action-reset-column-widths")).1);
+        banc.clic_sur(&tr!("action-reset-column-widths"));
+        assert!(
+            banc.vues
+                .contains(&Action::ResetColumnWidths { columns: vec![b] }),
+            "{:?}",
+            banc.vues
+        );
+    }
+
+    /// Une sélection de colonnes est traitée en entier : A et B, dont une seule
+    /// a une largeur, partent ensemble. Témoin éprouvé : ne viser que la colonne
+    /// cliquée (rouge).
+    #[test]
+    fn la_remise_traite_toute_la_selection() {
+        let mut banc = Banc::new();
+        redimensionne(&mut banc, 1, 30.0);
+        let (sheet, a, b) = (banc.sheet, banc.columns[0], banc.columns[1]);
+        banc.state.select_column(sheet, a);
+        banc.state.toggle_column_selection(sheet, b);
+        banc.image(Vec::new());
+        ouvre_menu_lettre(&mut banc, 0);
+        banc.clic_sur(&tr!("action-reset-column-widths"));
+        assert!(
+            banc.vues.contains(&Action::ResetColumnWidths {
+                columns: vec![a, b]
+            }),
+            "{:?}",
+            banc.vues
+        );
+    }
+
+    /// Clic droit de l'onglet de la feuille : l'entrée de feuille, grisée sans
+    /// largeur, active avec, pousse toutes les colonnes de la feuille. Témoins
+    /// éprouvés : entrée toujours active, ou une seule colonne visée (rouges).
+    #[test]
+    fn le_clic_droit_de_l_onglet_remet_toute_la_feuille() {
+        let mut banc = Banc::new();
+        banc.context.enable_accesskit();
+        let nom = banc.state.worksheets_of(banc.book)[0].1.clone();
+        banc.image(Vec::new());
+        banc.clic_bouton(&nom, egui::PointerButton::Secondary);
+        let menu = menu_lu(&banc);
+        assert!(!entree_menu(&menu, &tr!("action-reset-sheet-column-widths")).1);
+
+        let mut banc = Banc::new();
+        redimensionne(&mut banc, 1, 30.0);
+        banc.context.enable_accesskit();
+        banc.image(Vec::new());
+        banc.clic_bouton(&nom, egui::PointerButton::Secondary);
+        let menu = menu_lu(&banc);
+        assert!(entree_menu(&menu, &tr!("action-reset-sheet-column-widths")).1);
+        banc.clic_sur(&tr!("action-reset-sheet-column-widths"));
+        assert!(
+            banc.vues.contains(&Action::ResetColumnWidths {
+                columns: banc.columns.clone()
+            }),
+            "{:?}",
+            banc.vues
+        );
     }
 
     // --- Sous-menu Move ▸ des lettres de colonne (#319) -----------------------

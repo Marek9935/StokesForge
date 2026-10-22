@@ -309,6 +309,14 @@ pub enum Action {
         /// Nouvelle largeur.
         width: f32,
     },
+    /// Remet des colonnes à la largeur par défaut (#330) : leur clé quitte la
+    /// table (la grille applique alors son défaut). Même statut que
+    /// `SetColumnWidth` : ni historique ni `revision`, pas de commande ; voir
+    /// [`AppState::reset_column_widths`].
+    ResetColumnWidths {
+        /// Colonnes visées (une sélection est traitée en entier).
+        columns: Vec<NodeId>,
+    },
     /// Insère `count` lignes à `at` dans `sheet`.
     InsertRows {
         /// Feuille visée.
@@ -3165,6 +3173,45 @@ impl AppState {
         }
     }
 
+    /// Celles des colonnes `columns` qui ont une largeur retenue (#330) : ce
+    /// que « remettre à la largeur par défaut » peut encore changer. Vide =
+    /// l'entrée de menu est grisée.
+    pub fn columns_with_width(&self, columns: &[NodeId]) -> Vec<NodeId> {
+        columns
+            .iter()
+            .copied()
+            .filter(|column| self.column_width(*column).is_some())
+            .collect()
+    }
+
+    /// Toutes les colonnes de `sheet` (#330), pour « remettre toute la feuille
+    /// à la largeur par défaut ».
+    pub fn sheet_column_ids(&self, sheet: NodeId) -> Vec<NodeId> {
+        self.visible_columns(sheet)
+            .into_iter()
+            .map(|(id, _, _)| id)
+            .collect()
+    }
+
+    /// Remet les colonnes `columns` à la largeur par défaut auprès de l'acteur
+    /// (#330) : leur clé est retirée, ici aussi dans la copie locale de
+    /// l'instantané (comme [`AppState::set_column_width`]), pour que
+    /// [`AppState::column_width`] rende `None` avant le prochain rafraîchissement.
+    pub fn reset_column_widths(&mut self, columns: &[NodeId]) {
+        match self.handle.reset_column_widths(columns) {
+            Ok(_) => {
+                let widths = Arc::make_mut(&mut self.snapshot.column_widths);
+                for column in columns {
+                    widths.remove(column);
+                }
+            }
+            Err(err) => self.fail(tr!(
+                "error-column-width",
+                cause = errors::session::error_message(&err)
+            )),
+        }
+    }
+
     /// La largeur retenue de la colonne `column`, en points logiques ; `None`
     /// pour une colonne jamais redimensionnée (la grille applique alors sa
     /// largeur par défaut). Lue sur l'instantané : voir
@@ -4888,6 +4935,7 @@ impl AppState {
             }
             Action::MoveColumns { sheet, columns, to } => self.move_columns(sheet, &columns, to),
             Action::SetColumnWidth { column, width } => self.set_column_width(column, width),
+            Action::ResetColumnWidths { columns } => self.reset_column_widths(&columns),
             Action::InsertRows { sheet, at, count } => self.rows(sheet, at, count, true),
             Action::DeleteRows { sheet, at, count } => self.rows(sheet, at, count, false),
             Action::SetNoteText { note, text } => self.set_note_text(note, text),
