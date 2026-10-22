@@ -35,6 +35,7 @@ use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::{AutoDetect, Operation, OperationKind, Readiness, HEAVY_BATCH};
 use stokesforge_analysis::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec};
 use stokesforge_analysis::series::Series;
+use stokesforge_analysis::smooth::{self, SmoothMethod, SmoothSpec, SmoothWindow};
 use stokesforge_analysis::AnalysisError;
 use stokesforge_core::{
     compute, AuxRef, Calculation, CalculationDraft, ComputeError, Computed, NodeId, OutputDraft,
@@ -76,6 +77,12 @@ pub enum Preset {
     Reconvolution,
     /// Déconvolution directe.
     DirectDeconvolution,
+    /// Lissage par moyenne adjacente (#324).
+    SmoothAdjacent,
+    /// Lissage de Savitzky-Golay (#324).
+    SmoothSavitzkyGolay,
+    /// Lissage par médiane glissante (#324).
+    SmoothMedian,
 }
 
 impl Preset {
@@ -92,6 +99,9 @@ impl Preset {
             Preset::Peaks => OperationKind::Peaks,
             Preset::Reconvolution => OperationKind::Reconvolution,
             Preset::DirectDeconvolution => OperationKind::DirectDeconvolution,
+            Preset::SmoothAdjacent | Preset::SmoothSavitzkyGolay | Preset::SmoothMedian => {
+                OperationKind::Smooth
+            }
         }
     }
 
@@ -125,7 +135,7 @@ impl Preset {
 /// peut **remplacer** les données ; les autres écrivent de nouvelles colonnes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Category {
-    /// Lignes de base et correction par une référence.
+    /// Lignes de base, correction par une référence et lissage.
     DataManipulation,
     /// Ajustement par un modèle.
     Fitting,
@@ -147,7 +157,9 @@ impl Category {
     /// La catégorie d'une famille d'opération.
     pub fn of(kind: OperationKind) -> Self {
         match kind {
-            OperationKind::Baseline | OperationKind::Correct => Category::DataManipulation,
+            OperationKind::Baseline | OperationKind::Correct | OperationKind::Smooth => {
+                Category::DataManipulation
+            }
             OperationKind::Fit => Category::Fitting,
             OperationKind::Peaks
             | OperationKind::Reconvolution
@@ -159,7 +171,11 @@ impl Category {
     /// Les familles que la fenêtre de la catégorie propose (« Analysis type »).
     pub fn kinds(self) -> &'static [OperationKind] {
         match self {
-            Category::DataManipulation => &[OperationKind::Baseline, OperationKind::Correct],
+            Category::DataManipulation => &[
+                OperationKind::Baseline,
+                OperationKind::Correct,
+                OperationKind::Smooth,
+            ],
             Category::Fitting => &[OperationKind::Fit],
             Category::PeaksAndDeconvolution => &[
                 OperationKind::Peaks,
@@ -465,6 +481,72 @@ impl Default for DirectSetup {
     }
 }
 
+/// L'algorithme d'un lissage (#324), l'ordre du polynôme étant gardé à part
+/// pour survivre à un changement de méthode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmoothAlgorithm {
+    AdjacentAverage,
+    SavitzkyGolay,
+    Median,
+}
+
+/// L'unité dans laquelle la fenêtre d'un lissage se règle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmoothUnit {
+    Points,
+    XUnits,
+}
+
+/// Réglages d'un lissage (#324).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SmoothSetup {
+    pub algorithm: SmoothAlgorithm,
+    pub unit: SmoothUnit,
+    /// Fenêtre en points : toujours impaire (voir [`Self::set_points`]).
+    pub points: usize,
+    /// Fenêtre en unités de X.
+    pub x_width: f64,
+    /// Ordre du polynôme de Savitzky-Golay.
+    pub order: usize,
+}
+
+impl Default for SmoothSetup {
+    fn default() -> Self {
+        Self {
+            algorithm: SmoothAlgorithm::AdjacentAverage,
+            unit: SmoothUnit::Points,
+            points: 5,
+            x_width: 1.0,
+            order: 2,
+        }
+    }
+}
+
+impl SmoothSetup {
+    /// Règle la fenêtre en points : bornée à `[MIN_WINDOW, MAX_WINDOW]` et
+    /// relevée au nombre impair suivant (un lissage centré a autant de voisins
+    /// de chaque côté), pour que le champ ne puisse pas fabriquer un réglage que
+    /// le calcul refuserait.
+    pub fn set_points(&mut self, points: usize) {
+        self.points = (points | 1).clamp(smooth::MIN_WINDOW, smooth::MAX_WINDOW);
+    }
+
+    /// L'opération que ces réglages décrivent.
+    pub fn spec(&self) -> SmoothSpec {
+        SmoothSpec {
+            method: match self.algorithm {
+                SmoothAlgorithm::AdjacentAverage => SmoothMethod::AdjacentAverage,
+                SmoothAlgorithm::SavitzkyGolay => SmoothMethod::SavitzkyGolay { order: self.order },
+                SmoothAlgorithm::Median => SmoothMethod::Median,
+            },
+            window: match self.unit {
+                SmoothUnit::Points => SmoothWindow::Points(self.points),
+                SmoothUnit::XUnits => SmoothWindow::XUnits(self.x_width),
+            },
+        }
+    }
+}
+
 /// Les réglages de toutes les familles, gardés ensemble.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Setup {
@@ -475,6 +557,7 @@ pub struct Setup {
     pub peaks: PeaksSetup,
     pub reconv: ReconvSetup,
     pub direct: DirectSetup,
+    pub smooth: SmoothSetup,
 }
 
 impl Default for Setup {
@@ -489,6 +572,7 @@ impl Default for Setup {
             peaks: PeaksSetup::default(),
             reconv: ReconvSetup::default(),
             direct: DirectSetup::default(),
+            smooth: SmoothSetup::default(),
         }
     }
 }
@@ -572,6 +656,14 @@ impl AnalysisForm {
             }
             Preset::BaselineAnchors => setup.baseline.shape = BaselineShape::Anchors,
             Preset::Fit(model) => setup.fit.set_model(model.clone()),
+            Preset::SmoothAdjacent => setup.smooth.algorithm = SmoothAlgorithm::AdjacentAverage,
+            Preset::SmoothSavitzkyGolay => {
+                setup.smooth.algorithm = SmoothAlgorithm::SavitzkyGolay;
+                // Un polynôme d'ordre 2 sur 5 points est trop serré pour lisser :
+                // 9 points est le défaut courant.
+                setup.smooth.points = 9;
+            }
+            Preset::SmoothMedian => setup.smooth.algorithm = SmoothAlgorithm::Median,
             _ => {}
         }
         let kind = preset.kind();
@@ -783,6 +875,9 @@ impl AnalysisForm {
                 spec: s.reconv.spec.clone(),
                 residuals: s.reconv.residuals || for_preview,
             },
+            OperationKind::Smooth => Operation::Smooth {
+                spec: s.smooth.spec(),
+            },
             OperationKind::DirectDeconvolution => {
                 let d = &s.direct;
                 Operation::DirectDeconvolution {
@@ -850,7 +945,10 @@ impl AnalysisForm {
     /// Une correction peut remplacer uniquement des colonnes ordinaires.
     pub fn replacement_disabled(&self, tree: &Tree) -> Option<String> {
         if self.editing.is_some()
-            || !matches!(self.kind, OperationKind::Baseline | OperationKind::Correct)
+            || !matches!(
+                self.kind,
+                OperationKind::Baseline | OperationKind::Correct | OperationKind::Smooth
+            )
         {
             return Some(tr!("disabled-analysis-replace-operation"));
         }
@@ -1016,6 +1114,9 @@ pub fn output_name_text_in(loader: &FluentLanguageLoader, name: &OutputName) -> 
         OutputName::Deconvolved { name } => {
             tr!("analysis-output-deconvolved", name = name.as_str())
         }
+        OutputName::Smoothed { name } => {
+            tr!("analysis-output-smoothed", name = name.as_str())
+        }
         // Le repli d'une clé inconnue est le nom de la source, déjà du texte
         // de l'utilisateur : rien à traduire.
         OutputName::Source { name } => name.clone(),
@@ -1057,6 +1158,7 @@ pub fn kind_title(kind: OperationKind) -> String {
         OperationKind::Peaks => tr!("analysis-kind-peaks"),
         OperationKind::Reconvolution => tr!("analysis-kind-reconvolution"),
         OperationKind::DirectDeconvolution => tr!("analysis-kind-direct-deconvolution"),
+        OperationKind::Smooth => tr!("analysis-kind-smooth"),
     }
 }
 
@@ -1099,6 +1201,11 @@ pub fn preset_of(op: &Operation) -> Preset {
         Operation::Peaks { .. } => Preset::Peaks,
         Operation::Reconvolution { .. } => Preset::Reconvolution,
         Operation::DirectDeconvolution { .. } => Preset::DirectDeconvolution,
+        Operation::Smooth { spec } => match spec.method {
+            SmoothMethod::AdjacentAverage => Preset::SmoothAdjacent,
+            SmoothMethod::SavitzkyGolay { .. } => Preset::SmoothSavitzkyGolay,
+            SmoothMethod::Median => Preset::SmoothMedian,
+        },
     }
 }
 
@@ -1143,6 +1250,27 @@ impl Setup {
                 }
             }
             Operation::Correct { op } => self.correct = *op,
+            Operation::Smooth { spec } => {
+                let s = &mut self.smooth;
+                match spec.method {
+                    SmoothMethod::AdjacentAverage => s.algorithm = SmoothAlgorithm::AdjacentAverage,
+                    SmoothMethod::SavitzkyGolay { order } => {
+                        s.algorithm = SmoothAlgorithm::SavitzkyGolay;
+                        s.order = order;
+                    }
+                    SmoothMethod::Median => s.algorithm = SmoothAlgorithm::Median,
+                }
+                match spec.window {
+                    SmoothWindow::Points(n) => {
+                        s.unit = SmoothUnit::Points;
+                        s.set_points(n);
+                    }
+                    SmoothWindow::XUnits(w) => {
+                        s.unit = SmoothUnit::XUnits;
+                        s.x_width = w;
+                    }
+                }
+            }
             Operation::Integrate { spec } => {
                 self.integrate = IntegrateSetup {
                     ranges: spec.ranges.clone(),
@@ -1785,6 +1913,7 @@ pub fn value_label(key: &str, index: Option<usize>) -> String {
         "area.to" => tr!("analysis-value-area-to", index = n),
         "area.total" => tr!("analysis-value-area-total"),
         "count.out_of_reference" => tr!("analysis-value-out-of-reference"),
+        "count.window" => tr!("analysis-value-window"),
         "stat.points" => tr!("analysis-value-points"),
         "stat.r_squared" => tr!("analysis-value-r-squared"),
         "stat.reduced_chi2" => tr!("analysis-value-reduced-chi2"),

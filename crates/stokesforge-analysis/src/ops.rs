@@ -20,6 +20,7 @@ use crate::integrate::{self, IntegrateSpec};
 use crate::model::Model;
 use crate::peaks::{self, PeakSeed, PeaksSpec};
 use crate::series::{clean, interpolate, Series};
+use crate::smooth::{self, SmoothMethod, SmoothSpec};
 
 /// Les colonnes d'une courbe à traiter, ligne à ligne. `NaN` : cellule vide,
 /// texte ou invalide.
@@ -84,6 +85,10 @@ pub enum Operation {
         method: DirectMethod,
         shift: f64,
     },
+    /// Lissage d'une courbe (#324).
+    Smooth {
+        spec: SmoothSpec,
+    },
 }
 
 /// La famille d'une opération, sans ses réglages : le libellé d'historique, la
@@ -98,10 +103,11 @@ pub enum OperationKind {
     Peaks,
     Reconvolution,
     DirectDeconvolution,
+    Smooth,
 }
 
 impl OperationKind {
-    pub const ALL: [OperationKind; 7] = [
+    pub const ALL: [OperationKind; 8] = [
         OperationKind::Baseline,
         OperationKind::Correct,
         OperationKind::Integrate,
@@ -109,6 +115,7 @@ impl OperationKind {
         OperationKind::Peaks,
         OperationKind::Reconvolution,
         OperationKind::DirectDeconvolution,
+        OperationKind::Smooth,
     ];
 
     /// Clé stable (celle de `Tree` et des scripts).
@@ -121,6 +128,7 @@ impl OperationKind {
             OperationKind::Peaks => "peaks",
             OperationKind::Reconvolution => "reconvolution",
             OperationKind::DirectDeconvolution => "direct_deconvolution",
+            OperationKind::Smooth => "smooth",
         }
     }
 
@@ -143,6 +151,7 @@ impl Operation {
             Operation::Peaks { .. } => OperationKind::Peaks,
             Operation::Reconvolution { .. } => OperationKind::Reconvolution,
             Operation::DirectDeconvolution { .. } => OperationKind::DirectDeconvolution,
+            Operation::Smooth { .. } => OperationKind::Smooth,
         }
     }
 
@@ -507,7 +516,8 @@ impl Operation {
             | Operation::Integrate { .. }
             | Operation::Peaks { .. }
             | Operation::Reconvolution { .. }
-            | Operation::DirectDeconvolution { .. } => Readiness::Ready,
+            | Operation::DirectDeconvolution { .. }
+            | Operation::Smooth { .. } => Readiness::Ready,
         }
     }
 
@@ -535,7 +545,8 @@ impl Operation {
             }
             Operation::Baseline { .. }
             | Operation::Correct { .. }
-            | Operation::DirectDeconvolution { .. } => {}
+            | Operation::DirectDeconvolution { .. }
+            | Operation::Smooth { .. } => {}
         }
     }
 
@@ -613,6 +624,7 @@ impl Operation {
             Operation::Reconvolution { spec, .. } if spec.window.is_some_and(|w| !is_posed(w)) => {
                 bad("window")
             }
+            Operation::Smooth { spec } => spec.validate(),
             _ => Ok(()),
         }
     }
@@ -736,6 +748,14 @@ pub fn run(
                 // Étendre, pas écraser : `Undetermined` et `NotConverged` sont déjà posés
                 // plus haut ; `deconv_warnings` ne produit que les trois autres (#292).
                 o.warnings.extend(deconv_warnings(r.warnings));
+            }
+            Operation::Smooth { spec } => {
+                let r = smooth::smooth(&a.series, spec)?;
+                o.column("smoothed", None, a.expand(&r.values));
+                o.value("count.window", None, r.window as f64, None);
+                if !r.step_uniform && matches!(spec.method, SmoothMethod::SavitzkyGolay { .. }) {
+                    o.warnings.push(Warning::SignalStepNotUniform);
+                }
             }
             Operation::DirectDeconvolution { method, shift } => {
                 let irf = aux_series(aux).map_err(|_| AnalysisError::EmptyResponse)?;

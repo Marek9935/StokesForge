@@ -165,6 +165,7 @@ pub fn group_line(group: &LowRSquaredGroup) -> String {
         OperationKind::DirectDeconvolution => {
             tr!("low-r2-count-direct-deconvolution", count = count)
         }
+        OperationKind::Smooth => tr!("low-r2-count-smooth", count = count),
     }
 }
 

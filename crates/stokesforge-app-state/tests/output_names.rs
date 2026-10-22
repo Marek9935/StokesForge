@@ -30,10 +30,11 @@ fn rank(name: &OutputName) -> usize {
         OutputName::PeaksSum { .. } => 9,
         OutputName::Deconvolved { .. } => 10,
         OutputName::Source { .. } => 11,
+        OutputName::Smoothed { .. } => 12,
     }
 }
 
-const VARIANTS: usize = 12;
+const VARIANTS: usize = 13;
 
 fn all_names() -> Vec<OutputName> {
     let text = |s: &str| s.to_string();
@@ -68,6 +69,7 @@ fn all_names() -> Vec<OutputName> {
             column: text(column),
         });
         names.push(OutputName::Deconvolved { name: text(name) });
+        names.push(OutputName::Smoothed { name: text(name) });
         names.push(OutputName::Source { name: text(name) });
     }
     names

@@ -274,6 +274,11 @@ grandeur sans dimension (absorbance) ne porte pas d'unité. Titre d'axe :
 | Low R² (badge) | R² faible(s) | Pastille de la barre d'état : nombre de séries à R² < 0,6 dans le projet ; un clic liste les types (#290) | Alerte | D |
 | Constant (baseline) | Constante (ligne de base) | Fond plat par un point ou la moyenne d’une zone | Décalage | D (#211) |
 | Anchor point | Point d'ancrage | Point posé sur l'aperçu pour tracer une ligne de base | Ancre | D |
+| Smoothing | Lissage | Atténuer le bruit d'une courbe à partir de ses voisins (#324) | Filtrage, Débruitage | D |
+| Adjacent averaging | Moyenne adjacente | Lissage par la moyenne des points de la fenêtre | Moyenne mobile | D (#324) |
+| Savitzky-Golay | Savitzky-Golay | Lissage par un polynôme ajusté sur la fenêtre | Filtre SG | D (#324) |
+| Rolling median | Médiane glissante | Lissage par la médiane des points de la fenêtre | Filtre médian | D (#324) |
+| Smoothing width | Largeur de lissage | Points voisins qu'un lissage lit (nombre impair) ou largeur en unités de X | Fenêtre (déjà prise : fenêtre de l'application) | D (#324) |
 | Zone | Zone | Intervalle d'abscisses choisi sur l'aperçu | Région, Plage | D |
 | Reference | Référence | Colonne par laquelle on corrige une série | Témoin | D |
 | IRF (instrument response) | Réponse de l'instrument | Réponse temporelle de l'appareil, à déconvoluer | — | I |

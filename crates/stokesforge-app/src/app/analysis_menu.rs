@@ -255,6 +255,21 @@ pub(super) fn analysis_menu_contents(
                     tr!("action-analysis-correct", "hint"),
                     Preset::Correct,
                 ),
+                (
+                    tr!("analysis-smooth-adjacent"),
+                    tr!("analysis-smooth-adjacent", "hint"),
+                    Preset::SmoothAdjacent,
+                ),
+                (
+                    tr!("analysis-smooth-savitzky-golay"),
+                    tr!("analysis-smooth-savitzky-golay", "hint"),
+                    Preset::SmoothSavitzkyGolay,
+                ),
+                (
+                    tr!("analysis-smooth-median"),
+                    tr!("analysis-smooth-median", "hint"),
+                    Preset::SmoothMedian,
+                ),
             ] {
                 open_entry(ui, actions, target, enabled, label, hint, preset);
             }

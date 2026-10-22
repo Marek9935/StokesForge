@@ -179,6 +179,11 @@ fn un_argument_invalide_leve_invalid_value_error_sans_rien_ecrire() {
         "pyst.analysis.integrate(y, x, under='sideways')",
         "pyst.analysis.peaks(y, x, prominence=0.0)",
         "pyst.analysis.reconvolve(y, ref, x, components=9)",
+        "pyst.analysis.smooth(y, x, window=4)",
+        "pyst.analysis.smooth(y, x, window=2.5)",
+        "pyst.analysis.smooth(y, x, method='savitzky-golay', window=5, order=7)",
+        "pyst.analysis.smooth(y, x, method='nope')",
+        "pyst.analysis.smooth(y, x, window=-1, window_unit='x')",
     ] {
         run(
             &banc,
@@ -603,4 +608,46 @@ ok = pyst.analysis.fit(g, x, model='gaussian', initial={'xc': 7.0, 'fwhm': 2.0})
 assert ok['warnings'] == [], ok['warnings']
 "#,
     );
+}
+
+/// #324 : `pyst.analysis.smooth` écrit la colonne lissée avec le nom, l'unité
+/// et le commentaire de l'interface, et remplace les Y sur demande. Une droite
+/// reste une droite sous les trois méthodes (hors des bords pour la moyenne).
+#[test]
+fn le_lissage_ecrit_sa_colonne_nommee_et_remplace_les_y_sur_demande() {
+    let banc = banc();
+    run(
+        &banc,
+        "
+pyst.set_column_meta(y, long_name='Intensity', unit='counts')
+for m in ('adjacent', 'savitzky-golay', 'median'):
+    r = pyst.analysis.smooth(y, x, method=m, window=5)
+    s = pyst.column(r['columns']['smoothed'])
+    assert abs(s[10] - 21.0) < 1e-9, (m, s[10])
+r = pyst.analysis.smooth(y, x, window=4.0, window_unit='x')
+assert r['values']['count.window'] == 5.0
+",
+    );
+    let sorties = sorties(&banc);
+    assert_eq!(sorties.len(), 1, "{sorties:?}");
+    assert_eq!(sorties[0].0, "smoothed");
+    assert_eq!(sorties[0].1, "Intensity (smoothed)");
+    assert_eq!(sorties[0].2, "counts");
+    assert_eq!(sorties[0].3, "Smoothing");
+
+    let banc = banc_avec(false);
+    let before = banc.session.snapshot().unwrap();
+    run(
+        &banc,
+        "
+r = pyst.analysis.smooth(y, x, method='median', window=3, replace_original=True)
+assert repr(r['columns']['smoothed']) == repr(y)
+",
+    );
+    let after = banc.session.snapshot().unwrap();
+    assert!(after.tree.calculations().is_empty());
+    assert_eq!(after.tree.correction_traces().len(), 1);
+    assert_eq!(columns(&banc), 3);
+    banc.session.undo().unwrap();
+    assert_eq!(banc.session.snapshot().unwrap().tree, before.tree);
 }

@@ -379,6 +379,15 @@ impl CalculationDraft {
     }
 }
 
+/// La clé de la sortie qui remplace les Y d'une source : la courbe corrigée
+/// d'une correction ou d'une ligne de base, la courbe lissée d'un lissage.
+fn replacement_key(operation: &Operation) -> &'static str {
+    match operation {
+        Operation::Smooth { .. } => "smoothed",
+        _ => "corrected",
+    }
+}
+
 impl Project {
     /// Remplace les Y par leur correction et garde la trace du geste, atomiquement.
     /// Le client fournit les versions de toutes les entrées lues : un résultat
@@ -408,10 +417,10 @@ impl Project {
         }
         if !matches!(
             draft.operation,
-            Operation::Baseline { .. } | Operation::Correct { .. }
+            Operation::Baseline { .. } | Operation::Correct { .. } | Operation::Smooth { .. }
         ) {
             return Err(CoreError::Structure(
-                "only a curve correction can replace original data".into(),
+                "only a curve correction or smoothing can replace original data".into(),
             ));
         }
         for &(id, expected) in expected_versions {
@@ -444,7 +453,7 @@ impl Project {
             let output = draft
                 .outputs
                 .iter()
-                .find(|o| o.series == rank && o.key == "corrected")
+                .find(|o| o.series == rank && o.key == replacement_key(&draft.operation))
                 .ok_or_else(|| {
                     CoreError::Structure("a correction needs its corrected output".into())
                 })?;
@@ -1110,6 +1119,8 @@ pub enum OutputName {
     PeaksSum { column: String },
     /// `Intensity (deconvolved)`.
     Deconvolved { name: String },
+    /// Le Y lissé : `Intensity (smoothed)`.
+    Smoothed { name: String },
     /// Repli d'une clé que cette version ne connaît pas : le nom de la source.
     Source { name: String },
 }
@@ -1156,6 +1167,7 @@ impl OutputName {
             (_, "background") => Self::Background { column },
             (_, "peaks_sum") => Self::PeaksSum { column },
             (_, "deconvolved") => Self::Deconvolved { name },
+            (_, "smoothed") => Self::Smoothed { name },
             _ => Self::Source { name },
         }
     }
@@ -1174,17 +1186,18 @@ impl OutputName {
             Self::Background { column } => format!("Background of {column}"),
             Self::PeaksSum { column } => format!("Sum of peaks of {column}"),
             Self::Deconvolved { name } => format!("{name} (deconvolved)"),
+            Self::Smoothed { name } => format!("{name} (smoothed)"),
             Self::Source { name } => name.clone(),
         }
     }
 }
 
 /// L'unité d'une colonne de sortie : **toujours celle de la source** pour les
-/// dix clés connues, vide pour une clé inconnue.
+/// onze clés connues, vide pour une clé inconnue.
 pub fn output_unit(tree: &Tree, series: &SeriesRef, key: &str) -> String {
     match key {
         "corrected" | "baseline" | "cumulative" | "normalized" | "fit" | "residuals" | "peak"
-        | "background" | "peaks_sum" | "deconvolved" => tree
+        | "background" | "peaks_sum" | "deconvolved" | "smoothed" => tree
             .node(series.y)
             .and_then(|n| n.as_column())
             .map(|c| c.meta().unit.clone())
@@ -1205,6 +1218,7 @@ pub fn family_english(kind: OperationKind) -> &'static str {
         OperationKind::Peaks => "Peak Decomposition",
         OperationKind::Reconvolution => "Reconvolution",
         OperationKind::DirectDeconvolution => "Direct Deconvolution",
+        OperationKind::Smooth => "Smoothing",
     }
 }
 
@@ -1368,7 +1382,7 @@ mod output_name_tests {
     }
 
     #[test]
-    fn the_unit_is_the_one_of_the_source_for_the_ten_keys() {
+    fn the_unit_is_the_one_of_the_source_for_the_eleven_keys() {
         let (project, b, c) = fixture();
         let tree = project.tree();
         for key in [
@@ -1382,6 +1396,7 @@ mod output_name_tests {
             "background",
             "peaks_sum",
             "deconvolved",
+            "smoothed",
         ] {
             assert_eq!(output_unit(tree, &b, key), "counts", "{key}");
             assert_eq!(output_unit(tree, &c, key), "", "{key} sans unité");
@@ -1401,7 +1416,8 @@ mod output_name_tests {
                 "Fit",
                 "Peak Decomposition",
                 "Reconvolution",
-                "Direct Deconvolution"
+                "Direct Deconvolution",
+                "Smoothing"
             ]
         );
     }

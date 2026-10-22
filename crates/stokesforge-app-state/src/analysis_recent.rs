@@ -106,6 +106,9 @@ impl RecentAnalysis {
             Preset::Peaks => tr!("analysis-recent-peaks"),
             Preset::Reconvolution => tr!("analysis-recent-reconvolution"),
             Preset::DirectDeconvolution => tr!("analysis-recent-direct"),
+            Preset::SmoothAdjacent => tr!("analysis-recent-smooth-adjacent"),
+            Preset::SmoothSavitzkyGolay => tr!("analysis-recent-smooth-savitzky-golay"),
+            Preset::SmoothMedian => tr!("analysis-recent-smooth-median"),
         }
     }
 
@@ -113,6 +116,7 @@ impl RecentAnalysis {
     fn detail(&self) -> Option<String> {
         use stokesforge_analysis::baseline::BaselineOp;
         use stokesforge_analysis::correct::CorrectOp;
+        use stokesforge_analysis::smooth::SmoothWindow;
         let op_word = |op: BaselineOp| match op {
             BaselineOp::Subtract => tr!("analysis-recent-subtract"),
             BaselineOp::Divide => tr!("analysis-recent-divide"),
@@ -130,6 +134,13 @@ impl RecentAnalysis {
                 CorrectOp::Divide => tr!("analysis-recent-divide"),
                 CorrectOp::Multiply => tr!("analysis-recent-multiply"),
                 CorrectOp::Subtract => tr!("analysis-recent-subtract"),
+            }),
+            Operation::Smooth { spec } => Some(match spec.window {
+                SmoothWindow::Points(points) => tr!(
+                    "analysis-recent-window-points",
+                    points = i64::try_from(points).unwrap_or(i64::MAX)
+                ),
+                SmoothWindow::XUnits(width) => tr!("analysis-recent-window-x", width = width),
             }),
             Operation::Fit { spec, .. } => match &spec.model {
                 Model::Polynomial { degree } => Some(tr!(

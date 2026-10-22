@@ -26,6 +26,7 @@ use stokesforge_analysis::integrate::{IntegrateSpec, Under};
 use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::Operation;
 use stokesforge_analysis::peaks::{PeakBackground, PeakSeed, PeakShape, PeaksSpec};
+use stokesforge_analysis::smooth::{SmoothMethod, SmoothSpec, SmoothWindow};
 use stokesforge_analysis::voigt;
 use stokesforge_core::{
     compute, family_english, output_unit, AuxRef, CalculationDraft, Column, ColumnMeta, ColumnRole,
@@ -199,6 +200,30 @@ fn baseline() -> Jeu {
             keep_baseline: true,
         },
         vec![Attendu::Ligne("corrected", 100, 4.0, 0.15)],
+    )
+}
+
+/// Un pic bruité que Savitzky-Golay lisse sans l'abaisser : le sommet garde sa
+/// hauteur (10) là où une moyenne de la même fenêtre l'écraserait.
+fn lissage() -> Jeu {
+    let mut bruit = Bruit::new(14);
+    let x = grille(0.0, 100.0, 0.5);
+    let propre: Vec<f64> = x.iter().map(|&x| gaussienne(x, 10.0, 50.0, 8.0)).collect();
+    jeu(
+        "Smooth",
+        [("Déplacement", "mm"), ("Signal", "mV")],
+        (x, bruit.bruite(&propre, 0.5)),
+        Operation::Smooth {
+            spec: SmoothSpec {
+                method: SmoothMethod::SavitzkyGolay { order: 3 },
+                window: SmoothWindow::Points(15),
+            },
+        },
+        vec![
+            Attendu::Valeur("count.window", None, 15.0, 0.0),
+            Attendu::Ligne("smoothed", 100, 10.0, 0.5),
+            Attendu::Ligne("smoothed", 0, 0.0, 0.5),
+        ],
     )
 }
 
@@ -542,6 +567,7 @@ pub(super) fn jeux() -> Vec<Jeu> {
     vec![
         baseline(),
         correct(),
+        lissage(),
         integrate(),
         ajustement_lineaire(),
         ajustement_polynome(),
