@@ -174,6 +174,15 @@ pub const MAX_FILE_MB: Quantity = Quantity::whole(64.0)
     )
     .with_presets(&[64.0, 128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0]);
 
+/// Budget global de cellules d'un `.stf` à l'ouverture, en millions (B1,
+/// #316) ; bornes de `preferences::{MIN,MAX}_MAX_CELLS_M`.
+pub const MAX_CELLS_M: Quantity = Quantity::whole(100.0)
+    .between(
+        crate::preferences::MIN_MAX_CELLS_M as f64,
+        crate::preferences::MAX_MAX_CELLS_M as f64,
+    )
+    .with_presets(&[10.0, 100.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0]);
+
 /// Période de la sauvegarde automatique, en minutes (#317) ; bornes de
 /// `preferences::{MIN,MAX}_AUTOSAVE_MINUTES`.
 pub const AUTOSAVE_MINUTES: Quantity = Quantity::whole(1.0)

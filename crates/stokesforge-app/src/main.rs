@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
     let requested = std::env::args().nth(1).map(PathBuf::from);
     let (session, path, report) = session_for_project(
         requested,
-        stokesforge_app_state::preferences::Preferences::load().max_file_bytes(),
+        stokesforge_app_state::preferences::Preferences::load().load_limits(),
     )?;
     let mut state = AppState::new(session.handle(), path.display().to_string())
         .context("premier instantané du projet")?;
@@ -122,7 +122,7 @@ fn configure_window_backend(_builder: &mut eframe::EventLoopBuilder<eframe::User
 /// chemin, donc un `demo.stf` du dossier courant n'est ni lu ni écrasé (#315).
 fn session_for_project(
     requested: Option<PathBuf>,
-    max_file_bytes: u64,
+    max_limits: stokesforge_app_state::preferences::LoadLimits,
 ) -> anyhow::Result<(Session, PathBuf, Option<LoadReport>)> {
     let load_existing = requested.as_ref().is_some_and(|path| path.exists());
     let path = requested.unwrap_or_default();
@@ -144,7 +144,7 @@ fn session_for_project(
     let report = if load_existing {
         let (_, report) = session
             .handle()
-            .load_with_limit(&path, max_file_bytes)
+            .load_with_limits(&path, max_limits)
             .with_context(|| format!("chargement de {}", path.display()))?;
         Some(report)
     } else {
@@ -211,7 +211,7 @@ mod startup_tests {
 
         let (loaded, actual_path, report) = session_for_project(
             Some(path.clone()),
-            stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+            stokesforge_app_state::preferences::default_load_limits(),
         )
         .unwrap();
         assert!(
@@ -249,7 +249,7 @@ mod startup_tests {
 
         let (loaded, _, _) = session_for_project(
             Some(path),
-            stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+            stokesforge_app_state::preferences::default_load_limits(),
         )
         .unwrap();
         let snapshot = loaded.handle().snapshot().unwrap();
@@ -264,7 +264,7 @@ mod startup_tests {
     fn sans_argument_la_demo_n_a_ni_chemin_ni_repere_charge() {
         let (session, path, report) = session_for_project(
             None,
-            stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+            stokesforge_app_state::preferences::default_load_limits(),
         )
         .unwrap();
         assert!(path.as_os_str().is_empty());
@@ -279,7 +279,7 @@ mod startup_tests {
         let path = directory.path().join("absent.stf");
         let (session, actual, report) = session_for_project(
             Some(path.clone()),
-            stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+            stokesforge_app_state::preferences::default_load_limits(),
         )
         .unwrap();
         assert_eq!(actual, path);
@@ -341,7 +341,7 @@ mod startup_tests {
 
         let (session, _, report) = session_for_project(
             Some(path),
-            stokesforge_app_state::preferences::DEFAULT_MAX_FILE_BYTES,
+            stokesforge_app_state::preferences::default_load_limits(),
         )
         .unwrap();
         let report = report.expect("fichier chargé");

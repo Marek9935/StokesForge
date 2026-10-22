@@ -879,6 +879,8 @@ pub enum Action {
     /// Règle le plafond de taille d'un `.stf` à l'ouverture, en Mo (A2, #316).
     /// Préférence de l'application : ni commande, ni historique, ni `.stf`.
     SetMaxFileMb(u32),
+    /// Budget global de cellules à l'ouverture, en millions (B1, #316).
+    SetMaxCellsM(u32),
     /// Active ou coupe la sauvegarde automatique (#317). Préférence de
     /// l'application : ni commande, ni historique, ni `.stf`.
     SetAutosave(bool),
@@ -5286,6 +5288,14 @@ impl AppState {
                     ));
                 }
             }
+            Action::SetMaxCellsM(millions) => {
+                if let Err(error) = self.object_manager_preferences.save_max_cells_m(millions) {
+                    self.fail(tr!(
+                        "error-preferences-not-saved",
+                        cause = errors::io::error_message(&error)
+                    ));
+                }
+            }
             Action::SetAutosave(on) => self.set_autosave(on),
             Action::SetAutosaveMinutes(minutes) => self.set_autosave_minutes(minutes),
             Action::RecoveryOpen(path) => self.recovery_open(path),
@@ -6987,6 +6997,11 @@ impl AppState {
         self.object_manager_preferences.max_file_mb()
     }
 
+    /// Budget global de cellules à l'ouverture, en millions (B1, #316).
+    pub fn max_cells_m(&self) -> u32 {
+        self.object_manager_preferences.max_cells_m()
+    }
+
     /// La boîte « R² très faible » est-elle permise par l'application (#288) ?
     pub fn analysis_low_r2_dialog(&self) -> bool {
         self.object_manager_preferences.analysis_low_r2_dialog()
@@ -7163,8 +7178,8 @@ impl AppState {
     /// (S-M8) : dialogue bloquant ; rend `false`.
     fn load(&mut self) -> bool {
         let path = PathBuf::from(&self.path);
-        let limit = self.object_manager_preferences.max_file_bytes();
-        match self.handle.load_with_limit(&path, limit) {
+        let limits = self.object_manager_preferences.load_limits();
+        match self.handle.load_with_limits(&path, limits) {
             Ok((_, report)) => {
                 // Les identifiants du fichier n'ont aucun rapport avec ceux de
                 // l'arbre précédent : la sélection doit être revalidée, ce que

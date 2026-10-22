@@ -795,3 +795,33 @@ fn b3_largeurs_de_colonne_hostiles() {
     let hors_borne = ecrire_largeurs(&dir, "hors_borne.stf", &[(u64::MAX, 50.0)]);
     assert!(load_with_report(&hors_borne).is_err());
 }
+
+/// B1 (#316) : un fichier dont les colonnes déclarent plus de cellules que le
+/// budget global est refusé avant toute allocation de colonne. Les colonnes
+/// forgées sont sous `MAX_COLUMN_ROWS` chacune : seul le cumul les arrête.
+#[test]
+fn b3_budget_global_de_cellules_refuse_le_cumul() {
+    use stokesforge_core::{Column, Project};
+    use stokesforge_persistence::{load_with_limits, save, LoadLimits, PersistenceError};
+    let dir = TempDir::new().unwrap();
+    let mut project = Project::new("P").unwrap();
+    let root = project.root();
+    let book = project.add_workbook(root, Some("B")).unwrap();
+    let sheet = project.tree().children(book).unwrap()[0];
+    for nom in ["A", "B", "C"] {
+        project
+            .add_column(sheet, None, Some(nom), Column::from_f64(&[0.0; 1000]))
+            .unwrap();
+    }
+    let path = dir.path().join("cumul.stf");
+    save(&project, &path).unwrap();
+    let avec = |max_cells| LoadLimits {
+        max_cells,
+        ..LoadLimits::default()
+    };
+    assert!(load_with_limits(&path, avec(3000)).is_ok());
+    assert!(matches!(
+        load_with_limits(&path, avec(2999)),
+        Err(PersistenceError::TooManyCells { .. })
+    ));
+}

@@ -99,19 +99,37 @@ where
     // par le vrai décodeur `rmp_serde` (voir la doc de tête du module) :
     // c'est lui, pas `rmpv`, qui sait interpréter le tag externally-tagged
     // par nom que ce format écrit partout ailleurs.
-    if let Ok(reencoded) = rmp_serde::to_vec_named(&value) {
-        if let Ok(known) = rmp_serde::from_slice::<Known>(&reencoded) {
-            return Ok(known.into());
-        }
+    //
+    // La valeur est libérée **avant** la tentative : une colonne de plusieurs
+    // centaines de Mo ne coexiste ainsi pas en trois copies (valeur, octets
+    // réencodés, enregistrement connu). Le chemin d'échec, rare, relit la
+    // valeur depuis les octets réencodés (#316).
+    let Ok(reencoded) = rmp_serde::to_vec_named(&value) else {
+        return raw_variant(&value)
+            .map(Public::from)
+            .map_err(D::Error::custom);
+    };
+    drop(value);
+    if let Ok(known) = rmp_serde::from_slice::<Known>(&reencoded) {
+        return Ok(known.into());
     }
-    let (name, payload) = match split_tag(&value).map_err(D::Error::custom)? {
+    let value: rmpv::Value = rmp_serde::from_slice(&reencoded).map_err(D::Error::custom)?;
+    drop(reencoded);
+    raw_variant(&value)
+        .map(Public::from)
+        .map_err(D::Error::custom)
+}
+
+/// Nom et contenu bruts d'une variante qu'on ne sait pas lire.
+fn raw_variant(value: &rmpv::Value) -> Result<RawVariant, String> {
+    let (name, payload) = match split_tag(value)? {
         Tag::Bare(name) => (name, Vec::new()),
         Tag::Tagged(name, content) => {
-            let bytes = rmp_serde::to_vec_named(&content).map_err(D::Error::custom)?;
+            let bytes = rmp_serde::to_vec_named(&content).map_err(|err| err.to_string())?;
             (name, bytes)
         }
     };
-    Ok(Public::from(RawVariant { name, payload }))
+    Ok(RawVariant { name, payload })
 }
 
 /// Réécrit une variante capturée à l'identique : `payload` vide → la simple

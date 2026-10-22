@@ -317,6 +317,12 @@ pub mod file {
                     limit = limit_mb
                 )
             }
+            PersistenceError::TooManyCells { path, cells, limit } => tr!(
+                "error-file-too-many-cells",
+                path = path.display().to_string(),
+                cells = i64::try_from(cells.div_ceil(1_000_000)).unwrap_or(i64::MAX),
+                limit = i64::try_from(limit / 1_000_000).unwrap_or(i64::MAX)
+            ),
             PersistenceError::NotAStokesForgeFile { path } => {
                 tr!(
                     "error-file-not-stokesforge",
@@ -403,8 +409,13 @@ pub mod file {
                     size: 600 << 20,
                     limit: 512 << 20,
                 },
+                PersistenceError::TooManyCells {
+                    path: path(),
+                    cells: 2_000_000_000,
+                    limit: 1_000_000_000,
+                },
             ];
-            let mut seen = [false; 9];
+            let mut seen = [false; 10];
             for sample in &samples {
                 let index = match sample {
                     PersistenceError::Io { .. } => 0,
@@ -416,6 +427,7 @@ pub mod file {
                     PersistenceError::ConcurrentModification { .. } => 6,
                     PersistenceError::UnreadableTarget { .. } => 7,
                     PersistenceError::TooLarge { .. } => 8,
+                    PersistenceError::TooManyCells { .. } => 9,
                 };
                 seen[index] = true;
             }

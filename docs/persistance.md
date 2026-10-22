@@ -248,7 +248,24 @@ puisse pas amener en mémoire un projet inutilisable (batterie `b4`).
 annonce plus de lignes (`tags.len()` pour `Mixed`, `octets / 8` pour `Float`,
 `values.len()` pour l'ancien `Text`) est refusée en `Corrupt`
 (`ConvertError::TooManyRows`, aide `check_rows`) **avant** toute allocation
-(#316). Il n'y a pas de budget global de cellules : décision encore ouverte.
+(#316). 
+
+**Budget global de cellules (B1, #316).** `load_with_limits(path,
+LoadLimits { max_bytes, max_cells })` somme les longueurs déclarées de toutes
+les colonnes (`check_cell_budget` : `tags.len()`, `octets / 8`, `values.len()`)
+une fois le corps décodé et **avant** `record_to_kind`, donc avant toute
+allocation de colonne du modèle ; au-delà, `PersistenceError::TooManyCells
+{ path, cells, limit }` (clé `error-file-too-many-cells`). Défaut
+`DEFAULT_MAX_CELLS` = 1 milliard ; réglable dans File › Preferences › General
+(millions de cellules, de 1 à 10 000, clé `max_cells_m`, `Action::SetMaxCellsM`).
+CLI, scripts et `load_with_limit` gardent la valeur par défaut
+(`LoadLimits::default()`). Témoins : `tests/budget_cellules.rs`, batterie `b3`.
+
+**Copies du décodage (#316).** `unknown::deserialize_with_fallback` libère le
+`rmpv::Value` capturé dès qu'il est réencodé, avant de bâtir l'enregistrement
+connu ; le chemin d'échec (variante inconnue) relit la valeur depuis les octets
+réencodés. Mesure (`VmHWM`, une colonne de 20 M de `f64`, fichier de 160 Mo,
+build de test) : pic 631 Mo avant, 475 Mo après (-25 %).
 
 **Plafond de taille de fichier à l'ouverture (A2, #316).** `load_with_limit`
 (et `load_with_report`, qui prend `DEFAULT_MAX_FILE_BYTES` = 512 Mo) lit la

@@ -117,6 +117,29 @@ pub use error::{PersistenceError, PersistenceResult};
 /// taille décompressée. L'application la rend réglable (préférences).
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
+/// Budget global de cellules à l'ouverture quand l'appelant n'en fixe pas
+/// (B1, #316) : un milliard. C'est la somme des longueurs de toutes les
+/// colonnes déclarées par le fichier ; l'application le rend réglable.
+pub const DEFAULT_MAX_CELLS: u64 = 1_000_000_000;
+
+/// Les plafonds appliqués à l'ouverture d'un `.stf`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoadLimits {
+    /// Taille maximale du fichier, en octets (A2).
+    pub max_bytes: u64,
+    /// Nombre maximal de cellules déclarées, toutes colonnes confondues (B1).
+    pub max_cells: u64,
+}
+
+impl Default for LoadLimits {
+    fn default() -> Self {
+        Self {
+            max_bytes: DEFAULT_MAX_FILE_BYTES,
+            max_cells: DEFAULT_MAX_CELLS,
+        }
+    }
+}
+
 /// Un calcul que la lecture n'a pas pu garder : son enregistrement est
 /// illisible (opération inconnue ou invalide, identifiant hors borne). Donnée
 /// neutre : la mise en phrase est l'affaire de l'application.
@@ -430,7 +453,25 @@ pub fn load_with_limit(
     path: &Path,
     max_bytes: u64,
 ) -> PersistenceResult<(Project, ViewTables, LoadReport)> {
+    load_with_limits(
+        path,
+        LoadLimits {
+            max_bytes,
+            ..LoadLimits::default()
+        },
+    )
+}
+
+/// Comme [`load_with_limit`], avec aussi le budget global de cellules (B1,
+/// #316) : si les colonnes déclarent au total plus de `max_cells` cellules,
+/// la lecture est refusée par [`PersistenceError::TooManyCells`] **avant**
+/// toute allocation de colonne.
+pub fn load_with_limits(
+    path: &Path,
+    limits: LoadLimits,
+) -> PersistenceResult<(Project, ViewTables, LoadReport)> {
     use std::io::Read;
+    let max_bytes = limits.max_bytes;
     let io = |source| PersistenceError::Io {
         path: path.to_path_buf(),
         source,
@@ -492,6 +533,7 @@ pub fn load_with_limit(
     for &id in raw_geometries.keys().chain(raw_widths.keys()) {
         check_node_id(id, path)?;
     }
+    check_cell_budget(&body, limits.max_cells, path)?;
     let (project, report) = build_project_reported(body, path)?;
     track_counter(path, &project, save_counter);
 
@@ -643,6 +685,31 @@ fn check_node_id(id: u64, path: &Path) -> PersistenceResult<()> {
     } else {
         Ok(())
     }
+}
+
+/// Refuse un fichier dont les colonnes déclarent au total plus de
+/// `max_cells` cellules (B1, #316). Ne lit que les longueurs des enregistrements
+/// déjà décodés : rien n'est alloué pour les colonnes du modèle.
+fn check_cell_budget(body: &FileBody, max_cells: u64, path: &Path) -> PersistenceResult<()> {
+    let mut cells: u64 = 0;
+    for record in &body.nodes {
+        if let schema::KindRecord::Column { values, .. } = &record.kind {
+            let len = match values {
+                schema::ValuesRecord::Float(bytes) => bytes.len() / 8,
+                schema::ValuesRecord::Text(values) => values.len(),
+                schema::ValuesRecord::Mixed { tags, .. } => tags.len(),
+            };
+            cells = cells.saturating_add(len as u64);
+            if cells > max_cells {
+                return Err(PersistenceError::TooManyCells {
+                    path: path.to_path_buf(),
+                    cells,
+                    limit: max_cells,
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Traduit une erreur de conversion bas niveau (`convert.rs`) en erreur
