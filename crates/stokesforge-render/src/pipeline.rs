@@ -292,6 +292,10 @@ pub struct AxisArea {
     pub size: u32,
     /// Vrai si l'axe porte un titre (libellé ou unité non vides).
     pub titled: bool,
+    /// Distance, en pixels, entre la zone de tracé et le bord intérieur de
+    /// l'aire : 0 en général, un multiple de `size` pour l'axe d'un calque
+    /// superposé empilé derrière les axes des calques plus anciens (#168).
+    pub offset: u32,
 }
 
 /// Les aires de graduation d'un panneau.
@@ -459,9 +463,18 @@ pub fn draw_on<DB: DrawingBackend>(
     // de tracé identique. `bases` garde, par case, le dernier calque ordinaire
     // tracé : celui qu'un calque superposé recouvre.
     let mut plans: std::collections::HashMap<usize, CellPlan> = std::collections::HashMap::new();
+    // Le rang de chaque calque superposé parmi ceux de sa case qui affichent un
+    // axe du même côté (#168) : 0 contre la zone de tracé. Il vient de l'ordre
+    // des calques, jamais d'un niveau stocké : un calque supprimé ne laisse
+    // donc pas de bande vide.
+    let mut ranks: Vec<(u32, u32)> = Vec::with_capacity(plot.panels.len());
     for (index, panel) in plot.panels.iter().enumerate() {
         if let Some(cell) = layout.cells.get(index) {
-            plans.entry(*cell).or_default().add(panel);
+            let plan = plans.entry(*cell).or_default();
+            ranks.push((plan.top_levels, plan.right_levels));
+            plan.add(panel);
+        } else {
+            ranks.push((0, 0));
         }
     }
     let mut bases = std::collections::HashMap::new();
@@ -510,6 +523,7 @@ pub fn draw_on<DB: DrawingBackend>(
             index,
             background,
             plan,
+            ranks.get(index).copied().unwrap_or_default(),
             bases.get(&cell_index),
             &overlay_panels,
             plot.spec.decimal_comma,
@@ -711,6 +725,11 @@ struct CellPlan {
     /// il prime sur un axe miroir (#176).
     top_overlay: bool,
     right_overlay: bool,
+    /// Nombre de calques superposés de la case qui affichent leur axe en
+    /// haut / à droite : chacun a sa bande, empilées vers l'extérieur dans
+    /// l'ordre des calques (#168).
+    top_levels: u32,
+    right_levels: u32,
     /// Un calque ordinaire de la case demande un axe miroir en haut / à
     /// droite, et si l'un d'eux garde ses libellés.
     top_mirror: bool,
@@ -728,6 +747,8 @@ impl CellPlan {
             Some(overlay) => {
                 self.top_overlay |= overlay.x_top && spec.bottom.visible;
                 self.right_overlay |= overlay.y_right && spec.left.visible;
+                self.top_levels += u32::from(overlay.x_top && spec.bottom.visible);
+                self.right_levels += u32::from(overlay.y_right && spec.left.visible);
                 self.top |= overlay.x_top && spec.bottom.visible;
                 self.right |= overlay.y_right && spec.left.visible;
             }
@@ -757,6 +778,12 @@ impl CellPlan {
 }
 
 impl CellPlan {
+    /// Bandes de l'aire de droite quand des calques superposés y affichent un
+    /// axe : une par calque, plus celle de l'axe de droite à données (#168).
+    fn right_slots(&self) -> u32 {
+        (self.right_levels + u32::from(self.right_data)).max(1)
+    }
+
     /// Le miroir du haut est tracé : demandé, et pas d'axe propre d'un calque
     /// superposé à cet endroit.
     fn mirror_top(&self) -> bool {
@@ -771,7 +798,9 @@ impl CellPlan {
     /// La taille voulue pour l'aire du haut : un miroir sans libellés n'a
     /// besoin que de ses tirets.
     fn top_wanted(&self) -> u32 {
-        if self.top_overlay || self.top_labels {
+        if self.top_overlay {
+            X_LABEL_AREA.saturating_mul(self.top_levels.max(1))
+        } else if self.top_labels {
             X_LABEL_AREA
         } else {
             BARE_LABEL_AREA
@@ -781,7 +810,9 @@ impl CellPlan {
     /// Même chose pour l'aire de droite (un vrai axe de droite y garde la
     /// sienne : `right` est alors déjà vrai sans miroir).
     fn right_wanted(&self) -> u32 {
-        if self.right_data || self.right_overlay || self.right_labels {
+        if self.right_overlay {
+            Y_LABEL_AREA.saturating_mul(self.right_slots())
+        } else if self.right_data || self.right_labels {
             Y_LABEL_AREA
         } else {
             BARE_LABEL_AREA
@@ -807,6 +838,7 @@ fn draw_panel<DB: DrawingBackend>(
     index: usize,
     background: (u8, u8, u8, u8),
     plan: CellPlan,
+    rank: (u32, u32),
     base: Option<&BaseFrame<DB>>,
     legend_overlays: &[&ResolvedPanel<'_>],
     decimal_comma: bool,
@@ -980,17 +1012,24 @@ fn draw_panel<DB: DrawingBackend>(
     // Les aires de graduation de ce calque seul : un axe n'a d'aire que là
     // où il est affiché (le plan de la case en réserve aussi pour les autres
     // calques).
+    // Pour un calque superposé, la bande de son axe : l'aire de la case
+    // partagée à parts égales entre les axes qui s'y empilent, la sienne
+    // décalée de `rank` bandes vers l'extérieur (#168).
+    let top_stride = top_label_area / plan.top_levels.max(1);
+    let right_stride = right_label_area / plan.right_slots();
+    let top_offset = rank.0 * top_stride;
+    let right_offset = (rank.1 + u32::from(plan.right_data)) * right_stride;
     let (x_area, top_area, y_area, right_area) = match overlay {
         Some(o) => (
             0,
             if o.x_top && spec.bottom.visible {
-                top_label_area
+                top_stride
             } else {
                 0
             },
             0,
             if o.y_right && spec.left.visible {
-                right_label_area
+                right_stride
             } else {
                 0
             },
@@ -1000,7 +1039,11 @@ fn draw_panel<DB: DrawingBackend>(
             if mirror_top { top_label_area } else { 0 },
             if spec.left.visible { y_label_area } else { 0 },
             if right_active || mirror_right {
-                right_label_area
+                if plan.right_overlay {
+                    right_stride
+                } else {
+                    right_label_area
+                }
             } else {
                 0
             },
@@ -1134,47 +1177,70 @@ fn draw_panel<DB: DrawingBackend>(
         mesh.draw()?;
     }
 
-    if let Some(o) = overlay.filter(|o| {
-        (o.x_top && spec.bottom.visible && top_area > 0)
-            || (o.y_right && spec.left.visible && right_area > 0)
-    }) {
+    // Les axes d'un calque superposé : chacun dans une zone « axe seul » qui
+    // reprend les bords de la zone de tracé dans le sens de l'axe et se place
+    // à sa bande (Plotters colle l'axe secondaire à la zone de tracé ; un
+    // axe plus loin en demande une autre, #168). Même style pour les deux axes
+    // : celui de l'axe X, ou de l'axe Y si c'est le seul affiché.
+    if let Some(o) = overlay {
         let show_x = o.x_top && spec.bottom.visible && top_area > 0;
         let show_y = o.y_right && spec.left.visible && right_area > 0;
-        // Un seul style de ligne et de libellés pour les deux axes
-        // secondaires : celui de l'axe affiché, de l'axe X si les deux le
-        // sont.
         let colors = AxisColors::of(
             if show_x { &spec.bottom } else { &spec.left },
             ink,
             figure_width,
         );
-        let mut mesh = chart.configure_secondary_axes();
-        mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
-            .axis_desc_style(colors.title_style.clone())
-            .axis_style(rgba(colors.ticks))
-            .x_desc(if show_x {
-                plotters_desc(&spec.bottom, bottom_anchor)
-            } else {
-                String::new()
-            })
-            .y_desc(if show_y {
-                plotters_desc(&spec.left, left_anchor)
-            } else {
-                String::new()
-            });
-        if !show_x {
-            mesh.x_labels(0);
-        } else {
-            mesh.x_label_formatter(&format_x)
-                .x_labels(scale::label_count(x_scale, x_range));
+        let stub = 4;
+        if show_x {
+            let y0 = top_label_area.saturating_sub(top_offset + top_area);
+            let h = (2 * MARGIN + top_area + stub).min(height.saturating_sub(y0));
+            if h > 2 * MARGIN + top_area {
+                let sub = area.clone().shrink((0, y0 as i32), (width, h));
+                let mut b = ChartBuilder::on(&sub);
+                b.margin(MARGIN)
+                    .margin_left(MARGIN + y_label_area)
+                    .margin_right(MARGIN + right_label_area)
+                    .top_x_label_area_size(top_area);
+                let mut axis = b
+                    .build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?
+                    .set_secondary_coord(x_range.0..x_range.1, y_range.0..y_range.1);
+                let mut mesh = axis.configure_secondary_axes();
+                mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
+                    .axis_desc_style(colors.title_style.clone())
+                    .axis_style(rgba(colors.ticks))
+                    .x_desc(plotters_desc(&spec.bottom, bottom_anchor))
+                    .x_label_formatter(&format_x)
+                    .x_labels(scale::label_count(x_scale, x_range))
+                    .y_labels(0);
+                mesh.draw()?;
+            }
         }
-        if !show_y {
-            mesh.y_labels(0);
-        } else {
-            mesh.y_label_formatter(&format_y)
-                .y_labels(scale::label_count(y_scale, y_range));
+        if show_y {
+            // Le bord droit de la zone « axe seul » est celui de la bande.
+            let right_edge = width.saturating_sub(right_label_area) + right_offset + right_area;
+            let x0 = right_edge.saturating_sub(2 * MARGIN + right_area + stub);
+            let w = right_edge - x0;
+            if w > 2 * MARGIN + right_area {
+                let sub = area.clone().shrink((x0 as i32, 0), (w, height));
+                let mut b = ChartBuilder::on(&sub);
+                b.margin(MARGIN)
+                    .margin_top(MARGIN + top_label_area)
+                    .margin_bottom(MARGIN + x_label_area)
+                    .right_y_label_area_size(right_area);
+                let mut axis = b
+                    .build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?
+                    .set_secondary_coord(x_range.0..x_range.1, y_range.0..y_range.1);
+                let mut mesh = axis.configure_secondary_axes();
+                mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
+                    .axis_desc_style(colors.title_style.clone())
+                    .axis_style(rgba(colors.ticks))
+                    .y_desc(plotters_desc(&spec.left, left_anchor))
+                    .y_label_formatter(&format_y)
+                    .y_labels(scale::label_count(y_scale, y_range))
+                    .x_labels(0);
+                mesh.draw()?;
+            }
         }
-        mesh.draw()?;
     }
 
     // 5 — les séries, en pixels.
@@ -1237,6 +1303,7 @@ fn draw_panel<DB: DrawingBackend>(
                     && spec.bottom.title_visible
                     && !spec.bottom.display_label().is_empty()
                     && bottom_anchor.is_none(),
+                offset: 0,
             },
             left: AxisArea {
                 size: y_area,
@@ -1244,9 +1311,11 @@ fn draw_panel<DB: DrawingBackend>(
                     && spec.left.title_visible
                     && !spec.left.display_label().is_empty()
                     && left_anchor.is_none(),
+                offset: 0,
             },
             right: AxisArea {
                 size: right_area,
+                offset: if overlay.is_some() { right_offset } else { 0 },
                 titled: match overlay {
                     Some(_) => {
                         spec.left.title_visible
@@ -1262,6 +1331,7 @@ fn draw_panel<DB: DrawingBackend>(
             },
             top: AxisArea {
                 size: top_area,
+                offset: if overlay.is_some() { top_offset } else { 0 },
                 titled: spec.bottom.title_visible
                     && !spec.bottom.display_label().is_empty()
                     && bottom_anchor.is_none(),
@@ -1344,13 +1414,25 @@ fn draw_panel<DB: DrawingBackend>(
         let text_size = area.estimate_text_size(&label, &colors.title_style)?;
         let half = text_size.1 as f64 / 2.0;
         let area_size = area_size as f64;
+        // Un axe de calque superposé empilé (#168) est décalé vers l'extérieur.
+        let shift = match (overlay.is_some(), place) {
+            (true, PlotAxisSide::Top) => top_offset as f64,
+            (true, PlotAxisSide::Right) => right_offset as f64,
+            _ => 0.0,
+        };
         let (center, rotation) = match place {
             PlotAxisSide::Left => ((plot_x - area_size + half, plot_y + plot_h / 2.0), 90.0),
             PlotAxisSide::Right => (
-                (plot_x + plot_w + area_size - half, plot_y + plot_h / 2.0),
+                (
+                    plot_x + plot_w + shift + area_size - half,
+                    plot_y + plot_h / 2.0,
+                ),
                 -90.0,
             ),
-            PlotAxisSide::Top => ((plot_x + plot_w / 2.0, plot_y - area_size + half), 0.0),
+            PlotAxisSide::Top => (
+                (plot_x + plot_w / 2.0, plot_y - shift - area_size + half),
+                0.0,
+            ),
             PlotAxisSide::Bottom => (
                 (plot_x + plot_w / 2.0, plot_y + plot_h + area_size - half),
                 0.0,

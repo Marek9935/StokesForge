@@ -830,3 +830,76 @@ fn la_legende_du_calque_ordinaire_liste_les_courbes_des_calques_superposes() {
     assert_eq!(drawn.panels[0].legend_entries, 2);
     assert_eq!(drawn.panels[1].legend_entries, 1, "ses propres courbes");
 }
+
+/// #168 : les axes de plusieurs calques superposés s'empilent vers
+/// l'extérieur, dans l'ordre des calques, sur une zone de tracé commune ; un
+/// calque sans axe affiché ne laisse pas de bande vide.
+#[test]
+fn les_axes_de_plusieurs_calques_superposes_s_empilent_vers_l_exterieur() {
+    use stokesforge_plot::{OverlaySpec, Panels};
+    let colonnes = [
+        ("X", vec![0.0, 1.0, 2.0]),
+        ("Y", vec![10.0, 20.0, 30.0]),
+        ("X2", vec![400.0, 500.0, 800.0]),
+        ("Y2", vec![0.0, 1.0, 2.0]),
+        ("X3", vec![5.0, 6.0, 7.0]),
+        ("Y3", vec![1.0, 2.0, 3.0]),
+        ("X4", vec![50.0, 60.0, 70.0]),
+        ("Y4", vec![1.0, 2.0, 3.0]),
+    ];
+    let construire = |axes: Vec<OverlaySpec>| {
+        move |ids: &[NodeId]| {
+            let mut base = PanelSpec::at(0, 0);
+            base.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
+            let mut panels = vec![base.clone()];
+            for (rang, axes) in axes.iter().copied().enumerate() {
+                let mut calque = PanelSpec::overlay_on(&base, axes);
+                calque
+                    .series
+                    .push(SeriesSpec::new_xy(ids[2 + 2 * rang], ids[3 + 2 * rang]));
+                panels.push(calque);
+            }
+            PlotSpec::empty("Test").with_panels(Panels::new(panels))
+        }
+    };
+
+    let trois = geometrie(&colonnes, construire(vec![OverlaySpec::SECOND_AXES; 3]));
+    assert_eq!(trois.panels.len(), 4);
+    for calque in &trois.panels[1..] {
+        assert_eq!(calque.pixel_origin, trois.panels[0].pixel_origin);
+        assert_eq!(calque.pixel_size, trois.panels[0].pixel_size);
+    }
+    let haut: Vec<_> = trois.panels[1..]
+        .iter()
+        .map(|p| (p.axis_areas.top.offset, p.axis_areas.top.size))
+        .collect();
+    let droite: Vec<_> = trois.panels[1..]
+        .iter()
+        .map(|p| (p.axis_areas.right.offset, p.axis_areas.right.size))
+        .collect();
+    let bande = haut[0].1;
+    assert!(bande > 0);
+    assert_eq!(haut, vec![(0, bande), (bande, bande), (2 * bande, bande)]);
+    assert_eq!(droite[1].0, droite[0].1, "{droite:?}");
+    assert!(droite[2].0 > droite[1].0, "{droite:?}");
+
+    // Un seul calque superposé : la zone de tracé est plus haute que sous
+    // trois étages d'axes.
+    let un = geometrie(&colonnes[..4], construire(vec![OverlaySpec::SECOND_AXES]));
+    assert!(trois.panels[0].pixel_size.1 < un.panels[0].pixel_size.1);
+
+    // Le deuxième calque sans axe affiché : le troisième vient contre la zone.
+    let sans = geometrie(
+        &colonnes,
+        construire(vec![
+            OverlaySpec::SECOND_AXES,
+            OverlaySpec::new(false, false),
+            OverlaySpec::SECOND_AXES,
+        ]),
+    );
+    assert_eq!(sans.panels[1].axis_areas.top.offset, 0);
+    assert_eq!(
+        sans.panels[3].axis_areas.top.offset,
+        sans.panels[3].axis_areas.top.size
+    );
+}

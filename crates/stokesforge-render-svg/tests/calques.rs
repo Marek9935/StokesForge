@@ -126,3 +126,71 @@ fn les_axes_se_rejoignent_aux_coins() {
     }));
     assert_eq!(coins(&avec), 4);
 }
+
+/// #168 : trois calques superposés, axes empilés vers l'extérieur. Retourne
+/// l'export de la figure.
+fn exporte_trois() -> String {
+    let mut project = Project::new("Calques").expect("projet");
+    let root = project.root();
+    let book = project.add_empty_workbook(root, None).expect("classeur");
+    let sheet = project.add_worksheet(book, None).expect("feuille");
+    let mut colonne = |nom: &str, valeurs: Vec<f64>| -> NodeId {
+        let column = Column::from_block(
+            ColumnType::Numeric,
+            ValueBlock::Float(valeurs),
+            ColumnMeta::default(),
+        )
+        .expect("colonne");
+        project
+            .add_column(sheet, None, Some(nom), column)
+            .expect("colonne")
+    };
+    let jeux = [
+        ("X", vec![0.0, 1.0, 2.0]),
+        ("Y", vec![10.0, 20.0, 30.0]),
+        ("X2", vec![400.0, 600.0, 800.0]),
+        ("Y2", vec![0.0, 0.5, 1.0]),
+        ("X3", vec![4000.0, 6000.0, 8000.0]),
+        ("Y3", vec![100.0, 200.0, 300.0]),
+        ("X4", vec![40000.0, 60000.0, 80000.0]),
+        ("Y4", vec![1000.0, 2000.0, 3000.0]),
+    ];
+    let ids: Vec<NodeId> = jeux
+        .into_iter()
+        .map(|(nom, valeurs)| colonne(nom, valeurs))
+        .collect();
+    let mut base = PanelSpec::at(0, 0);
+    base.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
+    let mut panels = vec![base.clone()];
+    for rang in 1..4 {
+        let mut calque = PanelSpec::overlay_on(&base, OverlaySpec::SECOND_AXES);
+        calque
+            .series
+            .push(SeriesSpec::new_xy(ids[2 * rang], ids[2 * rang + 1]));
+        panels.push(calque);
+    }
+    let spec = PlotSpec::empty("").with_panels(Panels::new(panels));
+    let plot = resolve_spec(project.tree(), &spec);
+    let svg = render_to_string(&plot, (480, 360), &TextMeasurer::default()).expect("export");
+    if let Some(dir) = std::env::var_os("STOKESFORGE_DUMP") {
+        std::fs::write(std::path::Path::new(&dir).join("trois.svg"), &svg).ok();
+    }
+    svg
+}
+
+#[test]
+fn les_graduations_des_calques_superposes_s_empilent() {
+    let svg = exporte_trois();
+    for graduation in ["\n850\n", "\n8500\n", "\n85000\n", "\n3000\n"] {
+        assert!(svg.contains(graduation), "{graduation:?} absente : {svg}");
+    }
+    // Les graduations X3 et X4 sont au-dessus de celles de X2 (y plus petit).
+    let ordonnee = |texte: &str| -> f64 {
+        let fin = svg.find(&format!("\n{texte}\n")).expect("graduation");
+        let balise = &svg[svg[..fin].rfind("<text").expect("balise")..fin];
+        let y = balise.split("y=\"").nth(1).expect("y");
+        y.split('"').next().unwrap().parse().expect("nombre")
+    };
+    assert!(ordonnee("8500") < ordonnee("850"));
+    assert!(ordonnee("85000") < ordonnee("8500"));
+}

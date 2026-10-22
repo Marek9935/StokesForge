@@ -449,6 +449,21 @@ haut ; `PlotComponent::Axis` garde le côté **du spec** (`Bottom`/`Left`) même
 quand l'axe est affiché en haut ou à droite. Test : `geometrie.rs`,
 `stokesforge-render-svg/tests/calques.rs`.
 
+**Axes empilés (#168).** Plusieurs calques superposés d'une même case peuvent
+afficher un axe du même côté : chacun a sa **bande** (aire de la case divisée
+par le nombre de calques qui y affichent un axe, `CellPlan::top_levels` /
+`right_slots`, plafonnée comme toute aire au tiers de la case), placée vers
+l'extérieur dans l'**ordre des calques** — le plus ancien contre la zone de
+tracé. Le rang vient de cet ordre (`ranks` dans `draw_on`), jamais d'un niveau
+stocké : un calque sans axe affiché ou supprimé ne laisse pas de bande vide.
+Plotters collant l'axe secondaire à la zone de tracé, chaque axe de calque est
+tracé dans une zone « axe seul » (`area.shrink`) qui reprend les bords de la
+zone de tracé dans le sens de l'axe et se place à sa bande.
+`AxisArea::offset` est la distance de la bande à la zone de tracé, que
+`hit::axis_component_at` compte. Limite connue : un axe de droite à données
+(`SeriesAxis::Right`) du calque ordinaire garde son titre au bord extérieur de
+toute l'aire. Test : `geometrie.rs`, `calques.rs`, `hit.rs`.
+
 **Légende commune (#172).** La légende d'un calque ordinaire liste d'abord ses
 courbes puis, calque par calque dans l'ordre de `PlotSpec::panels`, celles des
 calques superposés qui le recouvrent (`overlays_of` dans `draw_on`, préparées

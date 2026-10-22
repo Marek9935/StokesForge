@@ -175,8 +175,9 @@ fn axis_component_at(index: usize, panel: &DrawnPanel, x: f64, y: f64) -> Option
     candidates
         .into_iter()
         .find_map(|(side, aligned, depth, area)| {
-            (aligned && depth > 0.0 && depth <= area.size as f64)
-                .then(|| axis_part(index, side, depth, area))
+            let offset = area.offset as f64;
+            (aligned && depth > offset && depth <= offset + area.size as f64)
+                .then(|| axis_part(index, side, depth - offset, area))
         })
 }
 
@@ -201,7 +202,11 @@ mod tests {
     /// (440, 280), aire du bas de 52 px, de gauche de 64 px, pas d'axe
     /// secondaire.
     fn figure() -> DrawnPlot {
-        let area = |size| AxisArea { size, titled: true };
+        let area = |size| AxisArea {
+            size,
+            titled: true,
+            offset: 0,
+        };
         DrawnPlot {
             panels: vec![DrawnPanel {
                 index: 0,
@@ -286,6 +291,37 @@ mod tests {
         assert_eq!(component_at(&plot, 460.0, 150.0), None);
         // Coin bas-gauche, hors des deux aires : rien.
         assert_eq!(component_at(&plot, 40.0, 320.0), None);
+    }
+
+    /// #168 : l'axe d'un calque superposé empilé à une seconde bande n'est
+    /// atteint que dans cette bande, pas dans celle du calque plus ancien.
+    #[test]
+    fn une_bande_decalee_ne_designe_que_son_calque() {
+        let mut plot = figure();
+        let mut second = plot.panels[0].clone();
+        second.index = 1;
+        second.overlay = Some(stokesforge_plot::OverlaySpec::SECOND_AXES);
+        plot.panels[0].axis_areas.top = AxisArea {
+            size: 8,
+            titled: false,
+            offset: 0,
+        };
+        second.axis_areas.top = AxisArea {
+            size: 8,
+            titled: false,
+            offset: 8,
+        };
+        plot.panels.push(second);
+        // La zone de tracé commence à y = 60 : 0-8 px au-dessus pour le
+        // premier calque, 8-16 px pour le second.
+        let axis = |panel| {
+            Some(PlotComponent::Axis {
+                panel,
+                side: AxisSide::Bottom,
+            })
+        };
+        assert_eq!(component_at(&plot, 240.0, 56.0), axis(0));
+        assert_eq!(component_at(&plot, 240.0, 48.0), axis(1));
     }
 
     #[test]
