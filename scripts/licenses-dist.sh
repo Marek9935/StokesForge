@@ -25,6 +25,17 @@ if [[ "$PYTHON_VERSION" != "$LICENSE_PYTHON_VERSION" ||
 fi
 
 PYTHON_LIB="$PACKAGE_DIR/lib/python/lib/python${PYTHON_XY}"
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        # Windows (#332) : disposition lib/python/Lib. Les notices du runtime
+        # (vendor/python/licenses) sont celles de Linux : tant qu'elles ne sont
+        # pas établies pour x86_64-pc-windows-msvc, on refuse de les livrer.
+        PYTHON_LIB="$PACKAGE_DIR/lib/python/Lib"
+        [[ "$LICENSE_PBS_TRIPLE" == "$PBS_TRIPLE_WINDOWS" ]] || {
+            echo "[licences] ERREUR : notices Python Windows à établir (vendor/python/licenses, triplet $PBS_TRIPLE_WINDOWS)" >&2
+            exit 1
+        } ;;
+esac
 NUMPY_LICENSES="$PYTHON_LIB/site-packages/numpy-${NUMPY_VERSION}.dist-info/licenses"
 SCIPY_LICENSE="$PYTHON_LIB/site-packages/scipy-${SCIPY_VERSION}.dist-info/LICENSE.txt"
 for notice in "$PYTHON_LIB/LICENSE.txt" "$NUMPY_LICENSES/LICENSE.txt" "$SCIPY_LICENSE"; do

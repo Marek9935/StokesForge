@@ -10,6 +10,15 @@ VENDOR_DIR="$REPO_ROOT/vendor/python"
 # shellcheck source=../vendor/python/lock.env
 source "$VENDOR_DIR/lock.env"
 
+# Windows (#332) : lancé sous Git Bash. Autre triplet, `python.exe` à la racine
+# du préfixe (pas de bin/).
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        PBS_TRIPLE="$PBS_TRIPLE_WINDOWS"
+        PY_REL="python.exe" ;;
+    *) PY_REL="bin/python3" ;;
+esac
+
 ARCHIVE="$VENDOR_DIR/cpython-${PYTHON_VERSION}-${PBS_TRIPLE}-${PBS_FLAVOR}.tar.gz"
 EXTRACTED="$VENDOR_DIR/extracted"
 PREFIX="$EXTRACTED/python"
@@ -28,7 +37,7 @@ else
 fi
 
 # --- 2. Extraction ----------------------------------------------------------
-if [[ -x "$PREFIX/bin/python3" ]]; then
+if [[ -x "$PREFIX/$PY_REL" ]]; then
     echo "[vendor] préfixe déjà extrait : $PREFIX"
 else
     echo "[vendor] extraction dans $EXTRACTED"
@@ -36,7 +45,7 @@ else
     tar -xzf "$ARCHIVE" -C "$EXTRACTED"
 fi
 
-PY="$PREFIX/bin/python3"
+PY="$PREFIX/$PY_REL"
 [[ -x "$PY" ]] || { echo "[vendor] ERREUR : $PY introuvable après extraction" >&2; exit 1; }
 
 # Garde-fou : l'interpréteur extrait doit bien être celui du verrou.

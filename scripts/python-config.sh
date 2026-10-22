@@ -14,9 +14,18 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREFIX="$REPO_ROOT/vendor/python/extracted/python"
 TEMPLATE="$REPO_ROOT/crates/stokesforge-python/pyo3-config.template.txt"
+PY_REL="bin/python3"
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        # Windows (#332) : python.exe et python312.lib (libs/) ; chemins en
+        # style Windows (C:/…) pour pyo3-build-config.
+        TEMPLATE="$REPO_ROOT/crates/stokesforge-python/pyo3-config.windows.template.txt"
+        PY_REL="python.exe"
+        PREFIX="$(cygpath -m "$PREFIX")" ;;
+esac
 OUT="$REPO_ROOT/target/pyo3-config.txt"
 
-if [[ ! -x "$PREFIX/bin/python3" ]]; then
+if [[ ! -x "$PREFIX/$PY_REL" ]]; then
     echo "[config] ERREUR : préfixe embarqué absent ($PREFIX). Lance d'abord scripts/python-vendor.sh" >&2
     exit 1
 fi

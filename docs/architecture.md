@@ -157,6 +157,17 @@ ou en texte brut), détaillé dans [`rendu.md`](rendu.md#typst-r8).
 Les `scripts/*.sh` de la racine assemblent et relancent les distributions
 (`dist/`) dans un environnement nettoyé.
 
+**Windows (#332, première passe non vérifiée sous Windows).**
+`scripts/app-dist-windows.sh` (Git Bash) est le pendant de `app-dist.sh` ;
+`python-vendor.sh`, `python-config.sh` (gabarit
+`pyo3-config.windows.template.txt`) et `python-test.sh` détectent Windows.
+Le préfixe embarqué y a la disposition python-build-standalone
+(`lib/python/{Lib,DLLs}`, `python312.dll` à côté de l'exécutable), prise en
+charge par `EmbeddedPython` (`cfg(windows)`). Reste : exécuter le tout sous
+Windows, établir les notices du runtime Windows (`licenses-dist.sh` refuse
+tant que `vendor/python/licenses` est celui de Linux) et fournir un runner
+(tâche CI `dist-windows`, manuelle).
+
 ## Vocabulaire
 
 - **Nœud** — une entrée de l'arbre de projet : dossier, classeur, feuille,

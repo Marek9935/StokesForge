@@ -161,3 +161,22 @@ test-python:
   script:
     - scripts/python-vendor.sh
     - scripts/python-test.sh
+
+# #332 : distribution Windows, PREMIÈRE PASSE non vérifiée. Manuelle et non
+# bloquante : exige un runner Windows (étiquette `windows`, Git Bash, Rust MSVC,
+# cargo-deny/cargo-about) que le dépôt ne fournit pas encore. Les notices du
+# runtime Python Windows manquent : le script est lancé avec
+# STOKESFORGE_DIST_SKIP_LICENSES=1, donc le paquet n'est pas publiable.
+dist-windows:
+  stage: check
+  tags: [windows]
+  when: manual
+  allow_failure: true
+  variables:
+    STOKESFORGE_DIST_SKIP_LICENSES: "1"
+  script:
+    - bash scripts/python-vendor.sh
+    - bash scripts/app-dist-windows.sh
+  artifacts:
+    paths:
+      - dist/stokesforge-app-windows/

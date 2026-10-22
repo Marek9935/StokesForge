@@ -17,7 +17,13 @@ PYO3_CONFIG_FILE="$("$REPO_ROOT/scripts/python-config.sh")"
 export PYO3_CONFIG_FILE
 # Seuls les crates listés plus bas sont construits ici : on n'impose ce rpath
 # à aucun autre crate du dépôt.
-export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,$PREFIX/lib"
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        # Windows (#332) : pas de rpath ; python312.dll est trouvée par PATH.
+        export PATH="$PREFIX:$PATH" ;;
+    *)
+        export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,$PREFIX/lib" ;;
+esac
 export STOKESFORGE_PYTHON_HOME="$PREFIX"
 
 cd "$REPO_ROOT"

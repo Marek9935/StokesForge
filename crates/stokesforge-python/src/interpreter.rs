@@ -113,9 +113,22 @@ impl EmbeddedPython {
         &self.home
     }
 
-    /// `<home>/lib/python3.12` : la bibliothèque standard.
+    /// La bibliothèque standard : `<home>/lib/python3.12` sous Unix,
+    /// `<home>/Lib` dans la distribution python-build-standalone de Windows.
     fn stdlib_dir(&self) -> PathBuf {
-        self.home.join("lib").join(format!("python{PYTHON_XY}"))
+        #[cfg(windows)]
+        return self.home.join("Lib");
+        #[cfg(not(windows))]
+        return self.home.join("lib").join(format!("python{PYTHON_XY}"));
+    }
+
+    /// Les modules d'extension : `lib-dynload` sous Unix, `<home>/DLLs`
+    /// (`.pyd`) sous Windows.
+    fn dynload_dir(&self) -> PathBuf {
+        #[cfg(windows)]
+        return self.home.join("DLLs");
+        #[cfg(not(windows))]
+        return self.stdlib_dir().join("lib-dynload");
     }
 
     /// Les trois répertoires injectés dans `sys.path`, dans l'ordre.
@@ -124,7 +137,7 @@ impl EmbeddedPython {
     /// d'un Python système.
     fn search_paths(&self) -> [PathBuf; 3] {
         let stdlib = self.stdlib_dir();
-        let dynload = stdlib.join("lib-dynload");
+        let dynload = self.dynload_dir();
         let site = stdlib.join("site-packages");
         [stdlib, dynload, site]
     }
