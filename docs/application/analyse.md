@@ -36,8 +36,11 @@ L'interface du traitement mathématique est répartie ainsi :
 - L'aperçu est peint à la main (pas de graphe du projet) mais **sa géométrie ne
   lui appartient pas** (#261) : pixel ↔ données, zoom, déplacement, cadre
   initial (marge de 5 %, bornes mémorisées, inversion), aimantation
-  sur la courbe et graduations viennent de `stokesforge-render`
-  (`PanelTransform::new`, `zoom`, `pan`, `axis_frame`, `snap_to_curve`,
+  sur la courbe (le rond orange couvre la zone moyennée : rayon = plus grand
+  demi-côté de la zone en X converti en pixels par la transformation d'écran,
+  6 px au minimum, la diagonale du tracé au plus ; le texte « Moyenne sur N
+  points » dit le nombre réel de points, #334) et graduations viennent de `stokesforge-render`
+  (`PanelTransform::new`, `zoom`, `pan`, `axis_frame`, `snap_to_curve_zone`,
   `scale::axis_ticks`) ;
   l'application construit une transformation par image (une seconde pour la
   bande des résidus) et convertit en `Pos2`. Les graduations ont donc le pas et
