@@ -22,7 +22,9 @@ use stokesforge_app_state::tr;
 use stokesforge_core::NodeId;
 
 use super::inplace_edit;
-use super::list_row::list_row;
+use super::list_row::{
+    list_row, raise_to_list_row_height, restore_row_height, with_list_row_height,
+};
 use super::menu_sections::MenuSections;
 use super::shortcuts::{shortcut_text_delete, SHORTCUT_DUPLICATE_OBJECT, SHORTCUT_RENAME_OBJECT};
 use super::tab::{tab_for_window, tab_node, Tab};
@@ -507,6 +509,9 @@ fn project_tree_node_ui(
             if revealed {
                 state.set_open(true);
             }
+            // #170 : la ligne d'en-tête a la hauteur d'une ligne de liste ; la
+            // hauteur est rendue après le corps (la réponse emprunte l'`Ui`).
+            let previous_height = raise_to_list_row_height(ui);
             let (toggle, _, _) = state
                 .show_header(ui, |ui| {
                     ui.add(icon_image(Icon::Folder, IconRole::Folder));
@@ -538,6 +543,7 @@ fn project_tree_node_ui(
                         }
                     });
                 });
+            restore_row_height(ui, previous_height);
             toggle.rect.center().y
         }
         ProjectTreeNode::Window { id, name, kind } => {
@@ -549,10 +555,12 @@ fn project_tree_node_ui(
             };
             let tab = tab_for_window(*id, *kind);
             if is_renaming(ui.ctx(), memory_key, *id) {
-                return rename_editor(ui, interaction, memory_key, *id, name, siblings)
-                    .rect
-                    .center()
-                    .y;
+                return with_list_row_height(ui, |ui| {
+                    rename_editor(ui, interaction, memory_key, *id, name, siblings)
+                })
+                .rect
+                .center()
+                .y;
             }
             let selected = interaction.selection.contains(&tab);
             let is_closed = !interaction.open.contains(&tab);
@@ -940,6 +948,50 @@ pub(super) mod tests {
             });
             output.textures_delta.clear();
             output
+        }
+    }
+
+    /// #170, point 5 : l'en-tête d'un dossier a la même hauteur qu'une fenêtre
+    /// (`LIST_ROW_HEIGHT`) ; les connecteurs en L visent le centre de la ligne.
+    /// Mesuré par le pas entre les centres de lignes consécutives (dossier ->
+    /// fenêtre -> fenêtre -> dossier) : constant, et égal à la hauteur de ligne
+    /// plus l'écart vertical. Témoin : sans la hauteur imposée à l'en-tête, le
+    /// pas du dossier à la fenêtre est plus court.
+    #[test]
+    fn un_dossier_a_la_hauteur_d_une_fenetre() {
+        use super::super::list_row::LIST_ROW_HEIGHT;
+        let mut project = Project::new("Hauteurs").unwrap();
+        let root = project.root();
+        project.add_folder(root, "Dossier A").unwrap();
+        project.add_graph(root, None, PlotSpec::default()).unwrap();
+        project.add_note(root, None, "").unwrap();
+        project.add_folder(root, "Dossier B").unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let tree = state.project_tree();
+        let context = super::super::test_support::contexte();
+        let banc = Banc::new(HashSet::new());
+        banc.paint(&context, &tree, Vec::new());
+        let output = banc.paint(&context, &tree, Vec::new());
+        let mut centres: Vec<f32> = super::super::test_support::textes(&output.shapes)
+            .iter()
+            .filter(|t| {
+                t.texte.starts_with("Dossier")
+                    || t.texte.contains("Graph")
+                    || t.texte.contains("Note")
+            })
+            .map(|t| t.centre.y)
+            .collect();
+        centres.sort_by(f32::total_cmp);
+        assert_eq!(centres.len(), 4, "{centres:?}");
+        let pas: Vec<f32> = centres.windows(2).map(|w| w[1] - w[0]).collect();
+        let spacing = context.global_style().spacing.item_spacing.y;
+        for p in &pas {
+            assert!(
+                (p - (LIST_ROW_HEIGHT + spacing)).abs() < 1.0,
+                "pas {p} attendu {} : {pas:?}",
+                LIST_ROW_HEIGHT + spacing
+            );
         }
     }
 

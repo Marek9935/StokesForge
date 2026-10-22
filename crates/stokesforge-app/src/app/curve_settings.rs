@@ -39,7 +39,9 @@ use stokesforge_app_state::tr;
 use super::empty_state::empty_state;
 use super::form::{choice, form, ChoiceOption, Form};
 use super::hover_help::help_text;
-use super::list_row::list_row_draggable;
+use super::list_row::{
+    list_row_draggable, raise_to_list_row_height, restore_row_height, with_list_row_height,
+};
 use super::object_dnd::{self, Hover};
 use super::plot_settings::series_editor;
 use super::reorder_list::reorder_row_with;
@@ -158,33 +160,35 @@ fn series_row(
     let label = series_list_label(tree, &panel.series[index]);
     let row = ui
         .push_id(index, |ui| {
-            ui.horizontal(|ui| {
-                let mut clicked = false;
-                let outcome = reorder_row_with(
-                    ui,
-                    ui.id().with("row"),
-                    matches!(
-                        dnd.item,
-                        Some(DragItem::Series { current, .. }) if current == index
-                    ),
-                    |ui| {
-                        // « Show series » : la case de la série, en tête de ligne.
-                        let mut visible = panel.series[index].visible;
-                        if ui
-                            .add(egui::Checkbox::new(&mut visible, ""))
-                            .on_hover_text(tr!("plot-series-show"))
-                            .changed()
-                        {
-                            panel.series[index].visible = visible;
-                            *commit = true;
-                        }
-                        // Toute la ligne, hors case, se clique et se glisse.
-                        let response = list_row_draggable(ui, &label, *selected == index);
-                        clicked = response.clicked();
-                        Some(response)
-                    },
-                );
-                (outcome, clicked)
+            with_list_row_height(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let mut clicked = false;
+                    let outcome = reorder_row_with(
+                        ui,
+                        ui.id().with("row"),
+                        matches!(
+                            dnd.item,
+                            Some(DragItem::Series { current, .. }) if current == index
+                        ),
+                        |ui| {
+                            // « Show series » : la case de la série, en tête de ligne.
+                            let mut visible = panel.series[index].visible;
+                            if ui
+                                .add(egui::Checkbox::new(&mut visible, ""))
+                                .on_hover_text(tr!("plot-series-show"))
+                                .changed()
+                            {
+                                panel.series[index].visible = visible;
+                                *commit = true;
+                            }
+                            // Toute la ligne, hors case, se clique et se glisse.
+                            let response = list_row_draggable(ui, &label, *selected == index);
+                            clicked = response.clicked();
+                            Some(response)
+                        },
+                    );
+                    (outcome, clicked)
+                })
             })
         })
         .inner;
@@ -247,76 +251,81 @@ fn series_list(
                     }
                     SeriesSlot::Group { id, members } => {
                         let state = ui.make_persistent_id(("curve_list_group", layer, id));
-                        egui::collapsing_header::CollapsingState::load_with_default_open(
-                            ui.ctx(),
-                            state,
-                            true,
-                        )
-                        .show_header(ui, |ui| {
-                            // Comme dans l'Object Manager (#208) : l'en-tête est
-                            // surligné quand le groupe est ce qu'on règle, et un
-                            // clic choisit le groupe (sa première série, portée
-                            // « tout le groupe »).
-                            let scope_id = egui::Id::new("curve_edit_scope");
-                            let scope = ui
-                                .data(|d| d.get_temp(scope_id))
-                                .unwrap_or(EditScope::Group);
-                            let on_group = scope == EditScope::Group && members.contains(selected);
-                            let title = group_title(panel, id);
-                            let mut clicked = false;
-                            let outcome = reorder_row_with(
-                                ui,
-                                ui.id().with("row"),
-                                matches!(
-                                    dnd.item,
-                                    Some(DragItem::Group { group, .. }) if group == id
-                                ),
-                                |ui| {
-                                    let response = list_row_draggable(ui, &title, on_group);
-                                    clicked = response.clicked();
-                                    Some(response)
-                                },
+                        let header =
+                            egui::collapsing_header::CollapsingState::load_with_default_open(
+                                ui.ctx(),
+                                state,
+                                true,
                             );
-                            if clicked || outcome.grabbed {
-                                if let Some(first) = members.first() {
-                                    *selected = *first;
-                                }
-                                ui.data_mut(|d| d.insert_temp(scope_id, EditScope::Group));
-                            }
-                            if outcome.grabbed {
-                                object_dnd::begin(
-                                    ui.ctx(),
-                                    None,
-                                    DragItem::Group {
-                                        panel: layer,
-                                        group: id,
+                        let previous_height = raise_to_list_row_height(ui);
+                        header
+                            .show_header(ui, |ui| {
+                                // Comme dans l'Object Manager (#208) : l'en-tête est
+                                // surligné quand le groupe est ce qu'on règle, et un
+                                // clic choisit le groupe (sa première série, portée
+                                // « tout le groupe »).
+                                let scope_id = egui::Id::new("curve_edit_scope");
+                                let scope = ui
+                                    .data(|d| d.get_temp(scope_id))
+                                    .unwrap_or(EditScope::Group);
+                                let on_group =
+                                    scope == EditScope::Group && members.contains(selected);
+                                let title = group_title(panel, id);
+                                let mut clicked = false;
+                                let outcome = reorder_row_with(
+                                    ui,
+                                    ui.id().with("row"),
+                                    matches!(
+                                        dnd.item,
+                                        Some(DragItem::Group { group, .. }) if group == id
+                                    ),
+                                    |ui| {
+                                        let response = list_row_draggable(ui, &title, on_group);
+                                        clicked = response.clicked();
+                                        Some(response)
                                     },
                                 );
-                            }
-                            if let Some(rect) = outcome.hover {
-                                dnd.hover.offer(DropOver::Header {
-                                    panel: layer,
-                                    group: id,
-                                    after: object_dnd::pointer_after(ui, rect),
-                                });
-                            }
-                        })
-                        .body(|ui| {
-                            crate::tree_lines::tree_children(ui, |ui, branch| {
-                                for &member in &members {
-                                    let y = series_row(
-                                        ui,
-                                        panel,
-                                        tree,
-                                        member,
-                                        selected,
-                                        &dnd,
-                                        &mut commit,
+                                if clicked || outcome.grabbed {
+                                    if let Some(first) = members.first() {
+                                        *selected = *first;
+                                    }
+                                    ui.data_mut(|d| d.insert_temp(scope_id, EditScope::Group));
+                                }
+                                if outcome.grabbed {
+                                    object_dnd::begin(
+                                        ui.ctx(),
+                                        None,
+                                        DragItem::Group {
+                                            panel: layer,
+                                            group: id,
+                                        },
                                     );
-                                    branch.mark(y);
+                                }
+                                if let Some(rect) = outcome.hover {
+                                    dnd.hover.offer(DropOver::Header {
+                                        panel: layer,
+                                        group: id,
+                                        after: object_dnd::pointer_after(ui, rect),
+                                    });
                                 }
                             })
-                        });
+                            .body(|ui| {
+                                crate::tree_lines::tree_children(ui, |ui, branch| {
+                                    for &member in &members {
+                                        let y = series_row(
+                                            ui,
+                                            panel,
+                                            tree,
+                                            member,
+                                            selected,
+                                            &dnd,
+                                            &mut commit,
+                                        );
+                                        branch.mark(y);
+                                    }
+                                })
+                            });
+                        restore_row_height(ui, previous_height);
                     }
                 }
             }
@@ -1075,6 +1084,52 @@ mod tests {
                 .iter()
                 .all(|t| !t.texte.contains('·')),
             "plus de groupe en suffixe"
+        );
+    }
+
+    /// #170, point 5 : une ligne série avec sa case à cocher a la hauteur
+    /// unique des lignes de liste — la case est un carré de `LIST_ROW_HEIGHT`,
+    /// centré sur le libellé — et les lignes se suivent d'un pas constant, que
+    /// la série soit seule, en groupe ou l'en-tête du groupe. Témoin : sans la
+    /// hauteur imposée, la case retombe à 18 px.
+    #[test]
+    fn la_ligne_serie_a_la_hauteur_unique_avec_sa_case() {
+        use super::super::list_row::LIST_ROW_HEIGHT;
+        let ctx = super::super::test_support::contexte();
+        let mut panel = calque_avec_groupe();
+        let mut selected = 0;
+        page(&ctx, &mut panel, &mut selected, Vec::new());
+        let (output, _) = page(&ctx, &mut panel, &mut selected, Vec::new());
+        for nom in ["A", "B"] {
+            let label = centre(&output, nom);
+            let cases: Vec<egui::Rect> = output
+                .shapes
+                .iter()
+                .filter_map(|peint| match &peint.shape {
+                    egui::Shape::Rect(rect)
+                        if (rect.rect.width() - rect.rect.height()).abs() < 1.0
+                            && (rect.rect.width() - LIST_ROW_HEIGHT).abs() < 1.0
+                            && (rect.rect.center().y - label.y).abs() < 1.0
+                            && rect.rect.center().x < label.x =>
+                    {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(!cases.is_empty(), "{nom} : case de LIST_ROW_HEIGHT absente");
+        }
+        let (a, lots, b) = (
+            centre(&output, "A"),
+            centre(&output, "Lots"),
+            centre(&output, "B"),
+        );
+        let pas = lots.y - a.y;
+        assert!(pas >= LIST_ROW_HEIGHT, "lignes trop serrées : {pas}");
+        assert!(
+            ((b.y - lots.y) - pas).abs() < 1.0,
+            "pas constant entre série seule, en-tête et membre : {pas} / {}",
+            b.y - lots.y
         );
     }
 

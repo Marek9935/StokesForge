@@ -128,14 +128,38 @@ impl FieldWidth {
     }
 }
 
+/// Les **trois niveaux de texte** de l'interface (#170, point 10) ; aucun autre
+/// ne s'écrit à la main. Le niveau 1 est le titre de section ([`section_heading`]),
+/// le niveau 2 l'en-tête de colonne d'un tableau ([`table_header`]), le niveau 3
+/// le texte secondaire ([`secondary_text`]). Combiner `bold(` et `.small()` hors
+/// de ce module est refusé (`aucun_gras_petit_hors_du_theme`, `tests/gardes.rs`).
+///
+/// Niveau 1 : le texte d'un titre de section, en [`bold`] à la taille du corps.
+pub fn section_heading(text: impl Into<String>) -> egui::RichText {
+    bold(text)
+}
+
+/// Niveau 2 : l'en-tête de colonne d'un tableau (aperçu d'import, résultats,
+/// mémo des formules), en [`bold`] et en petit corps : il se distingue d'un titre
+/// de section sans le concurrencer.
+pub fn table_header(text: impl Into<String>) -> egui::RichText {
+    bold(text).small()
+}
+
+/// Niveau 3 : le texte secondaire (détail, aide), atténué et en petit corps. Les
+/// règles d'emploi sont celles du texte atténué (`docs/standard-interface.md`).
+pub fn secondary_text(text: impl Into<String>) -> egui::RichText {
+    egui::RichText::new(text).small().weak()
+}
+
 /// **Le** titre de section d'un formulaire (propriétés du graphe, assistant
-/// d'import…) : un espace, puis le libellé en [`bold`]. Le titre suffit à
-/// séparer les groupes : jamais de `ui.separator()` juste avant
+/// d'import…) : un espace, puis le libellé au niveau [`section_heading`]. Le
+/// titre suffit à séparer les groupes : jamais de `ui.separator()` juste avant
 /// (`aucun_separateur_avant_un_titre_de_section`), jamais un trait seul entre
 /// deux blocs (S-L3), et jamais un libellé ordinaire qui ferait office de titre.
 pub fn section_title(ui: &mut egui::Ui, text: impl Into<String>) -> egui::Response {
     ui.add_space(SPACE_SECTION);
-    ui.label(bold(text))
+    ui.label(section_heading(text))
 }
 
 /// Les variations qu'écrit [`bold`], pour mesurer ou reconnaître un gras
@@ -644,6 +668,64 @@ mod tests {
             egui::Align::LEFT,
         );
         assert_ne!(job.sections[0].format.coords, bold_variations());
+    }
+
+    /// Chaque niveau de texte pose sa graisse et sa taille : le titre de section
+    /// et l'en-tête de tableau sont en gras, le secondaire non ; seuls l'en-tête
+    /// et le secondaire sont en petit corps, et le secondaire est atténué.
+    #[test]
+    fn chaque_niveau_de_texte_pose_graisse_et_taille() {
+        let job = |texte: egui::RichText| {
+            egui::WidgetText::from(texte).into_layout_job(
+                &egui::Style::default(),
+                egui::FontSelection::Default,
+                egui::Align::LEFT,
+            )
+        };
+        let corps = job(egui::RichText::new("x")).sections[0]
+            .format
+            .font_id
+            .size;
+        let section = job(section_heading("x"));
+        let entete = job(table_header("x"));
+        let secondaire = job(secondary_text("x"));
+        assert_eq!(section.sections[0].format.coords, bold_variations());
+        assert_eq!(entete.sections[0].format.coords, bold_variations());
+        assert_ne!(secondaire.sections[0].format.coords, bold_variations());
+        assert_eq!(section.sections[0].format.font_id.size, corps);
+        assert!(entete.sections[0].format.font_id.size < corps);
+        assert!(secondaire.sections[0].format.font_id.size < corps);
+        // Seul le secondaire est atténué : les deux autres gardent la couleur
+        // de repli (`PLACEHOLDER`), résolue à la peinture.
+        assert_eq!(section.sections[0].format.color, Color32::PLACEHOLDER);
+        assert_eq!(entete.sections[0].format.color, Color32::PLACEHOLDER);
+        assert_ne!(secondaire.sections[0].format.color, Color32::PLACEHOLDER);
+    }
+
+    /// `section_title` s'appuie sur le niveau 1 : même graisse, même taille.
+    #[test]
+    fn section_title_peint_le_niveau_titre_de_section() {
+        let ctx = Context::default();
+        let mut sortie = ctx.run_ui(egui::RawInput::default(), |ui| {
+            section_title(ui, "Titre");
+        });
+        sortie.textures_delta.clear();
+        let texte = sortie
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some(t.clone()),
+                _ => None,
+            })
+            .expect("un texte peint");
+        let coords: Vec<_> = texte
+            .galley
+            .job
+            .sections
+            .iter()
+            .map(|s| s.format.coords.clone())
+            .collect();
+        assert_eq!(coords, [bold_variations()]);
     }
 
     /// Avec les polices embarquées, [`bold`] graisse vraiment les glyphes

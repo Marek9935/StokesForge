@@ -903,10 +903,18 @@ fn separateurs_avant_un_titre(sources: &[Fichier]) -> Vec<String> {
             }
             let appel: String = masque[k..nom_debut].iter().collect();
             let titre = nom_court(&appel) == "section_title"
-                || (commence_par(masque, k, "ui.label(")
-                    && commence_par(masque, k + "ui.label(".len(), "crate::theme::bold("))
-                || (commence_par(masque, k, "ui.label(")
-                    && commence_par(masque, k + "ui.label(".len(), "theme::bold("));
+                || ["section_heading(", "table_header(", "bold("]
+                    .iter()
+                    .any(|niveau| {
+                        commence_par(masque, k, "ui.label(")
+                            && ["crate::theme::", "theme::", ""].iter().any(|chemin| {
+                                commence_par(
+                                    masque,
+                                    k + "ui.label(".len(),
+                                    &format!("{chemin}{niveau}"),
+                                )
+                            })
+                    });
             if titre {
                 trouves.push(format!(
                     "src/{}:{}",
@@ -934,7 +942,7 @@ fn aucun_separateur_avant_un_titre_de_section() {
     );
     assert!(fonction_unique(&sources, "section_title")
         .corps
-        .contains("bold("));
+        .contains("section_heading("));
 }
 
 /// Le témoin : un filet suivi d'un titre, sous toutes ses formes, est vu ;
@@ -946,6 +954,8 @@ fn la_garde_des_titres_voit_un_filet_avant_un_titre() {
         "fn f(ui: &mut Ui) { ui.separator(); crate::theme::section_title(ui, t); }",
         "fn f(ui: &mut Ui) { ui.separator(); ui.label(crate::theme::bold(t)); }",
         "fn f(ui: &mut Ui) { ui.separator(); ui.label(theme::bold(t)); }",
+        "fn f(ui: &mut Ui) { ui.separator(); ui.label(theme::section_heading(t)); }",
+        "fn f(ui: &mut Ui) { ui.separator(); ui.label(crate::theme::table_header(t)); }",
     ] {
         assert_eq!(
             separateurs_avant_un_titre(&[fichier("app/s.rs", code)]).len(),
@@ -963,6 +973,114 @@ fn la_garde_des_titres_voit_un_filet_avant_un_titre() {
             "faux positif : {code}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Trois niveaux de texte : pas de gras en petit corps écrit à la main (#170)
+// ---------------------------------------------------------------------------
+
+/// Les `bold(…)` dont la chaîne de méthodes contient `.small()`, hors de
+/// `theme.rs` (qui définit les niveaux), `chemin:ligne`.
+fn gras_en_petit_corps(sources: &[Fichier]) -> Vec<String> {
+    let mut trouves = Vec::new();
+    for fichier in sources {
+        if fichier.chemin == "theme.rs" {
+            continue;
+        }
+        let source = fichier.production();
+        let masque = &source.masque;
+        for i in 0..masque.len() {
+            if !mot_en(masque, i, "bold") || masque.get(i + 4) != Some(&'(') {
+                continue;
+            }
+            let Some(mut k) = fermante(masque, i + 4) else {
+                continue;
+            };
+            k += 1;
+            // La chaîne `.méthode(…)` qui suit l'appel.
+            loop {
+                while k < masque.len() && masque[k].is_whitespace() {
+                    k += 1;
+                }
+                if masque.get(k) != Some(&'.') {
+                    break;
+                }
+                k += 1;
+                while k < masque.len() && masque[k].is_whitespace() {
+                    k += 1;
+                }
+                let nom = ident_en(masque, k);
+                if nom.is_empty() {
+                    break;
+                }
+                if nom == "small" {
+                    trouves.push(format!(
+                        "src/{}:{}",
+                        fichier.chemin,
+                        ligne_de(&source.original, i)
+                    ));
+                    break;
+                }
+                k += nom.chars().count();
+                if masque.get(k) != Some(&'(') {
+                    break;
+                }
+                match fermante(masque, k) {
+                    Some(fin) => k = fin + 1,
+                    None => break,
+                }
+            }
+        }
+    }
+    trouves
+}
+
+/// Règle #170 (point 10) : un gras en petit corps est le niveau « en-tête de
+/// tableau » (`theme::table_header`), jamais un `bold(…).small()` écrit sur
+/// place. Sans dérogation.
+#[test]
+fn aucun_gras_petit_hors_du_theme() {
+    let fautifs = gras_en_petit_corps(&sources::sources());
+    assert!(
+        fautifs.is_empty(),
+        "`bold(…).small()` hors de theme.rs — passer par theme::table_header          (en-tête de tableau) ou theme::section_heading (titre) : {fautifs:?}"
+    );
+}
+
+/// Le témoin : `bold(…).small()`, seul ou suivi d'autres méthodes, est vu ;
+/// le gras seul, le petit corps seul, `theme.rs` et le code de test passent.
+#[test]
+fn la_garde_du_gras_petit_voit_un_bold_small() {
+    for code in [
+        "fn f(ui: &mut Ui) { ui.label(crate::theme::bold(t).small()); }",
+        "fn f(ui: &mut Ui) { ui.label(theme::bold(t).color(c).small()); }",
+        "fn f(ui: &mut Ui) { ui.label(bold(format!(\"{}\", (a))).small()); }",
+    ] {
+        assert_eq!(
+            gras_en_petit_corps(&[fichier("app/g.rs", code)]).len(),
+            1,
+            "non vu : {code}"
+        );
+    }
+    for code in [
+        "fn f(ui: &mut Ui) { ui.label(theme::bold(t)); }",
+        "fn f(ui: &mut Ui) { ui.label(RichText::new(t).small()); }",
+        "fn f(ui: &mut Ui) { ui.label(theme::bold(t).color(c)); ui.label(x.small()); }",
+        "fn f() {}
+#[cfg(test)]
+mod tests { fn g() { bold(t).small(); } }",
+        "fn f(ui: &mut Ui) { ui.label(my_bold(t).small()); }",
+    ] {
+        assert!(
+            gras_en_petit_corps(&[fichier("app/g.rs", code)]).is_empty(),
+            "faux positif : {code}"
+        );
+    }
+    assert!(gras_en_petit_corps(&[fichier(
+        "theme.rs",
+        "fn table_header(t: &str) -> RichText { bold(t).small() }"
+    )])
+    .is_empty());
 }
 
 // ---------------------------------------------------------------------------

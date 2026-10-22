@@ -12,7 +12,7 @@
 use eframe::egui;
 use stokesforge_import::{DecimalStyle, HeaderSkip, NameSource, Separator};
 
-use crate::icons::{icon_button, Icon, IconRole};
+use crate::icons::{icon_button, icon_image, Icon, IconRole};
 use crate::number_field::number_field;
 use crate::theme::{section_title, FIELD_WIDTH_MEDIUM, FIELD_WIDTH_SHORT};
 use stokesforge_app_state::errors;
@@ -1097,7 +1097,7 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
                         tr!("column-role"),
                         tr!("import-columns-values"),
                     ] {
-                        ui.label(crate::theme::bold(title));
+                        ui.label(crate::theme::table_header(title));
                     }
                     ui.end_row();
                     for (index, column) in columns.iter().enumerate() {
@@ -1403,7 +1403,12 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             ui.horizontal_wrapped(|ui| {
                 for (i, candidate) in ImportStep::ALL.iter().enumerate() {
                     if i > 0 {
-                        ui.weak("›");
+                        // Séparateur décoratif du fil d'étapes : une icône
+                        // atténuée, sans geste donc sans info-bulle.
+                        ui.add(
+                            icon_image(Icon::CaretRight, IconRole::Neutral)
+                                .tint(crate::theme::help_icon_tint()),
+                        );
                     }
                     let text = format!("{} {}", i + 1, candidate.title());
                     if *candidate == step {
@@ -1630,6 +1635,25 @@ mod tests {
     }
 
     // -- L'assistant entier -----------------------------------------------
+
+    /// Le fil d'étapes sépare ses étapes par une icône, plus par un chevron de
+    /// texte (#170, point 8). Témoin : le fil est bien peint (chaque étape
+    /// porte son rang), seul le chevron manque.
+    #[test]
+    fn le_fil_d_etapes_n_a_plus_de_chevron_de_texte() {
+        let mut banc = banc(true);
+        let context = contexte();
+        let mut actions = Vec::new();
+        let peints = peindre_assistant(&context, &mut banc.state, &mut actions, Vec::new());
+        for (i, etape) in ImportStep::ALL.iter().enumerate() {
+            let attendu = format!("{} {}", i + 1, etape.title());
+            assert!(est_peint(&peints, &attendu), "étape non peinte : {attendu}");
+        }
+        assert!(
+            !peints.iter().any(|t| t.texte.contains('\u{203A}')),
+            "un chevron de texte est encore peint : {peints:?}"
+        );
+    }
 
     #[test]
     fn noms_de_colonnes_inactifs_avec_noms_en_premiere_ligne() {

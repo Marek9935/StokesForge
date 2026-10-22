@@ -307,7 +307,7 @@ fn detail(
                 .show(ui, |ui| {
                     ui.label("");
                     for (key, index) in &columns {
-                        ui.label(theme::bold(value_label(key, *index)));
+                        ui.label(theme::table_header(value_label(key, *index)));
                     }
                     ui.end_row();
                     for (rank, series) in calc.series.iter().enumerate() {

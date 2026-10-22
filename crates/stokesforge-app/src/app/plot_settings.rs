@@ -19,7 +19,7 @@ use crate::color_picker::{ColorUsage, PickerEnv, SavedColorEdit};
 use crate::field_state::{self, FieldIssue};
 use crate::icons::ICON_SIZE;
 use crate::number_field::number_field;
-use crate::theme::{bold, FieldWidth};
+use crate::theme::{table_header, FieldWidth};
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{
     parse_x_prime, Action, AppState, PlotAxis, PlotSettings, PlotSettingsTab, SaveTarget,
@@ -143,7 +143,7 @@ pub(super) fn column_metadata_window(
                     .show(ui, |ui| {
                         for line in &lines {
                             if line.is_section() {
-                                ui.label(crate::theme::bold(&line.key));
+                                ui.label(crate::theme::table_header(&line.key));
                                 ui.label("");
                             } else if line.key.is_empty() {
                                 ui.label("");
@@ -532,7 +532,7 @@ fn formula_help(ui: &mut egui::Ui, hint: &str) {
         if !hint.is_empty() {
             ui.label(hint);
         }
-        ui.label(bold(tr!("plot-math-memo-header")));
+        ui.label(table_header(tr!("plot-math-memo-header")));
         egui::Grid::new("plot_formula_help")
             .num_columns(2)
             .spacing([12.0, 2.0])

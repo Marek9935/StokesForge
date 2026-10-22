@@ -217,7 +217,7 @@ un littéral textuel dans `label`, `button`, `menu_button`, `checkbox`, `radio`,
 dans le nom visible des filtres `add_filter` (#127), dans les
 `Button::new(…)`, `RichText::new(…)`, `Label::new(…)`, `Checkbox::new(…)`,
 `CollapsingHeader::new(…)`, dans les fonctions libres de l'aspect commun
-(`section_title`, `bold`, `list_row`, `list_row_text`, #169), et dans les
+(`section_title`, `section_heading`, `table_header`, `secondary_text`, `bold`, `list_row`, `list_row_text`, #169, #170), et dans les
 tables `fn label()` / `fn title()`. Un titre de section de formulaire est un
 nom court sans deux-points (« Scale », « Line », « Destination ») posé par
 `theme::section_title`. Un

@@ -116,7 +116,7 @@ propriétés sont aussi un jeu d'onglets (`tab_strip`, `Top`).
 | Rôle | Brique | Aspect |
 |---|---|---|
 | jeu d'onglets (feuilles, pages, axes) | `tab_strip` / `tab_strip_with` + `TabStripSide` | plat, actif en gras et accent, trait du côté du contenu |
-| entrée de liste ou d'arbre (Project Manager, Object Manager, liste des séries des propriétés) | `app/list_row.rs` : `list_row`, ou `ListRowBackground` + `list_row_label` pour une ligne composée | ligne pleine largeur, fond pâle d'accent, filet d'accent à gauche, gras |
+| entrée de liste ou d'arbre (Project Manager, Object Manager, liste des séries des propriétés) | `app/list_row.rs` : `list_row`, ou `ListRowBackground` + `list_row_label` pour une ligne composée | ligne pleine largeur de `LIST_ROW_HEIGHT` (24 pt, la même pour toutes, #170), fond pâle d'accent, filet d'accent à gauche, gras |
 | choix exclusif dans un menu, une liste déroulante ou le sélecteur de couleur | `selectable_label` / `selectable_value` d'egui | fond de bouton sélectionné |
 | bascule d'outil d'une barre | `Button::selected` (`toolbar::tool_button`) | bouton enfoncé |
 
@@ -132,7 +132,20 @@ graisse 600) : `RichText::strong` d'egui ne graisse rien, il est interdit
 juste avant (`aucun_separateur_avant_un_titre_de_section`) ; l'étape courante
 de l'assistant d'import et l'élément sélectionné d'une liste sont aussi en
 gras. Une police sans axe `wght` (paire Fira ou Libertinus, police système)
-reste en graisse normale, sans erreur. Toute couleur d'état ou de chrome
+reste en graisse normale, sans erreur.
+
+Trois niveaux de texte nommés (#170, S-L6), dans `theme.rs` : le titre de
+section (`section_heading`, gras au corps normal ; `section_title` le pose avec
+son espace), l'en-tête de colonne d'un tableau (`table_header`, gras en petit
+corps : aperçu d'import, résultats, mémo des formules) et le texte secondaire
+(`secondary_text`, atténué en petit corps). Un gras en petit corps écrit sur
+place (`bold(…).small()`) est refusé (`aucun_gras_petit_hors_du_theme`). Une
+ligne de liste (`list_row`) et toute ligne composée (case, échantillon,
+libellé) ont la même hauteur, `list_row::LIST_ROW_HEIGHT` (S-L7) : la rangée
+`ui.horizontal` la reçoit par `with_list_row_height` (hauteur d'interaction
+relevée le temps de la rangée), donc la case à cocher y mesure 24 pt de côté.
+Le séparateur du fil d'étapes de l'assistant d'import est l'icône `CaretRight`
+atténuée, sans info-bulle (décorative, sans geste). Toute couleur d'état ou de chrome
 vient de `theme.rs` (`accent`, `tab_rule_color`, `tab_hover_mark_color`,
 `list_row_selected_fill`, `list_row_hover_fill`, `file_drop_outline_color`…)
 ou des `Visuals` qu'il pose (`error_fg_color`, `warn_fg_color`,

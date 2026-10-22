@@ -39,7 +39,9 @@ use super::graph_text_edit::{
 };
 use super::graph_window::open_shape_properties;
 use super::inplace_edit;
-use super::list_row::{list_row_grip, list_row_text, list_row_text_color, ListRowBackground};
+use super::list_row::{
+    list_row_grip, list_row_text, list_row_text_color, with_list_row_height, ListRowBackground,
+};
 use super::menu_sections::MenuSections;
 use super::object_dnd::{self, Hover};
 use super::reorder_list::reorder_row_with;
@@ -904,8 +906,8 @@ impl ObjectManagerPaint<'_> {
     ) {
         let target = T::SeriesGroup(group.target);
         let background = ListRowBackground::reserve(ui);
-        let row = ui
-            .horizontal(|ui| {
+        let row = with_list_row_height(ui, |ui| {
+            ui.horizontal(|ui| {
                 let renaming = group_rename_of(ui.ctx(), self.graph, group.target);
                 if let Some(rename) = renaming {
                     object_visibility(
@@ -976,8 +978,9 @@ impl ObjectManagerPaint<'_> {
                     });
                 }
             })
-            .response
-            .rect;
+        })
+        .response
+        .rect;
         background.paint(ui, row, group.selected);
     }
 
@@ -1076,8 +1079,8 @@ impl ObjectManagerPaint<'_> {
             // #169 : une ligne de liste, fond posé sous la case et l'échantillon.
             let background = ListRowBackground::reserve(ui);
             let target = series.target;
-            let row = ui
-                .horizontal(|ui| {
+            let row = with_list_row_height(ui, |ui| {
+                ui.horizontal(|ui| {
                     // La poignée en tête (comme les formats de copie des
                     // préférences) : la ligne se glisse, les autres s'écartent.
                     let outcome = reorder_row_with(
@@ -1160,8 +1163,9 @@ impl ObjectManagerPaint<'_> {
                         });
                     }
                 })
-                .response
-                .rect;
+            })
+            .response
+            .rect;
             background.paint(ui, row, series.selected);
             row.center().y
         })
@@ -1363,8 +1367,8 @@ fn object_manager_object_row(
             )),
             _ => None,
         };
-        let row = ui
-            .horizontal(|ui| {
+        let row = with_list_row_height(ui, |ui| {
+            ui.horizontal(|ui| {
                 let mut body = |ui: &mut egui::Ui| {
                     object_visibility(ui, graph, object.target, spec, Shown::BASE, actions);
                     let icon = match object.kind {
@@ -1428,8 +1432,9 @@ fn object_manager_object_row(
                     dnd.hover.offer(over);
                 }
             })
-            .response
-            .rect;
+        })
+        .response
+        .rect;
         background.paint(ui, row, object.selected);
         row.center().y
     })
@@ -2594,6 +2599,100 @@ mod tests {
         assert!(!gras("Deuxième") && !gras("Dernier"), "témoin : les autres");
     }
 
+    /// #170, point 5 : un groupe, une série et un objet libre sélectionnés
+    /// peignent un fond de la même hauteur, `LIST_ROW_HEIGHT` ; les connecteurs
+    /// en L (#112) visent le centre de cette hauteur. Témoin : sans la hauteur
+    /// imposée, la rangée retombe à celle de ses widgets (18 px) et le test
+    /// échoue.
+    #[test]
+    fn groupe_serie_et_objet_ont_la_meme_hauteur_de_ligne() {
+        use super::super::list_row::LIST_ROW_HEIGHT;
+        let (mut project, graph, mut spec, _) = trois_series();
+        let panel = spec.panels.get_mut(0).unwrap();
+        panel.series[1].group = Some(1);
+        panel.series[2].group = Some(1);
+        assert!(panel.rename_group(1, "Lots"));
+        panel
+            .shapes
+            .push(ShapeSpec::new(ShapeKind::Rectangle, 0.0, 0.0, 1.0, 1.0));
+        project
+            .set_plot_spec(graph, spec.clone())
+            .expect("spec avec groupe et forme");
+        let settings = ObjectManagerSettings {
+            objects_open: true,
+            ..ObjectManagerSettings::default()
+        };
+        let cibles = [
+            (
+                "groupe",
+                T::SeriesGroup(stokesforge_plot::SeriesGroupRef::new(0, 1)),
+            ),
+            ("série", T::Series(SeriesRef::new(0, 0))),
+            ("objet", T::Shape(ShapeRef { panel: 0, index: 0 })),
+        ];
+        for (nature, cible) in cibles {
+            let model = stokesforge_app_state::object_manager::object_tree_with_selection(
+                project.tree(),
+                graph,
+                Some(cible),
+                false,
+                true,
+            )
+            .unwrap();
+            let ctx = super::super::test_support::contexte();
+            let mut actions = Vec::new();
+            let mut sortie = None;
+            for _ in 0..3 {
+                sortie = Some(image_de(&ctx, egui::vec2(600.0, 500.0), Vec::new(), |ui| {
+                    object_manager_contents(
+                        ui,
+                        project.tree(),
+                        Some(&model),
+                        Some(&spec),
+                        settings,
+                        &mut actions,
+                    );
+                }));
+            }
+            let sortie = sortie.unwrap();
+            let fonds: Vec<egui::Rect> = sortie
+                .shapes
+                .iter()
+                .filter_map(|peint| match &peint.shape {
+                    egui::Shape::Rect(rect)
+                        if rect.fill == crate::theme::list_row_selected_fill() =>
+                    {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(fonds.len(), 1, "{nature} : une ligne sélectionnée");
+            assert_eq!(fonds[0].height(), LIST_ROW_HEIGHT, "{nature}");
+            // Le fond impose sa hauteur minimale : la rangée elle-même doit la
+            // remplir, donc le texte de la ligne est centré dans le fond.
+            let centres: Vec<f32> = sortie
+                .shapes
+                .iter()
+                .filter_map(|peint| match &peint.shape {
+                    egui::Shape::Text(texte) if !texte.galley.text().is_empty() => {
+                        let y = texte.pos.y + texte.galley.rect.center().y;
+                        fonds[0].y_range().contains(y).then_some(y)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(!centres.is_empty(), "{nature} : un texte sur la ligne");
+            for y in centres {
+                assert!(
+                    (y - fonds[0].center().y).abs() < 1.0,
+                    "{nature} : texte à {y}, ligne centrée à {}",
+                    fonds[0].center().y
+                );
+            }
+        }
+    }
+
     /// Trois séries, les deux dernières en groupe nommé « Lots » (#197), et
     /// l'arbre d'Object Manager de ce graphe.
     fn groupe_nomme() -> (
@@ -2925,9 +3024,12 @@ mod tests {
                 .iter()
                 .filter_map(|painted| match &painted.shape {
                     egui::Shape::Rect(rect)
-                        // La case fait 18 px ; la poignée, à sa gauche, 16 px.
+                        // La case fait la hauteur d'une ligne (#170) ; la
+                        // poignée, à sa gauche, 16 px.
                         if (rect.rect.width() - rect.rect.height()).abs() < 1.0
-                            && (rect.rect.width() - 18.0).abs() < 1.0
+                            && (rect.rect.width() - super::super::list_row::LIST_ROW_HEIGHT)
+                                .abs()
+                                < 1.0
                             && (rect.rect.center().y - label.y).abs() < 4.0
                             && rect.rect.center().x < label.x =>
                     {

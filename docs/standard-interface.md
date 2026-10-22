@@ -99,6 +99,8 @@ mécanique.
 | S-L3 | `titre-de-section-entre-blocs` | Un titre de section entre deux blocs, jamais un trait seul. |
 | S-L4 | `deux-espacements` | Deux constantes d'espacement dans `theme.rs` ; aucun `add_space` numérique ailleurs. |
 | S-L5 | `pas-de-section-repliable` | Pas de section repliable dans un formulaire ; trop long, on passe en onglets. |
+| S-L6 | `trois-niveaux-de-texte` | Trois niveaux de texte nommés dans `theme.rs` : titre de section, en-tête de tableau, texte secondaire ; jamais `bold(…).small()` écrit sur place. |
+| S-L7 | `hauteur-de-ligne-unique` | Une ligne de liste ou d'arbre a une seule hauteur, `LIST_ROW_HEIGHT`, composée ou non. |
 | S-K1 | `registre-des-touches` | Toutes les touches sont dans le registre de `app/shortcuts.rs` ; aucun `consume_key` ailleurs. |
 | S-K2 | `suppr-immediat-annulable` | Suppr supprime la sélection tout de suite, annulable, partout (la grille vide d'abord). |
 | S-K3 | `double-clic-par-sorte` | Double-clic : texte ou nom → édition sur place ; objet → Properties ; fond vide d'un graphe → vue réinitialisée ; Project Manager → active la fenêtre, ne la ferme jamais. |
@@ -644,6 +646,13 @@ Historique : #226.
 - **Deux constantes d'espacement** dans `theme.rs`, aucun `add_space`
   numérique ailleurs (S-L4).
 - **Pas de section repliable** dans un formulaire ; trop long → onglets (S-L5).
+- **Trois niveaux de texte** (S-L6, #170) : `theme::section_heading` (titre de
+  section, gras), `theme::table_header` (en-tête de colonne d'un tableau, gras
+  en petit corps), `theme::secondary_text` (atténué, petit corps). Garde
+  `aucun_gras_petit_hors_du_theme`.
+- **Une hauteur de ligne unique** (S-L7, #170) : `list_row::LIST_ROW_HEIGHT`
+  (24 pt) pour `list_row` et pour les lignes composées de l'Object Manager, du
+  Project Manager (dossier compris) et de la liste des séries.
 - **Tab suit l'ordre de lecture** (S-K6) : haut-bas, gauche-droite.
 
 Comment c'est tenu :

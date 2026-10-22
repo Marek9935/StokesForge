@@ -78,10 +78,20 @@ const APPELS: &[&str] = &[
 ];
 
 /// Les fonctions libres de l'application qui posent un libellé (#169) :
-/// `theme::section_title(ui, "…")`, `theme::bold("…")`, la ligne de liste.
+/// `theme::section_title(ui, "…")`, les trois niveaux de texte
+/// (`section_heading`, `table_header`, `secondary_text`, #170), `theme::bold("…")`,
+/// la ligne de liste.
 /// Vues appelées seules ou par un chemin (`crate::theme::bold(`), jamais
 /// comme méthode.
-const FONCTIONS_LIBRES: &[&str] = &["section_title", "bold", "list_row", "list_row_text"];
+const FONCTIONS_LIBRES: &[&str] = &[
+    "section_title",
+    "section_heading",
+    "table_header",
+    "secondary_text",
+    "bold",
+    "list_row",
+    "list_row_text",
+];
 
 /// Les widgets bâtis par `Type::new("texte")` : `egui::Button::new("Ouvrir…")`
 /// est la forme de presque toute entrée de menu, et `RichText::new(…)` celle
@@ -551,6 +561,9 @@ fn la_garde_voit_les_libelles_des_fonctions_libres_du_theme() {
         r#"fn f(ui: &mut Ui) { section_title(ui, "Échelle"); }"#,
         r#"fn f(ui: &mut Ui) { crate::theme::section_title(ui, "Échelle"); }"#,
         r#"fn f(ui: &mut Ui) { ui.label(theme::bold("Titre")); }"#,
+        r#"fn f(ui: &mut Ui) { ui.label(theme::section_heading("Titre")); }"#,
+        r#"fn f(ui: &mut Ui) { ui.label(theme::table_header("Valeur")); }"#,
+        r#"fn f(ui: &mut Ui) { ui.label(theme::secondary_text("Détail")); }"#,
         r#"fn f(ui: &mut Ui) { list_row(ui, None, "Série", true, false); }"#,
     ] {
         assert_eq!(trouve(code).len(), 1, "non vu : {code}");

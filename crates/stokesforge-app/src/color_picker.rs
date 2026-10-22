@@ -630,7 +630,7 @@ fn picker_contents(
     }
     let current = parse_hex(value);
     for section in palette(usage, curve_palette) {
-        ui.label(crate::theme::bold(section.title).small());
+        ui.label(crate::theme::section_heading(section.title));
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::splat(3.0);
             for rgba in section.colors {
@@ -682,7 +682,7 @@ fn picker_contents(
         if saved.is_empty() {
             continue;
         }
-        ui.label(crate::theme::bold(title).small());
+        ui.label(crate::theme::section_heading(title));
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = Vec2::splat(3.0);
             for color in saved {

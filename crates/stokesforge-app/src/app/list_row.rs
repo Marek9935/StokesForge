@@ -32,11 +32,52 @@ use crate::theme;
 /// Largeur du filet d'accent à gauche d'une ligne sélectionnée.
 pub(super) const LIST_ROW_MARK: f32 = 3.0;
 
+/// Hauteur **unique** d'une ligne de liste (#170, point 5) : la même pour une
+/// ligne de [`list_row`] avec ou sans icône, sélectionnée ou non, et pour une
+/// ligne composée (case de visibilité, échantillon, libellé : groupe, série,
+/// objet de l'Object Manager, en-tête de dossier du Project Manager, ligne
+/// série des propriétés). Valeur : la hauteur naturelle d'une ligne à icône
+/// (ligne de texte de 18 px plus 2 x 3 px de marge, soit 24 px), qui loge la case à cocher
+/// (`interact_size.y`) et l'échantillon de 18 px sans les rogner.
+pub(crate) const LIST_ROW_HEIGHT: f32 = 24.0;
+
 /// Marges intérieures d'une ligne peinte par [`list_row`].
 const LIST_ROW_PADDING: egui::Vec2 = egui::vec2(6.0, 3.0);
 
 /// Écart entre l'icône et le libellé.
 const LIST_ROW_GAP: f32 = 5.0;
+
+/// Impose [`LIST_ROW_HEIGHT`] aux widgets d'une ligne composée : `add` s'écrit
+/// avec la hauteur d'interaction (`interact_size.y`) relevée à la hauteur de
+/// ligne, que lisent le `ui.horizontal` (hauteur de départ de la rangée), la
+/// case à cocher, le bouton et le champ de saisie ; chaque widget se centre
+/// donc dans une rangée de [`LIST_ROW_HEIGHT`], sans sous-`Ui` neuf (les
+/// identifiants egui et le glisser-déposer ne changent pas). Le réglage est
+/// rendu à l'appelant dès `add` terminée.
+pub(super) fn with_list_row_height<R>(
+    ui: &mut egui::Ui,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    let before = raise_to_list_row_height(ui);
+    let result = add(ui);
+    restore_row_height(ui, before);
+    result
+}
+
+/// La moitié « poser » de [`with_list_row_height`], pour une en-tête repliable
+/// dont la réponse (`HeaderResponse`) emprunte l'`Ui` jusqu'à son `.body(…)` :
+/// pose [`LIST_ROW_HEIGHT`] et rend la hauteur d'avant, à rendre par
+/// [`restore_row_height`] une fois l'en-tête et son corps peints.
+pub(super) fn raise_to_list_row_height(ui: &mut egui::Ui) -> f32 {
+    let before = ui.spacing().interact_size.y;
+    ui.spacing_mut().interact_size.y = LIST_ROW_HEIGHT;
+    before
+}
+
+/// La moitié « rendre » : voir [`raise_to_list_row_height`].
+pub(super) fn restore_row_height(ui: &mut egui::Ui, before: f32) {
+    ui.spacing_mut().interact_size.y = before;
+}
 
 /// Le libellé d'une ligne : gras si elle est sélectionnée.
 pub(super) fn list_row_text(text: &str, selected: bool) -> egui::RichText {
@@ -123,7 +164,10 @@ impl ListRowBackground {
     pub(super) fn paint(self, ui: &egui::Ui, row: egui::Rect, selected: bool) {
         let rect = egui::Rect::from_min_max(
             row.min,
-            egui::pos2(row.right().max(ui.max_rect().right()), row.bottom()),
+            egui::pos2(
+                row.right().max(ui.max_rect().right()),
+                row.bottom().max(row.top() + LIST_ROW_HEIGHT),
+            ),
         );
         let hovered = ui.rect_contains_pointer(rect);
         for (index, shape) in self
@@ -183,10 +227,7 @@ fn list_row_sensed(
         0.0
     };
     let natural = 2.0 * LIST_ROW_PADDING.x + icon_width + galley.size().x;
-    let size = egui::vec2(
-        ui.available_width().max(natural),
-        galley.size().y.max(ICON_SIZE) + 2.0 * LIST_ROW_PADDING.y,
-    );
+    let size = egui::vec2(ui.available_width().max(natural), LIST_ROW_HEIGHT);
     let (rect, response) = ui.allocate_exact_size(size, sense);
     let response = super::cursors::clickable(response);
     response.widget_info(|| {
@@ -273,6 +314,94 @@ mod tests {
         let peints = textes(&output.shapes);
         assert!(peints.iter().any(|t| t.texte == "Série A" && t.gras));
         assert!(peints.iter().any(|t| t.texte == "Série B" && !t.gras));
+    }
+
+    /// #170, point 5 : une ligne de liste a toujours `LIST_ROW_HEIGHT`, avec ou
+    /// sans icône, sélectionnée (gras) ou non. Témoin : la hauteur d'une ligne
+    /// n'est pas celle d'un simple libellé.
+    #[test]
+    fn toute_ligne_de_liste_a_la_hauteur_unique() {
+        let context = contexte();
+        let mut hauteurs = Vec::new();
+        image(&context, |ui| {
+            for (icone, selected) in [(false, false), (false, true), (true, false), (true, true)] {
+                let icon = icone.then(|| {
+                    crate::icons::icon_image(
+                        crate::icons::Icon::Folder,
+                        crate::icons::IconRole::Folder,
+                    )
+                });
+                hauteurs.push(list_row(ui, icon, "Série", selected, false).rect.height());
+            }
+            hauteurs.push(list_row_draggable(ui, "Série", false).rect.height());
+            hauteurs.push(ui.label("Série").rect.height());
+        });
+        assert_eq!(hauteurs[..5], [LIST_ROW_HEIGHT; 5], "{hauteurs:?}");
+        assert!(
+            hauteurs[5] < LIST_ROW_HEIGHT,
+            "témoin : un libellé nu est plus bas : {hauteurs:?}"
+        );
+    }
+
+    /// `with_list_row_height` loge case, bouton et champ dans une rangée de
+    /// `LIST_ROW_HEIGHT`, centrés sur son milieu, puis rend la hauteur
+    /// d'interaction d'avant. Témoin : sans lui, la rangée est plus basse.
+    #[test]
+    fn la_rangee_composee_prend_la_hauteur_unique_et_la_rend() {
+        let context = contexte();
+        let mut mesures = Vec::new();
+        image(&context, |ui| {
+            let avant = ui.spacing().interact_size.y;
+            for imposer in [true, false] {
+                let mut case = true;
+                let mut rangee = |ui: &mut egui::Ui| {
+                    ui.horizontal(|ui| {
+                        let c = ui.checkbox(&mut case, "").rect.center().y;
+                        let b = ui.button("Nom").rect.center().y;
+                        (c, b)
+                    })
+                };
+                let sortie = if imposer {
+                    with_list_row_height(ui, rangee)
+                } else {
+                    rangee(ui)
+                };
+                let (c, b) = sortie.inner;
+                mesures.push((sortie.response.rect, c, b));
+            }
+            assert_eq!(ui.spacing().interact_size.y, avant, "hauteur rendue");
+        });
+        let (avec, c, b) = mesures[0];
+        assert_eq!(avec.height(), LIST_ROW_HEIGHT);
+        assert!((c - avec.center().y).abs() < 0.5 && (b - avec.center().y).abs() < 0.5);
+        assert!(
+            mesures[1].0.height() < LIST_ROW_HEIGHT,
+            "témoin : {mesures:?}"
+        );
+    }
+
+    /// Le fond d'une ligne composée est au moins `LIST_ROW_HEIGHT` de haut,
+    /// même si la rangée mesurée est plus basse.
+    #[test]
+    fn le_fond_reserve_impose_la_hauteur_minimale() {
+        let context = contexte();
+        let output = image(&context, |ui| {
+            let background = ListRowBackground::reserve(ui);
+            let row = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(100.0, 18.0));
+            background.paint(ui, row, true);
+        });
+        let rows = rects(&output, theme::list_row_selected_fill());
+        assert_eq!(rows[0].height(), LIST_ROW_HEIGHT);
+        let output = image(&context, |ui| {
+            let background = ListRowBackground::reserve(ui);
+            let row = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(100.0, 40.0));
+            background.paint(ui, row, true);
+        });
+        assert_eq!(
+            rects(&output, theme::list_row_selected_fill())[0].height(),
+            40.0,
+            "témoin : une rangée plus haute n'est pas rognée"
+        );
     }
 
     /// Le fond réservé d'une ligne composée passe **sous** ses widgets et
