@@ -18,6 +18,11 @@
 stages:
   - check
 
+# Runners : seuls les runners perso servent (partagés désactivés dans GitLab).
+# Les travaux Linux portent `tags: [linux]` et restent en attente tant qu'aucun
+# runner Linux n'est enregistré ; seul `dist-windows` (`tags: [windows]`, manuel)
+# tourne pour l'instant, sur le runner Windows.
+
 variables:
   CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
   # #88 : le runner partagé saturait son disque (`No space left on device`)
@@ -40,6 +45,7 @@ variables:
 # `fmt` ne compile rien : seul le registre Cargo vaut d'être gardé.
 fmt:
   stage: check
+  tags: [linux]
   image: rust:1
   cache:
     key: cargo-${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}
@@ -53,6 +59,7 @@ fmt:
 # sans compilation du workspace. Versions partagées avec la distribution.
 licenses:
   stage: check
+  tags: [linux]
   image: rust:1
   cache:
     key: cargo-${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}
@@ -61,7 +68,9 @@ licenses:
   script:
     - source scripts/licenses-tools.env
     - cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
-    - cargo install cargo-about --locked --version "$CARGO_ABOUT_VERSION"
+    # Le binaire de cargo-about exige la feature `cli`, absente par défaut :
+    # sans elle, `cargo install` réussit sans rien installer (#332).
+    - cargo install cargo-about --locked --features cli --version "$CARGO_ABOUT_VERSION"
     - export PATH="${CARGO_HOME}/bin:${PATH}"
     - cargo deny --locked check licenses
     - scripts/licenses-test.sh
@@ -72,6 +81,7 @@ licenses:
 
 clippy:
   stage: check
+  tags: [linux]
   image: rust:1
   <<: *rust-cache
   script:
@@ -89,6 +99,7 @@ clippy:
 #     ci-dessous qui s'en charge.
 test:
   stage: check
+  tags: [linux]
   image: rust:1
   <<: *rust-cache
   script:
@@ -119,6 +130,7 @@ test:
 # `docs/rustrewrite/guide-de-correction-robustesse.md`.
 robustesse:
   stage: check
+  tags: [linux]
   image: rust:1
   <<: *rust-cache
   allow_failure: true
@@ -130,6 +142,7 @@ robustesse:
 # Les reproductions ignorées et le spike Matplotlib restent des essais explicites.
 test-python:
   stage: check
+  tags: [linux]
   image: rust:1
   # Deux caches distincts (`.rust-cache` n'est pas réutilisable tel quel ici :
   # son ancre porte déjà la clé `cache`, la fusionner dans un élément de liste
