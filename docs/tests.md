@@ -730,7 +730,9 @@ Table `NodeId -> f32` de l'acteur, hors modèle et hors historique, enregistrée
 | ouvrir et peindre n'envoie rien, ne marque pas le projet modifié | `ouvrir_la_feuille_n_envoie_aucune_largeur` (pousser la largeur rendue à chaque image : rouge) |
 | Add Column : les largeurs gardées, la neuve à 54 ; Delete puis Ctrl+Z | `la_largeur_de_chaque_colonne_survit_a_l_ajout_d_une_colonne`, `supprimer_puis_annuler_rend_la_colonne_et_ses_voisines_a_leur_largeur` (largeur par position : rouge ; sans `reset()` quand la liste change à nombre égal : rouge) |
 
-La largeur se lit dans le banc sur l'aplat de la lettre de colonne (`largeur_peinte`).
+| la largeur par défaut est la même flottante, maximisée, puis restaurée (#337) | `window_stack::tests::la_largeur_par_defaut_d_une_colonne_est_la_meme_flottante_et_maximisee` (ne pas oublier l'état de la table après la passe de mesure du `Window` : rouge, 58 au lieu de 62) |
+
+La largeur se lit dans le banc sur l'aplat de la lettre de colonne (`largeur_peinte`). Le banc de la grille peint `book_contents` hors de tout `Window` : il ne voit pas la passe de mesure, d'où le test au niveau de `show_workspace`.
 
 ### Remettre au défaut (#330)
 

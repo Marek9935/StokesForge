@@ -46,7 +46,7 @@ const ROW_HEIGHT: f32 = 20.0;
 /// (plutôt que les 110px historiques) : demande explicite, pour loger
 /// davantage de colonnes à l'écran — l'utilisateur peut toujours
 /// redimensionner à la souris (`.resizable(true)`).
-const DEFAULT_COLUMN_WIDTH: f32 = 54.0;
+pub(super) const DEFAULT_COLUMN_WIDTH: f32 = 54.0;
 /// Largeur minimale d'une colonne de données après redimensionnement manuel.
 /// Sous l'ancien plancher (56px) pour ne pas empêcher un retour à
 /// [`DEFAULT_COLUMN_WIDTH`] une fois qu'on l'a élargie puis rétrécie.
@@ -1777,9 +1777,17 @@ pub(super) fn grid_contents(
         .collect();
     let layout_key = (state.snapshot().epoch, column_ids.clone(), widths);
     let layout_memory = ui.id().with("stokesforge_grid_layout");
-    let layout_changed = ui
-        .data(|data| data.get_temp::<(u64, Vec<NodeId>, Vec<Option<u32>>)>(layout_memory))
-        != Some(layout_key.clone());
+    // #337 : la première image d'un `egui::Window` est une passe de mesure
+    // (`Ui::is_sizing_pass`) pendant laquelle egui_extras réduit chaque colonne
+    // à la largeur que son contenu a utilisée (50 au lieu de 54), puis garde
+    // cette valeur. La table oublie donc son état à l'image qui suit une passe
+    // de mesure, et `TableColumn::initial` redonne les largeurs retenues.
+    let sizing_memory = ui.id().with("stokesforge_grid_sizing_pass");
+    let after_sizing_pass = ui.data(|data| data.get_temp::<bool>(sizing_memory)) == Some(true);
+    ui.data_mut(|data| data.insert_temp(sizing_memory, ui.is_sizing_pass()));
+    let layout_changed = after_sizing_pass
+        || ui.data(|data| data.get_temp::<(u64, Vec<NodeId>, Vec<Option<u32>>)>(layout_memory))
+            != Some(layout_key.clone());
     if layout_changed {
         ui.data_mut(|data| data.insert_temp(layout_memory, layout_key));
     }
@@ -1964,7 +1972,9 @@ fn grid_table_header(
 ) {
     header.col(|ui| {
         let width = ui.max_rect().width();
-        if width > 0.0 {
+        // Pas pendant une passe de mesure (#337) : sa largeur n'est pas celle de
+        // la gouttière.
+        if width > 0.0 && !ui.is_sizing_pass() {
             ui.ctx()
                 .data_mut(|data| data.insert_temp(gutter_width_id(sheet), width));
         }

@@ -784,6 +784,91 @@ mod tests {
         }
     }
 
+    /// #337 : la largeur d'une colonne jamais réglée est celle du défaut, que le
+    /// classeur soit flottant ou maximisé. Dans une fenêtre flottante, la
+    /// première image d'un `egui::Window` est une passe de mesure
+    /// (`Ui::is_sizing_pass`) pendant laquelle egui_extras réduit chaque
+    /// colonne à la largeur que son contenu a utilisée, puis la garde.
+    #[test]
+    fn la_largeur_par_defaut_d_une_colonne_est_la_meme_flottante_et_maximisee() {
+        let mut project = stokesforge_core::Project::new("Largeur").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        let sheet = project.add_worksheet(book, None).unwrap();
+        for colonne in 1..=3_u32 {
+            let valeurs: Vec<f64> = (1..=20_u32).map(|r| f64::from(colonne * 100 + r)).collect();
+            project
+                .add_column(
+                    sheet,
+                    None,
+                    None,
+                    stokesforge_core::Column::from_f64(&valeurs),
+                )
+                .unwrap();
+        }
+        let session = stokesforge_session::Session::spawn(project, None).unwrap();
+        let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
+        let tab = Tab::Book(book);
+        let mut app = StokesForgeApp::new(state);
+        app.floating_tabs = vec![tab];
+        let context = super::super::test_support::contexte();
+        egui_extras::install_image_loaders(&context);
+        // Écart entre les centres des lettres de colonne « A(Y) », « B(Y) »…
+        let pas = |app: &mut StokesForgeApp| {
+            let mut sortie = None;
+            for _ in 0..6 {
+                sortie = Some(super::super::test_support::image_de(
+                    &context,
+                    egui::vec2(1400.0, 900.0),
+                    Vec::new(),
+                    |ui| {
+                        app.show_workspace(
+                            ui,
+                            Some(tab),
+                            &mut Vec::new(),
+                            &mut Vec::new(),
+                            &mut Vec::new(),
+                            &mut Vec::new(),
+                        );
+                    },
+                ));
+            }
+            let centres: Vec<f32> = sortie
+                .unwrap()
+                .shapes
+                .iter()
+                .filter_map(|peint| match &peint.shape {
+                    egui::Shape::Text(shape) if shape.galley.job.text.ends_with("(Y)") => {
+                        Some(shape.pos.x + shape.galley.rect.center().x)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(centres.len(), 3, "trois lettres de colonne : {centres:?}");
+            centres[1] - centres[0]
+        };
+        let attendu = super::super::grid::DEFAULT_COLUMN_WIDTH
+            + context.global_style().spacing.item_spacing.x;
+        let flottant = pas(&mut app);
+        app.maximized_tab = Some(tab);
+        let maximise = pas(&mut app);
+        app.maximized_tab = None;
+        let restaure = pas(&mut app);
+        assert!(
+            (flottant - attendu).abs() < 0.6,
+            "flottant : {flottant}, attendu {attendu}"
+        );
+        assert!(
+            (maximise - attendu).abs() < 0.6,
+            "maximisé : {maximise}, attendu {attendu}"
+        );
+        assert!(
+            (restaure - attendu).abs() < 0.6,
+            "restauré : {restaure}, attendu {attendu}"
+        );
+        session.shutdown().unwrap();
+    }
+
     #[test]
     fn le_repli_ne_concerne_que_longlet_vise() {
         let node = NodeId::from_raw(1);

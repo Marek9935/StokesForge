@@ -204,10 +204,16 @@ modifié à chaque ouverture. La vue détachée a son propre `AppState` ; sa
 largeur passe aussi par l'acteur, l'état principal la relit à son
 rafraîchissement.
 
-**Largeur par défaut variable (#337).** Remonté sous #330 : maximisée, la
-fenêtre du classeur ferait passer les colonnes jamais réglées de 57 à 62 px.
-Non reproduit dans le banc ; suivi par #337, aucune coupe du contenu n'est
-posée en attendant.
+**Largeur par défaut identique flottant / maximisé (#337).** Remonté sous
+#330 : maximisée, la fenêtre du classeur faisait passer les colonnes jamais
+réglées de 57 à 62 px d'écart entre lettres. Cause : la première image d'un
+`egui::Window` est une passe de mesure (`Ui::is_sizing_pass`) pendant laquelle
+egui_extras réduit chaque colonne à la largeur que son contenu a utilisée (50
+au lieu de 54), puis garde cette valeur ; une fenêtre maximisée, peinte dans le
+`CentralPanel`, n'a pas de passe de mesure et gardait les 54. Ni les valeurs, ni
+la taille de la fenêtre n'y sont pour rien (le banc direct, sans `Window`, ne
+voyait rien). `grid_contents` oublie l'état de la table à l'image qui suit une
+passe de mesure, et ne retient pas la largeur de la gouttière pendant celle-ci.
 
 **Remettre au défaut (#330).** Clic droit sur une lettre ou Workbook ▸ Columns :
 « Reset Width » (après Role ▸), sur toute la sélection ; Workbook ▸ Sheet et
