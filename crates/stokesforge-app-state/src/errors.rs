@@ -486,7 +486,7 @@ pub mod file {
                     found: 9,
                     supported: 2
                 }),
-                "/data/run.stf needs a newer version of StokesForge (file format 9, supported up to 2)"
+                "/data/run.stf was saved by a newer version of StokesForge (file format 9, this version reads up to 2): update StokesForge to open it"
             );
         }
     }

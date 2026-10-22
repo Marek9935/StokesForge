@@ -1529,9 +1529,27 @@ mod inputs_digest_tests {
         (project, ids)
     }
 
+    const NUMERIC_DIGEST: u64 = 14_944_315_663_721_976_880;
+    const MIXED_DIGEST: u64 = 16_594_512_645_915_888_955;
+
     fn digest(columns: &[Column]) -> Option<u64> {
         let (project, ids) = sheet_with(columns);
         calc_on(ids[0]).inputs_digest(project.tree())
+    }
+
+    /// L'empreinte fait partie du format `.stf` (S3, #323) : ces valeurs sont
+    /// écrites dans les fichiers, elles ne changent jamais. Un changement ici
+    /// périmerait à la relecture tous les calculs des fichiers déjà écrits.
+    #[test]
+    fn the_digest_is_frozen_on_known_inputs() {
+        let numeric = Column::from_f64(&[1.5, f64::NAN, -0.0, 0.0]);
+        assert_eq!(digest(&[numeric]), Some(NUMERIC_DIGEST));
+        let mixed = Column::from_mixed(&[
+            MixedCell::Empty,
+            MixedCell::Number(2.5),
+            MixedCell::Text("é".into()),
+        ]);
+        assert_eq!(digest(&[mixed]), Some(MIXED_DIGEST));
     }
 
     #[test]

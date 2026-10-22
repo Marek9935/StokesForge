@@ -627,7 +627,7 @@ error-session-closed = The project is no longer available. Restart StokesForge
 # Project files
 error-file-io = Could not access { $path }: { $detail }
 error-file-not-stokesforge = { $path } is not a StokesForge file
-error-file-too-new = { $path } needs a newer version of StokesForge (file format { $found }, supported up to { $supported })
+error-file-too-new = { $path } was saved by a newer version of StokesForge (file format { $found }, this version reads up to { $supported }): update StokesForge to open it
 error-file-too-many-cells = { $path } declares too many cells ({ $cells } million, limit { $limit } million). Raise the limit in File > Preferences > General, then open it again
 error-file-too-large = { $path } is too large to open ({ $size } MB, limit { $limit } MB). Raise the limit in File > Preferences > General, then open it again
 error-file-corrupt = { $path } is damaged: { $detail }
