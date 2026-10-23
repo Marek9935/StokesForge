@@ -46,7 +46,7 @@ const TAB_MARK: f32 = 2.0;
 /// Place de la bande par rapport à son contenu : le trait de l'onglet actif
 /// et le filet de séparation se posent du côté du contenu (#169).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum TabStripSide {
+pub(crate) enum TabStripSide {
     /// Bande au-dessus du contenu (pages des propriétés du graphe).
     Top,
     /// Bande sous le contenu (feuilles d'un classeur).
@@ -68,7 +68,7 @@ pub(super) struct TabStripOverflow {
 /// tests le lisent ; l'interface n'en a pas besoin.
 #[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Default)]
-pub(super) struct TabStripOutput {
+pub(crate) struct TabStripOutput {
     pub(super) offset: f32,
     pub(super) overflow: TabStripOverflow,
     pub(super) arrows: Option<[egui::Rect; 2]>,
@@ -88,7 +88,7 @@ pub(super) struct TabStripOutput {
 /// des onglets sont cachés. Changer de feuille sélectionnée (au clavier, par
 /// script, ou par clic) fait défiler la bande juste assez pour montrer
 /// l'onglet actif et ses voisins ([`scroll_tab_strip_to_selected`]).
-pub(super) fn tab_strip<
+pub(crate) fn tab_strip<
     K: Copy + std::hash::Hash + std::fmt::Debug + PartialEq + Send + Sync + 'static,
 >(
     ui: &mut egui::Ui,

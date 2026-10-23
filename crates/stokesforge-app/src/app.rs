@@ -178,7 +178,7 @@ pub(crate) mod shortcuts;
 mod stale_export;
 mod status_history;
 mod tab;
-mod tab_strip;
+pub(crate) mod tab_strip;
 #[cfg(test)]
 mod test_support;
 mod transpose_ui;

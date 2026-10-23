@@ -117,7 +117,7 @@ propriétés sont aussi un jeu d'onglets (`tab_strip`, `Top`).
 |---|---|---|
 | jeu d'onglets (feuilles, pages, axes) | `tab_strip` / `tab_strip_with` + `TabStripSide` | plat, actif en gras et accent, trait du côté du contenu |
 | entrée de liste ou d'arbre (Project Manager, Object Manager, liste des séries des propriétés) | `app/list_row.rs` : `list_row`, ou `ListRowBackground` + `list_row_label` pour une ligne composée | ligne pleine largeur de `LIST_ROW_HEIGHT` (24 pt, la même pour toutes, #170), fond pâle d'accent, filet d'accent à gauche, gras |
-| choix exclusif dans un menu, une liste déroulante ou le sélecteur de couleur | `selectable_label` / `selectable_value` d'egui | fond de bouton sélectionné |
+| choix exclusif dans un menu, une liste déroulante ou le sélecteur de couleur (ses vues « Square | Wheel » sont des onglets `tab_strip`, pas des boutons) | `selectable_label` / `selectable_value` d'egui | fond de bouton sélectionné |
 | bascule d'outil d'une barre | `Button::selected` (`toolbar::tool_button`) | bouton enfoncé |
 
 Garde `aucun_bouton_selectionnable_hors_d_un_menu` (`tests/gardes.rs`) : un

@@ -58,6 +58,7 @@ pub use stokesforge_plot::ColorUsage;
 use stokesforge_plot::{SavedColors, CURVE_PALETTES};
 
 use crate::app::hover_help::help_text;
+use crate::app::tab_strip::{tab_strip, TabStripSide};
 use crate::number_field::number_field;
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{AppState, SaveTarget};
@@ -383,7 +384,7 @@ const CHECKER: f32 = 5.0;
 
 /// Nuancier affiché : carré ou roue. Choix mémorisé pour la session, commun
 /// à tous les sélecteurs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 enum PickerShape {
     #[default]
     Square,
@@ -757,10 +758,22 @@ fn picker_contents(
         let mut shape: PickerShape = ui
             .memory(|memory| memory.data.get_temp(shape_id))
             .unwrap_or_default();
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut shape, PickerShape::Square, tr!("color-shape-square"));
-            ui.selectable_value(&mut shape, PickerShape::Wheel, tr!("color-shape-wheel"));
-        });
+        // Deux vues du même nuancier : un petit jeu d'onglets, donc la bande
+        // commune (#170, point 7), pas des boutons sélectionnables.
+        let mut chosen = shape;
+        tab_strip(
+            ui,
+            TabStripSide::Top,
+            &[
+                (PickerShape::Square, tr!("color-shape-square")),
+                (PickerShape::Wheel, tr!("color-shape-wheel")),
+            ],
+            shape,
+            |picked| chosen = picked,
+            None,
+            || {},
+        );
+        shape = chosen;
         ui.memory_mut(|m| m.data.insert_temp(shape_id, shape));
 
         let (h, s, v) = &mut memory.hsv;
@@ -1261,6 +1274,130 @@ mod tests {
             .shapes
             .iter()
             .find_map(|clipped| walk(&clipped.shape, needle))
+    }
+
+    /// #170, point 7 : « Square | Wheel » est un jeu d'onglets soulignés, comme
+    /// le reste de l'application, pas deux boutons sélectionnables : le trait
+    /// d'accent est sous l'onglet actif, aucun fond `selection.bg_fill` ne
+    /// couvre un libellé, et un clic sur « Wheel » change de vue (et le garde
+    /// en mémoire pour les sélecteurs suivants).
+    #[test]
+    fn carre_et_roue_sont_des_onglets_soulignes() {
+        let context = egui::Context::default();
+        let mut env = PickerEnv {
+            project: SavedColors::default(),
+            user: SavedColors::default(),
+            requests: Vec::new(),
+        };
+        let mut value = "#ff0000".to_string();
+        let selection_fill = std::cell::Cell::new(egui::Color32::TRANSPARENT);
+        let mut clock = 0.0_f64;
+        let mut run = |events: Vec<egui::Event>, open: bool| {
+            // Le temps avance d'un dixième de seconde par image : la fenêtre surgissante
+            // s'ouvre en fondu, sa teinte doit être pleine pour la comparer.
+            clock += 0.1;
+            let input = egui::RawInput {
+                events,
+                time: Some(clock),
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                selection_fill.set(ui.visuals().selection.bg_fill);
+                let popup_id = ui.make_persistent_id(("stokesforge_color_popup", "Couleur"));
+                if open {
+                    set_picker_open(ui.ctx(), popup_id, true);
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(custom_id(popup_id), true));
+                }
+                color_button(
+                    ui,
+                    "Couleur",
+                    &mut value,
+                    ColorUsage::Background,
+                    Some("Auto"),
+                    &mut env,
+                );
+            });
+            output.textures_delta.clear();
+            output
+        };
+        run(vec![], true);
+        run(vec![], false);
+        let mut output = run(vec![], false);
+        fn flat_rects(output: &egui::FullOutput) -> Vec<egui::epaint::RectShape> {
+            fn walk(shape: &egui::Shape, into: &mut Vec<egui::epaint::RectShape>) {
+                match shape {
+                    egui::Shape::Rect(rect) => into.push(rect.clone()),
+                    egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, into)),
+                    _ => {}
+                }
+            }
+            let mut found = Vec::new();
+            for painted in &output.shapes {
+                walk(&painted.shape, &mut found);
+            }
+            found
+        }
+        let marks = |output: &egui::FullOutput| -> Vec<egui::Rect> {
+            flat_rects(output)
+                .into_iter()
+                .filter(|rect| rect.fill == crate::theme::accent())
+                .map(|rect| rect.rect)
+                .collect()
+        };
+        let under = |output: &egui::FullOutput, label: &str| -> bool {
+            let at = find_text(output, label).expect("onglet peint");
+            marks(output).iter().any(|mark| {
+                mark.height() <= 2.5 && mark.x_range().contains(at.x) && mark.top() > at.y
+            })
+        };
+        assert!(
+            under(&output, &tr!("color-shape-square")),
+            "trait sous Square"
+        );
+        assert!(
+            !under(&output, &tr!("color-shape-wheel")),
+            "témoin : pas de trait sous l'onglet inactif"
+        );
+        let filled_label = |output: &egui::FullOutput| {
+            let fill = selection_fill.get();
+            [tr!("color-shape-square"), tr!("color-shape-wheel")]
+                .iter()
+                .any(|label| {
+                    let at = find_text(output, label).expect("onglet peint");
+                    flat_rects(output)
+                        .iter()
+                        .any(|rect| rect.fill == fill && rect.rect.contains(at))
+                })
+        };
+        assert!(
+            !filled_label(&output),
+            "aucun fond de sélection derrière un libellé : des onglets, pas des boutons"
+        );
+        let click = |at, pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let wheel = find_text(&output, &tr!("color-shape-wheel")).unwrap();
+        run(vec![egui::Event::PointerMoved(wheel)], false);
+        run(vec![click(wheel, true)], false);
+        run(vec![click(wheel, false)], false);
+        output = run(vec![], false);
+        assert!(
+            under(&output, &tr!("color-shape-wheel")),
+            "un clic sur Wheel y déplace le trait"
+        );
+        assert!(!under(&output, &tr!("color-shape-square")));
+        let kept: PickerShape = context
+            .memory(|memory| {
+                memory
+                    .data
+                    .get_temp(egui::Id::new("stokesforge_picker_shape"))
+            })
+            .unwrap();
+        assert_eq!(kept, PickerShape::Wheel, "le choix reste en mémoire");
     }
 
     /// Bug #9 : le menu déroulant de destination de « Enregistrer » s'ouvre

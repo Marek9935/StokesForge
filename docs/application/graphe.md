@@ -389,7 +389,8 @@ quand la couleur peut l'être, couleurs enregistrées et saisie hexadécimale
 (`#RRGGBB`, ou `#RRGGBBAA` avec l'opacité). La case **« Custom color »**
 (une case à cocher depuis S-C5, #227) déplie le reste — Save Color et sa destination, nuancier (carré saturation ×
 luminosité avec barre de teinte, ou **roue chromatique** avec barre de
-valeur), **opacité**, saisie RGB et HSL. Le sélecteur se rouvre toujours
+valeur ; le choix « Square | Wheel » est un jeu d'onglets soulignés, `tab_strip`
+— #170, point 7 — et se garde en mémoire d'egui, `stokesforge_picker_shape`), **opacité**, saisie RGB et HSL. Le sélecteur se rouvre toujours
 replié (`color_picker::custom_id`). Cette fenêtre est une `egui::Area` gérée
 par `color_button` (et non un `egui::Popup`, dont egui n'autorise qu'un
 exemplaire ouvert : la liste d'un menu déroulant le refermerait) ; elle
