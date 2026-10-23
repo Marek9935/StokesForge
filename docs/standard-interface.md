@@ -113,6 +113,7 @@ mécanique.
 | S-X2 | `curseurs` | Main ouverte puis fermée pour glisser, flèche de redimensionnement sur une poignée, doigt sur un élément cliquable qui n'est pas un bouton. |
 | S-X3 | `fenetre-preferences` | **À venir (#148).** Les réglages d'application vont dans Edit › Preferences… ; les menus gardent les bascules d'affichage fréquentes. |
 | S-X4 | `registre-d-actions` | **À venir (#110).** Une table par action (libellé, logo, raccourci, grisage et sa raison) lue par menus, barres et clic droit. |
+| S-X5 | `trait-de-depot-unique` | Un seul trait « déposer ici » (`theme::drop_stroke`, vert de l'accent) : fichier externe sur la fenêtre ou le classeur, colonnes et lignes sur un graphe. |
 | S-P1 | `indicateur-apres-0-5-s` | Au-delà d'≈ 0,5 s : indicateur tournant + mot à l'endroit du résultat ; barre de progression si les étapes sont connues. |
 | S-P2 | `stop-au-dela-de-3-s` | Bouton Stop pour tout travail de plus de quelques secondes. |
 | S-P3 | `etat-vide-explicite` | Un état vide est une phrase grisée centrée qui dit ce qui manque et le geste pour le créer. |
@@ -713,6 +714,7 @@ Historique : #227, #237 (largeur « quelques chiffres »), #241 (volet Results).
 - **Curseurs** (S-X2) : main ouverte puis fermée pour glisser, flèche de
   redimensionnement sur une poignée, doigt sur un élément cliquable qui n'est
   pas un bouton.
+- **Trait de dépôt unique** (S-X5, #170) : survoler une fenêtre ou un classeur avec un fichier du système, un graphe avec des colonnes ou des lignes, se voit du même trait, `theme::drop_stroke` (vert de l'accent). Tests : `file_drop::tests`, `graph_window::tests`, `theme::tests`.
 - **Pas de sélecteur d'outil dans une fenêtre** (S-K7, #299). L'objet d'abord :
   on clique ou on glisse l'objet lui-même (une courbe, une poignée, une
   cellule) ; les outils (Pointeur, Texte, Zoom, formes) vivent dans la barre

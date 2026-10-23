@@ -60,8 +60,8 @@ const GRAPH_CONTROLS_HEIGHT: f32 = 28.0;
 /// de code de dépôt séparé à maintenir pour le cas détaché.
 ///
 /// Un survol avec une [`ColumnDragPayload`] active dessine un contour sobre
-/// autour du graphe (teinte de sélection de `theme`, pas de palette
-/// inventée) ; un relâchement au-dessus pousse
+/// autour du graphe (`theme::drop_stroke`, le même trait que le dépôt d'un
+/// fichier externe) ; un relâchement au-dessus pousse
 /// [`stokesforge_app_state::state::drop_payload_action`] dans `actions`, converti en
 /// [`Action::AddSeriesToGraph`]. Relâcher ailleurs qu'au-dessus d'un graphe
 /// ne pousse rien : `dnd_release_payload` ne répond que si le pointeur est
@@ -105,7 +105,7 @@ pub(super) fn graph_drop_target(
         ui.painter().rect_stroke(
             tab_rect,
             4.0,
-            egui::Stroke::new(2.5, theme::header_letter_row_selected_fill()),
+            theme::drop_stroke(),
             egui::StrokeKind::Inside,
         );
     }
@@ -1706,7 +1706,7 @@ pub(super) mod tests {
         let outline = |output: &egui::FullOutput| {
             output.shapes.iter().any(|painted| {
                 matches!(&painted.shape,
-                    egui::Shape::Rect(rect) if rect.rect == contents && rect.stroke.width == 2.5)
+                    egui::Shape::Rect(rect) if rect.rect == contents && rect.stroke == theme::drop_stroke())
             })
         };
         let release = |pos| egui::Event::PointerButton {

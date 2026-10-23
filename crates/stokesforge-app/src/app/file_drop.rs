@@ -62,7 +62,7 @@ pub(super) fn begin_file_drop(ctx: &egui::Context) {
         .rect_stroke(
             rect,
             0.0,
-            egui::Stroke::new(2.0, crate::theme::file_drop_outline_color()),
+            crate::theme::drop_stroke(),
             egui::StrokeKind::Inside,
         );
     }
@@ -89,7 +89,7 @@ pub(super) fn claim_file_drop(ui: &egui::Ui, book: NodeId) {
         ui.painter().rect_stroke(
             rect,
             0.0,
-            egui::Stroke::new(3.0, crate::theme::file_drop_outline_color()),
+            crate::theme::drop_stroke(),
             egui::StrokeKind::Inside,
         );
     }
@@ -247,14 +247,15 @@ mod tests {
     }
 
     /// Le survol d'un fichier se voit : un contour autour de la fenêtre
-    /// (destination « nouveau classeur »), plus épais autour du classeur
-    /// survolé. Sans survol, aucun contour.
+    /// (destination « nouveau classeur »), un second autour du classeur
+    /// survolé, **du même trait** que le graphe survolé par des colonnes
+    /// (`theme::drop_stroke`, #170 point 2). Sans survol, aucun contour.
     #[test]
     fn le_survol_d_un_fichier_entoure_la_fenetre_et_le_classeur_survole() {
         let book = NodeId::from_raw(42);
         let context = egui::Context::default();
-        let strokes = |pointer: egui::Pos2, hovered: bool| -> Vec<f32> {
-            let mut widths = Vec::new();
+        let strokes = |pointer: egui::Pos2, hovered: bool| -> Vec<(f32, [u8; 3])> {
+            let mut found = Vec::new();
             for _ in 0..3 {
                 let image = Image {
                     pointer,
@@ -268,34 +269,41 @@ mod tests {
                     finish_file_drop(&ctx);
                 });
                 output.textures_delta.clear();
-                widths = output
+                found = output
                     .shapes
                     .iter()
                     .filter_map(|painted| match &painted.shape {
                         egui::Shape::Rect(rect) if rect.stroke.width > 0.0 => {
-                            Some(rect.stroke.width)
+                            // Sans l'alpha : la fenêtre du faux classeur s'ouvre en fondu.
+                            let [r, g, b, _] = rect.stroke.color.to_array();
+                            Some((rect.stroke.width, [r, g, b]))
                         }
                         _ => None,
                     })
                     .collect();
             }
-            widths.sort_by(f32::total_cmp);
-            widths
+            found
         };
+        let stroke = crate::theme::drop_stroke();
+        let [r, g, b, _] = stroke.color.to_array();
+        let expected = (stroke.width, [r, g, b]);
         assert!(
             strokes(egui::pos2(200.0, 200.0), false).is_empty(),
             "sans survol, rien"
         );
         assert_eq!(
             strokes(egui::pos2(700.0, 500.0), true),
-            vec![2.0],
-            "la fenêtre seule"
+            vec![expected],
+            "la fenêtre seule, exactement le trait de dépôt"
         );
-        assert_eq!(
-            strokes(egui::pos2(200.0, 200.0), true),
-            vec![2.0, 3.0],
-            "la fenêtre et le classeur survolé"
-        );
+        // Le classeur survolé s'ouvre en fondu : sa teinte n'est pas encore
+        // pleine, on vérifie l'épaisseur et la dominante verte.
+        let both = strokes(egui::pos2(200.0, 200.0), true);
+        assert_eq!(both.len(), 2, "la fenêtre et le classeur survolé");
+        for (width, [r, g, b]) in both {
+            assert_eq!(width, stroke.width, "même épaisseur que le graphe");
+            assert!(g > r && g > b, "vert de l'accent, pas le bleu d'avant");
+        }
     }
 
     /// Deux classeurs superposés : le dépôt va à celui du dessus, seul à

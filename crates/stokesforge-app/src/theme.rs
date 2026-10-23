@@ -216,12 +216,13 @@ pub fn list_row_hover_fill() -> Color32 {
     Color32::from_gray(0xEC)
 }
 
-/// Contour bleu d'un fichier du système glissé au-dessus de la fenêtre
-/// (`app/file_drop.rs`). Distinct, à ce jour, du vert des dépôts internes
-/// (colonnes vers un graphe, [`header_letter_row_selected_fill`]) : l'écart
-/// est une question ouverte de #170 (point 2), pas un choix arrêté.
-pub fn file_drop_outline_color() -> Color32 {
-    Color32::from_rgb(0x2a, 0x7f, 0xff)
+/// Trait « déposer ici », **unique** (#170, point 2) : le vert de l'accent,
+/// pour un fichier du système glissé au-dessus de la fenêtre
+/// (`app/file_drop.rs`) comme pour des colonnes ou des lignes glissées vers un
+/// graphe (`app/graph_window.rs`). Un seul aspect dit « le dépôt est possible
+/// ici » ; la nature du geste (externe ou interne) ne change pas sa couleur.
+pub fn drop_stroke() -> egui::Stroke {
+    egui::Stroke::new(2.5, ACCENT)
 }
 
 /// Aperçu de l'import : ligne d'en-tête reconnue (nom, sous-en-tête, unité),
@@ -495,6 +496,18 @@ mod tests {
         assert!(
             !visuals().dark_mode,
             "le thème StokesForge doit rester clair"
+        );
+    }
+
+    /// Le trait de dépôt (#170, point 2) est le vert de l'accent, pour un
+    /// fichier externe comme pour des colonnes : pas le bleu d'avant.
+    #[test]
+    fn le_trait_de_depot_est_le_vert_de_l_accent() {
+        let stroke = drop_stroke();
+        assert_eq!(stroke.color, ACCENT);
+        assert!(
+            stroke.color.g() > stroke.color.b() && stroke.color.g() > stroke.color.r(),
+            "vert dominant"
         );
     }
 

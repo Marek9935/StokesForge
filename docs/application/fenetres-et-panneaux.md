@@ -147,7 +147,7 @@ relevée le temps de la rangée), donc la case à cocher y mesure 24 pt de côt�
 Le séparateur du fil d'étapes de l'assistant d'import est l'icône `CaretRight`
 atténuée, sans info-bulle (décorative, sans geste). Toute couleur d'état ou de chrome
 vient de `theme.rs` (`accent`, `tab_rule_color`, `tab_hover_mark_color`,
-`list_row_selected_fill`, `list_row_hover_fill`, `file_drop_outline_color`…)
+`list_row_selected_fill`, `list_row_hover_fill`, `drop_stroke`…)
 ou des `Visuals` qu'il pose (`error_fg_color`, `warn_fg_color`,
 `selection`) : aucun `Color32::from_…` ni teinte nommée hors de `theme.rs` et
 `color_picker.rs` (`aucune_couleur_en_dur_hors_du_theme`). Les notes

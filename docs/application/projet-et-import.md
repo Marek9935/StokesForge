@@ -67,7 +67,7 @@ Ce geste n'a pas de raccourci supplémentaire ; il reste accessible au menu.
 
 ### Glisser-déposer de fichiers
 
-Déposer des fichiers sur la fenêtre principale émet `Action::DropFiles`. Le
+Déposer des fichiers sur la fenêtre principale émet `Action::DropFiles`. Le survol se voit par le trait de dépôt **unique** de l'application, `theme::drop_stroke` (vert de l'accent, S-X5), le même que celui du graphe survolé par des colonnes ou des lignes. Le
 classeur flottant sous le curseur réclame le dépôt en se peignant
 (`app::file_drop::claim_file_drop`) : il reçoit une feuille par fichier, sinon un nouveau
 classeur est créé. Les `.stf` ne sont jamais importés : `AppState` les met en
