@@ -166,7 +166,7 @@ use super::object_manager_ui::{
     object_manager_contents, selected_manager_target, ObjectManagerRequest,
 };
 use super::project_manager::{
-    project_manager_contents_from_tree, PmInteraction, PROJECT_MANAGER_WIDTH,
+    project_manager_contents_from_tree, PmEntry, PmInteraction, PROJECT_MANAGER_WIDTH,
 };
 use super::script_console::{script_model_contents, ScriptConsoleModel};
 use super::shortcuts::collect_undo_redo_shortcuts;
@@ -210,7 +210,7 @@ pub(super) struct ProjectManagerViewModel {
     /// `tree` — nécessaire pour que la fenêtre détachée du Project Manager
     /// affiche elle aussi la sélection courante et les fenêtres fermées atténuées à
     /// jour (§6).
-    pub(super) selected: HashSet<Tab>,
+    pub(super) selected: HashSet<PmEntry>,
     /// Copie des onglets ouverts ([`StokesForgeApp::open_tabs`]), même
     /// resynchronisation : les autres lignes sont atténuées.
     pub(super) open: HashSet<Tab>,
@@ -240,7 +240,7 @@ pub(super) struct DetachedProjectManagerRequests {
     /// peinte par la fenêtre détachée — `None` tant qu'aucune image n'a
     /// encore tourné depuis la dernière vidange. Remplacés en bloc plutôt
     /// qu'en delta, comme `DetachedTabRequests::geometry` (§6).
-    pub(super) selection: Option<HashSet<Tab>>,
+    pub(super) selection: Option<HashSet<PmEntry>>,
     /// Onglets que « Close » a demandé de fermer depuis la dernière vidange.
     pub(super) close: Vec<Tab>,
 }
@@ -1590,7 +1590,10 @@ mod tests {
             );
         }
         settle(&mut app);
-        app.pm_selection.insert(Tab::Book(book));
+        app.pm_selection
+            .insert(super::super::project_manager::PmEntry::Window(Tab::Book(
+                book,
+            )));
         let output = paint(&mut app);
         assert_eq!(
             output.viewport_output[&ids[2]].repaint_delay,

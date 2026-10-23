@@ -75,6 +75,7 @@ détaché : Rattacher uniquement, sans décoration système. Une fermeture OS
 rattache. Réutiliser les contenus de chaque surface et les lectures/requêtes
 de `window_detach.rs` ; le moteur Python reste dans l’AppState principal.
 
+- Project Manager (#170, point 4) : sa sélection est un ensemble de `PmEntry` (`Folder(NodeId)` ou `Window(Tab)`), jamais des `Tab` seuls ; un geste de ligne passe par `select_gestures` (dossier et fenêtre), un clic simple sur un dossier le sélectionne et le déplie s'il est fermé sans jamais le replier (le double-clic et le triangle le replient), `open_requests` reste réservé aux fenêtres, le collage vise `paste_parent` (le dossier seul sélectionné, sinon la racine). **Copier et dupliquer un dossier sont refusés** (`AppState::refuse_folder_copy`, entrées grisées `disabled-copy-folder`) tant qu'une copie de dossier avec ses classeurs d'origine n'est pas faite (issue à part) ; ne pas contourner par `capture_objects`.
 - Menus (#114, #152) : la grammaire de `docs/menus.md` est la source unique
   — sections dans l'ordre canonique (principale, créer, presse-papiers,
   organiser, supprimer, sortie, `Properties…` en dernier), séparateurs posés

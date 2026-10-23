@@ -11,6 +11,17 @@
 //! pas à définir la prochaine plage après un clic dans le workspace (#154).
 //! Open et Close vivent dans le menu contextuel d'une entrée et portent
 //! sur la sélection entière ; l'arbre commence directement sous l'en-tête.
+//!
+//! Une entrée sélectionnable est un dossier **ou** une fenêtre ([`PmEntry`],
+//! #170 point 4). Un clic sur un dossier le sélectionne et, s'il est fermé, le
+//! déplie ; un clic sur un dossier ouvert ne le replie pas (un clic de
+//! sélection ne doit pas faire sauter l'arbre) ; le double-clic et le
+//! triangle le replient. Supprimer et Renommer agissent sur lui, une sélection
+//! de dossier collée **dans** ce dossier. **Copier et dupliquer un dossier sont
+//! refusés pour l'instant** : une copie locale garderait ses références vers
+//! les classeurs d'origine (hors dossier) ; l'entrée de menu est grisée avec sa
+//! raison, et `AppState` refuse le geste au clavier avec la même phrase. À
+//! reprendre dans une issue à part.
 
 use std::collections::HashSet;
 
@@ -44,7 +55,7 @@ pub(super) struct PmInteraction<'a> {
     pub(super) open_requests: &'a mut Vec<Tab>,
     /// Sélection courante dans l'arbre — Ctrl/Cmd-clic en bascule
     /// l'appartenance sans ouvrir l'onglet.
-    pub(super) selection: &'a mut HashSet<Tab>,
+    pub(super) selection: &'a mut HashSet<PmEntry>,
     /// Onglets actuellement ouverts (flottants ou détachés) : les autres
     /// lignes sont atténuées dans l'arbre (#327).
     pub(super) open: &'a HashSet<Tab>,
@@ -58,30 +69,73 @@ pub(super) struct PmInteraction<'a> {
 #[derive(Clone, Default)]
 struct PmMemory {
     focus: bool,
-    anchor: Option<Tab>,
+    anchor: Option<PmEntry>,
     rename: Vec<NodeId>,
     renamed: Vec<(NodeId, String)>,
     text: Option<String>,
     /// Dernier clic simple sur une fenêtre déjà seule sélectionnée : s'il n'est
     /// pas suivi d'un second clic avant [`SLOW_CLICK_SECONDS`], c'est un clic
     /// lent, donc un renommage (S-K4, #224).
-    slow_click: Option<(Tab, f64)>,
-    /// Les fenêtres de l'arbre dans l'ordre de lecture, dossiers repliés
-    /// compris (#327) : la plage Maj et les ids agissants en dépendent.
-    order: Vec<Tab>,
+    slow_click: Option<(PmEntry, f64)>,
+    /// Les dossiers et fenêtres de l'arbre dans l'ordre de lecture, dossiers
+    /// repliés compris (#327) : la plage Maj et les ids agissants en dépendent.
+    order: Vec<PmEntry>,
     /// Dossiers à déplier à leur prochaine peinture (#326) : le parent d'un
     /// dossier qu'on vient de créer doit montrer son nouvel enfant.
     reveal: Vec<NodeId>,
 }
 
-/// Les onglets des fenêtres de `tree`, en parcours en profondeur.
-fn tree_order(tree: &[ProjectTreeNode], out: &mut Vec<Tab>) {
-    for node in tree {
-        match node {
-            ProjectTreeNode::Folder { children, .. } => tree_order(children, out),
-            ProjectTreeNode::Window { id, kind, .. } => out.push(tab_for_window(*id, *kind)),
+/// Une entrée sélectionnable de l'arbre du Project Manager (#170, point 4) :
+/// un dossier, ou une fenêtre (son onglet).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) enum PmEntry {
+    Folder(NodeId),
+    Window(Tab),
+}
+
+impl PmEntry {
+    /// Le nœud du modèle que désigne l'entrée.
+    pub(super) fn node(self) -> NodeId {
+        match self {
+            PmEntry::Folder(id) => id,
+            PmEntry::Window(tab) => tab_node(tab),
         }
     }
+
+    fn is_folder(self) -> bool {
+        matches!(self, PmEntry::Folder(_))
+    }
+}
+
+/// Les dossiers et fenêtres de `tree`, en parcours en profondeur, un dossier
+/// avant ses enfants.
+fn tree_order(tree: &[ProjectTreeNode], out: &mut Vec<PmEntry>) {
+    for node in tree {
+        match node {
+            ProjectTreeNode::Folder { id, children, .. } => {
+                out.push(PmEntry::Folder(*id));
+                tree_order(children, out);
+            }
+            ProjectTreeNode::Window { id, kind, .. } => {
+                out.push(PmEntry::Window(tab_for_window(*id, *kind)));
+            }
+        }
+    }
+}
+
+/// Où se colle le presse-papiers : **dans** le dossier quand la sélection est
+/// ce seul dossier, à la racine sinon (comme avant #170).
+pub(super) fn paste_parent(selection: &HashSet<PmEntry>, root: NodeId) -> NodeId {
+    let mut entries = selection.iter();
+    match (entries.next(), entries.next()) {
+        (Some(PmEntry::Folder(id)), None) => *id,
+        _ => root,
+    }
+}
+
+/// La sélection contient-elle un dossier (copie refusée, voir la doc de tête) ?
+pub(super) fn selection_has_folder(selection: &HashSet<PmEntry>) -> bool {
+    selection.iter().any(|entry| entry.is_folder())
 }
 
 pub(super) fn viewport_id() -> egui::ViewportId {
@@ -108,11 +162,12 @@ fn memory_id(ctx: &egui::Context) -> egui::Id {
 /// l'éditeur du panneau. Les gestes internes gardent leur propre ancre,
 /// notamment lorsqu'une plage Maj revient à une seule entrée.
 pub(super) fn follow_selection_anchor(ctx: &egui::Context, tab: Option<Tab>) {
+    let anchor = tab.map(PmEntry::Window);
     ctx.data_mut(|data| {
         for viewport in [egui::ViewportId::ROOT, viewport_id()] {
             let key = egui::Id::new(("project_manager_gestures", viewport));
             let mut memory = data.get_temp::<PmMemory>(key).unwrap_or_default();
-            memory.anchor = tab;
+            memory.anchor = anchor;
             data.insert_temp(key, memory);
         }
     });
@@ -156,16 +211,17 @@ pub(super) fn has_focus(ctx: &egui::Context) -> bool {
     })
 }
 
-fn selected_ids(selection: &HashSet<Tab>, order: &[Tab]) -> Vec<NodeId> {
+fn selected_ids(selection: &HashSet<PmEntry>, order: &[PmEntry]) -> Vec<NodeId> {
     order
         .iter()
-        .filter(|tab| selection.contains(tab))
-        .map(|tab| tab_node(*tab))
+        .filter(|entry| selection.contains(entry))
+        .map(|entry| entry.node())
         .collect()
 }
 
 /// La cible d'un menu d'objets du Project Manager : des fenêtres, ou un
-/// dossier (qui n'a ni Copier ni Dupliquer).
+/// dossier (qui offre en plus Add Folder, et dont Copier et Dupliquer sont
+/// grisés pour l'instant, comme pour toute sélection qui en contient un).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ObjectMenuTarget {
     Windows,
@@ -178,20 +234,32 @@ pub(super) enum ObjectMenuTarget {
 /// `sections` est celui du menu appelant : les entrées propres au panneau
 /// (Open · Close) se peignent avant, sous le même compte de séparateurs.
 /// Le collage déclenche une demande de lecture à egui-winit, donc utilise
-/// aussi le récepteur Wayland.
+/// aussi le récepteur Wayland. `has_folder` : la sélection contient un dossier,
+/// donc Copy et Duplicate sont grisés (copie de dossier refusée, #170).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn object_menu(
     ui: &mut egui::Ui,
     sections: &mut MenuSections,
     target: ObjectMenuTarget,
     ids: &[NodeId],
     parent: NodeId,
+    has_folder: bool,
     actions: &mut Vec<Action>,
     rename_viewport: egui::ViewportId,
 ) {
     let memory_key = egui::Id::new(("project_manager_gestures", rename_viewport));
     let paste_key = egui::Id::new(("project_paste_parent", ui.ctx().viewport_id()));
-    let windows = target == ObjectMenuTarget::Windows;
     let enabled = !ids.is_empty();
+    // Copier et dupliquer : refusés dès qu'un dossier est visé (voir la doc de tête).
+    let has_folder = has_folder || target == ObjectMenuTarget::Folder;
+    let copy_enabled = enabled && !has_folder;
+    let copy_reason = || {
+        if has_folder {
+            tr!("disabled-copy-folder")
+        } else {
+            tr!("project-manager-selection-needed")
+        }
+    };
     if target == ObjectMenuTarget::Folder {
         // Seul geste qui crée dans un sous-dossier (#326, `docs/menus.md`).
         sections.section(ui, true, |ui| {
@@ -206,15 +274,14 @@ pub(super) fn object_menu(
         });
     }
     sections.section(ui, true, |ui| {
-        if windows
-            && ui
-                .add_enabled(
-                    enabled,
-                    egui::Button::new(tr!("action-copy"))
-                        .shortcut_text(ui.ctx().format_shortcut(&super::shortcuts::SHORTCUT_COPY)),
-                )
-                .on_disabled_hover_text(tr!("project-manager-selection-needed"))
-                .clicked()
+        if ui
+            .add_enabled(
+                copy_enabled,
+                egui::Button::new(tr!("action-copy"))
+                    .shortcut_text(ui.ctx().format_shortcut(&super::shortcuts::SHORTCUT_COPY)),
+            )
+            .on_disabled_hover_text(copy_reason())
+            .clicked()
         {
             actions.push(Action::CopyObjects(ids.to_vec()));
             ui.close();
@@ -253,15 +320,14 @@ pub(super) fn object_menu(
             }
             ui.close();
         }
-        if windows
-            && ui
-                .add_enabled(
-                    enabled,
-                    egui::Button::new(tr!("action-duplicate-project-object"))
-                        .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_DUPLICATE_OBJECT)),
-                )
-                .on_disabled_hover_text(tr!("project-manager-selection-needed"))
-                .clicked()
+        if ui
+            .add_enabled(
+                copy_enabled,
+                egui::Button::new(tr!("action-duplicate-project-object"))
+                    .shortcut_text(ui.ctx().format_shortcut(&SHORTCUT_DUPLICATE_OBJECT)),
+            )
+            .on_disabled_hover_text(copy_reason())
+            .clicked()
         {
             actions.push(Action::DuplicateObjects(ids.to_vec()));
             ui.close();
@@ -302,7 +368,7 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
     });
     let ids = selected_ids(interaction.selection, &memory.order);
     // Clic lent : le délai écoulé sans second clic, le nom se renomme comme à F2.
-    if let Some((tab, at)) = memory.slow_click {
+    if let Some((entry, at)) = memory.slow_click {
         let now = ctx.input(|input| input.time);
         if now - at >= SLOW_CLICK_SECONDS {
             memory.slow_click = None;
@@ -312,7 +378,7 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
                 memory.text = None;
                 ctx.request_repaint();
             }
-        } else if !interaction.selection.contains(&tab) {
+        } else if !interaction.selection.contains(&entry) {
             memory.slow_click = None;
         } else {
             ctx.request_repaint_after(std::time::Duration::from_secs_f64(
@@ -321,7 +387,8 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
         }
     }
     if pending.is_some() || (memory.focus && memory.rename.is_empty() && !ctx.text_edit_focused()) {
-        let parent = pending.unwrap_or(interaction.root);
+        let parent =
+            pending.unwrap_or_else(|| paste_parent(interaction.selection, interaction.root));
         let mut paste = None;
         ctx.input_mut(|input| {
             if memory.focus && !ids.is_empty() {
@@ -380,6 +447,10 @@ pub(super) fn project_manager_contents_from_tree(
         let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
         memory.order.clear();
         tree_order(tree, &mut memory.order);
+        // Un dossier supprimé ne reste pas sélectionné (un script, Ctrl+Z).
+        interaction
+            .selection
+            .retain(|entry| !entry.is_folder() || memory.order.contains(entry));
         data.insert_temp(memory_key, memory);
     });
     let response = egui::ScrollArea::vertical().show(ui, |ui| {
@@ -483,6 +554,86 @@ fn rename_editor(
     shown.response
 }
 
+/// Ce qu'une ligne a reçu comme geste de sélection (voir [`select_gestures`]).
+#[derive(Default)]
+struct RowGestures {
+    /// Clic simple sans modificateur : la ligne devient la seule sélectionnée.
+    plain: bool,
+    /// Double-clic sans modificateur.
+    double: bool,
+}
+
+/// Les gestes de sélection d'une ligne, communs aux dossiers et aux fenêtres :
+/// clic droit (sélectionne si besoin), Maj (plage), Ctrl/Cmd (bascule), clic
+/// simple (remplace, arme le clic lent du renommage) et double-clic (désarme
+/// le clic lent). Ce que le clic simple **fait** ensuite — ouvrir la fenêtre,
+/// déplier le dossier — est à l'appelant.
+fn select_gestures(
+    ui: &egui::Ui,
+    interaction: &mut PmInteraction,
+    memory_key: egui::Id,
+    entry: PmEntry,
+    response: &egui::Response,
+    selected: bool,
+) -> RowGestures {
+    let mut gestures = RowGestures::default();
+    if response.clicked() || response.secondary_clicked() {
+        let modifiers = ui.input(|input| input.modifiers);
+        let mut memory = ui
+            .ctx()
+            .data(|data| data.get_temp::<PmMemory>(memory_key))
+            .unwrap_or_default();
+        if response.secondary_clicked() {
+            if !selected {
+                interaction.selection.clear();
+                interaction.selection.insert(entry);
+            }
+        } else if modifiers.shift {
+            let anchor = memory.anchor.unwrap_or(entry);
+            if let (Some(a), Some(b)) = (
+                memory.order.iter().position(|t| *t == anchor),
+                memory.order.iter().position(|t| *t == entry),
+            ) {
+                // L'ordre complet de l'image précédente reste disponible dans
+                // la liste de rangs des lignes, y compris après la cible.
+                if !modifiers.command {
+                    interaction.selection.clear();
+                }
+                interaction
+                    .selection
+                    .extend(memory.order[a.min(b)..=a.max(b)].iter().copied());
+            }
+        } else if modifiers.command {
+            if !interaction.selection.remove(&entry) {
+                interaction.selection.insert(entry);
+            }
+            memory.anchor = Some(entry);
+        } else {
+            let alone = selected && interaction.selection.len() == 1;
+            memory.slow_click = alone.then(|| (entry, ui.input(|input| input.time)));
+            interaction.selection.clear();
+            interaction.selection.insert(entry);
+            memory.anchor = Some(entry);
+            gestures.plain = true;
+        }
+        memory.focus = true;
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(memory_key, memory));
+        // La demande d'ouverture s'applique après la peinture : sans
+        // image réclamée ici, le surlignage et la fenêtre active
+        // n'apparaîtraient qu'au prochain mouvement de souris.
+        ui.ctx().request_repaint();
+    }
+    if response.double_clicked() {
+        ui.ctx().data_mut(|data| {
+            data.get_temp_mut_or_default::<PmMemory>(memory_key)
+                .slow_click = None;
+        });
+        gestures.double = ui.input(|input| input.modifiers.is_none());
+    }
+    gestures
+}
+
 /// Peint récursivement un nœud de [`ProjectTreeNode`] et ses enfants ; rend
 /// le centre vertical de sa rangée, pour les connecteurs de son parent.
 fn project_tree_node_ui(
@@ -494,6 +645,7 @@ fn project_tree_node_ui(
     let memory_key = memory_id(ui.ctx());
     match node {
         ProjectTreeNode::Folder { id, name, children } => {
+            let entry = PmEntry::Folder(*id);
             let state_id = ui.make_persistent_id(("project_tree_folder", id));
             let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
                 ui.ctx(),
@@ -512,37 +664,62 @@ fn project_tree_node_ui(
             // #170 : la ligne d'en-tête a la hauteur d'une ligne de liste ; la
             // hauteur est rendue après le corps (la réponse emprunte l'`Ui`).
             let previous_height = raise_to_list_row_height(ui);
-            let (toggle, _, _) = state
-                .show_header(ui, |ui| {
+            let mut gestures = RowGestures::default();
+            let mut header = state.show_header(ui, |ui| {
+                if is_renaming(ui.ctx(), memory_key, *id) {
                     ui.add(icon_image(Icon::Folder, IconRole::Folder));
-                    if is_renaming(ui.ctx(), memory_key, *id) {
-                        rename_editor(ui, interaction, memory_key, *id, name, siblings);
-                        return;
-                    }
-                    let response = ui.label(name);
-                    response.context_menu(|ui| {
-                        let viewport = ui.ctx().viewport_id();
-                        object_menu(
-                            ui,
-                            &mut MenuSections::new(),
-                            ObjectMenuTarget::Folder,
-                            &[*id],
-                            *id,
-                            interaction.actions,
-                            viewport,
-                        )
-                    });
-                })
-                .body(|ui| {
-                    crate::tree_lines::tree_children(ui, |ui, branch| {
-                        if children.is_empty() {
-                            branch.mark(ui.weak(tr!("project-folder-empty")).rect.center().y);
-                        }
-                        for child in children {
-                            branch.mark(project_tree_node_ui(ui, child, children, interaction));
-                        }
-                    });
+                    rename_editor(ui, interaction, memory_key, *id, name, siblings);
+                    return;
+                }
+                // #170 point 4 : un dossier est une ligne de liste comme une
+                // fenêtre (fond, filet, survol), sélectionnable.
+                let selected = interaction.selection.contains(&entry);
+                let response = list_row(
+                    ui,
+                    Some(icon_image(Icon::Folder, IconRole::Folder)),
+                    name,
+                    selected,
+                    false,
+                );
+                gestures = select_gestures(ui, interaction, memory_key, entry, &response, selected);
+                response.context_menu(|ui| {
+                    let viewport = ui.ctx().viewport_id();
+                    let memory = ui
+                        .ctx()
+                        .data(|data| data.get_temp::<PmMemory>(memory_key))
+                        .unwrap_or_default();
+                    let ids = selected_ids(interaction.selection, &memory.order);
+                    let has_folder = selection_has_folder(interaction.selection);
+                    object_menu(
+                        ui,
+                        &mut MenuSections::new(),
+                        ObjectMenuTarget::Folder,
+                        &ids,
+                        *id,
+                        has_folder,
+                        interaction.actions,
+                        viewport,
+                    )
                 });
+            });
+            // Un clic sur un dossier fermé le déplie, sur un dossier ouvert il
+            // ne le replie pas ; le double-clic le replie (le triangle aussi).
+            if gestures.plain && !header.is_open() {
+                header.set_open(true);
+            }
+            if gestures.double {
+                header.set_open(false);
+            }
+            let (toggle, _, _) = header.body(|ui| {
+                crate::tree_lines::tree_children(ui, |ui, branch| {
+                    if children.is_empty() {
+                        branch.mark(ui.weak(tr!("project-folder-empty")).rect.center().y);
+                    }
+                    for child in children {
+                        branch.mark(project_tree_node_ui(ui, child, children, interaction));
+                    }
+                });
+            });
             restore_row_height(ui, previous_height);
             toggle.rect.center().y
         }
@@ -554,6 +731,7 @@ fn project_tree_node_ui(
                 WindowKind::Note => (Icon::Note, IconRole::Note),
             };
             let tab = tab_for_window(*id, *kind);
+            let entry = PmEntry::Window(tab);
             if is_renaming(ui.ctx(), memory_key, *id) {
                 return with_list_row_height(ui, |ui| {
                     rename_editor(ui, interaction, memory_key, *id, name, siblings)
@@ -562,7 +740,7 @@ fn project_tree_node_ui(
                 .center()
                 .y;
             }
-            let selected = interaction.selection.contains(&tab);
+            let selected = interaction.selection.contains(&entry);
             let is_closed = !interaction.open.contains(&tab);
             // Le salt par onglet évite que toutes les lignes partagent le même Id.
             let response = ui
@@ -577,52 +755,9 @@ fn project_tree_node_ui(
                     )
                 })
                 .inner;
-            if response.clicked() || response.secondary_clicked() {
-                let modifiers = ui.input(|input| input.modifiers);
-                let mut memory = ui
-                    .ctx()
-                    .data(|data| data.get_temp::<PmMemory>(memory_key))
-                    .unwrap_or_default();
-                if response.secondary_clicked() {
-                    if !selected {
-                        interaction.selection.clear();
-                        interaction.selection.insert(tab);
-                    }
-                } else if modifiers.shift {
-                    let anchor = memory.anchor.unwrap_or(tab);
-                    if let (Some(a), Some(b)) = (
-                        memory.order.iter().position(|t| *t == anchor),
-                        memory.order.iter().position(|t| *t == tab),
-                    ) {
-                        // L'ordre complet de l'image précédente reste disponible dans
-                        // la liste de rangs des lignes, y compris après la cible.
-                        if !modifiers.command {
-                            interaction.selection.clear();
-                        }
-                        interaction
-                            .selection
-                            .extend(memory.order[a.min(b)..=a.max(b)].iter().copied());
-                    }
-                } else if modifiers.command {
-                    if !interaction.selection.remove(&tab) {
-                        interaction.selection.insert(tab);
-                    }
-                    memory.anchor = Some(tab);
-                } else {
-                    let alone = selected && interaction.selection.len() == 1;
-                    memory.slow_click = alone.then(|| (tab, ui.input(|input| input.time)));
-                    interaction.selection.clear();
-                    interaction.selection.insert(tab);
-                    memory.anchor = Some(tab);
-                    interaction.open_requests.push(tab);
-                }
-                memory.focus = true;
-                ui.ctx()
-                    .data_mut(|data| data.insert_temp(memory_key, memory));
-                // La demande d'ouverture s'applique après la peinture : sans
-                // image réclamée ici, le surlignage et la fenêtre active
-                // n'apparaîtraient qu'au prochain mouvement de souris.
-                ui.ctx().request_repaint();
+            let gestures = select_gestures(ui, interaction, memory_key, entry, &response, selected);
+            if gestures.plain {
+                interaction.open_requests.push(tab);
             }
             response.context_menu(|ui| {
                 let mut sections = MenuSections::new();
@@ -632,8 +767,10 @@ fn project_tree_node_ui(
                         .on_hover_text(tr!("project-manager-open", "hint"))
                         .clicked()
                     {
-                        for &tab in interaction.selection.iter() {
-                            interaction.open_requests.push(tab);
+                        for entry in interaction.selection.iter() {
+                            if let PmEntry::Window(tab) = entry {
+                                interaction.open_requests.push(*tab);
+                            }
                         }
                         ui.close();
                     }
@@ -642,8 +779,10 @@ fn project_tree_node_ui(
                         .on_hover_text(tr!("project-manager-close", "hint"))
                         .clicked()
                     {
-                        for &tab in interaction.selection.iter() {
-                            interaction.close_requests.push(tab);
+                        for entry in interaction.selection.iter() {
+                            if let PmEntry::Window(tab) = entry {
+                                interaction.close_requests.push(*tab);
+                            }
                         }
                         ui.close();
                     }
@@ -654,25 +793,22 @@ fn project_tree_node_ui(
                     .unwrap_or_default();
                 let ids = selected_ids(interaction.selection, &memory.order);
                 let viewport = ui.ctx().viewport_id();
+                let parent = paste_parent(interaction.selection, interaction.root);
+                let has_folder = selection_has_folder(interaction.selection);
                 object_menu(
                     ui,
                     &mut sections,
                     ObjectMenuTarget::Windows,
                     &ids,
-                    interaction.root,
+                    parent,
+                    has_folder,
                     interaction.actions,
                     viewport,
                 );
             });
-            if response.double_clicked() {
-                ui.ctx().data_mut(|data| {
-                    data.get_temp_mut_or_default::<PmMemory>(memory_key)
-                        .slow_click = None;
-                });
-            }
             // S-K3 : un double-clic active ou restaure la fenêtre, il ne la
             // ferme jamais (fermer se fait par Close ou l'en-tête).
-            if response.double_clicked() && ui.input(|input| input.modifiers.is_none()) {
+            if gestures.double {
                 interaction.open_requests.push(tab);
             }
             response.rect.center().y
@@ -699,7 +835,7 @@ impl StokesForgeApp {
             self.pm_last_active_tab = active_tab;
             if self.pm_selection.len() <= 1 {
                 self.pm_selection.clear();
-                self.pm_selection.extend(active_tab);
+                self.pm_selection.extend(active_tab.map(PmEntry::Window));
                 follow_selection_anchor(ctx, active_tab);
             }
         }
@@ -887,18 +1023,34 @@ pub(super) mod tests {
         (session, Tab::Book(book_id), Tab::Graph(graph), tree)
     }
 
+    /// Une sélection de fenêtres (les tests historiques n'en ont pas d'autre).
+    pub(in crate::app) fn fenetres<const N: usize>(tabs: [Tab; N]) -> HashSet<PmEntry> {
+        tabs.into_iter().map(PmEntry::Window).collect()
+    }
+
+    /// Les onglets des fenêtres d'une sélection (les dossiers sont écartés).
+    fn onglets(selection: &HashSet<PmEntry>) -> HashSet<Tab> {
+        selection
+            .iter()
+            .filter_map(|entry| match entry {
+                PmEntry::Window(tab) => Some(*tab),
+                PmEntry::Folder(_) => None,
+            })
+            .collect()
+    }
+
     /// Les accumulateurs de [`PmInteraction`] d'un test, et une image peinte
     /// de l'arbre sur un écran de 400 × 400.
     struct Banc {
         actions: RefCell<Vec<Action>>,
         open_requests: RefCell<Vec<Tab>>,
-        selection: RefCell<HashSet<Tab>>,
+        selection: RefCell<HashSet<PmEntry>>,
         open: RefCell<HashSet<Tab>>,
         close_requests: RefCell<Vec<Tab>>,
     }
 
     impl Banc {
-        fn new(selection: HashSet<Tab>) -> Self {
+        fn new(selection: HashSet<PmEntry>) -> Self {
             Banc {
                 actions: RefCell::new(Vec::new()),
                 open_requests: RefCell::new(Vec::new()),
@@ -1012,7 +1164,7 @@ pub(super) mod tests {
         let state = AppState::new(session.handle(), "test.stf".to_string()).unwrap();
         let tree = state.project_tree();
         let context = super::super::test_support::contexte();
-        let banc = Banc::new(HashSet::from([book, graph, note, matrix]));
+        let banc = Banc::new(fenetres([book, graph, note, matrix]));
         banc.paint(&context, &tree, Vec::new());
         let output = banc.paint(&context, &tree, Vec::new());
         let rects = |output: &egui::FullOutput, fill: egui::Color32| -> Vec<egui::Rect> {
@@ -1091,24 +1243,24 @@ pub(super) mod tests {
             }
         };
         app.follow_project_manager_active_tab(&context, Some(book));
-        assert_eq!(app.pm_selection, HashSet::from([book]));
-        assert_anchor(Some(book));
+        assert_eq!(app.pm_selection, fenetres([book]));
+        assert_anchor(Some(PmEntry::Window(book)));
         app.follow_project_manager_active_tab(&context, Some(graph));
-        assert_eq!(app.pm_selection, HashSet::from([graph]));
-        assert_anchor(Some(graph));
-        app.pm_selection.insert(book);
+        assert_eq!(app.pm_selection, fenetres([graph]));
+        assert_anchor(Some(PmEntry::Window(graph)));
+        app.pm_selection.insert(PmEntry::Window(book));
         app.follow_project_manager_active_tab(&context, Some(book));
-        assert_eq!(app.pm_selection, HashSet::from([book, graph]));
-        assert_anchor(Some(graph));
+        assert_eq!(app.pm_selection, fenetres([book, graph]));
+        assert_anchor(Some(PmEntry::Window(graph)));
         app.follow_project_manager_active_tab(&context, None);
-        assert_eq!(app.pm_selection, HashSet::from([book, graph]));
+        assert_eq!(app.pm_selection, fenetres([book, graph]));
         // Le clic simple existant remplace la sélection. Même fenêtre active :
         // ne pas écraser ce clic avant l'application de sa demande d'ouverture.
-        app.pm_selection = HashSet::from([book]);
+        app.pm_selection = fenetres([book]);
         app.follow_project_manager_active_tab(&context, None);
-        assert_eq!(app.pm_selection, HashSet::from([book]));
+        assert_eq!(app.pm_selection, fenetres([book]));
         app.follow_project_manager_active_tab(&context, Some(graph));
-        assert_eq!(app.pm_selection, HashSet::from([graph]));
+        assert_eq!(app.pm_selection, fenetres([graph]));
         app.follow_project_manager_active_tab(&context, None);
         assert!(app.pm_selection.is_empty());
         assert_anchor(None);
@@ -1181,19 +1333,19 @@ pub(super) mod tests {
             // L'ancre vient d'un vrai clic du panneau, puis la même fenêtre
             // déjà active reprend la sélection par le workspace.
             click_at(&context, book_pos, egui::Modifiers::NONE, paint);
-            assert_eq!(app.borrow().pm_selection, HashSet::from([book]));
+            assert_eq!(app.borrow().pm_selection, fenetres([book]));
             click_at(
                 &context,
                 egui::pos2(410.0, 150.0),
                 egui::Modifiers::NONE,
                 paint,
             );
-            assert_eq!(app.borrow().pm_selection, HashSet::from([graph]));
+            assert_eq!(app.borrow().pm_selection, fenetres([graph]));
             let detached_key = egui::Id::new(("project_manager_gestures", viewport_id()));
             context.data(|data| {
                 assert_eq!(
                     data.get_temp::<PmMemory>(detached_key).unwrap().anchor,
-                    Some(graph),
+                    Some(PmEntry::Window(graph)),
                     "le clic workspace déplace aussi l'ancre du panneau détaché"
                 )
             });
@@ -1206,9 +1358,9 @@ pub(super) mod tests {
             assert_eq!(
                 app.borrow().pm_selection,
                 if same_target {
-                    HashSet::from([graph])
+                    fenetres([graph])
                 } else {
-                    HashSet::from([book, graph])
+                    fenetres([book, graph])
                 },
                 "maximisée={maximized}, même cible={same_target}"
             );
@@ -1228,7 +1380,7 @@ pub(super) mod tests {
         let graph_pos = find_text_center(&first.shapes, "Graph");
         click_at(&context, book_pos, egui::Modifiers::NONE, paint);
         click_at(&context, graph_pos, egui::Modifiers::SHIFT, paint);
-        assert_eq!(*banc.selection.borrow(), HashSet::from([book, graph]));
+        assert_eq!(*banc.selection.borrow(), fenetres([book, graph]));
         paint(&context, vec![egui::Event::Copy]);
         assert_eq!(
             banc.actions.take(),
@@ -1274,7 +1426,7 @@ pub(super) mod tests {
     fn f2_ouvre_le_champ_et_entree_valide_une_seule_action() {
         let (_session, book, _graph, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::from([book]));
+        let banc = Banc::new(fenetres([book]));
         let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let memory_key = memory_id(&context);
@@ -1363,7 +1515,10 @@ pub(super) mod tests {
 
         let book = find_text_center(&output.shapes, "Book");
         click_at(&context, book, egui::Modifiers::COMMAND, paint);
-        assert!(app.borrow().pm_selection.contains(&book_tab));
+        assert!(app
+            .borrow()
+            .pm_selection
+            .contains(&PmEntry::Window(book_tab)));
         assert!(
             open.borrow().is_empty(),
             "Ctrl-clic sélectionne sans ouvrir"
@@ -1417,7 +1572,7 @@ pub(super) mod tests {
 
         assert_eq!(
             *banc.selection.borrow(),
-            HashSet::from([graph_tab]),
+            fenetres([graph_tab]),
             "Ctrl/Cmd-clic doit ajouter l'entrée à la sélection"
         );
         assert!(
@@ -1445,17 +1600,14 @@ pub(super) mod tests {
         let context = egui::Context::default();
         // Sélection posée directement plutôt que reconstruite par deux
         // Ctrl-clics successifs (voir `ctrl_clic_selectionne_sans_ouvrir`).
-        let banc = Banc::new(HashSet::from([graph_tab, book_tab]));
+        let banc = Banc::new(fenetres([graph_tab, book_tab]));
         let paint = |context: &egui::Context, events| banc.paint(context, &tree, events);
 
         paint(&context, Vec::new());
         let first = paint(&context, Vec::new());
         let graph_pos = find_text_center(&first.shapes, "Graph");
         let menu = ouvrir_menu_contextuel(&context, graph_pos, paint);
-        assert_eq!(
-            *banc.selection.borrow(),
-            HashSet::from([graph_tab, book_tab])
-        );
+        assert_eq!(*banc.selection.borrow(), fenetres([graph_tab, book_tab]));
         let close_pos = find_text_center(&menu.shapes, &tr!("project-manager-close"));
         click_at(&context, close_pos, egui::Modifiers::NONE, paint);
         let closed: HashSet<Tab> = banc.close_requests.borrow().iter().copied().collect();
@@ -1533,16 +1685,23 @@ pub(super) mod tests {
         // Du bas vers le haut, puis du haut vers le bas.
         click_at(&context, delta_pos, egui::Modifiers::NONE, paint);
         click_at(&context, alpha_pos, egui::Modifiers::SHIFT, paint);
-        let tout = HashSet::from([alpha, beta, gamma, delta]);
+        // Le dossier replié est lui aussi dans la plage (#170, point 4).
+        let dossier = PmEntry::Folder(NodeId::from_raw(3));
+        let mut tout = fenetres([alpha, beta, gamma, delta]);
+        tout.insert(dossier);
         assert_eq!(*banc.selection.borrow(), tout);
         click_at(&context, alpha_pos, egui::Modifiers::NONE, paint);
         click_at(&context, delta_pos, egui::Modifiers::SHIFT, paint);
         assert_eq!(*banc.selection.borrow(), tout);
 
-        let ids: Vec<NodeId> = [alpha, beta, gamma, delta]
-            .into_iter()
-            .map(tab_node)
-            .collect();
+        // Dans l'ordre de lecture : le dossier précède ses enfants.
+        let ids: Vec<NodeId> = vec![
+            tab_node(alpha),
+            dossier.node(),
+            tab_node(beta),
+            tab_node(gamma),
+            tab_node(delta),
+        ];
         banc.actions.borrow_mut().clear();
         paint(&context, vec![egui::Event::Copy]);
         assert_eq!(banc.actions.take(), vec![Action::CopyObjects(ids.clone())]);
@@ -1567,14 +1726,19 @@ pub(super) mod tests {
         click_at(&context, close_pos, egui::Modifiers::NONE, paint);
         let closed: HashSet<Tab> = banc.close_requests.borrow().iter().copied().collect();
         assert_eq!(
-            closed, tout,
+            closed,
+            onglets(&tout),
             "Close ferme aussi les fenêtres du dossier replié"
         );
         let menu = ouvrir_menu_contextuel(&context, alpha_pos, paint);
         let open_pos = find_text_center(&menu.shapes, &tr!("project-manager-open"));
         click_at(&context, open_pos, egui::Modifiers::NONE, paint);
         let opened: HashSet<Tab> = banc.open_requests.borrow().iter().copied().collect();
-        assert_eq!(opened, tout, "Open ouvre aussi celles du dossier replié");
+        assert_eq!(
+            opened,
+            onglets(&tout),
+            "Open ouvre aussi celles du dossier replié"
+        );
     }
 
     /// #327 : une borne de la plage peut elle-même être dans un dossier replié
@@ -1583,7 +1747,7 @@ pub(super) mod tests {
     fn une_borne_de_plage_maj_dans_un_dossier_replie_compte() {
         let (tree, [_alpha, beta, gamma, delta]) = arbre_avec_dossier_replie();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::from([beta]));
+        let banc = Banc::new(fenetres([beta]));
         let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let first = paint(&context, vec![]);
@@ -1594,10 +1758,7 @@ pub(super) mod tests {
             egui::Modifiers::SHIFT,
             paint,
         );
-        assert_eq!(
-            *banc.selection.borrow(),
-            HashSet::from([beta, gamma, delta])
-        );
+        assert_eq!(*banc.selection.borrow(), fenetres([beta, gamma, delta]));
     }
 
     fn ouvrir_menu_contextuel(
@@ -1640,7 +1801,7 @@ pub(super) mod tests {
         assert_eq!(*banc.open_requests.borrow(), vec![graph_tab]);
         assert_eq!(
             *banc.selection.borrow(),
-            HashSet::from([graph_tab]),
+            fenetres([graph_tab]),
             "un clic simple sélectionne sa cible (#105)"
         );
 
@@ -1722,13 +1883,21 @@ pub(super) mod tests {
                 < find_text_center(&menu.shapes, &tr!("action-paste")).y,
             "la création vient en tête"
         );
-        for absent in [
-            tr!("action-copy"),
-            tr!("action-duplicate-project-object"),
-            tr!("project-manager-open"),
-            tr!("project-manager-close"),
-        ] {
+        for absent in [tr!("project-manager-open"), tr!("project-manager-close")] {
             assert!(!painted(&menu, &absent), "{absent} n'a pas de sens ici");
+        }
+        // Copier et Dupliquer un dossier sont refusés pour l'instant : les
+        // entrées restent visibles, grisées (leur clic ne pousse rien).
+        for grisee in [tr!("action-copy"), tr!("action-duplicate-project-object")] {
+            assert!(painted(&menu, &grisee), "{grisee} grisée sur un dossier");
+            let at = find_text_center(&menu.shapes, &grisee);
+            click_at(&context, at, egui::Modifiers::NONE, paint);
+            assert!(
+                banc.actions.borrow().is_empty(),
+                "{grisee} grisée : aucune action, {:?}",
+                banc.actions.borrow()
+            );
+            ouvrir_menu_contextuel(&context, pos, paint);
         }
         let rename = find_text_center(&menu.shapes, &tr!("action-rename-project-object"));
         click_at(&context, rename, egui::Modifiers::NONE, paint);
@@ -1938,7 +2107,7 @@ pub(super) mod tests {
         let (_session, book, _graph, tree) = project_manager_fixture();
         for double in [false, true] {
             let context = egui::Context::default();
-            let banc = Banc::new(HashSet::from([book]));
+            let banc = Banc::new(fenetres([book]));
             let horloge = std::cell::Cell::new(1.0);
             let paint = |ctx: &egui::Context, events| {
                 horloge.set(horloge.get() + 0.01);
@@ -1969,7 +2138,7 @@ pub(super) mod tests {
     fn un_nom_deja_pris_garde_le_champ_ouvert() {
         let (_session, book, _graph, tree) = project_manager_fixture();
         let context = egui::Context::default();
-        let banc = Banc::new(HashSet::from([book]));
+        let banc = Banc::new(fenetres([book]));
         let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
         paint(&context, vec![]);
         let memory_key = memory_id(&context);
@@ -1995,5 +2164,325 @@ pub(super) mod tests {
         paint(&context, vec![egui::Event::Text("Libre".to_string())]);
         paint(&context, vec![key(egui::Key::Enter)]);
         assert_eq!(banc.actions.borrow().len(), 1);
+    }
+
+    // -- Dossiers sélectionnables (#170, point 4) -----------------------------
+
+    fn touche_pm(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }
+    }
+
+    /// Le dossier de `arbre_avec_dossier_replie`.
+    fn dossier_de_l_arbre() -> NodeId {
+        NodeId::from_raw(3)
+    }
+
+    /// Ouvre le dossier au prochain dessin (comme après *Add Folder*).
+    fn deplier(context: &egui::Context, dossier: NodeId) {
+        let key = memory_id(context);
+        context.data_mut(|data| {
+            data.get_temp_mut_or_default::<PmMemory>(key)
+                .reveal
+                .push(dossier);
+        });
+    }
+
+    /// Un clic sur un dossier le sélectionne et, s'il est fermé, le déplie ;
+    /// il n'ouvre aucune fenêtre. Témoin : sans insertion du dossier dans la
+    /// sélection, rien n'est sélectionné.
+    #[test]
+    fn un_clic_sur_un_dossier_le_selectionne_et_le_deplie() {
+        let (tree, _tabs) = arbre_avec_dossier_replie();
+        let dossier = dossier_de_l_arbre();
+        let context = egui::Context::default();
+        let banc = Banc::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        assert!(!painted(&first, "Beta"), "témoin : le dossier est replié");
+        let pos = find_text_center(&first.shapes, "Dossier");
+        click_at(&context, pos, egui::Modifiers::NONE, paint);
+        assert_eq!(
+            *banc.selection.borrow(),
+            HashSet::from([PmEntry::Folder(dossier)])
+        );
+        paint(&context, vec![]);
+        let apres = paint(&context, vec![]);
+        assert!(painted(&apres, "Beta"), "le clic a déplié le dossier");
+        assert!(
+            banc.open_requests.borrow().is_empty(),
+            "un dossier n'ouvre aucune fenêtre"
+        );
+    }
+
+    /// Un dossier sélectionné se peint comme une fenêtre : fond pâle d'accent
+    /// et filet à gauche ; survolé seulement, fond gris. Témoin : non
+    /// sélectionné et non survolé, ni l'un ni l'autre.
+    #[test]
+    fn un_dossier_selectionne_porte_fond_filet_et_survol_comme_une_fenetre() {
+        let (tree, _tabs) = arbre_avec_dossier_replie();
+        let dossier = dossier_de_l_arbre();
+        let context = super::super::test_support::contexte();
+        let banc = Banc::new(HashSet::new());
+        let rects = |output: &egui::FullOutput, fill: egui::Color32| -> usize {
+            output
+                .shapes
+                .iter()
+                .filter(
+                    |shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == fill),
+                )
+                .count()
+        };
+        banc.paint(&context, &tree, vec![]);
+        let repos = banc.paint(&context, &tree, vec![]);
+        assert_eq!(rects(&repos, theme::list_row_selected_fill()), 0);
+        assert_eq!(rects(&repos, theme::list_row_hover_fill()), 0);
+        let pos = find_text_center(&repos.shapes, "Dossier");
+        let survol = banc.paint(&context, &tree, vec![egui::Event::PointerMoved(pos)]);
+        assert_eq!(
+            rects(&survol, theme::list_row_hover_fill()),
+            1,
+            "le dossier survolé a le fond de survol"
+        );
+        banc.selection.borrow_mut().insert(PmEntry::Folder(dossier));
+        let choisi = banc.paint(
+            &context,
+            &tree,
+            vec![egui::Event::PointerMoved(egui::pos2(380.0, 390.0))],
+        );
+        assert_eq!(rects(&choisi, theme::list_row_selected_fill()), 1);
+        assert_eq!(rects(&choisi, theme::accent()), 1, "filet d'accent");
+        assert!(
+            super::super::test_support::textes(&choisi.shapes)
+                .iter()
+                .any(|t| t.texte == "Dossier" && t.gras),
+            "libellé en gras"
+        );
+    }
+
+    /// Un clic sur un dossier ouvert le sélectionne **sans** le replier, même
+    /// quand il est déjà seul sélectionné. Témoin : un clic sur un dossier
+    /// fermé l'ouvre (autre test).
+    #[test]
+    fn un_clic_sur_un_dossier_ouvert_le_selectionne_sans_le_replier() {
+        let (tree, [alpha, ..]) = arbre_avec_dossier_replie();
+        let dossier = dossier_de_l_arbre();
+        let context = egui::Context::default();
+        let banc = Banc::new(HashSet::new());
+        let horloge = std::cell::Cell::new(1.0);
+        let paint = |ctx: &egui::Context, events| {
+            horloge.set(horloge.get() + 0.01);
+            banc.paint_at(ctx, &tree, events, Some(horloge.get()))
+        };
+        deplier(&context, dossier);
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        assert!(painted(&first, "Beta"), "précondition : dossier ouvert");
+        let alpha_pos = find_text_center(&first.shapes, "Alpha");
+        let dossier_pos = find_text_center(&first.shapes, "Dossier");
+        click_at(&context, alpha_pos, egui::Modifiers::NONE, paint);
+        assert_eq!(*banc.selection.borrow(), fenetres([alpha]));
+        for _ in 0..2 {
+            // Hors de l'intervalle de double-clic : deux clics simples.
+            horloge.set(horloge.get() + 2.0);
+            click_at(&context, dossier_pos, egui::Modifiers::NONE, paint);
+            // Un repli serait animé : on laisse passer le temps.
+            horloge.set(horloge.get() + 0.3);
+            paint(&context, vec![]);
+            let apres = paint(&context, vec![]);
+            assert_eq!(
+                *banc.selection.borrow(),
+                HashSet::from([PmEntry::Folder(dossier)])
+            );
+            assert!(painted(&apres, "Beta"), "le clic ne replie pas");
+        }
+    }
+
+    /// Un double-clic replie le dossier, qu'il fût ouvert ou fermé au départ
+    /// (le premier clic d'un double-clic déplie un dossier fermé).
+    #[test]
+    fn un_double_clic_replie_le_dossier() {
+        let (tree, _tabs) = arbre_avec_dossier_replie();
+        let dossier = dossier_de_l_arbre();
+        for ouvert_au_depart in [false, true] {
+            // Contexte neuf : voir `le_double_clic_active_lentree_sans_modificateur`.
+            let context = egui::Context::default();
+            let banc = Banc::new(HashSet::new());
+            let horloge = std::cell::Cell::new(1.0);
+            let paint = |ctx: &egui::Context, events| {
+                horloge.set(horloge.get() + 0.01);
+                banc.paint_at(ctx, &tree, events, Some(horloge.get()))
+            };
+            if ouvert_au_depart {
+                deplier(&context, dossier);
+            }
+            paint(&context, vec![]);
+            let first = paint(&context, vec![]);
+            assert_eq!(painted(&first, "Beta"), ouvert_au_depart);
+            let pos = find_text_center(&first.shapes, "Dossier");
+            click_at(&context, pos, egui::Modifiers::NONE, paint);
+            click_at(&context, pos, egui::Modifiers::NONE, paint);
+            // Le repli est animé : on laisse passer le temps.
+            horloge.set(horloge.get() + 2.0);
+            paint(&context, vec![]);
+            let apres = paint(&context, vec![]);
+            assert!(
+                !painted(&apres, "Beta"),
+                "double-clic : replié (ouvert au départ : {ouvert_au_depart})"
+            );
+            assert_eq!(
+                *banc.selection.borrow(),
+                HashSet::from([PmEntry::Folder(dossier)])
+            );
+        }
+    }
+
+    /// Le triangle replie un dossier ouvert (geste d'egui, conservé).
+    #[test]
+    fn le_triangle_replie_un_dossier_ouvert() {
+        let (tree, _tabs) = arbre_avec_dossier_replie();
+        let dossier = dossier_de_l_arbre();
+        let context = egui::Context::default();
+        let banc = Banc::new(HashSet::new());
+        let horloge = std::cell::Cell::new(1.0);
+        let paint = |ctx: &egui::Context, events| {
+            horloge.set(horloge.get() + 0.01);
+            banc.paint_at(ctx, &tree, events, Some(horloge.get()))
+        };
+        deplier(&context, dossier);
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        assert!(painted(&first, "Beta"));
+        let libelle = find_text_center(&first.shapes, "Dossier");
+        let triangle = egui::pos2(libelle.x - 62.0, libelle.y);
+        click_at(&context, triangle, egui::Modifiers::NONE, paint);
+        // Le repli est animé : on laisse passer le temps.
+        horloge.set(horloge.get() + 2.0);
+        paint(&context, vec![]);
+        let apres = paint(&context, vec![]);
+        assert!(!painted(&apres, "Beta"), "le triangle replie");
+        assert!(
+            banc.selection.borrow().is_empty(),
+            "le triangle ne sélectionne pas"
+        );
+    }
+
+    /// Suppr sur un dossier sélectionné supprime le dossier (une entrée
+    /// d'historique, `DeleteObjects`) ; F2 ouvre son renommage sur place.
+    #[test]
+    fn suppr_et_f2_agissent_sur_un_dossier_selectionne() {
+        let (tree, _tabs) = arbre_avec_dossier_replie();
+        let dossier = dossier_de_l_arbre();
+        let context = egui::Context::default();
+        let banc = Banc::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        let pos = find_text_center(&first.shapes, "Dossier");
+        click_at(&context, pos, egui::Modifiers::NONE, paint);
+        banc.actions.borrow_mut().clear();
+        paint(&context, vec![touche_pm(egui::Key::Delete)]);
+        assert_eq!(
+            banc.actions.take(),
+            vec![Action::DeleteObjects(vec![dossier])]
+        );
+        paint(&context, vec![touche_pm(egui::Key::F2)]);
+        paint(&context, vec![]);
+        assert_eq!(
+            renaming_in(&context, context.viewport_id()),
+            vec![dossier],
+            "F2 ouvre le renommage du dossier"
+        );
+        paint(&context, vec![egui::Event::Text("Série".to_string())]);
+        paint(&context, vec![touche_pm(egui::Key::Enter)]);
+        assert_eq!(
+            banc.actions.take(),
+            vec![Action::RenameObjects(vec![(dossier, "Série".into())])]
+        );
+    }
+
+    /// Copier et dupliquer un dossier sont refusés (voir la doc de tête) :
+    /// Ctrl+C et Ctrl+D transmettent le geste à l'état, qui le refuse avec sa
+    /// raison (`stokesforge-app-state/tests/project_objects.rs`) ; l'entrée de
+    /// menu, elle, est grisée (test du clic droit d'un dossier).
+    #[test]
+    fn ctrl_c_sur_un_dossier_passe_par_l_etat_qui_le_refuse() {
+        let (tree, _tabs) = arbre_avec_dossier_replie();
+        let dossier = dossier_de_l_arbre();
+        let context = egui::Context::default();
+        let banc = Banc::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        let pos = find_text_center(&first.shapes, "Dossier");
+        click_at(&context, pos, egui::Modifiers::NONE, paint);
+        banc.actions.borrow_mut().clear();
+        paint(&context, vec![egui::Event::Copy]);
+        assert_eq!(
+            banc.actions.take(),
+            vec![Action::CopyObjects(vec![dossier])]
+        );
+    }
+
+    /// Ctrl+V avec un dossier seul sélectionné colle **dans** ce dossier ;
+    /// avec une fenêtre sélectionnée, à la racine comme avant. Témoin : les
+    /// deux parents diffèrent.
+    #[test]
+    fn ctrl_v_avec_un_dossier_selectionne_colle_dans_le_dossier() {
+        let (tree, [alpha, ..]) = arbre_avec_dossier_replie();
+        let dossier = dossier_de_l_arbre();
+        let racine = NodeId::from_raw(1);
+        let context = egui::Context::default();
+        let banc = Banc::new(HashSet::new());
+        let paint = |ctx: &egui::Context, events| banc.paint(ctx, &tree, events);
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        let dossier_pos = find_text_center(&first.shapes, "Dossier");
+        let alpha_pos = find_text_center(&first.shapes, "Alpha");
+        click_at(&context, dossier_pos, egui::Modifiers::NONE, paint);
+        banc.actions.borrow_mut().clear();
+        paint(&context, vec![egui::Event::Paste("données".into())]);
+        assert_eq!(
+            banc.actions.take(),
+            vec![Action::PasteObjects {
+                parent: dossier,
+                text: "données".into()
+            }]
+        );
+        click_at(&context, alpha_pos, egui::Modifiers::NONE, paint);
+        assert_eq!(*banc.selection.borrow(), fenetres([alpha]));
+        banc.actions.borrow_mut().clear();
+        paint(&context, vec![egui::Event::Paste("données".into())]);
+        assert_eq!(
+            banc.actions.take(),
+            vec![Action::PasteObjects {
+                parent: racine,
+                text: "données".into()
+            }]
+        );
+    }
+
+    /// `paste_parent` : le dossier seul, sinon la racine.
+    #[test]
+    fn le_parent_du_collage_est_le_dossier_seul_ou_la_racine() {
+        let racine = NodeId::from_raw(1);
+        let dossier = PmEntry::Folder(NodeId::from_raw(3));
+        let fenetre = PmEntry::Window(Tab::Book(NodeId::from_raw(2)));
+        assert_eq!(
+            paste_parent(&HashSet::from([dossier]), racine),
+            NodeId::from_raw(3)
+        );
+        assert_eq!(paste_parent(&HashSet::from([fenetre]), racine), racine);
+        assert_eq!(
+            paste_parent(&HashSet::from([dossier, fenetre]), racine),
+            racine
+        );
+        assert_eq!(paste_parent(&HashSet::new(), racine), racine);
     }
 }

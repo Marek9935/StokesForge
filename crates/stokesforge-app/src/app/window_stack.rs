@@ -118,6 +118,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::project_manager::PmEntry;
+
 use eframe::egui;
 use stokesforge_core::NodeId;
 use stokesforge_render_egui::GraphView;
@@ -231,7 +233,7 @@ struct Workspace<'a> {
     next_cascade: &'a mut u32,
     focus_next: &'a mut Option<Tab>,
     active_detached: &'a mut Option<Tab>,
-    pm_selection: &'a mut HashSet<Tab>,
+    pm_selection: &'a mut HashSet<PmEntry>,
     graph_views: &'a mut HashMap<NodeId, GraphView>,
     collapsed_tabs: &'a mut HashSet<Tab>,
     maximized_tab: &'a mut Option<Tab>,
@@ -249,7 +251,7 @@ impl Workspace<'_> {
     fn activate_clicked_tab(&mut self, ctx: &egui::Context, tab: Tab) {
         *self.active_detached = None;
         self.pm_selection.clear();
-        self.pm_selection.insert(tab);
+        self.pm_selection.insert(PmEntry::Window(tab));
         super::project_manager::follow_selection_anchor(ctx, Some(tab));
         // Le panneau et son viewport détaché ont déjà été publiés cette image.
         ctx.request_repaint();
@@ -656,6 +658,7 @@ impl StokesForgeApp {
 
 #[cfg(test)]
 mod tests {
+    use super::super::project_manager::tests::fenetres;
     use super::super::window_chrome::show_window_in_layer;
     use super::*;
     use stokesforge_app_state::state::ProjectTreeNode;
@@ -690,7 +693,7 @@ mod tests {
             app.window_positions.insert(tab, egui::pos2(30.0, 30.0));
             app.window_positions.insert(book, egui::pos2(750.0, 30.0));
             app.maximized_tab = maximized.then_some(tab);
-            app.pm_selection = HashSet::from([tab, book]);
+            app.pm_selection = fenetres([tab, book]);
             let context = egui::Context::default();
             context.set_fonts(stokesforge_render_egui::font_definitions());
             crate::theme::install(&context);
@@ -728,7 +731,7 @@ mod tests {
             for _ in 0..3 {
                 assert_eq!(
                     paint(Vec::new()),
-                    HashSet::from([tab, book]),
+                    fenetres([tab, book]),
                     "le repos conserve les actions groupées"
                 );
             }
@@ -742,7 +745,7 @@ mod tests {
                         pressed: true,
                         modifiers: egui::Modifiers::NONE,
                     }]),
-                    HashSet::from([tab, book]),
+                    fenetres([tab, book]),
                     "le vide du workspace conserve la sélection"
                 );
                 paint(vec![egui::Event::PointerButton {
@@ -766,7 +769,7 @@ mod tests {
             );
             assert_eq!(
                 paint(vec![egui::Event::PointerMoved(pos)]),
-                HashSet::from([tab, book]),
+                fenetres([tab, book]),
                 "le survol conserve la sélection"
             );
             let selection = paint(vec![egui::Event::PointerButton {
@@ -777,7 +780,7 @@ mod tests {
             }]);
             assert_eq!(
                 selection,
-                HashSet::from([tab]),
+                fenetres([tab]),
                 "maximisée={maximized}, déjà active={already_active}, en-tête={header}"
             );
             session.shutdown().unwrap();

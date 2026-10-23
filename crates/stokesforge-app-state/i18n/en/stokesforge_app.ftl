@@ -1847,6 +1847,7 @@ analysis-reference-line = Reference: { $reference }
 analysis-output-replace-hint = The correction replaces the source values. Its settings remain in Results. Undo restores the original data.
 disabled-analysis-replace-operation = Only a new correction or reference can replace original data.
 disabled-analysis-replace-readonly = Calculated columns and columns with a formula cannot be replaced.
+disabled-copy-folder = A folder can't be copied yet. Select windows only
 analysis-replace-title = Replace original data
 analysis-replace-confirm = Several curves use these data. They will all show the corrected values.
 analysis-replace-accept = Replace

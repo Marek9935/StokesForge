@@ -7616,7 +7616,27 @@ impl AppState {
         }
     }
 
+    /// Copier ou dupliquer un dossier est refusé pour l'instant (#170, point 4) :
+    /// la copie locale garderait ses références vers les classeurs d'origine,
+    /// qui ne sont pas dans le dossier. Le geste est expliqué dans la barre
+    /// d'état (le menu, lui, grise l'entrée avec la même phrase). Rend vrai
+    /// quand le geste est refusé. À reprendre dans une issue à part.
+    fn refuse_folder_copy(&mut self, ids: &[NodeId]) -> bool {
+        let has_folder = self.object_targets(ids).into_iter().any(|id| {
+            self.tree()
+                .node(id)
+                .is_some_and(|node| node.kind().is_folder())
+        });
+        if has_folder {
+            self.warn(tr!("disabled-copy-folder"));
+        }
+        has_folder
+    }
+
     fn copy_objects(&mut self, ids: &[NodeId]) {
+        if self.refuse_folder_copy(ids) {
+            return;
+        }
         let copies = self.capture_objects(ids);
         if copies.is_empty() {
             return;
@@ -7648,6 +7668,9 @@ impl AppState {
     }
 
     fn duplicate_objects(&mut self, ids: &[NodeId]) {
+        if self.refuse_folder_copy(ids) {
+            return;
+        }
         let copies = self.capture_objects(ids);
         if copies.is_empty() {
             return;

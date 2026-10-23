@@ -1843,6 +1843,7 @@ analysis-reference-line = Référence : { $reference }
 analysis-output-replace-hint = La correction remplace les valeurs sources. Ses réglages restent dans Résultats. Annuler restaure les données originales.
 disabled-analysis-replace-operation = Seule une nouvelle correction ou référence peut remplacer les données originales.
 disabled-analysis-replace-readonly = Les colonnes calculées et les colonnes à formule ne peuvent pas être remplacées.
+disabled-copy-folder = Un dossier ne peut pas encore être copié. Sélectionnez seulement des fenêtres
 analysis-replace-title = Remplacer les données originales
 analysis-replace-confirm = Plusieurs courbes utilisent ces données. Elles afficheront toutes les valeurs corrigées.
 analysis-replace-accept = Remplacer

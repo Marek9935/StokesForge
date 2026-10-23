@@ -55,7 +55,7 @@ Une section vide disparaît avec ses séparateurs.
   Type ▸ / Role ▸ (trois niveaux dans la barre : Workbook, Columns, le
   sous-menu ; #319 pour Move ▸).
 - **Absent ou grisé** : sans objet pour cette cible → **absent** (Show Data
-  hors d'une courbe, Copy sur un dossier) ; pertinent mais momentanément
+  hors d'une courbe) ; pertinent mais momentanément
   impossible → **grisé avec une info-bulle `.disabled`** qui dit pourquoi.
 - **Cible** : un clic droit hors de la sélection la remplace par l'élément
   visé (une courbe cliquée au clic droit est sélectionnée) ; dedans, il agit
@@ -113,7 +113,7 @@ Les cases gardent le menu ouvert (#114).
 | Cible | Menu |
 |---|---|
 | Fenêtre(s) | Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete |
-| Dossier | Add Folder (dans ce dossier) ─ Paste (dans ce dossier) ─ Rename (sur place) ─ Delete |
+| Dossier | Add Folder (dans ce dossier) ─ Copy (grisé) · Paste (dans ce dossier) ─ Rename (sur place) · Duplicate (grisé) ─ Delete |
 
 Selection ▸ ne subsiste que dans Edit.
 

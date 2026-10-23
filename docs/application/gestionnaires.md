@@ -6,9 +6,26 @@ Suite du sommaire [`README.md`](README.md). Contenu : Project Manager et fenêtr
 
 Le menu contextuel des fenêtres (à plat) et le menu *Edit* › Selection proposent
 Copier, Coller, Renommer, Dupliquer et Supprimer (#105) ; un dossier propose
-Coller, Renommer (sur place) et Supprimer (#157). Un clic sélectionne et ouvre l'objet ; Ctrl
+Add Folder, Coller, Renommer (sur place) et Supprimer (#157), et son Copier et
+son Dupliquer sont grisés (voir plus bas). Un clic sélectionne et ouvre l'objet ; Ctrl
 bascule une cible sans ouvrir, Maj sélectionne une plage dans l'ordre de
 l'arbre, y compris les fenêtres des dossiers repliés (#327).
+
+**Dossiers sélectionnables (#170, point 4).** La sélection du Project Manager
+est un ensemble d'entrées `PmEntry` (`app/project_manager.rs`) : un dossier ou
+une fenêtre (son `Tab`). Un dossier se peint comme une fenêtre
+(`list_row` : fond pâle, filet d'accent, survol). Un clic le **sélectionne** et
+le déplie s'il est fermé, sans ouvrir de fenêtre (`open_requests` reste réservé
+aux fenêtres) ; un clic sur un dossier ouvert le sélectionne **sans le
+replier** ; un double-clic le replie, le triangle aussi. Suppr et F2 agissent
+sur lui (une entrée d'historique, `DeleteObjects` / `RenameObjects`). Coller
+avec ce seul dossier sélectionné colle **dans** ce dossier (`paste_parent`),
+sinon à la racine. Un dossier supprimé quitte la sélection. **Copier et
+Dupliquer un dossier sont refusés** : une copie locale garderait ses références
+vers les classeurs d'origine, qui sont hors du dossier. Le menu grise les deux
+entrées (`disabled-copy-folder`), et `AppState::refuse_folder_copy` refuse le
+geste clavier avec la même phrase dans la barre d'état. Reste : une issue à
+part pour copier un dossier avec ses dépendances.
 F2, Ctrl+D, Ctrl+C, Ctrl+V et Suppr s'appliquent à cette sélection quand le
 Project Manager a le focus, aussi en fenêtre détachée. Les renommages multiples
 saisissent les noms successivement, puis valident une seule entrée annulable ;

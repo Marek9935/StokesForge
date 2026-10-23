@@ -103,7 +103,7 @@ mécanique.
 | S-L7 | `hauteur-de-ligne-unique` | Une ligne de liste ou d'arbre a une seule hauteur, `LIST_ROW_HEIGHT`, composée ou non. |
 | S-K1 | `registre-des-touches` | Toutes les touches sont dans le registre de `app/shortcuts.rs` ; aucun `consume_key` ailleurs. |
 | S-K2 | `suppr-immediat-annulable` | Suppr supprime la sélection tout de suite, annulable, partout (la grille vide d'abord). |
-| S-K3 | `double-clic-par-sorte` | Double-clic : texte ou nom → édition sur place ; objet → Properties ; fond vide d'un graphe → vue réinitialisée ; Project Manager → active la fenêtre, ne la ferme jamais. |
+| S-K3 | `double-clic-par-sorte` | Double-clic : texte ou nom → édition sur place ; objet → Properties ; fond vide d'un graphe → vue réinitialisée ; Project Manager → active la fenêtre, ne la ferme jamais, et replie un dossier. |
 | S-K4 | `renommer-f2-ou-clic-lent` | Renommer dans le Project Manager : F2, ou un clic lent sur un nom déjà sélectionné. |
 | S-K5 | `aide-raccourcis-generee` | Help › Keyboard Shortcuts est générée depuis le registre des touches. |
 | S-K6 | `tab-suit-la-lecture` | Tab suit l'ordre de lecture : haut-bas, gauche-droite. |
@@ -708,7 +708,8 @@ Historique : #227, #237 (largeur « quelques chiffres »), #241 (volet Results).
 - **Double-clic** (S-K3 → S-R7) : texte ou nom (cellule, onglet, titre) → édition
   sur place ; objet (série, axe) → Properties ; fond vide d'un graphe → vue
   réinitialisée ; Project Manager → active ou restaure la fenêtre, **ne ferme
-  jamais**.
+  jamais**. Sur un **dossier**, un clic le sélectionne et le déplie s'il est
+  fermé (jamais ne le replie), le double-clic le replie (#170).
 - **Help › Keyboard Shortcuts**, généré depuis `shortcuts.rs` (S-K5).
 - **Ctrl+molette = zoom**, partout (S-X1 → S-R1, S-R7).
 - **Curseurs** (S-X2) : main ouverte puis fermée pour glisser, flèche de

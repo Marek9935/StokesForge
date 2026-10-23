@@ -47,7 +47,6 @@ use super::shortcuts::{
     SHORTCUT_EXPORT_GRAPH, SHORTCUT_IMPORT_TEXT, SHORTCUT_NEW_PROJECT, SHORTCUT_OPEN,
     SHORTCUT_REDO_Y, SHORTCUT_SAVE, SHORTCUT_SAVE_AS, SHORTCUT_SELECT_ALL, SHORTCUT_UNDO,
 };
-use super::tab::tab_node;
 use super::tab::Tab;
 use super::tab::{active_tab_kind, tab_title};
 use super::workbook::workbook_menu;
@@ -325,7 +324,7 @@ impl StokesForgeApp {
                 .tree()
                 .walk_all()
                 .into_iter()
-                .filter(|id| self.pm_selection.iter().any(|tab| tab_node(*tab) == *id))
+                .filter(|id| self.pm_selection.iter().any(|entry| entry.node() == *id))
                 .collect();
             let rename_viewport = if self.pm_detached {
                 super::project_manager::viewport_id()
@@ -340,7 +339,8 @@ impl StokesForgeApp {
                         &mut MenuSections::new(),
                         super::project_manager::ObjectMenuTarget::Windows,
                         &ids,
-                        root,
+                        super::project_manager::paste_parent(&self.pm_selection, root),
+                        super::project_manager::selection_has_folder(&self.pm_selection),
                         actions,
                         rename_viewport,
                     );
@@ -1354,7 +1354,10 @@ mod tests {
             active(&menu, &tr!("action-paste")).enabled,
             "témoin indépendant de la sélection"
         );
-        app.pm_selection.insert(Tab::Graph(graph));
+        app.pm_selection
+            .insert(super::super::project_manager::PmEntry::Window(Tab::Graph(
+                graph,
+            )));
         let (ctx, menu) = ouvre_chemin(
             &mut app,
             tab,

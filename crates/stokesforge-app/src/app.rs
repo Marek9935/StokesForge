@@ -373,7 +373,7 @@ pub struct StokesForgeApp {
     /// Sélection courante dans l'arbre du Project Manager (§6) — Ctrl/Cmd-clic
     /// en bascule l'appartenance ; consommée par « Afficher »/« Masquer ».
     /// Indépendante de `selection.rs`, propre à la grille de données.
-    pm_selection: HashSet<Tab>,
+    pm_selection: HashSet<project_manager::PmEntry>,
     /// Dernier contenu actif observé pour suivre la sélection simple (#146).
     pm_last_active_tab: Option<Tab>,
     /// Fichier où déposer une capture de la fenêtre, s'il en est demandé une
@@ -1493,7 +1493,8 @@ impl StokesForgeApp {
                     egui::ViewportCommand::Close,
                 );
             }
-            self.pm_selection.remove(tab);
+            self.pm_selection
+                .remove(&project_manager::PmEntry::Window(*tab));
             self.collapsed_tabs.remove(tab);
             self.graph_views.remove(&tab_node(*tab));
             if self.active_detached == Some(*tab) {
@@ -1711,7 +1712,7 @@ mod tests {
         for _ in 0..5 {
             run(&mut app, Vec::new());
         }
-        assert_eq!(app.pm_selection, HashSet::from([tab]));
+        assert_eq!(app.pm_selection, project_manager::tests::fenetres([tab]));
         let output = run(&mut app, Vec::new());
         let title = |output: &egui::FullOutput, wanted: &str, left: bool| {
             output.shapes.iter().find_map(|sh| match &sh.shape {
@@ -1744,7 +1745,7 @@ mod tests {
             output = run(&mut app, Vec::new());
             extra += 1;
         }
-        assert_eq!(app.pm_selection, HashSet::from([book]));
+        assert_eq!(app.pm_selection, project_manager::tests::fenetres([book]));
         let row = title(&output, "Book1", true).expect("ligne du classeur").y;
         let highlighted: Vec<f32> = output
             .shapes
@@ -1828,7 +1829,7 @@ mod tests {
             extra += 1;
         }
         assert_eq!(app.floating_tabs.last(), Some(&book));
-        assert_eq!(app.pm_selection, HashSet::from([book]));
+        assert_eq!(app.pm_selection, project_manager::tests::fenetres([book]));
         let highlighted: Vec<f32> = output
             .shapes
             .iter()

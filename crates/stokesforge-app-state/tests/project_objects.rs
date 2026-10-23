@@ -1,6 +1,7 @@
 //! #105 : décisions du Project Manager sans serveur d'affichage.
 
-use stokesforge_app_state::state::{Action, AppState};
+use stokesforge_app_state::state::{Action, AppState, StatusLevel};
+use stokesforge_app_state::tr;
 use stokesforge_commands::{HistoryLabel, MacroKind};
 use stokesforge_core::{Column, NodeId, NodeKind, Project};
 use stokesforge_plot::{PanelSpec, PlotSpec, SeriesSpec};
@@ -381,4 +382,46 @@ fn les_colonnes_calculees_embarquees_conservent_leurs_valeurs_sans_dependances()
     let data = target.tree().node(column).unwrap().as_column().unwrap();
     assert_eq!(data.get(0), stokesforge_core::Cell::Float(2.));
     assert_eq!(data.meta().formula, None);
+}
+
+/// #170, point 4 : copier ou dupliquer un dossier est refusé pour l'instant
+/// (la copie locale garderait ses références vers les classeurs d'origine).
+/// Rien n'est écrit au presse-papiers ni à l'arbre, l'historique ne bouge pas,
+/// et la barre d'état dit pourquoi. Témoin : la même copie d'une fenêtre passe.
+#[test]
+fn copier_ou_dupliquer_un_dossier_est_refuse_avec_sa_raison() {
+    let mut project = Project::new("Dossiers").unwrap();
+    let root = project.root();
+    let dossier = project.add_folder(root, "Dossier").unwrap();
+    let note = project.add_note(root, Some("Note1"), "").unwrap();
+    let session = Session::spawn(project, None).unwrap();
+    let mut state = AppState::new_with_preferences(
+        session.handle(),
+        String::new(),
+        stokesforge_app_state::preferences::Preferences::load_from(None),
+    )
+    .unwrap();
+    let before = state.tree().clone();
+    let undo = state.snapshot().history.undo_label.clone();
+
+    for action in [
+        Action::CopyObjects(vec![dossier]),
+        Action::CopyObjects(vec![note, dossier]),
+        Action::DuplicateObjects(vec![dossier]),
+        Action::DuplicateObjects(vec![note, dossier]),
+    ] {
+        state.dispatch(action.clone());
+        assert_eq!(state.take_object_clipboard_text(), None, "{action:?}");
+        assert_eq!(state.tree(), &before, "{action:?}");
+        assert_eq!(state.snapshot().history.undo_label, undo, "{action:?}");
+        let status = state.status().expect("la raison est dite");
+        assert_eq!(status.level, StatusLevel::Warning, "{action:?}");
+        assert_eq!(status.text, tr!("disabled-copy-folder"), "{action:?}");
+    }
+
+    state.dispatch(Action::CopyObjects(vec![note]));
+    assert!(
+        state.take_object_clipboard_text().is_some(),
+        "témoin : une fenêtre se copie"
+    );
 }
