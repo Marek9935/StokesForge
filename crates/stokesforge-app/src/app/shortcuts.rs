@@ -22,7 +22,8 @@ use stokesforge_app_state::tr;
 /// Échap — annule la saisie en cours, ferme la liste ou le dialogue.
 pub(crate) const KEY_ESCAPE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Escape);
-/// Entrée — valide la saisie en cours ou le dialogue.
+/// Entrée — valide la saisie en cours ou le dialogue ; dans une liste (Project
+/// Manager, Object Manager), ouvre la ligne sélectionnée (S-K9).
 pub(crate) const KEY_ENTER: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Enter);
 /// Tab — valide la saisie et passe au champ suivant.
@@ -34,10 +35,12 @@ pub(crate) const KEY_DELETE: egui::KeyboardShortcut =
 /// Retour arrière — vide la sélection de la grille.
 pub(crate) const KEY_BACKSPACE: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::Backspace);
-/// ↑ — valeur voisine d'un champ nombre ou d'une liste.
+/// ↑ — valeur voisine d'un champ nombre ou d'une liste ; ligne précédente d'un
+/// gestionnaire (Project Manager, Object Manager, S-K9).
 pub(crate) const KEY_ARROW_UP: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowUp);
-/// ↓ — valeur voisine d'un champ nombre ou d'une liste.
+/// ↓ — valeur voisine d'un champ nombre ou d'une liste ; ligne suivante d'un
+/// gestionnaire (S-K9).
 pub(crate) const KEY_ARROW_DOWN: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::ArrowDown);
 /// Maj+↑ — dix crans vers le haut dans un champ nombre.
@@ -315,6 +318,12 @@ pub(super) const HELP: &[HelpEntry] = &[
     entry!(Managers, "help-rename", shortcut SHORTCUT_RENAME_OBJECT),
     entry!(Managers, "help-delete-selection", text shortcut_text_delete),
     entry!(Managers, "help-duplicate", shortcut SHORTCUT_DUPLICATE_OBJECT),
+    entry!(
+        Managers,
+        "help-select-neighbour",
+        text || tr!("help-keys-arrows")
+    ),
+    entry!(Managers, "help-open-entry", text || tr!("help-keys-enter")),
     entry!(Fields, "help-validate", text || tr!("help-keys-enter")),
     entry!(Fields, "help-cancel", text || tr!("help-keys-escape")),
     entry!(Fields, "help-next-field", text || tr!("help-keys-tab")),

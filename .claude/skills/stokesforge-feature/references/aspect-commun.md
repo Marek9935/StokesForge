@@ -15,6 +15,7 @@ Quand la lire : on peint une barre de défilement, un jeu d'onglets, une liste o
 - [ ] aucun `ScrollStyle` local ; place d'une barre lue par `theme::scroll_bar_allocated_width`
 - [ ] onglets par `tab_strip`, jamais une rangée de `selectable_label`
 - [ ] liste ou arbre par `list_row` / `ListRowBackground` ; ligne composée à la hauteur `LIST_ROW_HEIGHT` (`with_list_row_height` dans son `ui.horizontal`)
+- [ ] une liste ou un arbre qui se parcourt au clavier suit S-K9 : ↑ ↓ Entrée par `list_row::read_navigation` et `neighbour` sur les lignes visibles, contour de focus par `paint_focus_outline` ; un dossier sélectionnable est une `PmEntry`, pas un `Tab` (#170)
 - [ ] gras par `theme::bold` ; titre par `theme::section_title`, sans `separator()` juste avant ; en-tête de tableau `theme::table_header`, texte secondaire `theme::secondary_text`, jamais `bold(…).small()` (#170)
 - [ ] un séparateur décoratif est une icône atténuée, pas un glyphe (`›`)
 - [ ] aucune couleur en dur hors `theme.rs` et `color_picker.rs`

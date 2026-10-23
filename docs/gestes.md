@@ -111,6 +111,8 @@ Sources : `app/object_manager_ui.rs`, `app/list_row.rs`, `app/reorder_list.rs`,
 | Ctrl + clic | ligne (PM) | bascule la ligne dans la sélection |
 | Maj + clic | ligne (PM) | plage ancre → cible dans l'ordre de l'arbre, dossiers repliés compris : le dossier et ses fenêtres entrent dans la sélection et dans l'action (Delete, Open, Close ; Copy refuse un dossier) (Ctrl + Maj : ajoute la plage) |
 | Clic lent (clic sur l'entrée déjà seule sélectionnée, puis délai écoulé sans second clic) | ligne (PM) | renomme, comme F2 ; un double-clic rapide ne renomme pas |
+| ↑, ↓ | ligne (OM, PM focalisés) | sélectionne la ligne visible précédente ou suivante, sans ouvrir (S-K9) ; Maj+↑/↓ et Alt+↓ sans effet |
+| Entrée | ligne (OM, PM focalisés) | PM : ouvre la fenêtre, déplie ou replie le dossier ; OM : ouvre les paramètres de la série ou de l'objet sélectionné (comme le double-clic) |
 | Double-clic | ligne (OM) | ouvre les paramètres de l'objet |
 | Double-clic | ligne (PM) | fenêtre : l'active ou la restaure, jamais ne la ferme ; dossier : le replie (sans modificateur) |
 | Glisser | ligne (OM) | réordonne ; sur un graphe, déplace l'objet |

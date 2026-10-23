@@ -26,6 +26,19 @@ vers les classeurs d'origine, qui sont hors du dossier. Le menu grise les deux
 entrées (`disabled-copy-folder`), et `AppState::refuse_folder_copy` refuse le
 geste clavier avec la même phrase dans la barre d'état. Reste : une issue à
 part pour copier un dossier avec ses dépendances.
+**Clavier (#170, point 6, S-K9).** Panneau focalisé, ↑ et ↓ déplacent la
+sélection d'une ligne visible à l'autre (`PmMemory::visible`, relevée à la
+peinture ; `order`, qui garde les dossiers repliés, ne sert qu'aux plages Maj),
+Entrée ouvre les fenêtres sélectionnées et bascule les dossiers. La ligne du
+curseur (l'ancre du dernier geste) porte le contour de focus
+(`list_row::paint_focus_outline`) ; la zone défile jusqu'à elle. Les touches
+sont lues et consommées par `list_row::read_navigation` (Maj+flèche et Alt+↓
+d'abord, sans effet) avant la grille d'un classeur ; la fenêtre détachée a sa
+propre mémoire par viewport. L'Object Manager suit le même contrat
+(`object_manager_contents`) : ↑ ↓ sélectionnent la série, le groupe ou l'objet
+visible voisin, Entrée demande ses Properties ; Ctrl+↑/↓ reste « déplacer la
+série ».
+
 F2, Ctrl+D, Ctrl+C, Ctrl+V et Suppr s'appliquent à cette sélection quand le
 Project Manager a le focus, aussi en fenêtre détachée. Les renommages multiples
 saisissent les noms successivement, puis valident une seule entrée annulable ;

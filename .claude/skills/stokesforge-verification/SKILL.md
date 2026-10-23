@@ -140,6 +140,8 @@ Gardes **en place** du clavier et de la souris (#231) :
 neuf se déclare dans `shortcuts.rs` **et** dans `HELP` (le test
 `chaque_raccourci_consomme_figure_dans_l_aide` en liste les constantes).
 
+Navigation au clavier des gestionnaires **en place** (#170, S-K9) : pas de garde de plus (`aucun_consume_key_hors_du_registre` couvre les touches) ; un test de gestionnaire qui prouve qu'une flèche est consommée lit `key_pressed` après le panneau (modèle : `une_fleche_du_panneau_n_atteint_pas_la_grille`), et un mutant « flèche lue sans être consommée » doit le faire échouer.
+
 Briques **en place** (#232) : `busy.rs` et `empty_state.rs`, testées dans leur module ; le Stop de l'import et celui du recalcul (#239) dans `tests/shell.rs`. Aucune garde ne les verrouille encore.
 
 Gardes **à venir** du standard d'interface (#217) : aucune connue. Elles

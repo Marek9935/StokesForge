@@ -109,6 +109,7 @@ mécanique.
 | S-K6 | `tab-suit-la-lecture` | Tab suit l'ordre de lecture : haut-bas, gauche-droite. |
 | S-K7 | `outils-dans-la-barre-tools` | Pas de sélecteur d'outil dans une fenêtre : les outils restent dans la barre Tools, l'objet d'abord ; sortie admise (outils d'analyse), toujours justifiée dans le code et la doc. |
 | S-K8 | `gestes-dans-la-matrice` | Tout geste de molette ou de double-clic est rangé dans la matrice `gestes.md`, où l'on voit si le même geste fait ailleurs autre chose. |
+| S-K9 | `fleches-dans-les-gestionnaires` | Dans le Project Manager et l'Object Manager focalisés, ↑ et ↓ déplacent la sélection d'une ligne visible à l'autre (sans ouvrir ni écrire dans l'historique), Entrée ouvre la fenêtre, déplie ou replie le dossier, ou ouvre les Properties de l'objet ; la ligne du curseur porte le contour de focus. |
 | S-X1 | `ctrl-molette-zoom` | Ctrl+molette zoome, partout. |
 | S-X2 | `curseurs` | Main ouverte puis fermée pour glisser, flèche de redimensionnement sur une poignée, doigt sur un élément cliquable qui n'est pas un bouton. |
 | S-X3 | `fenetre-preferences` | **À venir (#148).** Les réglages d'application vont dans Edit › Preferences… ; les menus gardent les bascules d'affichage fréquentes. |
@@ -716,6 +717,7 @@ Historique : #227, #237 (largeur « quelques chiffres »), #241 (volet Results).
   redimensionnement sur une poignée, doigt sur un élément cliquable qui n'est
   pas un bouton.
 - **Trait de dépôt unique** (S-X5, #170) : survoler une fenêtre ou un classeur avec un fichier du système, un graphe avec des colonnes ou des lignes, se voit du même trait, `theme::drop_stroke` (vert de l'accent). Tests : `file_drop::tests`, `graph_window::tests`, `theme::tests`.
+- **Flèches et Entrée dans les gestionnaires** (S-K9, #170) : le Project Manager et l'Object Manager se parcourent au clavier quand ils ont le focus (un clic dedans le donne). ↑ et ↓ sélectionnent la ligne **visible** voisine (les enfants d'un dossier ou d'une section repliés sont sautés), bornées aux deux bouts ; elles n'ouvrent rien et n'écrivent pas dans l'historique. Entrée ouvre : une fenêtre s'ouvre (comme le double-clic), un dossier se déplie ou se replie, une série ou un objet de l'Object Manager ouvre ses Properties. La ligne qui porte le curseur a le contour de focus de `selection.stroke` (`list_row::paint_focus_outline`). Maj+↑/↓ et Alt+↓ sont consommés sans effet ; Ctrl+↑/↓ de l'Object Manager garde « déplacer la série ». Les touches sont consommées avant la grille d'un classeur, qui lit les flèches sans les consommer. Touches : `KEY_ARROW_UP`, `KEY_ARROW_DOWN`, `KEY_ENTER` de `app/shortcuts.rs`, lignes d'aide `help-select-neighbour` et `help-open-entry`.
 - **Pas de sélecteur d'outil dans une fenêtre** (S-K7, #299). L'objet d'abord :
   on clique ou on glisse l'objet lui-même (une courbe, une poignée, une
   cellule) ; les outils (Pointeur, Texte, Zoom, formes) vivent dans la barre

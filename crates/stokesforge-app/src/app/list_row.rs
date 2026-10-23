@@ -124,6 +124,81 @@ pub(super) fn list_row_grip(
     label.union(rest)
 }
 
+/// Le contour de focus clavier d'une ligne (#170, point 6) : celui de
+/// `selection.stroke`, posé en retrait d'un point. Une seule écriture pour
+/// toutes les lignes : une ligne de [`list_row`] qui a le focus d'egui, la ligne
+/// du curseur clavier du Project Manager (qui suit son propre focus, pas celui
+/// d'egui) et celle de l'Object Manager (une ancre de focus pour tout le
+/// panneau).
+pub(super) fn paint_focus_outline(ui: &egui::Ui, rect: egui::Rect) {
+    ui.painter().rect_stroke(
+        rect.shrink(1.0),
+        0.0,
+        ui.visuals().selection.stroke,
+        egui::StrokeKind::Inside,
+    );
+}
+
+/// Où va le curseur clavier depuis `cursor` quand on appuie sur ↑ (`step` = -1)
+/// ou ↓ (+1) dans `visible`, les lignes **visibles** dans l'ordre de lecture :
+/// la voisine, sans passer d'un bout à l'autre. Sans curseur (ou si le curseur
+/// n'est pas visible), ↓ va à la première ligne et ↑ à la dernière. `None` si
+/// rien n'est visible. Partagée par le Project Manager et l'Object Manager
+/// (#170, point 6).
+pub(super) fn neighbour<T: Copy + PartialEq>(
+    visible: &[T],
+    cursor: Option<T>,
+    step: i32,
+) -> Option<T> {
+    let last = visible.len().checked_sub(1)?;
+    let target = match cursor.and_then(|entry| visible.iter().position(|e| *e == entry)) {
+        Some(at) if step < 0 => at.saturating_sub(1),
+        Some(at) => (at + 1).min(last),
+        None if step < 0 => last,
+        None => 0,
+    };
+    visible.get(target).copied()
+}
+
+/// Les touches de navigation d'une liste, lues (et consommées) une fois par
+/// image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum NavKey {
+    Up,
+    Down,
+    Enter,
+}
+
+/// Lit ↑, ↓ et Entrée dans le registre des touches. Les variantes Maj (↑ ↓) et
+/// Alt+↓ sont consommées **d'abord** et ne font rien : `consume_shortcut`
+/// ignore Maj et Alt en trop et les prendrait pour ↑ ou ↓ simples. Ctrl+↑ et
+/// Ctrl+↓ (déplacer une série) ne correspondent pas : le modificateur Ctrl, lui,
+/// doit être exact.
+pub(super) fn read_navigation(input: &mut egui::InputState) -> Option<NavKey> {
+    use super::shortcuts::{
+        KEY_ALT_ARROW_DOWN, KEY_ARROW_DOWN, KEY_ARROW_UP, KEY_ENTER, KEY_SHIFT_ARROW_DOWN,
+        KEY_SHIFT_ARROW_UP,
+    };
+    let swallowed = [
+        input.consume_shortcut(&KEY_SHIFT_ARROW_UP),
+        input.consume_shortcut(&KEY_SHIFT_ARROW_DOWN),
+        input.consume_shortcut(&KEY_ALT_ARROW_DOWN),
+    ]
+    .contains(&true);
+    if swallowed {
+        return None;
+    }
+    if input.consume_shortcut(&KEY_ARROW_UP) {
+        Some(NavKey::Up)
+    } else if input.consume_shortcut(&KEY_ARROW_DOWN) {
+        Some(NavKey::Down)
+    } else if input.consume_shortcut(&KEY_ENTER) {
+        Some(NavKey::Enter)
+    } else {
+        None
+    }
+}
+
 /// Le fond d'une ligne : fond pâle et filet d'accent si elle est
 /// sélectionnée, gris clair si elle est seulement survolée, rien sinon. Deux
 /// formes à plat (fond, puis filet), jamais un `Shape::Vec` : les tests et
@@ -160,8 +235,9 @@ impl ListRowBackground {
     }
 
     /// Pose le fond sous la ligne `row`, prolongée jusqu'au bord droit de
-    /// l'`Ui` : la ligne court sur toute la largeur restante.
-    pub(super) fn paint(self, ui: &egui::Ui, row: egui::Rect, selected: bool) {
+    /// l'`Ui` (la ligne court sur toute la largeur restante), et le contour de
+    /// focus clavier quand elle porte le curseur (`focused`, #170 point 6).
+    pub(super) fn paint(self, ui: &egui::Ui, row: egui::Rect, selected: bool, focused: bool) {
         let rect = egui::Rect::from_min_max(
             row.min,
             egui::pos2(
@@ -177,6 +253,9 @@ impl ListRowBackground {
         {
             ui.painter().set(index, shape);
         }
+        if focused {
+            paint_focus_outline(ui, rect);
+        }
     }
 }
 
@@ -191,7 +270,37 @@ pub(super) fn list_row(
     selected: bool,
     dimmed: bool,
 ) -> egui::Response {
-    list_row_sensed(ui, icon, text, selected, dimmed, egui::Sense::click())
+    list_row_sensed(
+        ui,
+        icon,
+        text,
+        selected,
+        dimmed,
+        false,
+        egui::Sense::click(),
+    )
+}
+
+/// [`list_row`] dont le contour de focus est peint aussi quand l'appelant sait
+/// que la ligne porte le curseur clavier sans avoir le focus d'egui (le Project
+/// Manager suit son focus lui-même, #170 point 6).
+pub(super) fn list_row_focused(
+    ui: &mut egui::Ui,
+    icon: Option<egui::Image<'static>>,
+    text: &str,
+    selected: bool,
+    dimmed: bool,
+    focused: bool,
+) -> egui::Response {
+    list_row_sensed(
+        ui,
+        icon,
+        text,
+        selected,
+        dimmed,
+        focused,
+        egui::Sense::click(),
+    )
 }
 
 /// [`list_row`] qui se glisse aussi : toute la ligne saisit (glisser-déposer
@@ -203,6 +312,7 @@ pub(super) fn list_row_draggable(ui: &mut egui::Ui, text: &str, selected: bool) 
         text,
         selected,
         false,
+        false,
         egui::Sense::click_and_drag(),
     )
 }
@@ -213,6 +323,7 @@ fn list_row_sensed(
     text: &str,
     selected: bool,
     dimmed: bool,
+    focused: bool,
     sense: egui::Sense,
 ) -> egui::Response {
     let galley = egui::WidgetText::from(list_row_text(text, selected)).into_galley(
@@ -248,13 +359,8 @@ fn list_row_sensed(
         let text_pos = egui::pos2(text_left, rect.center().y - galley.size().y / 2.0);
         let color = list_row_text_color(ui, selected, dimmed);
         ui.painter().galley(text_pos, galley, color);
-        if response.has_focus() {
-            ui.painter().rect_stroke(
-                rect.shrink(1.0),
-                0.0,
-                ui.visuals().selection.stroke,
-                egui::StrokeKind::Inside,
-            );
+        if focused || response.has_focus() {
+            paint_focus_outline(ui, rect);
         }
     }
     response
@@ -388,14 +494,14 @@ mod tests {
         let output = image(&context, |ui| {
             let background = ListRowBackground::reserve(ui);
             let row = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(100.0, 18.0));
-            background.paint(ui, row, true);
+            background.paint(ui, row, true, false);
         });
         let rows = rects(&output, theme::list_row_selected_fill());
         assert_eq!(rows[0].height(), LIST_ROW_HEIGHT);
         let output = image(&context, |ui| {
             let background = ListRowBackground::reserve(ui);
             let row = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(100.0, 40.0));
-            background.paint(ui, row, true);
+            background.paint(ui, row, true, false);
         });
         assert_eq!(
             rects(&output, theme::list_row_selected_fill())[0].height(),
@@ -419,7 +525,7 @@ mod tests {
                     })
                     .response
                     .rect;
-                background.paint(ui, row, selected);
+                background.paint(ui, row, selected, false);
             });
             let fill = output.shapes.iter().position(|s| {
                 matches!(&s.shape, egui::Shape::Rect(r) if r.fill == theme::list_row_selected_fill())

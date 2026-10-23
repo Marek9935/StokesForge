@@ -40,7 +40,8 @@ use super::graph_text_edit::{
 use super::graph_window::open_shape_properties;
 use super::inplace_edit;
 use super::list_row::{
-    list_row_grip, list_row_text, list_row_text_color, with_list_row_height, ListRowBackground,
+    list_row_grip, list_row_text, list_row_text_color, neighbour, read_navigation,
+    with_list_row_height, ListRowBackground, NavKey,
 };
 use super::menu_sections::MenuSections;
 use super::object_dnd::{self, Hover};
@@ -633,6 +634,8 @@ pub(super) fn object_manager_contents(
         settings,
         item,
         hover: Hover::default(),
+        visible: std::cell::RefCell::new(Vec::new()),
+        has_focus: ui.memory(|m| m.focused()) == Some(focus),
     };
     egui::ScrollArea::both().show(ui, |ui| {
         crate::tree_lines::begin_tree(ui);
@@ -640,6 +643,24 @@ pub(super) fn object_manager_contents(
     });
     object_dnd::end_of_frame(ui.ctx(), model.graph, spec, paint.hover.take(), actions);
     if ui.memory(|m| m.focused()) == Some(focus) {
+        // ↑ ↓ : la ligne sélectionnable visible voisine ; Entrée : ses propriétés,
+        // comme le double-clic (#170, point 6). Ctrl+↑ / Ctrl+↓ (déplacer une
+        // série) ne passent pas par ici : `series_shortcuts` plus bas.
+        match ui.input_mut(read_navigation) {
+            Some(key @ (NavKey::Up | NavKey::Down)) => {
+                let step = if key == NavKey::Up { -1 } else { 1 };
+                if let Some(next) = neighbour(&paint.visible.borrow(), selected, step) {
+                    requests.push(ObjectManagerRequest::Select(next));
+                    ui.ctx().request_repaint();
+                }
+            }
+            Some(NavKey::Enter) => {
+                if let Some(target) = selected {
+                    requests.push(ObjectManagerRequest::Properties(target));
+                }
+            }
+            None => {}
+        }
         if let Some(target) = selected {
             if target.removable(spec)
                 && ui.input_mut(|i| i.consume_shortcut(&super::shortcuts::KEY_DELETE))
@@ -676,6 +697,13 @@ struct ObjectManagerPaint<'a> {
     item: Option<DragItem>,
     /// La ligne que l'élément glissé survole, vue pendant la peinture.
     hover: Hover,
+    /// Les lignes sélectionnables **peintes** cette image, dans l'ordre de
+    /// lecture : ce que ↑ et ↓ parcourent (#170, point 6) ; une section
+    /// repliée n'y figure pas.
+    visible: std::cell::RefCell<Vec<T>>,
+    /// Le panneau a le focus clavier : sa ligne sélectionnée porte le contour
+    /// de focus.
+    has_focus: bool,
 }
 
 impl ObjectManagerPaint<'_> {
@@ -905,6 +933,7 @@ impl ObjectManagerPaint<'_> {
         requests: &mut Vec<ObjectManagerRequest>,
     ) {
         let target = T::SeriesGroup(group.target);
+        self.visible.borrow_mut().push(target);
         let background = ListRowBackground::reserve(ui);
         let row = with_list_row_height(ui, |ui| {
             ui.horizontal(|ui| {
@@ -981,7 +1010,7 @@ impl ObjectManagerPaint<'_> {
         })
         .response
         .rect;
-        background.paint(ui, row, group.selected);
+        background.paint(ui, row, group.selected, group.selected && self.has_focus);
     }
 
     fn axes(
@@ -1075,6 +1104,7 @@ impl ObjectManagerPaint<'_> {
         actions: &mut Vec<Action>,
         requests: &mut Vec<ObjectManagerRequest>,
     ) -> f32 {
+        self.visible.borrow_mut().push(T::Series(series.target));
         ui.push_id(series.target, |ui| {
             // #169 : une ligne de liste, fond posé sous la case et l'échantillon.
             let background = ListRowBackground::reserve(ui);
@@ -1166,7 +1196,7 @@ impl ObjectManagerPaint<'_> {
             })
             .response
             .rect;
-            background.paint(ui, row, series.selected);
+            background.paint(ui, row, series.selected, series.selected && self.has_focus);
             row.center().y
         })
         .inner
@@ -1337,6 +1367,7 @@ fn object_manager_object_row(
     actions: &mut Vec<Action>,
     requests: &mut Vec<ObjectManagerRequest>,
 ) -> f32 {
+    dnd.visible.borrow_mut().push(object.target);
     ui.push_id(object.target, |ui| {
         // #169 : une ligne de liste, fond posé sous la case et l'icône.
         let background = ListRowBackground::reserve(ui);
@@ -1435,7 +1466,7 @@ fn object_manager_object_row(
         })
         .response
         .rect;
-        background.paint(ui, row, object.selected);
+        background.paint(ui, row, object.selected, object.selected && dnd.has_focus);
         row.center().y
     })
     .inner
@@ -2905,6 +2936,120 @@ mod tests {
             properties,
             "le double-clic sur le trait ouvre les propriétés"
         );
+    }
+
+    /// #170, point 6 : dans l'Object Manager focalisé, ↑ et ↓ sélectionnent la
+    /// ligne visible voisine (bornée), Entrée demande les propriétés de la
+    /// sélection comme le double-clic, Maj+↓ ne fait rien, et Ctrl+↓ reste le
+    /// déplacement de la série (aucune sélection). Sans focus, aucune touche.
+    #[test]
+    fn fleches_et_entree_parcourent_les_lignes_de_l_object_manager() {
+        let (project, graph, spec, _model) = trois_series();
+        // La série du milieu est la sélection : ↑ et ↓ ont chacune un voisin.
+        let model = stokesforge_app_state::object_manager::object_tree(
+            project.tree(),
+            graph,
+            Some(SeriesRef::new(0, 1)),
+        )
+        .unwrap();
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let image = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+        let selects = |requests: &[ObjectManagerRequest]| -> Vec<SeriesRef> {
+            requests
+                .iter()
+                .filter_map(|request| match request {
+                    ObjectManagerRequest::Select(T::Series(series)) => Some(*series),
+                    _ => None,
+                })
+                .collect()
+        };
+        image(Vec::new());
+        let (output, _, _) = image(Vec::new());
+        // Sans focus du panneau, les flèches ne sont pas pour nous.
+        let (_, _, requests) = image(vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)]);
+        assert!(selects(&requests).is_empty(), "sans focus");
+
+        // Un clic sur la ligne du milieu donne le focus au panneau.
+        let row = text_center(&output, "Deuxième");
+        image(vec![egui::Event::PointerMoved(row)]);
+        image(vec![pointer(row, true)]);
+        image(vec![pointer(row, false)]);
+        image(Vec::new());
+
+        let (_, _, requests) = image(vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)]);
+        assert_eq!(
+            selects(&requests),
+            vec![SeriesRef::new(0, 2)],
+            "↓ : la suivante"
+        );
+        let (_, _, requests) = image(vec![key(egui::Key::ArrowUp, egui::Modifiers::NONE)]);
+        assert_eq!(
+            selects(&requests),
+            vec![SeriesRef::new(0, 0)],
+            "↑ : la précédente"
+        );
+        let (_, _, requests) = image(vec![key(egui::Key::ArrowDown, egui::Modifiers::SHIFT)]);
+        assert!(selects(&requests).is_empty(), "Maj+↓ ne déplace pas");
+
+        // Ctrl+↓ reste « descendre la série » : une action, aucune sélection.
+        let (_, actions, requests) = image(vec![key(egui::Key::ArrowDown, egui::Modifiers::CTRL)]);
+        assert_eq!(
+            actions,
+            vec![Action::MoveSeries {
+                graph,
+                series: SeriesRef::new(0, 1),
+                up: false,
+            }]
+        );
+        assert!(
+            selects(&requests).is_empty(),
+            "Ctrl+↓ ne change pas de ligne"
+        );
+
+        // Entrée : les propriétés de la série sélectionnée, comme le double-clic.
+        let (_, actions, requests) = image(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
+        assert!(actions.is_empty());
+        assert!(requests.iter().any(|request| matches!(
+            request,
+            ObjectManagerRequest::Properties(T::Series(series)) if *series == SeriesRef::new(0, 1)
+        )));
+    }
+
+    /// #170, point 6 : la ligne sélectionnée porte le contour de focus quand le
+    /// panneau a le focus clavier, et seulement alors.
+    #[test]
+    fn la_ligne_selectionnee_a_le_contour_de_focus_quand_le_panneau_est_focalise() {
+        let (project, _graph, spec, model) = trois_series();
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let image = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+        let stroke = ctx.global_style().visuals.selection.stroke;
+        let contours = |output: &egui::FullOutput| {
+            output
+                .shapes
+                .iter()
+                .filter(|shape| {
+                    matches!(&shape.shape, egui::Shape::Rect(rect) if rect.stroke == stroke)
+                })
+                .count()
+        };
+        image(Vec::new());
+        let (output, _, _) = image(Vec::new());
+        assert_eq!(contours(&output), 0, "sans focus, pas de contour");
+        let row = text_center(&output, "Premier");
+        image(vec![egui::Event::PointerMoved(row)]);
+        image(vec![pointer(row, true)]);
+        image(vec![pointer(row, false)]);
+        let (output, _, _) = image(Vec::new());
+        assert_eq!(contours(&output), 1, "focalisé : la ligne sélectionnée");
+        // Témoin : un clic ailleurs rend le focus, le contour disparaît.
+        let away = egui::pos2(590.0, 490.0);
+        image(vec![egui::Event::PointerMoved(away)]);
+        image(vec![pointer(away, true)]);
+        image(vec![pointer(away, false)]);
+        let (output, _, _) = image(Vec::new());
+        assert_eq!(contours(&output), 0, "le focus rendu, plus de contour");
     }
 
     /// Suppr retire l'objet sélectionné, mais seulement quand le panneau a le

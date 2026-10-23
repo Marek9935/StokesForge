@@ -22,6 +22,18 @@
 //! les classeurs d'origine (hors dossier) ; l'entrée de menu est grisée avec sa
 //! raison, et `AppState` refuse le geste au clavier avec la même phrase. À
 //! reprendre dans une issue à part.
+//!
+//! **Navigation au clavier (#170, point 6).** Panneau focalisé (`PmMemory::focus`,
+//! posé par un clic), ↑ et ↓ déplacent la sélection d'une ligne **visible** à
+//! l'autre (`PmMemory::visible`, relevée à la peinture : les dossiers repliés
+//! sont sautés, contrairement à `order`, qui sert aux plages Maj), et Entrée
+//! ouvre la ou les fenêtres sélectionnées, déplie ou replie les dossiers. La
+//! flèche ne touche à aucune fenêtre ni à l'historique. Les touches sont
+//! consommées ici, avant la grille d'un classeur (peinte après le panneau), qui
+//! lit les flèches sans les consommer ; les variantes Maj et Alt+↓, qu'egui
+//! confondrait avec ↑ et ↓ (il ignore Maj et Alt en trop), sont consommées
+//! d'abord et laissées sans effet. La ligne qui porte le curseur clavier a le
+//! contour de focus des lignes de liste (`list_row::paint_focus_outline`).
 
 use std::collections::HashSet;
 
@@ -34,7 +46,8 @@ use stokesforge_core::NodeId;
 
 use super::inplace_edit;
 use super::list_row::{
-    list_row, raise_to_list_row_height, restore_row_height, with_list_row_height,
+    list_row_focused, neighbour, raise_to_list_row_height, read_navigation, restore_row_height,
+    with_list_row_height, NavKey,
 };
 use super::menu_sections::MenuSections;
 use super::shortcuts::{shortcut_text_delete, SHORTCUT_DUPLICATE_OBJECT, SHORTCUT_RENAME_OBJECT};
@@ -83,6 +96,15 @@ struct PmMemory {
     /// Dossiers à déplier à leur prochaine peinture (#326) : le parent d'un
     /// dossier qu'on vient de créer doit montrer son nouvel enfant.
     reveal: Vec<NodeId>,
+    /// Les lignes **visibles** de l'image précédente, dans l'ordre de lecture :
+    /// ce que ↑ et ↓ parcourent (un dossier replié cache ses enfants, à la
+    /// différence de `order`).
+    visible: Vec<PmEntry>,
+    /// Dossiers que Entrée doit déplier ou replier à leur prochaine peinture.
+    toggle: Vec<NodeId>,
+    /// Ligne que le clavier vient d'atteindre : à faire apparaître dans la
+    /// zone de défilement à sa prochaine peinture.
+    scroll_to: Option<PmEntry>,
 }
 
 /// Une entrée sélectionnable de l'arbre du Project Manager (#170, point 4) :
@@ -131,6 +153,29 @@ pub(super) fn paste_parent(selection: &HashSet<PmEntry>, root: NodeId) -> NodeId
         (Some(PmEntry::Folder(id)), None) => *id,
         _ => root,
     }
+}
+
+/// La ligne qui porte le curseur clavier : l'ancre du dernier geste si elle est
+/// sélectionnée, sinon l'unique entrée sélectionnée.
+fn cursor_of(selection: &HashSet<PmEntry>, anchor: Option<PmEntry>) -> Option<PmEntry> {
+    anchor
+        .filter(|entry| selection.contains(entry))
+        .or_else(|| {
+            let mut entries = selection.iter();
+            match (entries.next(), entries.next()) {
+                (Some(entry), None) => Some(*entry),
+                _ => None,
+            }
+        })
+}
+
+/// Note qu'une ligne est visible dans cette image (voir `PmMemory::visible`).
+fn note_visible(ctx: &egui::Context, memory_key: egui::Id, entry: PmEntry) {
+    ctx.data_mut(|data| {
+        data.get_temp_mut_or_default::<PmMemory>(memory_key)
+            .visible
+            .push(entry);
+    });
 }
 
 /// La sélection contient-elle un dossier (copie refusée, voir la doc de tête) ?
@@ -390,7 +435,11 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
         let parent =
             pending.unwrap_or_else(|| paste_parent(interaction.selection, interaction.root));
         let mut paste = None;
+        let mut navigation = None;
         ctx.input_mut(|input| {
+            if memory.focus {
+                navigation = read_navigation(input);
+            }
             if memory.focus && !ids.is_empty() {
                 if input.consume_shortcut(&super::shortcuts::SHORTCUT_RENAME_OBJECT) {
                     memory.rename = ids.clone();
@@ -425,6 +474,36 @@ fn object_shortcuts(ui: &egui::Ui, interaction: &mut PmInteraction) {
         } else if let Some(parent) = pending {
             ctx.data_mut(|data| data.insert_temp(paste_key, parent));
         }
+        match navigation {
+            Some(key @ (NavKey::Up | NavKey::Down)) => {
+                let step = if key == NavKey::Up { -1 } else { 1 };
+                let cursor = cursor_of(interaction.selection, memory.anchor);
+                if let Some(entry) = neighbour(&memory.visible, cursor, step) {
+                    interaction.selection.clear();
+                    interaction.selection.insert(entry);
+                    memory.anchor = Some(entry);
+                    memory.slow_click = None;
+                    memory.scroll_to = Some(entry);
+                    ctx.request_repaint();
+                }
+            }
+            Some(NavKey::Enter) => {
+                // Comme « Open » du menu : chaque fenêtre sélectionnée s'ouvre,
+                // chaque dossier bascule.
+                for entry in memory
+                    .order
+                    .iter()
+                    .filter(|e| interaction.selection.contains(e))
+                {
+                    match entry {
+                        PmEntry::Window(tab) => interaction.open_requests.push(*tab),
+                        PmEntry::Folder(id) => memory.toggle.push(*id),
+                    }
+                }
+                ctx.request_repaint();
+            }
+            None => {}
+        }
     }
     ctx.data_mut(|data| data.insert_temp(memory_key, memory));
 }
@@ -446,6 +525,7 @@ pub(super) fn project_manager_contents_from_tree(
     ui.ctx().data_mut(|data| {
         let mut memory = data.get_temp::<PmMemory>(memory_key).unwrap_or_default();
         memory.order.clear();
+        memory.visible.clear();
         tree_order(tree, &mut memory.order);
         // Un dossier supprimé ne reste pas sélectionné (un script, Ctrl+Z).
         interaction
@@ -458,6 +538,13 @@ pub(super) fn project_manager_contents_from_tree(
         for node in tree {
             project_tree_node_ui(ui, node, tree, interaction);
         }
+    });
+    // Une demande de clavier ne vaut que pour l'image qui suit : un dossier
+    // caché (replié sous un autre) ne doit pas la garder en réserve.
+    ui.ctx().data_mut(|data| {
+        let memory = data.get_temp_mut_or_default::<PmMemory>(memory_key);
+        memory.toggle.clear();
+        memory.scroll_to = None;
     });
     if ui.input(|input| input.pointer.any_pressed()) {
         let inside = ui
@@ -634,6 +721,36 @@ fn select_gestures(
     gestures
 }
 
+/// La ligne qui porte le contour de focus : le curseur clavier, tant que le
+/// panneau a le focus (`PmMemory::focus`, posé par un clic dedans). Rend `None`
+/// panneau non focalisé ou en renommage.
+fn keyboard_cursor(
+    ctx: &egui::Context,
+    memory_key: egui::Id,
+    selection: &HashSet<PmEntry>,
+) -> Option<PmEntry> {
+    let memory = ctx.data(|data| data.get_temp::<PmMemory>(memory_key))?;
+    (memory.focus && memory.rename.is_empty())
+        .then(|| cursor_of(selection, memory.anchor))
+        .flatten()
+}
+
+/// Fait défiler la zone jusqu'à la ligne que le clavier vient d'atteindre.
+fn reveal_if_reached(
+    ctx: &egui::Context,
+    memory_key: egui::Id,
+    entry: PmEntry,
+    response: &egui::Response,
+) {
+    let reached = ctx.data_mut(|data| {
+        let memory = data.get_temp_mut_or_default::<PmMemory>(memory_key);
+        (memory.scroll_to == Some(entry)).then(|| memory.scroll_to.take())
+    });
+    if reached.is_some() {
+        response.scroll_to_me(None);
+    }
+}
+
 /// Peint récursivement un nœud de [`ProjectTreeNode`] et ses enfants ; rend
 /// le centre vertical de sa rangée, pour les connecteurs de son parent.
 fn project_tree_node_ui(
@@ -646,20 +763,30 @@ fn project_tree_node_ui(
     match node {
         ProjectTreeNode::Folder { id, name, children } => {
             let entry = PmEntry::Folder(*id);
+            note_visible(ui.ctx(), memory_key, entry);
             let state_id = ui.make_persistent_id(("project_tree_folder", id));
             let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
                 ui.ctx(),
                 state_id,
                 false,
             );
-            let revealed = ui.ctx().data_mut(|data| {
+            let (revealed, toggled) = ui.ctx().data_mut(|data| {
                 let memory = data.get_temp_mut_or_default::<PmMemory>(memory_key);
                 let before = memory.reveal.len();
                 memory.reveal.retain(|folder| folder != id);
-                memory.reveal.len() != before
+                let toggles = memory.toggle.len();
+                memory.toggle.retain(|folder| folder != id);
+                (
+                    memory.reveal.len() != before,
+                    memory.toggle.len() != toggles,
+                )
             });
             if revealed {
                 state.set_open(true);
+            }
+            if toggled {
+                // Entrée (#170, point 6) : déplie un dossier fermé, replie un ouvert.
+                state.set_open(!state.is_open());
             }
             // #170 : la ligne d'en-tête a la hauteur d'une ligne de liste ; la
             // hauteur est rendue après le corps (la réponse emprunte l'`Ui`).
@@ -674,13 +801,17 @@ fn project_tree_node_ui(
                 // #170 point 4 : un dossier est une ligne de liste comme une
                 // fenêtre (fond, filet, survol), sélectionnable.
                 let selected = interaction.selection.contains(&entry);
-                let response = list_row(
+                let focused =
+                    keyboard_cursor(ui.ctx(), memory_key, interaction.selection) == Some(entry);
+                let response = list_row_focused(
                     ui,
                     Some(icon_image(Icon::Folder, IconRole::Folder)),
                     name,
                     selected,
                     false,
+                    focused,
                 );
+                reveal_if_reached(ui.ctx(), memory_key, entry, &response);
                 gestures = select_gestures(ui, interaction, memory_key, entry, &response, selected);
                 response.context_menu(|ui| {
                     let viewport = ui.ctx().viewport_id();
@@ -732,6 +863,7 @@ fn project_tree_node_ui(
             };
             let tab = tab_for_window(*id, *kind);
             let entry = PmEntry::Window(tab);
+            note_visible(ui.ctx(), memory_key, entry);
             if is_renaming(ui.ctx(), memory_key, *id) {
                 return with_list_row_height(ui, |ui| {
                     rename_editor(ui, interaction, memory_key, *id, name, siblings)
@@ -742,19 +874,23 @@ fn project_tree_node_ui(
             }
             let selected = interaction.selection.contains(&entry);
             let is_closed = !interaction.open.contains(&tab);
+            let focused =
+                keyboard_cursor(ui.ctx(), memory_key, interaction.selection) == Some(entry);
             // Le salt par onglet évite que toutes les lignes partagent le même Id.
             let response = ui
                 .push_id(tab, |ui| {
                     // #169 : une ligne de liste (`list_row`), jamais un bouton `.selected()`.
-                    list_row(
+                    list_row_focused(
                         ui,
                         Some(icon_image(icon.0, icon.1)),
                         name,
                         selected,
                         is_closed,
+                        focused,
                     )
                 })
                 .inner;
+            reveal_if_reached(ui.ctx(), memory_key, entry, &response);
             let gestures = select_gestures(ui, interaction, memory_key, entry, &response, selected);
             if gestures.plain {
                 interaction.open_requests.push(tab);
@@ -1047,6 +1183,10 @@ pub(super) mod tests {
         selection: RefCell<HashSet<PmEntry>>,
         open: RefCell<HashSet<Tab>>,
         close_requests: RefCell<Vec<Tab>>,
+        /// ↓ était-elle encore lisible après le panneau, dans la même image ?
+        /// Ce qu'une grille peinte ensuite verrait (elle lit les flèches sans
+        /// les consommer, #170 point 6).
+        arrow_down_left: std::cell::Cell<bool>,
     }
 
     impl Banc {
@@ -1057,6 +1197,7 @@ pub(super) mod tests {
                 selection: RefCell::new(selection),
                 open: RefCell::new(HashSet::new()),
                 close_requests: RefCell::new(Vec::new()),
+                arrow_down_left: std::cell::Cell::new(false),
             }
         }
 
@@ -1097,6 +1238,8 @@ pub(super) mod tests {
             };
             let mut output = context.run_ui(input, |ui| {
                 project_manager_contents_from_tree(ui, tree, &mut interaction);
+                self.arrow_down_left
+                    .set(ui.input(|input| input.key_pressed(egui::Key::ArrowDown)));
             });
             output.textures_delta.clear();
             output
@@ -2484,5 +2627,251 @@ pub(super) mod tests {
             racine
         );
         assert_eq!(paste_parent(&HashSet::new(), racine), racine);
+    }
+
+    // -- Navigation au clavier (#170, point 6) --------------------------------
+
+    fn touche_avec(key: egui::Key, modifiers: egui::Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    /// Un banc dont le panneau a le focus (un clic sur « Alpha »), l'arbre
+    /// `arbre_avec_dossier_replie` : Alpha, Dossier (replié : Beta, Gamma),
+    /// Delta. `f` reçoit le banc, le contexte et le peintre.
+    fn avec_panneau_focalise(
+        f: impl FnOnce(
+            &Banc,
+            &egui::Context,
+            &dyn Fn(&egui::Context, Vec<egui::Event>) -> egui::FullOutput,
+            [Tab; 4],
+        ),
+    ) {
+        let (tree, tabs) = arbre_avec_dossier_replie();
+        let context = super::super::test_support::contexte();
+        let banc = Banc::new(HashSet::new());
+        let horloge = std::cell::Cell::new(1.0);
+        let paint = |ctx: &egui::Context, events| {
+            horloge.set(horloge.get() + 0.1);
+            banc.paint_at(ctx, &tree, events, Some(horloge.get()))
+        };
+        paint(&context, vec![]);
+        let first = paint(&context, vec![]);
+        let alpha = find_text_center(&first.shapes, "Alpha");
+        click_at(&context, alpha, egui::Modifiers::NONE, paint);
+        paint(&context, vec![]);
+        banc.open_requests.borrow_mut().clear();
+        f(&banc, &context, &paint, tabs);
+    }
+
+    /// ↓ deux fois depuis Alpha atteint la **troisième ligne visible** (Delta),
+    /// le dossier replié comptant pour une ligne et ses enfants pour aucune ;
+    /// la flèche ne demande ni ouverture ni action. Témoin : suivre `order`
+    /// (enfants cachés compris) s'arrêterait sur Beta.
+    #[test]
+    fn deux_fois_bas_atteignent_la_troisieme_ligne_visible() {
+        avec_panneau_focalise(|banc, context, paint, [alpha, _beta, _gamma, delta]| {
+            assert_eq!(*banc.selection.borrow(), fenetres([alpha]));
+            paint(
+                context,
+                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            );
+            assert_eq!(
+                *banc.selection.borrow(),
+                HashSet::from([PmEntry::Folder(dossier_de_l_arbre())]),
+                "la première flèche va au dossier"
+            );
+            paint(
+                context,
+                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            );
+            assert_eq!(
+                *banc.selection.borrow(),
+                fenetres([delta]),
+                "la seconde saute les enfants du dossier replié"
+            );
+            assert!(
+                banc.open_requests.borrow().is_empty(),
+                "une flèche n'ouvre rien"
+            );
+            assert!(banc.actions.borrow().is_empty(), "ni action, ni historique");
+            // En bas de liste : ↓ reste sur place ; ↑ remonte d'une ligne visible.
+            paint(
+                context,
+                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            );
+            assert_eq!(*banc.selection.borrow(), fenetres([delta]));
+            paint(
+                context,
+                vec![touche_avec(egui::Key::ArrowUp, egui::Modifiers::NONE)],
+            );
+            assert_eq!(
+                *banc.selection.borrow(),
+                HashSet::from([PmEntry::Folder(dossier_de_l_arbre())])
+            );
+        });
+    }
+
+    /// Les flèches ne s'appliquent qu'à un panneau qui a le focus : sans clic
+    /// dedans, ↓ ne bouge rien et reste lisible par le reste de l'application.
+    #[test]
+    fn sans_focus_les_fleches_ne_touchent_pas_au_panneau() {
+        let (tree, _tabs) = arbre_avec_dossier_replie();
+        let context = egui::Context::default();
+        let banc = Banc::new(HashSet::new());
+        banc.paint(&context, &tree, vec![]);
+        banc.paint(
+            &context,
+            &tree,
+            vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+        );
+        assert!(banc.selection.borrow().is_empty());
+        assert!(banc.arrow_down_left.get(), "la touche reste à qui la veut");
+    }
+
+    /// Depuis le panneau focalisé, la flèche est consommée : la grille d'un
+    /// classeur, peinte après, lit les flèches sans les consommer et déplacerait
+    /// sa cellule en même temps. Témoin : sans focus, la flèche reste lisible.
+    #[test]
+    fn une_fleche_du_panneau_n_atteint_pas_la_grille() {
+        avec_panneau_focalise(|banc, context, paint, _| {
+            paint(
+                context,
+                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            );
+            assert!(
+                !banc.arrow_down_left.get(),
+                "↓ consommée par le panneau : la grille ne la voit pas"
+            );
+        });
+    }
+
+    /// Maj+↓ et Alt+↓ ne se prennent pas pour ↓ (egui ignore Maj et Alt en
+    /// trop) : ils sont consommés et ne bougent pas la sélection. Témoin : ↓
+    /// seule la bouge.
+    #[test]
+    fn maj_et_alt_bas_ne_deplacent_pas_la_selection() {
+        avec_panneau_focalise(|banc, context, paint, [alpha, ..]| {
+            for modifiers in [egui::Modifiers::SHIFT, egui::Modifiers::ALT] {
+                paint(context, vec![touche_avec(egui::Key::ArrowDown, modifiers)]);
+                assert_eq!(*banc.selection.borrow(), fenetres([alpha]), "{modifiers:?}");
+                assert!(!banc.arrow_down_left.get(), "{modifiers:?} consommée");
+            }
+            paint(
+                context,
+                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            );
+            assert_ne!(*banc.selection.borrow(), fenetres([alpha]), "témoin");
+        });
+    }
+
+    /// Entrée ouvre la fenêtre sélectionnée (`open_requests`), déplie un
+    /// dossier fermé et le replie ouvert. Témoin : sans Entrée, rien.
+    #[test]
+    fn entree_ouvre_la_fenetre_et_bascule_le_dossier() {
+        avec_panneau_focalise(|banc, context, paint, [alpha, ..]| {
+            paint(context, vec![]);
+            assert!(banc.open_requests.borrow().is_empty(), "témoin");
+            paint(
+                context,
+                vec![touche_avec(egui::Key::Enter, egui::Modifiers::NONE)],
+            );
+            assert_eq!(
+                *banc.open_requests.borrow(),
+                vec![alpha],
+                "Entrée ouvre Alpha"
+            );
+
+            paint(
+                context,
+                vec![touche_avec(egui::Key::ArrowDown, egui::Modifiers::NONE)],
+            );
+            let ferme = paint(context, vec![]);
+            assert!(!painted(&ferme, "Beta"), "précondition : dossier replié");
+            paint(
+                context,
+                vec![touche_avec(egui::Key::Enter, egui::Modifiers::NONE)],
+            );
+            let ouvert = paint(context, vec![]);
+            assert!(painted(&ouvert, "Beta"), "Entrée déplie le dossier");
+            assert_eq!(
+                banc.open_requests.borrow().len(),
+                1,
+                "un dossier n'ouvre aucune fenêtre"
+            );
+            paint(
+                context,
+                vec![touche_avec(egui::Key::Enter, egui::Modifiers::NONE)],
+            );
+            // Le repli est animé : on laisse passer le temps.
+            let mut apres = paint(context, vec![]);
+            for _ in 0..10 {
+                apres = paint(context, vec![]);
+            }
+            assert!(!painted(&apres, "Beta"), "Entrée replie le dossier ouvert");
+        });
+    }
+
+    /// La ligne qui porte le curseur clavier a le contour de focus de
+    /// `selection.stroke`, comme une ligne de liste qui a le focus d'egui ;
+    /// sans focus du panneau, aucun contour. Témoin : le contour retiré de la
+    /// peinture des lignes fait échouer ce test.
+    #[test]
+    fn la_ligne_du_curseur_clavier_a_le_contour_de_focus() {
+        let (tree, _tabs) = arbre_avec_dossier_replie();
+        let context = super::super::test_support::contexte();
+        let banc = Banc::new(HashSet::new());
+        let contour = |output: &egui::FullOutput| -> usize {
+            let stroke = context.global_style().visuals.selection.stroke;
+            output
+                .shapes
+                .iter()
+                .filter(|shape| {
+                    matches!(&shape.shape, egui::Shape::Rect(rect) if rect.stroke == stroke)
+                })
+                .count()
+        };
+        banc.paint(&context, &tree, vec![]);
+        let first = banc.paint(&context, &tree, vec![]);
+        banc.selection
+            .borrow_mut()
+            .insert(PmEntry::Folder(dossier_de_l_arbre()));
+        let sans_focus = banc.paint(&context, &tree, vec![]);
+        assert_eq!(
+            contour(&sans_focus),
+            0,
+            "panneau sans focus : pas de contour"
+        );
+        let pos = find_text_center(&first.shapes, "Alpha");
+        click_at(&context, pos, egui::Modifiers::NONE, |ctx, events| {
+            banc.paint(ctx, &tree, events)
+        });
+        let avec_focus = banc.paint(&context, &tree, vec![]);
+        assert_eq!(contour(&avec_focus), 1, "une seule ligne, celle du curseur");
+    }
+
+    /// `neighbour` : voisine visible, bornée ; sans curseur ↓ va au début et ↑
+    /// à la fin ; liste vide, rien.
+    #[test]
+    fn la_ligne_voisine_est_bornee_et_sans_curseur_on_part_d_un_bout() {
+        use super::super::list_row::neighbour;
+        let lignes = [10, 20, 30];
+        assert_eq!(neighbour(&lignes, Some(20), 1), Some(30));
+        assert_eq!(neighbour(&lignes, Some(20), -1), Some(10));
+        assert_eq!(neighbour(&lignes, Some(30), 1), Some(30), "borné en bas");
+        assert_eq!(neighbour(&lignes, Some(10), -1), Some(10), "borné en haut");
+        assert_eq!(neighbour(&lignes, None, 1), Some(10));
+        assert_eq!(neighbour(&lignes, None, -1), Some(30));
+        assert_eq!(
+            neighbour(&lignes, Some(99), 1),
+            Some(10),
+            "curseur invisible"
+        );
+        assert_eq!(neighbour::<i32>(&[], Some(1), 1), None);
     }
 }
