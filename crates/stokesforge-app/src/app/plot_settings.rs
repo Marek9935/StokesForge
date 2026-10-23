@@ -394,7 +394,7 @@ fn plot_area_settings_page(ui: &mut egui::Ui, panel: &mut PanelSpec) -> bool {
 }
 
 /// Page des axes : choix local de l'axe, puis éditeur partagé.
-fn axes_settings_page(
+pub(super) fn axes_settings_page(
     ui: &mut egui::Ui,
     panel: &mut PanelSpec,
     chosen_axis: &mut PlotAxis,

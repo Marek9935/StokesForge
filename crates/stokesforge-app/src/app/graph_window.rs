@@ -2375,4 +2375,167 @@ pub(super) mod tests {
                 != super::super::graph_text_edit::TextEditTarget::GroupName(group)));
         session.shutdown().unwrap();
     }
+
+    // -- Bornes publiées et champs grisés (#170, point 1 ; #221) -------------
+
+    /// Un graphe d'une courbe (x en abscisse, y = 1, 2, 3…) dont `regler`
+    /// ajuste le calque, peint trois images ; rend de quoi lire les bornes
+    /// publiées et la géométrie de la dernière figure.
+    fn graphe_peint(
+        xs: &[f64],
+        regler: impl FnOnce(&mut PanelSpec),
+    ) -> (Session, NodeId, egui::Context, GraphView) {
+        let mut project = Project::new("Bornes").unwrap();
+        let root = project.root();
+        let book = project.add_empty_workbook(root, None).unwrap();
+        let sheet = project.add_worksheet(book, None).unwrap();
+        let ys: Vec<f64> = (1..=xs.len()).map(|n| n as f64).collect();
+        let x = project
+            .add_column(sheet, None, None, stokesforge_core::Column::from_f64(xs))
+            .unwrap();
+        let y = project
+            .add_column(sheet, None, None, stokesforge_core::Column::from_f64(&ys))
+            .unwrap();
+        let mut panel = PanelSpec::at(0, 0);
+        panel.series.push(SeriesSpec::new_xy(x, y));
+        regler(&mut panel);
+        let graph = project
+            .add_graph(root, None, PlotSpec::empty("Bornes").with_panels(panel))
+            .unwrap();
+        let session = Session::spawn(project, None).unwrap();
+        let snapshot = session.handle().snapshot().unwrap();
+        let context = egui::Context::default();
+        context.set_fonts(stokesforge_render_egui::font_definitions());
+        let mut view = GraphView::new();
+        let contents =
+            egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(560.0, 540.0));
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 1200.0),
+                )),
+                ..Default::default()
+            };
+            let mut output = context.run_ui(input, |ui| {
+                let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(contents));
+                content_ui.set_clip_rect(contents);
+                graph_view_contents(
+                    &mut content_ui,
+                    &mut view,
+                    &snapshot,
+                    graph,
+                    &mut Vec::new(),
+                );
+            });
+            output.textures_delta.clear();
+        }
+        (session, graph, context, view)
+    }
+
+    /// #170, point 1 : les bornes que la fenêtre des propriétés montre grisées
+    /// sont celles du tracé (`DrawnPanel`), publiées **dans l'ordre croissant**
+    /// même quand l'axe est inversé (le tracé les rend alors décroissantes).
+    #[test]
+    fn les_bornes_publiees_sont_celles_du_trace_en_ordre_croissant() {
+        let (session, graph, context, view) =
+            graphe_peint(&[0.0, 1.0, 2.0], |panel| panel.bottom.inverted = true);
+        let drawn = &view.last_drawn().unwrap().panels[0];
+        assert!(
+            drawn.x_range.0 > drawn.x_range.1,
+            "précondition : l'axe inversé est tracé à l'envers, {:?}",
+            drawn.x_range
+        );
+        let published = published_axis_bounds(&context, graph, 0).expect("bornes publiées");
+        assert_eq!(
+            published.bottom,
+            Some((drawn.x_range.1, drawn.x_range.0)),
+            "croissantes malgré l'inversion"
+        );
+        assert_eq!(
+            published.left,
+            Some((
+                drawn.y_range.0.min(drawn.y_range.1),
+                drawn.y_range.0.max(drawn.y_range.1)
+            ))
+        );
+        assert_eq!(published.right, None, "aucune série à droite");
+        assert_eq!(published_axis_bounds(&context, graph, 7), None);
+        session.shutdown().unwrap();
+    }
+
+    /// Peint la page des axes (axe du bas) avec les bornes publiées pour
+    /// `graph`, après avoir déplacé le pointeur en `pointer`.
+    fn peindre_axes(
+        context: &egui::Context,
+        graph: NodeId,
+        panel: &mut PanelSpec,
+        pointer: Option<egui::Pos2>,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let mut env = crate::color_picker::PickerEnv {
+            project: Default::default(),
+            user: Default::default(),
+            requests: Vec::new(),
+        };
+        let mut axis = stokesforge_app_state::state::PlotAxis::Bottom;
+        let mut decimal_comma = false;
+        let events = pointer.map(egui::Event::PointerMoved).into_iter().collect();
+        super::super::test_support::image(context, events, |ui| {
+            super::super::plot_settings::axes_settings_page(
+                ui,
+                panel,
+                &mut axis,
+                published_axis_bounds(ui.ctx(), graph, 0),
+                &mut decimal_comma,
+                &mut env,
+            );
+        })
+    }
+
+    /// #170, point 1 : sous « Auto range », les champs de bornes restent
+    /// visibles (grisés) avec les bornes calculées — pour un axe logarithmique
+    /// de 1 à 1000, les valeurs et non leurs logarithmes — et les survoler dit
+    /// pourquoi ils sont grisés.
+    #[test]
+    fn les_champs_de_bornes_grises_montrent_les_bornes_et_leur_raison_au_survol() {
+        use super::super::test_support::textes;
+        let (session, graph, drawn_context, _view) = graphe_peint(&[1.0, 10.0, 1000.0], |panel| {
+            panel.bottom.scale = stokesforge_plot::AxisScale::Log;
+        });
+        // Le contexte de la page est celui du tracé : les bornes s'y publient.
+        let context = drawn_context;
+        crate::theme::install(&context);
+        context.all_styles_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let mut panel = PanelSpec::at(0, 0);
+        panel.bottom.scale = stokesforge_plot::AxisScale::Log;
+        assert!(
+            panel.bottom.auto_range,
+            "précondition : échelle automatique"
+        );
+        // La grille du formulaire se mesure à la première image.
+        peindre_axes(&context, graph, &mut panel, None);
+        let peints = textes(&peindre_axes(&context, graph, &mut panel, None));
+        assert!(
+            peints.iter().any(|t| t.texte == "1000"),
+            "la borne haute calculée s'affiche : {:?}",
+            peints.iter().map(|t| &t.texte).collect::<Vec<_>>()
+        );
+        let raison = tr!("plot-axes-auto-range", "disabled");
+        assert!(
+            !peints.iter().any(|t| t.texte == raison),
+            "témoin : sans survol, pas d'explication"
+        );
+        let champ = peints.iter().find(|t| t.texte == "1000").unwrap().centre;
+        let mut vus = Vec::new();
+        for _ in 0..4 {
+            vus = textes(&peindre_axes(&context, graph, &mut panel, Some(champ)));
+        }
+        assert!(
+            vus.iter().any(|t| t.texte == raison),
+            "le survol du champ grisé dit pourquoi : {:?}",
+            vus.iter().map(|t| &t.texte).collect::<Vec<_>>()
+        );
+        assert_eq!(panel.bottom.range_max, None, "rien n'est écrit sans geste");
+        session.shutdown().unwrap();
+    }
 }
