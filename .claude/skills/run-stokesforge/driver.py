@@ -15,7 +15,7 @@ import os, subprocess, sys, time, signal, pathlib
 DISPLAY = os.environ.get("SF_DISPLAY", ":99")
 RUN = pathlib.Path(os.environ.get("SF_RUN_DIR", "/tmp/stokesforge-run"))
 ROOT = pathlib.Path(__file__).resolve().parents[3]
-APP = ROOT / "target/debug/stokesforge-app"
+APP = pathlib.Path(os.environ.get("SF_APP", ROOT / "target/debug/stokesforge-app"))
 GEOM = os.environ.get("SF_GEOMETRY", "1400x900")
 
 

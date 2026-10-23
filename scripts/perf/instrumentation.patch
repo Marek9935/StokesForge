@@ -1,0 +1,209 @@
+diff --git a/crates/stokesforge-app/src/app.rs b/crates/stokesforge-app/src/app.rs
+index 9c718d68..3e892172 100644
+--- a/crates/stokesforge-app/src/app.rs
++++ b/crates/stokesforge-app/src/app.rs
+@@ -133,6 +133,7 @@
+ //! tourne — sans quoi, egui ne redessinant que sur événement d'entrée, la fin
+ //! du script n'apparaîtrait qu'au prochain mouvement de souris.
+ 
++mod prof;
+ mod analysis_dialog;
+ mod analysis_forms;
+ mod analysis_handles;
+@@ -902,6 +903,10 @@ impl eframe::App for StokesForgeApp {
+ 
+     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+         // `Context` est un `Arc` : le clone évite l’emprunt de lecture du Ui peint.
++        if let Some(c) = frame.info().cpu_usage {
++            prof::record("00b cpu_usage image precedente", c);
++        }
++        let _p_ui = prof::span("01 ui total");
+         let ctx = ui.ctx().clone();
+         self.sync_window_title_and_status(&ctx);
+         let published_stamp = snapshot_stamp(self.state.snapshot());
+@@ -933,28 +938,28 @@ impl eframe::App for StokesForgeApp {
+         self.request_active_figure_copy(&ctx, active_tab, &mut actions);
+ 
+         // L’ordre de ces appels détermine l’emprise des panneaux egui (#115).
+-        self.menu_bar(ui, &ctx, &mut actions, active_tab);
++        { let _p = prof::span("02 menu_bar"); self.menu_bar(ui, &ctx, &mut actions, active_tab); }
+         self.show_toolbars(ui, &ctx, active_tab, &mut actions);
+         self.status_bar(ui, &mut actions);
+         self.script_panel(ui, &ctx, &mut actions);
+-        self.show_project_manager(
++        { let _p = prof::span("03 project_manager"); self.show_project_manager(
+             ui,
+             &ctx,
+             active_tab,
+             &mut open_requests,
+             &mut close_requests,
+             &mut actions,
+-        );
+-        self.object_manager_panel(ui, active_tab, &mut actions);
++        ); }
++        { let _p = prof::span("04 object_manager"); self.object_manager_panel(ui, active_tab, &mut actions); }
+         self.drain_detached_tabs(&ctx, &mut actions);
+-        self.show_workspace(
++        { let _p = prof::span("05 show_workspace"); self.show_workspace(
+             ui,
+             active_tab,
+             &mut actions,
+             &mut detach_requests,
+             &mut close_requests,
+             &mut geometry_updates,
+-        );
++        ); }
+ 
+         for (tab, rect) in geometry_updates {
+             self.remember_window_geometry(tab, rect);
+@@ -968,17 +973,19 @@ impl eframe::App for StokesForgeApp {
+         }
+         self.apply_window_requests(&ctx, open_requests, detach_requests, close_requests);
+         self.blocking_confirmations(&ctx, &mut actions);
+-        self.dispatch_actions(&ctx, actions);
++        { let _p = prof::span("06 dispatch_actions"); self.dispatch_actions(&ctx, actions); }
+         self.close_when_ready(&ctx);
+         self.offer_figure(frame);
+ 
+-        self.sync_window_views();
++        { let _p = prof::span("07 sync_window_views"); self.sync_window_views(); }
+         if snapshot_stamp(self.state.snapshot()) != published_stamp {
+             // Une commande appliquée après la publication réveille les viewports.
+             ctx.request_repaint();
+         }
+         self.screenshot(&ctx);
+         self.autoquit(&ctx);
++        drop(_p_ui);
++        prof::frame_end();
+     }
+ }
+ 
+diff --git a/crates/stokesforge-app/src/app/prof.rs b/crates/stokesforge-app/src/app/prof.rs
+new file mode 100644
+index 00000000..55472c60
+--- /dev/null
++++ b/crates/stokesforge-app/src/app/prof.rs
+@@ -0,0 +1,91 @@
++//! TEMPORAIRE (mesure #340/#341) : chronomètres par étape, activés par `STOKESFORGE_PROF=1`.
++use std::cell::RefCell;
++use std::collections::BTreeMap;
++use std::time::{Duration, Instant};
++
++thread_local! {
++    static ACC: RefCell<BTreeMap<&'static str, (u32, Duration, Duration)>> = RefCell::new(BTreeMap::new());
++    static LAST_PRINT: RefCell<Option<Instant>> = const { RefCell::new(None) };
++    static LAST_FRAME: RefCell<Option<Instant>> = const { RefCell::new(None) };
++}
++
++fn on() -> bool {
++    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *ON.get_or_init(|| std::env::var_os("STOKESFORGE_PROF").is_some())
++}
++
++pub struct Span(&'static str, Instant);
++
++pub fn span(name: &'static str) -> Option<Span> {
++    on().then(|| Span(name, Instant::now()))
++}
++
++impl Drop for Span {
++    fn drop(&mut self) {
++        let d = self.1.elapsed();
++        ACC.with(|a| {
++            let mut a = a.borrow_mut();
++            let e = a.entry(self.0).or_default();
++            e.0 += 1;
++            e.1 += d;
++            e.2 = e.2.max(d);
++        });
++    }
++}
++
++/// Appelé en fin de `ui` : imprime le tableau chaque seconde.
++pub fn frame_end() {
++    if !on() {
++        return;
++    }
++    let now = Instant::now();
++    if let Some(prev) = LAST_FRAME.with(|l| l.replace(Some(now))) {
++        ACC.with(|a| {
++            let mut a = a.borrow_mut();
++            let e = a.entry("00 intervalle entre images").or_default();
++            let d = now - prev;
++            e.0 += 1;
++            e.1 += d;
++            e.2 = e.2.max(d);
++        });
++    }
++    let due = LAST_PRINT.with(|l| {
++        let mut l = l.borrow_mut();
++        match *l {
++            Some(t) if now - t < Duration::from_secs(2) => false,
++            _ => {
++                *l = Some(now);
++                true
++            }
++        }
++    });
++    if due {
++        ACC.with(|a| {
++            let mut a = a.borrow_mut();
++            eprintln!("--- PROF (2 s) : étape | n | moy ms | max ms | total ms");
++            for (k, (n, tot, max)) in a.iter() {
++                eprintln!(
++                    "PROF {k:<34} {n:>5} {:>8.3} {:>8.3} {:>9.1}",
++                    tot.as_secs_f64() * 1e3 / f64::from(*n),
++                    max.as_secs_f64() * 1e3,
++                    tot.as_secs_f64() * 1e3
++                );
++            }
++            a.clear();
++        });
++    }
++}
++
++pub fn record(name: &'static str, secs: f32) {
++    if !on() {
++        return;
++    }
++    let d = Duration::from_secs_f32(secs);
++    ACC.with(|a| {
++        let mut a = a.borrow_mut();
++        let e = a.entry(name).or_default();
++        e.0 += 1;
++        e.1 += d;
++        e.2 = e.2.max(d);
++    });
++}
+diff --git a/crates/stokesforge-app/src/app/window_detach.rs b/crates/stokesforge-app/src/app/window_detach.rs
+index dafa9181..f4e6da04 100644
+--- a/crates/stokesforge-app/src/app/window_detach.rs
++++ b/crates/stokesforge-app/src/app/window_detach.rs
+@@ -893,6 +893,7 @@ impl StokesForgeApp {
+                 }),
+             };
+             if self.saved_window_geometries.get(&node) != Some(&geometry) {
++                let _p = super::prof::span("08 set_window_geometry");
+                 self.state.set_window_geometry(node, geometry);
+                 self.saved_window_geometries.insert(node, geometry);
+             }
+diff --git a/crates/stokesforge-app/src/app/window_stack.rs b/crates/stokesforge-app/src/app/window_stack.rs
+index 761f9126..d60e0a9a 100644
+--- a/crates/stokesforge-app/src/app/window_stack.rs
++++ b/crates/stokesforge-app/src/app/window_stack.rs
+@@ -345,6 +345,7 @@ impl Workspace<'_> {
+         for index in 0..self.floating_tabs.len() {
+             // La pile n’est réordonnée qu’après son parcours, comme avant #124.
+             let tab = self.floating_tabs[index];
++            let _p = super::prof::span("09 show_floating_tab (par fenêtre)");
+             self.show_floating_tab(ui, tab, active_tab, viewport_rect);
+         }
+         let refocused = self.focus_next.take().is_some();
+@@ -486,6 +487,7 @@ impl Workspace<'_> {
+                     // déborder de la fenêtre. La grille seule
+                     // reçoit un défilement horizontal (F8).
+                     show_window_contents_bounded(ui, |ui| {
++                        let _p = super::prof::span("10 tab_contents flottant");
+                         tab_contents(ui, self.state, self.actions, self.graph_views, tab);
+                     });
+                 }

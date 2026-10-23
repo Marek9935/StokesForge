@@ -37,6 +37,7 @@ page qui contredit le code a tort.
 | poser un champ, un message, un dialogue, une confirmation, un grisage, un geste clavier ou souris | [`standard-interface.md`](standard-interface.md) (comportement, #217) |
 | créer une fenêtre ou un dialogue neuf, ou poser un geste (molette, double-clic) | [`fenetres.md`](fenetres.md) (catalogue des fenêtres), [`principes-ui.md`](principes-ui.md) (principes d'interface), [`gestes.md`](gestes.md) (matrice des gestes) |
 | écrire ou lancer un test, comprendre la CI | [`tests.md`](tests.md) |
+| mesurer la fluidité de l'interface (temps d'image, lancer en release) | [`mesure-performance.md`](mesure-performance.md) |
 | licence, contributions, interfaces d'extension et notices tierces | [`licence-et-extensions.md`](licence-et-extensions.md) |
 
 `.claude/rules.md` complète ce tableau côté **chargement de contexte** : quels
