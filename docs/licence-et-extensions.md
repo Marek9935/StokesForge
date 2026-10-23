@@ -1,7 +1,7 @@
 # Licence et interfaces d'extension
 
 Copyright © 2026 Aliocha Skrzypczak. Le code original de StokesForge de la
-branche `dev` est distribué sous **GNU GPL version 3 ou ultérieure**,
+branche `main` est distribué sous **GNU GPL version 3 ou ultérieure**,
 avec la permission supplémentaire de [`LICENSE-EXCEPTION`](../LICENSE-EXCEPTION).
 Le texte officiel de la GPLv3 est reproduit sans modification dans
 [`LICENSE`](../LICENSE). Les composants tiers conservent leurs licences.

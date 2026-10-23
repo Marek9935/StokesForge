@@ -1,4 +1,4 @@
-# StokesForge — branche `dev`
+# StokesForge — branche `main`
 
 Cette branche est dédiée au portage de StokesForge vers Rust. PyQt/PySide n'est
 plus à l'ordre du jour ici — le développement actif se fait dans le
@@ -54,5 +54,5 @@ la page de licence. Le travail CI `licenses` vérifie la politique et génère
 les notices.
 
 Les contributions extérieures suivent [`CONTRIBUTING.md`](CONTRIBUTING.md)
-et le [DCO 1.1](DCO). Ce changement de licence concerne `dev` ;
+et le [DCO 1.1](DCO). Ce changement de licence concerne `main` ;
 l'ancienne implémentation Python/Qt (tag `legacy-python`) conserve son statut propre.

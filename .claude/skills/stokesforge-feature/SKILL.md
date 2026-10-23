@@ -1,6 +1,6 @@
 ---
 name: stokesforge-feature
-description: Implémenter une nouvelle fonctionnalité dans StokesForge (portage Rust, branche dev) — du choix de la couche jusqu'au menu contextuel, au raccourci clavier, aux tests et à la mise à jour de la doc. À utiliser quand l'utilisateur demande de réaliser une fonctionnalité dans le dépôt, y compris pour un changement d'une seule ligne. Dans un contexte de signalement ou de création d'issues, « ajoute », « je voudrais pouvoir… », « il manque… » ou « fais que… » restent des demandes à consigner tant que le passage à l'implémentation n'est pas explicite.
+description: Implémenter une nouvelle fonctionnalité dans StokesForge (portage Rust, branche main) — du choix de la couche jusqu'au menu contextuel, au raccourci clavier, aux tests et à la mise à jour de la doc. À utiliser quand l'utilisateur demande de réaliser une fonctionnalité dans le dépôt, y compris pour un changement d'une seule ligne. Dans un contexte de signalement ou de création d'issues, « ajoute », « je voudrais pouvoir… », « il manque… » ou « fais que… » restent des demandes à consigner tant que le passage à l'implémentation n'est pas explicite.
 ---
 
 # Implémenter une fonctionnalité dans StokesForge

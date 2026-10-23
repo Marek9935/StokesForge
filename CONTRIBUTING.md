@@ -1,6 +1,6 @@
 # Contribuer à StokesForge
 
-Le développement actif se fait sur `dev`. Lire
+Le développement actif se fait sur `main`. Lire
 [`AGENTS.md`](AGENTS.md), [`.codex/README.md`](.codex/README.md) et la
 documentation du domaine avant de proposer une modification. Les bugs et
 évolutions se suivent dans les issues GitLab. Les commentaires, la
@@ -40,5 +40,5 @@ dans [`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
 
 Toute nouvelle interface d'extension couverte par l'exception nécessite un
 commit explicite dans la liste fermée de cette même page, avec son contrat
-public. Le présent accord de contribution concerne `dev` ; il ne
+public. Le présent accord de contribution concerne `main` ; il ne
 change pas la licence de l'ancienne implémentation conservée sous le tag `legacy-python`.

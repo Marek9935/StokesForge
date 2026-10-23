@@ -1,4 +1,4 @@
-# CI de la branche dev : cœur Rust et intégration Python embarquée.
+# CI de la branche main : cœur Rust et intégration Python embarquée.
 # Ce fichier racine est le seul lu par GitLab.
 #
 # ATTENTION — ce que `fmt`, `clippy` et `test` ne prouvent PAS :
@@ -28,7 +28,7 @@ variables:
   # #88 : le runner partagé saturait son disque (`No space left on device`)
   # sur les travaux qui compilent Typst et egui. Pas de compilation
   # incrémentale (inutile en CI) et pas d'informations de débogage : le profil
-  # `test` hérite de `dev`. Réglage propre à la CI, `Cargo.toml` reste intact
+  # `test` hérite de `main`. Réglage propre à la CI, `Cargo.toml` reste intact
   # et le débogage local aussi.
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "0"
