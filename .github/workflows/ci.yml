@@ -1,0 +1,101 @@
+# CI Linux sur GitHub Actions (miroir du dépôt GitLab).
+#
+# Reprend les travaux `tags: [linux]` de `.gitlab-ci.yml`, qui restent en
+# attente côté GitLab faute de runner Linux. Le fichier GitLab fait foi : toute
+# modification de ses commandes se répercute ici. Les travaux Windows
+# (`dist-windows`, `test-python-windows`) restent sur le runner GitLab.
+#
+# Comme côté GitLab, `fmt`, `clippy` et `test` n'activent jamais la feature
+# `python` : seul `test-python` exerce le pont PyO3.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+# Un push plus récent annule la série en cours sur la même référence.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Mêmes réglages que GitLab (#88) : pas d'incrémental, pas d'infos de débogage.
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup component add rustfmt
+      - run: cargo fmt --all -- --check
+
+  # #129 : politique et notices, sans compilation du workspace.
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - name: Outils de licences
+        run: |
+          source scripts/licenses-tools.env
+          cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
+          cargo install cargo-about --locked --features cli --version "$CARGO_ABOUT_VERSION"
+      - run: cargo deny --locked check licenses
+      - run: scripts/licenses-test.sh
+      - run: scripts/licenses-rust.sh target/licenses/THIRD-PARTY-LICENSES.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: third-party-licenses
+          path: target/licenses/THIRD-PARTY-LICENSES.txt
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: rustup component add clippy
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # Inclut les garde-fous de `stokesforge-robustesse` ; les `#[ignore]`
+  # (reproductions d'anomalies) sont dans le travail `robustesse`.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  # Reproductions d'anomalies : échouent par construction tant que l'anomalie
+  # n'est pas corrigée, donc non bloquant (`allow_failure` côté GitLab).
+  robustesse:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p stokesforge-robustesse -- --ignored
+
+  # Pont Python : bloquant. L'interpréteur est vendorisé par le script,
+  # aucun Python système n'est requis (curl, tar et ca-certificates suffisent).
+  test-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: |
+            vendor/python/*.tar.gz
+            vendor/python/extracted/
+          key: python-${{ hashFiles('vendor/python/lock.env') }}
+      - run: scripts/python-vendor.sh
+      - run: scripts/python-test.sh
