@@ -501,6 +501,14 @@ fn layer_badges(
                 egui::Sense::click(),
             )
             .on_hover_text(tr!("plot-layer-badge", "hint", n = number.to_string()));
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::Button,
+                ui.is_enabled(),
+                index == active,
+                tr!("plot-layer-badge-accessible", n = number.to_string()),
+            )
+        });
         let visuals = ui.visuals();
         let (fill, ink) = if index == active {
             (visuals.selection.bg_fill, visuals.selection.stroke.color)
@@ -1505,6 +1513,70 @@ pub(super) mod tests {
             })),
             PlotTarget::Legend
         );
+    }
+
+    /// #170 : chaque pastille se nomme comme un calque et annonce sa
+    /// sélection ; les deux états sont éprouvés sur chacun des deux calques.
+    #[test]
+    fn les_pastilles_de_calque_annoncent_leur_numero_et_leur_selection() {
+        for active in [0, 1] {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let mut spec = PlotSpec::empty("Figure");
+            spec.panels.push(PanelSpec::at(0, 1));
+            let mut view = GraphView::new();
+            view.set_active_panel(active, &spec);
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(300.0, 200.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    layer_badges(
+                        ui,
+                        &mut view,
+                        &spec,
+                        NodeId::from_raw(2),
+                        ui.available_rect_before_wrap(),
+                    );
+                },
+            );
+            output.textures_delta.clear();
+            let mut badges: Vec<_> = output
+                .platform_output
+                .accesskit_update
+                .expect("arbre d'accessibilité")
+                .nodes
+                .into_iter()
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::Button)
+                .map(|(_, node)| {
+                    assert!(!node.is_disabled());
+                    let bounds = node.bounds().expect("rectangle de la pastille");
+                    assert!(bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0);
+                    (node.label().unwrap().to_owned(), node.toggled())
+                })
+                .collect();
+            let mut expected: Vec<_> = (0..2)
+                .map(|index| {
+                    (
+                        tr!("plot-layer-badge-accessible", n = (index + 1).to_string()),
+                        Some(if index == active {
+                            egui::accesskit::Toggled::True
+                        } else {
+                            egui::accesskit::Toggled::False
+                        }),
+                    )
+                })
+                .collect();
+            // L'ordre de publication des nœuds AccessKit n'est pas celui
+            // de la peinture : comparer les descriptions, sans cet ordre.
+            badges.sort_by(|a, b| a.0.cmp(&b.0));
+            expected.sort_by(|a, b| a.0.cmp(&b.0));
+            assert_eq!(badges, expected);
+        }
     }
 
     /// #161 : le repère numéroté active un calque, le dépôt de colonnes le

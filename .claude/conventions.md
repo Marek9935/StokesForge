@@ -37,6 +37,12 @@ Le graphique vide passe par `AddGraph` ; `SessionHandle::new_project`, comme
 
 ## Object Manager, panneaux fixes, menus
 
+Accessibilité (#170) : une cible peinte à la main publie son libellé et son
+état par `Response::widget_info`, comme les widgets egui. Les pastilles de
+calque annoncent leur numéro et leur sélection ; les poignées des fenêtres
+flottantes et détachées annoncent leur direction de redimensionnement. Les
+tests lisent les nœuds AccessKit réellement publiés, au plus près de la surface.
+
 Object Manager (#81–85) : `object_manager.rs` projette le graphe,
 `app/object_manager_ui.rs` peint l'arbre (#121), la sélection
 reste dans `GraphView` (même vue en fenêtre détachée). Les textes liés

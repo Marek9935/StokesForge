@@ -493,6 +493,12 @@ l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
   `platform_output.accesskit_update`) : libellé, grisage, case cochée et
   rectangle de chaque entrée, sans supposer de position ni comparer de
   couleur (modèle : `entrees`, `src/app/menus.rs`, #122).
+- Accessibilité (#170) : les pastilles de calque et les poignées de fenêtre
+  publient leur nom et leur rôle par `Response::widget_info`. Les tests de
+  `graph_window.rs` lisent le numéro et les deux états de sélection des
+  pastilles ; ceux de `window_chrome.rs` lisent les huit directions des
+  poignées flottantes et détachées. Retirer la publication d'une surface doit
+  faire échouer son test : une assertion sur une liste vide ne suffit pas.
 - Dans `stokesforge-app` et `stokesforge-app-state`, un test suit le code qu'il éprouve (#115) : une
   décision d'`AppState` dans `stokesforge-app-state/tests/shell.rs` (compile sans egui), un geste peint dans le module
   `tests` de sa surface (`src/app/<surface>.rs`) ; celui d'`app.rs` n'éprouve

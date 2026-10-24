@@ -633,15 +633,18 @@ fn import_file_status_rows(ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
-/// Étape 2 : séparateur et décimale.
+/// Étape 2 : lecture des colonnes et du fichier, groupée par réglage.
 fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(import) = state.import_state_mut() else {
         return;
     };
     let recipe = &mut import.recipe;
     form(ui, "import_format", |rows| {
+        rows.section(tr!("import-format-delimiter-section"));
         import_delimiter_controls(rows, recipe);
+        rows.section(tr!("import-format-numbers-section"));
         import_number_controls(rows, recipe);
+        rows.section(tr!("import-format-comments-section"));
         rows.row(tr!("import-format-comment-prefix"), |ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut recipe.comment_prefix)
@@ -649,7 +652,9 @@ fn import_step_format(ui: &mut egui::Ui, state: &mut AppState) {
             );
             help_text(ui, tr!("import-format-comment-prefix", "hint"));
         });
+        rows.section(tr!("import-format-file-section"));
         import_block_encoding_controls(rows, recipe);
+        rows.section(tr!("import-format-skipped-section"));
         rows.row(tr!("import-format-skip-chars"), |ui| {
             number_field(
                 ui,
@@ -1702,6 +1707,61 @@ mod tests {
             stokesforge_import::NameSource::HeaderKey("TITLE".into()),
             "le champ et les deux choix restent inactifs, sans perdre la clé"
         );
+    }
+
+    /// Les groupes de Format sont nommés par de vrais titres, dans l'ordre
+    /// des contrôles, plutôt que séparés par des traits sans indication.
+    #[test]
+    fn le_format_d_import_nomme_les_groupes_de_reglages() {
+        let mut banc = banc(false);
+        let context = contexte();
+        let recette_avant = banc.state.import_state().unwrap().recipe.clone();
+        for _ in 0..2 {
+            image(&context, Vec::new(), |ui| {
+                super::import_step_format(ui, &mut banc.state)
+            });
+        }
+        let formes = image(&context, Vec::new(), |ui| {
+            super::import_step_format(ui, &mut banc.state)
+        });
+        let peints = textes(&formes);
+        let groupes = [
+            (
+                tr!("import-format-delimiter-section"),
+                tr!("import-format-delimiter"),
+            ),
+            (
+                tr!("import-format-numbers-section"),
+                tr!("import-format-decimal"),
+            ),
+            (
+                tr!("import-format-comments-section"),
+                tr!("import-format-comment-prefix"),
+            ),
+            (
+                tr!("import-format-file-section"),
+                tr!("import-format-blocks"),
+            ),
+            (
+                tr!("import-format-skipped-section"),
+                tr!("import-format-skip-chars"),
+            ),
+        ];
+        let mut precedent = f32::NEG_INFINITY;
+        for (titre, champ) in groupes {
+            let titre = peints
+                .iter()
+                .find(|texte| texte.texte == titre && texte.gras)
+                .unwrap_or_else(|| panic!("titre de section absent : {titre}"));
+            let champ = peints
+                .iter()
+                .find(|texte| texte.texte == champ && !texte.gras)
+                .unwrap_or_else(|| panic!("libellé ordinaire absent : {champ}"));
+            assert!(titre.centre.y > precedent);
+            assert!(champ.centre.y > titre.centre.y);
+            precedent = champ.centre.y;
+        }
+        assert_eq!(banc.state.import_state().unwrap().recipe, recette_avant);
     }
 
     /// Issue #6 : chaque étape de l'assistant se peint sans paniquer, montre

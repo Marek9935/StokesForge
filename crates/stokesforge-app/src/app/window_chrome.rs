@@ -406,7 +406,14 @@ pub(super) fn floating_resize_handles(
     }
     let base_id = egui::Id::new(("floating_resize_handle", tab));
     for (source, zone, cursor, west, east, north, south) in zones {
-        let response = ui.interact(zone, base_id.with(source), egui::Sense::drag());
+        let response = ui.interact(zone, base_id.with(&source), egui::Sense::drag());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::ResizeHandle,
+                ui.is_enabled(),
+                resize_handle_label(&source),
+            )
+        });
         if response.hovered() || response.dragged() {
             ui.ctx().set_cursor_icon(cursor);
         }
@@ -430,6 +437,22 @@ pub(super) fn floating_resize_handles(
         if south {
             size.y = (size.y + delta.y).max(MIN_CONTENT_WINDOW_SIZE.y);
         }
+    }
+}
+
+/// Les deux branches du L d'un coin partagent sa direction accessible ;
+/// les identifiants et les rectangles restent propres à chaque cible.
+fn resize_handle_label(source: &str) -> String {
+    match source.split('-').next().unwrap_or(source) {
+        "n" => tr!("window-resize-top"),
+        "s" => tr!("window-resize-bottom"),
+        "w" => tr!("window-resize-left"),
+        "e" => tr!("window-resize-right"),
+        "nw" => tr!("window-resize-top-left"),
+        "ne" => tr!("window-resize-top-right"),
+        "sw" => tr!("window-resize-bottom-left"),
+        "se" => tr!("window-resize-bottom-right"),
+        _ => unreachable!("direction de poignée inconnue : {source}"),
     }
 }
 
@@ -517,6 +540,13 @@ pub(super) fn detached_resize_handles(ui: &egui::Ui) {
     let base_id = egui::Id::new("detached_resize_handle");
     for (source, zone, cursor, direction) in zones {
         let response = ui.interact(zone, base_id.with(source), egui::Sense::drag());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::ResizeHandle,
+                ui.is_enabled(),
+                resize_handle_label(source),
+            )
+        });
         if response.hovered() {
             ui.ctx().set_cursor_icon(cursor);
         }
@@ -894,6 +924,75 @@ pub(super) fn show_window_contents_bounded(
 pub(super) mod tests {
     use super::*;
     use stokesforge_core::NodeId;
+
+    /// Les deux cibles d'un coin flottant annoncent la même direction,
+    /// tandis que chaque bord/coin reste distinct dans l'arbre AccessKit.
+    #[test]
+    fn les_poignees_de_fenetre_annoncent_les_huit_directions() {
+        for detached in [false, true] {
+            let context = egui::Context::default();
+            context.enable_accesskit();
+            let mut position = egui::pos2(80.0, 80.0);
+            let mut size = egui::vec2(200.0, 180.0);
+            let mut output = context.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(600.0, 500.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    if detached {
+                        detached_resize_handles(ui);
+                    } else {
+                        floating_resize_handles(
+                            ui,
+                            Tab::Book(NodeId::from_raw(2)),
+                            egui::Rect::from_min_size(position, size),
+                            &mut position,
+                            &mut size,
+                        );
+                    }
+                },
+            );
+            output.textures_delta.clear();
+            let mut labels = std::collections::BTreeMap::new();
+            for (_, node) in output
+                .platform_output
+                .accesskit_update
+                .expect("arbre d'accessibilité")
+                .nodes
+            {
+                if node.role() != egui::accesskit::Role::Splitter {
+                    continue;
+                }
+                assert!(!node.is_disabled());
+                let bounds = node.bounds().expect("rectangle de la poignée");
+                assert!(bounds.x1 > bounds.x0 && bounds.y1 > bounds.y0);
+                *labels.entry(node.label().unwrap().to_owned()).or_insert(0) += 1;
+            }
+            let expected = [
+                (tr!("window-resize-top"), 1),
+                (tr!("window-resize-bottom"), 1),
+                (tr!("window-resize-left"), 1),
+                (tr!("window-resize-right"), 1),
+                (tr!("window-resize-top-left"), if detached { 1 } else { 2 }),
+                (tr!("window-resize-top-right"), if detached { 1 } else { 2 }),
+                (
+                    tr!("window-resize-bottom-left"),
+                    if detached { 1 } else { 2 },
+                ),
+                (
+                    tr!("window-resize-bottom-right"),
+                    if detached { 1 } else { 2 },
+                ),
+            ]
+            .into_iter()
+            .collect();
+            assert_eq!(labels, expected, "fenêtre détachée : {detached}");
+        }
+    }
 
     /// Centres des icônes peintes (images : rectangles à texture), de gauche à
     /// droite. Les chargeurs d'images doivent être installés sur le contexte,

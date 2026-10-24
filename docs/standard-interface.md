@@ -685,6 +685,10 @@ Historique : #227, #237 (largeur « quelques chiffres »), #241 (volet Results).
 
 ## Clavier et souris
 
+- **Cibles peintes à la main et accessibilité** (#170) : une pastille de
+  calque annonce son numéro et sa sélection ; une poignée de fenêtre annonce
+  la direction de redimensionnement. Le nom vient du catalogue et l'état
+  accessible suit le même état que le dessin (`Response::widget_info`).
 - **Registre unique des touches** dans `app/shortcuts.rs` (S-K1 : F2, Suppr,
   Échap, Entrée…) ; aucun `consume_key` ailleurs.
 - **Suppr** supprime la sélection tout de suite, annulable, partout (S-K2) :

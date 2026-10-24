@@ -74,6 +74,10 @@ d'`app` est `pub(in crate::app)` dans le module de tests qui la porte
 
 ### Le témoin — sans lui, un test d'égalité ne prouve rien
 
+Pour une cible peinte à la main (pastille, poignée, ligne d'arbre), vérifier
+aussi son nom, son rôle et son état dans l'arbre AccessKit publié ; voir
+`docs/tests.md`, « Ce qu'il faut savoir avant d'écrire un test » (#170).
+
 C'est la méthode la plus importante du dépôt, et elle vaut au-delà du rendu.
 Un test qui compare deux chemins peut passer parce que les deux sont justes —
 ou parce que **les deux sont faux de la même façon**. D'où des cas qui doivent

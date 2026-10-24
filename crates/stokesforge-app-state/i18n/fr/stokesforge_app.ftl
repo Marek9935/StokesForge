@@ -1916,3 +1916,21 @@ analysis-smooth-unit-x = Largeur en unités de X
 analysis-smooth-window-points = Largeur (points)
 analysis-smooth-window-x = Largeur (unités de X)
 analysis-smooth-order = Ordre du polynôme
+
+# Accessibilité des calques et des poignées de fenêtre (#170)
+plot-layer-badge-accessible = Calque { $n }
+window-resize-top = Redimensionner par le bord supérieur
+window-resize-bottom = Redimensionner par le bord inférieur
+window-resize-left = Redimensionner par le bord gauche
+window-resize-right = Redimensionner par le bord droit
+window-resize-top-left = Redimensionner par le coin supérieur gauche
+window-resize-top-right = Redimensionner par le coin supérieur droit
+window-resize-bottom-left = Redimensionner par le coin inférieur gauche
+window-resize-bottom-right = Redimensionner par le coin inférieur droit
+
+# Groupes de réglages du format d'import (#170)
+import-format-delimiter-section = Séparateur
+import-format-numbers-section = Nombres et dates
+import-format-comments-section = Lignes de commentaire
+import-format-file-section = Blocs et encodage
+import-format-skipped-section = Lignes ignorées

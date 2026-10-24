@@ -100,6 +100,11 @@ les autres cas du protocole ci-dessous restent à valider manuellement.
 
 ### Assistant d'import
 
+L'étape Format regroupe ses réglages sous cinq titres (#170) : séparateur,
+nombres et dates, lignes de commentaire, blocs et encodage, lignes ignorées.
+Ces titres utilisent la même brique de section que les autres formulaires ;
+ils ne changent ni la recette ni l'ordre des contrôles.
+
 « Importer… » ouvre un assistant en six étapes façon Origin (`import_window`,
 `ImportStep` ; module `src/app/import_wizard.rs`, #118, seul point d'entrée
 appelé par `app.rs`), **dialogue modal de la brique commune** (`modal_dialog_with` :
@@ -202,7 +207,7 @@ fenêtre native, donc le chemin de dépôt de l'application et des fenêtres
 détachées reste commun. Le pipe est lu sans attente bloquante, avec une liste
 d'URI limitée à 1 Mio et un délai de 10 secondes. La position au lâcher reste
 celle utilisée pour choisir le classeur. Voir
-[`vendor/winit/STOKESFORGE.md`](../vendor/winit/STOKESFORGE.md) pour le choix
+[`vendor/winit/STOKESFORGE.md`](../../vendor/winit/STOKESFORGE.md) pour le choix
 technique, les alternatives, le protocole manuel GNOME/KDE/wlroots et le
 retrait lors du passage à winit 0.31.
 
