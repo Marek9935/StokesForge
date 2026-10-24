@@ -71,4 +71,9 @@ mod tests {
         let id = NodeId::from_raw(42);
         assert_eq!(NodeId::from_raw(id.raw()), id);
     }
+
+    #[test]
+    fn echec_volontaire_test_du_rapporteur_ci() {
+        assert_eq!(1, 2, "échec volontaire : test du commentaire de commit GitLab");
+    }
 }
