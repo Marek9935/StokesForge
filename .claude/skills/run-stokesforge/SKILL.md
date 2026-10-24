@@ -1,124 +1,32 @@
 ---
 name: run-stokesforge
-description: Build, run, drive and screenshot the StokesForge desktop app (eframe/egui) on Linux — launch it, click menus, type, take PNG screenshots, import a CSV with the CLI, run the shell tests. Use when asked to "run", "start", "launch", "screenshot" StokesForge, or to confirm a UI change works in the real app and not only in tests.
+description: Build, launch, drive and screenshot the real StokesForge desktop app on Linux — clicks, keys, PNG captures. Use for « lance l'app », « screenshot », « vérifie dans l'app », to look at a visual symptom, or to confirm a UI change works in the real app, not only in tests.
 ---
 
-# run-stokesforge
+StokesForge is an egui desktop app with no port and no API. Drive it with `driver.py` (rootful Xwayland + XTEST mouse/keyboard + ImageMagick capture). Paths are relative to the repo root; no `sudo`. Prerequisites: `Xwayland`, ImageMagick (`import`, `magick`), Python 3 with `python-xlib`, an open Wayland session.
 
-StokesForge est une appli de bureau egui (Rust). Elle n'a ni port ni API : on la
-pilote avec `driver.py` (Xwayland « rootful » + injection de souris/clavier XTEST
-+ capture `import` d'ImageMagick). Un second chemin, plus simple, prend une
-seule capture d'une fenêtre Wayland native.
+## Steps
 
-Les chemins sont relatifs à la racine du dépôt. Aucun `sudo` requis.
+1. **Build**: `cargo build -p stokesforge-app -p stokesforge-cli`. Without the `python` feature the console shows « Not available in this build » (`scripts/python-test.sh` for it).
+2. **Drive**:
 
-## Prérequis (vérifiés présents sur cette machine, Fedora)
+   ```sh
+   D=.claude/skills/run-stokesforge/driver.py
+   python3 $D start [project.stf]   # Xwayland :99 (1400x900) + the app in X11, ~15 s
+   python3 $D click 20 11           # x y [left|right|double] — File menu
+   python3 $D key ctrl+z            # F2, Return, Escape, ctrl+shift+s…
+   python3 $D type "Renamed"
+   python3 $D ss /tmp/shot.png      # capture, then READ the PNG
+   python3 $D stop                  # kills the app and Xwayland
+   ```
 
-`Xwayland`, `ImageMagick` (`import`, `magick`), Python 3 avec `python-xlib`
-(`pip install python-xlib` sinon), une session Wayland ouverte
-(`$WAYLAND_DISPLAY`). Pas de Xvfb/xdotool : inutile.
+   Screen pixels, app window 1100x700 at (0,0), scale 1.0. Without argument, `start` opens the demo project (Book1, Graph1, folders Classeurs and Analyse, graphs Panneaux, Axes, TypesTrace, Annotations, Groupes, Lignes; `crates/stokesforge-app/src/demo/`). A project to open: `target/debug/stokesforge-cli import --out p.stf file.csv`. Logs: `/tmp/stokesforge-run/{app,xwayland}.log` (`SF_RUN_DIR`). `SF_APP` picks the binary (release measurements: `docs/mesure-performance.md` § Lancer l'application en release).
+3. **Single capture in native Wayland**, or text checks with the pseudo-language: [references/quick-capture.md](references/quick-capture.md).
+4. **Read the PNG** with the Read tool and compare before / after; a visual claim without a capture is not made.
+5. **Stop**: always `stop` (or `kill` by pid); reset the language to English if a test switched it.
 
-## Build
+Traps (lost clicks, capture lag, focus, killing the right process) and troubleshooting: [references/pitfalls.md](references/pitfalls.md).
 
-```sh
-cargo build -p stokesforge-app -p stokesforge-cli   # ~7 s si déjà compilé
-```
+Limits to state in the report: X11 under Xwayland only — no native Wayland, no `rfd` file chooser, no drag, no detached OS window. For those, ask the user for a screenshot.
 
-La feature `python` n'est pas dans le build par défaut : la console Python
-affiche « Not available in this build ». Voir `scripts/python-test.sh`.
-
-Pour une mesure de fluidité (#340, #341), suivre
-[`docs/mesure-performance.md`](../../../docs/mesure-performance.md) : mesurer
-en release ou comparer debug/release. Le pilote accepte `SF_APP` pour choisir
-le binaire, par exemple après `cargo build --release -p stokesforge-app` :
-
-```sh
-SF_APP="$PWD/target/release/stokesforge-app" python3 .claude/skills/run-stokesforge/driver.py start
-```
-
-Le protocole instrumenté et le retrait du patch temporaire sont décrits dans
-cette page ; les chronomètres ne font pas partie du code de production.
-
-## Run (agent path) : `driver.py`
-
-```sh
-D=.claude/skills/run-stokesforge/driver.py
-python3 $D start [projet.stf]      # Xwayland :99 (1400x900) + l'app en X11 ; ~15 s
-python3 $D click 20 11             # menu File   (x y [left|right|double])
-python3 $D click 58 183            # File > Preferences…
-python3 $D ss /tmp/shot.png        # capture, puis la LIRE avec Read
-python3 $D key ctrl+z              # F2, Return, Escape, ctrl+shift+s…
-python3 $D type "Renamed"          # saisie de texte
-python3 $D stop                    # tue l'app et Xwayland
-```
-
-Coordonnées : pixels écran X, fenêtre de 1100x700 en (0,0), échelle 1.0.
-Sans argument, `start` ouvre le projet de démonstration (Book1 + Graph1, puis les dossiers
-Classeurs et Analyse et six graphes : Panneaux, Axes, TypesTrace, Annotations, Groupes, Lignes ;
-voir `crates/stokesforge-app/src/demo/`).
-Journaux : `/tmp/stokesforge-run/{app,xwayland}.log` (`SF_RUN_DIR` pour changer).
-
-Exemple vérifié de bout en bout : Préférences → bascule Français (toute
-l'interface change) → retour English ; clic Book1 dans le Project Manager →
-`F2` → `type Renamed` → `Return` → nom changé → `ctrl+z` → annulé.
-
-Projet à ouvrir avec `start` : `target/debug/stokesforge-cli import --out p.stf
-fichier.csv`.
-
-## Run (chemin rapide, une seule capture, sans Xwayland)
-
-```sh
-STOKESFORGE_APP_SCREENSHOT=/tmp/w.ppm target/debug/stokesforge-app & P=$!
-# attendre « capture écrite » (≈10-30 s), puis :
-kill $P; magick /tmp/w.ppm /tmp/w.png
-```
-
-Fenêtre Wayland native, rendue à l'échelle de l'écran (1650x1050 ici). Le
-format est PPM. Aucune interaction possible.
-
-## Tests
-
-```sh
-cargo test -p stokesforge-app-state --test shell   # boucle complète sans fenêtre (sans egui à compiler), ~7 s
-```
-
-Suite complète : voir `CLAUDE.md` (Commandes) et `stokesforge-verification`.
-
-## Gotchas
-
-- **Les fenêtres s'ouvrent vraiment sur le bureau de l'utilisateur** : Xwayland
-  est lancé sans `-rootless`, et l'app ordinaire (chemin rapide) aussi. Les
-  garder brèves, toujours finir par `stop`/`kill`.
-- **`STOKESFORGE_APP_AUTOQUIT_MS` n'est évalué qu'à l'image peinte** (`autoquit`
-  dans `app.rs`, qui demande son propre réveil par `request_repaint_after`).
-  Vérifié le 2026-10-12 : l'app se ferme seule après 2-3 s en Wayland natif, avec
-  `STOKESFORGE_X11=1` et sous `driver.py start`. Si la fenêtre ne peint jamais
-  (masquée, pas d'affichage), rien ne la ferme : borner par `timeout` et
-  terminer par un `kill` explicite (par pid : `kill $P`, jamais `pgrep -x`, qui tuerait aussi une instance de l'utilisateur). **N'utilise pas `pkill -f stokesforge-app`** : le
-  motif attrape le shell de la commande et le tue (exit 144) ; `pkill -x`/`kill $(pgrep -x …)`.
-- **La capture X retarde d'une action sous Xwayland.** `ss` fait donc quatre
-  micro-mouvements de pointeur (egui ne repeint que sur événement), capture
-  une première fois pour jeter l'image, recommence, et garde la seconde. Ne
-  pas court-circuiter par un `import` direct.
-- **Un clic sur une cible lointaine est perdu** si le pointeur n'a pas survolé
-  la cible avant. `click` fait donc mouvement + micro-mouvement + attente avant
-  d'appuyer. Les entrées de menu en ont besoin.
-- **Pas de gestionnaire de fenêtres → pas de focus clavier.** `start` appelle
-  `focus()` ; sans cela `key`/`type` ne font rien. Les menus sont en pixels
-  fixes (en français les largeurs changent, ex. « Préférences… » reste en
-  (58,183) mais le menu est plus large).
-- **La langue choisie est enregistrée** dans `~/.config/stokesforge/preferences.json`
-  (hors projet). Si un test passe en Français, repasser en English avant de finir.
-- Premier rendu lent (wgpu en logiciel, `MESA: warning … Xe KMD` sans gravité) :
-  `start` attend 10 s ; une capture trop précoce montre une fenêtre noire.
-- `type` sait les lettres, chiffres et `. , - _ = ( ) / # " : [ ] !` ; ajouter
-  les autres à la table `names` de `driver.py` au besoin.
-
-## Troubleshooting
-
-- `touche inconnue : #` → caractère absent de la table `names` de `type_text`.
-- `app: MORTE` après `start` → lire `/tmp/stokesforge-run/app.log`.
-- `fenêtre de l'app introuvable` (`focus`) → l'app n'est pas (encore) mappée :
-  relancer `start` ou attendre.
-- Capture montrant le menu ouvert mais pas son effet → l'action n'est pas
-  passée (clic perdu) ou un 2e `ss` suffit ; refaire le `click`.
+Done when the capture showing the expected state was read, the app and Xwayland are stopped, and the report says what was seen and what this path cannot show.

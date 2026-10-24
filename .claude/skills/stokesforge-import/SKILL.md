@@ -1,146 +1,28 @@
 ---
 name: stokesforge-import
-description: Travailler sur l'import de fichiers d'instruments dans StokesForge (`stokesforge-import`) — recettes de format d'appareil, séparateurs, virgule décimale, lignes d'en-tête et de pied, sous-en-têtes et leurs rôles (nom long, unité, commentaire), prévisualisation façon assistant ASCII d'OriginLab, conversion vers les colonnes du modèle. À utiliser dès qu'il est question de lire un CSV/TXT/ASC d'appareil, d'ajouter le support d'un nouvel instrument (Jasco, spectro, chromato…), d'un fichier mal découpé, d'une colonne qui arrive en texte au lieu de nombres, ou d'un aperçu d'import incorrect.
+description: Work on importing instrument files (stokesforge-import, stokesforge-importer) — recipes, delimiters, decimal comma, header and footer lines, sub-headers, live preview. Use for a badly read CSV/TXT/ASC, a new instrument (Jasco…), a column read as text, or a wrong import preview.
 ---
 
-# Import de fichiers d'instruments
+`stokesforge-import` reproduces OriginLab's ASCII import wizard: the user picks a **recipe** describing how an instrument writes its files, applies it, and may save it.
 
-`stokesforge-import` reproduit l'assistant d'import ASCII d'OriginLab — et sa fenêtre côté application est un **dialogue modal de la brique commune** (`modal_dialog_with`, voir `stokesforge-feature`, fiche `references/fenetres-dialogues.md`), jamais une `egui::Window` brute :
-l'utilisateur choisit une **recette** décrivant comment un appareil écrit ses
-fichiers, l'applique, et peut l'enregistrer pour la réutiliser.
+## Read first
 
-Lire d'abord la doc de tête de `stokesforge-import/src/lib.rs`, puis
-`docs/chantier-import-previsualisation.md` — en gardant en tête que c'est une
-**note de passation** : son « reste à faire » demande confrontation au code
-avant d'être repris.
+The header doc of `crates/stokesforge-import/src/lib.rs`, then `docs/application/projet-et-import.md` § Assistant d'import. `docs/chantier-import-previsualisation.md` is a hand-over note: confront its "to do" with the code before reusing it.
 
-## La frontière à ne pas franchir
+## Rules
 
-Le crate est **volontairement pur** : zéro dépendance UI, zéro dépendance à
-`stokesforge-commands`, `stokesforge-session` **et `stokesforge-core`**. Son vocabulaire de
-sortie est le plus simple qui existe — des `f64`, `NaN` pour une valeur
-manquante — précisément pour rester indépendant.
+1. **The crate stays pure**: no dependency on UI, `stokesforge-core`, `stokesforge-commands` or `stokesforge-session`; its output vocabulary is `f64` with `NaN` for missing. Conversion to model columns is `stokesforge-importer` (`plan_import`, `make_import_column`), shared by the app, the CLI and `pyst.import_file`: never rewrite it in a consumer. Missing information is added to the crate's own vocabulary, never by importing the model.
+2. **One layout, one line splitter**: `layout` (with `layout::split_lines`) is computed once and shared by `parse` and `preview`; `data_end.rs` is the single rule for where data stops. Never re-implement these steps in one of them.
+3. **Extend a recipe without breaking saved ones**: every new field carries `#[serde(default)]`, and its default reproduces **exactly** the previous behaviour. The recipe has a mirror in the `.stf` format (`crates/stokesforge-persistence/src/recipe_record.rs`, #323): add the field there too, with the same default. Test that a JSON recipe from **before** the change reloads and splits identically.
+4. **Respect the preview's cost budget** (header doc of `preview.rs`): a preview that rereads the whole file on each keystroke makes the window unusable.
+5. **The app imports in the background**: menu and drag-and-drop both go through `AppState::start_import`, applied by `poll_import` (#266); never read or parse on the UI thread. Writing into a live project goes through undoable commands (`stokesforge-commande`); only `stokesforge-cli import` builds a new `Project` directly.
+6. **Wizard texts** are `import-*` keys used by `tr!`, with the terms of `docs/textes-interface.md` § 2.4 Import (*Delimiter*, *Template* — never « recipe » on screen —, *Subheader*, *Footer*). Template names and file contents are data, never translated. Window: `app/import_wizard.rs`, a dialog of the shared building block (`stokesforge-feature`, sheet `windows-dialogs`); state in `stokesforge-app-state/src/state.rs`.
+7. **A mixed-type column is not an import failure** (invariant 10): keep it, never refuse the file.
 
-C'est `stokesforge-importer` qui convertit vers `stokesforge_core::Column`
-(`plan_import`, `make_import_column`), pour l'application, le CLI et
-`pyst.import_file` à la fois — jamais un consommateur de son côté.
-Conséquence pratique : **ne jamais faire entrer un type de `stokesforge-core` dans
-`stokesforge-import`** pour se simplifier la vie. Si une information manque à la
-conversion, elle s'ajoute au vocabulaire propre du crate, pas en important le
-modèle.
-
-Et côté application : l'assistant vit dans
-`stokesforge-app/src/app/import_wizard.rs` (#118) — `import_window`, seul point
-d'entrée appelé par `app.rs`, ses six étapes, l'aperçu, les tables de libellés —
-et ses tests unitaires l'y suivent (étapes peintes avec leur aperçu,
-Terminer/Annuler, clic droit sur une ligne, libellés distincts) ; l'état
-(`ImportState`, `import_line_action`…) reste dans `state.rs` (`stokesforge-app-state`), testé par
-`stokesforge-app-state/tests/shell.rs`. **Les textes de l'assistant** (`import_window` et ses six
-étapes, `ImportStep::title`, tables `separator_label`, `column_role_label`…) sont
-des clés `import-*` du catalogue `en`, employées par `tr!` ; les termes viennent
-de `docs/textes-interface.md` § 2.4 (*Delimiter*, pas « separator » ; *Template*,
-jamais « recipe » ni « recette » à l'écran ; *Subheader*, *Footer*, *Block*). Un
-réglage nouveau ajoute sa clé (libellé de 1 à 3 mots, infobulle en attribut
-`.hint`), pas un littéral. Les noms de modèles (« JASCO »…) et le contenu du
-fichier sont des données : jamais traduits. Le vocabulaire de `stokesforge-import`
-(`recipe`, `SubheaderRoles`…) reste celui du code et ne passe jamais à l'écran.
-
-Et côté application (et `pyst`) : l'import écrit dans un projet vivant, donc il
-passe par une **commande annulable** comme tout le reste (skill
-**stokesforge-commande**). Un import qu'on ne peut pas annuler serait la seule
-écriture non réversible du logiciel. Seul `stokesforge-cli import` construit un
-`Project` neuf directement, sans session ni historique : il n'y a rien à
-annuler.
-
-## Les modules
-
-| Module | Rôle |
-|---|---|
-| `recipe` | le **modèle de recette** : description figée et sérialisable d'un format d'appareil. Ne connaît pas le moteur de parsing |
-| `parse` | applique une recette à un fichier |
-| (crate `stokesforge-importer`) | `plan_import`, `make_import_column` : des tableaux analysés aux **colonnes du modèle**, partagés par l'application, le CLI et `pyst.import_file` — ne jamais réécrire cette conversion dans un consommateur ; chacun décide seulement comment écrire (commandes, `Project` direct) |
-| `layout` | **le** découpage (lignes terminées par `\r\n`, `\n` ou `\r` : `layout::split_lines`, seul découpeur, aussi pour `detect_header_layout`) d'un fichier en zones (en-tête, sous-en-tête, noms, données, pied, commentaires, lignes ignorées), calculé une fois et partagé par `parse` et `preview` : ne jamais réécrire cette suite d'étapes dans l'un des deux |
-| `numbers`, `datetime` | lecture des nombres (décimale `Auto`, milliers — espace + séparateur « espaces » (choisi ou résolu depuis Auto) : refusé par `ImportError::WhitespaceWithSpaceThousands`, aperçu comme import ; avec `;`/tabulation l'espace et U+00A0/U+202F sont retirés —, valeurs manquantes ; un résultat non fini `inf`/`1e400` est `NaN`, jeton gardé en texte) et des dates en timestamps POSIX (copie de `stokesforge_core::datetime::parse_datetime`, accord testé dans `stokesforge-importer` en jour d'abord ; la recette porte `date_order` `DayFirst`/`MonthFirst`, `parse_datetime_with`, sans effet sur l'ISO ; le crate core reste jour d'abord, #217) |
-| `builtin`, `choose` | modèles fournis d'office, et choix automatique d'un modèle (extension, nom, signature de contenu) |
-| `preview` | (même découpage que `parse` : séparateur résolu sur la même ligne, virgule exclue si décimale virgule — test `accord_apercu_import.rs`, issue #23) classe chaque ligne en rôle (en-tête principal, sous-en-tête et son rôle, donnée, pied) pour l'aperçu en direct |
-| `store` | enregistre et recharge les recettes (JSON) |
-| `decode` | octets → texte avant tout découpage (UTF-8, ou page de code Windows des logiciels d'appareil, `°C` en `0xB0` ; en `Auto`, décodage **mixte** : séquences UTF-8 valides gardées, octet invalide lu en Windows-1252 ; risque accepté : `Ã©` Windows-1252 lu `é`, forcer l'encodage) |
-| `metadata` | l'en-tête (et le pied si demandé) en lignes clé / valeur ; `stokesforge-importer` les convertit en `MetaLine` |
-| `recent` | fichiers importés récemment et dossier mémorisé (`import_recent.json`), jamais de panique sur un fichier corrompu |
-
-`preview` existe pour que la fenêtre d'import montre **en direct** comment un
-fichier va être découpé pendant que l'utilisateur règle la recette — comme
-Origin. Sa doc de tête porte le budget de coût sur un gros fichier : le
-respecter, un aperçu qui relit tout le fichier à chaque frappe rend la fenêtre
-inutilisable.
-
-## Étendre une recette sans casser les recettes enregistrées
-
-C'est le piège principal de ce crate. Une recette est sérialisée en JSON et
-**rechargée depuis le disque** : un champ ajouté sans précaution rend
-illisibles toutes les recettes que l'utilisateur a déjà enregistrées.
-
-La convention en place, à suivre à l'identique :
-
-- tout champ nouveau porte `#[serde(default)]`, pour qu'une recette enregistrée
-  avant son arrivée se recharge à l'identique ;
-- sa valeur par défaut doit reproduire **exactement** le comportement d'avant.
-  `HeaderLayout` (découpage en-tête principal / sous-en-tête) le fait bien :
-  zéro partout laisse `header` entièrement aux commandes, comme avant le
-  chantier de prévisualisation — les deux modèles ne se recouvrent que si
-  l'appelant y touche ;
-- un champ sans effet tant qu'un autre n'est pas réglé (`subheader_roles` sans
-  ligne de sous-en-tête) doit le dire dans sa doc, sinon le réglage a l'air
-  cassé.
-
-Tester ce point explicitement : une recette JSON **d'avant** le changement doit
-se recharger et produire le même découpage.
-
-## Erreurs de lecture les plus fréquentes, et où elles vivent
-
-| Symptôme | Où regarder |
-|---|---|
-| colonnes fusionnées en une seule | `Separator` de la recette (tabulation vs espaces multiples vs `;`) |
-| nombres lus comme du texte | `DecimalStyle` — un appareil européen écrit `1,234` |
-| premières lignes de données avalées | `HeaderSkip` / `HeaderLayout` |
-| dernières lignes parasites (sommes, mentions) | `footer_skip_lines` (nombre fixe) ou `data_end` (`DataEnd`, défaut `None` ; `Auto`, demandé par les modèles Jasco, coupe au premier X non numérique une fois armée ; règle unique dans `data_end.rs`, partagée par `parse` et `preview`) |
-| noms de colonnes absents ou faux | `has_column_header_row`, `NameSource` |
-| nom long / unité / commentaire / x' (#164) mal placés | `SubheaderRoles` |
-| préfixe parasite sur chaque ligne | le retrait de caractères en tête de ligne de données |
-
-Une **colonne à types mixtes** n'est pas un échec d'import : le modèle sait
-porter une colonne dont certaines cellules sont du texte (« n/a », « sat. »)
-et d'autres des nombres, et un tracé n'y garde que les cellules numériques.
-Voir `docs/modele-de-donnees.md`. Refuser le fichier serait la mauvaise
-réponse — invariant 10, un défaut de donnée dégrade, il ne plante pas.
+Module map and symptom → field table: [references/modules-and-symptoms.md](references/modules-and-symptoms.md).
 
 ## Tests
 
-`stokesforge-import/tests/fixtures.rs` porte les fichiers d'exemple. Ajouter le
-support d'un appareil, c'est **ajouter son fichier d'exemple** — un extrait
-réduit et anonymisé suffit — et le test qui vérifie le découpage attendu.
-Sans fichier réel, une recette n'est qu'une hypothèse.
+Supporting an instrument means **adding its sample file** (reduced, anonymised) to `crates/stokesforge-import/tests/fixtures.rs` with the expected split; reuse `test/import/` samples first, and check a new one holds nothing the user does not want published. Preview/parse agreement: `tests/accord_apercu_import.rs`.
 
-Le dépôt contient déjà des échantillons sous `test/import/` : s'en servir
-plutôt que d'en inventer, et vérifier avant d'en committer un nouveau qu'il ne
-contient pas de données que l'utilisateur ne veut pas publier.
-
-## Import de l'application : un seul chemin en fond
-
-L'import de menu et le glisser-déposer passent tous deux par
-`AppState::start_import` (fil `stokesforge-app-import`, source fermée
-`Menu(recette)` ou `Dépôt{repli, classeur cible}`), appliqué par `poll_import`
-(#266). Ne jamais lire ni analyser un fichier sur le fil de l'interface ;
-un résultat reçu pendant que les propriétés du graphe sont ouvertes est gardé
-et appliqué après leur fermeture (invariants 1 et 8).
-
-## Checklist
-
-- [ ] doc de tête de `lib.rs` lue ; note de passation confrontée au code
-- [ ] aucune dépendance à `core`/`commands`/`session`/UI ajoutée
-- [ ] nouveau champ de recette : `#[serde(default)]` + défaut = comportement d'avant
-- [ ] rechargement d'une recette enregistrée **avant** le changement testé
-- [ ] fichier d'exemple ajouté à `tests/fixtures.rs`
-- [ ] budget de coût de l'aperçu respecté sur un gros fichier
-- [ ] l'écriture dans le projet passe par une commande annulable
-- [ ] `fmt` + `clippy` + `cargo test --workspace` verts
+Done when no forbidden dependency was added, an old saved recipe reloads identically, the sample file and its test exist, and `stokesforge-verification` is green.

@@ -113,7 +113,7 @@ confirmation pour les choix courants couverts par la demande.
 
 ## Pour terminer une modification
 
-- Après fusion et push sur `main`, nettoyer automatiquement le worktree temporaire de la tâche et sa branche locale fusionnée, sauf conservation demandée ; suivre `stokesforge-verification`, « Nettoyer après une fusion sur `main` ».
+- Après fusion et push sur `main`, nettoyer automatiquement le worktree temporaire de la tâche et sa branche locale fusionnée, sauf conservation demandée ; suivre `stokesforge-verification`, « Clean up after a merge on `main` ».
 
 Exécuter les vérifications adaptées au changement, relire le diff et mettre
 à jour la documentation concernée. Ne pas masquer une régression en

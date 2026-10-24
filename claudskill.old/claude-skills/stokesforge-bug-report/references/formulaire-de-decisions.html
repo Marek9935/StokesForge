@@ -1,0 +1,397 @@
+<title>Arbitrages StokesForge</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Gabarit du formulaire de décisions StokesForge (.claude/skills/stokesforge-bug-report/references/formulaire-de-decisions.md).
+   Une décision à la fois : contexte, aujourd'hui (avant), puis chaque choix avec son après, son avantage et son défaut.
+   Police Atkinson Hyperlegible (lisibilité, dyslexie), texte à gauche, interligne large, puces courtes, un schéma par bloc. */
+:root{
+  --bg:#f5f6f4; --panel:#ffffff; --fg:#1d2327; --muted:#5b6670; --line:#d9ded9;
+  --accent:#1f5f8b; --accent-fg:#ffffff; --accent-soft:#e3eef6;
+  --ok:#1f7a4d; --ok-soft:#e1f2e8; --warn:#8a5a00; --warn-soft:#fbf0d6; --bad:#b3261e; --bad-soft:#fbe5e3;
+  --font:'Atkinson Hyperlegible',system-ui,-apple-system,'Segoe UI',sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#14181b; --panel:#1d2327; --fg:#e8ecee; --muted:#9aa6af; --line:#35404a;
+  --accent:#7ab6e0; --accent-fg:#0d1a24; --accent-soft:#1f3140;
+  --ok:#6fcf9b; --ok-soft:#1a3326; --warn:#e8bb5a; --warn-soft:#3a2f15; --bad:#f08a82; --bad-soft:#3d1f1d; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#14181b; --panel:#1d2327; --fg:#e8ecee; --muted:#9aa6af; --line:#35404a;
+  --accent:#7ab6e0; --accent-fg:#0d1a24; --accent-soft:#1f3140;
+  --ok:#6fcf9b; --ok-soft:#1a3326; --warn:#e8bb5a; --warn-soft:#3a2f15; --bad:#f08a82; --bad-soft:#3d1f1d; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:18px;line-height:1.6;letter-spacing:.01em;padding-inline:16px;margin:0}
+button,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.wrap{max-width:780px;margin-inline:auto;padding-block:16px 120px}
+header{display:flex;flex-direction:column;gap:10px;margin-bottom:16px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font-size:1.15rem;margin:0;font-weight:700}
+.prog{height:10px;background:var(--line);border-radius:5px;overflow:hidden}
+.prog>i{display:block;height:100%;background:var(--ok);width:0;transition:width .25s}
+.count{color:var(--muted);font-size:.95rem}
+.link{background:none;border:0;color:var(--accent);text-decoration:underline;cursor:pointer;padding:6px 2px;font-weight:700}
+details.map{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+details.map summary{cursor:pointer;font-weight:700;padding:4px 0}
+.grp{margin-block:10px 4px;color:var(--muted);font-size:.9rem;font-weight:700}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{min-width:46px;padding:6px 8px;border:2px solid var(--line);background:var(--bg);border-radius:6px;cursor:pointer;font-size:.9rem;font-weight:700}
+.chip.done{background:var(--ok-soft);border-color:var(--ok);color:var(--ok)}
+.chip.skip{background:var(--warn-soft);border-color:var(--warn);color:var(--warn)}
+.chip.cur{outline:3px solid var(--accent);outline-offset:1px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:18px}
+.meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:.9rem}
+.tag{padding:2px 10px;border-radius:99px;background:var(--accent-soft);color:var(--accent);font-weight:700}
+.tag.p1{background:var(--bad-soft);color:var(--bad)} .tag.p2{background:var(--warn-soft);color:var(--warn)}
+.code{color:var(--muted);font-weight:700}
+h2{font-size:1.5rem;line-height:1.3;margin:0;text-wrap:balance}
+.lbl{font-size:.85rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+ul.pts{margin:0;padding-left:1.2em;display:flex;flex-direction:column;gap:4px}
+ul.pts li::marker{color:var(--accent)}
+.block{display:flex;flex-direction:column;gap:10px}
+.avant{border-left:4px solid var(--muted);padding-left:14px}
+.schema{border:1px dashed var(--line);border-radius:8px;padding:14px;background:var(--bg);display:flex;flex-direction:column;gap:10px;overflow-x:auto}
+.links{font-size:.9rem;color:var(--muted)}
+.opts{display:flex;flex-direction:column;gap:12px}
+.opt{display:flex;gap:12px;align-items:flex-start;text-align:left;width:100%;padding:14px;border:2px solid var(--line);background:var(--panel);border-radius:10px;cursor:pointer}
+.opt:hover{border-color:var(--accent)}
+.opt .dot{flex:none;width:22px;height:22px;border-radius:50%;border:2px solid var(--muted);margin-top:3px}
+.opt.sel{border-color:var(--accent);background:var(--accent-soft)}
+.opt.sel .dot{border-color:var(--accent);background:radial-gradient(var(--accent) 0 45%,transparent 50%)}
+.opt .body{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
+.opt .name{font-weight:700}
+.opt .schema{background:var(--panel)}
+.opt.sel .schema{background:var(--bg)}
+.pm{display:grid;grid-template-columns:1.6rem 1fr;gap:2px 6px;font-size:.95rem;line-height:1.45}
+.pm .s{font-weight:700}
+.pm .s.plus{color:var(--ok)} .pm .s.moins{color:var(--bad)}
+.rec{display:inline-block;margin-left:6px;font-size:.8rem;padding:1px 8px;border-radius:99px;background:var(--ok-soft);color:var(--ok);font-weight:700;vertical-align:1px}
+.note{width:100%;min-height:72px;padding:10px;border:2px solid var(--line);border-radius:8px;background:var(--bg);resize:vertical}
+.primary{padding:14px 18px;border-radius:10px;border:0;background:var(--accent);color:var(--accent-fg);font-weight:700;cursor:pointer}
+.sec{padding:12px 16px;border-radius:10px;border:2px solid var(--line);background:var(--panel);cursor:pointer;font-weight:700}
+.sec:disabled{opacity:.45;cursor:default}
+nav.bar{position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px))}
+nav.bar>div{max-width:780px;margin-inline:auto;display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap}
+.srow{display:grid;grid-template-columns:3.2rem 1fr;gap:4px 10px;padding:8px 0;border-top:1px solid var(--line);cursor:pointer;background:none;border-inline:0;border-bottom:0;text-align:left;width:100%}
+.srow .c{font-weight:700;color:var(--muted)}
+.srow .a{grid-column:2;font-size:.92rem;color:var(--muted)}
+.srow.ok .a{color:var(--ok)} .srow.skip .a{color:var(--warn)}
+.confirm{border:2px solid var(--warn);background:var(--warn-soft);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.row2{display:flex;gap:8px;flex-wrap:wrap}
+.sync{font-size:.85rem;color:var(--muted)}
+/* maquettes */
+.mrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.mpair{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:560px){.mpair{grid-template-columns:1fr}}
+.mcap{font-size:.8rem;font-weight:700;color:var(--muted);margin-bottom:6px}
+.mf{display:inline-block;min-width:64px;padding:3px 10px;border:2px solid var(--muted);border-radius:5px;background:var(--panel);font-size:.95rem;white-space:nowrap}
+.mf.err{border-color:var(--bad);background:var(--bad-soft)} .mf.ok{border-color:var(--ok)} .mf.warn{border-color:var(--warn);background:var(--warn-soft)} .mf.off{opacity:.45;border-style:dashed}
+.mf.ph{color:var(--muted)} .mf.s{min-width:50px} .mf.m{min-width:110px} .mf.l{min-width:200px}
+.mb{display:inline-block;padding:3px 12px;border:2px solid var(--muted);border-radius:5px;background:var(--panel);font-size:.95rem;font-weight:700;white-space:nowrap}
+.mb.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.mb.def{outline:3px solid var(--accent);outline-offset:2px}
+.mb.dan{background:var(--bad);border-color:var(--bad);color:#fff} .mb.off{opacity:.4}
+.mt{display:inline-block;padding:3px 10px;border-radius:5px;background:var(--fg);color:var(--bg);font-size:.85rem}
+.ml{color:var(--muted);font-size:.95rem} .mdim{color:var(--muted);font-size:.9rem}
+.mgrid{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;align-items:center;justify-items:start;font-size:.95rem}
+.mgrid .k{font-weight:700}
+.mgrid .bad{color:var(--bad);font-weight:700}
+.mwin{border:2px solid var(--muted);border-radius:8px;background:var(--panel);max-width:440px}
+.mwt{padding:4px 10px;border-bottom:2px solid var(--muted);font-weight:700;font-size:.9rem}
+.mwb{padding:12px 10px;color:var(--muted)}
+.mwf{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 10px;border-top:2px solid var(--muted)} .sp{flex:1}
+.mbar{display:flex;flex-direction:column;gap:2px;font-size:.9rem}
+.mbar>div{padding:3px 10px;background:var(--panel);border:1px solid var(--line);display:flex;gap:12px;flex-wrap:wrap}
+.mbar .warn{background:var(--warn-soft);color:var(--warn)} .mbar .errb{background:var(--bad-soft);color:var(--bad)}
+.mbar .lk{color:var(--accent);text-decoration:underline} .mbar .r{margin-left:auto;color:var(--muted)}
+.mttl{padding:4px 10px;border:2px solid var(--muted);border-radius:6px 6px 0 0;font-size:.9rem;font-weight:700;max-width:440px}
+.msl{display:inline-block;width:140px;height:8px;border-radius:4px;background:var(--line);position:relative;vertical-align:middle}
+.msl>i{position:absolute;left:0;top:0;bottom:0;border-radius:4px;background:var(--accent)}
+.msl>b{position:absolute;top:-5px;width:18px;height:18px;border-radius:50%;background:var(--panel);border:2px solid var(--accent);margin-left:-9px}
+.msh{display:inline-grid;grid-auto-flow:column;grid-auto-columns:minmax(56px,auto);border:2px solid var(--muted);border-radius:5px;overflow:hidden;font-size:.9rem;max-width:100%}
+.msc{display:flex;flex-direction:column;border-left:1px solid var(--line)}
+.msc:first-child{border-left:0}
+.msc b{padding:2px 8px;background:var(--line);text-align:center}
+.msc span{padding:3px 8px;background:var(--panel);white-space:nowrap}
+.msc.bad span{background:var(--bad-soft);color:var(--bad);font-weight:700}
+.msc.ok span{background:var(--ok-soft);color:var(--ok);font-weight:700}
+.msc.warn span{background:var(--warn-soft);color:var(--warn);font-weight:700}
+.msc.new span{background:var(--accent-soft);color:var(--accent);font-weight:700}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+<div class="wrap">
+<header>
+  <div class="top"><h1 id="h1"></h1><button class="link" id="goSum">Voir le résumé</button></div>
+  <div class="prog" aria-hidden="true"><i id="bar"></i></div>
+  <div class="count" id="count" aria-live="polite"></div>
+  <details class="map"><summary>Toutes les décisions</summary><div id="map"></div></details>
+</header>
+<main id="main"></main>
+</div>
+<nav class="bar"><div>
+  <button class="sec" id="prev">← Précédent</button>
+  <button class="sec" id="skip">Plus tard</button>
+  <button class="sec" id="next">Suivant →</button>
+</div></nav>
+<script>
+// ---- Briques de maquette (schémas) -----------------------------------------
+const f=(t,c='')=>`<span class="mf ${c}">${t}</span>`;          // champ ; c = err | ok | warn | off | ph | s | m | l
+const b=(t,c='')=>`<span class="mb ${c}">${t}</span>`;          // bouton ; c = pri | def | dan | off
+const tip=t=>`<span class="mt">${t}</span>`;                     // bulle
+const row=(...x)=>`<div class="mrow">${x.join('')}</div>`;
+const lab=t=>`<span class="ml">${t}</span>`;
+const dim=t=>`<span class="mdim">${t}</span>`;
+const cap=t=>`<div class="mcap">${t}</div>`;
+const pair=(a,z)=>`<div class="mpair"><div>${a}</div><div>${z}</div></div>`;
+const grid=rows=>`<div class="mgrid">${rows.map(([k,v])=>`<span class="k">${k}</span><span>${v}</span>`).join('')}</div>`;
+const win=(t,body,foot)=>`<div class="mwin"><div class="mwt">${t}</div><div class="mwb">${body}</div><div class="mwf">${foot}</div></div>`;
+const sbar=(...lines)=>`<div class="mbar">${lines.join('')}</div>`;
+const slider=p=>`<span class="msl"><i style="width:${p}%"></i><b style="left:${p}%"></b></span>`;
+// Feuille : colonnes [lettre, contenu, c] ; c = bad | ok | warn | new (colonne insérée)
+const sheet=cols=>`<div class="msh">${cols.map(([l,t,c=''])=>`<div class="msc ${c}"><b>${l}</b><span>${t}</span></div>`).join('')}</div>`;
+// Une option : nom, puces « après », schéma « après », avantage, défaut. La première est la recommandation.
+const O=(t,pts,m,plus,moins)=>({t,pts:pts||[],m:m||'',plus:plus||'',moins:moins||''});
+
+/* DONNÉES — début. Remplacer ce bloc pour un nouveau lot de décisions (voir formulaire-de-decisions.md). */
+const TITRE='Arbitrages StokesForge — suite des décisions d’interface';
+const SEC={R:'Reprise'};
+const D=[
+// ---------- P1
+{c:'R1',p:1,t:'La molette change-t-elle un champ numérique ?',l:'X1, N1, N2',
+ ctx:['Tu règles une valeur dans Graph Properties.','Puis tu fais défiler la fenêtre avec la molette.','Le curseur passe sur d’autres champs pendant le défilement.'],
+ av:{pts:['Aujourd’hui : la molette ne change aucun champ.','Tes réponses se contredisent : X1 « jamais », N2 « si le champ a le focus », N1 « au survol ».'],
+     m:row(lab('Width (pt)'),f('2'),dim('molette → la fenêtre défile'))},
+ o:[O('Focus et curseur sur le champ',['Clique dans le champ, puis molette : un pas par cran','Sans clic : la molette fait défiler la fenêtre','Les crans d’affilée font une seule entrée d’historique'],
+      row(lab('Width (pt)'),f('2 → 3','ok'),dim('clic, puis molette')),'Réglage rapide, sans risque pendant un défilement.','Il faut cliquer dans le champ avant de tourner la molette.'),
+    O('Au survol seul (ta version de N1)',['Curseur sur le champ + molette : un pas par cran','Pas besoin de cliquer'],
+      row(lab('Width (pt)'),f('2 → 7','err'),dim('changé en faisant défiler la fenêtre')),'Le plus rapide.','En faisant défiler un long dialogue, un champ passe sous le curseur et change sans que tu le voies.'),
+    O('Jamais (X1 tel quel)',['La molette fait toujours défiler','↑/↓ au clavier pour changer d’un pas'],
+      '','Aucune modification par accident.','Plus lent pour ajuster une valeur pas à pas.')]},
+{c:'R2',p:1,t:'Valeur illisible ou hors bornes : refuser ou ramener ?',l:'N6, N7',
+ ctx:['Tu tapes une épaisseur dans un champ limité à 0–20 pt.','N6 (refuser) et N7 (ramener à la borne) visent ce même cas.'],
+ av:{pts:['La maquette de N6 refuse « 250 ».','N7 dit de ramener 250 à 20.'],
+     m:pair(cap('N6')+row(f('250','err'),tip('Between 0 and 20')),cap('N7')+row(f('20','ok'),dim('← 250 ramené')))},
+ o:[O('Illisible → refusé ; hors bornes → ramené',['« abc », « 1..2 » : refusé, l’ancienne valeur revient','« 250 » : devient 20, et c’est signalé (voir R8)'],
+      pair(cap('Tapé « abc »')+row(f('abc','err'),tip('Not a number')),cap('Tapé « 250 »')+row(f('20','warn'),tip('Set to the maximum, 20'))),
+      'Tu obtiens la valeur la plus proche de ce que tu voulais.','Une faute de frappe (2500 pour 2.5) donne 20 au lieu d’une erreur.'),
+    O('Tout refuser',['« abc » et « 250 » : cadre rouge, l’ancienne valeur revient'],
+      row(f('250','err'),tip('Between 0 and 20')),'Une seule règle : rien ne change sans toi.','Il faut retaper pour atteindre la borne.')]},
+{c:'R3',p:1,t:'Combien de chiffres affiche un nombre ?',l:'D1, D2, N3',
+ ctx:['Ton commentaire D1 : 3 chiffres significatifs en notation « e ».','D2 prévoit 6 chiffres pour un résultat sans erreur type.','N3 : quitter un champ (Tab, clic ailleurs) le valide.'],
+ av:{pts:['Aujourd’hui : chaque endroit formate à sa façon.','Piège : un champ montre 1.23e-5, tu fais Tab, et 1.23e-5 remplace 1.23456e-5.','Dans tous les choix ci-dessous : en édition, la valeur complète ; rien n’est écrit si tu n’as rien tapé.'],
+     m:row(f('1.23e-5'),dim('Tab →'),f('1.23e-5','err'),dim('1.23456e-5 perdu'))},
+ o:[O('3 chiffres pour résultats et graduations ; 6 dans la grille et les champs',['Results, graduations : 1.23e-5','Grille, champs : 1.23456e-5','En édition : la valeur complète'],
+      pair(cap('Results')+row(f('1.23e-5')),cap('Grille')+row(f('1.23456e-5','m'))),'Lisible là où on lit, exact là où on saisit.','Deux précisions selon l’endroit.'),
+    O('3 chiffres partout',['Grille, champs, résultats : 1.23e-5','En édition : la valeur complète'],
+      row(f('1.23e-5'),f('1.23e-5'),dim('← 1.23e-5 et 1.234e-5 ?')),'Une seule apparence partout.','Deux valeurs différentes s’affichent pareil dans la grille.'),
+    O('Réglage par colonne, 6 chiffres par défaut',['Chaque colonne choisit son format, comme dans Origin','Résultats : 3 chiffres en « e »'],
+      row(lab('Display'),f('Significant digits: 6 ▾','l')),'Chaque série a la précision qui lui convient.','Un réglage de plus, à enregistrer dans le .stf.')]},
+{c:'R4',p:1,t:'Aspect du bouton Delete dans une confirmation',l:'F3, F5, G1',
+ ctx:['Avec F3, seul un geste non annulable demande confirmation.','Exemples : écraser un fichier, supprimer un modèle d’import.','Ton choix F5 : Entrée et Échap annulent ; Delete grisé, rouge au survol.','Ta branche « Entrée valide » ne sert donc jamais : toute confirmation est non annulable.'],
+ av:{pts:['Aujourd’hui : Entrée = Delete.'],m:row(b('Cancel'),b('Delete','pri'),dim('← Entrée'))},
+ o:[O('Delete normal, rouge au survol et au focus',['Entrée et Échap = Cancel (ton choix)','Cancel porte le cadre du bouton par défaut','Delete devient rouge quand la souris ou Tab le vise'],
+      row(b('Cancel','def'),b('Delete'),dim('visé →'),b('Delete','dan')),'Rien ne ressemble à un bouton inactif ; le clavier voit aussi le rouge.','Le danger ne se voit qu’en visant le bouton.'),
+    O('Delete grisé, rouge au survol (ton choix F5)',['Entrée et Échap = Cancel','Delete a l’air inactif'],
+      row(b('Cancel','def'),b('Delete','off'),dim('survol →'),b('Delete','dan')),'Freine le clic réflexe.','Partout ailleurs, grisé veut dire inactif (G1) : on croira que Delete ne marche pas. Au clavier, le rouge ne s’affiche jamais.'),
+    O('Delete rouge en permanence',['Entrée et Échap = Cancel'],
+      row(b('Cancel','def'),b('Delete','dan')),'Le danger se voit tout de suite.','Un gros bouton rouge attire l’œil, donc le clic.')]},
+{c:'R5',p:1,t:'Touche Entrée en quittant un projet non enregistré',l:'F3, F4, F5',
+ ctx:['Tu quittes ou ouvres un projet modifié.','F4 : boutons Discard Changes · Cancel · Save.','Ta règle F5 : non annulable → Entrée = Cancel.'],
+ av:{pts:['Aujourd’hui : aucune question, le travail est perdu (F3 le corrige).']},
+ o:[O('Entrée = Save',['Save ne perd rien : c’est le choix sûr ici','Échap = Cancel'],
+      row(b('Discard Changes'),dim('···'),b('Cancel'),b('Save','pri def'),dim('← Entrée')),'L’usage de presque tous les logiciels ; Entrée ne perd jamais de travail.','Entrée ne fait pas la même chose que dans les autres confirmations.'),
+    O('Entrée = Cancel',['Même règle que toutes les confirmations'],
+      row(b('Discard Changes'),dim('···'),b('Cancel','def'),b('Save','pri'),dim('← Entrée')),'Une seule règle à retenir.','Quitter puis Entrée ne quitte pas : il faut viser Save à la souris.')]},
+{c:'R6',p:1,t:'Virgule décimale dans les formules et les listes',l:'N4',
+ ctx:['N4 : « 1,5 » et « 1.5 » acceptés partout.','Dans une formule, la virgule sépare les arguments : max(a, b).','Dans une liste, elle sépare les éléments : 1, 2, 3.','Effet de N4 à connaître : en anglais, « 1,000 » sera lu 1.'],
+ av:{pts:['Aujourd’hui : la virgule décimale est refusée partout.'],m:row(lab('Formula'),f('a*exp(-x/b)','l'))},
+ o:[O('Virgule seulement dans un champ à un seul nombre',['Champs numériques et cellules Numeric : 1,5 = 1.5','Formules et listes : point obligatoire'],
+      pair(cap('Champ nombre')+row(f('1,5'),dim('= 1.5')),cap('Formule')+row(f('2.5*x','m'))),'Aucune ambiguïté.','Il faut penser au point dans les formules.'),
+    O('Partout ; « ; » sépare les arguments (façon Excel en français)',['max(1,5 ; 2)','Liste : 1,5 ; 2 ; 3'],
+      row(f('max(1,5 ; 2)','m')),'La virgule marche partout.','Une formule s’écrit autrement selon le réglage ; les scripts pyst et les exemples ne se copient plus tels quels.')]},
+{c:'R7',p:1,t:'Que fait le double-clic ?',l:'K3, K4',
+ ctx:['Tu as écrit « je ne comprends pas le contrat » : voici ce qui existe.','Aujourd’hui le double-clic fait quatre choses selon l’endroit.','K4 (choisi) suppose déjà : double-clic dans le Project Manager = ouvrir.'],
+ av:{pts:['Le cas du Project Manager est un piège : on ferme en voulant ouvrir.'],
+     m:grid([['Grille','édite la cellule'],['Onglet de feuille','renomme'],['Object Manager','ouvre Properties'],['Project Manager','<span class="bad">ferme la fenêtre active</span>']])},
+ o:[O('Une règle par sorte de chose',['Texte ou nom (cellule, onglet, titre) : édition sur place','Objet (série, axe) : Properties','Fond vide d’un graphe : vue réinitialisée (comme X1)','Project Manager : active ou restaure la fenêtre, ne ferme jamais'],
+      grid([['Grille','édite la cellule'],['Onglet de feuille','renomme'],['Object Manager','ouvre Properties'],['Project Manager','active la fenêtre'],['Fond du graphe','réinitialise la vue']]),
+      'Plus de fermeture par erreur ; même geste, même effet partout.','Fermer une fenêtre passe par sa croix ou le clic droit, plus par le double-clic.'),
+    O('Garder l’existant, seulement l’écrire',[],'','Rien ne change pour toi.','Le double-clic du Project Manager continue de fermer la fenêtre active.')]},
+// ---------- P2
+{c:'R8',p:2,t:'Couleur du signal « valeur ramenée à la borne »',l:'N7, N6, M4',
+ ctx:['Vaut seulement si R2 garde le ramenage.','Ton commentaire N7 : surligner en rouge.','Le rouge est déjà réservé à « refusé » (N6, T2, M4).'],
+ av:{pts:['Aujourd’hui : aucun signal.'],m:row(f('20'),dim('← rien ne dit que 250 a été changé'))},
+ o:[O('Orange (avertissement) + bulle, 2 secondes',['Cadre orange pendant 2 s','Bulle « Set to the maximum, 20 »'],
+      row(f('20','warn'),tip('Set to the maximum, 20')),'Rouge = refusé, orange = accepté mais changé : deux sens, deux couleurs.','Une couleur de plus à apprendre.'),
+    O('Rouge + bulle (ton commentaire)',[],row(f('20','err'),tip('Set to the maximum, 20')),'Très visible.','Rouge veut dire « refusé » partout ailleurs, alors qu’ici la valeur est acceptée.')]},
+{c:'R9',p:2,t:'Où se règle le séparateur décimal d’un graphe ?',l:'N4, N5, X3',
+ ctx:['Ton commentaire N4 : point partout, sauf une option dans les graphes.','Emplacement voulu : Graph Properties › Axes › Display.','Indépendant de la langue de l’interface.'],
+ av:{pts:['Aujourd’hui : graduations toujours avec un point.'],m:row(dim('graduations'),f('0.5','s'),f('1.0','s'),f('1.5','s'))},
+ o:[O('Par graphe, avec un défaut dans Preferences',['Tous les axes du graphe suivent le même réglage','Graduations, légende, exports SVG, PDF, PNG','Un graphe neuf prend le défaut de Preferences (point au départ)'],
+      row(lab('Decimal separator'),f('Comma ▾','m'),dim('→'),f('0,5','s'),f('1,0','s')),'Une figure ne mélange jamais 0.5 et 0,5 ; pas de réglage à refaire si tu publies en français.','Un réglage de plus dans Preferences.'),
+    O('Par graphe, sans défaut global',['Chaque graphe neuf commence avec un point'],'','Rien dans Preferences.','À régler sur chaque graphe destiné à un texte français.'),
+    O('Par axe',['X et Y ont chacun leur réglage'],row(lab('X'),f('Point ▾'),lab('Y'),f('Comma ▾')),'Le plus souple.','Une figure peut mélanger 0.5 et 0,5 ; à régler sur chaque axe.')]},
+{c:'R10',p:2,t:'Que veut dire un champ numérique vidé ?',l:'C4, N6',
+ ctx:['C4 : un champ vide veut dire « Auto ».','N6 : jamais d’effacement, l’ancienne valeur revient.','Cas : tu effaces tout le contenu d’un champ, puis tu le quittes.'],
+ av:{pts:['Aujourd’hui : ça dépend du champ.']},
+ o:[O('Auto si la grandeur a un Auto, sinon refusé',['Axis min vidé → Auto (0–4000)','Line width vidé → cadre rouge, l’ancienne valeur revient'],
+      pair(cap('A un Auto')+row(f('Auto (0–4000)','ph')),cap('Sans Auto')+row(f('&nbsp;','err'),tip('Enter a number'))),'Vider est le geste naturel pour revenir à Auto.','Le même geste fait deux choses selon le champ.'),
+    O('Toujours refusé ; Auto se choisit dans la liste ▼',['Contredit C4'],row(f('Auto ▾','m')),'Vider ne change jamais rien.','Revenir à Auto demande d’ouvrir la liste.')]},
+{c:'R11',p:2,t:'Aperçu pendant qu’on tape un nombre',l:'T1, N3',
+ ctx:['T1 : les aperçus (analyse, import) suivent la frappe pour le texte.','N3 : un nombre n’est appliqué qu’à Entrée ou en quittant le champ.','Cas : tu tapes « 12 » itérations dans la fenêtre d’analyse.'],
+ av:{pts:['Rien n’est fixé pour les nombres d’un aperçu.','Risque : un calcul lancé avec 1, puis un autre avec 12.']},
+ o:[O('À la frappe, après une pause de 0,3 s',['Texte et nombres réagissent pareil','Le calcul part quand tu t’arrêtes de taper','Rien n’est créé avant le bouton Create'],
+      row(f('12'),dim('pause 0,3 s →'),dim('aperçu recalculé')),'Aperçu vivant, sans calcul inutile sur « 1 ».','Un court délai avant de voir le résultat.'),
+    O('À Entrée seulement pour les nombres',[],row(f('12'),dim('Entrée →'),dim('aperçu recalculé')),'Même règle que N3.','Texte et nombres ne réagissent pas pareil dans la même fenêtre.')]},
+{c:'R12',p:2,t:'La brique « nombre » : quand montrer la liste ▼ ?',l:'N1, N8, N9',
+ ctx:['Ton choix N1 : champ [valeur ▼], un clic sélectionne et déplie la liste.','N9 (choisi) : listes éditables dans les barres d’outils.','Une même brique peut servir aux deux.','La molette suit R1.'],
+ av:{pts:['Aujourd’hui : on glisse la souris sur le champ pour changer (DragValue).'],m:row(f('12.5'),dim('↔ glisser'))},
+ o:[O('▼ seulement s’il y a des valeurs à proposer',['Valeurs proposées : dans la table N8 (épaisseur, police…)','Clic dans le texte : tout sélectionné, sans liste','Liste : clic sur ▼ ou Alt+↓','Borne d’axe, paramètre d’ajustement : champ sans ▼'],
+      pair(cap('Épaisseur')+row(f('2 ▾')),cap('Axis min')+row(f('0'))),'Taper reste direct ; ▼ n’apparaît que s’il sert.','Deux aspects de champ selon la grandeur.'),
+    O('Ta version : ▼ partout, liste à chaque clic',[],row(f('0 ▾'),dim('Axis min : que proposer ?')),'Un seul aspect partout.','La liste s’ouvre même quand tu veux juste taper, et cache les champs du dessous. Dans Graph Properties, egui n’ouvre qu’une fenêtre surgissante à la fois (#9) : conflit avec le sélecteur de couleur.')]},
+// ---------- P3
+{c:'R13',p:3,t:'Messages en double : exceptions à M9',l:'M9, M10, F10',
+ ctx:['M9 : une information à un seul endroit.','M10 : erreur de script dans la barre d’état ET dans la console.','F10 : raison d’un bouton grisé dans le pied du dialogue ET dans sa bulle.'],
+ av:{pts:['Les deux choix M10 et F10 contredisent M9 tels quels.']},
+ o:[O('Garder les deux, écrits comme exceptions',['Barre d’état : un renvoi, pas le message','F10 : pied + bulle'],
+      sbar('<div class="errb">● Script failed. See the console</div>'),'Un échec de script se voit même console fermée.','M9 a deux exceptions à retenir.'),
+    O('Supprimer les doublons',['Script : console seule','Bouton grisé : bulle seule'],'','M9 sans exception.','Console fermée, l’échec ne se voit pas ; pour un bouton grisé, il faut le survoler pour savoir pourquoi.')]},
+{c:'R14',p:3,t:'Pied d’un dialogue : erreur et raison en même temps',l:'M7, F10',
+ ctx:['M7 : les erreurs d’un dialogue vont dans son pied.','F10 : la raison du bouton principal grisé y va aussi.','Les deux peuvent arriver ensemble.'],
+ av:{pts:['Rien n’est prévu pour ce cas.']},
+ o:[O('L’erreur passe devant ; la raison revient ensuite',[],
+      win('Import','…',tip('Template name is empty')+'<span class="sp"></span>'+b('Cancel')+b('Finish','off')),'Un seul message à lire à la fois.','La raison du grisage reste cachée tant que l’erreur est là.'),
+    O('Les deux, sur deux lignes',[],'','Tout est visible.','Pied plus haut, deux messages à démêler.')]},
+{c:'R15',p:3,t:'Contenu permanent de la barre d’état',l:'M11',
+ ctx:['Tu as demandé plus de contexte : voici ce qu’elle montre.','À droite, « Revision 42 » : un compteur interne, +1 à chaque modification.','À gauche, le lien « Reopen Last Import… », déjà présent dans le menu File.','Le titre de la fenêtre dit toujours « StokesForge », sans nom de projet.'],
+ av:{pts:['Rien ne dit si le projet est enregistré.'],m:sbar('<div><span>Ready</span><span class="lk">Reopen Last Import…</span><span class="r">Revision 42</span></div>')},
+ o:[O('Retirer les deux ; nom du projet et « • » dans le titre',['Titre : « essai.stf • — StokesForge » tant que non enregistré','Rouvrir l’import : menu File seulement'],
+      '<div class="mttl">essai.stf • — StokesForge</div>'+sbar('<div><span>Ready</span></div>'),'Le titre dit l’état du projet, comme la plupart des logiciels.','Le lien rapide vers le dernier import disparaît de la vue.'),
+    O('Remplacer « Revision » par « Unsaved changes », garder le lien',[],
+      sbar('<div><span>Ready</span><span class="lk">Reopen Last Import…</span><span class="r">Unsaved changes</span></div>'),'Rouvrir l’import reste à un clic.','La barre d’état mêle messages et actions ; le lien apparaît et disparaît.'),
+    O('Garder tel quel',[],'','Rien à faire.','« Revision 42 » ne dit rien d’utile.')]},
+{c:'R16',p:3,t:'Le slider d’opacité',l:'N12, N1',
+ ctx:['Tu as demandé plus de contexte : c’est le seul slider du logiciel.','Il règle Opacity dans le sélecteur de couleur.','Les autres réglages de ce sélecteur (R, G, B…) sont des champs.','N1 interdit tout widget numérique hors de la brique commune.'],
+ av:{pts:['Un slider à côté de champs.'],m:row(lab('Opacity'),slider(50),dim('50 %'))},
+ o:[O('Un champ, comme R, G, B',[],row(lab('Opacity (%)'),f('50','s')),'Une seule brique, le même geste que les autres canaux.','On ne voit plus d’un coup d’œil où on est entre 0 et 100.'),
+    O('Garder le slider, avec son champ',[],row(lab('Opacity (%)'),slider(50),f('50','s')),'Glisser vite de transparent à opaque.','Seule exception à la brique N1 ; deux widgets pour une valeur.')]},
+];
+/* DONNÉES — fin */
+
+D.forEach(d=>{d.s=SEC[d.c[0]]||'';});
+const PN={1:'Priorité 1 · risque de perte ou piège silencieux',2:'Priorité 2 · incohérence visible',3:'Priorité 3 · finition'};
+const ORDER=D.slice().sort((a,z)=>a.p-z.p);
+const KEY='sf-dec-'+ORDER.map(d=>d.c).join(',');
+let ans={}, cur=0, view='card', confirmAll=false, store=null, sync='';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+try{ans=JSON.parse(lsGet(KEY)||'{}')}catch(e){ans={}}
+const pos=parseInt(lsGet(KEY+'-pos')||'0',10); if(pos>=0&&pos<ORDER.length)cur=pos;
+$('h1').textContent=TITRE; document.title=document.title||TITRE;
+
+function label(d,a){ if(!a)return ''; if(a.skip)return 'Plus tard'; if(a.i===-1)return 'Autre'; return d.o[a.i]?d.o[a.i].t:''; }
+function save(d){
+  lsSet(KEY,JSON.stringify(ans)); lsSet(KEY+'-pos',String(cur));
+  const a=ans[d.c];
+  if(store&&a){ store.doc('decisions/'+d.c).set({code:d.c,priorite:d.p,question:d.t,statut:a.skip?'plus_tard':'tranche',choix:label(d,a),recommande:a.i===0,commentaire:a.note||'',date:new Date().toISOString()})
+    .then(()=>{sync='Enregistré';paintSync()}).catch(()=>{sync='Enregistré sur cet appareil seulement';paintSync()}); }
+}
+function paintSync(){const e=document.querySelector('.sync'); if(e)e.textContent=sync;}
+function stat(d){const a=ans[d.c]; return !a?'':a.skip?'skip':'done';}
+function paintTop(){
+  const n=ORDER.filter(d=>ans[d.c]&&!ans[d.c].skip).length;
+  $('bar').style.width=(100*n/ORDER.length)+'%';
+  $('count').textContent=n+' sur '+ORDER.length+' tranchées';
+  let h='',last=0;
+  ORDER.forEach((d,i)=>{ if(d.p!==last){last=d.p;h+=(i?'</div>':'')+'<div class="grp">'+PN[d.p]+'</div><div class="chips">';}
+    h+='<button class="chip '+stat(d)+(view==='card'&&i===cur?' cur':'')+'" data-i="'+i+'">'+d.c+'</button>'; });
+  $('map').innerHTML=h+'</div>';
+  $('map').querySelectorAll('.chip').forEach(x=>x.onclick=()=>go(+x.dataset.i));
+}
+const pts=a=>a&&a.length?'<ul class="pts">'+a.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'';
+function opt(o,i,a){
+  const sel=a.i===i;
+  let h='<div class="opt'+(sel?' sel':'')+'" role="radio" tabindex="0" aria-checked="'+sel+'" data-i="'+i+'"><span class="dot"></span><div class="body">';
+  h+='<span class="name">'+esc(o.t)+(i===0?'<span class="rec">Recommandé</span>':'')+'</span>';
+  h+=pts(o.pts);
+  if(o.m)h+='<div class="schema" aria-label="Après">'+cap('Après')+o.m+'</div>';
+  if(o.plus||o.moins)h+='<div class="pm">'+(o.plus?'<span class="s plus">+</span><span>'+esc(o.plus)+'</span>':'')+(o.moins?'<span class="s moins">−</span><span>'+esc(o.moins)+'</span>':'')+'</div>';
+  return h+'</div></div>';
+}
+function card(){
+  const d=ORDER[cur], a=ans[d.c]||{};
+  const idx=ORDER.filter(x=>x.p===d.p).indexOf(d)+1, tot=ORDER.filter(x=>x.p===d.p).length;
+  let h='<div class="card">';
+  h+='<div class="meta"><span class="tag p'+d.p+'">P'+d.p+'</span>'+(d.s?'<span>'+esc(d.s)+'</span>':'')+'<span class="code">'+d.c+' · '+idx+'/'+tot+'</span></div>';
+  h+='<h2>'+esc(d.t)+'</h2>';
+  if(d.ctx&&d.ctx.length)h+='<div class="block"><div class="lbl">Contexte</div>'+pts(d.ctx)+(d.l?'<div class="links">Décisions liées : '+esc(d.l)+'</div>':'')+'</div>';
+  if(d.av)h+='<div class="block avant"><div class="lbl">Aujourd’hui (avant)</div>'+pts(d.av.pts)+(d.av.m?'<div class="schema" aria-label="Avant">'+d.av.m+'</div>':'')+'</div>';
+  h+='<button class="primary" id="acc">Prendre la recommandation et continuer</button>';
+  h+='<div><div class="lbl">Les choix (après)</div><div class="opts" role="radiogroup">';
+  d.o.forEach((o,i)=>{h+=opt(o,i,a);});
+  h+='<div class="opt'+(a.i===-1?' sel':'')+'" role="radio" tabindex="0" aria-checked="'+(a.i===-1)+'" data-i="-1"><span class="dot"></span><div class="body"><span class="name">Autre / à discuter</span><span class="mdim">Écris ta réponse dans le champ ci-dessous.</span></div></div>';
+  h+='</div></div>';
+  h+='<div><label for="note" class="lbl" style="display:block">Commentaire (facultatif)</label><textarea id="note" class="note" placeholder="Ex. : oui, mais seulement pour les graphes">'+esc(a.note||'')+'</textarea></div>';
+  h+='<div class="sync" aria-live="polite">'+esc(sync)+'</div></div>';
+  return h;
+}
+function summary(){
+  const dec=ORDER.filter(d=>ans[d.c]&&!ans[d.c].skip), later=ORDER.filter(d=>ans[d.c]&&ans[d.c].skip), none=ORDER.filter(d=>!ans[d.c]);
+  let h='<div class="card"><h2>Résumé</h2><div class="count">'+dec.length+' tranchées · '+later.length+' pour plus tard · '+none.length+' pas vues</div>';
+  const rest=none.length+later.length;
+  if(rest){ if(!confirmAll) h+='<button class="sec" id="accAll">Prendre la recommandation pour les '+rest+' restantes…</button>';
+    else h+='<div class="confirm"><b>Appliquer la recommandation aux '+rest+' décisions restantes ?</b><span>Tu pourras encore changer chacune ensuite.</span><div class="row2"><button class="primary" id="accAllOk">Oui, appliquer</button><button class="sec" id="accAllNo">Annuler</button></div></div>'; }
+  h+='<div><button class="link" id="copy">Copier le résumé</button> <span class="sync" id="copied"></span></div>';
+  let last=0;
+  ORDER.forEach((d,i)=>{ if(d.p!==last){last=d.p;h+='<div class="grp">'+PN[d.p]+'</div>';}
+    const a=ans[d.c]; const cls=!a?'':a.skip?'skip':'ok';
+    h+='<button class="srow '+cls+'" data-i="'+i+'"><span class="c">'+d.c+'</span><span>'+esc(d.t)+'</span><span class="a">'+(a?esc(label(d,a))+(a.note?' — '+esc(a.note):''):'Pas encore vue')+'</span></button>'; });
+  return h+'</div>';
+}
+function go(i){cur=Math.max(0,Math.min(ORDER.length-1,i));view='card';lsSet(KEY+'-pos',String(cur));render();window.scrollTo(0,0);}
+function choose(d,i){ans[d.c]={i,note:(ans[d.c]||{}).note||''};save(d);render();
+  const el=$('main').querySelector('.opt[data-i="'+i+'"]'); if(el)el.focus(); if(i===-1)$('note').focus();}
+function render(){
+  $('main').innerHTML=view==='card'?card():summary();
+  paintTop();
+  $('prev').hidden=view!=='card'; $('skip').hidden=view!=='card'; $('next').hidden=view!=='card';
+  $('prev').disabled=cur===0;
+  $('next').textContent=cur===ORDER.length-1?'Résumé →':'Suivant →';
+  if(view==='card'){
+    const d=ORDER[cur];
+    $('acc').onclick=()=>{ans[d.c]={i:0,note:(ans[d.c]||{}).note||''};save(d);cur<ORDER.length-1?go(cur+1):(view='sum',render());};
+    $('main').querySelectorAll('.opt').forEach(x=>{
+      x.onclick=()=>choose(d,+x.dataset.i);
+      x.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(d,+x.dataset.i);}};
+    });
+    let t;$('note').oninput=e=>{const a=ans[d.c]||{i:-1};a.note=e.target.value;ans[d.c]=a;clearTimeout(t);t=setTimeout(()=>{save(d);paintTop();},500);};
+  } else {
+    $('main').querySelectorAll('.srow').forEach(x=>x.onclick=()=>go(+x.dataset.i));
+    const g=id=>$(id);
+    if(g('accAll'))g('accAll').onclick=()=>{confirmAll=true;render();};
+    if(g('accAllNo'))g('accAllNo').onclick=()=>{confirmAll=false;render();};
+    if(g('accAllOk'))g('accAllOk').onclick=()=>{ORDER.forEach(d=>{const a=ans[d.c];if(!a||a.skip){ans[d.c]={i:0,note:(a&&a.note)||''};save(d);}});confirmAll=false;render();};
+    g('copy').onclick=()=>{const txt=ORDER.map(d=>d.c+' — '+d.t+' : '+(ans[d.c]?label(d,ans[d.c])+(ans[d.c].note?' ('+ans[d.c].note+')':''):'pas vue')).join('\n');
+      const ok=()=>g('copied').textContent='Copié';
+      try{navigator.clipboard.writeText(txt).then(ok,()=>g('copied').textContent='Copie refusée');}catch(e){g('copied').textContent='Copie refusée';}};
+  }
+}
+$('prev').onclick=()=>go(cur-1);
+$('next').onclick=()=>{ if(cur===ORDER.length-1){view='sum';render();window.scrollTo(0,0);} else go(cur+1); };
+$('skip').onclick=()=>{const d=ORDER[cur];const a=ans[d.c];if(!a||a.i===undefined||a.skip){ans[d.c]={skip:true,note:(a&&a.note)||''};save(d);}go(cur+1);};
+$('goSum').onclick=()=>{view='sum';confirmAll=false;render();window.scrollTo(0,0);};
+render();
+// Base partagée (capacité db) : lue après coup, jamais bloquante ; Claude relit la collection « decisions ».
+(async()=>{ try{
+  const db=await (window.claude&&window.claude.use?window.claude.use('db'):null); if(!db)return; store=db;
+  const snap=await db.collection('decisions').get();
+  snap.docs.forEach(s=>{const x=s.data(); const d=D.find(q=>q.c===s.id); if(!x||!d||ans[d.c])return;
+    if(x.statut==='plus_tard')ans[d.c]={skip:true,note:x.commentaire||''};
+    else{ let i=d.o.findIndex(o=>o.t===x.choix); if(i<0&&x.choix==='Autre')i=-1; if(i>=0||x.choix==='Autre')ans[d.c]={i,note:x.commentaire||''}; } });
+  render();
+}catch(e){} })();
+</script>

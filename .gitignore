@@ -53,3 +53,26 @@ htmlcov/
 /vendor/phosphor-icons/Fonts/
 /vendor/phosphor-icons/PNGs/
 /vendor/phosphor-icons/SVGs Flat/
+
+# Skills d'agent tiers installés localement : non redistribués (seul audit-test
+# porte une licence). Seuls les skills StokesForge sont versionnés.
+/.claude/skills/agents-manager/
+/.claude/skills/apex/
+/.claude/skills/audit-memories/
+/.claude/skills/audit-skills/
+/.claude/skills/audit-test/
+/.claude/skills/environments-manager/
+/.claude/skills/grill-me/
+/.claude/skills/hooks-manager/
+/.claude/skills/rules-manager/
+/.claude/skills/skill-manager/
+/.agents/skills/agents-manager
+/.agents/skills/apex
+/.agents/skills/audit-memories
+/.agents/skills/audit-skills
+/.agents/skills/audit-test
+/.agents/skills/environments-manager
+/.agents/skills/grill-me
+/.agents/skills/hooks-manager
+/.agents/skills/rules-manager
+/.agents/skills/skill-manager

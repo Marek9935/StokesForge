@@ -36,18 +36,20 @@ en refonte générale.
 
 ### Skills de projet repris de Claude
 
-Les douze skills maintenus dans [`.claude/skills/`](../.claude/skills/README.md)
+Les onze skills maintenus dans [`.claude/skills/`](../.claude/skills/README.md), rédigés en anglais,
 sont également disponibles pour Codex via les liens de `.agents/skills/`.
 Ce sont les mêmes fichiers : modifier le skill source dans `.claude/skills/`
 met à jour les deux assistants. Pour une tâche donnée, lire le `SKILL.md`
 concerné et ses seules références utiles, après le parcours de lecture
-ci-dessus ; ne pas charger les douze systématiquement.
+ci-dessus ; ne pas charger les onze systématiquement.
 
 Les liens partagent le dossier entier, y compris `references/` et les scripts.
-Les fiches thématiques de `stokesforge-feature` (#301) renvoient aux sections
-de `docs/` ou de `.claude/conventions.md` : lire seulement celles du thème
-touché, puis les sources citées. Maintenir les règles dans ces sources ; le
-test `stokesforge-arch-guard/tests/renvois_fiches.rs` contrôle les renvois.
+Les skills renvoient aux sections de `docs/` ou de `.claude/conventions.md`
+au lieu de recopier les règles ; les fiches thématiques de
+`stokesforge-feature` (#301) ne portent que ces renvois : lire seulement
+celles du thème touché, puis les sources citées. Maintenir les règles dans
+ces sources ; le test `stokesforge-arch-guard/tests/renvois_fiches.rs`
+contrôle les renvois de tous les skills de projet.
 
 | Besoin | Skill à consulter |
 |---|---|
@@ -60,8 +62,7 @@ test `stokesforge-arch-guard/tests/renvois_fiches.rs` contrôle les renvois.
 | Pont PyO3, scripts et console Python | [`stokesforge-python`](../.agents/skills/stokesforge-python/SKILL.md) |
 | Tests, vérification finale et commit | [`stokesforge-verification`](../.agents/skills/stokesforge-verification/SKILL.md) |
 | Lancer, piloter et capturer l'application réelle sous Linux | [`run-stokesforge`](../.agents/skills/run-stokesforge/SKILL.md) |
-| Expliquer le découpage du logiciel | [`stokesforge-architecture`](../.agents/skills/stokesforge-architecture/SKILL.md) |
-| Expliquer ce que le logiciel sait faire | [`stokesforge-fonctionnalites`](../.agents/skills/stokesforge-fonctionnalites/SKILL.md) |
+| Expliquer ce que le logiciel sait faire et comment il est découpé | [`stokesforge-expliquer`](../.agents/skills/stokesforge-expliquer/SKILL.md) |
 | Écrire ou modifier un texte visible | [`stokesforge-textes-interface`](../.agents/skills/stokesforge-textes-interface/SKILL.md) |
 
 Les skills s'enchaînent selon le besoin : `stokesforge-feature` ou
@@ -86,7 +87,7 @@ Pendant la création ou l'enrichissement d'issues, conserver le contexte de
 signalement entre les messages : « ajoute », « enlève » ou « supprime »
 décrivent les changements à consigner. Ne modifier l'application que sur
 demande explicite de passer à l'implémentation dans le dépôt, selon la
-[règle du triage](../.agents/skills/stokesforge-bug-report/SKILL.md#avant-tout--conserver-le-contexte-de-signalement).
+[règle du triage](../.agents/skills/stokesforge-bug-report/SKILL.md#keep-the-reporting-context).
 
 ## 2. Où chercher
 
@@ -292,4 +293,4 @@ ou visuelle à partir des seuls tests Rust par défaut.
 
 Après fusion et push sur `main`, la livraison comprend le retrait du worktree
 temporaire et de sa branche locale fusionnée, selon
-[le nettoyage du skill de vérification](../.agents/skills/stokesforge-verification/SKILL.md#nettoyer-après-une-fusion-sur-main).
+[le nettoyage du skill de vérification](../.agents/skills/stokesforge-verification/SKILL.md#clean-up-after-a-merge-on-main).

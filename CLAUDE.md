@@ -50,11 +50,11 @@ Règles de chargement par domaine (quel crate/doc charger selon la tâche) : `.c
 | fenêtre ou dialogue neuf | `docs/fenetres.md` (catalogue : ouvrir une fenêtre jumelle de référence, #300), `docs/principes-ui.md` (E3) |
 | rendu (`stokesforge-render*`) | « Rendu : pièges silencieux » (+ skill `stokesforge-rendu`) |
 
-Skills de projet : `.claude/skills/` — douze compétences par type de tâche
+Skills de projet : `.claude/skills/` — onze compétences par type de tâche
 (implémenter une fonctionnalité, signaler puis corriger un bug, ajouter une
 commande annulable, rendu, import, pont Python, vérifier avant de committer,
-répondre sur l'architecture ou sur les fonctionnalités, écrire un texte
-d'interface). Index et
+piloter l'application réelle, répondre sur les fonctionnalités et
+l'architecture, écrire un texte d'interface), rédigées en anglais. Index et
 enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 
 ## Conventions
@@ -69,11 +69,11 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
   maintenance dans `docs/tests.md` (« Utiliser la CI au quotidien »). Résultats
   d'un commit, lus depuis GitLab : `scripts/ci-statuts.sh [commit]`.
 - Quand un travail installe une règle nouvelle (standard d'interface, motif à suivre, frontière), mettre à jour **au besoin** les skills concernés (`.claude/skills/`) et ce fichier ou `.claude/conventions.md`, dans le même commit que le code, pour garder le développement cohérent. Voir `.claude/skills/README.md` (règles transversales).
-- Décisions à faire trancher : jusqu'à cinq, `AskUserQuestion` ; **six ou plus**, un formulaire de décisions publié en Artifact (une carte par décision : contexte, avant, après schématisés, avantage et défaut de chaque option ; l'utilisateur est dyslexique). Gabarit et marche à suivre : `.claude/skills/stokesforge-bug-report/references/formulaire-de-decisions.md`.
+- Décisions à faire trancher : jusqu'à quatre, `AskUserQuestion` (une diapositive par question) ; **cinq ou plus**, un formulaire de décisions (QCM) publié en Artifact, jamais une liste de questions dans le terminal (une carte par décision : contexte, avant, après schématisés, avantage et défaut de chaque option ; l'utilisateur est dyslexique). Gabarit et marche à suivre : `.claude/skills/stokesforge-bug-report/references/formulaire-de-decisions.md`.
 - Bugs et évolutions se suivent en issues GitLab (`glab issue list`), pas en `.md` ; chaque issue porte une ligne « **Cohérence** » qui dit quels skills et quelles docs mettre à jour.
 - Pendant le signalement et la création ou l'enrichissement d'issues, les retours suivants complètent les issues, même formulés comme « ajoute » ou « supprime ». Ne passer au code que sur demande explicite d'implémentation dans le dépôt ; voir la règle de contexte de `stokesforge-bug-report`.
 - Commits et docs techniques en français.
-- Après fusion et push sur `main`, nettoyer automatiquement le worktree temporaire de la tâche et sa branche locale fusionnée, sauf conservation demandée ; suivre `stokesforge-verification`, « Nettoyer après une fusion sur `main` ».
+- Après fusion et push sur `main`, nettoyer automatiquement le worktree temporaire de la tâche et sa branche locale fusionnée, sauf conservation demandée ; suivre `stokesforge-verification`, « Clean up after a merge on `main` ».
 - Toute mutation du modèle passe par une commande annulable de `stokesforge-commands`, jamais par une primitive `core` en direct.
 - Un libellé d'historique est une **donnée** (`stokesforge_commands::HistoryLabel`, `MacroKind` fermé pour `begin_macro`), jamais une phrase : les crates du dessous ne mettent rien en phrase, `stokesforge-app-state` le fait par `history_text` et les clés `history-*` (#46).
 - Erreurs : le `Display` (`#[error(...)]`) des crates du dessous est en **anglais brut**, jamais traduit (CLI, `pyst`, journaux). `stokesforge-app-state` les met en phrase par `errors::<famille>::error_message`, qui associe chaque variante à une clé `error-*` du catalogue `en` (seule exception, `ClipboardError` : `app/figure_copy.rs`, car `stokesforge-clipboard` reste dans la coquille) ; un `match` exhaustif, sans `_`, force à associer toute variante nouvelle. Jamais de `to_string()` ni de `{err}` d'une erreur affichée à l'utilisateur. Les `std::io::Error` passent par `errors::io::error_message` (clés `error-io-*`) ; `ErrorKind` étant `#[non_exhaustive]`, son `match` garde un repli `_` (`error-io-other`), seule exception à « sans `_` », commentée dans le code. Les messages de la barre d'état (`AppState::notice`/`fail`) sont des `tr!` (clés `status-*` / `error-*`), gardés par `aucun_libelle_en_dur` (`stokesforge-app/tests/libelles.rs`, qui lit les sources des deux crates).

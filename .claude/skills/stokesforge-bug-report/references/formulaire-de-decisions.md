@@ -1,89 +1,54 @@
-# Faire trancher plusieurs décisions : le formulaire
+# Asking the user to decide: slides or a multiple-choice form
 
-Règle demandée par l'utilisateur (2026-10-10). Dès qu'**au moins six choix**
-sont à faire trancher en une fois (maquettes, arbitrages d'interface,
-incohérences, options d'une issue), on ne pose pas les questions dans le
-terminal ni avec `AskUserQuestion` : on publie un **formulaire de décisions**,
-une page Artifact bâtie sur le gabarit
-[`formulaire-de-decisions.html`](formulaire-de-decisions.html). Jusqu'à cinq
-choix, `AskUserQuestion` suffit.
+Used by every skill that asks questions (feature, bug report, bug fix, commands). The user is not a developer and is dyslexic: they arbitrate **observable behaviour**, never code structure, and decide best one card at a time, in short bullets with a sketch.
 
-Pourquoi : l'utilisateur est dyslexique. Une décision par écran, des puces
-courtes et un schéma pour chaque état lui évitent de relire de longs
-paragraphes. C'est le format qu'il juge idéal pour décider en série.
+## When to ask
 
-## Ce que montre chaque carte, dans cet ordre
+Ask, in one batch, before freezing a classification, a report or code, when:
 
-1. **Question** : courte, en titre, avec priorité (P1 risque de perte ou piège
-   silencieux, P2 incohérence visible, P3 finition) et code (`R1`, `N4`…).
-2. **Contexte** : *où* et *quand* l'utilisateur rencontre le cas (fenêtre,
-   geste, exemple concret), et les **décisions liées** par leur code. C'était
-   le manque du premier formulaire : ne jamais supposer qu'il se souvient de
-   l'écran concerné ou d'une décision précédente.
-3. **Aujourd'hui (avant)** : ce que fait le logiciel maintenant, **vérifié
-   dans le code** (et cité au besoin), avec un schéma de l'état actuel.
-4. **Les choix (après)** : la recommandation en premier, puis les autres.
-   Chaque option porte :
-   - des puces « après » (ce qui change) ;
-   - un **schéma de l'après**, chaque fois qu'un écran ou un geste peut se
-     dessiner ;
-   - une ligne **+** (avantage) et une ligne **−** (défaut), **pour toutes
-     les options, recommandation comprise**. Le défaut d'un choix non
-     recommandé doit être lisible *avant* qu'il le choisisse.
-5. « Autre / à discuter » et un commentaire libre.
+| Situation | Why |
+|---|---|
+| the request does not say the behaviour **at the edges** (last column, empty selection, detached window, mixed column) | most round trips hide there |
+| doing it **breaks an existing gesture** | the user must know what they lose, before |
+| a code comment says "deliberate choice" but the request **differs from the rejected option** | a comment closes one alternative, not all |
+| the request has several plausible readings that do not cost the same | price the options, let them choose |
+| the scope is fuzzy (« revoir toute la logique de X ») | a fix and a redesign diverge there |
+| the symptom cannot be reproduced without their screenshot or file | guessing produces a false report |
 
-Puces : une idée par puce, moins de 12 mots si possible, vocabulaire de
-l'utilisateur (gestes, noms de fenêtres), jamais de nom de fonction Rust sauf
-si l'utilisateur l'a déjà employé. Textes de l'interface en anglais, tels
-qu'ils apparaissent à l'écran.
+State what is already established and give concrete options (cost, risk, what breaks), recommendation first. Never an open question that hands the work back. What has an obvious default is not asked: choose it, say so in one line, move on.
 
-## Le gabarit
+"Faithful to what you chose before" is not an argument for an option, unless a general interface rule (`docs/standard-interface.md`, `docs/menus.md`) imposes the consistency. Challenge earlier answers that lead somewhere doubtful (a one-entry submenu…), and check a menu mockup against the submenu rule (`docs/menus.md` § Règles) before proposing it.
 
-- Copier `formulaire-de-decisions.html` dans le scratchpad, remplacer
-  seulement le bloc entre `DONNÉES — début` et `DONNÉES — fin` (`TITRE`,
-  `SEC`, `D`), puis adapter `<title>`.
-- Une décision : `{c, p, t, l, ctx:[…], av:{pts:[…], m}, o:[O(nom, puces,
-  schéma, plus, moins), …]}` ; la première option de `o` est la
-  recommandation.
-- Les schémas se bâtissent avec les briques du haut du script : `f` (champ ;
-  `err`, `ok`, `warn`, `off`, `ph`), `b` (bouton ; `pri`, `def`, `dan`,
-  `off`), `tip` (bulle), `row`, `pair` (deux maquettes côte à côte), `grid`
-  (table avant/après), `win` (dialogue avec pied), `sbar` (barre d'état),
-  `slider`, `sheet` (colonnes d'une feuille avec leur lettre ; `bad`, `ok`,
-  `warn`, `new`). En ajouter une au gabarit plutôt que d'écrire du HTML à la main
-  dans les données.
-- Vérifier le script (`node --check`) avant de publier.
-- Publier avec `capabilities: {db: {}}` : les réponses vont dans la
-  collection `decisions` (code, choix, `recommande`, commentaire, statut).
-  Elles restent aussi dans le navigateur si la base manque.
-- Un nouveau lot de décisions = un **nouvel** artifact (nouveau fichier),
-  pas une republication du précédent : ses réponses sont la trace du lot.
+## How to ask
 
-## Défendre une option sur le fond (règle demandée le 2026-10-14)
+- **1 to 4 questions: `AskUserQuestion`** (the "small slides"): one question per slide, 2 to 4 options, recommendation first with « (Recommandé) », the advantage and the drawback of each option in its description, a `preview` sketch when a screen or gesture can be drawn.
+- **5 questions or more: the multiple-choice form**, a published Artifact page built from [`formulaire-de-decisions.html`](formulaire-de-decisions.html). Never a list of questions in the terminal.
 
-- « Fidèle à ce que tu as choisi », « cohérent avec ta réponse précédente »
-  **n'est pas un argument** pour une option. Il ne vaut que si une **règle
-  générale d'interface** (`docs/standard-interface.md`, `docs/menus.md`) impose
-  la cohérence ; une décision de produit prise en cherchant une solution n'en
-  est pas une.
-- Remettre en question les points déjà abordés : si une réponse antérieure
-  mène à un résultat discutable (menu à une entrée, module d'une fonction),
-  le dire dans la question et chiffrer l'inconvénient plutôt que le recopier.
-- Avant de proposer un classement de menus, relire la règle des sous-menus
-  (`docs/menus.md` : 3 entrées au moins, profondeur 2) : une maquette qui la
-  viole est une erreur de la question, pas un choix de l'utilisateur.
+The page itself stays **in French** (the user reads it); interface texts appear in English, as on screen.
 
-## Après les réponses
+## Each card of the form, in this order
 
-1. Relire la collection avec `ArtifactData` (`action: list`,
-   `collection: decisions`).
-2. Croiser les réponses entre elles et avec les règles existantes
-   (`CLAUDE.md`, `docs/`) : chercher les **incohérences**.
-3. Pour chaque choix qui n'est pas la recommandation : dire son défaut, et
-   proposer un aménagement qui garde son intention.
-4. Pour un « Autre » qui demande du contexte : aller le chercher dans le code,
-   puis reposer la question.
-5. S'il reste au moins six points à trancher, proposer un nouveau formulaire
-   au même format. Sinon, utiliser `AskUserQuestion`.
-6. Consigner les décisions arrêtées dans les issues (ligne « **Cohérence** »)
-   ou la doc concernée. Ne pas passer au code sans demande explicite.
+1. **Question**: short, as a title, with priority (P1 risk of loss or silent trap, P2 visible inconsistency, P3 polish) and code (`R1`, `N4`…).
+2. **Contexte**: where and when the user meets the case (window, gesture, concrete example) and the **related decisions** by code. Never assume they remember the screen or an earlier answer.
+3. **Aujourd'hui (avant)**: what the software does now, **checked in the code**, with a sketch.
+4. **Les choix (après)**: recommendation first; each option has "after" bullets, a sketch when drawable, a **+** line and a **−** line — for every option, recommendation included.
+5. « Autre / à discuter » and a free comment (built into the template).
+
+Bullets: one idea each, under 12 words when possible, the user's vocabulary (gestures, window names), never a Rust function name unless the user used it.
+
+## Building and publishing the form
+
+1. Copy `formulaire-de-decisions.html` to the scratchpad; replace only the block between `DONNÉES — début` and `DONNÉES — fin` (`TITRE`, `SEC`, `D`), and the `<title>`.
+2. A decision: `{c, p, t, l, ctx:[…], av:{pts:[…], m}, o:[O(name, bullets, sketch, plus, minus), …]}`; the first option of `o` is the recommendation.
+3. Sketches use the helpers at the top of the script: `f` (field; `err`, `ok`, `warn`, `off`, `ph`), `b` (button; `pri`, `def`, `dan`, `off`), `tip`, `row`, `lab`, `dim`, `cap`, `pair`, `grid`, `win`, `sbar`, `slider`, `sheet`. Add a helper to the template rather than hand-written HTML in the data.
+4. `node --check` the extracted script, then publish with `capabilities: {db: {}}`: answers go to the `decisions` collection (code, choix, recommande, commentaire, statut) and stay in the browser if the database is missing.
+5. A new batch of decisions is a **new** artifact (new file): its answers are the record of that batch.
+
+## After the answers
+
+1. Read them: `ArtifactData`, `action: list`, `collection: decisions`.
+2. Cross-check them against each other and against `CLAUDE.md` and `docs/`: look for **inconsistencies**.
+3. For each choice that is not the recommendation: state its drawback and propose an adjustment that keeps its intent.
+4. An « Autre » that needs context: fetch it in the code, then ask again.
+5. Remaining questions: same thresholds (≤ 4 slides, ≥ 5 a new form).
+6. Record the decisions in the issues (« **Cohérence** » line) or the docs concerned. No code without an explicit request.
