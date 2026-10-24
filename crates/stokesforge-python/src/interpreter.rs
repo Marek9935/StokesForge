@@ -19,7 +19,8 @@
 //! PyO3 0.29 n'offre **aucune** API sûre pour une configuration d'initialisation
 //! personnalisée : `Python::initialize()` appelle `Py_InitializeEx(0)`, qui lit
 //! l'environnement. Le passage par `pyo3::ffi` est donc obligatoire ici — c'est
-//! le seul `unsafe` du crate.
+//! le seul `unsafe` de l'initialisation ; le crate n'en porte qu'un autre,
+//! l'emprunt sans copie de `array.rs` (`PyArray1::borrow_from_array`).
 //!
 //! # Fin de vie (piège n°7)
 //!

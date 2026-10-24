@@ -10,7 +10,7 @@ tenue par la relecture se perd.
 
 | # | Règle | Ce qui la tient |
 |---|---|---|
-| 1 | Aucune mutation du modèle hors d'une commande, pour les clients d'une session | la propriété : l'acteur détient le `&mut Project` de la session (la construction, les tests et le CLI passent par les primitives de `core`) ; `b21` |
+| 1 | Aucune mutation du modèle hors d'une commande, pour les clients d'une session | la propriété : l'acteur détient le `&mut Project` de la session (la construction, les tests et le CLI passent par les primitives de `core`) ; la relecture pour une méthode `pub` mutante ajoutée à `core` (aucun test) |
 | 2 | Aucune dépendance UI sous `stokesforge-session`, ni dans l'état de l'application (`stokesforge-app-state`, #263) | `tests/no_ui_dependency.rs`, une liste blanche par crate |
 | 3 | `stokesforge-plot` ne connaît aucun moteur de rendu | sa seule dépendance est `stokesforge-id` |
 | 4 | Une seule source de mesure de texte | `stokesforge-render/tests/mesure.rs` + le test d'accord |
@@ -37,7 +37,9 @@ et donc par la pile d'historique — donc être annulable.
 
 Corollaire : ajouter une méthode `pub` mutante à `stokesforge-core` sans commande
 correspondante dans `stokesforge-commands` ouvre un chemin d'écriture non
-annulable. C'est ce que la batterie `b21` vérifie.
+annulable. Aucun test ne le vérifie aujourd'hui (`b21` mesure le coût et
+l'identité sur le chemin d'écriture, pas ce corollaire) : c'est la relecture
+qui le tient.
 
 **À lire** : `stokesforge-core/src/project.rs` (tête), `stokesforge-session/src/lib.rs`
 (tête).
