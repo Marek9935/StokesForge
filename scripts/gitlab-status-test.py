@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Contrats du retour GitHub → GitLab, sans réseau ni jeton réel."""
+
+import contextlib
+import copy
+import importlib.util
+import io
+import json
+from pathlib import Path
+import unittest
+from unittest.mock import patch
+import urllib.error
+
+
+spec = importlib.util.spec_from_file_location("gitlab_status", Path(__file__).with_name("gitlab-status.py"))
+status = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(status)
+
+
+def event():
+    return {
+        "action": "completed",
+        "repository": {"full_name": status.REPOSITORY},
+        "workflow_run": {
+            "id": 42, "run_attempt": 2, "head_sha": "a" * 40,
+            "event": "push", "head_branch": "main", "conclusion": "success",
+            "path": ".github/workflows/ci.yml",
+            "head_repository": {"full_name": status.REPOSITORY},
+        },
+    }
+
+
+class ReportTest(unittest.TestCase):
+    def setUp(self):
+        self.event = event()
+        self.jobs = [
+            {"name": name, "id": i + 1, "conclusion": "success", "steps": []}
+            for i, name in enumerate(status.JOBS)
+        ]
+        self.posts = []
+        self.pages = []
+        self.pipeline = [{"id": 99}]
+
+    def api(self, url, headers, data=None):
+        if data is not None:
+            self.assertEqual(headers, {"PRIVATE-TOKEN": "secret-sentinelle"})
+            self.assertTrue(url.endswith("/statuses/" + "a" * 40))
+            self.posts.append(copy.deepcopy(data))
+            self.pipeline = [{"id": 99}]
+            return {}
+        if "/jobs?" in url:
+            self.pages.append(url)
+            return {"total_count": len(self.jobs), "jobs": self.jobs}
+        if "/pipelines?" in url:
+            self.assertIn("sha=" + "a" * 40, url)
+            self.assertIn("ref=main", url)
+            return self.pipeline
+        return {"run_attempt": 2}
+
+    def report(self):
+        with patch.object(status, "request_json", side_effect=self.api):
+            with contextlib.redirect_stdout(io.StringIO()):
+                status.report(self.event, "github-sentinelle", "secret-sentinelle")
+
+    def test_succes_et_reproduction_toleree_gardent_liens_sha_et_pipeline(self):
+        self.jobs[4]["steps"] = [{"conclusion": "failure"}]
+        self.report()
+        self.assertEqual(len(self.posts), 6)
+        for post in self.posts:
+            self.assertEqual(post["pipeline_id"], 99)
+            self.assertIn("Tentative 2", post["description"])
+            self.assertRegex(post["target_url"], r"/actions/runs/42/job/\d+$")
+        self.assertEqual([p["state"] for p in self.posts], ["success"] * 4 + ["skipped", "success"])
+        self.assertIn("Échec non bloquant", self.posts[4]["description"])
+
+    def test_echec_timeout_et_annulation_ne_deviennent_pas_verts(self):
+        for conclusion, expected in [("failure", "failed"), ("timed_out", "failed"), ("cancelled", "canceled")]:
+            with self.subTest(conclusion=conclusion):
+                self.posts.clear()
+                self.jobs[0]["conclusion"] = conclusion
+                self.report()
+                self.assertEqual(self.posts[0]["state"], expected)
+        self.jobs = []
+        self.event["workflow_run"]["conclusion"] = "cancelled"
+        self.posts.clear()
+        self.report()
+        self.assertEqual([p["state"] for p in self.posts], ["canceled"] * 6)
+
+    def test_travail_absent_est_un_echec_et_non_un_succes_implicite(self):
+        self.jobs.pop(0)
+        self.report()
+        self.assertEqual(self.posts[0]["state"], "failed")
+        self.assertIn("absent", self.posts[0]["description"])
+
+    def test_pr_fork_et_autre_workflow_ne_font_aucune_requete(self):
+        for field, value in [("event", "pull_request"), ("head_repository", {"full_name": "fork/repo"}), ("path", ".github/workflows/autre.yml")]:
+            with self.subTest(field=field):
+                candidate = event()
+                candidate["workflow_run"][field] = value
+                with patch.object(status, "request_json") as api:
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        status.report(candidate, None, None)
+                    api.assert_not_called()
+
+    def test_ancienne_tentative_ne_republie_pas(self):
+        with patch.object(status, "request_json", return_value={"run_attempt": 3}) as api:
+            with contextlib.redirect_stdout(io.StringIO()):
+                status.report(self.event, "github", "gitlab")
+            self.assertEqual(api.call_count, 1)
+
+    def test_pagination_et_creation_du_pipeline(self):
+        self.pipeline = []
+        fake_jobs = [{"name": "autre", "id": 100, "conclusion": "success"}] * 100
+        def paginated(url, headers, data=None):
+            if "/jobs?" in url:
+                self.pages.append(url)
+                return {"total_count": 106, "jobs": fake_jobs if "&page=1" in url else self.jobs}
+            return self.api(url, headers, data)
+        with patch.object(status, "request_json", side_effect=paginated):
+            with contextlib.redirect_stdout(io.StringIO()):
+                status.report(self.event, "github", "secret-sentinelle")
+        self.assertEqual(len(self.pages), 2)
+        self.assertNotIn("pipeline_id", self.posts[0])
+        self.assertTrue(all(p["pipeline_id"] == 99 for p in self.posts[1:]))
+        self.assertTrue(all(p["state"] == "success" for p in self.posts))
+
+    def test_erreurs_http_reprises_bornees_et_aucun_secret_dans_les_messages(self):
+        success = io.BytesIO(b'{}')
+        conflict = urllib.error.HTTPError("https://gitlab.com", 409, "secret-sentinelle", {}, None)
+        with patch.object(status.urllib.request, "urlopen", side_effect=[conflict, success]) as api:
+            with patch.object(status.time, "sleep") as sleep:
+                self.assertEqual(status.request_json("https://gitlab.com", {"PRIVATE-TOKEN": "secret-sentinelle"}, {}), {})
+                self.assertEqual(api.call_count, 2)
+                sleep.assert_called_once_with(1)
+        for code, attempts in [(401, 1), (403, 1), (503, 3)]:
+            error = urllib.error.HTTPError("https://gitlab.com", code, "secret-sentinelle", {}, None)
+            with patch.object(status.urllib.request, "urlopen", side_effect=error) as api:
+                with patch.object(status.time, "sleep"):
+                    with self.assertRaises(RuntimeError) as raised:
+                        status.request_json("https://gitlab.com", {"PRIVATE-TOKEN": "secret-sentinelle"})
+                self.assertNotIn("secret-sentinelle", str(raised.exception))
+                self.assertEqual(api.call_count, attempts)
+
+
+if __name__ == "__main__":
+    unittest.main()

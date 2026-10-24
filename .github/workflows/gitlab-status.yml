@@ -1,0 +1,38 @@
+# Rapport indépendant de CI : il s'exécute aussi après un échec ou une annulation.
+name: Résultats GitLab
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+# Sérialiser les rapports d'un même commit, sans en annuler un à mi-publication.
+concurrency:
+  group: gitlab-status-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: >-
+      github.repository == 'Marek9935/StokesForge' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # workflow_run ne doit jamais exécuter le code d'une pull request avec le secret.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Vérifier le rapporteur
+        run: python3 scripts/gitlab-status-test.py
+      - name: Publier les résultats dans GitLab
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLAB_STATUS_TOKEN: ${{ secrets.GITLAB_STATUS_TOKEN }}
+        run: python3 scripts/gitlab-status.py

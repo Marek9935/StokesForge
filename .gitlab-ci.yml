@@ -19,11 +19,12 @@ stages:
   - check
 
 # Runners : seuls les runners perso servent (partagés désactivés dans GitLab).
-# Les travaux Linux portent `tags: [linux]` et restent en attente tant qu'aucun
-# runner Linux n'est enregistré ; seuls `dist-windows` et `test-python-windows`
-# (`tags: [windows]`) tournent pour l'instant, sur le runner Windows.
+# Les travaux Linux s'exécutent sur GitHub, qui retourne leurs statuts externes.
+# Poser STOKESFORGE_CI_LINUX=gitlab pour les réactiver ici avec un runner Linux.
+# Windows reste exécuté sur le runner GitLab `tags: [windows]`.
 
 variables:
+  STOKESFORGE_CI_LINUX: "github"
   CARGO_HOME: "${CI_PROJECT_DIR}/.cargo"
   # #88 : le runner partagé saturait son disque (`No space left on device`)
   # sur les travaux qui compilent Typst et egui. Pas de compilation
@@ -32,6 +33,11 @@ variables:
   # et le débogage local aussi.
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "0"
+
+.linux-job:
+  tags: [linux]
+  rules:
+    - if: '$STOKESFORGE_CI_LINUX == "gitlab"'
 
 # Une clé par travail : ils ne partageaient qu'une clé par branche et se
 # réécrivaient mutuellement un `target/` volumineux (#88).
@@ -45,7 +51,7 @@ variables:
 # `fmt` ne compile rien : seul le registre Cargo vaut d'être gardé.
 fmt:
   stage: check
-  tags: [linux]
+  extends: .linux-job
   image: rust:1
   cache:
     key: cargo-${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}
@@ -59,7 +65,7 @@ fmt:
 # sans compilation du workspace. Versions partagées avec la distribution.
 licenses:
   stage: check
-  tags: [linux]
+  extends: .linux-job
   image: rust:1
   cache:
     key: cargo-${CI_JOB_NAME}-${CI_COMMIT_REF_SLUG}
@@ -81,7 +87,7 @@ licenses:
 
 clippy:
   stage: check
-  tags: [linux]
+  extends: .linux-job
   image: rust:1
   <<: *rust-cache
   script:
@@ -99,7 +105,7 @@ clippy:
 #     ci-dessous qui s'en charge.
 test:
   stage: check
-  tags: [linux]
+  extends: .linux-job
   image: rust:1
   <<: *rust-cache
   script:
@@ -130,7 +136,7 @@ test:
 # `docs/rustrewrite/guide-de-correction-robustesse.md`.
 robustesse:
   stage: check
-  tags: [linux]
+  extends: .linux-job
   image: rust:1
   <<: *rust-cache
   allow_failure: true
@@ -142,7 +148,7 @@ robustesse:
 # Les reproductions ignorées et le spike Matplotlib restent des essais explicites.
 test-python:
   stage: check
-  tags: [linux]
+  extends: .linux-job
   image: rust:1
   # Deux caches distincts (`.rust-cache` n'est pas réutilisable tel quel ici :
   # son ancre porte déjà la clé `cache`, la fusionner dans un élément de liste

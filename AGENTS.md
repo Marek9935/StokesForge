@@ -104,6 +104,12 @@ confirmation pour les choix courants couverts par la demande.
   CLI se vérifie par `scripts/cli-dist.sh` ; Matplotlib reste un spike isolé
   (`scripts/python-matplotlib-spike.sh`). Les commandes adaptées sont dans
   `.codex/README.md`.
+- CI : Linux tourne sur le miroir GitHub, Windows sur GitLab. Maintenir les
+  commandes de `.gitlab-ci.yml` et `.github/workflows/ci.yml` ensemble ; le
+  rapporteur `gitlab-status.yml` / `scripts/gitlab-status.py` renvoie les
+  statuts Linux vers GitLab (secret GitHub `GITLAB_STATUS_TOKEN`, procédure
+  dans `docs/tests.md`). `STOKESFORGE_CI_LINUX=gitlab` réactive les travaux
+  Linux GitLab ; sans runner Linux, les laisser désactivés.
 
 ## Pour terminer une modification
 

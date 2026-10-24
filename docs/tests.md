@@ -442,11 +442,17 @@ cargo test -p stokesforge-app-state --features python --test script_panel --test
 
 ## CI (`.gitlab-ci.yml`)
 
-Un seul étage, `check`, et cinq travaux :
+Les contrôles Linux s'exécutent sur le miroir GitHub
+(`.github/workflows/ci.yml`), Windows reste sur le runner GitLab. Les commandes
+de `.gitlab-ci.yml` restent la référence ; les deux configurations évoluent
+ensemble. Les travaux Linux GitLab sont désactivés par défaut pour ne plus
+attendre un runner absent. `STOKESFORGE_CI_LINUX=gitlab` les réactive si un
+runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 
 | Travail | Bloquant | Ce qu'il fait |
 |---|---|---|
 | `fmt` | oui | `cargo fmt --all -- --check` |
+| `licenses` | oui | politique et génération des notices tierces |
 | `clippy` | oui | `cargo clippy --workspace --all-targets -- -D warnings` |
 | `test` | oui | `cargo test --workspace` |
 | `robustesse` | non | `cargo test -p stokesforge-robustesse -- --ignored` |
@@ -465,10 +471,48 @@ scripts, robustesse, application et CLI. Les reproductions ignorées et le
 spike Matplotlib restent des essais explicites. Aucun Python système n'est
 requis.
 
-Typst, lui, n'est plus une feature (issue #29) : c'est une dépendance ferme des
-trois crates de rendu, donc `fmt`, `clippy` et `test` le compilent et le
-testent. Ce que la CI ne prouve pas pour Typst, c'est l'export : tant que
-l'issue #34 n'a pas branché SVG/PDF/PNG dessus, il sort en texte brut.
+Typst n'est plus une feature (issue #29) : Clippy le compile, les tests du
+workspace l'exercent, y compris les exports (#34). `fmt` ne compile rien.
+
+### Résultats GitHub visibles dans GitLab
+
+`.github/workflows/gitlab-status.yml` se déclenche quand `CI` est terminée,
+même en échec ou après annulation. `scripts/gitlab-status.py` publie les six
+statuts `github-actions/<travail>` sur le SHA testé, dans le même pipeline
+GitLab, avec un lien vers les journaux GitHub de chaque travail. Les résultats
+arrivent après la fin de l'ensemble de la CI ; les journaux et les artefacts
+restent sur GitHub. Les anciennes pipelines ne sont pas corrigées rétroactivement.
+
+Une reproduction `robustesse` échouée est marquée `skipped`, avec la description
+« Échec non bloquant des reproductions » : l'API des statuts externes n'offre
+pas de paramètre `allow_failure`. Les autres échecs sont rouges, une annulation
+reste annulée, et un travail manquant n'est jamais déclaré réussi.
+
+Le rapporteur ignore les pull requests et les forks, et lit son script depuis
+`main`, jamais depuis le code d'une PR. Il ignore aussi une tentative dont une
+relance plus récente existe. Une panne de publication fait échouer le workflow
+`Résultats GitLab` sur GitHub, sans transformer les résultats des tests.
+
+Configuration initiale :
+
+1. Dans les **paramètres du compte GitLab**, créer un jeton personnel dédié
+   (`Access > Personal access tokens > Legacy token`), nommé
+   `github-ci-status`, avec portée `api` et date d'expiration. Le compte doit
+   pouvoir publier des statuts dans le projet StokesForge. Un jeton de projet
+   avec rôle Developer et portée `api` peut être utilisé si l'abonnement le permet.
+2. Dans les **paramètres du dépôt GitHub** `Marek9935/StokesForge`, ouvrir
+   `Secrets and variables > Actions > New repository secret`. Nom exact :
+   `GITLAB_STATUS_TOKEN`. Valeur : le jeton GitLab, saisi directement ici.
+   Aucun jeton n'est committé ni demandé dans la conversation.
+3. Pousser un commit GitLab et attendre son miroir, ou relancer la CI GitHub.
+   Le workflow `Résultats GitLab` publie ensuite les états dans
+   `GitLab > Build > Pipelines`, étage `external`.
+
+Tests du rapporteur, sans réseau ni jeton réel :
+`python3 scripts/gitlab-status-test.py`. Ils couvrent les résultats, la
+reproduction tolérée (y compris une étape échouée sous une conclusion tolérée),
+les annulations, les travaux absents, les PR/forks exclus, les anciennes
+tentatives, la pagination, la sélection du pipeline et les reprises HTTP.
 
 ## Ce qu'il faut savoir avant d'écrire un test
 

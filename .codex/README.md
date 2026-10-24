@@ -109,6 +109,7 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 | Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app-state/src/state.rs` et `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
 | Python embarqué et scripts `pyst` | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
 | Tests et robustesse | `docs/tests.md` | tests du crate ; index `stokesforge-robustesse/src/lib.rs`, puis batterie `bN` concernée |
+| CI Linux GitHub, Windows GitLab et retour des résultats | `docs/tests.md` (§ CI et Résultats GitHub visibles dans GitLab) | `.gitlab-ci.yml`, `.github/workflows/{ci,gitlab-status}.yml`, `scripts/gitlab-status{,-test}.py` |
 | Distribution | `crates/stokesforge-python/README.md`, `docs/application/etat-et-console.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
 | Licence, contributions et interfaces d'extension | `docs/licence-et-extensions.md`, `CONTRIBUTING.md` | `LICENSE`, `LICENSE-EXCEPTION`, `deny.toml`, `about.toml`, `scripts/licenses-{tools.env,rust.sh,dist.sh,test.sh}`, `scripts/licenses.hbs`, `vendor/{crate-license-notices,epaint-default-fonts,python/licenses-{linux,windows}}/` |
 
@@ -195,6 +196,13 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+Linux tourne sur GitHub ; Windows reste sur GitLab. Le workflow séparé
+`gitlab-status.yml` retourne les statuts Linux après la fin de `CI`, avec le
+secret GitHub `GITLAB_STATUS_TOKEN` ; configuration dans `docs/tests.md`.
+Une modification du rapporteur se vérifie par
+`python3 scripts/gitlab-status-test.py` et validation des YAML. Les travaux
+Linux de `.gitlab-ci.yml` ne s'activent qu'avec `STOKESFORGE_CI_LINUX=gitlab`.
 
 `cargo build --workspace` construit les cibles par défaut. Éviter un
 reformatage sans rapport avec la tâche. Pour un changement uniquement

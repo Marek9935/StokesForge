@@ -1,7 +1,7 @@
 # CI Linux sur GitHub Actions (miroir du dépôt GitLab).
 #
-# Reprend les travaux `tags: [linux]` de `.gitlab-ci.yml`, qui restent en
-# attente côté GitLab faute de runner Linux. Le fichier GitLab fait foi : toute
+# Reprend les travaux `tags: [linux]` de `.gitlab-ci.yml`, désactivés par défaut
+# côté GitLab faute de runner Linux. Le fichier GitLab fait foi : toute
 # modification de ses commandes se répercute ici. Les travaux Windows
 # (`dist-windows`, `test-python-windows`) restent sur le runner GitLab.
 #
@@ -35,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: python3 scripts/gitlab-status-test.py
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
 

@@ -62,6 +62,10 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 - Licence (#129) : GPL-3.0-or-later avec `LICENSE-EXCEPTION`, limitée aux interfaces de la liste fermée `docs/licence-et-extensions.md` (`pyst` aujourd'hui). Une nouvelle interface couverte exige un commit explicite dans cette liste. Préserver les licences des composants tiers ; une dépendance ou un runtime modifié actualise les notices et passe `cargo deny check licenses`. Les distributions utilisent `scripts/licenses-dist.sh`. Les contributions extérieures portent le DCO de `CONTRIBUTING.md` ; il ne remplace pas un CLA pour un futur relicenciement.
 - Notices Rust : `scripts/licenses-rust.sh` ajoute les copyrights amont manquants de `vendor/crate-license-notices/`. Leur empreinte lie le rapport au `Cargo.lock` exact ; toute modification du verrou exige de revalider ces compléments avant de générer les notices.
 - `rustfmt` + `clippy -D warnings` obligatoires (CI `.gitlab-ci.yml`).
+- CI Linux : `.github/workflows/ci.yml` reprend les commandes GitLab ; Windows
+  reste sur GitLab. Le workflow `gitlab-status.yml` renvoie les résultats Linux
+  via `scripts/gitlab-status.py`, testé sans réseau par `gitlab-status-test.py`.
+  Secret GitHub `GITLAB_STATUS_TOKEN` et procédure dans `docs/tests.md`.
 - Quand un travail installe une règle nouvelle (standard d'interface, motif à suivre, frontière), mettre à jour **au besoin** les skills concernés (`.claude/skills/`) et ce fichier ou `.claude/conventions.md`, dans le même commit que le code, pour garder le développement cohérent. Voir `.claude/skills/README.md` (règles transversales).
 - Décisions à faire trancher : jusqu'à cinq, `AskUserQuestion` ; **six ou plus**, un formulaire de décisions publié en Artifact (une carte par décision : contexte, avant, après schématisés, avantage et défaut de chaque option ; l'utilisateur est dyslexique). Gabarit et marche à suivre : `.claude/skills/stokesforge-bug-report/references/formulaire-de-decisions.md`.
 - Bugs et évolutions se suivent en issues GitLab (`glab issue list`), pas en `.md` ; chaque issue porte une ligne « **Cohérence** » qui dit quels skills et quelles docs mettre à jour.

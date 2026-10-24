@@ -7,6 +7,13 @@ description: Écrire un test StokesForge au bon endroit, et vérifier un changem
 
 ## Les commandes, et ce qu'elles ne prouvent pas
 
+CI : Linux s'exécute sur GitHub, Windows sur GitLab ; commandes partagées entre
+`.github/workflows/ci.yml` et `.gitlab-ci.yml`. Les statuts Linux reviennent
+dans GitLab par `gitlab-status.yml` après la fin de la CI ; un rapport absent
+exige de lire le workflow `Résultats GitLab` et de vérifier son secret, pas de
+conclure que les tests sont verts. Configuration et tests du rapporteur :
+`docs/tests.md`, « Résultats GitHub visibles dans GitLab ».
+
 ```sh
 cargo fmt --all -- --check                    # bloquant en CI
 cargo clippy --workspace --all-targets -- -D warnings   # bloquant en CI
