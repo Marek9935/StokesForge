@@ -43,6 +43,12 @@ met à jour les deux assistants. Pour une tâche donnée, lire le `SKILL.md`
 concerné et ses seules références utiles, après le parcours de lecture
 ci-dessus ; ne pas charger les douze systématiquement.
 
+Les liens partagent le dossier entier, y compris `references/` et les scripts.
+Les fiches thématiques de `stokesforge-feature` (#301) renvoient aux sections
+de `docs/` ou de `.claude/conventions.md` : lire seulement celles du thème
+touché, puis les sources citées. Maintenir les règles dans ces sources ; le
+test `stokesforge-arch-guard/tests/renvois_fiches.rs` contrôle les renvois.
+
 | Besoin | Skill à consulter |
 |---|---|
 | Ajouter une fonctionnalité | [`stokesforge-feature`](../.agents/skills/stokesforge-feature/SKILL.md) |
@@ -98,6 +104,8 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 | Menus et clics droits | `docs/menus.md` (grammaire), `docs/application/menus-et-barres.md` (§ Menus thématiques) | `stokesforge-app/src/app/menu_sections.rs`, `menus.rs`, `object_manager_ui.rs`, `project_manager.rs`, `grid.rs`, `graph_window.rs`, `tab_strip.rs` |
 | Comportement de l'interface (champs, messages, dialogues, grisage, clavier) | `docs/standard-interface.md` (#217, sections *en place* / *à venir*) | le module de la surface dans `src/app/`, `app/dialogs.rs`, `app/shortcuts.rs`, `theme.rs` |
 | Fenêtre, grille, raccourcis | `docs/application/coquille-et-code.md` (§ Découpage du code) | `stokesforge-app-state/src/state.rs`, le module de la surface dans `src/app/` (`app.rs` pour l'orchestration seule), `selection.rs`, `object_manager.rs` (aussi dans `stokesforge-app-state/src/`), `stokesforge-app/src/theme.rs` ; `stokesforge-session` |
+| Fenêtre ou dialogue neuf, gestes d'interface | `docs/fenetres.md`, `docs/principes-ui.md`, `docs/gestes.md` | une fenêtre de référence de même nature dans `stokesforge-app/src/app/`, `app/dialogs.rs` (`DialogNature`) |
+| Fluidité de l'interface | `docs/mesure-performance.md` | `scripts/perf/`, `.claude/skills/run-stokesforge/driver.py` (`SF_APP` pour choisir le binaire) ; mesure en release ou comparaison debug/release |
 | Import CSV/TXT/ASC et aperçu | `docs/chantier-import-previsualisation.md` (passation) | `stokesforge-import/src/{recipe,parse,preview,store}.rs`, intégration dans `stokesforge-app-state/src/state.rs` et `src/app/import_wizard.rs`, `stokesforge-import/tests/fixtures.rs` |
 | Python embarqué et scripts `pyst` | `docs/python-et-script.md`, `crates/stokesforge-python/README.md` | `stokesforge-python`, `stokesforge-script`, `scripts/python-*.sh` |
 | Tests et robustesse | `docs/tests.md` | tests du crate ; index `stokesforge-robustesse/src/lib.rs`, puis batterie `bN` concernée |
@@ -159,6 +167,10 @@ l'ancienne implémentation reste accessible sous le tag `legacy-python`.
 - Aucun objet Python ne traverse le canal de l'acteur ; le script relâche le
   GIL pendant l'attente. L'interpréteur démarre à la première exécution de
   script, sans bloquer le fil UI.
+- La surface `pyst` est figée (#331) : toute évolution du contrat public met
+  à jour les blocs `pyst-api` de `docs/python-et-script.md` dans le même commit.
+  Lire le skill `stokesforge-python` ; `stokesforge-script/tests/surface_figee.rs`
+  garde l'accord entre ces blocs et l'API.
 - Préserver les distinctions entre valeurs manquantes, texte vide, nombres
   et cellules mixtes. Pour les fichiers enregistrés, relire les conversions,
   les valeurs inconnues et les tests de compatibilité avant de changer le schéma.
@@ -270,6 +282,6 @@ Dans le compte rendu, distinguer les tests exécutés, les échecs rencontrés
 et les vérifications non réalisées. Ne pas annoncer une validation Python
 ou visuelle à partir des seuls tests Rust par défaut.
 
-Après fusion et push sur `dev`, la livraison comprend le retrait du worktree
+Après fusion et push sur `main`, la livraison comprend le retrait du worktree
 temporaire et de sa branche locale fusionnée, selon
-[le nettoyage du skill de vérification](../.agents/skills/stokesforge-verification/SKILL.md#nettoyer-après-une-fusion-sur-dev).
+[le nettoyage du skill de vérification](../.agents/skills/stokesforge-verification/SKILL.md#nettoyer-après-une-fusion-sur-main).

@@ -1,6 +1,7 @@
 ---
 name: stokesforge-textes-interface
-description: Écrire ou modifier tout texte visible de StokesForge — libellé de menu, de bouton, de champ, d'onglet, titre de fenêtre, infobulle, message d'état ou d'erreur affiché, nom d'axe ou d'unité. À utiliser dès qu'un littéral destiné à l'utilisateur est ajouté, changé ou traduit, avant d'écrire le texte : le glossaire anglais ↔ français (`docs/textes-interface.md`) est la source unique des termes, des majuscules et du ton. Une notion = un mot, partout.
+description: >-
+  Écrire ou modifier tout texte visible de StokesForge — libellé de menu, de bouton, de champ, d'onglet, titre de fenêtre, infobulle, message d'état ou d'erreur affiché, nom d'axe ou d'unité. À utiliser dès qu'un littéral destiné à l'utilisateur est ajouté, changé ou traduit, avant d'écrire le texte : le glossaire anglais ↔ français (`docs/textes-interface.md`) est la source unique des termes, des majuscules et du ton. Une notion = un mot, partout.
 ---
 
 # Textes d'interface

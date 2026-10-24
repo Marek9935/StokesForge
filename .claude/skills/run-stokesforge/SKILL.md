@@ -27,6 +27,18 @@ cargo build -p stokesforge-app -p stokesforge-cli   # ~7 s si déjà compilé
 La feature `python` n'est pas dans le build par défaut : la console Python
 affiche « Not available in this build ». Voir `scripts/python-test.sh`.
 
+Pour une mesure de fluidité (#340, #341), suivre
+[`docs/mesure-performance.md`](../../../docs/mesure-performance.md) : mesurer
+en release ou comparer debug/release. Le pilote accepte `SF_APP` pour choisir
+le binaire, par exemple après `cargo build --release -p stokesforge-app` :
+
+```sh
+SF_APP="$PWD/target/release/stokesforge-app" python3 .claude/skills/run-stokesforge/driver.py start
+```
+
+Le protocole instrumenté et le retrait du patch temporaire sont décrits dans
+cette page ; les chronomètres ne font pas partie du code de production.
+
 ## Run (agent path) : `driver.py`
 
 ```sh

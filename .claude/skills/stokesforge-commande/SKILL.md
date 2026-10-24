@@ -1,6 +1,7 @@
 ---
 name: stokesforge-commande
-description: Ajouter ou modifier une commande annulable de StokesForge (`stokesforge-commands`) — la seule voie de mutation du modèle. À utiliser dès qu'une tâche doit créer, supprimer, renommer, déplacer ou modifier quoi que ce soit dans le projet (colonne, feuille, classeur, graphe, note, matrice, dossier, `PlotSpec`, métadonnées de fenêtre), ou dès qu'une méthode `pub` mutante est ajoutée à `stokesforge-core`. Couvre la chaîne complète : primitive core → variante de `Command` → delta d'historique → transport `.stf` → acteur de session → `Action` d'interface, et les tests qui tiennent chaque maillon.
+description: >-
+  Ajouter ou modifier une commande annulable de StokesForge (`stokesforge-commands`) — la seule voie de mutation du modèle. À utiliser dès qu'une tâche doit créer, supprimer, renommer, déplacer ou modifier quoi que ce soit dans le projet (colonne, feuille, classeur, graphe, note, matrice, dossier, `PlotSpec`, métadonnées de fenêtre), ou dès qu'une méthode `pub` mutante est ajoutée à `stokesforge-core`. Couvre la chaîne complète : primitive core → variante de `Command` → delta d'historique → transport `.stf` → acteur de session → `Action` d'interface, et les tests qui tiennent chaque maillon.
 ---
 
 # Ajouter une commande annulable

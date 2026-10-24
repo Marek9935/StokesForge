@@ -45,6 +45,8 @@ confirmation pour les choix courants couverts par la demande.
 - Les skills de projet dans `.agents/skills/` renvoient aux sources maintenues
   dans `.claude/skills/`. Consulter le skill pertinent selon la table de
   `.codex/README.md` et ses références utiles, sans charger toute la collection.
+  Les liens partagent aussi les fiches et les scripts : une mise à jour par
+  Claude s'applique directement à Codex, sans copie à synchroniser.
 - Les conventions détaillées sont partagées dans `.claude/conventions.md` :
   lire la section du domaine avant d'écrire du code (table dans `CLAUDE.md`).
   `.claude/rules.md` précise le périmètre de lecture. Le skill `run-stokesforge`
@@ -105,7 +107,7 @@ confirmation pour les choix courants couverts par la demande.
 
 ## Pour terminer une modification
 
-- Après fusion et push sur `dev`, nettoyer automatiquement le worktree temporaire de la tâche et sa branche locale fusionnée, sauf conservation demandée ; suivre `stokesforge-verification`, « Nettoyer après une fusion sur `dev` ».
+- Après fusion et push sur `main`, nettoyer automatiquement le worktree temporaire de la tâche et sa branche locale fusionnée, sauf conservation demandée ; suivre `stokesforge-verification`, « Nettoyer après une fusion sur `main` ».
 
 Exécuter les vérifications adaptées au changement, relire le diff et mettre
 à jour la documentation concernée. Ne pas masquer une régression en

@@ -1,6 +1,7 @@
 ---
 name: stokesforge-fonctionnalites
-description: Répondre aux questions sur ce que StokesForge sait faire aujourd'hui, côté utilisateur — grille et saisie, types de colonnes, sélection, copier/coller, menus contextuels, raccourcis, import CSV/TXT/ASC, tracé depuis un classeur, fenêtre des propriétés des graphes (clic droit, menu Graphique), export, fenêtres, scripts Python, enregistrement `.stf`. À utiliser dès que la question est « est-ce que je peux… », « comment je fais pour… », « ça existe ? », « pourquoi ça ne marche pas comme dans Origin », « à quoi sert ce menu ». La réponse s'adresse à un **chimiste** venu d'OriginLab : Python correct, Rust nul — décrire des **gestes**, pas des fonctions, et vérifier dans le code avant d'affirmer qu'une fonctionnalité existe.
+description: >-
+  Répondre aux questions sur ce que StokesForge sait faire aujourd'hui, côté utilisateur — grille et saisie, types de colonnes, sélection, copier/coller, menus contextuels, raccourcis, import CSV/TXT/ASC, tracé depuis un classeur, fenêtre des propriétés des graphes (clic droit, menu Graphique), export, fenêtres, scripts Python, enregistrement `.stf`. À utiliser dès que la question est « est-ce que je peux… », « comment je fais pour… », « ça existe ? », « pourquoi ça ne marche pas comme dans Origin », « à quoi sert ce menu ». La réponse s'adresse à un **chimiste** venu d'OriginLab : Python correct, Rust nul — décrire des **gestes**, pas des fonctions, et vérifier dans le code avant d'affirmer qu'une fonctionnalité existe.
 ---
 
 # Répondre sur les fonctionnalités de StokesForge
