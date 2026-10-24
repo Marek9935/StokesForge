@@ -440,7 +440,7 @@ Avec l'environnement embarqué décrit dans [`.codex/README.md`](../.codex/READM
 cargo test -p stokesforge-app-state --features python --test script_panel --test script_bridge_lazy
 ```
 
-## CI (`.gitlab-ci.yml`)
+## CI (GitHub Actions pour Linux, GitLab pour Windows)
 
 Les contrôles Linux s'exécutent sur le miroir GitHub
 (`.github/workflows/ci.yml`), Windows reste sur le runner GitLab. Les commandes
@@ -473,6 +473,60 @@ requis.
 
 Typst n'est plus une feature (issue #29) : Clippy le compile, les tests du
 workspace l'exercent, y compris les exports (#34). `fmt` ne compile rien.
+
+### Utiliser la CI au quotidien
+
+**Qui fait quoi.** GitLab est le dépôt de référence ; un miroir le recopie vers
+`github.com/Marek9935/StokesForge`, où `ci.yml` tourne dès qu'un `push` de `main`
+(ou un tag `v*`) arrive. Un second workflow, `Résultats GitLab`, renvoie ensuite
+les résultats dans le pipeline GitLab du même commit. **On ne consulte donc que
+GitLab** ; les journaux complets restent sur GitHub (lien dans chaque statut).
+
+**Pousser.** `git push origin main` (GitLab). Compter une quinzaine de minutes
+pour que la CI Linux finisse, puis quelques instants pour le rapport. Un push plus
+récent sur la même référence annule la série en cours. Les pull requests lancent
+la CI GitHub mais ne remontent rien dans GitLab (voulu, voir plus bas).
+
+**Lire le résultat.**
+
+```sh
+scripts/ci-statuts.sh [commit]      # HEAD par défaut ; exige glab connecté
+```
+
+Ou dans l'interface GitLab : `Build > Pipelines`, étage `external`. Une ligne par
+travail ; en cas d'échec, l'étape fautive et la première erreur sont dans la
+description, et un **commentaire du commit** donne une cinquantaine de lignes de
+journal (le script les affiche). « Pas de pipeline pour ce commit » veut dire que
+la CI GitHub n'a pas fini ou que le miroir n'a pas encore reçu le commit.
+
+**Windows** n'est pas lancé par un simple push de `main` : dans le pipeline
+GitLab, cliquer ▶ sur `test-python-windows` (contrôles) ou `dist-windows`
+(installeur). `dist-windows` part seul sur un tag de version (`v1.0.0`).
+
+**Reproduire un échec Linux chez soi.** Le runner (`ubuntu-latest`) diffère d'un
+poste de développement par trois points qui ont déjà causé des échecs :
+
+- **Rust stable plus récent** que celui du poste (`rust-toolchain.toml` demande
+  `stable`) : un lint nouveau de Clippy peut faire échouer `clippy` sans rien
+  avoir changé. Corriger le code, ne pas figer la version.
+- **Pas de GPU** : les captures (`egui_kittest` + wgpu) cherchent un adaptateur
+  Vulkan. `ci.yml` installe le pilote logiciel `mesa-vulkan-drivers libvulkan1`
+  (travaux `test` et `test-python`).
+- **Paquets de développement absents** : `test-python` compile `wayland-sys` avec
+  pkg-config et installe `libwayland-dev`. Une erreur `failed to run custom build
+  command for …-sys` signale un paquet manquant : l'ajouter à l'étape `apt-get`
+  du travail concerné dans `ci.yml`.
+
+Pour rejouer dans un Ubuntu neuf : un conteneur `ubuntu:24.04` avec
+`build-essential pkg-config curl git`, `rustup` (profil minimal) et les paquets
+ci-dessus, en montant le dépôt en lecture seule et en copiant sa source ailleurs.
+**Mettre `CARGO_TARGET_DIR` sur le disque**, jamais sous `/tmp` : c'est un tmpfs en
+mémoire vive, et une compilation du workspace y pèse plus de 10 Go.
+
+**Garder les deux CI d'accord.** Toute commande modifiée dans `.gitlab-ci.yml` ou
+`ci.yml` se répercute dans l'autre (voir la table plus haut). Un nouveau travail
+Linux s'ajoute aussi à `JOBS` dans `scripts/gitlab-status.py`, sinon son
+résultat n'est pas publié.
 
 ### Résultats GitHub visibles dans GitLab
 
@@ -515,7 +569,24 @@ Le rapporteur ignore les pull requests et les forks, et lit son script depuis
 relance plus récente existe. Une panne de publication fait échouer le workflow
 `Résultats GitLab` sur GitHub, sans transformer les résultats des tests.
 
-Configuration initiale :
+Le dépôt GitHub `Marek9935/StokesForge` et l'identifiant du projet GitLab
+(`86104040`) sont écrits dans `scripts/gitlab-status.py` (`REPOSITORY`, `GITLAB`),
+dans `gitlab-status.yml` (condition `github.repository`) et dans
+`scripts/ci-statuts.sh`. Renommer l'un des deux dépôts oblige à les changer.
+
+**Maintenance.** Le jeton GitLab `github-ci-status` **expire** : à son échéance,
+`Résultats GitLab` échoue sur GitHub (« Retour GitLab impossible ») et plus aucun
+statut n'arrive. Créer un jeton neuf (étape 1) et remplacer le secret
+`GITLAB_STATUS_TOKEN` (étape 2). Le jeton GitHub du miroir GitLab → GitHub doit
+pouvoir écrire dans le dépôt ; sans ce droit, la CI ne démarre jamais.
+
+Configuration initiale (une seule fois) :
+
+0. **Miroir.** Dans GitLab, `Settings > Repository > Mirroring repositories` :
+   miroir `push` vers `https://github.com/Marek9935/StokesForge.git`, avec un
+   jeton GitHub autorisé à écrire dans le dépôt. Sur GitHub, `main` doit être la
+   branche par défaut (un `workflow_run` ne se déclenche que depuis elle) et
+   `Settings > Actions > General` autoriser les actions.
 
 1. Dans les **paramètres du compte GitLab**, créer un jeton personnel dédié
    (`Access > Personal access tokens > Legacy token`), nommé
@@ -531,7 +602,7 @@ Configuration initiale :
    `GitLab > Build > Pipelines`, étage `external`.
 
 Tests du rapporteur, sans réseau ni jeton réel :
-`python3 scripts/gitlab-status-test.py`. Ils couvrent les résultats, la
+`python3 scripts/gitlab-status-test.py` (aussi lancé par le travail `fmt`). Ils couvrent les résultats, la
 reproduction tolérée (y compris une étape échouée sous une conclusion tolérée),
 les annulations, les travaux absents, les PR/forks exclus, les anciennes
 tentatives, la pagination, la sélection du pipeline et les reprises HTTP.

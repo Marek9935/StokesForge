@@ -38,6 +38,11 @@ ressource nouvelle doit aussi respecter [`deny.toml`](deny.toml) et figurer
 dans les notices de distribution. Les outils et commandes de licence sont
 dans [`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
 
+La CI Linux tourne sur GitHub (miroir du dépôt), Windows sur GitLab ; les
+résultats se lisent dans le pipeline GitLab du commit ou par
+`scripts/ci-statuts.sh`. Mode d'emploi, pièges du runner et maintenance :
+[`docs/tests.md`](docs/tests.md), « Utiliser la CI au quotidien ».
+
 Toute nouvelle interface d'extension couverte par l'exception nécessite un
 commit explicite dans la liste fermée de cette même page, avec son contrat
 public. Le présent accord de contribution concerne `main` ; il ne

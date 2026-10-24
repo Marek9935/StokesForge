@@ -65,7 +65,9 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 - CI Linux : `.github/workflows/ci.yml` reprend les commandes GitLab ; Windows
   reste sur GitLab. Le workflow `gitlab-status.yml` renvoie les résultats Linux
   via `scripts/gitlab-status.py`, testé sans réseau par `gitlab-status-test.py`.
-  Secret GitHub `GITLAB_STATUS_TOKEN` et procédure dans `docs/tests.md`.
+  Secret GitHub `GITLAB_STATUS_TOKEN`, mode d'emploi, pièges du runner et
+  maintenance dans `docs/tests.md` (« Utiliser la CI au quotidien »). Résultats
+  d'un commit, lus depuis GitLab : `scripts/ci-statuts.sh [commit]`.
 - Quand un travail installe une règle nouvelle (standard d'interface, motif à suivre, frontière), mettre à jour **au besoin** les skills concernés (`.claude/skills/`) et ce fichier ou `.claude/conventions.md`, dans le même commit que le code, pour garder le développement cohérent. Voir `.claude/skills/README.md` (règles transversales).
 - Décisions à faire trancher : jusqu'à cinq, `AskUserQuestion` ; **six ou plus**, un formulaire de décisions publié en Artifact (une carte par décision : contexte, avant, après schématisés, avantage et défaut de chaque option ; l'utilisateur est dyslexique). Gabarit et marche à suivre : `.claude/skills/stokesforge-bug-report/references/formulaire-de-decisions.md`.
 - Bugs et évolutions se suivent en issues GitLab (`glab issue list`), pas en `.md` ; chaque issue porte une ligne « **Cohérence** » qui dit quels skills et quelles docs mettre à jour.
