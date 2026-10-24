@@ -488,6 +488,12 @@ Une reproduction `robustesse` échouée est marquée `skipped`, avec la descript
 pas de paramètre `allow_failure`. Les autres échecs sont rouges, une annulation
 reste annulée, et un travail manquant n'est jamais déclaré réussi.
 
+Pour un travail en échec, la description du statut donne l'étape fautive et la
+première cause lue dans son journal GitHub (erreur `rustc`/`clippy` avec son
+fichier, panique de test avec son message, erreur de script), tronquée à 255
+caractères. Le journal est lu avec `GITHUB_TOKEN` (`actions: read`) ; s'il est
+indisponible, l'étape seule est publiée, et le rapport n'échoue jamais pour cela.
+
 Le rapporteur ignore les pull requests et les forks, et lit son script depuis
 `main`, jamais depuis le code d'une PR. Il ignore aussi une tentative dont une
 relance plus récente existe. Une panne de publication fait échouer le workflow

@@ -40,6 +40,7 @@ class ReportTest(unittest.TestCase):
         self.posts = []
         self.pages = []
         self.pipeline = [{"id": 99}]
+        self.log = None
 
     def api(self, url, headers, data=None):
         if data is not None:
@@ -59,8 +60,9 @@ class ReportTest(unittest.TestCase):
 
     def report(self):
         with patch.object(status, "request_json", side_effect=self.api):
-            with contextlib.redirect_stdout(io.StringIO()):
-                status.report(self.event, "github-sentinelle", "secret-sentinelle")
+            with patch.object(status, "fetch_job_log", side_effect=lambda *_: self.log):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    status.report(self.event, "github-sentinelle", "secret-sentinelle")
 
     def test_succes_et_reproduction_toleree_gardent_liens_sha_et_pipeline(self):
         self.jobs[4]["steps"] = [{"conclusion": "failure"}]
@@ -85,6 +87,57 @@ class ReportTest(unittest.TestCase):
         self.posts.clear()
         self.report()
         self.assertEqual([p["state"] for p in self.posts], ["canceled"] * 6)
+
+    def test_echec_publie_etape_et_premiere_erreur_du_journal(self):
+        self.jobs[2]["conclusion"] = "failure"
+        self.jobs[2]["steps"] = [
+            {"name": "Set up job", "conclusion": "success"},
+            {"name": "Run cargo clippy", "conclusion": "failure"},
+        ]
+        self.log = (
+            "2026-10-24T17:00:00.1Z    Checking foo v0.0.0\n"
+            "2026-10-24T17:00:01.2Z warning: unused variable\n"
+            "2026-10-24T17:00:02.2Z \x1b[31merror\x1b[0m: the borrowed expression implements the required traits\n"
+            "2026-10-24T17:00:02.4Z    --> crates/x/src/app.rs:1295:69\n"
+            "2026-10-24T17:00:03.0Z error: could not compile `x`\n"
+        )
+        self.report()
+        description = self.posts[2]["description"]
+        self.assertEqual(self.posts[2]["state"], "failed")
+        self.assertIn("étape « Run cargo clippy »", description)
+        self.assertIn("the borrowed expression", description)
+        self.assertIn("crates/x/src/app.rs:1295:69", description)
+        self.assertNotIn("unused variable", description)
+        self.assertLessEqual(len(description), status.DESCRIPTION_MAX)
+
+    def test_journal_indisponible_ou_enorme_ne_casse_pas_le_rapport(self):
+        self.jobs[3]["conclusion"] = "failure"
+        self.jobs[3]["steps"] = [{"name": "Run cargo test", "conclusion": "failure"}]
+        self.report()  # journal absent : l'étape seule suffit
+        self.assertIn("étape « Run cargo test »", self.posts[3]["description"])
+        self.posts.clear()
+        self.log = "error: " + "x" * 5000
+        self.report()
+        self.assertLessEqual(len(self.posts[3]["description"]), status.DESCRIPTION_MAX)
+        self.assertTrue(self.posts[3]["description"].endswith("…"))
+
+    def test_succes_ne_telecharge_aucun_journal(self):
+        with patch.object(status, "request_json", side_effect=self.api):
+            with patch.object(status, "fetch_job_log") as fetch:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    status.report(self.event, "github", "secret-sentinelle")
+        fetch.assert_not_called()
+
+    def test_la_panique_garde_son_message_et_passe_avant_la_ligne_failed(self):
+        log = (
+            "test a::b ... FAILED\n"
+            "thread 'a::b' (1) panicked at /root/.cargo/registry/src/index-1/k-0.1/src/x.rs:7:6:\n"
+            "No adapter found\n"
+        )
+        excerpt = status.failure_excerpt(log)
+        self.assertIn("No adapter found", excerpt)
+        self.assertNotIn("/root/.cargo", excerpt)
+        self.assertEqual(status.failure_excerpt("test a::b ... FAILED\n"), "test a::b ... FAILED")
 
     def test_travail_absent_est_un_echec_et_non_un_succes_implicite(self):
         self.jobs.pop(0)
@@ -117,8 +170,9 @@ class ReportTest(unittest.TestCase):
                 return {"total_count": 106, "jobs": fake_jobs if "&page=1" in url else self.jobs}
             return self.api(url, headers, data)
         with patch.object(status, "request_json", side_effect=paginated):
-            with contextlib.redirect_stdout(io.StringIO()):
-                status.report(self.event, "github", "secret-sentinelle")
+            with patch.object(status, "fetch_job_log", return_value=None):
+                with contextlib.redirect_stdout(io.StringIO()):
+                    status.report(self.event, "github", "secret-sentinelle")
         self.assertEqual(len(self.pages), 2)
         self.assertNotIn("pipeline_id", self.posts[0])
         self.assertTrue(all(p["pipeline_id"] == 99 for p in self.posts[1:]))

@@ -21,6 +21,9 @@ REPOSITORY = "Marek9935/StokesForge"
 GITHUB = f"https://api.github.com/repos/{REPOSITORY}"
 GITLAB = "https://gitlab.com/api/v4/projects/86104040"
 JOBS = ("fmt", "licenses", "clippy", "test", "robustesse", "test-python")
+# GitLab borne la description d'un statut externe.
+DESCRIPTION_MAX = 255
+LOG_MAX = 20_000_000
 
 
 def request_json(url, headers, data=None):
@@ -43,6 +46,89 @@ def request_json(url, headers, data=None):
             if attempt == 2:
                 raise RuntimeError("API injoignable après trois essais") from None
         time.sleep(2 ** attempt)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def fetch_job_log(job_id, github_token):
+    """Journal d'un travail GitHub, ou None. Jamais fatal : il ne fait qu'enrichir.
+
+    L'API répond par une redirection vers un stockage signé. On la suit à la
+    main, sans en-tête d'autorisation, pour ne pas envoyer le jeton GitHub à un
+    autre domaine.
+    """
+    opener = urllib.request.build_opener(NoRedirect)
+    request = urllib.request.Request(
+        f"{GITHUB}/actions/jobs/{job_id}/logs",
+        headers={"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github+json"},
+    )
+    try:
+        try:
+            response = opener.open(request, timeout=20)
+        except urllib.error.HTTPError as error:
+            location = error.headers.get("Location") if error.code in (301, 302, 303, 307) else None
+            if not location or not location.startswith("https://"):
+                return None
+            response = urllib.request.urlopen(location, timeout=60)
+        with response:
+            return response.read(LOG_MAX).decode("utf-8", "replace")
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+
+
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+TIMESTAMP = re.compile(r"^\d{4}-\d\d-\d\dT[\d:.]+Z ?")
+# Première ligne qui dit pourquoi : erreur cargo/rustc, panique, test rouge,
+# erreur de script. Les `warning:` et le bruit de compilation sont ignorés.
+CAUSE = re.compile(
+    r"^(error(\[E\d+\])?:|\s*thread '.*' .*panicked|\[licences\] ERREUR|Traceback|"
+    r"E: |fatal:|.*: command not found|.*No such file)"
+)
+# Repli : un test rouge sans panique visible dans le journal.
+TEST_FAILED = re.compile(r"^\S.* \.\.\. FAILED")
+REGISTRY = re.compile(r"/\S*?/registry/src/[^/]+/")
+LOCATION = re.compile(r"^\s*--> (\S+)")
+
+
+def failure_excerpt(log):
+    """Première cause d'échec d'un journal, sur une ligne, ou None."""
+    lines = [TIMESTAMP.sub("", ANSI.sub("", raw)).rstrip() for raw in log.splitlines()]
+    for pattern in (CAUSE, TEST_FAILED):
+        for i, line in enumerate(lines):
+            if not pattern.match(line):
+                continue
+            excerpt = REGISTRY.sub("", line.strip())
+            for following in lines[i + 1 : i + 4]:
+                location = LOCATION.match(following)
+                if location:
+                    excerpt += f" ({location.group(1)})"
+                    break
+            # Une panique : le message est sur la ligne suivante.
+            if "panicked" in line and i + 1 < len(lines) and lines[i + 1].strip():
+                excerpt += " : " + lines[i + 1].strip()
+            return excerpt
+    return None
+
+
+def failure_detail(job, log):
+    """Étape en échec + première cause, pour la description du statut."""
+    step = next(
+        (s.get("name") for s in job.get("steps", []) if s.get("conclusion") == "failure"), None
+    )
+    parts = []
+    if step:
+        parts.append(f"étape « {step} »")
+    excerpt = failure_excerpt(log) if log else None
+    if excerpt:
+        parts.append(excerpt)
+    return " : ".join(parts) or None
+
+
+def clip(text):
+    return text if len(text) <= DESCRIPTION_MAX else text[: DESCRIPTION_MAX - 1] + "…"
 
 
 def trusted_run(event):
@@ -124,6 +210,10 @@ def report(event, github_token, gitlab_token):
     for name in JOBS:
         job = jobs.get(name)
         state, description = job_status(job, run.get("conclusion") == "cancelled")
+        if state == "failed" and job:
+            detail = failure_detail(job, fetch_job_log(job["id"], github_token))
+            if detail:
+                description = detail
         payload = {
             "state": state,
             "name": f"github-actions/{name}",
@@ -132,7 +222,7 @@ def report(event, github_token, gitlab_token):
                 f"https://github.com/{REPOSITORY}/actions/runs/{run['id']}/job/{job['id']}"
                 if job else f"https://github.com/{REPOSITORY}/actions/runs/{run['id']}"
             ),
-            "description": f"Tentative {run['run_attempt']} — {description}",
+            "description": clip(f"Tentative {run['run_attempt']} — {description}"),
         }
         if pipeline_id is not None:
             payload["pipeline_id"] = pipeline_id

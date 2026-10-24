@@ -1292,7 +1292,7 @@ impl StokesForgeApp {
                             state.editing().is_some()
                                 || state.header_editing().is_some()
                                 || state.note_editing().is_some()
-                        }) || model.graph_view.as_ref().is_some_and(&graph_editing)
+                        }) || model.graph_view.as_ref().is_some_and(graph_editing)
                     })
                 });
             match action {

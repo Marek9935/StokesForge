@@ -73,6 +73,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
+      # Les captures (egui_kittest + wgpu) exigent un adaptateur Vulkan : le
+      # runner n'a pas de GPU, lavapipe (Mesa) fournit un rendu logiciel.
+      - name: Pilote Vulkan logiciel
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
       - run: cargo test --workspace
 
   # Reproductions d'anomalies : échouent par construction tant que l'anomalie
@@ -98,5 +102,9 @@ jobs:
             vendor/python/*.tar.gz
             vendor/python/extracted/
           key: python-${{ hashFiles('vendor/python/lock.env') }}
+      # Les captures (egui_kittest + wgpu) exigent un adaptateur Vulkan : le
+      # runner n'a pas de GPU, lavapipe (Mesa) fournit un rendu logiciel.
+      - name: Pilote Vulkan logiciel
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
       - run: scripts/python-vendor.sh
       - run: scripts/python-test.sh
