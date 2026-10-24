@@ -6,6 +6,7 @@ import copy
 import importlib.util
 import io
 import json
+import zipfile
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -41,8 +42,15 @@ class ReportTest(unittest.TestCase):
         self.pages = []
         self.pipeline = [{"id": 99}]
         self.log = None
+        self.comments = []
+        self.licenses = b"rapport"
+        self.uploads = []
 
     def api(self, url, headers, data=None):
+        if data is not None and url.endswith("/comments"):
+            self.assertIn("/repository/commits/" + "a" * 40, url)
+            self.comments.append(data["note"])
+            return {}
         if data is not None:
             self.assertEqual(headers, {"PRIVATE-TOKEN": "secret-sentinelle"})
             self.assertTrue(url.endswith("/statuses/" + "a" * 40))
@@ -61,8 +69,15 @@ class ReportTest(unittest.TestCase):
     def report(self):
         with patch.object(status, "request_json", side_effect=self.api):
             with patch.object(status, "fetch_job_log", side_effect=lambda *_: self.log):
-                with contextlib.redirect_stdout(io.StringIO()):
-                    status.report(self.event, "github-sentinelle", "secret-sentinelle")
+                with patch.object(status, "fetch_artifact_file", return_value=self.licenses):
+                    with patch.object(status, "upload_package", side_effect=self.upload):
+                        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                            status.report(self.event, "github-sentinelle", "secret-sentinelle")
+
+    def upload(self, package, version, filename, data, token):
+        self.assertEqual(token, "secret-sentinelle")
+        self.uploads.append((package, version, filename, data))
+        return "https://gitlab.example/pkg"
 
     def test_succes_et_reproduction_toleree_gardent_liens_sha_et_pipeline(self):
         self.jobs[4]["steps"] = [{"conclusion": "failure"}]
@@ -109,6 +124,92 @@ class ReportTest(unittest.TestCase):
         self.assertIn("crates/x/src/app.rs:1295:69", description)
         self.assertNotIn("unused variable", description)
         self.assertLessEqual(len(description), status.DESCRIPTION_MAX)
+
+    def test_echec_poste_un_commentaire_de_commit_de_cinquante_lignes(self):
+        self.jobs[3]["conclusion"] = "failure"
+        self.jobs[3]["steps"] = [{"name": "Run cargo test", "conclusion": "failure"}]
+        before = [f"ligne avant {n}" for n in range(30)]
+        after = [f"ligne après {n}" for n in range(100)]
+        self.log = "\n".join(before + ["error: la cause"] + after)
+        self.report()
+        self.assertEqual(len(self.comments), 1)
+        note = self.comments[0]
+        self.assertIn("github-actions/test", note)
+        self.assertIn("/actions/runs/42/job/", note)
+        self.assertIn("error: la cause", note)
+        self.assertIn("ligne avant 29", note)
+        self.assertNotIn("ligne avant 5\n", note)  # au-delà du contexte avant
+        self.assertNotIn("ligne après 60", note)  # au-delà de 50 lignes
+        code = note.split("```text\n")[1].split("\n```")[0]
+        self.assertEqual(len(code.splitlines()), status.CONTEXT_LINES)
+
+    def test_commentaire_seulement_pour_un_echec_et_sans_journal_il_reste_utile(self):
+        self.report()
+        self.assertEqual(self.comments, [])
+        self.jobs[0]["conclusion"] = "failure"
+        self.report()  # journal absent
+        self.assertEqual(len(self.comments), 1)
+        self.assertNotIn("```", self.comments[0])
+        self.assertIn("Journal complet", self.comments[0])
+
+    def test_commentaire_refuse_ne_casse_pas_le_rapport(self):
+        self.jobs[0]["conclusion"] = "failure"
+        def api(url, headers, data=None):
+            if url.endswith("/comments"):
+                raise RuntimeError("API : erreur HTTP 403")
+            return self.api(url, headers, data)
+        with patch.object(status, "request_json", side_effect=api):
+            with patch.object(status, "fetch_job_log", return_value="error: x"):
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    status.report(self.event, "github", "secret-sentinelle")
+        self.assertEqual(len(self.posts), 6)
+
+    def test_licences_deposees_en_paquet_gitlab_seulement_si_le_travail_reussit(self):
+        self.report()
+        self.assertEqual(self.uploads, [("third-party-licenses", "a" * 12, "THIRD-PARTY-LICENSES.txt", b"rapport")])
+        self.uploads.clear()
+        self.jobs[1]["conclusion"] = "failure"  # licenses
+        self.report()
+        self.assertEqual(self.uploads, [])
+        self.jobs[1]["conclusion"] = "success"
+        self.licenses = None  # artefact introuvable
+        self.report()
+        self.assertEqual(self.uploads, [])
+        self.assertEqual(len(self.posts), 18)  # les statuts passent toujours
+
+    def test_depot_de_licences_refuse_ne_casse_pas_le_rapport(self):
+        with patch.object(status, "request_json", side_effect=self.api):
+            with patch.object(status, "fetch_artifact_file", return_value=b"x"):
+                with patch.object(status, "upload_package", side_effect=RuntimeError("API : erreur HTTP 403")):
+                    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                        status.report(self.event, "github", "secret-sentinelle")
+        self.assertEqual(len(self.posts), 6)
+
+    def test_artefact_zip_extrait_sans_envoyer_le_jeton_ailleurs(self):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as bundle:
+            bundle.writestr("THIRD-PARTY-LICENSES.txt", "licences")
+        listing = {"artifacts": [
+            {"name": "autre", "expired": False, "archive_download_url": "https://api.github.com/x"},
+            {"name": status.LICENSES_ARTIFACT, "expired": False, "archive_download_url": "https://api.github.com/ok"},
+        ]}
+        with patch.object(status, "request_json", return_value=listing):
+            with patch.object(status, "fetch_github_bytes", return_value=buffer.getvalue()) as fetch:
+                data = status.fetch_artifact_file(42, status.LICENSES_ARTIFACT, "THIRD-PARTY-LICENSES.txt", "gh", {})
+        self.assertEqual(data, b"licences")
+        self.assertEqual(fetch.call_args.args[0], "https://api.github.com/ok")
+        listing["artifacts"][1]["expired"] = True
+        with patch.object(status, "request_json", return_value=listing):
+            self.assertIsNone(status.fetch_artifact_file(42, status.LICENSES_ARTIFACT, "THIRD-PARTY-LICENSES.txt", "gh", {}))
+
+    def test_redirection_non_https_ou_absente_refusee(self):
+        for location in (None, "http://evil.example/x"):
+            headers = {} if location is None else {"Location": location}
+            error = urllib.error.HTTPError("https://api.github.com", 302, "redirect", headers, None)
+            with patch.object(status.urllib.request.OpenerDirector, "open", side_effect=error):
+                with patch.object(status.urllib.request, "urlopen") as direct:
+                    self.assertIsNone(status.fetch_github_bytes("https://api.github.com/x", "gh", 10))
+                    direct.assert_not_called()
 
     def test_journal_indisponible_ou_enorme_ne_casse_pas_le_rapport(self):
         self.jobs[3]["conclusion"] = "failure"

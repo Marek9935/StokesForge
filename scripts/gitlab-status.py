@@ -6,6 +6,7 @@ restent dans l'environnement et les erreurs HTTP ne versent ni en-têtes ni
 corps dans les journaux. Aucune bibliothèque externe n'est nécessaire.
 """
 
+import io
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 
 
 REPOSITORY = "Marek9935/StokesForge"
@@ -24,6 +26,14 @@ JOBS = ("fmt", "licenses", "clippy", "test", "robustesse", "test-python")
 # GitLab borne la description d'un statut externe.
 DESCRIPTION_MAX = 255
 LOG_MAX = 20_000_000
+# Rapport de licences : un fichier par push de main, déposé en paquet GitLab.
+PACKAGE_MAX = 20_000_000
+LICENSES_ARTIFACT = "third-party-licenses"
+LICENSES_FILE = "THIRD-PARTY-LICENSES.txt"
+# Commentaire de commit : de quoi comprendre l'échec sans ouvrir GitHub.
+CONTEXT_BEFORE = 10
+CONTEXT_LINES = 50
+COMMENT_MAX = 15_000
 
 
 def request_json(url, headers, data=None):
@@ -53,8 +63,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def fetch_job_log(job_id, github_token):
-    """Journal d'un travail GitHub, ou None. Jamais fatal : il ne fait qu'enrichir.
+def fetch_github_bytes(url, github_token, limit):
+    """Octets d'une ressource GitHub servie par redirection, ou None. Jamais fatal.
 
     L'API répond par une redirection vers un stockage signé. On la suit à la
     main, sans en-tête d'autorisation, pour ne pas envoyer le jeton GitHub à un
@@ -62,7 +72,7 @@ def fetch_job_log(job_id, github_token):
     """
     opener = urllib.request.build_opener(NoRedirect)
     request = urllib.request.Request(
-        f"{GITHUB}/actions/jobs/{job_id}/logs",
+        url,
         headers={"Authorization": f"Bearer {github_token}", "Accept": "application/vnd.github+json"},
     )
     try:
@@ -74,9 +84,47 @@ def fetch_job_log(job_id, github_token):
                 return None
             response = urllib.request.urlopen(location, timeout=60)
         with response:
-            return response.read(LOG_MAX).decode("utf-8", "replace")
+            return response.read(limit)
     except (urllib.error.URLError, TimeoutError, OSError):
         return None
+
+
+def fetch_job_log(job_id, github_token):
+    """Journal d'un travail GitHub, ou None : il ne fait qu'enrichir le rapport."""
+    data = fetch_github_bytes(f"{GITHUB}/actions/jobs/{job_id}/logs", github_token, LOG_MAX)
+    return None if data is None else data.decode("utf-8", "replace")
+
+
+def fetch_artifact_file(run_id, artifact, filename, github_token, gh_headers):
+    """Contenu d'un fichier d'un artefact GitHub (zip), ou None."""
+    listing = request_json(f"{GITHUB}/actions/runs/{run_id}/artifacts?per_page=100", gh_headers)
+    found = next((a for a in listing.get("artifacts", []) if a["name"] == artifact and not a["expired"]), None)
+    if found is None:
+        return None
+    archive = fetch_github_bytes(found["archive_download_url"], github_token, PACKAGE_MAX)
+    if archive is None:
+        return None
+    try:
+        with zipfile.ZipFile(io.BytesIO(archive)) as bundle:
+            return bundle.read(filename)
+    except (zipfile.BadZipFile, KeyError):
+        return None
+
+
+def upload_package(package, version, filename, data, gitlab_token):
+    """Dépose un fichier dans le registre de paquets génériques de GitLab."""
+    url = f"{GITLAB}/packages/generic/{package}/{version}/{filename}"
+    request = urllib.request.Request(
+        url, data=data, method="PUT",
+        headers={"PRIVATE-TOKEN": gitlab_token, "Content-Type": "application/octet-stream"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60):
+            return url
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f"API : erreur HTTP {error.code}") from None
+    except (urllib.error.URLError, TimeoutError):
+        raise RuntimeError("API injoignable") from None
 
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -93,24 +141,57 @@ REGISTRY = re.compile(r"/\S*?/registry/src/[^/]+/")
 LOCATION = re.compile(r"^\s*--> (\S+)")
 
 
-def failure_excerpt(log):
-    """Première cause d'échec d'un journal, sur une ligne, ou None."""
-    lines = [TIMESTAMP.sub("", ANSI.sub("", raw)).rstrip() for raw in log.splitlines()]
+def clean_lines(log):
+    return [TIMESTAMP.sub("", ANSI.sub("", raw)).rstrip() for raw in log.splitlines()]
+
+
+def find_cause(lines):
+    """Indice de la première cause d'échec, ou None."""
     for pattern in (CAUSE, TEST_FAILED):
         for i, line in enumerate(lines):
-            if not pattern.match(line):
-                continue
-            excerpt = REGISTRY.sub("", line.strip())
-            for following in lines[i + 1 : i + 4]:
-                location = LOCATION.match(following)
-                if location:
-                    excerpt += f" ({location.group(1)})"
-                    break
-            # Une panique : le message est sur la ligne suivante.
-            if "panicked" in line and i + 1 < len(lines) and lines[i + 1].strip():
-                excerpt += " : " + lines[i + 1].strip()
-            return excerpt
+            if pattern.match(line):
+                return i
     return None
+
+
+def failure_excerpt(log):
+    """Première cause d'échec d'un journal, sur une ligne, ou None."""
+    lines = clean_lines(log)
+    i = find_cause(lines)
+    if i is None:
+        return None
+    line = lines[i]
+    excerpt = REGISTRY.sub("", line.strip())
+    for following in lines[i + 1 : i + 4]:
+        location = LOCATION.match(following)
+        if location:
+            excerpt += f" ({location.group(1)})"
+            break
+    # Une panique : le message est sur la ligne suivante.
+    if "panicked" in line and i + 1 < len(lines) and lines[i + 1].strip():
+        excerpt += " : " + lines[i + 1].strip()
+    return excerpt
+
+
+def failure_context(log):
+    """Une cinquantaine de lignes autour de la première cause, ou la fin du journal."""
+    lines = clean_lines(log)
+    i = find_cause(lines)
+    start = max(0, i - CONTEXT_BEFORE) if i is not None else max(0, len(lines) - CONTEXT_LINES)
+    # Une clôture de bloc dans le journal fermerait le commentaire trop tôt.
+    text = "\n".join(lines[start : start + CONTEXT_LINES]).replace("```", "'" * 3)
+    return text if len(text) <= COMMENT_MAX else text[:COMMENT_MAX] + "\n[…tronqué]"
+
+
+def failure_comment(name, job_url, attempt, detail, log):
+    """Commentaire de commit GitLab pour un travail en échec."""
+    body = f"**github-actions/{name}** — tentative {attempt}, échec"
+    if detail:
+        body += f" ({detail})"
+    body += f"\n\n[Journal complet sur GitHub]({job_url})\n"
+    if log:
+        body += f"\n```text\n{failure_context(log)}\n```\n"
+    return body
 
 
 def failure_detail(job, log):
@@ -210,8 +291,10 @@ def report(event, github_token, gitlab_token):
     for name in JOBS:
         job = jobs.get(name)
         state, description = job_status(job, run.get("conclusion") == "cancelled")
+        log = None
         if state == "failed" and job:
-            detail = failure_detail(job, fetch_job_log(job["id"], github_token))
+            log = fetch_job_log(job["id"], github_token)
+            detail = failure_detail(job, log)
             if detail:
                 description = detail
         payload = {
@@ -227,6 +310,19 @@ def report(event, github_token, gitlab_token):
         if pipeline_id is not None:
             payload["pipeline_id"] = pipeline_id
         request_json(f"{GITLAB}/statuses/{run['head_sha']}", gl_headers, payload)
+        if state == "failed" and job:
+            note = failure_comment(
+                name, payload["target_url"], run["run_attempt"], description, log
+            )
+            try:
+                request_json(
+                    f"{GITLAB}/repository/commits/{run['head_sha']}/comments",
+                    gl_headers,
+                    {"note": note},
+                )
+            except RuntimeError as error:
+                # Le statut est déjà publié : le commentaire n'est qu'un plus.
+                print(f"Commentaire non publié pour {name} : {error}", file=sys.stderr)
         if pipeline_id is None:
             # Le premier statut peut créer un pipeline externe. Les suivants
             # doivent tous rejoindre ce pipeline, même s'il n'existait pas avant.
@@ -235,6 +331,23 @@ def report(event, github_token, gitlab_token):
                 raise RuntimeError("Pipeline GitLab créé mais introuvable")
             pipeline_id = pipelines[0]["id"]
         print(f"github-actions/{name} : {state}")
+    publish_licenses(run, jobs.get("licenses"), github_token, gitlab_token, gh_headers)
+
+
+def publish_licenses(run, job, github_token, gitlab_token, gh_headers):
+    """Rapport de licences en paquet GitLab, lisible sans passer par GitHub."""
+    if not job or job.get("conclusion") != "success":
+        return
+    try:
+        data = fetch_artifact_file(run["id"], LICENSES_ARTIFACT, LICENSES_FILE, github_token, gh_headers)
+        if data is None:
+            print("Rapport de licences introuvable sur GitHub", file=sys.stderr)
+            return
+        url = upload_package(LICENSES_ARTIFACT, run["head_sha"][:12], LICENSES_FILE, data, gitlab_token)
+        print(f"Rapport de licences déposé : {url}")
+    except RuntimeError as error:
+        # Les statuts sont déjà publiés : le rapport n'est qu'un plus.
+        print(f"Rapport de licences non déposé : {error}", file=sys.stderr)
 
 
 def main():

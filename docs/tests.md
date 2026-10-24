@@ -494,6 +494,22 @@ fichier, panique de test avec son message, erreur de script), tronquée à 255
 caractères. Le journal est lu avec `GITHUB_TOKEN` (`actions: read`) ; s'il est
 indisponible, l'étape seule est publiée, et le rapport n'échoue jamais pour cela.
 
+Le même échec est aussi posté en **commentaire du commit GitLab** : une
+cinquantaine de lignes autour de la première cause (10 avant, le reste après) et
+le lien vers le journal complet. Se lit par
+`glab api projects/86104040/repository/commits/<sha>/comments`, comme les
+statuts par GraphQL (l'API REST ne liste pas les statuts externes) :
+`pipeline(iid){stages{nodes{name jobs{nodes{name status detailedStatus{label}}}}}}`.
+
+Quand `licenses` réussit, le rapport `THIRD-PARTY-LICENSES.txt` (artefact GitHub
+`third-party-licenses`) est déposé dans le registre de paquets génériques de
+GitLab : paquet `third-party-licenses`, version = 12 premiers caractères du SHA.
+Un fichier d'environ 600 Ko par push de `main` consomme le quota de stockage du
+projet ; les journaux complets ne sont volontairement pas déposés. Les
+redirections de téléchargement GitHub sont suivies sans renvoyer le jeton. Un
+commentaire ou un dépôt refusé est signalé sur stderr sans faire échouer le
+rapport : les statuts sont déjà publiés.
+
 Le rapporteur ignore les pull requests et les forks, et lit son script depuis
 `main`, jamais depuis le code d'une PR. Il ignore aussi une tentative dont une
 relance plus récente existe. Une panne de publication fait échouer le workflow
