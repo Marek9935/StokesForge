@@ -590,9 +590,11 @@ Configuration initiale (une seule fois) :
    limité au seul dépôt `Marek9935/StokesForge`, avec ces droits :
    `Contents` lecture et écriture, **`Workflows` lecture et écriture** (sans lui,
    GitHub refuse tout push qui touche `.github/workflows/`), `Metadata` lecture
-   seule (imposé). Dans GitLab, `Settings > Repository > Mirroring repositories` :
-   miroir `push` vers `https://github.com/Marek9935/StokesForge.git`, avec ce
-   jeton. Sur GitHub, `main` doit être la branche par défaut (un `workflow_run`
+   seule (imposé). Dans GitLab, `Paramètres > Dépôt > Dépôts miroirs`
+   (`Settings > Repository > Mirroring repositories`) : direction « Poussée »
+   vers `https://<utilisateur>:<jeton>@github.com/Marek9935/StokesForge.git`
+   (GitLab masque ensuite les identifiants). Le bouton de synchronisation de la
+   ligne force un envoi immédiat. Sur GitHub, `main` doit être la branche par défaut (un `workflow_run`
    ne se déclenche que depuis elle) et `Settings > Actions > General` autoriser
    les actions.
 1. Dans les **paramètres du compte GitLab**, créer un jeton personnel dédié
