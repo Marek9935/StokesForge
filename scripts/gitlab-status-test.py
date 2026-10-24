@@ -143,6 +143,20 @@ class ReportTest(unittest.TestCase):
         code = note.split("```text\n")[1].split("\n```")[0]
         self.assertEqual(len(code.splitlines()), status.CONTEXT_LINES)
 
+    def test_fenetre_ancree_sur_le_marqueur_d_erreur_github(self):
+        # Vrai journal de `cargo fmt --check` : aucune ligne `error:`, la sortie
+        # utile est juste avant `##[error]`, le nettoyage du travail après.
+        log = "\n".join(
+            ["bruit d'une étape précédente"] * 40
+            + ["Diff in crates/x/src/lib.rs:74:", "-ancien", "+nouveau", "##[error]Process completed with exit code 1.",
+               "Post job cleanup.", "[command]/usr/bin/git version"]
+        )
+        context = status.failure_context(log)
+        self.assertIn("+nouveau", context)
+        self.assertIn("Diff in crates/x/src/lib.rs:74:", context)
+        self.assertNotIn("Post job cleanup", context)
+        self.assertLessEqual(len(context.splitlines()), status.CONTEXT_LINES)
+
     def test_commentaire_seulement_pour_un_echec_et_sans_journal_il_reste_utile(self):
         self.report()
         self.assertEqual(self.comments, [])

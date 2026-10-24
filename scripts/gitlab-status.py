@@ -174,12 +174,23 @@ def failure_excerpt(log):
 
 
 def failure_context(log):
-    """Une cinquantaine de lignes autour de la première cause, ou la fin du journal."""
+    """Une cinquantaine de lignes sur l'échec.
+
+    GitHub clôt l'étape fautive par `##[error]` : ce qui la suit (nettoyage du
+    travail) est du bruit, et ce qui la précède est la sortie de l'étape. La
+    fenêtre commence dix lignes avant la première cause quand il y en a une, et
+    sinon remonte de cinquante lignes depuis le marqueur (ou la fin du journal).
+    """
     lines = clean_lines(log)
-    i = find_cause(lines)
-    start = max(0, i - CONTEXT_BEFORE) if i is not None else max(0, len(lines) - CONTEXT_LINES)
+    end = next((n for n, line in enumerate(lines) if line.startswith("##[error]")), None)
+    stop = len(lines) if end is None else end + 1
+    cause = find_cause(lines[:stop])
+    if cause is not None:
+        start = max(0, cause - CONTEXT_BEFORE)
+    else:
+        start = max(0, stop - CONTEXT_LINES)
     # Une clôture de bloc dans le journal fermerait le commentaire trop tôt.
-    text = "\n".join(lines[start : start + CONTEXT_LINES]).replace("```", "'" * 3)
+    text = "\n".join(lines[start : min(start + CONTEXT_LINES, stop)]).replace("```", "'" * 3)
     return text if len(text) <= COMMENT_MAX else text[:COMMENT_MAX] + "\n[…tronqué]"
 
 
