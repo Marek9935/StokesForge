@@ -577,17 +577,24 @@ dans `gitlab-status.yml` (condition `github.repository`) et dans
 **Maintenance.** Le jeton GitLab `github-ci-status` **expire** : à son échéance,
 `Résultats GitLab` échoue sur GitHub (« Retour GitLab impossible ») et plus aucun
 statut n'arrive. Créer un jeton neuf (étape 1) et remplacer le secret
-`GITLAB_STATUS_TOKEN` (étape 2). Le jeton GitHub du miroir GitLab → GitHub doit
-pouvoir écrire dans le dépôt ; sans ce droit, la CI ne démarre jamais.
+`GITLAB_STATUS_TOKEN` (étape 2). Le jeton GitHub du miroir (étape 0) **expire aussi**
+(créé le 17 octobre 2026, échéance le 17 octobre 2027) : passé ce délai, le miroir
+ne pousse plus et la CI ne démarre jamais. Le régénérer sur GitHub (`Regenerate
+token`), puis recoller sa valeur dans le miroir GitLab. Un droit manquant (surtout
+`Workflows`) a le même effet : le miroir échoue en silence côté GitHub.
 
 Configuration initiale (une seule fois) :
 
-0. **Miroir.** Dans GitLab, `Settings > Repository > Mirroring repositories` :
-   miroir `push` vers `https://github.com/Marek9935/StokesForge.git`, avec un
-   jeton GitHub autorisé à écrire dans le dépôt. Sur GitHub, `main` doit être la
-   branche par défaut (un `workflow_run` ne se déclenche que depuis elle) et
-   `Settings > Actions > General` autoriser les actions.
-
+0. **Miroir GitLab → GitHub.** Sur GitHub, créer un jeton **fine-grained**
+   (`Settings > Developer settings > Personal access tokens > Fine-grained`),
+   limité au seul dépôt `Marek9935/StokesForge`, avec ces droits :
+   `Contents` lecture et écriture, **`Workflows` lecture et écriture** (sans lui,
+   GitHub refuse tout push qui touche `.github/workflows/`), `Metadata` lecture
+   seule (imposé). Dans GitLab, `Settings > Repository > Mirroring repositories` :
+   miroir `push` vers `https://github.com/Marek9935/StokesForge.git`, avec ce
+   jeton. Sur GitHub, `main` doit être la branche par défaut (un `workflow_run`
+   ne se déclenche que depuis elle) et `Settings > Actions > General` autoriser
+   les actions.
 1. Dans les **paramètres du compte GitLab**, créer un jeton personnel dédié
    (`Access > Personal access tokens > Legacy token`), nommé
    `github-ci-status`, avec portée `api` et date d'expiration. Le compte doit
