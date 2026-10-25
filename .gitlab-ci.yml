@@ -208,7 +208,7 @@ dist-windows:
   extends: .windows-job
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+/'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    # DIAG temporaire : pas de dist-windows automatique sur main
     - when: manual
       allow_failure: true
   script:
@@ -228,8 +228,6 @@ dist-windows:
 test-python-windows:
   stage: check
   extends: .windows-job
-  variables:
-    RUST_TEST_THREADS: "1"
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+/'
     - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
@@ -237,7 +235,7 @@ test-python-windows:
       allow_failure: true
   script:
     - bash scripts/python-vendor.sh
-    - bash scripts/python-test.sh
+    - bash scripts/diag-windows.sh
 
 # #333 : release GitLab d'un tag vX.Y.Z. Notes tirées de CHANGELOG.md, lien vers
 # l'installeur de `dist-windows` ; l'archive Linux est publiée par le travail
