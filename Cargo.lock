@@ -5114,7 +5114,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stokesforge-analysis"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "libm",
  "stokesforge-arch-guard",
@@ -5123,7 +5123,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-app"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -5154,7 +5154,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-app-state"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "directories",
  "fluent-syntax",
@@ -5183,14 +5183,14 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-arch-guard"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "toml 0.8.23",
 ]
 
 [[package]]
 name = "stokesforge-cli"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "stokesforge-analysis",
  "stokesforge-commands",
@@ -5206,7 +5206,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-clipboard"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "clipboard-win",
  "objc2-app-kit 0.3.2",
@@ -5220,7 +5220,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-commands"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "proptest",
  "stokesforge-analysis",
@@ -5233,7 +5233,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-core"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "proptest",
  "stokesforge-analysis",
@@ -5246,11 +5246,11 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-id"
-version = "0.0.0"
+version = "1.0.0"
 
 [[package]]
 name = "stokesforge-import"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "directories",
  "serde",
@@ -5262,7 +5262,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-importer"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "stokesforge-arch-guard",
  "stokesforge-core",
@@ -5271,7 +5271,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-persistence"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "rmp-serde",
  "rmpv",
@@ -5289,7 +5289,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-plot"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "stokesforge-arch-guard",
  "stokesforge-id",
@@ -5298,7 +5298,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-python"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "numpy",
  "pyo3",
@@ -5307,7 +5307,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-render"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "epaint",
  "fontdb",
@@ -5324,7 +5324,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-render-egui"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "egui",
  "plotters",
@@ -5342,7 +5342,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-render-svg"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "lopdf",
  "plotters",
@@ -5362,7 +5362,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-robustesse"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "proptest",
  "rmp-serde",
@@ -5382,7 +5382,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-script"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "numpy",
  "pyo3",
@@ -5404,7 +5404,7 @@ dependencies = [
 
 [[package]]
 name = "stokesforge-session"
-version = "0.0.0"
+version = "1.0.0"
 dependencies = [
  "stokesforge-analysis",
  "stokesforge-arch-guard",

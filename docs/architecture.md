@@ -158,6 +158,13 @@ ou en texte brut), détaillé dans [`rendu.md`](rendu.md#typst-r8).
 Les `scripts/*.sh` de la racine assemblent et relancent les distributions
 (`dist/`) dans un environnement nettoyé.
 
+**Publication (#333).** `scripts/release-linux.sh` empaquette `dist/stokesforge-app`
+(déjà éprouvé par `app-dist.sh`) en `StokesForge-<version>-linux-x86_64.tar.gz` ;
+`scripts/release-notes.sh` vérifie qu'un tag `vX.Y.Z` correspond aux versions des
+crates et à une section de `CHANGELOG.md`, et imprime les notes ;
+`scripts/release-publier.sh` crée la release GitLab. Linux part de GitHub,
+Windows de GitLab : [`criteres-v1.md`](criteres-v1.md).
+
 **Windows (#332).**
 `scripts/app-dist-windows.sh` (Git Bash) est le pendant de `app-dist.sh` : il
 assemble un dossier de staging, l'éprouve, puis le livre en **installeur Inno

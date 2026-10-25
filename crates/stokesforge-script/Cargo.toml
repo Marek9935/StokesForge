@@ -1,6 +1,6 @@
 [package]
 name = "stokesforge-script"
-version = "0.0.0"
+version = "1.0.0"
 edition.workspace = true
 license.workspace = true
 description = "Fil de script Python : cycle de vie de l'interpréteur, interruption, et surface-témoin `pyst` exposée aux scripts. Tout derrière la feature `python`."
@@ -29,12 +29,12 @@ python = [
 ]
 
 [dependencies]
-stokesforge-analysis = { version = "0.0.0", path = "../stokesforge-analysis", optional = true }
-stokesforge-core = { version = "0.0.0", path = "../stokesforge-core", optional = true }
-stokesforge-commands = { version = "0.0.0", path = "../stokesforge-commands", optional = true }
-stokesforge-plot = { version = "0.0.0", path = "../stokesforge-plot", optional = true }
-stokesforge-session = { version = "0.0.0", path = "../stokesforge-session", optional = true }
-stokesforge-python = { version = "0.0.0", path = "../stokesforge-python", optional = true, features = ["python"] }
+stokesforge-analysis = { version = "1.0.0", path = "../stokesforge-analysis", optional = true }
+stokesforge-core = { version = "1.0.0", path = "../stokesforge-core", optional = true }
+stokesforge-commands = { version = "1.0.0", path = "../stokesforge-commands", optional = true }
+stokesforge-plot = { version = "1.0.0", path = "../stokesforge-plot", optional = true }
+stokesforge-session = { version = "1.0.0", path = "../stokesforge-session", optional = true }
+stokesforge-python = { version = "1.0.0", path = "../stokesforge-python", optional = true, features = ["python"] }
 stokesforge-import = { path = "../stokesforge-import", optional = true }
 stokesforge-importer = { path = "../stokesforge-importer", optional = true }
 # Export de figure (`pyst.export_graph`, #331) : le même rendu que l'application.

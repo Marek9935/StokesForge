@@ -39,6 +39,7 @@ page qui contredit le code a tort.
 | écrire ou lancer un test, comprendre la CI | [`tests.md`](tests.md) |
 | mesurer la fluidité de l'interface (temps d'image, lancer en release) | [`mesure-performance.md`](mesure-performance.md) |
 | licence, contributions, interfaces d'extension et notices tierces | [`licence-et-extensions.md`](licence-et-extensions.md) |
+| savoir ce qu'exige la V1, ou publier une version | [`criteres-v1.md`](criteres-v1.md) |
 
 `.claude/rules.md` complète ce tableau côté **chargement de contexte** : quels
 crates ouvrir, et surtout lesquels ne pas ouvrir, pour chaque domaine.

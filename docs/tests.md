@@ -457,6 +457,8 @@ runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 | `test` | oui | `cargo test --workspace` |
 | `robustesse` | non | `cargo test -p stokesforge-robustesse -- --ignored` |
 | `test-python` | oui, automatique | vendorise CPython + numpy, puis `scripts/python-test.sh` |
+| `release-linux` (GitHub) | sur un tag `vX.Y.Z` | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, publie l'archive dans une release GitHub (#333) |
+| `dist-windows`, `publier` (GitLab) | sur un tag `vX.Y.Z` | installeur Windows, puis release GitLab avec les notes du CHANGELOG (#333) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
 
 **Ce qu'un pipeline vert ne prouve pas**, et c'est écrit en tête du fichier CI :
 `fmt`, `clippy` et `test` n'activent **jamais** la feature `python`. Tout ce qui

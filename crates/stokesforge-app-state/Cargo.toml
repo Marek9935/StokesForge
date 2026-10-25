@@ -1,6 +1,6 @@
 [package]
 name = "stokesforge-app-state"
-version = "0.0.0"
+version = "1.0.0"
 edition.workspace = true
 license.workspace = true
 description = "État de l'application StokesForge sans interface graphique (#263) : décisions, préférences, sélection, textes et erreurs mises en phrase, testables sans fenêtre."

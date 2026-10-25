@@ -17,6 +17,7 @@
 
 stages:
   - check
+  - release
 
 # Runners : seuls les runners perso servent (partagés désactivés dans GitLab).
 # Les travaux Linux s'exécutent sur GitHub, qui retourne leurs statuts externes.
@@ -213,3 +214,18 @@ test-python-windows:
   script:
     - bash scripts/python-vendor.sh
     - bash scripts/python-test.sh
+
+# #333 : release GitLab d'un tag vX.Y.Z. Notes tirées de CHANGELOG.md, lien vers
+# l'installeur de `dist-windows` ; l'archive Linux est publiée par le travail
+# `release-linux` de GitHub (poser STOKESFORGE_LINUX_RELEASE_URL, variable CI,
+# pour l'ajouter aux liens). Tourne sur le runner `windows` (Git Bash + curl),
+# seul runner GitLab enregistré. Un tag incohérent avec les versions des crates
+# ou sans section dans CHANGELOG.md échoue ici (scripts/release-notes.sh).
+publier:
+  stage: release
+  tags: [windows]
+  needs: [dist-windows]
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
+  script:
+    - bash scripts/release-publier.sh

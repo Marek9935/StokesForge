@@ -440,9 +440,9 @@ textuel est limité à `MAX_OBJECT_CLIPBOARD_BYTES` (64 Mio).
   `Column(identifiant)`, l'identifiant borné à la lecture comme tout identifiant
   (`MAX_NODE_ID`, invariant 7). Un identifiant qui ne désigne aucune colonne de la
   feuille (fichier fabriqué, colonne disparue) se charge et s'affiche `#REF`
-  (invariant 10). L'ancienne clé `formula` (lettres) n'est plus lue : le format
-  n'a pas à rester compatible en développement, la colonne se charge avec ses
-  valeurs et sans formule.
+  (invariant 10). L'ancienne clé `formula` (lettres) n'est plus lue (changement fait
+  avant la V1, quand le format n'avait pas à rester compatible) : la colonne se
+  charge avec ses valeurs et sans formule.
 - Empreinte des entrées (A1, #316) : chaque calcul écrit `inputs_digest`, une
   empreinte **du contenu** de ses colonnes d'entrée (`Calculation::inputs_digest`,
   `stokesforge-core/src/calc.rs` : type + valeurs, `f64::to_bits` petit-boutiste,

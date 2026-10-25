@@ -111,3 +111,43 @@ jobs:
         run: sudo apt-get install -y --no-install-recommends libwayland-dev
       - run: scripts/python-vendor.sh
       - run: scripts/python-test.sh
+
+  # #333 : publication Linux. Sur un tag vX.Y.Z seulement, une fois les
+  # contrôles bloquants verts : vérifie le tag (versions des crates, section de
+  # CHANGELOG.md), assemble et éprouve la distribution, publie l'archive dans
+  # une release GitHub. L'installeur Windows et la release GitLab viennent de
+  # `dist-windows` et `publier` (.gitlab-ci.yml).
+  release-linux:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [fmt, licenses, clippy, test, test-python]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag et notes
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: |
+            vendor/python/*.tar.gz
+            vendor/python/extracted/
+          key: python-${{ hashFiles('vendor/python/lock.env') }}
+      - name: Outils de licences
+        run: |
+          source scripts/licenses-tools.env
+          cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
+          cargo install cargo-about --locked --features cli --version "$CARGO_ABOUT_VERSION"
+      # La distribution ouvre la fenêtre : écran virtuel et rendu logiciel.
+      - name: Dépendances d'exécution
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 libwayland-dev xvfb
+      - run: scripts/python-vendor.sh
+      - run: xvfb-run -a scripts/app-dist.sh
+      - run: scripts/release-linux.sh "$GITHUB_REF_NAME"
+      - name: Release GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/StokesForge-*-linux-x86_64.tar.gz \
+            --title "StokesForge ${GITHUB_REF_NAME#v}" --notes-file release-notes.md
