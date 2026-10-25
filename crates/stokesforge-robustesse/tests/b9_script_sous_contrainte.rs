@@ -181,7 +181,6 @@ fn b9_tableau_masque_ecrase_les_cellules_manquantes_par_des_valeurs() {
 // ============================================================ concurrence
 
 #[test]
-#[ignore = "dérive de longueur constatée le 2026-10-26 sur la CI Linux (test-python, commit b79c84c5) : la colonne finit à 999 lignes au lieu de 1000 une fois `ConcurrentWriteError` rattrapée par le script ; cause non établie (anomalie du produit ou artefact du `secoueur`, qui ignore le résultat de `InsertRows`) — à instruire avant la V1 (#333, critère « zéro rouge »)"]
 fn b9_course_entre_script_et_interface_sur_la_longueur() {
     // Le script écrit une colonne entière en boucle ; l'interface insère et
     // supprime des lignes en même temps. Le contrat de `pyst.set_column` est
@@ -191,8 +190,15 @@ fn b9_course_entre_script_et_interface_sur_la_longueur() {
     // aussitôt par `ConcurrentWriteError` (`docs/python-et-script.md`,
     // « version lue ») : c'est le contrat, pas une anomalie. Le script la
     // compte comme un refus, comme `InvalidValueError`. Le nombre de refus
-    // dépend de l'ordonnancement et n'est pas asserté ; la longueur, elle,
-    // doit rester exacte quoi qu'il arrive.
+    // dépend de l'ordonnancement et n'est pas asserté.
+    //
+    // L'interface, elle, peut être refusée : tant que le script tient sa macro
+    // ouverte, l'acteur refuse les commandes d'un autre client
+    // (`ForeignMacro("execute")`, `stokesforge-session`, table de tête). Une
+    // suppression acceptée dont la réinsertion est refusée laisse donc une
+    // ligne en moins, sans que le script y soit pour rien (constat CI du
+    // 2026-10-26 : 999 lignes). L'oracle compte ce que l'interface a réellement
+    // réussi : la longueur doit valoir 1000 − suppressions + insertions, exactement.
     let (_a, _b, sheet) = ids();
     let h0 = poignee();
     h0.execute(Command::AddColumn {
@@ -215,17 +221,26 @@ fn b9_course_entre_script_et_interface_sur_la_longueur() {
     let h = poignee();
     let secoueur = std::thread::spawn(move || {
         let mut tours = 0usize;
+        let (mut retirees, mut remises) = (0i64, 0i64);
         while !stop2.load(Ordering::Relaxed) {
-            let _ = h.execute(Command::DeleteRows {
+            if h.execute(Command::DeleteRows {
                 sheet,
                 at: 0,
                 count: 1,
-            });
-            let _ = h.execute(Command::InsertRows {
+            })
+            .is_ok()
+            {
+                retirees += 1;
+            }
+            if h.execute(Command::InsertRows {
                 sheet,
                 at: 0,
                 count: 1,
-            });
+            })
+            .is_ok()
+            {
+                remises += 1;
+            }
             let n = h
                 .snapshot()
                 .unwrap()
@@ -238,7 +253,7 @@ fn b9_course_entre_script_et_interface_sur_la_longueur() {
             }
             tours += 1;
         }
-        tours
+        (tours, retirees - remises)
     });
 
     let out = run("import numpy as np\n\
@@ -252,7 +267,7 @@ fn b9_course_entre_script_et_interface_sur_la_longueur() {
          \x20       refus += 1\n\
          print('refus', refus)\n");
     stop.store(true, Ordering::Relaxed);
-    let tours = secoueur.join().unwrap();
+    let (tours, retrait_net) = secoueur.join().unwrap();
     println!(
         "{} tours de l'interface, sortie script : {}",
         tours,
@@ -260,15 +275,16 @@ fn b9_course_entre_script_et_interface_sur_la_longueur() {
     );
     assert!(out.error.is_none(), "le script a explosé : {:?}", out.error);
     let n = valeurs(b).len();
-    let derive = n as i64 - 1000;
-    println!("dérive de longueur : {derive:+} ligne(s)");
+    let attendu = 1000 - retrait_net;
+    let derive = n as i64 - attendu;
+    println!("longueur {n}, attendue {attendu} (interface : {retrait_net} ligne(s) en moins), dérive {derive:+}");
     h0.execute(Command::DeleteColumn { column: b }).unwrap();
     assert_eq!(
-        n, 1000,
-        "la colonne fait {n} lignes après la course ({derive:+}) alors que ni le \
-         script (« n'allonge ni ne tronque », longueur exacte contrôlée avant \
-         envoi) ni l'interface (une ligne retirée puis remise) ne doivent la \
-         faire changer de taille"
+        n as i64, attendu,
+        "la colonne fait {n} lignes après la course, {attendu} attendues ({derive:+}) : \
+         le script (« n'allonge ni ne tronque », longueur exacte contrôlée avant \
+         envoi) ne doit pas la faire changer de taille, seule l'interface le peut, \
+         de ce qu'elle a réussi"
     );
 }
 
