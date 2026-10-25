@@ -114,19 +114,20 @@ jobs:
 
   # #333 : publication Linux. Sur un tag vX.Y.Z seulement, une fois les
   # contrôles bloquants verts : vérifie le tag (versions des crates, section de
-  # CHANGELOG.md), assemble et éprouve la distribution, publie l'archive dans
-  # une release GitHub. L'installeur Windows et la release GitLab viennent de
-  # `dist-windows` et `publier` (.gitlab-ci.yml).
+  # CHANGELOG.md), assemble et éprouve la distribution, téléverse l'archive dans
+  # le registre de paquets de GitLab. Aucune release GitHub : GitHub n'est qu'un
+  # miroir de GitLab, où `publier` (.gitlab-ci.yml) lie l'archive à la release,
+  # avec l'installeur Windows de `dist-windows`.
   release-linux:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [fmt, licenses, clippy, test, test-python]
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - name: Tag et notes
-        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > release-notes.md
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
       - uses: Swatinem/rust-cache@v2
       - uses: actions/cache@v4
         with:
@@ -145,9 +146,7 @@ jobs:
       - run: scripts/python-vendor.sh
       - run: xvfb-run -a scripts/app-dist.sh
       - run: scripts/release-linux.sh "$GITHUB_REF_NAME"
-      - name: Release GitHub
+      - name: Archive dans GitLab
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" dist/StokesForge-*-linux-x86_64.tar.gz \
-            --title "StokesForge ${GITHUB_REF_NAME#v}" --notes-file release-notes.md
+          GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
+        run: scripts/release-linux-televerser.sh "$GITHUB_REF_NAME"

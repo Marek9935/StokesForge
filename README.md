@@ -1,5 +1,9 @@
 # StokesForge — branche `main`
 
+Le dépôt de référence est sur GitLab (`gitlab.com/askrzypczak/stokesforge`) :
+issues, releases et téléchargements s'y trouvent. Le dépôt GitHub est un miroir
+en lecture seule, qui sert à la CI Linux.
+
 Cette branche est dédiée au portage de StokesForge vers Rust. PyQt/PySide n'est
 plus à l'ordre du jour ici — le développement actif se fait dans le
 workspace Cargo à la racine.

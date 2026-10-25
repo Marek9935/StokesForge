@@ -459,7 +459,7 @@ runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 | `test` | oui | `cargo test --workspace` |
 | `robustesse` | non | `cargo test -p stokesforge-robustesse -- --ignored` |
 | `test-python` | oui, automatique | vendorise CPython + numpy, puis `scripts/python-test.sh` |
-| `release-linux` (GitHub) | sur un tag `vX.Y.Z` | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, publie l'archive dans une release GitHub (#333) |
+| `release-linux` (GitHub) | sur un tag `vX.Y.Z` | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, téléverse l'archive dans le registre de paquets GitLab, sans release GitHub (#333) |
 | `test-python-windows`, `dist-windows` (GitLab) | oui, automatique sur `main` et sur un tag | tests Python Windows, puis installeur Windows |
 | `publier` (GitLab) | sur un tag `vX.Y.Z` | release GitLab avec les notes du CHANGELOG (#333) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
 

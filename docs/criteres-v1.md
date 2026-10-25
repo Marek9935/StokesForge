@@ -32,21 +32,26 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
 - [ ] Sur le commit du tag, les travaux bloquants sont verts : `fmt`, `licenses`,
   `clippy`, `test`, `test-python` (`scripts/ci-statuts.sh <commit>`).
 - [ ] `test-python-windows` et `dist-windows` (automatiques sur `main` et sur un tag) sont verts sur le même commit.
-- [ ] `cargo test -p stokesforge-robustesse -- --ignored` : l'état des
-  reproductions est connu et chaque échec correspond à une issue ouverte hors V1.
+- [ ] `cargo test -p stokesforge-robustesse -- --ignored` ne rend aucun échec
+  (zéro rouge : plus aucun `#[ignore]` ne reste, voir `docs/tests.md`).
 
 ### Distribution
 
 - [ ] `scripts/app-dist.sh` sort 0 sur Linux : la fenêtre s'ouvre et se ferme,
-  `stokesforge-selftest` passe, depuis le paquet.
+  `stokesforge-selftest` passe, depuis le paquet. La CI le fait sous écran
+  virtuel (xvfb) au tag ; avant le tag, l'essayer aussi à la main sur un bureau
+  Wayland réel (Fedora).
 - [ ] `scripts/app-dist-windows.sh` sort 0 sur le runner Windows et l'installeur
   `StokesForge-<version>-windows-setup.exe` s'installe, démarre et se désinstalle
-  sur un poste neuf (au moins une fois à la main : le runner n'a pas de bureau).
+  sur un poste neuf : au moins une fois à la main, sur un autre ordinateur
+  Windows, avec l'installeur produit par le tag `v1.0.0-rc1` (le runner n'a pas
+  de bureau).
 - [ ] Les notices de licences sont livrées dans les deux paquets, et celles de
   Windows sont recoupées avec l'archive python-build-standalone Windows complète
   (`vendor/python/licenses-windows/README.md`).
-- [ ] Windows affiche « éditeur inconnu » (pas de signature de code) : assumé et
-  écrit dans les notes de version, ou signature ajoutée.
+- [ ] Windows affiche « éditeur inconnu » (pas de signature de code) : assumé
+  (décision de la V1) et écrit dans les notes de version, section « Installation
+  sous Windows » de `CHANGELOG.md`.
 
 ### Version et documentation
 
@@ -58,9 +63,9 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
 ## Publier
 
 1. Constater les critères ci-dessus ; dater la section `## [1.0.0]` du CHANGELOG ;
-   poser la variable CI GitLab `STOKESFORGE_LINUX_RELEASE_URL`
-   (`https://github.com/<dépôt>/releases/tag`) pour que la release GitLab
-   pointe l'archive Linux.
+   créer le jeton qui laisse GitHub téléverser l'archive Linux dans GitLab : un
+   jeton de projet GitLab (rôle Developer, portée `api`), posé comme secret
+   GitHub `GITLAB_RELEASE_TOKEN`.
 2. Fusionner sur `main`, puis créer la branche `release/1.x` à ce commit.
 3. Poser le tag `v1.0.0` sur `release/1.x` et le pousser vers GitLab (le miroir
    le transmet à GitHub).
@@ -68,9 +73,11 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
    - GitLab `dist-windows` puis `publier` : installeur Windows et release GitLab
      (notes tirées du CHANGELOG) ;
    - GitHub `release-linux`, après les contrôles bloquants : archive
-     `StokesForge-1.0.0-linux-x86_64.tar.gz` et release GitHub.
-5. Constater : les deux releases existent, l'installeur et l'archive se
-   téléchargent.
+     `StokesForge-1.0.0-linux-x86_64.tar.gz`, téléversée dans le registre de
+     paquets GitLab (aucune release GitHub : GitHub n'est qu'un miroir).
+     `publier` attend l'archive (une heure au plus) avant de créer la release.
+5. Constater : la release GitLab existe, l'installeur et l'archive se
+   téléchargent depuis elle.
 
 Les travaux de publication refusent un tag incohérent avant tout téléversement :
 forme `vX.Y.Z`, versions des crates, section du CHANGELOG (`scripts/release-notes.sh`).
@@ -80,9 +87,11 @@ scripts ont été essayés en local (`release-notes.sh`, `release-linux.sh` sur 
 distribution existante, `release-publier.sh` en `STOKESFORGE_RELEASE_DRYRUN=1`).
 Un tag `v1.0.0-rc1` n'exerce que la construction Windows (`dist-windows` ; la
 release GitLab l'ignore et `release-linux` échoue sur `release-notes.sh`, ce qui
-est voulu) : à faire d'abord pour éprouver le runner. L'essai complet des appels
-d'API (release GitLab en formulaire, `gh release create`) n'a lieu qu'au premier
-vrai tag.
+est voulu) : à faire d'abord pour éprouver le runner, et l'installeur qu'il
+produit sert à l'essai d'installation sur un autre poste Windows. L'essai complet
+des appels d'API (téléversement de l'archive Linux, release GitLab en
+formulaire) n'a lieu qu'au premier vrai tag ; `release-linux-televerser.sh` et
+`release-publier.sh` s'essaient à vide avec `STOKESFORGE_RELEASE_DRYRUN=1`.
 
 ## Branches et versions
 

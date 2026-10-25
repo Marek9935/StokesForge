@@ -35,6 +35,12 @@ Première version publiée. Portage de StokesForge de Python/Qt vers Rust
 - Distribution autonome : archive Linux x86_64 et installeur Windows, avec
   l'interpréteur Python embarqué et les notices de licences (#332).
 
+### Installation sous Windows
+
+- L'installeur n'est pas signé : Windows affiche « éditeur inconnu » (ou « Windows
+  a protégé votre ordinateur ») au lancement. C'est attendu ; choisir « Informations
+  complémentaires » puis « Exécuter quand même ».
+
 ### Format de fichier `.stf`
 
 - Version 1 figée (#323) : tout fichier V1 se relira et se migrera jusqu'en V3.
