@@ -181,11 +181,17 @@ fn b9_tableau_masque_ecrase_les_cellules_manquantes_par_des_valeurs() {
 // ============================================================ concurrence
 
 #[test]
-#[ignore = "hors du périmètre F6 de la campagne du 2026-09-11 — A2 est fermée (b6_toctou_entre_instantane_et_commande, `expected_version` + retentatives) mais CE test reste rouge, sous une forme différente : le script ne relit et ne retente plus en silence, il relance la même écriture jusqu'à épuiser ses cinq tentatives contre un `secoueur` qui ne s'arrête jamais, et lève `ConcurrentWriteError`, non rattrapée ici (`except pyst.InvalidValueError` seulement) — dépend de l'ordonnancement, non repris car cela demanderait de faire boucler le script sur cette exception, ce que le motif original ne prévoyait pas"]
 fn b9_course_entre_script_et_interface_sur_la_longueur() {
     // Le script écrit une colonne entière en boucle ; l'interface insère et
     // supprime des lignes en même temps. Le contrat de `pyst.set_column` est
     // « n'allonge ni ne tronque jamais ». On le vérifie en continu.
+    //
+    // Une écriture dont la colonne a changé depuis la lecture est refusée
+    // aussitôt par `ConcurrentWriteError` (`docs/python-et-script.md`,
+    // « version lue ») : c'est le contrat, pas une anomalie. Le script la
+    // compte comme un refus, comme `InvalidValueError`. Le nombre de refus
+    // dépend de l'ordonnancement et n'est pas asserté ; la longueur, elle,
+    // doit rester exacte quoi qu'il arrive.
     let (_a, _b, sheet) = ids();
     let h0 = poignee();
     h0.execute(Command::AddColumn {
@@ -241,7 +247,7 @@ fn b9_course_entre_script_et_interface_sur_la_longueur() {
          \x20   v = pyst.column(h)\n\
          \x20   try:\n\
          \x20       pyst.set_column(h, np.asarray(v, dtype=np.float64) + 1.0)\n\
-         \x20   except pyst.InvalidValueError:\n\
+         \x20   except (pyst.InvalidValueError, pyst.ConcurrentWriteError):\n\
          \x20       refus += 1\n\
          print('refus', refus)\n");
     stop.store(true, Ordering::Relaxed);

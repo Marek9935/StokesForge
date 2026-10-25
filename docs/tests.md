@@ -142,10 +142,12 @@ plus rien. Une reproduction qui se met à **passer** est le signal attendu : le
 correctif est bon, et c'est le moment de retirer son `#[ignore]` pour que le
 garde-fou prenne le relais.
 
-La campagne de correction issue des rapports du 2026-09-11 est close : il ne
-reste qu'un `#[ignore]`, dans `b9`, dont le motif est écrit en toutes lettres
-dans l'attribut (il dépend de l'ordonnancement, et son motif original ne prévoit
-pas de boucler sur `ConcurrentWriteError`).
+La campagne de correction issue des rapports du 2026-09-11 est close : plus
+aucun `#[ignore]` ne reste dans `stokesforge-robustesse`. Le dernier, dans `b9`
+(`b9_course_entre_script_et_interface_sur_la_longueur`), attendait que le script
+rattrape `ConcurrentWriteError` : le contrat refuse l'écriture d'une colonne
+changée depuis la lecture, le script compte ce refus et la longueur reste
+exacte (#333, critère « zéro rouge »).
 
 Mesurer plutôt que chronométrer : `b17` et `b21` comptent des **octets
 alloués**, pas des millisecondes, pour que l'assertion dise « ce coût ne doit
