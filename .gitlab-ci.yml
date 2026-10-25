@@ -208,7 +208,7 @@ dist-windows:
   extends: .windows-job
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+/'
-    # DIAG temporaire : pas de dist-windows automatique sur main
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - when: manual
       allow_failure: true
   script:
@@ -222,9 +222,9 @@ dist-windows:
 # Pendant Windows de `test-python` : pont, scripts, robustesse, application et
 # CLI contre l'interpréteur vendorisé. Automatique et bloquant sur `main` et sur
 # un tag, manuel et non bloquant ailleurs. Les tests de l'application tournent
-# un par un (RUST_TEST_THREADS=1) tant que le crash 0xc0000005 de
-# `cargo test -p stokesforge-app --features python` n'est pas identifié : en
-# série, le journal nomme le test qui plante.
+# en parallèle : le crash 0xc0000005 d'autrefois venait de deux captures
+# `egui_kittest` (wgpu) simultanées, qui plantent `d3d10warp.dll` (WARP) ; elles
+# se partagent désormais un verrou (`verrou_captures`, preferences_proto.rs, #333).
 test-python-windows:
   stage: check
   extends: .windows-job
@@ -235,7 +235,7 @@ test-python-windows:
       allow_failure: true
   script:
     - bash scripts/python-vendor.sh
-    - bash scripts/diag-windows.sh
+    - bash scripts/python-test.sh
 
 # #333 : release GitLab d'un tag vX.Y.Z. Notes tirées de CHANGELOG.md, lien vers
 # l'installeur de `dist-windows` ; l'archive Linux est publiée par le travail

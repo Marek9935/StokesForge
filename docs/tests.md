@@ -508,8 +508,8 @@ GitLab `windows`. Sur une autre branche ou une demande de fusion, ils restent
 manuels (▶ dans le pipeline). Le runner est un poste en session ouverte :
 **poste éteint ou session fermée, les travaux restent « pending »** sans jamais
 échouer. Les deux se suivent l'un l'autre (un seul travail à la fois, environ
-15 min chacun à froid). `test-python-windows` pose `RUST_TEST_THREADS=1` (voir son
-commentaire dans `.gitlab-ci.yml`).
+15 min chacun à froid). `test-python-windows` lance les tests en parallèle ; seules
+les captures (`egui_kittest` + wgpu) s'excluent entre elles (voir plus bas).
 Les trois travaux Windows héritent de `.windows-job`, qui pose `core.longpaths`
 par l'environnement (`GIT_CONFIG_*`) : sans lui, le `git clean` de la
 récupération des sources échoue sur `.cargo/registry` (« Filename too long »)
@@ -646,6 +646,12 @@ tentatives, la pagination, la sélection du pipeline et les reprises HTTP.
   Linux : elle cesserait de correspondre à la CI. Un échec de capture est un
   `panicked` au `Drop` du banc, pas un plantage ; le test laisse `*.new.png` et
   `*.diff.png` à côté de la référence (à ne pas committer).
+- **Captures en parallèle sous Windows** : deux instances wgpu simultanées
+  plantent le rasteriseur logiciel `d3d10warp.dll` (`0xc0000005`, #333 ; module
+  fautif lu dans le journal d'événements Windows, trois fois, dont une sur le
+  poste de l'utilisateur). Tout test qui appelle `snapshot` prend d'abord
+  `verrou_captures()` (`app/preferences_proto.rs`) ; un nouveau fichier de
+  captures doit partager ce verrou (le déplacer dans un module commun).
 - La langue de l'interface est un état **global** du processus
   (`i18n::set_language`) : un test unitaire qui doit peindre dans une langue
   précise (`en`, `en-XA`) se relance en sous-processus avec `STOKESFORGE_LANG`
