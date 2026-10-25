@@ -602,6 +602,15 @@ mod tests {
 
     use super::*;
 
+    /// Un seul moteur de capture à la fois. Sous Windows, deux instances
+    /// wgpu simultanées (egui_kittest) plantent le rasteriseur logiciel
+    /// `d3d10warp.dll` en `0xc0000005` (#333). À prendre **avant** le banc
+    /// dans tout test qui appelle `snapshot` : il se libère après lui.
+    fn verrou_captures() -> std::sync::MutexGuard<'static, ()> {
+        static CAPTURES: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        CAPTURES.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Le banc : l'UI du thème de l'application, la fenêtre ouverte.
     fn banc() -> Harness<'static, Bench> {
         let mut harness = Harness::builder()
@@ -723,6 +732,7 @@ mod tests {
 
     #[test]
     fn glisser_une_ligne_change_l_ordre_de_copie() {
+        let _captures = verrou_captures();
         let mut harness = banc();
         aller_a(&mut harness, "Export");
         assert_eq!(ordre(&harness), [Format::Svg, Format::Png, Format::Pdf]);
@@ -747,6 +757,7 @@ mod tests {
     /// `UPDATE_SNAPSHOTS=1 cargo test -p stokesforge-app preferences_proto`).
     #[test]
     fn captures_des_rubriques() {
+        let _captures = verrou_captures();
         let mut harness = banc();
         for page in Page::ALL {
             aller_a(&mut harness, page.title());
