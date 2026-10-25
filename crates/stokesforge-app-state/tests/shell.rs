@@ -8898,6 +8898,18 @@ fn without_stop_the_heavy_recalculation_keeps_the_command() {
     assert!(state.snapshot().history.can_undo);
 }
 
+/// Les messages de la barre d'état, du plus ancien au plus récent. Le projet
+/// lourd pèse environ 240 Mo une fois écrit : si le dossier temporaire est plein
+/// (`Disk quota exceeded`), l'écriture échoue et seul ce message dit pourquoi
+/// (#342). À joindre aux assertions qui dépendent d'une écriture.
+fn status_messages(state: &AppState) -> String {
+    state
+        .status_history()
+        .map(|m| m.text.clone())
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
 /// Attend la fin du recalcul en cours, puis laisse l'état le relever.
 fn finish_recalculation(state: &mut AppState) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
@@ -8957,7 +8969,11 @@ fn saving_during_a_heavy_recalculation_clears_the_unsaved_mark() {
     state.dispatch(Action::Quit {
         pending_edits: false,
     });
-    assert!(state.unsaved_pending().is_none(), "plus rien à perdre");
+    assert!(
+        state.unsaved_pending().is_none(),
+        "plus rien à perdre ; messages : {}",
+        status_messages(&state)
+    );
     assert!(state.take_quit_ready());
 }
 
@@ -8996,7 +9012,13 @@ fn a_dead_session_raises_one_blocking_alert_with_a_recovery_copy() {
             .collect()
     };
     let copies = stf_files(&recovery);
-    assert_eq!(copies.len(), 1, "une copie de secours");
+    assert_eq!(
+        copies.len(),
+        1,
+        "une copie de secours ; alerte : {} ; messages : {}",
+        alert.message,
+        status_messages(&state)
+    );
     assert!(alert.message.contains(&copies[0].display().to_string()));
     let back = stokesforge_persistence::load(&copies[0]).expect("la copie se relit");
     assert_eq!(back.tree(), &tree, "le dernier état affiché");
@@ -12701,7 +12723,12 @@ mod autosave {
         assert!(copies(&recovery).is_empty());
         finish_recalculation(&mut state);
         state.poll_autosave(t0 + PERIOD + retry);
-        assert_eq!(copies(&recovery).len(), 1);
+        assert_eq!(
+            copies(&recovery).len(),
+            1,
+            "messages : {}",
+            status_messages(&state)
+        );
     }
 
     /// Dossier impossible : un seul avertissement tant que ça dure.

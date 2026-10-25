@@ -537,6 +537,19 @@ ci-dessus, en montant le dépôt en lecture seule et en copiant sa source ailleu
 **Mettre `CARGO_TARGET_DIR` sur le disque**, jamais sous `/tmp` : c'est un tmpfs en
 mémoire vive, et une compilation du workspace y pèse plus de 10 Go.
 
+**Place pour les tests lourds de `stokesforge-app-state`** (#342). Trois tests
+écrivent le « projet lourd » de `tests/shell.rs` (`heavy_formula_project`, 150
+colonnes de 200 000 valeurs, environ 240 Mo) dans `tempfile::tempdir()`, donc
+sous `TMPDIR` : `saving_during_a_heavy_recalculation_clears_the_unsaved_mark`,
+`a_dead_session_raises_one_blocking_alert_with_a_recovery_copy` et
+`autosave::pendant_un_recalcul_l_echeance_saute`. Il faut environ 1 Go libre
+dans `TMPDIR` ; sur un `/tmp` plein (`Disk quota exceeded`), poser `TMPDIR` sur
+le disque. L'application remonte l'erreur au lieu de perdre des données : ce
+n'est pas un bug. Les assertions de ces tests joignent les messages de la barre
+d'état (`status_messages`), où se lit l'erreur d'écriture. La taille du projet
+n'est pas réduite : elle fixe la durée du recalcul que les tests observent
+(attente de 200 ms dépassée).
+
 **Garder les deux CI d'accord.** Toute commande modifiée dans `.gitlab-ci.yml` ou
 `ci.yml` se répercute dans l'autre (voir la table plus haut). Un nouveau travail
 Linux s'ajoute aussi à `JOBS` dans `scripts/gitlab-status.py`, sinon son
