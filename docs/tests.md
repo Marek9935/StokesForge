@@ -504,6 +504,10 @@ la CI GitHub n'a pas fini ou que le miroir n'a pas encore reçu le commit.
 **Windows** n'est pas lancé par un simple push de `main` : dans le pipeline
 GitLab, cliquer ▶ sur `test-python-windows` (contrôles) ou `dist-windows`
 (installeur). `dist-windows` part seul sur un tag de version (`v1.0.0`).
+Les trois travaux Windows héritent de `.windows-job`, qui pose `core.longpaths`
+par l'environnement (`GIT_CONFIG_*`) : sans lui, le `git clean` de la
+récupération des sources échoue sur `.cargo/registry` (« Filename too long »)
+avant le premier script.
 
 **Reproduire un échec Linux chez soi.** Le runner (`ubuntu-latest`) diffère d'un
 poste de développement par trois points qui ont déjà causé des échecs :

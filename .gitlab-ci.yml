@@ -182,6 +182,19 @@ test-python:
     - scripts/python-vendor.sh
     - scripts/python-test.sh
 
+# Travaux du runner Windows. `CARGO_HOME` est sous le dossier du projet : au
+# travail suivant, le `git clean` de la récupération des sources doit effacer
+# `.cargo/registry`, dont certains chemins (android-activity) dépassent
+# MAX_PATH. Sans `core.longpaths`, il échoue (« Filename too long ») avant tout
+# script. Posé par l'environnement (GIT_CONFIG_*, Git ≥ 2.31), il vaut aussi
+# pour la récupération des sources, sans réglage à faire sur le poste.
+.windows-job:
+  tags: [windows]
+  variables:
+    GIT_CONFIG_COUNT: "1"
+    GIT_CONFIG_KEY_0: core.longpaths
+    GIT_CONFIG_VALUE_0: "true"
+
 # #332 : distribution Windows (installeur Inno Setup). Automatique et bloquante
 # sur un tag de version (vX.Y.Z), manuelle et non bloquante ailleurs. Prérequis
 # du runner `windows` (service ou session ouverte) : Git Bash, Rust MSVC,
@@ -191,7 +204,7 @@ test-python:
 # STOKESFORGE_DIST_SKIP_WINDOW=1 (le selftest, lui, reste exigé).
 dist-windows:
   stage: check
-  tags: [windows]
+  extends: .windows-job
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+/'
     - when: manual
@@ -208,7 +221,7 @@ dist-windows:
 # CLI contre l'interpréteur vendorisé. Manuel, lancé avant une version.
 test-python-windows:
   stage: check
-  tags: [windows]
+  extends: .windows-job
   when: manual
   allow_failure: true
   script:
@@ -223,7 +236,7 @@ test-python-windows:
 # ou sans section dans CHANGELOG.md échoue ici (scripts/release-notes.sh).
 publier:
   stage: release
-  tags: [windows]
+  extends: .windows-job
   needs: [dist-windows]
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+$/'
