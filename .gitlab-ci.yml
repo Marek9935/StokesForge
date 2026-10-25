@@ -196,7 +196,8 @@ test-python:
     GIT_CONFIG_VALUE_0: "true"
 
 # #332 : distribution Windows (installeur Inno Setup). Automatique et bloquante
-# sur un tag de version (vX.Y.Z), manuelle et non bloquante ailleurs. Prérequis
+# sur `main` et sur un tag de version, manuelle et non bloquante ailleurs
+# (branche, demande de fusion). Prérequis
 # du runner `windows` (service ou session ouverte) : Git Bash, Rust MSVC,
 # cargo-deny et cargo-about aux versions de scripts/licenses-tools.env, Inno
 # Setup 6 (ISCC.exe, cherché par $ISCC puis dans Program Files). Un runner en
@@ -207,6 +208,7 @@ dist-windows:
   extends: .windows-job
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+/'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
     - when: manual
       allow_failure: true
   script:
@@ -218,12 +220,21 @@ dist-windows:
       - dist/StokesForge-*-windows-setup.exe
 
 # Pendant Windows de `test-python` : pont, scripts, robustesse, application et
-# CLI contre l'interpréteur vendorisé. Manuel, lancé avant une version.
+# CLI contre l'interpréteur vendorisé. Automatique et bloquant sur `main` et sur
+# un tag, manuel et non bloquant ailleurs. Les tests de l'application tournent
+# un par un (RUST_TEST_THREADS=1) tant que le crash 0xc0000005 de
+# `cargo test -p stokesforge-app --features python` n'est pas identifié : en
+# série, le journal nomme le test qui plante.
 test-python-windows:
   stage: check
   extends: .windows-job
-  when: manual
-  allow_failure: true
+  variables:
+    RUST_TEST_THREADS: "1"
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+/'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - when: manual
+      allow_failure: true
   script:
     - bash scripts/python-vendor.sh
     - bash scripts/python-test.sh

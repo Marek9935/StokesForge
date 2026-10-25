@@ -458,7 +458,8 @@ runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 | `robustesse` | non | `cargo test -p stokesforge-robustesse -- --ignored` |
 | `test-python` | oui, automatique | vendorise CPython + numpy, puis `scripts/python-test.sh` |
 | `release-linux` (GitHub) | sur un tag `vX.Y.Z` | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, publie l'archive dans une release GitHub (#333) |
-| `dist-windows`, `publier` (GitLab) | sur un tag `vX.Y.Z` | installeur Windows, puis release GitLab avec les notes du CHANGELOG (#333) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
+| `test-python-windows`, `dist-windows` (GitLab) | oui, automatique sur `main` et sur un tag | tests Python Windows, puis installeur Windows |
+| `publier` (GitLab) | sur un tag `vX.Y.Z` | release GitLab avec les notes du CHANGELOG (#333) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
 
 **Ce qu'un pipeline vert ne prouve pas**, et c'est écrit en tête du fichier CI :
 `fmt`, `clippy` et `test` n'activent **jamais** la feature `python`. Tout ce qui
@@ -501,9 +502,14 @@ description, et un **commentaire du commit** donne une cinquantaine de lignes de
 journal (le script les affiche). « Pas de pipeline pour ce commit » veut dire que
 la CI GitHub n'a pas fini ou que le miroir n'a pas encore reçu le commit.
 
-**Windows** n'est pas lancé par un simple push de `main` : dans le pipeline
-GitLab, cliquer ▶ sur `test-python-windows` (contrôles) ou `dist-windows`
-(installeur). `dist-windows` part seul sur un tag de version (`v1.0.0`).
+**Windows** est automatique : un push sur `main` ou un tag de version lance
+`test-python-windows` (contrôles) et `dist-windows` (installeur) sur le runner
+GitLab `windows`. Sur une autre branche ou une demande de fusion, ils restent
+manuels (▶ dans le pipeline). Le runner est un poste en session ouverte :
+**poste éteint ou session fermée, les travaux restent « pending »** sans jamais
+échouer. Les deux se suivent l'un l'autre (un seul travail à la fois, environ
+15 min chacun à froid). `test-python-windows` pose `RUST_TEST_THREADS=1` (voir son
+commentaire dans `.gitlab-ci.yml`).
 Les trois travaux Windows héritent de `.windows-job`, qui pose `core.longpaths`
 par l'environnement (`GIT_CONFIG_*`) : sans lui, le `git clean` de la
 récupération des sources échoue sur `.cargo/registry` (« Filename too long »)

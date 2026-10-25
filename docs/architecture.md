@@ -174,8 +174,8 @@ complète). Pas de signature de code pour l'instant : Windows affiche « éditeu
 inconnu ». Les DLL Visual C++ sont livrées à côté de l'exécutable ;
 tkinter/Tcl/Tk, les tests et pip sont retirés du Python embarqué. Notices par
 plateforme (`vendor/python/licenses-linux`, `licenses-windows`). La tâche CI
-`dist-windows` est automatique sur un tag `vX.Y.Z`, manuelle sinon ;
-`test-python-windows` est manuelle. En release, `stokesforge-app` est du
+`dist-windows` et `test-python-windows` sont automatiques sur `main` et sur un tag
+`vX.Y.Z`, manuelles ailleurs. En release, `stokesforge-app` est du
 sous-système fenêtré. Les scripts
 `python-vendor.sh`, `python-config.sh` (gabarit
 `pyo3-config.windows.template.txt`) et `python-test.sh` détectent Windows.

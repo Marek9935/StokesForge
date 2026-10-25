@@ -31,7 +31,7 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
 
 - [ ] Sur le commit du tag, les travaux bloquants sont verts : `fmt`, `licenses`,
   `clippy`, `test`, `test-python` (`scripts/ci-statuts.sh <commit>`).
-- [ ] `test-python-windows` (manuel) est vert sur le même commit.
+- [ ] `test-python-windows` et `dist-windows` (automatiques sur `main` et sur un tag) sont verts sur le même commit.
 - [ ] `cargo test -p stokesforge-robustesse -- --ignored` : l'état des
   reproductions est connu et chaque échec correspond à une issue ouverte hors V1.
 
