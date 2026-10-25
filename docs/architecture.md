@@ -130,7 +130,7 @@ teste entièrement sans elle.
 
 | Feature | Crates | Ce qu'elle ajoute | Ce qu'elle exige |
 |---|---|---|---|
-| `python` | `stokesforge-python`, `stokesforge-script`, `stokesforge-app-state`, `stokesforge-app`, `stokesforge-robustesse` | PyO3, interpréteur embarqué, fil de script, console de script | `PYO3_CONFIG_FILE` (voir `scripts/python-config.sh`) et l'interpréteur vendorisé de `vendor/python/` |
+| `python` | `stokesforge-python`, `stokesforge-script`, `stokesforge-app-state`, `stokesforge-app`, `stokesforge-cli`, `stokesforge-robustesse` | PyO3, interpréteur embarqué, fil de script, console de script | `PYO3_CONFIG_FILE` (voir `scripts/python-config.sh`) et l'interpréteur vendorisé de `vendor/python/` |
 
 Sans la feature `python`, les crates concernés compilent vides — c'est la
 condition du droit d'abandonner Python sans rien démonter. Conséquence
@@ -185,8 +185,9 @@ Le préfixe embarqué y a la disposition python-build-standalone
 (`lib/python/{Lib,DLLs}`, `python312.dll` à côté de l'exécutable), prise en
 charge par `EmbeddedPython` (`cfg(windows)`). Reste à lever avant la V1 :
 recouper les notices Windows avec l'archive complète python-build-standalone
-Windows (`licenses-windows/README.md`), et prouver la distribution sur le runner
-CI (outils : Git Bash, Rust MSVC, cargo-deny, cargo-about, Inno Setup).
+Windows (`licenses-windows/README.md`). La distribution est éprouvée sur le
+runner CI (`dist-windows` et `test-python-windows`, pipeline #289 vert ; outils :
+Git Bash, Rust MSVC, cargo-deny, cargo-about, Inno Setup).
 
 ## Vocabulaire
 

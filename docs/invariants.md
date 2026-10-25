@@ -21,7 +21,7 @@ tenue par la relecture se perd.
 | 9 | Aucun objet Python ne traverse le canal de l'acteur | le marqueur `Ungil` de PyO3, à la compilation |
 | 10 | Un défaut de donnée dégrade, il ne plante pas | des états de première classe, pas des erreurs |
 | 11 | Un recalcul ciblé rend exactement le recalcul complet | l'empreinte contient toute donnée du calcul ; `b22` (oracle jumeau) et `stokesforge-session/tests/recalc_cible.rs` |
-| 12 | Un fichier `.stf` écrit par la V1 se relit jusqu'en V3, et une version plus ancienne refuse un fichier plus récent | `version::decode_body` (un bras par version), les fichiers témoins (`stokesforge-persistence/tests/fichiers_temoins.rs`), `UnsupportedVersion` |
+| 12 | Un fichier `.stf` écrit par la V1 se relit jusqu'en V3, et une version plus ancienne refuse un fichier d'un format (numéro) plus récent | `version::decode_body` (un bras par version), les fichiers témoins (`stokesforge-persistence/tests/fichiers_temoins.rs`), `UnsupportedVersion` |
 
 ---
 

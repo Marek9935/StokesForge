@@ -553,7 +553,9 @@ n'est pas réduite : elle fixe la durée du recalcul que les tests observent
 **Garder les deux CI d'accord.** Toute commande modifiée dans `.gitlab-ci.yml` ou
 `ci.yml` se répercute dans l'autre (voir la table plus haut). Un nouveau travail
 Linux s'ajoute aussi à `JOBS` dans `scripts/gitlab-status.py`, sinon son
-résultat n'est pas publié.
+résultat n'est pas publié. Exception connue : `release-linux` (tag seulement)
+n'y figure pas ; son échec se lit sur GitHub, et côté GitLab `publier` attend
+l'archive une heure avant d'échouer.
 
 ### Résultats GitHub visibles dans GitLab
 

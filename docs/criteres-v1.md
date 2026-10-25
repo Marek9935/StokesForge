@@ -8,9 +8,9 @@ constater ; le contenu de la version est dans [`CHANGELOG.md`](../CHANGELOG.md).
 
 | Promesse | Tenue par |
 |---|---|
-| Un fichier `.stf` écrit par la V1 se relit et se migre jusqu'en V3 ; un fichier plus récent est refusé avec un message clair | [`persistance.md`](persistance.md) § règle de version, [`invariants.md`](invariants.md) n° 12, fichier témoin `crates/stokesforge-persistence/tests/temoins/v1/` |
+| Un fichier `.stf` écrit par la V1 se relit et se migre jusqu'en V3 ; un fichier d'un **format** plus récent (numéro de format supérieur) est refusé avec un message clair | [`persistance.md`](persistance.md) § règle de version, [`invariants.md`](invariants.md) n° 12, fichier témoin `crates/stokesforge-persistence/tests/temoins/v1/` |
 | Un script `pyst` écrit contre la V1 continue de marcher | [`python-et-script.md`](python-et-script.md) § « API figée V1 », test `crates/stokesforge-script/tests/surface_figee.rs` |
-| L'application et son Python embarqué s'installent et démarrent sur Linux x86_64 et Windows x86_64 | `scripts/app-dist.sh`, `scripts/app-dist-windows.sh` ([`architecture.md`](architecture.md) § distributions) |
+| L'application et son Python embarqué s'installent et démarrent sur Linux x86_64 et Windows x86_64 | `scripts/app-dist.sh`, `scripts/app-dist-windows.sh` ([`architecture.md`](architecture.md), § « Où sont les binaires ») |
 
 Le reste du code n'a **aucune** promesse de compatibilité : `main` prépare la
 version majeure suivante (voir « Branches et versions » plus bas).
@@ -85,9 +85,9 @@ forme `vX.Y.Z`, versions des crates, section du CHANGELOG (`scripts/release-note
 **Non éprouvé.** Ces travaux n'ont jamais tourné sur un vrai tag : seuls les
 scripts ont été essayés en local (`release-notes.sh`, `release-linux.sh` sur une
 distribution existante, `release-publier.sh` en `STOKESFORGE_RELEASE_DRYRUN=1`).
-Un tag `v1.0.0-rc1` n'exerce que la construction Windows (`dist-windows` ; la
-release GitLab l'ignore et `release-linux` échoue sur `release-notes.sh`, ce qui
-est voulu) : à faire d'abord pour éprouver le runner, et l'installeur qu'il
+Un tag `v1.0.0-rc1` lance la CI GitHub complète et, sur GitLab, `test-python-windows`
+et `dist-windows` (leur règle accepte le suffixe `-rc1`) ; la release GitLab
+l'ignore et `release-linux` échoue sur `release-notes.sh`, ce qui est voulu : à faire d'abord pour éprouver le runner, et l'installeur qu'il
 produit sert à l'essai d'installation sur un autre poste Windows. L'essai complet
 des appels d'API (téléversement de l'archive Linux, release GitLab en
 formulaire) n'a lieu qu'au premier vrai tag ; `release-linux-televerser.sh` et
