@@ -197,7 +197,7 @@ jobs:
   # Bloquants : `publier` les attend. En cas
   # d'échec, les premières erreurs et la fin du journal sont posées en
   # annotation (lisible par l'API sans connexion). Git Bash (`shell: bash`) : les
-  # scripts sont les mêmes que sur le runner GitLab.
+  # scripts sont les mêmes que sur Linux.
   test-python-windows:
     if: github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/feature/')
     runs-on: windows-latest

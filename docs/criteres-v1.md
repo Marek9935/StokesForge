@@ -46,12 +46,15 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
   copié hors du dépôt, `stokesforge-selftest` code 0, application, console
   `pyst`/numpy/scipy, import, `.stf`, exports et glisser-déposer
   fonctionnent. Reste, pour cocher : la CI au tag, et refaire le même essai
-  avec l'archive du tag `v1.0.0-rc1` (construite sur Ubuntu par la CI).
+  avec l'archive du dernier `-rcN` (`v1.0.0-rc6` : construite sur Ubuntu par la
+  CI, dans le registre de paquets GitLab). Y constater aussi la première
+  ouverture : la démonstration s'ouvre au premier lancement, le suivant démarre
+  sur un projet vide (pour rejouer : supprimer `~/.config/StokesForge`).
 - [ ] `scripts/app-dist-windows.sh` sort 0 sur le runner Windows et l'installeur
   `StokesForge-<version>-windows-setup.exe` s'installe, démarre et se désinstalle
   sur un poste neuf : au moins une fois à la main, sur un autre ordinateur
-  Windows, avec l'installeur produit par le tag `v1.0.0-rc1` (le runner n'a pas
-  de bureau).
+  Windows, avec l'installeur du dernier `-rcN` (`v1.0.0-rc6`, même registre ; le runner
+  n'a pas de bureau), première ouverture comprise (démonstration, puis projet vide).
 - [ ] Les notices de licences sont livrées dans les deux paquets, et celles de
   Windows sont recoupées avec l'archive python-build-standalone Windows complète
   (`vendor/python/licenses-windows/README.md`).
@@ -69,9 +72,10 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
 ## Publier
 
 1. Constater les critères ci-dessus ; dater la section `## [1.0.0]` du CHANGELOG ;
-   créer le jeton qui laisse GitHub téléverser les paquets dans GitLab et y créer la release : un
-   jeton de projet GitLab (rôle Developer, portée `api`), posé comme secret
-   GitHub `GITLAB_RELEASE_TOKEN`.
+   le jeton qui laisse GitHub téléverser les paquets dans GitLab et y créer la
+   release existe déjà (jeton de projet GitLab, rôle Developer, portée `api`,
+   secret GitHub `GITLAB_RELEASE_TOKEN`) ; il **expire** : vérifier son échéance
+   avant le tag (`docs/tests.md`, « Maintenance »).
 2. Fusionner sur `main` : il n'y a pas de branche de version à créer.
 3. Poser le tag `v1.0.0` sur ce commit de `main` et le pousser vers GitLab (le
    miroir le transmet à GitHub).
@@ -101,25 +105,24 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
 Les travaux de publication refusent un tag incohérent avant tout téléversement :
 forme `vX.Y.Z`, versions des crates, section du CHANGELOG (`scripts/release-notes.sh`).
 
-**Non éprouvé.** Ces travaux n'ont jamais tourné sur un vrai tag : seuls les
-scripts ont été essayés en local (`release-notes.sh`, `release-linux.sh` sur une
-distribution existante, `release-publier.sh` en `STOKESFORGE_RELEASE_DRYRUN=1`).
-Un tag `vX.Y.Z-rcN` lance la CI GitHub complète et, aussi sur
-GitHub, `test-python-windows` et `dist-windows` (runners hébergés) ;
-`release-linux` construit l'archive Linux et la téléverse dans le registre de
-paquets GitLab (`release-notes.sh` n'y vérifie que les versions des crates) ;
-`publier` crée la release GitLab puis la supprime aussitôt (essai, le tag
-reste). Le tag `-rcN` éprouve donc les runners Windows et Linux, les deux
-téléversements (d'où l'on prend l'installeur pour l'essai sur un autre poste
-Windows) et l'appel de création de la release. Seul le contenu final des notes
-(section du CHANGELOG) n'est lu qu'au vrai tag ; `release-televerser.sh` et
-`release-publier.sh` s'essaient aussi à vide avec `STOKESFORGE_RELEASE_DRYRUN=1`.
+**Ce qui a été éprouvé, et ce qui ne l'a pas été.** Les tags `v1.0.0-rc1` à
+`-rc6` ont servi d'essais et restent comme trace (`rc1` rouge, corrigé par
+`rc2` ; `rc3` à `rc5` ont réparé `release-linux` et le téléversement Windows).
+`rc6` est entièrement vert : contrôles Linux et Windows, `release-linux`,
+`dist-windows` (archive et installeur dans le registre de paquets GitLab) et
+`publier`. Un tag `vX.Y.Z-rcN` fait tout cela, mais `release-notes.sh` n'y
+vérifie que les versions des crates, et `publier` crée la release GitLab puis
+la supprime aussitôt (le tag reste, aucune release ne reste). Seul reste non
+éprouvé le contenu final des notes (section du CHANGELOG), lu au seul vrai tag ;
+`release-televerser.sh` et `release-publier.sh` s'essaient aussi à vide avec
+`STOKESFORGE_RELEASE_DRYRUN=1`.
 
 ## Branches et versions
 
 Principe : **une seule ligne tant que rien ne diverge**, une branche de plus le
-jour où un gros chantier empêcherait de livrer un correctif. Une branche se
-crée à tout moment depuis un tag ; il est inutile d'en ouvrir une d'avance.
+jour où un gros chantier empêcherait de livrer un correctif. Une branche
+n'est jamais ouverte d'avance : `vN` se crée depuis `main` le jour du besoin,
+`release/(N-1).x` depuis le dernier tag de l'ancienne majeure.
 
 ```
  Phase 1 : une seule ligne            Phase 2 : un chantier qui casse
@@ -167,9 +170,11 @@ crée à tout moment depuis un tag ; il est inutile d'en ouvrir une d'avance.
   ou les scripts de distribution ont changé ; toujours sur ordre explicite de
   l'utilisateur. Un tag n'est posé que sur `main` ou sur `release/N.x` : la CI
   refuse sinon.
-- Aucune contrainte de rétrocompatibilité du code ; seuls les fichiers `.stf`
-  V1 restent relisibles (invariant 12) et l'API `pyst` ne change que par
-  décision explicite.
+- **Compatibilité** : le code interne n'a aucune promesse ; les deux surfaces
+  publiques suivent les numéros ci-dessus : fichiers `.stf` (invariant 12) et
+  API `pyst`, qui ne changent de façon cassante qu'à une version `X`.
+- **Qui décide `Z`, `Y` ou `X`** : l'utilisateur, au moment de demander le tag ;
+  le commit de version dédié le porte.
 - À partir de la V1, **la règle « pas de rétrocompatibilité du format en
   développement » ne s'applique plus** : tout changement de ce qui est écrit
   dans un `.stf` suit la règle de version de `persistance.md`.

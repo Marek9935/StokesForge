@@ -61,7 +61,7 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 
 - Licence (#129) : GPL-3.0-or-later avec `LICENSE-EXCEPTION`, limitée aux interfaces de la liste fermée `docs/licence-et-extensions.md` (`pyst` aujourd'hui). Une nouvelle interface couverte exige un commit explicite dans cette liste. Préserver les licences des composants tiers ; une dépendance ou un runtime modifié actualise les notices et passe `cargo deny check licenses`. Les distributions utilisent `scripts/licenses-dist.sh`. Les contributions extérieures portent le DCO de `CONTRIBUTING.md` ; il ne remplace pas un CLA pour un futur relicenciement.
 - Notices Rust : `scripts/licenses-rust.sh` ajoute les copyrights amont manquants de `vendor/crate-license-notices/`. Leur empreinte lie le rapport au `Cargo.lock` exact ; toute modification du verrou exige de revalider ces compléments avant de générer les notices.
-- `rustfmt` + `clippy -D warnings` obligatoires (CI `.gitlab-ci.yml`).
+- `rustfmt` + `clippy -D warnings` obligatoires (CI GitHub `.github/workflows/ci.yml`).
 - CI : `.github/workflows/ci.yml` (Linux et Windows, runners hébergés) reprend
   les commandes GitLab ; il construit les paquets de publication et crée la
   release GitLab (`publier`, #333). Le workflow `gitlab-status.yml` renvoie les

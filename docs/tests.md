@@ -447,10 +447,11 @@ cargo test -p stokesforge-app-state --features python --test script_panel --test
 ## CI (GitHub Actions pour Linux et Windows)
 
 Les contrôles Linux s'exécutent sur le miroir GitHub
-(`.github/workflows/ci.yml`), Windows aussi (runner hébergé `windows-latest`). Les commandes
-de `.gitlab-ci.yml` restent la référence ; les deux configurations évoluent
-ensemble. Les travaux Linux GitLab sont désactivés par défaut pour ne plus
-attendre un runner absent. `STOKESFORGE_CI_LINUX=gitlab` les réactive si un
+(`.github/workflows/ci.yml`), Windows aussi (runner hébergé `windows-latest`) :
+GitHub exécute tout, publication comprise. `.gitlab-ci.yml` ne garde que la
+définition de référence des travaux Linux, que les deux configurations
+suivent ensemble ; ils y sont désactivés par défaut pour ne plus attendre un
+runner absent. `STOKESFORGE_CI_LINUX=gitlab` les réactive si un
 runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 
 | Travail | Bloquant | Ce qu'il fait |
@@ -528,8 +529,20 @@ poste de l'auteur n'a plus besoin d'être allumé (l'ancien runner GitLab
 tests en parallèle ; seules les captures (`egui_kittest` + wgpu) s'excluent entre
 elles (voir plus bas). Le travail pose `core.longpaths` avant l'extraction :
 sans lui, le `git clean` échoue sur `.cargo/registry` (« Filename too long »).
-Ces travaux n'étant pas dans la liste de `gitlab-status.py`, leur résultat se lit
-sur GitHub, pas dans `ci-statuts.sh`.
+Ces travaux, comme `release-linux` et `publier`, n'étant pas dans la liste de
+`gitlab-status.py`, leur résultat se lit sur GitHub, pas dans `ci-statuts.sh`.
+L'API GitHub **sans connexion** est limitée à 60 requêtes par heure et par
+adresse : ne pas la scruter en boucle (une attente de CI se fait sur GitLab,
+`glab`, ou à intervalle long) ; au-delà, elle répond 403 jusqu'à l'heure suivante.
+
+**Tag et miroir.** Un tag poussé vers GitLab arrive parfois en retard sur GitHub
+(la CI n'y démarre qu'à son arrivée). Forcer l'envoi : bouton de synchronisation
+du miroir, ou `glab api -X POST projects/86104040/remote_mirrors/<id>/sync`.
+
+**Téléversement des paquets.** `scripts/release-televerser.sh` passe le jeton à
+`curl` par `-K -` (entrée standard), pas par substitution de processus : sous
+Git Bash (Windows) celle-ci échoue (curl code 26). Le jeton ne figure jamais
+dans les arguments de la commande.
 
 **Reproduire un échec Linux chez soi.** Le runner (`ubuntu-latest`) diffère d'un
 poste de développement par trois points qui ont déjà causé des échecs :
@@ -617,7 +630,11 @@ Le dépôt GitHub `Marek9935/StokesForge` et l'identifiant du projet GitLab
 dans `gitlab-status.yml` (condition `github.repository`) et dans
 `scripts/ci-statuts.sh`. Renommer l'un des deux dépôts oblige à les changer.
 
-**Maintenance.** Le jeton GitLab `github-ci-status` **expire** : à son échéance,
+**Maintenance.** Le jeton de projet GitLab du secret GitHub `GITLAB_RELEASE_TOKEN`
+(rôle Developer, portée `api` ; téléversement des paquets et création de la
+release, #333) **expire** aussi : passé l'échéance, `release-linux`, `dist-windows`
+et `publier` échouent. Le recréer dans GitLab (`Paramètres > Jetons
+d'accès`) et remplacer le secret. Le jeton GitLab `github-ci-status` **expire** : à son échéance,
 `Résultats GitLab` échoue sur GitHub (« Retour GitLab impossible ») et plus aucun
 statut n'arrive. Créer un jeton neuf (étape 1) et remplacer le secret
 `GITLAB_STATUS_TOKEN` (étape 2). Le jeton GitHub du miroir (étape 0) **expire aussi**
