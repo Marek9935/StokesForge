@@ -86,14 +86,26 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
 5. Constater : la release GitLab existe, l'installeur et l'archive se
    téléchargent depuis elle.
 
+**Variante pour une version `X.Y.Z` suivante** (`1.0.1`, `1.1.0`, `2.0.0`) : les
+étapes sont les mêmes, avec ce qui change :
+
+1. Un commit de version dédié : `version = "X.Y.Z"` dans tous les crates,
+   `cargo update --workspace`, section `## [X.Y.Z] - date` du CHANGELOG (la
+   section `[Non publié]` y est renommée et datée).
+2. CI verte sur ce commit (`scripts/ci-statuts.sh <commit>`), `test-python-windows`
+   et `dist-windows` compris.
+3. Tag `vX.Y.Z` sur ce commit de `main` (ou de `release/N.x` pour un correctif
+   d'une ancienne majeure), **sur ordre explicite de l'utilisateur**. Un
+   `-rcN` d'abord seulement dans les cas de « Branches et versions ».
+
 Les travaux de publication refusent un tag incohérent avant tout téléversement :
 forme `vX.Y.Z`, versions des crates, section du CHANGELOG (`scripts/release-notes.sh`).
 
 **Non éprouvé.** Ces travaux n'ont jamais tourné sur un vrai tag : seuls les
 scripts ont été essayés en local (`release-notes.sh`, `release-linux.sh` sur une
 distribution existante, `release-publier.sh` en `STOKESFORGE_RELEASE_DRYRUN=1`).
-Un tag `vX.Y.Z-rcN` lance la CI GitHub complète et, sur GitLab,
-`test-python-windows` et `dist-windows` (GitHub, runners hébergés) ;
+Un tag `vX.Y.Z-rcN` lance la CI GitHub complète et, aussi sur
+GitHub, `test-python-windows` et `dist-windows` (runners hébergés) ;
 `release-linux` construit l'archive Linux et la téléverse dans le registre de
 paquets GitLab (`release-notes.sh` n'y vérifie que les versions des crates) ;
 `publier` crée la release GitLab puis la supprime aussitôt (essai, le tag
@@ -117,20 +129,44 @@ crée à tout moment depuis un tag ; il est inutile d'en ouvrir une d'avance.
 ```
 
 - **`main`** : la ligne livrable. Les corrections, les petits ajouts sans
-  risque et leurs tags (`v1.0.1`, `v1.1.0`…) y sont posés directement.
-- **Numéros** : `Z` (`1.0.1`) = correction seule ; `Y` (`1.1.0`) = fonctionnalité
-  ajoutée sans rien casser ; `X` (`2.0.0`) = rupture de compatibilité.
+  risque et leurs tags (`v1.0.1`, `v1.1.0`…) y sont posés directement. Elle est
+  protégée (pas de force-push, voir `docs/tests.md` § CI).
+- **Numéros** : `Z` (`1.0.1`) = correction, ou champ additif du format `.stf`
+  (voir `persistance.md` : risque et annonce au CHANGELOG) ; `Y` (`1.1.0`) =
+  fonctionnalité ajoutée sans rien casser ; `X` (`2.0.0`) = rupture de
+  compatibilité, dont tout changement cassant du format (`FORMAT_VERSION`
+  monte).
+- **Branches de fonctionnalité** : `feature/<n>-<sujet>`, une par ticket, courtes
+  (quelques jours). Avant de fusionner, on fusionne `main` dedans. Elle entre
+  dans `main` par fusion `--no-ff`, commit « Fusion #N : … (Closes #N) ».
+  **Jamais** de squash ni de rebase d'une branche partagée.
 - **Ouvrir `vN`** (ex. `v2`) quand un chantier laisserait le code inutilisable
   pendant des semaines (changement de bibliothèque d'interface, refonte du
   modèle). Critère : *peut-on encore sortir un correctif de `main` pendant les
   travaux ?* Sinon, branche. Un ajout de fonctionnalité n'en demande pas.
-- **Les correctifs se font toujours sur `main`**, dans un commit isolé, puis
-  arrivent dans `vN` par **fusion** de `main` (pas par copie à la main). Fusionner
-  souvent, chaque semaine environ : une branche longue sans fusion donne des
-  conflits énormes.
+  **Une seule branche `vN` à la fois.** Tant qu'elle est ouverte, `main` ne
+  reçoit que des correctifs et de petits ajouts ; les fonctionnalités vont dans
+  `vN`. Dans `vN`, les commits disent « Refs #N » : « Closes » ne ferme
+  l'issue qu'à la fusion dans `main`.
+- **Le bug se corrige là où il est né** : un bug présent sur `main` se corrige
+  sur `main`, dans un commit isolé, et arrive dans `vN` par **fusion** de `main`
+  (pas par copie à la main) ; un bug de `release/1.x` absent de `main` se
+  corrige directement sur `release/1.x`, sans cherry-pick. Fusionner `main`
+  dans `vN` souvent, chaque semaine environ : une branche longue sans fusion
+  donne des conflits énormes. `main` → `vN` se fait toujours par fusion.
+- **Chaque correctif porte son test de régression.** À la fusion `main` → `vN`
+  en conflit, on garde le test et on réécrit la correction dans le code de `vN`.
+- **Format `.stf` gelé** : dès que le format N+1 existe sur une branche, le
+  format N est gelé partout ailleurs (rien n'y change plus), sinon un fichier
+  réenregistré perdrait des données sans message.
 - **Fin du chantier** : `vN` est fusionnée dans `main`, tag `vN.0.0`. Si la
   version précédente doit rester maintenue, créer alors `release/(N-1).x` depuis
-  son dernier tag ; les correctifs y arrivent par cherry-pick depuis `main`.
+  son dernier tag ; les correctifs nés sur `main` y arrivent par cherry-pick
+  (la ligne du CHANGELOG avec).
+- **Tags `-rcN`** : après la V1, seulement avant une version `X` ou quand la CI
+  ou les scripts de distribution ont changé ; toujours sur ordre explicite de
+  l'utilisateur. Un tag n'est posé que sur `main` ou sur `release/N.x` : la CI
+  refuse sinon.
 - Aucune contrainte de rétrocompatibilité du code ; seuls les fichiers `.stf`
   V1 restent relisibles (invariant 12) et l'API `pyst` ne change que par
   décision explicite.

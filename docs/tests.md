@@ -461,9 +461,20 @@ runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 | `test` | oui | `cargo test --workspace` |
 | `robustesse` | non | `cargo test -p stokesforge-robustesse -- --ignored` |
 | `test-python` | oui, automatique | vendorise CPython + numpy, puis `scripts/python-test.sh` |
-| `release-linux` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN` (le `-rcN` ne crée pas de release) | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, téléverse l'archive dans le registre de paquets GitLab, sans release GitHub (#333) |
-| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatique sur `main` et sur un tag, bloquants (#333) | mêmes contrôles sur un poste propre ; sur un tag, `dist-windows` téléverse l'installeur dans le registre GitLab (`scripts/release-televerser.sh windows`) |
+| `release-linux` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN` (sur un `-rcN`, `publier` crée la release puis la supprime ; aucune release ne reste) | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, téléverse l'archive dans le registre de paquets GitLab, sans release GitHub (#333) |
+| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatique sur `main`, `vN`, `release/**` et sur un tag (pas sur `feature/**`), bloquants (#333) | mêmes contrôles sur un poste propre ; sur un tag, `dist-windows` téléverse l'installeur dans le registre GitLab (`scripts/release-televerser.sh windows`) |
 | `publier` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN`, après tous les contrôles bloquants et les deux téléversements de paquets | release GitLab avec les notes du CHANGELOG (#333) ; un `-rcN` crée puis supprime la release (essai) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
+
+Les travaux Linux tournent sur les branches poussées `main`, `feature/**`,
+`v[0-9]*`, `release/**` et sur les tags `v*`. `release-linux` et `publier`
+refusent un tag dont le commit n'est ancêtre ni de `origin/main` ni d'une
+branche `release/*`.
+
+**Réglages hors dépôt** (à faire à la main, rien dans le code ne les pose) :
+- `main` protégée, sans force-push, sur GitLab et sur GitHub ;
+- tags `v*` protégés (création réservée au rôle Maintainer) sur GitLab ;
+- `main` branche par défaut sur GitLab : c'est ce qui rend « Closes #N »
+  opérant.
 
 **Ce qu'un pipeline vert ne prouve pas**, et c'est écrit en tête du fichier CI :
 `fmt`, `clippy` et `test` n'activent **jamais** la feature `python`. Tout ce qui

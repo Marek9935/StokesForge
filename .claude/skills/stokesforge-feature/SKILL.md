@@ -9,6 +9,8 @@ A feature almost always spans several layers. This skill keeps each piece in the
 
 ## 1. Before writing code
 
+Branch `feature/<n>-<sujet>`, one per issue, short; merge `main` into it, then merge it into `main` with `--no-ff` (`docs/criteres-v1.md` § Branches et versions).
+
 1. `git status --short`, then `git diff` on the target files: preserve the user's work in progress.
 2. Read the domain page first, never the whole workspace: `.claude/rules.md` § Routage, `docs/invariants.md`, then the domain section of `.claude/conventions.md` (table in `CLAUDE.md`).
 3. Search what exists (`rg`): an `Action`, a `Command`, a helper that already does most of it. Reuse beats writing.

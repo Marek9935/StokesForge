@@ -193,6 +193,17 @@ après la V1 : **ce que la V1 écrit**, et ce qu'elle fait d'un fichier plus ré
 | ajout d'un champ `#[serde(default)]`, d'une variante lue avec repli | reste (additif) ; régénérer le témoin courant |
 | retrait ou renommage d'un champ ou d'une variante, changement de sens d'une valeur, de l'unité, de l'ordre d'une liste positionnelle | **monte** |
 
+**Risque d'un champ additif.** Il peut sortir dans une version `Z` (1.0.1) ou `Y`,
+sans monter `FORMAT_VERSION`. Mais une version plus ancienne qui relit puis
+**réenregistre** le fichier ignore le champ et le perd, sans message. Chaque
+champ additif est donc annoncé au CHANGELOG. Un changement cassant du format
+monte `FORMAT_VERSION` et exige une version `X`.
+
+**Format N gelé.** Dès que le format N+1 existe sur une branche (`vN`), le format
+N est gelé sur toutes les autres : y toucher produirait des fichiers que la
+branche N+1 migre mal, ou une donnée perdue sans message. Seule la branche
+du format N+1 change le schéma.
+
 Quand le numéro monte (V → V+1) : copier le schéma de V en `schema/vV.rs`, y
 ajouter la fonction `vV → courant`, ajouter son bras dans `version::decode_body`,
 figer le témoin (`tests/temoins/vV/`, jamais modifié) et créer le témoin

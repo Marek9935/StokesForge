@@ -11,7 +11,15 @@ n'a pas de promesse de compatibilité.
 
 Une section par version, titrée `## [X.Y.Z] - date`. Le travail de publication
 (`scripts/release-notes.sh`) lit la section de la version du tag et refuse un
-tag dont la section est absente ou vide.
+tag dont la section est absente, vide ou encore « à dater » (toléré sur un
+`-rcN`).
+
+Qui remplit `[Non publié]` : chaque changement visible de l'utilisateur y ajoute
+une ligne, dans le commit qui le porte. Le commit de version renomme cette
+section en `[X.Y.Z] - date` et en rouvre une vide. Un correctif repris par
+cherry-pick vers `release/N.x` y porte aussi sa ligne. Un champ additif du
+format `.stf` y est annoncé (une version plus ancienne qui réenregistre le
+fichier le perd sans message, voir `docs/persistance.md`).
 
 ## [Non publié]
 
