@@ -166,7 +166,7 @@ crates et à une section de `CHANGELOG.md`, et imprime les notes ;
 le registre de paquets GitLab ; `scripts/release-publier.sh` crée la release
 GitLab, qui lie les deux. Linux et Windows se construisent sur GitHub (les
 travaux GitLab Windows restent en parallèle le temps de la mise au point), et
-tout se publie sur GitLab : [`criteres-v1.md`](criteres-v1.md).
+tout se publie sur GitLab (la release est créée par le travail `publier` de GitHub) : [`criteres-v1.md`](criteres-v1.md).
 
 **Windows (#332).**
 `scripts/app-dist-windows.sh` (Git Bash) est le pendant de `app-dist.sh` : il

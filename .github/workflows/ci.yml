@@ -133,12 +133,10 @@ jobs:
   # contrôles bloquants verts : vérifie le tag (versions des crates, section de
   # CHANGELOG.md), assemble et éprouve la distribution, téléverse l'archive dans
   # le registre de paquets de GitLab. Aucune release GitHub : GitHub n'est qu'un
-  # miroir de GitLab, où `publier` (.gitlab-ci.yml) lie l'archive à la release,
-  # avec l'installeur Windows de `dist-windows`.
+  # miroir de GitLab, où le travail `publier` ci-dessous crée la release et y lie
+  # l'archive et l'installeur Windows de `dist-windows`.
   release-linux:
-    # MISE AU POINT (à retirer) : aussi sur `main`, sans notes ni téléversement,
-    # pour itérer sans poser un tag à chaque essai (rc3 a échoué dans app-dist.sh).
-    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [fmt, licenses, clippy, test, test-python]
     runs-on: ubuntu-latest
     permissions:
@@ -146,7 +144,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Tag et notes
-        if: startsWith(github.ref, 'refs/tags/v')
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
       - uses: Swatinem/rust-cache@v2
       - uses: actions/cache@v4
@@ -175,24 +172,20 @@ jobs:
           fi
           exit "$code"
       - run: scripts/release-linux.sh "${GITHUB_REF_NAME}"
-        if: startsWith(github.ref, 'refs/tags/v')
       - name: Archive dans GitLab
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
         run: scripts/release-televerser.sh linux "$GITHUB_REF_NAME"
 
   # #333 : Windows sur un runner hébergé (poste propre, parallèle à Linux),
   # pendant des travaux GitLab `test-python-windows` et `dist-windows`, qui
-  # restent actifs le temps de la mise au point. `continue-on-error` tant que ces
-  # deux travaux n'ont pas fait leurs preuves ; en cas d'échec, les premières
-  # erreurs et la fin du journal sont posées en annotation (lisible par l'API
-  # sans connexion). Git Bash (`shell: bash`) : les scripts sont les mêmes que
-  # sur le runner GitLab.
+  # restent actifs en parallèle. Bloquants : `publier` les attend. En cas
+  # d'échec, les premières erreurs et la fin du journal sont posées en
+  # annotation (lisible par l'API sans connexion). Git Bash (`shell: bash`) : les
+  # scripts sont les mêmes que sur le runner GitLab.
   test-python-windows:
     if: github.event_name == 'push'
     runs-on: windows-latest
-    continue-on-error: true
     defaults:
       run:
         shell: bash
@@ -219,7 +212,6 @@ jobs:
   dist-windows:
     if: github.event_name == 'push'
     runs-on: windows-latest
-    continue-on-error: true
     defaults:
       run:
         shell: bash
@@ -272,3 +264,20 @@ jobs:
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
         run: scripts/release-televerser.sh windows "$GITHUB_REF_NAME"
+
+  # #333 : release GitLab. Sur un tag vX.Y.Z ou vX.Y.Z-rcN, quand les contrôles
+  # bloquants (Linux et Windows) et les deux téléversements de paquets sont
+  # faits. Un -rcN est un essai : la release est créée puis supprimée (voir
+  # scripts/release-publier.sh), le tag reste. Ne dépend d'aucun runner GitLab.
+  publier:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [fmt, licenses, clippy, test, test-python, robustesse, test-python-windows, release-linux, dist-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release GitLab
+        env:
+          GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
+        run: scripts/release-publier.sh "$GITHUB_REF_NAME"

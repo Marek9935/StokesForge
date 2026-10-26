@@ -464,7 +464,7 @@ runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 | `release-linux` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN` (le `-rcN` ne crée pas de release) | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, téléverse l'archive dans le registre de paquets GitLab, sans release GitHub (#333) |
 | `test-python-windows`, `dist-windows` (GitLab) | oui, automatique sur `main` et sur un tag | tests Python Windows, puis installeur Windows |
 | `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatique sur `main` et sur un tag, `continue-on-error` en mise au point (#333) | mêmes contrôles sur un poste propre ; sur un tag, `dist-windows` téléverse l'installeur dans le registre GitLab (`scripts/release-televerser.sh windows`) |
-| `publier` (GitLab) | sur un tag `vX.Y.Z` | release GitLab avec les notes du CHANGELOG (#333) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
+| `publier` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN`, après tous les contrôles bloquants et les deux téléversements de paquets | release GitLab avec les notes du CHANGELOG (#333) ; un `-rcN` crée puis supprime la release (essai) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
 
 **Ce qu'un pipeline vert ne prouve pas**, et c'est écrit en tête du fichier CI :
 `fmt`, `clippy` et `test` n'activent **jamais** la feature `python`. Tout ce qui
@@ -556,9 +556,9 @@ n'est pas réduite : elle fixe la durée du recalcul que les tests observent
 **Garder les deux CI d'accord.** Toute commande modifiée dans `.gitlab-ci.yml` ou
 `ci.yml` se répercute dans l'autre (voir la table plus haut). Un nouveau travail
 Linux s'ajoute aussi à `JOBS` dans `scripts/gitlab-status.py`, sinon son
-résultat n'est pas publié. Exception connue : `release-linux` (tag seulement)
-n'y figure pas ; son échec se lit sur GitHub, et côté GitLab `publier` attend
-l'archive une heure avant d'échouer.
+résultat n'est pas publié. Exception connue : `release-linux`, `publier` et les
+travaux Windows de GitHub n'y figurent pas ; leur échec se lit sur GitHub
+(annotations lisibles par l'API sans connexion).
 
 ### Résultats GitHub visibles dans GitLab
 
