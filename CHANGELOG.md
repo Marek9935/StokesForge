@@ -23,7 +23,7 @@ fichier le perd sans message, voir `docs/persistance.md`).
 
 ## [Non publié]
 
-## [1.0.0] - à dater à la publication
+## [1.0.0] - 2026-10-27
 
 Première version publiée. Portage de StokesForge de Python/Qt vers Rust
 (l'ancienne implémentation reste au tag `legacy-python`).

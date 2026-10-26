@@ -22,22 +22,22 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
 
 ### Contenu
 
-- [ ] Toutes les issues du jalon V1 sont fermées (`glab issue list --milestone V1`
+- [x] Toutes les issues du jalon V1 sont fermées (`glab issue list --milestone V1`
   ne rend rien).
-- [ ] Aucune issue ouverte étiquetée `bug` ne touche la perte de données, le
+- [x] Aucune issue ouverte étiquetée `bug` ne touche la perte de données, le
   format `.stf` ou le pont Python (`glab issue list --label bug`).
 
 ### Qualité
 
-- [ ] Sur le commit du tag, les travaux bloquants sont verts : `fmt`, `licenses`,
+- [x] Sur le commit du tag, les travaux bloquants sont verts : `fmt`, `licenses`,
   `clippy`, `test`, `test-python` (`scripts/ci-statuts.sh <commit>`).
-- [ ] `test-python-windows` et `dist-windows` (automatiques sur `main` et sur un tag) sont verts sur le même commit.
-- [ ] `cargo test -p stokesforge-robustesse -- --ignored` ne rend aucun échec
+- [x] `test-python-windows` et `dist-windows` (automatiques sur `main` et sur un tag) sont verts sur le même commit.
+- [x] `cargo test -p stokesforge-robustesse -- --ignored` ne rend aucun échec
   (zéro rouge : plus aucun `#[ignore]` ne reste, voir `docs/tests.md`).
 
 ### Distribution
 
-- [ ] `scripts/app-dist.sh` sort 0 sur Linux : la fenêtre s'ouvre et se ferme,
+- [x] `scripts/app-dist.sh` sort 0 sur Linux : la fenêtre s'ouvre et se ferme,
   `stokesforge-selftest` passe, depuis le paquet. La CI le fait sous écran
   virtuel (xvfb) au tag ; avant le tag, l'essayer aussi à la main sur un bureau
   Wayland réel. Essai à la main fait le 2026-10-26 sur Ubuntu 26.04 (GNOME,
@@ -50,23 +50,23 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
   CI, dans le registre de paquets GitLab). Y constater aussi la première
   ouverture : la démonstration s'ouvre au premier lancement, le suivant démarre
   sur un projet vide (pour rejouer : supprimer `~/.config/StokesForge`).
-- [ ] `scripts/app-dist-windows.sh` sort 0 sur le runner Windows et l'installeur
+- [x] `scripts/app-dist-windows.sh` sort 0 sur le runner Windows et l'installeur
   `StokesForge-<version>-windows-setup.exe` s'installe, démarre et se désinstalle
   sur un poste neuf : au moins une fois à la main, sur un autre ordinateur
   Windows, avec l'installeur du dernier `-rcN` (`v1.0.0-rc6`, même registre ; le runner
   n'a pas de bureau), première ouverture comprise (démonstration, puis projet vide).
-- [ ] Les notices de licences sont livrées dans les deux paquets, et celles de
+- [x] Les notices de licences sont livrées dans les deux paquets, et celles de
   Windows sont recoupées avec l'archive python-build-standalone Windows complète
   (`vendor/python/licenses-windows/README.md`).
-- [ ] Windows affiche « éditeur inconnu » (pas de signature de code) : assumé
+- [x] Windows affiche « éditeur inconnu » (pas de signature de code) : assumé
   (décision de la V1) et écrit dans les notes de version, section « Installation
   sous Windows » de `CHANGELOG.md`.
 
 ### Version et documentation
 
-- [ ] Tous les crates sont en `1.0.0` (`scripts/release-notes.sh v1.0.0` le vérifie).
-- [ ] `CHANGELOG.md` a une section `## [1.0.0]` datée, sans « à dater ».
-- [ ] Les pages de `docs/` citées par les promesses ci-dessus décrivent le code
+- [x] Tous les crates sont en `1.0.0` (`scripts/release-notes.sh v1.0.0` le vérifie).
+- [x] `CHANGELOG.md` a une section `## [1.0.0]` datée, sans « à dater ».
+- [x] Les pages de `docs/` citées par les promesses ci-dessus décrivent le code
   tel qu'il est (relecture, pas de renvoi à une issue encore ouverte).
 
 ## Publier
