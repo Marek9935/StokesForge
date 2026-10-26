@@ -75,8 +75,7 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
 2. Fusionner sur `main`, puis créer la branche `release/1.x` à ce commit.
 3. Poser le tag `v1.0.0` sur `release/1.x` et le pousser vers GitLab (le miroir
    le transmet à GitHub).
-4. Le tag déclenche sur GitHub (GitLab garde `test-python-windows` et
-   `dist-windows` en parallèle, sur le poste de l'auteur) :
+4. Le tag déclenche, sur GitHub seulement (le miroir le transmet) :
    - les contrôles bloquants, Linux et Windows ;
    - `release-linux` et `dist-windows` : archive
      `StokesForge-1.0.0-linux-x86_64.tar.gz` et installeur
@@ -94,7 +93,7 @@ forme `vX.Y.Z`, versions des crates, section du CHANGELOG (`scripts/release-note
 scripts ont été essayés en local (`release-notes.sh`, `release-linux.sh` sur une
 distribution existante, `release-publier.sh` en `STOKESFORGE_RELEASE_DRYRUN=1`).
 Un tag `vX.Y.Z-rcN` lance la CI GitHub complète et, sur GitLab,
-`test-python-windows` et `dist-windows` (leur règle accepte le suffixe) ;
+`test-python-windows` et `dist-windows` (GitHub, runners hébergés) ;
 `release-linux` construit l'archive Linux et la téléverse dans le registre de
 paquets GitLab (`release-notes.sh` n'y vérifie que les versions des crates) ;
 `publier` crée la release GitLab puis la supprime aussitôt (essai, le tag

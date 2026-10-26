@@ -1,9 +1,11 @@
-# CI Linux sur GitHub Actions (miroir du dépôt GitLab).
+# CI sur GitHub Actions (miroir du dépôt GitLab), Linux et Windows.
 #
 # Reprend les travaux `tags: [linux]` de `.gitlab-ci.yml`, désactivés par défaut
 # côté GitLab faute de runner Linux. Le fichier GitLab fait foi : toute
 # modification de ses commandes se répercute ici. Les travaux Windows
-# (`dist-windows`, `test-python-windows`) restent sur le runner GitLab.
+# (`dist-windows`, `test-python-windows`) et la publication (`release-linux`,
+# `publier`) ne vivent qu'ici, sur des runners hébergés (#333) : GitLab n'a plus
+# de runner.
 #
 # Comme côté GitLab, `fmt`, `clippy` et `test` n'activent jamais la feature
 # `python` : seul `test-python` exerce le pont PyO3.
@@ -177,9 +179,8 @@ jobs:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
         run: scripts/release-televerser.sh linux "$GITHUB_REF_NAME"
 
-  # #333 : Windows sur un runner hébergé (poste propre, parallèle à Linux),
-  # pendant des travaux GitLab `test-python-windows` et `dist-windows`, qui
-  # restent actifs en parallèle. Bloquants : `publier` les attend. En cas
+  # #333 : Windows sur un runner hébergé (poste propre, parallèle à Linux).
+  # Bloquants : `publier` les attend. En cas
   # d'échec, les premières erreurs et la fin du journal sont posées en
   # annotation (lisible par l'API sans connexion). Git Bash (`shell: bash`) : les
   # scripts sont les mêmes que sur le runner GitLab.

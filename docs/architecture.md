@@ -164,9 +164,8 @@ Les `scripts/*.sh` de la racine assemblent et relancent les distributions
 crates et à une section de `CHANGELOG.md`, et imprime les notes ;
 `scripts/release-televerser.sh linux|windows` envoie l'archive ou l'installeur dans
 le registre de paquets GitLab ; `scripts/release-publier.sh` crée la release
-GitLab, qui lie les deux. Linux et Windows se construisent sur GitHub (les
-travaux GitLab Windows restent en parallèle le temps de la mise au point), et
-tout se publie sur GitLab (la release est créée par le travail `publier` de GitHub) : [`criteres-v1.md`](criteres-v1.md).
+GitLab, qui lie les deux. Linux et Windows se construisent sur GitHub
+(runners hébergés), et tout se publie sur GitLab (la release est créée par le travail `publier` de GitHub) : [`criteres-v1.md`](criteres-v1.md).
 
 **Windows (#332).**
 `scripts/app-dist-windows.sh` (Git Bash) est le pendant de `app-dist.sh` : il
@@ -176,9 +175,9 @@ droits d'administrateur, association « Ouvrir avec » des `.stf`, désinstallat
 complète). Pas de signature de code pour l'instant : Windows affiche « éditeur
 inconnu ». Les DLL Visual C++ sont livrées à côté de l'exécutable ;
 tkinter/Tcl/Tk, les tests et pip sont retirés du Python embarqué. Notices par
-plateforme (`vendor/python/licenses-linux`, `licenses-windows`). La tâche CI
-`dist-windows` et `test-python-windows` sont automatiques sur `main` et sur un tag
-`vX.Y.Z`, manuelles ailleurs. En release, `stokesforge-app` est du
+plateforme (`vendor/python/licenses-linux`, `licenses-windows`). Les travaux CI
+GitHub `dist-windows` et `test-python-windows` sont automatiques sur `main` et
+sur un tag `vX.Y.Z`. En release, `stokesforge-app` est du
 sous-système fenêtré. Les scripts
 `python-vendor.sh`, `python-config.sh` (gabarit
 `pyo3-config.windows.template.txt`) et `python-test.sh` détectent Windows.
@@ -186,8 +185,8 @@ Le préfixe embarqué y a la disposition python-build-standalone
 (`lib/python/{Lib,DLLs}`, `python312.dll` à côté de l'exécutable), prise en
 charge par `EmbeddedPython` (`cfg(windows)`). Reste à lever avant la V1 :
 recouper les notices Windows avec l'archive complète python-build-standalone
-Windows (`licenses-windows/README.md`). La distribution est éprouvée sur le
-runner CI (`dist-windows` et `test-python-windows`, pipeline #289 vert ; outils :
+Windows (`licenses-windows/README.md`). La distribution est éprouvée sur un
+runner hébergé GitHub (`dist-windows` et `test-python-windows` ; outils :
 Git Bash, Rust MSVC, cargo-deny, cargo-about, Inno Setup).
 
 ## Vocabulaire

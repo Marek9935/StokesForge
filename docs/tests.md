@@ -444,10 +444,10 @@ Avec l'environnement embarqué décrit dans [`.codex/README.md`](../.codex/READM
 cargo test -p stokesforge-app-state --features python --test script_panel --test script_bridge_lazy
 ```
 
-## CI (GitHub Actions pour Linux, GitLab pour Windows)
+## CI (GitHub Actions pour Linux et Windows)
 
 Les contrôles Linux s'exécutent sur le miroir GitHub
-(`.github/workflows/ci.yml`), Windows reste sur le runner GitLab. Les commandes
+(`.github/workflows/ci.yml`), Windows aussi (runner hébergé `windows-latest`). Les commandes
 de `.gitlab-ci.yml` restent la référence ; les deux configurations évoluent
 ensemble. Les travaux Linux GitLab sont désactivés par défaut pour ne plus
 attendre un runner absent. `STOKESFORGE_CI_LINUX=gitlab` les réactive si un
@@ -462,8 +462,7 @@ runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 | `robustesse` | non | `cargo test -p stokesforge-robustesse -- --ignored` |
 | `test-python` | oui, automatique | vendorise CPython + numpy, puis `scripts/python-test.sh` |
 | `release-linux` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN` (le `-rcN` ne crée pas de release) | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, téléverse l'archive dans le registre de paquets GitLab, sans release GitHub (#333) |
-| `test-python-windows`, `dist-windows` (GitLab) | oui, automatique sur `main` et sur un tag | tests Python Windows, puis installeur Windows |
-| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatique sur `main` et sur un tag, `continue-on-error` en mise au point (#333) | mêmes contrôles sur un poste propre ; sur un tag, `dist-windows` téléverse l'installeur dans le registre GitLab (`scripts/release-televerser.sh windows`) |
+| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatique sur `main` et sur un tag, bloquants (#333) | mêmes contrôles sur un poste propre ; sur un tag, `dist-windows` téléverse l'installeur dans le registre GitLab (`scripts/release-televerser.sh windows`) |
 | `publier` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN`, après tous les contrôles bloquants et les deux téléversements de paquets | release GitLab avec les notes du CHANGELOG (#333) ; un `-rcN` crée puis supprime la release (essai) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
 
 **Ce qu'un pipeline vert ne prouve pas**, et c'est écrit en tête du fichier CI :
@@ -507,18 +506,19 @@ description, et un **commentaire du commit** donne une cinquantaine de lignes de
 journal (le script les affiche). « Pas de pipeline pour ce commit » veut dire que
 la CI GitHub n'a pas fini ou que le miroir n'a pas encore reçu le commit.
 
-**Windows** est automatique : un push sur `main` ou un tag de version lance
-`test-python-windows` (contrôles) et `dist-windows` (installeur) sur le runner
-GitLab `windows`. Sur une autre branche ou une demande de fusion, ils restent
-manuels (▶ dans le pipeline). Le runner est un poste en session ouverte :
-**poste éteint ou session fermée, les travaux restent « pending »** sans jamais
-échouer. Les deux se suivent l'un l'autre (un seul travail à la fois, environ
-15 min chacun à froid). `test-python-windows` lance les tests en parallèle ; seules
-les captures (`egui_kittest` + wgpu) s'excluent entre elles (voir plus bas).
-Les trois travaux Windows héritent de `.windows-job`, qui pose `core.longpaths`
-par l'environnement (`GIT_CONFIG_*`) : sans lui, le `git clean` de la
-récupération des sources échoue sur `.cargo/registry` (« Filename too long »)
-avant le premier script.
+**Windows** est automatique, sur GitHub : un push sur `main` ou un tag de version
+lance `test-python-windows` (contrôles) et `dist-windows` (installeur) sur un
+runner hébergé `windows-latest`, en parallèle de Linux (Git Bash,
+`shell: bash` : mêmes scripts que partout). Ils sont bloquants, `publier` les
+attend ; en cas d'échec, les premières erreurs sont posées en **annotation** (lisible par
+l'API sans connexion, voir ci-dessous). Plus aucun runner GitLab n'y sert : le
+poste de l'auteur n'a plus besoin d'être allumé (l'ancien runner GitLab
+`windows` et ses travaux, #333, sont retirés). `test-python-windows` lance les
+tests en parallèle ; seules les captures (`egui_kittest` + wgpu) s'excluent entre
+elles (voir plus bas). Le travail pose `core.longpaths` avant l'extraction :
+sans lui, le `git clean` échoue sur `.cargo/registry` (« Filename too long »).
+Ces travaux n'étant pas dans la liste de `gitlab-status.py`, leur résultat se lit
+sur GitHub, pas dans `ci-statuts.sh`.
 
 **Reproduire un échec Linux chez soi.** Le runner (`ubuntu-latest`) diffère d'un
 poste de développement par trois points qui ont déjà causé des échecs :

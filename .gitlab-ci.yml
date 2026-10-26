@@ -19,9 +19,11 @@ stages:
   - check
 
 # Runners : seuls les runners perso servent (partagés désactivés dans GitLab).
-# Les travaux Linux s'exécutent sur GitHub, qui retourne leurs statuts externes.
-# Poser STOKESFORGE_CI_LINUX=gitlab pour les réactiver ici avec un runner Linux.
-# Windows reste exécuté sur le runner GitLab `tags: [windows]`.
+# Les travaux Linux **et Windows** s'exécutent sur GitHub (`.github/workflows/ci.yml`,
+# runners hébergés), qui retourne leurs statuts externes ; la release GitLab y
+# est aussi créée (travail `publier`, #333). Poser STOKESFORGE_CI_LINUX=gitlab
+# pour réactiver les travaux Linux ici avec un runner Linux. Plus aucun runner
+# Windows GitLab n'est nécessaire.
 
 variables:
   STOKESFORGE_CI_LINUX: "github"
@@ -172,58 +174,3 @@ test-python:
   script:
     - scripts/python-vendor.sh
     - scripts/python-test.sh
-
-# Travaux du runner Windows. `CARGO_HOME` est sous le dossier du projet : au
-# travail suivant, le `git clean` de la récupération des sources doit effacer
-# `.cargo/registry`, dont certains chemins (android-activity) dépassent
-# MAX_PATH. Sans `core.longpaths`, il échoue (« Filename too long ») avant tout
-# script. Posé par l'environnement (GIT_CONFIG_*, Git ≥ 2.31), il vaut aussi
-# pour la récupération des sources, sans réglage à faire sur le poste.
-.windows-job:
-  tags: [windows]
-  variables:
-    GIT_CONFIG_COUNT: "1"
-    GIT_CONFIG_KEY_0: core.longpaths
-    GIT_CONFIG_VALUE_0: "true"
-
-# #332 : distribution Windows (installeur Inno Setup). Automatique et bloquante
-# sur `main` et sur un tag de version, manuelle et non bloquante ailleurs
-# (branche, demande de fusion). Prérequis
-# du runner `windows` (service ou session ouverte) : Git Bash, Rust MSVC,
-# cargo-deny et cargo-about aux versions de scripts/licenses-tools.env, Inno
-# Setup 6 (ISCC.exe, cherché par $ISCC puis dans Program Files). Un runner en
-# service Windows n'a pas de bureau : si la fenêtre ne s'y ouvre pas, poser
-# STOKESFORGE_DIST_SKIP_WINDOW=1 (le selftest, lui, reste exigé).
-dist-windows:
-  stage: check
-  extends: .windows-job
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+/'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - when: manual
-      allow_failure: true
-  script:
-    - if [ -n "$CI_COMMIT_TAG" ]; then export STOKESFORGE_VERSION="${CI_COMMIT_TAG#v}"; fi
-    - bash scripts/python-vendor.sh
-    - bash scripts/app-dist-windows.sh
-  artifacts:
-    paths:
-      - dist/StokesForge-*-windows-setup.exe
-
-# Pendant Windows de `test-python` : pont, scripts, robustesse, application et
-# CLI contre l'interpréteur vendorisé. Automatique et bloquant sur `main` et sur
-# un tag, manuel et non bloquant ailleurs. Les tests de l'application tournent
-# en parallèle : le crash 0xc0000005 d'autrefois venait de deux captures
-# `egui_kittest` (wgpu) simultanées, qui plantent `d3d10warp.dll` (WARP) ; elles
-# se partagent désormais un verrou (`verrou_captures`, preferences_proto.rs, #333).
-test-python-windows:
-  stage: check
-  extends: .windows-job
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v?[0-9]+\.[0-9]+\.[0-9]+/'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
-    - when: manual
-      allow_failure: true
-  script:
-    - bash scripts/python-vendor.sh
-    - bash scripts/python-test.sh
