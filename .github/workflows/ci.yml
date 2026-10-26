@@ -136,7 +136,9 @@ jobs:
   # miroir de GitLab, où `publier` (.gitlab-ci.yml) lie l'archive à la release,
   # avec l'installeur Windows de `dist-windows`.
   release-linux:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # MISE AU POINT (à retirer) : aussi sur `main`, sans notes ni téléversement,
+    # pour itérer sans poser un tag à chaque essai (rc3 a échoué dans app-dist.sh).
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
     needs: [fmt, licenses, clippy, test, test-python]
     runs-on: ubuntu-latest
     permissions:
@@ -144,6 +146,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Tag et notes
+        if: startsWith(github.ref, 'refs/tags/v')
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
       - uses: Swatinem/rust-cache@v2
       - uses: actions/cache@v4
@@ -161,9 +164,20 @@ jobs:
       - name: Dépendances d'exécution
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 libwayland-dev xvfb
       - run: scripts/python-vendor.sh
-      - run: xvfb-run -a scripts/app-dist.sh
-      - run: scripts/release-linux.sh "$GITHUB_REF_NAME"
+      # En cas d'échec, les premières erreurs et la fin du journal sont posées en
+      # annotation (lisible par l'API sans connexion).
+      - run: |
+          set +e
+          xvfb-run -a scripts/app-dist.sh > dist.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=app-dist::$( (grep -m6 -E 'ERREUR|^error|panicked|FAILED' dist.log; echo ...; tail -n 14 dist.log) | tr '\n' '|' | cut -c1-1500)"
+          fi
+          exit "$code"
+      - run: scripts/release-linux.sh "${GITHUB_REF_NAME}"
+        if: startsWith(github.ref, 'refs/tags/v')
       - name: Archive dans GitLab
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
         run: scripts/release-linux-televerser.sh "$GITHUB_REF_NAME"
