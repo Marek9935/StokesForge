@@ -87,7 +87,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p stokesforge-robustesse -- --ignored
+      # En cas d'échec, les premières erreurs et la fin du journal sont posées en
+      # annotation (lisible sans connexion, y compris par l'API), car ce travail
+      # est non bloquant et son journal n'est pas remonté dans GitLab.
+      - run: |
+          set +e
+          cargo test -p stokesforge-robustesse -- --ignored > robustesse.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=robustesse::$( (grep -m6 -E '^error|panicked|FAILED' robustesse.log; echo ...; tail -n 12 robustesse.log) | tr '\n' '|' | cut -c1-1500)"
+          fi
+          exit "$code"
 
   # Pont Python : bloquant. L'interpréteur est vendorisé par le script,
   # aucun Python système n'est requis (curl, tar et ca-certificates suffisent).
