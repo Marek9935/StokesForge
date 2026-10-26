@@ -167,3 +167,89 @@ jobs:
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
         run: scripts/release-linux-televerser.sh "$GITHUB_REF_NAME"
+
+  # #333 : Windows sur un runner hébergé (poste propre, parallèle à Linux),
+  # pendant des travaux GitLab `test-python-windows` et `dist-windows`, qui
+  # restent actifs le temps de la mise au point. `continue-on-error` tant que ces
+  # deux travaux n'ont pas fait leurs preuves ; en cas d'échec, les premières
+  # erreurs et la fin du journal sont posées en annotation (lisible par l'API
+  # sans connexion). Git Bash (`shell: bash`) : les scripts sont les mêmes que
+  # sur le runner GitLab.
+  test-python-windows:
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Chemins longs : `.cargo/registry` dépasse MAX_PATH (voir .windows-job).
+      - run: git config --system core.longpaths true
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: |
+            vendor/python/*.tar.gz
+            vendor/python/extracted/
+          key: python-windows-${{ hashFiles('vendor/python/lock.env') }}
+      - run: |
+          set +e
+          { bash scripts/python-vendor.sh && bash scripts/python-test.sh; } > windows-test.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=test-python-windows::$( (grep -m6 -E '^error|panicked|FAILED' windows-test.log; echo ...; tail -n 12 windows-test.log) | tr '\n' '|' | cut -c1-1500)"
+          fi
+          exit "$code"
+
+  dist-windows:
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: git config --system core.longpaths true
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
+        with:
+          path: |
+            vendor/python/*.tar.gz
+            vendor/python/extracted/
+          key: python-windows-${{ hashFiles('vendor/python/lock.env') }}
+      # Outils de licences aux versions de scripts/licenses-tools.env, gardés en
+      # cache : leur compilation à froid est longue.
+      - uses: actions/cache@v4
+        id: outils
+        with:
+          path: |
+            ~/.cargo/bin/cargo-deny.exe
+            ~/.cargo/bin/cargo-about.exe
+          key: outils-licences-windows-${{ hashFiles('scripts/licenses-tools.env') }}
+      - name: Outils de licences
+        if: steps.outils.outputs.cache-hit != 'true'
+        run: |
+          source scripts/licenses-tools.env
+          cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"
+          cargo install cargo-about --locked --features cli --version "$CARGO_ABOUT_VERSION"
+      # Inno Setup 6 : déjà sur l'image, sinon installé par Chocolatey.
+      - name: Inno Setup
+        run: |
+          if [ ! -e "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" ] && [ ! -e "/c/Program Files/Inno Setup 6/ISCC.exe" ]; then
+            choco install innosetup -y --no-progress
+          fi
+      - run: |
+          set +e
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then export STOKESFORGE_VERSION="${GITHUB_REF_NAME#v}"; fi
+          { bash scripts/python-vendor.sh && bash scripts/app-dist-windows.sh; } > windows-dist.log 2>&1
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=dist-windows::$( (grep -m6 -E '^error|ERREUR|panicked|FAILED' windows-dist.log; echo ...; tail -n 12 windows-dist.log) | tr '\n' '|' | cut -c1-1500)"
+          fi
+          exit "$code"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installeur
+          path: dist/StokesForge-*-windows-setup.exe
