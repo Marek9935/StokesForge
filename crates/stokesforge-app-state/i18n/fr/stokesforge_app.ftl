@@ -778,6 +778,12 @@ plot-axes-decimal-comma = Virgule décimale sur les graduations
 plot-axes-show-axis = Afficher l'axe
 plot-axes-show-gridlines = Afficher le quadrillage
 plot-axes-show-tick-labels = Afficher les étiquettes de graduation
+plot-axes-show-ticks = Afficher les graduations
+plot-axes-frame-section = Cadre
+plot-axes-tick-direction = Sens des graduations
+plot-axes-tick-out = Vers l'extérieur
+plot-axes-tick-in = Vers l'intérieur
+plot-axes-tick-both = Des deux côtés
 plot-axes-show-mirror = Afficher l'axe miroir
 plot-axes-mirror-note = Reprend l'échelle de l'axe opposé (bas ou gauche), sans titre
 plot-axes-color = Couleur de l'axe
@@ -1151,6 +1157,9 @@ action-move-series-up = Déplacer vers le haut
 action-move-series-down = Déplacer vers le bas
 action-show-content = Afficher
 action-hide-content = Masquer
+action-closed-frame = Cadre fermé
+    .hint = Affiche les axes du haut et de droite en miroirs sans étiquettes de graduation, avec les graduations du bas et de gauche. Décochez pour les masquer de nouveau. Avec une série sur l'axe de droite, seul le haut est fermé
+    .disabled = Un calque superposé a ses propres axes
 action-delete-content = Supprimer
 object-properties-title = Propriétés de l'objet
 object-coordinate = { $coordinate }
@@ -1165,6 +1174,7 @@ history-plot-rename-group = Renommer le groupe
 history-plot-dissolve-group = Dissoudre le groupe
 history-plot-remove-group = Supprimer le groupe
 history-plot-reorder-group = Réordonner le groupe
+history-plot-closed-frame = Modifier le cadre fermé
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau
@@ -1717,6 +1727,7 @@ disabled-script-not-running = Aucun script en cours
 disabled-color-invalid = Saisissez d'abord une couleur valide
 disabled-gradient-min-colors = Un dégradé a besoin d'au moins deux couleurs
 disabled-mirror-off = Activez d'abord l'axe miroir
+disabled-ticks-off = Affichez d'abord les graduations
 disabled-analysis-issues = Corrigez d'abord le problème signalé dans le formulaire
 
 ## Aide › Raccourcis clavier (#231, S-K5). Les listes sont générées du registre

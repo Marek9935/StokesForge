@@ -12,7 +12,7 @@
 use eframe::egui;
 use stokesforge_core::Tree;
 use stokesforge_plot::{
-    AxisSpec, LegendPosition, LineStyle, PanelSpec, PlotSpec, PlotType, SymbolShape,
+    AxisSpec, LegendPosition, LineStyle, PanelSpec, PlotSpec, PlotType, SymbolShape, TickDirection,
 };
 
 use crate::color_picker::{ColorUsage, PickerEnv, SavedColorEdit};
@@ -32,7 +32,7 @@ use super::dialogs::{
 };
 use super::form::{choice, form, ChoiceOption, Form};
 use super::graph_window::{published_axis_bounds, PanelBounds};
-use super::hover_help::hover_help;
+use super::hover_help::{help_beside, hover_help};
 use super::tab_strip::{tab_strip, TabStripSide};
 
 /// Fenêtre des propriétés d'un graphe : un dialogue flottant (même famille
@@ -458,6 +458,27 @@ pub(super) fn axes_settings_page(
         );
         commit
     });
+    // Raccourci du calque (#344) : une bascule qui règle d'un coup le haut et
+    // la droite ; le brouillon la valide comme tout autre réglage.
+    commit |= form(ui, "plot_frame_page", |form| {
+        form.section(tr!("plot-axes-frame-section"));
+        let mut closed = panel.frame_closed();
+        let enabled = panel.overlay.is_none();
+        let changed = form.field(|ui| {
+            help_beside(ui, tr!("action-closed-frame", "hint"), |ui| {
+                ui.add_enabled(
+                    enabled,
+                    egui::Checkbox::new(&mut closed, tr!("action-closed-frame")),
+                )
+                .on_disabled_hover_text(tr!("action-closed-frame", "disabled"))
+                .changed()
+            })
+        });
+        if changed {
+            panel.set_frame_closed(closed);
+        }
+        changed
+    });
     commit
 }
 
@@ -601,8 +622,51 @@ fn mirror_axis_editor(form: &mut Form<'_>, axis: &mut AxisSpec) -> bool {
         .on_disabled_hover_text(tr!("disabled-mirror-off"))
         .changed()
     });
+    commit |= form.field(|ui| {
+        ui.add_enabled(
+            axis.mirror,
+            egui::Checkbox::new(&mut axis.ticks, tr!("plot-axes-show-ticks")),
+        )
+        .on_disabled_hover_text(tr!("disabled-mirror-off"))
+        .changed()
+    });
+    commit |= tick_direction_row(form, axis, axis.mirror, tr!("disabled-mirror-off"));
     form.note(tr!("plot-axes-mirror-note"));
     commit
+}
+
+/// Le sens des graduations (#344) : vers l'extérieur, l'intérieur ou des deux
+/// côtés. `enabled` faux (miroir éteint, graduations coupées) grise le choix,
+/// avec `reason`.
+fn tick_direction_row(
+    form: &mut Form<'_>,
+    axis: &mut AxisSpec,
+    enabled: bool,
+    reason: String,
+) -> bool {
+    let enabled = enabled && axis.ticks;
+    let reason = if axis.ticks {
+        reason
+    } else {
+        tr!("disabled-ticks-off")
+    };
+    let options = [
+        ChoiceOption::new(TickDirection::Out, tr!("plot-axes-tick-out")),
+        ChoiceOption::new(TickDirection::In, tr!("plot-axes-tick-in")),
+        ChoiceOption::new(TickDirection::Both, tr!("plot-axes-tick-both")),
+    ];
+    form.row(tr!("plot-axes-tick-direction"), |ui| {
+        let shown = ui.add_enabled_ui(enabled, |ui| {
+            choice(
+                ui,
+                "plot_axis_tick_direction",
+                &mut axis.tick_direction,
+                &options,
+            )
+        });
+        shown.response.on_disabled_hover_text(reason);
+        shown.inner
+    })
 }
 
 /// Édite un [`AxisSpec`], en trois groupes : le titre de l'axe (libellé,
@@ -711,6 +775,8 @@ fn axis_editor(
         tr!("plot-axes-show-tick-labels"),
         None,
     );
+    commit |= form.checkbox(&mut axis.ticks, tr!("plot-axes-show-ticks"), None);
+    commit |= tick_direction_row(form, axis, true, String::new());
     commit |= form.checkbox(&mut axis.grid, tr!("plot-axes-show-gridlines"), None);
     commit |= form.color(
         &tr!("plot-axes-color"),
@@ -963,7 +1029,7 @@ mod tests {
     use super::{
         column_metadata_window, form, formula_field, formula_help, formula_memo_rows,
         legend_position_label, line_style_label, plot_settings_window, plot_type_label,
-        symbol_shape_label, theme_editor,
+        symbol_shape_label, theme_editor, TickDirection,
     };
     use crate::color_picker::PickerEnv;
     use stokesforge_app_state::i18n::{self, pseudo, Language, LANGUAGE_VARIABLE};
@@ -1304,6 +1370,97 @@ mod tests {
         let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
         assert!(est_peint(&peints, &tr!("plot-axes-quantity")));
         assert!(!est_peint(&peints, &tr!("plot-axes-show-mirror")));
+    }
+
+    /// #344 : la bascule « Cadre fermé » de la page des axes règle le haut et
+    /// la droite d'un coup, valide **une** entrée d'historique, et rouvre le
+    /// cadre au second clic. Un calque superposé la voit grisée.
+    #[test]
+    fn la_bascule_du_cadre_ferme_valide_une_entree_et_se_defait() {
+        let mut banc = banc(|spec| {
+            let panel = panneau(spec);
+            panel.bottom.tick_direction = TickDirection::Both;
+            let mut over = PanelSpec::at(0, 0);
+            over.overlay = Some(stokesforge_plot::OverlaySpec::default());
+            spec.panels.push(over);
+        });
+        // L'onglet du haut : page courte, la bascule y est peinte.
+        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Top));
+        let original = banc.modele();
+        let context = contexte();
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert!(est_peint(&peints, &tr!("action-closed-frame")));
+        assert_eq!(banc.modele(), original, "peindre ne modifie rien");
+
+        cliquer_libelle(&context, &mut banc.state, &tr!("action-closed-frame"));
+        let fermé = banc.modele();
+        let panel = &fermé.panels[0];
+        assert!(panel.frame_closed());
+        assert!(!panel.top.tick_labels && !panel.right.tick_labels);
+        assert_eq!(
+            panel.top.tick_direction,
+            TickDirection::Both,
+            "copié du bas"
+        );
+        assert_eq!(
+            fermé.panels[1], original.panels[1],
+            "l'autre calque ne bouge pas"
+        );
+
+        cliquer_libelle(&context, &mut banc.state, &tr!("action-closed-frame"));
+        assert!(
+            !banc.modele().panels[0].frame_closed(),
+            "second clic : rouvert"
+        );
+        // Les validations d'une même fenêtre se fusionnent : un Annuler rend
+        // le graphe d'avant l'ouverture.
+        banc.state.close_plot_settings();
+        banc.state.dispatch(Action::Undo);
+        assert_eq!(banc.modele(), original);
+    }
+
+    /// #344 : les graduations et leur sens se règlent par axe, miroirs compris ;
+    /// un miroir éteint ou des graduations coupées grisent le choix du sens.
+    #[test]
+    fn les_graduations_et_leur_sens_se_reglent_par_axe() {
+        let context = contexte();
+        // L'éditeur complet (bas, gauche, vrai axe de droite).
+        let mut axis = stokesforge_plot::AxisSpec::default();
+        let (_, peints) = peindre_axe(&context, &mut axis, None);
+        assert!(est_peint(&peints, &tr!("plot-axes-show-ticks")));
+        assert!(est_peint(&peints, &tr!("plot-axes-tick-direction")));
+
+        // Le miroir du haut, page courte : toutes les commandes sont peintes.
+        let mut banc = banc(|spec| panneau(spec).top.mirror = true);
+        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Top));
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        assert!(est_peint(&peints, &tr!("plot-axes-show-ticks")));
+        assert!(est_peint(&peints, &tr!("plot-axes-tick-direction")));
+        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-tick-in"));
+        assert_eq!(
+            banc.modele().panels[0].top.tick_direction,
+            TickDirection::In
+        );
+        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-tick-both"));
+        assert_eq!(
+            banc.modele().panels[0].top.tick_direction,
+            TickDirection::Both
+        );
+        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-show-ticks"));
+        assert!(!banc.modele().panels[0].top.ticks);
+        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-tick-in"));
+        assert_eq!(
+            banc.modele().panels[0].top.tick_direction,
+            TickDirection::Both,
+            "graduations coupées : le choix du sens est grisé"
+        );
+        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-show-ticks"));
+        assert!(banc.modele().panels[0].top.ticks);
+        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-tick-in"));
+        assert_eq!(
+            banc.modele().panels[0].top.tick_direction,
+            TickDirection::In
+        );
     }
 
     /// #124 : la page choisit le calque du brouillon ; le premier calque

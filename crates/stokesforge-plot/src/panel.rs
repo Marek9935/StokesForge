@@ -224,6 +224,39 @@ impl PanelSpec {
         self.overlay.is_none() && self.right.mirror && !self.uses_right_axis()
     }
 
+    /// Le cadre est fermé (#344) : le haut est un miroir, et la droite aussi
+    /// tant qu'aucune série n'y est rattachée (sinon la droite est un vrai
+    /// axe et seul le haut compte). Faux sur un calque superposé.
+    pub fn frame_closed(&self) -> bool {
+        self.overlay.is_none() && self.top.mirror && (self.uses_right_axis() || self.right.mirror)
+    }
+
+    /// Ferme ou rouvre le cadre (#344), d'un seul geste. Fermer règle le haut
+    /// (et la droite, si aucune série n'y est rattachée) en miroir sans
+    /// nombres, et **copie une fois** les tirets du bas (haut) et de gauche
+    /// (droite) : présence et sens ; ils se règlent ensuite séparément. Rouvrir
+    /// éteint ces miroirs et rend leurs nombres. Sans effet sur un calque
+    /// superposé (qui a ses propres axes, #167).
+    pub fn set_frame_closed(&mut self, closed: bool) {
+        if self.overlay.is_some() {
+            return;
+        }
+        let with_right = !self.uses_right_axis();
+        let (bottom, left) = (self.bottom.clone(), self.left.clone());
+        let set = |mirror: &mut crate::AxisSpec, source: &crate::AxisSpec| {
+            mirror.mirror = closed;
+            mirror.tick_labels = !closed;
+            if closed {
+                mirror.ticks = source.ticks;
+                mirror.tick_direction = source.tick_direction;
+            }
+        };
+        set(&mut self.top, &bottom);
+        if with_right {
+            set(&mut self.right, &left);
+        }
+    }
+
     /// Colonnes référencées par les séries du panneau, sans doublon, dans
     /// l'ordre de première apparition.
     pub fn referenced_columns(&self) -> Vec<NodeId> {

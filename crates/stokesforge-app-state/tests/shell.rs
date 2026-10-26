@@ -10626,6 +10626,81 @@ fn object_manager_supprime_une_courbe_sans_toucher_aux_donnees() {
     assert_eq!(remaining_nodes, original_nodes);
 }
 
+/// #344 : le cadre fermé est une bascule en **une seule** entrée d'historique
+/// (motif `ClosedFrame`) que l'Annuler défait d'un bloc ; les tirets du bas et
+/// de gauche sont copiés une fois ; avec une série à droite, seul le haut ferme.
+#[test]
+fn le_cadre_ferme_est_une_seule_entree_d_historique_et_epargne_la_droite_occupee() {
+    use stokesforge_commands::PlotEditKind as K;
+    use stokesforge_plot::{SeriesAxis, TickDirection};
+    let dir = tempfile::tempdir().unwrap();
+    let (mut project, graph, mut spec) = object_manager_project();
+    {
+        let panel = spec.panels.get_mut(0).unwrap();
+        panel.bottom.tick_direction = TickDirection::In;
+        panel.left.ticks = false;
+        // Le second calque a une série sur l'axe de droite : vrai axe.
+        let second = spec.panels.get_mut(1).unwrap();
+        second.series[0].axis = SeriesAxis::Right;
+    }
+    project.set_plot_spec(graph, spec.clone()).unwrap();
+    let (_session, mut state) = start(project, &dir.path().join("cadre.stf"));
+    let labels = |state: &AppState| state.snapshot().history.undo_label.clone();
+
+    state.dispatch(Action::SetClosedFrame {
+        graph,
+        panel: 0,
+        closed: true,
+    });
+    let closed = graph_spec(&state, graph);
+    let panel = &closed.panels[0];
+    assert!(panel.frame_closed());
+    assert!(panel.top.mirror && panel.right.mirror);
+    assert!(!panel.top.tick_labels && !panel.right.tick_labels);
+    assert_eq!(panel.top.tick_direction, TickDirection::In);
+    assert!(
+        panel.top.ticks && !panel.right.ticks,
+        "tirets copiés du bas et de gauche"
+    );
+    assert_eq!(
+        labels(&state),
+        Some(HistoryLabel::EditPlotSpec(K::ClosedFrame))
+    );
+
+    state.dispatch(Action::Undo);
+    assert_eq!(graph_spec(&state, graph), spec, "un Annuler rétablit tout");
+    state.dispatch(Action::Redo);
+    assert_eq!(graph_spec(&state, graph), closed);
+
+    // Bascule : le second geste rouvre le cadre, en une entrée aussi.
+    state.dispatch(Action::SetClosedFrame {
+        graph,
+        panel: 0,
+        closed: false,
+    });
+    let reopened = graph_spec(&state, graph);
+    assert!(!reopened.panels[0].frame_closed());
+    assert!(!reopened.panels[0].top.mirror && !reopened.panels[0].right.mirror);
+    state.dispatch(Action::Undo);
+    assert_eq!(
+        graph_spec(&state, graph),
+        closed,
+        "un seul Annuler rouvre le cadre fermé"
+    );
+    state.dispatch(Action::Redo);
+
+    // Droite occupée par une série : seul le haut ferme, la droite reste intacte.
+    state.dispatch(Action::SetClosedFrame {
+        graph,
+        panel: 1,
+        closed: true,
+    });
+    let second = &graph_spec(&state, graph).panels[1];
+    assert!(second.top.mirror && !second.top.tick_labels);
+    assert_eq!(second.right, spec.panels[1].right);
+    assert!(second.frame_closed());
+}
+
 /// #197 : les gestes d'un groupe de séries sont des commandes annulables,
 /// chacune avec son motif d'historique ; une cible périmée n'en crée aucune.
 #[test]

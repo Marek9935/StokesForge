@@ -379,6 +379,8 @@ partout, **sauf Q14 et Q22** où l'alternative l'emporte (marquées ✔).
 | Graph texts | Textes du graphique | Titres du graphique, des calques et des axes, et légende : jamais listés dans l'Object Manager (#214) : édition par double-clic ou dans les propriétés |
 | Show Axes | Afficher les axes | Les axes d'un calque (ligne, graduations, libellés), listés dans l'Object Manager si la bascule « Show Axes » est active (#111, #147) ; ce filtre ne modifie pas leur visibilité sur la figure ; une ligne « X (bottom) Axis » / « Axe X (bas) » par axe, dont Secondary X (top) / X secondaire (haut) |
 | Mirror axis | Axe miroir | Axe du haut ou de droite d'un calque ordinaire qui reprend l'échelle de celui du bas ou de gauche, sans titre (#176) |
+| Closed frame | Cadre fermé | Bascule d'un calque : haut et droite en axes miroirs sans étiquettes de graduation, graduations copiées du bas et de gauche (#344) |
+| Tick direction | Sens des graduations | Vers l'extérieur (Outward), vers l'intérieur (Inward) ou des deux côtés (Both sides) de la ligne d'axe (#344) |
 | Axes | Axes | Le groupe qui réunit les quatre axes d'un calque dans l'Object Manager (#111, #147) |
 | Detach / Reattach | Détacher / Rattacher | Ouvrir une fenêtre système / replacer le panneau à son emplacement fixe (#100) |
 

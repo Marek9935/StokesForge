@@ -183,6 +183,7 @@ pub(super) fn analysis_sources(
 /// 2. organiser — Rename (courbe, groupe), Move Up/Down (courbe, groupe),
 ///    Ungroup (groupe), Hide (courbe), Bring to Front / Send to Back (objet),
 ///    Hide (texte, axe, groupe) ;
+///    Closed Frame (calque et groupe d'axes, bascule, #344) ;
 /// 3. supprimer — Delete (courbe, texte libre, objet), Delete Group (groupe
 ///    et ses séries) ;
 /// 4. `Properties…`, toujours en dernier.
@@ -426,6 +427,36 @@ pub(super) fn object_node_menu(
             }
         },
     );
+    // Cadre fermé (#344) : une bascule du calque, au menu du calque et de son
+    // groupe d'axes ; grisée sur un calque superposé, qui a ses propres axes.
+    let frame_layer = match target {
+        T::Panel(index) | T::Axes(index) => Some(index),
+        _ => None,
+    };
+    sections.section(ui, frame_layer.is_some(), |ui| {
+        let Some(index) = frame_layer else {
+            return;
+        };
+        let panel = spec.panels.get(index);
+        let enabled = panel.is_some_and(|panel| panel.overlay.is_none());
+        let mut closed = panel.is_some_and(stokesforge_plot::PanelSpec::frame_closed);
+        if ui
+            .add_enabled(
+                enabled,
+                egui::Checkbox::new(&mut closed, tr!("action-closed-frame")),
+            )
+            .on_hover_text(tr!("action-closed-frame", "hint"))
+            .on_disabled_hover_text(tr!("action-closed-frame", "disabled"))
+            .clicked()
+        {
+            actions.push(Action::SetClosedFrame {
+                graph,
+                panel: index,
+                closed,
+            });
+            ui.close();
+        }
+    });
     sections.section(ui, deletable, |ui| {
         if ui
             .add(
@@ -2861,6 +2892,38 @@ mod tests {
                 group: target
             }]
         );
+    }
+
+    /// #344 : le menu d'un calque porte la bascule « Cadre fermé » ; son clic
+    /// n'émet qu'une action, qui ferme le cadre ; une fois fermé, la même
+    /// entrée émet l'action inverse.
+    #[test]
+    fn le_menu_d_un_calque_bascule_le_cadre_ferme() {
+        use super::super::test_support::painted;
+        let (project, graph, mut spec, model) = trois_series();
+        let ctx = super::super::test_support::contexte();
+        for fermer in [true, false] {
+            if !fermer {
+                spec.panels.get_mut(0).unwrap().set_frame_closed(true);
+            }
+            let paint = |events| image(&ctx, project.tree(), Some(&model), Some(&spec), events);
+            paint(Vec::new());
+            let (output, _, _) = paint(Vec::new());
+            let calque = text_center(&output, &tr!("object-manager-layer", index = 1));
+            clic_menu(&paint, calque, egui::PointerButton::Secondary);
+            let (output, _, _) = paint(Vec::new());
+            assert!(painted(&output, &tr!("action-closed-frame")));
+            let entree = text_center(&output, &tr!("action-closed-frame"));
+            let (_, actions, _) = clic_menu(&paint, entree, egui::PointerButton::Primary);
+            assert_eq!(
+                actions,
+                vec![Action::SetClosedFrame {
+                    graph,
+                    panel: 0,
+                    closed: fermer
+                }]
+            );
+        }
     }
 
     /// #197 : renommer un groupe se fait sur place, dans l'arbre — Entrée

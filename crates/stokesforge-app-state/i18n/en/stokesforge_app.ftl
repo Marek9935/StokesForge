@@ -782,6 +782,12 @@ plot-axes-decimal-comma = Decimal comma on tick labels
 plot-axes-show-axis = Show axis
 plot-axes-show-gridlines = Show gridlines
 plot-axes-show-tick-labels = Show tick labels
+plot-axes-show-ticks = Show ticks
+plot-axes-frame-section = Frame
+plot-axes-tick-direction = Tick direction
+plot-axes-tick-out = Outward
+plot-axes-tick-in = Inward
+plot-axes-tick-both = Both sides
 plot-axes-show-mirror = Show mirror axis
 plot-axes-mirror-note = Repeats the scale of the opposite axis (bottom or left), with no title
 plot-axes-color = Axis color
@@ -1155,6 +1161,9 @@ action-move-series-up = Move Up
 action-move-series-down = Move Down
 action-show-content = Show
 action-hide-content = Hide
+action-closed-frame = Closed Frame
+    .hint = Shows the top and right axes as mirrors with no tick labels, copying the ticks of the bottom and left axes. Uncheck to hide them again. With a series on the right axis, only the top is closed
+    .disabled = An overlaid layer has its own axes
 action-delete-content = Delete
 object-properties-title = Object Properties
 object-coordinate = { $coordinate }
@@ -1169,6 +1178,7 @@ history-plot-rename-group = Rename Group
 history-plot-dissolve-group = Ungroup Series
 history-plot-remove-group = Delete Group
 history-plot-reorder-group = Reorder Group
+history-plot-closed-frame = Change Closed Frame
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Expand the panel
@@ -1721,6 +1731,7 @@ disabled-script-not-running = No script is running
 disabled-color-invalid = Enter a valid color first
 disabled-gradient-min-colors = A gradient needs at least two colors
 disabled-mirror-off = Turn on the mirror axis first
+disabled-ticks-off = Show the ticks first
 disabled-analysis-issues = Fix the problem shown in the form first
 
 ## Help › Keyboard Shortcuts (#231, S-K5). The lists are generated from the key
