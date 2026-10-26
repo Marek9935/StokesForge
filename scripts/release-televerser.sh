@@ -37,10 +37,10 @@ if [ -z "${GITLAB_RELEASE_TOKEN:-}" ]; then
     echo "[release] (jeton de projet GitLab, rôle Developer, portée api : voir docs/criteres-v1.md)" >&2
     exit 1
 fi
-# L'en-tête passe par un fichier anonyme : le jeton n'apparaît pas dans la
-# liste des processus.
-curl --fail-with-body --silent --show-error \
-    --header @<(printf 'PRIVATE-TOKEN: %s\n' "$GITLAB_RELEASE_TOKEN") \
-    --upload-file "$ARCHIVE" "$URL"
+# L'en-tête passe par la configuration lue sur l'entrée standard (`-K -`) : le
+# jeton n'apparaît pas dans la liste des processus. Pas de substitution de
+# processus (`@<(...)`) : sous Git Bash, curl ne la lit pas (code 26, rc4).
+printf 'header = "PRIVATE-TOKEN: %s"\n' "$GITLAB_RELEASE_TOKEN" | curl --fail-with-body --silent --show-error \
+    -K - --upload-file "$ARCHIVE" "$URL"
 echo
 echo "[release] $PLATEFORME téléversé : $URL"
