@@ -162,6 +162,15 @@ enveloppent est le contenu des clics droits : Edit › Selection (menu des
 fenêtres du Project Manager), Graph › Selection (menu de l'objet),
 Workbook › Sheet (dont Reset Column Widths) / Columns (dont Reset Width) / Plot, View › Object Manager.
 
+**Bascule au survol (#343).** Quand un menu de la barre est déjà ouvert, passer
+le pointeur sur le titre d'un autre menu ouvre celui-ci et ferme le premier,
+sans clic. Barre au repos, le survol n'ouvre rien. Si le pointeur se dirige
+vers le popup ouvert (diagonale vers une entrée qui traverse le titre voisin),
+on ne bascule pas ; la bascule se fait dès que le pointeur ne vise plus le
+popup (tolérance `is_moving_towards_rect`, comme pour les sous-menus d'egui).
+Un seul code, `bascule_au_survol` (`app/menus.rs`), commun à l'onglet actif et
+à la fenêtre détachée. Un clic sur le titre déjà ouvert le referme.
+
 ## Ajouter une entrée
 
 1. Choisir sa section dans l'ordre canonique ; si aucune ne convient, la
