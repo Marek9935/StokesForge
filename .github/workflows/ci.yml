@@ -180,7 +180,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
-        run: scripts/release-linux-televerser.sh "$GITHUB_REF_NAME"
+        run: scripts/release-televerser.sh linux "$GITHUB_REF_NAME"
 
   # #333 : Windows sur un runner hébergé (poste propre, parallèle à Linux),
   # pendant des travaux GitLab `test-python-windows` et `dist-windows`, qui
@@ -267,3 +267,8 @@ jobs:
         with:
           name: windows-installeur
           path: dist/StokesForge-*-windows-setup.exe
+      - name: Installeur dans GitLab
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
+        run: scripts/release-televerser.sh windows "$GITHUB_REF_NAME"

@@ -162,10 +162,11 @@ Les `scripts/*.sh` de la racine assemblent et relancent les distributions
 (déjà éprouvé par `app-dist.sh`) en `StokesForge-<version>-linux-x86_64.tar.gz` ;
 `scripts/release-notes.sh` vérifie qu'un tag `vX.Y.Z` correspond aux versions des
 crates et à une section de `CHANGELOG.md`, et imprime les notes ;
-`scripts/release-linux-televerser.sh` envoie l'archive dans le registre de paquets
-GitLab ; `scripts/release-publier.sh` crée la release GitLab, qui lie l'archive
-et l'installeur. Linux se construit sur GitHub, Windows sur GitLab, et tout se
-publie sur GitLab : [`criteres-v1.md`](criteres-v1.md).
+`scripts/release-televerser.sh linux|windows` envoie l'archive ou l'installeur dans
+le registre de paquets GitLab ; `scripts/release-publier.sh` crée la release
+GitLab, qui lie les deux. Linux et Windows se construisent sur GitHub (les
+travaux GitLab Windows restent en parallèle le temps de la mise au point), et
+tout se publie sur GitLab : [`criteres-v1.md`](criteres-v1.md).
 
 **Windows (#332).**
 `scripts/app-dist-windows.sh` (Git Bash) est le pendant de `app-dist.sh` : il

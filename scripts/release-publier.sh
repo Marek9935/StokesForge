@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Crée la release GitLab d'un tag vX.Y.Z (#333) : notes tirées de CHANGELOG.md,
-# lien vers l'installeur Windows produit par `dist-windows` et vers l'archive
-# Linux que le travail `release-linux` de GitHub (.github/workflows/ci.yml)
-# téléverse dans le registre de paquets GitLab ; le script attend qu'elle y soit
-# (STOKESFORGE_LINUX_WAIT secondes, 3600 par défaut).
+# liens vers l'installeur Windows (travail `dist-windows` de GitHub) et vers
+# l'archive Linux (`release-linux`), que ces travaux
+# (.github/workflows/ci.yml) téléversent dans le registre de paquets GitLab ; le
+# script attend que chacun y soit (STOKESFORGE_LINUX_WAIT secondes, 3600 par
+# défaut, pour chaque paquet).
 #
 # Environnement GitLab CI : CI_COMMIT_TAG, CI_API_V4_URL, CI_PROJECT_ID,
 # CI_PROJECT_URL, CI_JOB_TOKEN. STOKESFORGE_RELEASE_DRYRUN=1 imprime la requête
@@ -20,7 +21,7 @@ fi
 
 NOTES="$("$REPO_ROOT/scripts/release-notes.sh" "$TAG")"
 SETUP="StokesForge-${VERSION}-windows-setup.exe"
-SETUP_URL="${CI_PROJECT_URL}/-/jobs/artifacts/${TAG}/raw/dist/${SETUP}?job=dist-windows"
+SETUP_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/stokesforge/${VERSION}/${SETUP}"
 
 args=(
     --data-urlencode "tag_name=${TAG}"
@@ -42,18 +43,21 @@ if [ "${STOKESFORGE_RELEASE_DRYRUN:-}" = 1 ]; then
     printf '%s\n' "${args[@]}"
     exit 0
 fi
-# L'archive Linux vient d'un autre travail (GitHub) : on ne publie pas un lien mort.
-attente="${STOKESFORGE_LINUX_WAIT:-3600}"
-until curl --silent --fail --output /dev/null --range 0-0 \
-        --header "JOB-TOKEN: ${CI_JOB_TOKEN:?CI_JOB_TOKEN absent}" "$LINUX_URL"; do
-    if [ "$attente" -le 0 ]; then
-        echo "[release] ERREUR : ${LINUX} absente du registre de paquets GitLab." >&2
-        echo "[release] Le travail release-linux de GitHub a-t-il échoué ? Relancer ce travail ensuite." >&2
-        exit 1
-    fi
-    echo "[release] attente de ${LINUX} (${attente} s au plus)"
-    sleep 30
-    attente=$((attente - 30))
+# Les deux paquets viennent d'autres travaux (GitHub) : on ne publie pas un lien mort.
+for paquet in "$LINUX|$LINUX_URL|release-linux" "$SETUP|$SETUP_URL|dist-windows"; do
+    IFS='|' read -r nom url travail <<< "$paquet"
+    attente="${STOKESFORGE_LINUX_WAIT:-3600}"
+    until curl --silent --fail --output /dev/null --range 0-0 \
+            --header "JOB-TOKEN: ${CI_JOB_TOKEN:?CI_JOB_TOKEN absent}" "$url"; do
+        if [ "$attente" -le 0 ]; then
+            echo "[release] ERREUR : ${nom} absent du registre de paquets GitLab." >&2
+            echo "[release] Le travail ${travail} de GitHub a-t-il échoué ? Le relancer ensuite." >&2
+            exit 1
+        fi
+        echo "[release] attente de ${nom} (${attente} s au plus)"
+        sleep 30
+        attente=$((attente - 30))
+    done
 done
 curl --fail-with-body --silent --show-error -X POST \
     --header "JOB-TOKEN: ${CI_JOB_TOKEN:?CI_JOB_TOKEN absent}" \

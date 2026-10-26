@@ -96,10 +96,11 @@ Un tag `vX.Y.Z-rcN` lance la CI GitHub complète et, sur GitLab,
 `release-linux` construit l'archive Linux et la téléverse dans le registre de
 paquets GitLab (`release-notes.sh` n'y vérifie que les versions des crates) ;
 la release GitLab, elle, ignore le tag (`publier` n'accepte que `vX.Y.Z`). Le
-tag `-rcN` éprouve donc le runner Windows, l'installeur (artefact de
-`dist-windows`, pour l'essai sur un autre poste Windows) et le téléversement de
-l'archive Linux. Seul l'appel qui crée la release GitLab (formulaire, liens
-vers l'installeur et l'archive) n'a lieu qu'au premier vrai tag ; `release-linux-televerser.sh` et
+tag `-rcN` éprouve donc les runners Windows et Linux, et le téléversement de
+l'installeur et de l'archive Linux (le travail `dist-windows` de GitHub les
+dépose dans le registre, d'où l'on prend l'installeur pour l'essai sur un autre
+poste Windows). Seul l'appel qui crée la release GitLab (formulaire, liens
+vers l'installeur et l'archive) n'a lieu qu'au premier vrai tag ; `release-televerser.sh` et
 `release-publier.sh` s'essaient à vide avec `STOKESFORGE_RELEASE_DRYRUN=1`.
 
 ## Branches et versions

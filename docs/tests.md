@@ -463,6 +463,7 @@ runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 | `test-python` | oui, automatique | vendorise CPython + numpy, puis `scripts/python-test.sh` |
 | `release-linux` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN` (le `-rcN` ne crée pas de release) | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, téléverse l'archive dans le registre de paquets GitLab, sans release GitHub (#333) |
 | `test-python-windows`, `dist-windows` (GitLab) | oui, automatique sur `main` et sur un tag | tests Python Windows, puis installeur Windows |
+| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatique sur `main` et sur un tag, `continue-on-error` en mise au point (#333) | mêmes contrôles sur un poste propre ; sur un tag, `dist-windows` téléverse l'installeur dans le registre GitLab (`scripts/release-televerser.sh windows`) |
 | `publier` (GitLab) | sur un tag `vX.Y.Z` | release GitLab avec les notes du CHANGELOG (#333) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
 
 **Ce qu'un pipeline vert ne prouve pas**, et c'est écrit en tête du fichier CI :
