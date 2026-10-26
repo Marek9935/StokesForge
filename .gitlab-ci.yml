@@ -1,4 +1,4 @@
-# CI de la branche main : cœur Rust et intégration Python embarquée.
+# CI du dépôt : cœur Rust et intégration Python embarquée.
 # Ce fichier racine est le seul lu par GitLab.
 #
 # ATTENTION — ce que `fmt`, `clippy` et `test` ne prouvent PAS :
