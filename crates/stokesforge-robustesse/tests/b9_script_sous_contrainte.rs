@@ -199,8 +199,33 @@ fn b9_course_entre_script_et_interface_sur_la_longueur() {
     // ligne en moins, sans que le script y soit pour rien (constat CI du
     // 2026-10-26 : 999 lignes). L'oracle compte ce que l'interface a réellement
     // réussi : la longueur doit valoir 1000 − suppressions + insertions, exactement.
-    let (_a, _b, sheet) = ids();
+    //
+    // Feuille à part : l'interface insère et supprime des lignes AU NIVEAU
+    // FEUILLE. Sur la feuille du banc, elle décalerait et rallongerait les
+    // colonnes `A` et `Jetable` que lisent les tests suivants (« expected
+    // length 1001 … got 1000 », constat CI du 2026-10-26, tag rc1) : ce test
+    // ne tournait pas tant qu'il était `#[ignore]`.
+    let (_a, _b, banc_sheet) = ids();
     let h0 = poignee();
+    let book = h0
+        .snapshot()
+        .unwrap()
+        .tree
+        .parent(banc_sheet)
+        .unwrap()
+        .unwrap();
+    h0.execute(Command::AddWorksheet {
+        book,
+        name: Some("Course".into()),
+    })
+    .unwrap();
+    let sheet = h0
+        .snapshot()
+        .unwrap()
+        .tree
+        .resolve("[Book1]Course")
+        .unwrap();
+    assert_ne!(sheet, banc_sheet);
     h0.execute(Command::AddColumn {
         sheet,
         index: None,
@@ -212,7 +237,7 @@ fn b9_course_entre_script_et_interface_sur_la_longueur() {
         .snapshot()
         .unwrap()
         .tree
-        .resolve("[Book1]Sheet1!Course")
+        .resolve("[Book1]Course!Course")
         .unwrap();
     let stop = Arc::new(AtomicBool::new(false));
     let violations = Arc::new(AtomicUsize::new(0));
@@ -257,7 +282,7 @@ fn b9_course_entre_script_et_interface_sur_la_longueur() {
     });
 
     let out = run("import numpy as np\n\
-         h = pyst.resolve('[Book1]Sheet1!Course')\n\
+         h = pyst.resolve('[Book1]Course!Course')\n\
          refus = 0\n\
          for i in range(400):\n\
          \x20   v = pyst.column(h)\n\
