@@ -76,8 +76,9 @@ distance de sa position de départ. Témoin :
 ### scipy dans le préfixe embarqué (#191)
 
 La pile embarquée porte numpy **et scipy** (`SCIPY_VERSION` de
-`vendor/python/lock.env`, roue cp312 manylinux, installée par
-`scripts/python-vendor.sh` avec `--no-deps --only-binary=:all:` comme numpy).
+`vendor/python/lock.env`, roue cp312 : manylinux sous Linux, `win_amd64` sous
+Windows ; installée par `scripts/python-vendor.sh` avec
+`--no-deps --only-binary=:all:` comme numpy).
 Les deux sont solidaires de CPython et entre eux (la roue scipy exige
 `numpy>=2.0,<2.8`) : changer l'un se rejoue par `scripts/python-vendor.sh` puis
 `scripts/python-test.sh`. scipy sert aux **scripts** `pyst` (par exemple
@@ -88,8 +89,8 @@ menus est du Rust pur (`stokesforge-analysis`). Poids : ≈ 140 Mo installés
 inclus), à compter dans le paquet. Les notices vont dans `licenses/scipy/`
 (`scripts/licenses-dist.sh`). Témoin : `stokesforge-script/tests/analysis.rs`,
 `scipy_ajuste_une_exponentielle_depuis_un_script` (travail CI `test-python`).
-Windows : la pile n'est pas vendorisée aujourd'hui (tâche 5.1b) ; la roue
-`win_amd64` s'y installera de la même façon, à vérifier alors.
+Windows : le même script (sous Git Bash, #332) installe la roue `win_amd64`, et
+le travail CI `test-python-windows` lance les tests de scripts avec elle.
 
 ## Tableaux : l'asymétrie est une décision
 

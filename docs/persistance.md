@@ -1,6 +1,6 @@
 # Persistance — le format `.stf`
 
-## Frontière figée, format provisoire
+## Frontière figée
 
 Deux fonctions, un sens chacune, un `Project` complet en entrée/sortie et rien
 d'autre :
@@ -10,8 +10,9 @@ save(project: &Project, path: &Path) -> PersistenceResult<()>;
 load(path: &Path)                    -> PersistenceResult<Project>;
 ```
 
-Aucun appelant ne connaît le format sur disque. Il sera remplacé plus tard
-(Zarr est envisagé) sans que rien au-dessus n'ait à changer. Le chargement est
+Aucun appelant ne connaît le format sur disque. S'il devait être remplacé un
+jour (Zarr avait été envisagé), rien au-dessus n'aurait à changer ; depuis la V1
+le format lui-même est figé (invariant 12, règle de version plus bas). Le chargement est
 **intégral** : tout le projet tient en mémoire, il n'y a pas de chargement
 partiel ni différé.
 
@@ -162,7 +163,8 @@ dans un `stokesforge_plot::RawVariant`.
 
 C'est ce qui borne la perte à **ce seul nœud** (ou cette seule série) au lieu
 du fichier entier, et ce qui fait qu'une variante inconnue **survit à deux
-sauvegardes successives à l'identique** (batterie `b20`). `RawVariant` ne
+sauvegardes successives à l'identique** (batterie `b19`, qui s'appuie sur
+l'écriture déterministe vérifiée par `b20`). `RawVariant` ne
 connaît ni `serde` ni MessagePack : il ne porte que des octets opaques, déjà
 encodés tels que lus, et seul ce crate sait les réinterpréter.
 
@@ -567,5 +569,5 @@ Lecture tolérante (invariant 10) : un lien dont la feuille ou la source n'est p
 une feuille de l'arbre, ou dont un identifiant dépasse `MAX_NODE_ID`, est écarté seul ;
 la feuille reste, ordinaire. Un identifiant de colonne qui n'existe plus est accepté
 (la colonne a pu être supprimée) : le lien la recrée à la remise à jour. Le presse-papiers
-d'objets ne porte pas les liens (une copie est ordinaire). Format provisoire : champ
-nouveau, additif.
+d'objets ne porte pas les liens (une copie est ordinaire). Champ additif : il
+ne change pas le numéro de version du format.

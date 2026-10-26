@@ -79,8 +79,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
       - run: cargo test --workspace
 
-  # Reproductions d'anomalies : échouent par construction tant que l'anomalie
-  # n'est pas corrigée, donc non bloquant (`allow_failure` côté GitLab).
+  # Reproductions d'anomalies (`#[ignore]` de robustesse ; aucune aujourd'hui) :
+  # elles échouent tant que l'anomalie n'est pas corrigée, donc non bloquant
+  # (`allow_failure` côté GitLab).
   robustesse:
     runs-on: ubuntu-latest
     continue-on-error: true

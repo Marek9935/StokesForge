@@ -112,29 +112,21 @@ test:
   script:
     - cargo test --workspace
 
-# Reproductions d'anomalies du banc de robustesse — les `#[ignore]` de
-# `stokesforge-robustesse`, une par anomalie consignée dans les rapports
-# `docs/rustrewrite/rapport-robustesse-2026-09-11.md` (A1 à C2) et
-# `docs/rustrewrite/rapport-robustesse-2026-09-11-suite.md` (A7 à D2, seize
-# anomalies), sous
-# l'identifiant que porte leur attribut (A1, B2, …).
+# Reproductions d'anomalies du banc de robustesse : les `#[ignore]` de
+# `stokesforge-robustesse`, une par anomalie, sous l'identifiant que porte leur
+# attribut. Il n'en reste aucune aujourd'hui (V1, #333 : critère « zéro
+# rouge ») ; le travail lance `--ignored` pour qu'une reproduction remise à
+# l'avenir soit vue à chaque pipeline.
 #
-# `allow_failure: true`, et ce n'est pas un aveu de faiblesse : ces tests
-# échouent PAR CONSTRUCTION tant que l'anomalie qu'ils décrivent n'est pas
-# corrigée. Les rendre bloquants mettrait le pipeline au rouge en permanence,
-# ce qui lui retirerait toute valeur de signal ; les retirer ferait perdre la
-# reproduction. Non bloquant, le travail garde les deux : la liste reste sous
-# les yeux à chaque pipeline, et son passage au vert est l'événement qu'on
-# attend.
+# `allow_failure: true` : une reproduction échoue tant que son anomalie n'est
+# pas corrigée ; la rendre bloquante mettrait le pipeline au rouge en
+# permanence. Les batteries sans `#[ignore]` tournent, elles, dans `test` et
+# `test-python`, bloquants.
 #
-# Ces reproductions sont automatiques et non bloquantes. Les garde-fous
-# Python, eux, sont automatiques et bloquants dans `test-python`.
-#
-# **Quand une reproduction passe au vert**, c'est que le correctif est bon :
-# retirer son `#[ignore]` pour que le garde-fou prenne le relais dans le
-# travail `test`. Le nombre de rouges est la mesure d'avancement ; l'ordre
-# dans lequel les traiter est dans
-# `docs/rustrewrite/guide-de-correction-robustesse.md`.
+# **Quand une reproduction passe au vert**, retirer son `#[ignore]` pour que le
+# garde-fou prenne le relais dans le travail `test`. Anomalies d'origine et
+# ordre de correction : `docs/archive/rustrewrite/` (rapports de robustesse,
+# `guide-de-correction-robustesse.md`).
 robustesse:
   stage: check
   extends: .linux-job
