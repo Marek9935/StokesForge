@@ -968,6 +968,19 @@ Limite : l'aspect du sous-menu et le texte des bulles se relisent à l'écran.
 
 ## Projet de démonstration (`demo/`)
 
+**Démarrage (#333).** `stokesforge-app-state/src/startup.rs` (`tests`) : la
+décision première ouverture / lancements suivants / démonstration forcée /
+chemin existant ou absent, sans fenêtre ; `preferences.rs` : le marqueur
+`first_run_done` (absent ou illisible = à faire, écrit en gardant les champs
+inconnus). `main.rs` (`startup_tests`, `cargo test -p stokesforge-app --bin
+stokesforge-app`) : `demo.stf` écrit puis relu sans rien écarter, repli en
+mémoire si le dossier ne peut pas se créer, projet vide sans classeur. Témoins
+éprouvés par mutation : l'écriture du fichier retirée, le marqueur ignoré.
+`scripts/app-dist.sh` et `app-dist-windows.sh` donnent un dossier de
+configuration jetable à la fenêtre empaquetée et exigent ensuite `demo.stf` et le
+marqueur : la première ouverture de production est éprouvée à chaque
+distribution.
+
 `crates/stokesforge-app/src/demo/tests.rs` (module du **binaire** : `cargo test -p stokesforge-app --bin stokesforge-app`). Chaque test a son témoin, vérifié par mutation (graine changée, titre donné à un graphe, colonne supprimée sous un graphe, amplitude du jeu gaussien changée, `recalculate` retiré de `session_for_project`) : noms de fenêtre uniques dans tout le projet, aucun titre de graphe (#103), chaque graphe résolu sans référence brisée et dessiné, axes logarithmiques sur données strictement positives (invariant 10), chaque jeu d'analyse retrouve ses paramètres connus par `core::compute` (`Attendu`, tolérance), les huit familles d'`OperationKind::ALL` couvertes (dont le lissage, jeu `Smooth`), bruit à graine fixe épinglé, colonnes à formule calculées dès le démarrage, aller-retour `.stf` par la session (rapport propre, mêmes specs), tous les `PlotType` (sans `Unknown`).
 
 ## Analyser des lignes (#253)

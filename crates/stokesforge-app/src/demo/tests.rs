@@ -2,7 +2,7 @@
 //! même vérification doit échouer, pour qu'un test qui ne vérifie plus rien se
 //! voie (le test lui-même a été éprouvé par mutation : graine changée, graphe
 //! à référence brisée, jeu gaussien remplacé par une constante, recalcul
-//! retiré de `session_for_project`).
+//! retiré de `demo_session`).
 
 use std::collections::BTreeSet;
 
@@ -16,7 +16,8 @@ use stokesforge_session::Session;
 use super::analyse::{self, Attendu, Jeu};
 use super::bruit::Bruit;
 use super::demo_project;
-use crate::session_for_project;
+use crate::session_for_startup;
+use stokesforge_app_state::startup::StartupSource;
 
 /// Les graphes du projet, `(nom, spec)`, dans l'ordre des noms.
 fn graphes(project: &Project) -> Vec<(String, PlotSpec)> {
@@ -364,8 +365,8 @@ const EPINGLE_MESURE: f64 = 94.427_690_068_6;
 
 #[test]
 fn le_demarrage_de_la_demo_recalcule_les_colonnes_a_formule() {
-    let (session, _, _) = session_for_project(
-        None,
+    let (session, _, _) = session_for_startup(
+        &StartupSource::DemoMemory(std::path::PathBuf::new()),
         stokesforge_app_state::preferences::default_load_limits(),
     )
     .unwrap();
@@ -392,7 +393,7 @@ fn le_demarrage_de_la_demo_recalcule_les_colonnes_a_formule() {
 
     // Témoin : sans session ni recalcul, la colonne à formule est vide — c'est
     // ce que verrait l'utilisateur si `recalculate` sortait de
-    // `session_for_project`.
+    // `demo_session`.
     let brut = demo_project().unwrap();
     assert_eq!(colonne_par_chemin(&brut, "[Types]Sheet1!F").len(), 0);
 }
@@ -411,8 +412,8 @@ fn project_feuille(tree: &Tree, nom: &str) -> NodeId {
 fn la_demo_fait_l_aller_retour_stf_par_la_session() {
     let dossier = tempfile::tempdir().unwrap();
     let chemin = dossier.path().join("demo.stf");
-    let (session, _, _) = session_for_project(
-        None,
+    let (session, _, _) = session_for_startup(
+        &StartupSource::DemoMemory(std::path::PathBuf::new()),
         stokesforge_app_state::preferences::default_load_limits(),
     )
     .unwrap();

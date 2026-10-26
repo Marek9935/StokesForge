@@ -103,11 +103,23 @@ relecture**. C'est le point à vérifier en premier quand une action est ajouté
 
 `stokesforge-app [chemin]`. Si `chemin` existe, le projet est chargé depuis ce
 fichier (et seul ce cas le marque « enregistré » : `AppState::mark_loaded`) ;
-sinon un projet de démonstration est construit et `chemin` devient la cible
-d'un futur enregistrement. Sans argument, la démonstration n'a **pas** de
-chemin (#315) : le titre porte « Untitled project » et le premier Ctrl+S ouvre
-le sélecteur, qui suggère `demo.stf` ; un `demo.stf` du dossier courant n'est
-ni pris pour le projet ni écrasé sans contrôle. **File › Save** et le bouton de
+sinon un projet **vide** est construit (comme Fichier › Nouveau, sans classeur)
+et `chemin` devient la cible d'un futur enregistrement.
+
+**Sans argument (#333)** : la démonstration s'offre **une seule fois**, à la
+première ouverture. Elle est écrite dans `demo.stf`, à côté de
+`preferences.json` (dossier de configuration), puis ouverte depuis ce fichier,
+que l'utilisateur retrouve par « Ouvrir » ; le marqueur `first_run_done` des
+préférences est alors posé et les lancements suivants partent d'un projet vide.
+Si `demo.stf` ne peut pas s'écrire, la démonstration reste en mémoire, sans
+chemin, et le démarrage n'échoue pas. La décision est
+`stokesforge_app_state::startup::plan` (pure, testée sans fenêtre) ;
+`main.rs` l'exécute. **`STOKESFORGE_DEMO=1`** (développement, captures, pilote
+`run-stokesforge`) garde la démonstration en mémoire à chaque lancement, **sans**
+chemin (#315 : le titre porte « Untitled project », le premier Ctrl+S ouvre le
+sélecteur) et sans poser le marqueur ; un `demo.stf` du dossier courant n'est
+jamais pris pour le projet ni écrasé sans contrôle. Le script d'exemple de la
+console n'est prérempli qu'avec la démonstration (il lit `[Book1]Sheet1!A`). **File › Save** et le bouton de
 la barre sont grisés pendant l'exécution d'un script (`disabled-script-running`).
 
 Les colonnes du projet de démonstration utilisent les noms automatiques
@@ -123,7 +135,7 @@ graphes ; une matrice ; la note `Lisez-moi`), un dossier `Analyse` (un classeur
 par famille de calcul, dont `Integrate`, `FitPolynome` et `FitGaussienne` avec
 leur calcul déjà fait, visible dans le volet Results) et six graphes (`Panneaux`,
 `Axes`, `TypesTrace`, `Annotations`, `Groupes`, `Lignes`). Les noms de fenêtre y
-sont uniques dans tout le projet. `session_for_project` demande un recalcul
+sont uniques dans tout le projet. `demo_session` demande un recalcul
 complet juste après `Session::spawn` : les colonnes à formule ne portent que
 leur formule (invariant 11) et resteraient vides sans lui. Le bruit des mesures
 est à graine fixe : la démonstration est la même à chaque lancement.

@@ -31,7 +31,7 @@ scripts/perf/mesure-fenetres.sh release 6
 git apply -R scripts/perf/instrumentation.patch       # retire les chronomètres
 ```
 
-Le second argument (0 à 6) est le nombre de graphes du projet de démonstration
+Le script passe par le pilote `run-stokesforge`, qui pose `STOKESFORGE_DEMO=1`. Le second argument (0 à 6) est le nombre de graphes du projet de démonstration
 ouverts en plus de Book1 et Graph1 : refaire varier ce nombre donne la courbe
 « coût par fenêtre ».
 

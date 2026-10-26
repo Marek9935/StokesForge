@@ -6,7 +6,7 @@
 //! (invariant 1 : ce n'est pas une mutation du modèle d'une session). Les
 //! colonnes à formule sont seulement *déclarées* ici ; leurs valeurs, jamais
 //! écrites à la main (invariant 11), viennent du recalcul que
-//! `session_for_project` demande au démarrage.
+//! `demo_session` demande au démarrage.
 
 use anyhow::Context as _;
 use stokesforge_core::{

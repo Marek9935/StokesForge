@@ -123,10 +123,18 @@ if [[ -z "${DISPLAY:-}" ]]; then
     exit 1
 fi
 
+# Dossier de configuration jetable (#333) : sans argument, la première
+# ouverture écrit la démonstration dans `demo.stf` de ce dossier et l'ouvre ;
+# c'est ce parcours de production que la fenêtre empaquetée éprouve, sans
+# toucher au vrai profil de la machine.
+CONFIG_DIR="$(mktemp -d)"
+trap 'rm -rf "$CONFIG_DIR"' EXIT
+
 echo "[dist] exécution en environnement nettoyé, STOKESFORGE_APP_AUTOQUIT_MS=$AUTOQUIT_MS"
 set +e
 env -i PATH=/usr/bin:/bin HOME=/tmp \
        DISPLAY="$DISPLAY" XAUTHORITY="${XAUTHORITY:-}" \
+       STOKESFORGE_CONFIG_DIR="$CONFIG_DIR" \
        STOKESFORGE_APP_AUTOQUIT_MS="$AUTOQUIT_MS" \
        "$DIST/stokesforge-app" 2>&1 | tee "$DIST/../stokesforge-app-run.log"
 CODE="${PIPESTATUS[0]}"
@@ -134,6 +142,13 @@ set -e
 
 if [[ "$CODE" -ne 0 ]]; then
     echo "[dist] ERREUR : la fenêtre empaquetée est sortie en code $CODE (attendu 0)" >&2
+    exit 1
+fi
+
+# La première ouverture a offert la démonstration : le fichier existe et le
+# marqueur est posé (#333).
+if [[ ! -s "$CONFIG_DIR/demo.stf" ]] || ! grep -q '"first_run_done": true' "$CONFIG_DIR/preferences.json" 2>/dev/null; then
+    echo "[dist] ERREUR : la première ouverture n'a pas écrit demo.stf et le marqueur dans $CONFIG_DIR" >&2
     exit 1
 fi
 

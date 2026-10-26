@@ -45,6 +45,7 @@ pub mod quantities;
 pub mod r_squared;
 pub mod recovery;
 pub mod selection;
+pub mod startup;
 pub mod state;
 pub mod text_format;
 pub mod user_colors;

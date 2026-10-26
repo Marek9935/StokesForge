@@ -20,7 +20,7 @@
 //!   alors appeler les primitives de `stokesforge-core`, jamais ensuite. Les
 //!   calculs déjà faits passent par `add_calculation` sur ce même projet neuf.
 //! - **Les colonnes à formule ne reçoivent aucune valeur ici** (invariant 11,
-//!   #193) : seule la formule est posée ; `session_for_project` demande un
+//!   #193) : seule la formule est posée ; `demo_session` demande un
 //!   recalcul complet juste après le démarrage de l'acteur, sans quoi ces
 //!   colonnes resteraient vides.
 //! - **Les noms de fenêtre sont uniques dans tout le projet**, pas seulement

@@ -1643,12 +1643,12 @@ impl StokesForgeApp {
 }
 
 /// Le nom de fichier suggéré par défaut au sélecteur « Enregistrer sous… » :
-/// le nom du chemin courant s'il en a un, sinon un nom de repli.
+/// le nom du chemin courant s'il en a un, sinon le nom d'un projet neuf.
 fn suggested_file_name(path: &str) -> String {
     std::path::Path::new(path)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "demo.stf".to_string())
+        .unwrap_or_else(|| format!("{}.stf", stokesforge_session::NEW_PROJECT_NAME))
 }
 
 #[cfg(test)]

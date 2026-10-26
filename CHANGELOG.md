@@ -32,6 +32,9 @@ Première version publiée. Portage de StokesForge de Python/Qt vers Rust
   (#168).
 - Scripts Python embarqués par le module `pyst`, dont l'API est figée
   (#331) ; `stokesforge-cli import` et `stokesforge-cli run`.
+- Première ouverture : un projet de démonstration est offert, enregistré dans
+  `demo.stf` du dossier de configuration ; les lancements suivants démarrent
+  sur un projet vide.
 - Distribution autonome : archive Linux x86_64 et installeur Windows, avec
   l'interpréteur Python embarqué et les notices de licences (#332).
 

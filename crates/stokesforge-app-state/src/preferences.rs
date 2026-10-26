@@ -253,7 +253,14 @@ struct PreferencesFile {
     /// brute : une liste illisible retombe sur le défaut.
     #[serde(default)]
     copy_formats: Option<serde_json::Value>,
+    /// La démonstration a déjà été offerte à la première ouverture ; absent ou
+    /// illisible : pas encore (#333).
+    #[serde(default, deserialize_with = "lenient")]
+    first_run_done: Option<bool>,
 }
+
+/// Nom du fichier de démonstration dans le dossier de configuration (#333).
+pub const DEMO_FILE_NAME: &str = "demo.stf";
 
 fn clamp_autosave_minutes(minutes: u32) -> u32 {
     minutes.clamp(MIN_AUTOSAVE_MINUTES, MAX_AUTOSAVE_MINUTES)
@@ -297,6 +304,7 @@ pub struct Preferences {
     analysis_recent: Vec<crate::analysis_recent::RecentAnalysis>,
     dialogs: BTreeMap<String, DialogGeometry>,
     copy_formats: Vec<CopyFormatEntry>,
+    first_run_done: bool,
     path: Option<PathBuf>,
 }
 
@@ -355,6 +363,7 @@ impl Preferences {
                 .copy_formats
                 .and_then(|value| serde_json::from_value::<Vec<CopyFormatEntry>>(value).ok())
                 .map_or_else(default_copy_formats, |list| normalize_copy_formats(&list)),
+            first_run_done: file.first_run_done.unwrap_or(false),
             path,
         }
     }
@@ -647,6 +656,30 @@ impl Preferences {
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
+
+    /// `true` si la démonstration a déjà été offerte : elle ne s'ouvre qu'à la
+    /// toute première ouverture (#333).
+    pub fn first_run_done(&self) -> bool {
+        self.first_run_done
+    }
+
+    /// Mémorise que la démonstration a été offerte, sans remplacer les autres
+    /// préférences. Sans dossier de configuration, l'erreur est rendue : la
+    /// démonstration reviendra alors au lancement suivant.
+    pub fn save_first_run_done(&mut self) -> std::io::Result<()> {
+        self.first_run_done = true;
+        self.save_field("first_run_done", true.into())
+    }
+
+    /// Où vit le fichier de démonstration : `demo.stf`, à côté du fichier de
+    /// préférences (le dossier de configuration de l'utilisateur). `None` sans
+    /// fichier de préférences.
+    pub fn demo_file_path(&self) -> Option<PathBuf> {
+        self.path
+            .as_deref()
+            .and_then(Path::parent)
+            .map(|folder| folder.join(DEMO_FILE_NAME))
+    }
 }
 
 /// Les géométries de dialogue lues dans le fichier : les entrées illisibles ou
@@ -702,6 +735,37 @@ fn default_path() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn la_premiere_ouverture_est_a_faire_tant_que_le_marqueur_manque_ou_est_illisible() {
+        for content in ["{}", r#"{ "first_run_done": "oui" }"#] {
+            let (_dir, path) = written(content);
+            assert!(!Preferences::load_from(Some(path)).first_run_done());
+        }
+    }
+
+    #[test]
+    fn le_marqueur_de_premiere_ouverture_s_ecrit_et_garde_le_reste() {
+        let (_dir, path) = written(r#"{ "language": "fr", "avenir": 7 }"#);
+        let mut preferences = Preferences::load_from(Some(path.clone()));
+        preferences.save_first_run_done().unwrap();
+        let reloaded = Preferences::load_from(Some(path.clone()));
+        assert!(reloaded.first_run_done());
+        assert_eq!(reloaded.language(), Some("fr"));
+        let text = std::fs::read_to_string(path).unwrap();
+        assert!(text.contains("\"avenir\""), "un champ inconnu est gardé");
+    }
+
+    #[test]
+    fn le_fichier_de_demo_est_a_cote_des_preferences_et_absent_sans_elles() {
+        let (dir, path) = written("{}");
+        let preferences = Preferences::load_from(Some(path));
+        assert_eq!(
+            preferences.demo_file_path(),
+            Some(dir.path().join(DEMO_FILE_NAME))
+        );
+        assert_eq!(Preferences::load_from(None).demo_file_path(), None);
+    }
 
     #[test]
     fn la_boite_r2_faible_est_active_par_defaut_ecrite_et_relue() {

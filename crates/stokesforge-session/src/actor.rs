@@ -543,7 +543,7 @@ pub(crate) fn run(
                         "new project",
                     )))
                 } else {
-                    Project::new("Project1")
+                    Project::new(crate::NEW_PROJECT_NAME)
                         .map_err(CommandError::from)
                         .map_err(SessionError::from)
                         .map(|empty| {

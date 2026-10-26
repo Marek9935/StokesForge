@@ -324,7 +324,7 @@ de second contrôle à faire sur un « petit fichier qui se dilate » (la dilata
 mémoire, elle, est bornée par `MAX_COLUMN_ROWS`). La limite est réglable dans les
 préférences (File › Preferences › General, 512 Mo par défaut, de 16 Mo à
 16 Go, pas de « sans limite ») ; l'application la lit **avant** de démarrer la
-session (`main.rs`, `session_for_project`). Un refus à l'ouverture laisse projet
+session (`main.rs`, `session_for_startup`). Un refus à l'ouverture laisse projet
 et chemin courants (`open_project`). À l'enregistrement, un fichier qui dépasse
 la limite s'écrit quand même, mais un avertissement (`status-saved-over-limit`)
 remplace « Enregistré » et dit comment la relever.
@@ -534,7 +534,7 @@ n'est posé que par un **vrai chargement** (`load`, `open_project`, ou
 `AppState::mark_loaded` appelé par le binaire après `stokesforge-app <chemin>`).
 Il n'est jamais déduit de l'existence d'un fichier au chemin : sinon un `demo.stf`
 du dossier courant passerait pour le projet et Ctrl+S l'écraserait sans le contrôle
-de l'enregistrement. Sans argument, la démonstration n'a pas de chemin.
+de l'enregistrement. Sans argument, la démonstration en mémoire (`STOKESFORGE_DEMO=1`) n'a pas de chemin ; celle de la première ouverture est ouverte depuis `demo.stf` du dossier de configuration (#333).
 
 - `Action::SaveAs { path }` remplace le chemin puis enregistre ; en cas d'échec le
   chemin précédent est **rétabli** (après `save`), pour que le Ctrl+S suivant

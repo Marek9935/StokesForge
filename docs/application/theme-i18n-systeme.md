@@ -87,6 +87,10 @@ Menu **Fichier › Langue** : change la langue tout de suite (`set_language`, le
 textes se redessinent à l'image suivante) et l'écrit dans `preferences.json` ;
 `STOKESFORGE_LANG` l'emporte encore au prochain démarrage.
 
+**Variable de développement `STOKESFORGE_DEMO=1`** (#333) : ouvre la démonstration
+en mémoire à chaque lancement, au lieu de la seule première ouverture (voir
+`etat-et-console.md`, « Binaire »). Posée par le pilote `run-stokesforge`.
+
 **Dossier de configuration** (#332) : la variable `STOKESFORGE_CONFIG_DIR`,
 si elle est posée et non vide, désigne le dossier tel quel (sans suffixe) ;
 sinon le dossier du système (`directories::ProjectDirs`, `…\StokesForge\config`

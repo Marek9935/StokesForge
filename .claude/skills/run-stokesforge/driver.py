@@ -50,7 +50,7 @@ def start(args):
         time.sleep(3)
     if alive("app"):
         stop(["app"])
-    env = dict(os.environ, DISPLAY=DISPLAY, STOKESFORGE_X11="1")
+    env = dict(os.environ, DISPLAY=DISPLAY, STOKESFORGE_X11="1", STOKESFORGE_DEMO="1")
     env.pop("WAYLAND_DISPLAY", None)
     spawn("app", [str(APP), *args], env)
     time.sleep(10)  # le premier rendu wgpu/llvmpipe est lent

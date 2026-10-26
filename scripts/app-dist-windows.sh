@@ -123,9 +123,21 @@ echo "[dist] taille de $DIST : $(du -sm "$DIST" | cut -f1) Mo"
 if [[ "${STOKESFORGE_DIST_SKIP_WINDOW:-0}" == "1" ]]; then
     echo "[dist] ATTENTION : ouverture de la fenêtre sautée (STOKESFORGE_DIST_SKIP_WINDOW=1)" >&2
 else
+    # Dossier de configuration jetable (#333) : sans argument, la première
+    # ouverture écrit la démonstration dans `demo.stf` de ce dossier et l'ouvre ;
+    # c'est ce parcours de production que la fenêtre empaquetée éprouve, sans
+    # toucher au vrai %APPDATA%.
+    CONFIG_DIR="$(mktemp -d)"
     echo "[dist] fenêtre empaquetée, fermeture auto après ${AUTOQUIT_MS} ms"
     STOKESFORGE_APP_AUTOQUIT_MS="$AUTOQUIT_MS" clean_env \
+        STOKESFORGE_CONFIG_DIR="$(cygpath -w "$CONFIG_DIR")" \
         STOKESFORGE_APP_AUTOQUIT_MS="$AUTOQUIT_MS" "$DIST/stokesforge-app.exe"
+    if [[ ! -s "$CONFIG_DIR/demo.stf" ]] || ! grep -q '"first_run_done": true' "$CONFIG_DIR/preferences.json" 2>/dev/null; then
+        echo "[dist] ERREUR : la première ouverture n'a pas écrit demo.stf et le marqueur dans $CONFIG_DIR" >&2
+        rm -rf "$CONFIG_DIR"
+        exit 1
+    fi
+    rm -rf "$CONFIG_DIR"
 fi
 
 echo "[dist] auto-vérification depuis le staging, environnement vidé et piégé"

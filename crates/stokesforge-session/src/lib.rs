@@ -168,6 +168,10 @@ use stokesforge_core::{NodeId, Project};
 use actor::Request;
 use gauge::RecalcGauge;
 
+/// Nom d'un projet neuf : celui de Fichier > Nouveau, et celui du projet vide
+/// du démarrage (#333).
+pub const NEW_PROJECT_NAME: &str = "Project1";
+
 pub use error::{SessionError, SessionResult};
 pub use gauge::RecalcEnd;
 pub use recalc::FormulaRecalc;
