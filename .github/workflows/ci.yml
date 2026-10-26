@@ -162,7 +162,7 @@ jobs:
           cargo install cargo-about --locked --features cli --version "$CARGO_ABOUT_VERSION"
       # La distribution ouvre la fenêtre : écran virtuel et rendu logiciel.
       - name: Dépendances d'exécution
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 libwayland-dev xvfb
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 libwayland-dev libxkbcommon-x11-0 xvfb
       - run: scripts/python-vendor.sh
       # En cas d'échec, les premières erreurs et la fin du journal sont posées en
       # annotation (lisible par l'API sans connexion).
