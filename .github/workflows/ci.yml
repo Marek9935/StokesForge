@@ -128,7 +128,8 @@ jobs:
       - run: scripts/python-vendor.sh
       - run: scripts/python-test.sh
 
-  # #333 : publication Linux. Sur un tag vX.Y.Z seulement, une fois les
+  # #333 : publication Linux. Sur un tag vX.Y.Z ou vX.Y.Z-rcN (le -rcN éprouve
+  # la construction et le téléversement, sans release), une fois les
   # contrôles bloquants verts : vérifie le tag (versions des crates, section de
   # CHANGELOG.md), assemble et éprouve la distribution, téléverse l'archive dans
   # le registre de paquets de GitLab. Aucune release GitHub : GitHub n'est qu'un

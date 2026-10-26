@@ -13,6 +13,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TAG="${CI_COMMIT_TAG:?CI_COMMIT_TAG absent : ce script ne tourne que sur un tag}"
 VERSION="${TAG#v}"
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "[release] ERREUR : pas de release pour « $TAG » (attendu vX.Y.Z, sans suffixe)" >&2
+    exit 1
+fi
 
 NOTES="$("$REPO_ROOT/scripts/release-notes.sh" "$TAG")"
 SETUP="StokesForge-${VERSION}-windows-setup.exe"

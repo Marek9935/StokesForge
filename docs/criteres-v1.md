@@ -91,12 +91,15 @@ forme `vX.Y.Z`, versions des crates, section du CHANGELOG (`scripts/release-note
 **Non éprouvé.** Ces travaux n'ont jamais tourné sur un vrai tag : seuls les
 scripts ont été essayés en local (`release-notes.sh`, `release-linux.sh` sur une
 distribution existante, `release-publier.sh` en `STOKESFORGE_RELEASE_DRYRUN=1`).
-Un tag `v1.0.0-rc1` lance la CI GitHub complète et, sur GitLab, `test-python-windows`
-et `dist-windows` (leur règle accepte le suffixe `-rc1`) ; la release GitLab
-l'ignore et `release-linux` échoue sur `release-notes.sh`, ce qui est voulu : à faire d'abord pour éprouver le runner, et l'installeur qu'il
-produit sert à l'essai d'installation sur un autre poste Windows. L'essai complet
-des appels d'API (téléversement de l'archive Linux, release GitLab en
-formulaire) n'a lieu qu'au premier vrai tag ; `release-linux-televerser.sh` et
+Un tag `vX.Y.Z-rcN` lance la CI GitHub complète et, sur GitLab,
+`test-python-windows` et `dist-windows` (leur règle accepte le suffixe) ;
+`release-linux` construit l'archive Linux et la téléverse dans le registre de
+paquets GitLab (`release-notes.sh` n'y vérifie que les versions des crates) ;
+la release GitLab, elle, ignore le tag (`publier` n'accepte que `vX.Y.Z`). Le
+tag `-rcN` éprouve donc le runner Windows, l'installeur (artefact de
+`dist-windows`, pour l'essai sur un autre poste Windows) et le téléversement de
+l'archive Linux. Seul l'appel qui crée la release GitLab (formulaire, liens
+vers l'installeur et l'archive) n'a lieu qu'au premier vrai tag ; `release-linux-televerser.sh` et
 `release-publier.sh` s'essaient à vide avec `STOKESFORGE_RELEASE_DRYRUN=1`.
 
 ## Branches et versions
