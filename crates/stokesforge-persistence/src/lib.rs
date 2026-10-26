@@ -1,6 +1,6 @@
 //! Persistance de StokesForge : `save`/`load` d'un [`stokesforge_core::Project`] complet.
 //!
-//! # Frontière figée, format provisoire
+//! # Frontière figée
 //!
 //! Deux fonctions, un sens chacune, un `Project` complet en entrée/sortie et
 //! rien d'autre :
@@ -10,8 +10,9 @@
 //! load(path: &Path) -> Result<Project, PersistenceError>;
 //! ```
 //!
-//! Aucun appelant ne connaît le format sur disque ; il sera remplacé plus
-//! tard (Zarr est envisagé) sans que rien au-dessus n'ait à changer. Le
+//! Aucun appelant ne connaît le format sur disque ; s'il devait être
+//! remplacé un jour (Zarr avait été envisagé), rien au-dessus n'aurait à
+//! changer. Depuis la V1 le format lui-même est figé (invariant 12). Le
 //! chargement est **intégral** : tout le projet tient en mémoire, il n'y a
 //! pas de chargement partiel ou différé.
 //!
