@@ -40,7 +40,13 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
 - [ ] `scripts/app-dist.sh` sort 0 sur Linux : la fenêtre s'ouvre et se ferme,
   `stokesforge-selftest` passe, depuis le paquet. La CI le fait sous écran
   virtuel (xvfb) au tag ; avant le tag, l'essayer aussi à la main sur un bureau
-  Wayland réel (Fedora).
+  Wayland réel. Essai à la main fait le 2026-10-26 sur Ubuntu 26.04 (GNOME,
+  Wayland, VM, rendu logiciel) plutôt que sur Fedora, pour sortir de la
+  distribution de développement : paquet construit sur la machine de dev,
+  copié hors du dépôt, `stokesforge-selftest` code 0, application, console
+  `pyst`/numpy/scipy, import, `.stf`, exports et glisser-déposer
+  fonctionnent. Reste, pour cocher : la CI au tag, et refaire le même essai
+  avec l'archive du tag `v1.0.0-rc1` (construite sur Ubuntu par la CI).
 - [ ] `scripts/app-dist-windows.sh` sort 0 sur le runner Windows et l'installeur
   `StokesForge-<version>-windows-setup.exe` s'installe, démarre et se désinstalle
   sur un poste neuf : au moins une fois à la main, sur un autre ordinateur
