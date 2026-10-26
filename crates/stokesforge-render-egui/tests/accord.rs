@@ -745,3 +745,66 @@ fn titres_masques_accord_et_temoins_avec_et_sans_ancre() {
         }
     }
 }
+
+/// Tirets en dedans, des deux côtés ou coupés (#344) : tracés par le
+/// pipeline, donc les deux backends s'accordent, sur les quatre côtés et
+/// avec ou sans nombres. Témoin : chaque réglage change la figure.
+#[test]
+fn les_tirets_maison_s_accordent_et_changent_la_figure() {
+    use stokesforge_plot::TickDirection;
+    let fixture = minimal();
+    let tree = fixture.project.tree();
+    let mut base = fixture.spec.clone();
+    {
+        let panel = base.panels.get_mut(0).unwrap();
+        panel.top.mirror = true;
+        panel.right.mirror = true;
+    }
+    let (baseline, _) = accord(tree, &base, SIZE, "cadre fermé par défaut");
+    // (nom, sens, nombres des miroirs, tirets)
+    let regles: [(&str, TickDirection, bool, bool); 6] = [
+        ("dedans", TickDirection::In, true, true),
+        ("des deux côtés", TickDirection::Both, true, true),
+        ("dedans sans nombres", TickDirection::In, false, true),
+        (
+            "des deux côtés sans nombres",
+            TickDirection::Both,
+            false,
+            true,
+        ),
+        ("coupés", TickDirection::Out, true, false),
+        ("coupés sans nombres", TickDirection::Out, false, false),
+    ];
+    let mut vues = vec![baseline];
+    for (quoi, sens, nombres_miroirs, tirets) in regles {
+        let mut spec = base.clone();
+        let panel = spec.panels.get_mut(0).unwrap();
+        for axe in [
+            &mut panel.bottom,
+            &mut panel.left,
+            &mut panel.top,
+            &mut panel.right,
+        ] {
+            axe.tick_direction = sens;
+            axe.ticks = tirets;
+        }
+        panel.top.tick_labels = nombres_miroirs;
+        panel.right.tick_labels = nombres_miroirs;
+        let (pixels, _) = accord(tree, &spec, SIZE, quoi);
+        assert!(!vues.contains(&pixels), "{quoi} : la figure ne change pas");
+        if !tirets {
+            // Sans tirets : les quatre lignes restent, les traits de repère
+            // (de bas en haut, les graduations) ont disparu.
+            let traits = |p: &[Primitive]| {
+                p.iter()
+                    .filter(|p| matches!(p, Primitive::Segment(..)))
+                    .count()
+            };
+            assert!(
+                traits(&pixels) + 20 < traits(&vues[0]),
+                "{quoi} : les tirets doivent disparaître"
+            );
+        }
+        vues.push(pixels);
+    }
+}

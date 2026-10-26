@@ -482,6 +482,24 @@ superposé de la case qui occupe ce côté prime (`CellPlan::mirror_top` /
 les nombres (formateur vide) ; l'aire de graduation d'un miroir sans libellés
 n'est que `BARE_LABEL_AREA`. Test : `stokesforge-render-svg/tests/miroirs.rs`.
 
+**Tirets et sens des tirets (#344).** `AxisSpec::ticks` (tirets tracés) et
+`AxisSpec::tick_direction` (`TickDirection` : `Out` défaut, `In`, `Both`)
+valent pour les quatre côtés d'un calque ordinaire (pas pour les axes d'un calque
+superposé). Le défaut (`ticks` vrai, `Out`) reste **entièrement à Plotters**
+(`custom_ticks` faux) : les figures existantes sont identiques au pixel. Sinon :
+Plotters ne trace les tirets qu'avec la ligne d'axe et place les nombres à deux
+fois leur longueur (`tick_size < 0` déplace même la ligne) ; l'axe passe donc en
+deux passes de maillage (`mesh_passes`) : les nombres seuls (ligne d'alpha nul,
+écart d'origine), puis la ligne seule (tirets de longueur nulle, aucune
+graduation demandée). Le pipeline trace ensuite les tirets lui-même
+(`draw_ticks`, `PathElement`, donc identiques en egui et en SVG) aux graduations
+de `scale::linear_key_points`, projetées par le repère principal (bas, gauche)
+ou secondaire (haut, droite : l'arrondi y diffère parfois d'un pixel). Longueur =
+celle de Plotters (`tick_length`, 5 px au plus). Dans un maillage « maison », un
+axe voisin resté par défaut a ses tirets `Out` tracés aussi par le pipeline, au
+même pixel. Tests : `miroirs.rs` (SVG), `accord.rs`
+(`les_tirets_maison_s_accordent_et_changent_la_figure`).
+
 Les échelles linéaires propres d'un calque superposé sont **jointes** à celles
 du calque recouvert (#174) : sans étendue fixée à la main, `scale::aligned_range`
 choisit un pas rond et une position telle que l'intervalle enveloppe les données

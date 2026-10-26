@@ -26,6 +26,19 @@ pub enum AxisSide {
     Top,
 }
 
+/// Sens des tirets d'un axe (#344) : hors de la zone de tracé (défaut, comme
+/// Plotters), vers l'intérieur, ou des deux côtés de la ligne.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum TickDirection {
+    /// Vers l'extérieur du cadre (défaut).
+    #[default]
+    Out,
+    /// Vers l'intérieur de la zone de tracé.
+    In,
+    /// De part et d'autre de la ligne.
+    Both,
+}
+
 /// Un axe : titre, unité, échelle, limites.
 ///
 /// [`AxisSpec::auto_range`] prime sur `range_min`/`range_max` : les bornes
@@ -74,6 +87,11 @@ pub struct AxisSpec {
     /// Libellés des graduations affichés ; faux = la ligne et les tirets
     /// seulement (#176).
     pub tick_labels: bool,
+    /// Tirets des graduations tracés ; faux = la ligne et les nombres
+    /// seulement, l'écart des nombres est conservé (#344).
+    pub ticks: bool,
+    /// Sens des tirets (#344).
+    pub tick_direction: TickDirection,
 }
 
 impl AxisSpec {
@@ -121,6 +139,8 @@ impl Default for AxisSpec {
             tick_color: String::new(),
             mirror: false,
             tick_labels: true,
+            ticks: true,
+            tick_direction: TickDirection::Out,
         }
     }
 }

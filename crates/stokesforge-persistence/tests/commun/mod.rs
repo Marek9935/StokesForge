@@ -226,6 +226,9 @@ pub fn non_trivial_spec(
             // #176 : axe miroir, sans étiquettes de graduation.
             mirror: true,
             tick_labels: false,
+            // #344 : tirets coupés, sens vers l'intérieur (hors défaut).
+            ticks: false,
+            tick_direction: stokesforge_plot::TickDirection::In,
         },
         title_visible: true,
         title_anchor: Some(stokesforge_plot::TextAnchor {

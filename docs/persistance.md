@@ -336,7 +336,9 @@ remplace « Enregistré » et dit comment la relever.
 - Tout nouveau champ porte `#[serde(default)]`. Sans lui, le fichier de la
   veille devient illisible.
   Exemple : `AxisSpecRecord::mirror` / `tick_labels` (#176, ce dernier vrai par
-  défaut) ; les couleurs de texte (`PlotSpecRecord::title_color`,
+  défaut) ; `ticks` (#344, **vrai** par défaut, sinon un ancien fichier perdrait
+  ses tirets) et `tick_direction` (`TickDirectionRecord`, valeur inconnue lue
+  `Out`, test `un_sens_de_tirets_inconnu_se_lit_vers_l_exterieur`) ; les couleurs de texte (`PlotSpecRecord::title_color`,
   `AxisSpecRecord::title_color`/`tick_color`) — un fichier plus ancien se
   relit avec des chaînes vides, c'est-à-dire en couleur automatique (test
   `un_spec_anterieur_aux_couleurs_de_texte_se_relit_en_automatique`). Ou

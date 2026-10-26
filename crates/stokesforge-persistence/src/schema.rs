@@ -936,6 +936,13 @@ pub(crate) struct AxisSpecRecord {
     /// Libellés des graduations (#176).
     #[serde(default = "visible_by_default")]
     pub(crate) tick_labels: bool,
+    /// Tirets des graduations (#344) ; vrai par défaut, sinon les anciens
+    /// fichiers perdraient leurs tirets.
+    #[serde(default = "visible_by_default")]
+    pub(crate) ticks: bool,
+    /// Sens des tirets (#344).
+    #[serde(default)]
+    pub(crate) tick_direction: TickDirectionRecord,
 }
 
 impl AxisSpecRecord {
@@ -968,8 +975,21 @@ impl Default for AxisSpecRecord {
             tick_color: String::new(),
             mirror: false,
             tick_labels: true,
+            ticks: true,
+            tick_direction: TickDirectionRecord::Out,
         }
     }
+}
+
+/// [`stokesforge_plot::TickDirection`], à plat. Une valeur inconnue se lit
+/// `Out` (dégradation gracieuse, invariant 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub(crate) enum TickDirectionRecord {
+    In,
+    Both,
+    #[default]
+    #[serde(other)]
+    Out,
 }
 
 /// [`stokesforge_plot::AxisScale`], à plat.
@@ -1180,6 +1200,23 @@ fn visible_by_default() -> bool {
 mod tests {
     use super::*;
 
+    /// Un sens de tirets inconnu (fichier d'une version plus récente) se lit
+    /// « vers l'extérieur », sans échec (invariant 10).
+    #[test]
+    fn un_sens_de_tirets_inconnu_se_lit_vers_l_exterieur() {
+        #[derive(Serialize)]
+        enum Futur {
+            Diagonale,
+            In,
+        }
+        let inconnu = rmp_serde::to_vec_named(&Futur::Diagonale).expect("encodage");
+        let relu: TickDirectionRecord = rmp_serde::from_slice(&inconnu).expect("relecture");
+        assert_eq!(relu, TickDirectionRecord::Out);
+        let connu = rmp_serde::to_vec_named(&Futur::In).expect("encodage");
+        let relu: TickDirectionRecord = rmp_serde::from_slice(&connu).expect("relecture");
+        assert_eq!(relu, TickDirectionRecord::In);
+    }
+
     /// Un fichier écrit avant l'ajout des couleurs de texte (titre du
     /// graphe, titre et échelle des axes) se relit : les champs absents
     /// reviennent vides, c'est-à-dire en couleur automatique.
@@ -1220,6 +1257,9 @@ mod tests {
         assert_eq!(relu.title_color, "");
         assert_eq!(relu.tick_color, "");
         assert!(relu.title_visible, "un ancien axe garde son titre visible");
+        // #344 : un ancien axe garde ses tirets, vers l'extérieur.
+        assert!(relu.ticks, "un ancien axe garde ses tirets");
+        assert_eq!(relu.tick_direction, TickDirectionRecord::Out);
 
         let spec = AncienSpec {
             title: "Ancien".to_string(),
