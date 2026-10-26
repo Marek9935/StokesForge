@@ -87,6 +87,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
+      # `-p stokesforge-robustesse` seul tire `wayland-sys`, qui s'édite avec
+      # pkg-config : sans ce paquet le travail échouait à la compilation, sans
+      # jamais lancer un test (constat du 2026-10-26).
+      - name: Fichiers de développement Wayland
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libwayland-dev
       # En cas d'échec, les premières erreurs et la fin du journal sont posées en
       # annotation (lisible sans connexion, y compris par l'API), car ce travail
       # est non bloquant et son journal n'est pas remonté dans GitLab.
