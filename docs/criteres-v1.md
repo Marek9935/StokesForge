@@ -12,8 +12,8 @@ constater ; le contenu de la version est dans [`CHANGELOG.md`](../CHANGELOG.md).
 | Un script `pyst` écrit contre la V1 continue de marcher | [`python-et-script.md`](python-et-script.md) § « API figée V1 », test `crates/stokesforge-script/tests/surface_figee.rs` |
 | L'application et son Python embarqué s'installent et démarrent sur Linux x86_64 et Windows x86_64 | `scripts/app-dist.sh`, `scripts/app-dist-windows.sh` ([`architecture.md`](architecture.md), § « Où sont les binaires ») |
 
-Le reste du code n'a **aucune** promesse de compatibilité : `main` prépare la
-version majeure suivante (voir « Branches et versions » plus bas).
+Le reste du code n'a **aucune** promesse de compatibilité d'une version
+majeure à l'autre (voir « Branches et versions » plus bas).
 
 ## Critères
 
@@ -72,9 +72,9 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
    créer le jeton qui laisse GitHub téléverser les paquets dans GitLab et y créer la release : un
    jeton de projet GitLab (rôle Developer, portée `api`), posé comme secret
    GitHub `GITLAB_RELEASE_TOKEN`.
-2. Fusionner sur `main`, puis créer la branche `release/1.x` à ce commit.
-3. Poser le tag `v1.0.0` sur `release/1.x` et le pousser vers GitLab (le miroir
-   le transmet à GitHub).
+2. Fusionner sur `main` : il n'y a pas de branche de version à créer.
+3. Poser le tag `v1.0.0` sur ce commit de `main` et le pousser vers GitLab (le
+   miroir le transmet à GitHub).
 4. Le tag déclenche, sur GitHub seulement (le miroir le transmet) :
    - les contrôles bloquants, Linux et Windows ;
    - `release-linux` et `dist-windows` : archive
@@ -105,11 +105,35 @@ Windows) et l'appel de création de la release. Seul le contenu final des notes
 
 ## Branches et versions
 
-- `main` : travail vers la version majeure suivante. Aucune contrainte de
-  rétrocompatibilité du code ; seuls les fichiers `.stf` V1 restent relisibles
-  (invariant 12) et l'API `pyst` ne change que par décision explicite.
-- `release/N.x` : une branche par version majeure, reçoit les correctifs
-  (cherry-pick depuis `main`). Tags `v1.0.0`, `v1.0.1`…
+Principe : **une seule ligne tant que rien ne diverge**, une branche de plus le
+jour où un gros chantier empêcherait de livrer un correctif. Une branche se
+crée à tout moment depuis un tag ; il est inutile d'en ouvrir une d'avance.
+
+```
+ Phase 1 : une seule ligne            Phase 2 : un chantier qui casse
+ main ──●──●──●──●──●──►              main ──●──●──●──►   V1 continue
+       ▼1.0.0 ▼1.0.1 ▼1.1.0                  ↓ fusion  ↓ fusion
+                                       v2 ───●──●──●──●──►  chantier cassant
+```
+
+- **`main`** : la ligne livrable. Les corrections, les petits ajouts sans
+  risque et leurs tags (`v1.0.1`, `v1.1.0`…) y sont posés directement.
+- **Numéros** : `Z` (`1.0.1`) = correction seule ; `Y` (`1.1.0`) = fonctionnalité
+  ajoutée sans rien casser ; `X` (`2.0.0`) = rupture de compatibilité.
+- **Ouvrir `vN`** (ex. `v2`) quand un chantier laisserait le code inutilisable
+  pendant des semaines (changement de bibliothèque d'interface, refonte du
+  modèle). Critère : *peut-on encore sortir un correctif de `main` pendant les
+  travaux ?* Sinon, branche. Un ajout de fonctionnalité n'en demande pas.
+- **Les correctifs se font toujours sur `main`**, dans un commit isolé, puis
+  arrivent dans `vN` par **fusion** de `main` (pas par copie à la main). Fusionner
+  souvent, chaque semaine environ : une branche longue sans fusion donne des
+  conflits énormes.
+- **Fin du chantier** : `vN` est fusionnée dans `main`, tag `vN.0.0`. Si la
+  version précédente doit rester maintenue, créer alors `release/(N-1).x` depuis
+  son dernier tag ; les correctifs y arrivent par cherry-pick depuis `main`.
+- Aucune contrainte de rétrocompatibilité du code ; seuls les fichiers `.stf`
+  V1 restent relisibles (invariant 12) et l'API `pyst` ne change que par
+  décision explicite.
 - À partir de la V1, **la règle « pas de rétrocompatibilité du format en
   développement » ne s'applique plus** : tout changement de ce qui est écrit
   dans un `.stf` suit la règle de version de `persistance.md`.
