@@ -3,8 +3,10 @@
 //! Ce module ne connaît **pas** `stokesforge-core` au sens inverse : c'est
 //! `convert.rs` qui sait construire un `NodeRecord` depuis un `Node` et
 //! réciproquement, jamais l'inverse. Le schéma est volontairement
-//! indépendant du modèle en mémoire (voir la doc de crate) : il peut évoluer
-//! (ajout de champs `#[serde(default)]`) sans jamais dériver `Serialize` sur
+//! indépendant du modèle en mémoire (voir la doc de crate) : il évolue selon la
+//! règle de version de `docs/persistance.md` (ajout de champs
+//! `#[serde(default)]` additif ; retrait ou renommage = nouvelle version, avec
+//! migration) sans jamais dériver `Serialize` sur
 //! les types de `stokesforge-core`.
 //!
 //! Toutes ces structures sont sérialisées **comme des maps nommées**

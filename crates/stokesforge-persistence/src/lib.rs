@@ -26,10 +26,10 @@
 //! sans casser les fichiers déjà écrits, par exemple) ne coûtera qu'une
 //! fonction de conversion à ajuster.
 //!
-//! # Cinq propriétés tenues dès cette version provisoire
+//! # Cinq propriétés tenues dès la version 1
 //!
 //! Les rajouter après coup coûterait une migration ; elles sont donc dans le
-//! format dès la version 1 :
+//! format depuis la version 1, figée (règle de version : `docs/persistance.md`) :
 //!
 //! 1. **Écriture atomique.** `save` écrit dans un fichier temporaire du même
 //!    répertoire que la destination, puis le renomme sur la cible
