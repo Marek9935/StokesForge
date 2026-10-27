@@ -14,7 +14,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Linux sur toutes ces branches ; Windows seulement hors `feature/**` (voir
+    # les `if` de `test-python-windows` et `dist-windows`).
+    branches: [main, 'feature/**', 'v[0-9]*', 'release/**']
     tags: ['v*']
   pull_request:
 
@@ -145,6 +147,18 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Le commit tagué est sur main ou sur une branche release
+        run: |
+          ok=0
+          for ref in origin/main $(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/release/*'); do
+            if git merge-base --is-ancestor "$GITHUB_SHA" "$ref"; then ok=1; fi
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error title=tag hors main::le commit $GITHUB_SHA du tag $GITHUB_REF_NAME n'est ancêtre ni de origin/main ni d'une branche release/* : tag posé sur une branche de travail"
+            exit 1
+          fi
       - name: Tag et notes
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
       - uses: Swatinem/rust-cache@v2
@@ -183,9 +197,9 @@ jobs:
   # Bloquants : `publier` les attend. En cas
   # d'échec, les premières erreurs et la fin du journal sont posées en
   # annotation (lisible par l'API sans connexion). Git Bash (`shell: bash`) : les
-  # scripts sont les mêmes que sur le runner GitLab.
+  # scripts sont les mêmes que sur Linux.
   test-python-windows:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/feature/')
     runs-on: windows-latest
     defaults:
       run:
@@ -211,7 +225,7 @@ jobs:
           exit "$code"
 
   dist-windows:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && !startsWith(github.ref, 'refs/heads/feature/')
     runs-on: windows-latest
     defaults:
       run:
@@ -278,6 +292,18 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Le commit tagué est sur main ou sur une branche release
+        run: |
+          ok=0
+          for ref in origin/main $(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/release/*'); do
+            if git merge-base --is-ancestor "$GITHUB_SHA" "$ref"; then ok=1; fi
+          done
+          if [ "$ok" != 1 ]; then
+            echo "::error title=tag hors main::le commit $GITHUB_SHA du tag $GITHUB_REF_NAME n'est ancêtre ni de origin/main ni d'une branche release/* : tag posé sur une branche de travail"
+            exit 1
+          fi
       - name: Release GitLab
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}

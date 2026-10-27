@@ -19,6 +19,8 @@ State what is already established and give concrete options (cost, risk, what br
 
 "Faithful to what you chose before" is not an argument for an option, unless a general interface rule (`docs/standard-interface.md`, `docs/menus.md`) imposes the consistency. Challenge earlier answers that lead somewhere doubtful (a one-entry submenu…), and check a menu mockup against the submenu rule (`docs/menus.md` § Règles) before proposing it.
 
+Before offering options on an architecture choice, give the figures the user decides on: memory cost, development cost (how many mechanisms to write), and whether the bugs would be detectable. Each card reads on its own: no bare code (« C2 », « A ») without its question; the user does not remember them. Read the user's answers **before** launching any search agent.
+
 ## How to ask
 
 - **1 to 4 questions: `AskUserQuestion`** (the "small slides"): one question per slide, 2 to 4 options, recommendation first with « (Recommandé) », the advantage and the drawback of each option in its description, a `preview` sketch when a screen or gesture can be drawn.

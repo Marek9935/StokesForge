@@ -78,7 +78,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Les deux dernières sont obligatoires : la CI (`.gitlab-ci.yml`) les fait
+Les deux dernières sont obligatoires : la CI (`.github/workflows/ci.yml`) les fait
 échouer au premier écart.
 
 ## Conventions

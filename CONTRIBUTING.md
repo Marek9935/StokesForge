@@ -6,6 +6,13 @@ documentation du domaine avant de proposer une modification. Les bugs et
 évolutions se suivent dans les issues GitLab. Les commentaires, la
 documentation et les messages de commit sont en français.
 
+## Travailler à plusieurs
+
+Une contribution passe par une merge request vers `main` : une relecture, la CI
+verte exigée. Ni force-push ni rebase sur une branche partagée ; la branche se
+nomme `feature/<n>-<sujet>`, reste courte et reçoit `main` avant la fusion
+(détail : [`docs/criteres-v1.md`](docs/criteres-v1.md), « Branches et versions »).
+
 ## Licence des contributions
 
 Toute contribution originale à cette branche doit être proposée sous
@@ -38,7 +45,7 @@ ressource nouvelle doit aussi respecter [`deny.toml`](deny.toml) et figurer
 dans les notices de distribution. Les outils et commandes de licence sont
 dans [`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
 
-La CI Linux tourne sur GitHub (miroir du dépôt), Windows sur GitLab ; les
+La CI Linux et Windows tourne sur GitHub (miroir du dépôt) ; les
 résultats se lisent dans le pipeline GitLab du commit ou par
 `scripts/ci-statuts.sh`. Mode d'emploi, pièges du runner et maintenance :
 [`docs/tests.md`](docs/tests.md), « Utiliser la CI au quotidien ».

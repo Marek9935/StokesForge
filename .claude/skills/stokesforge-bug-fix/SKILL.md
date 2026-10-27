@@ -1,6 +1,6 @@
 ---
 name: stokesforge-bug-fix
-description: Fix a StokesForge bug — failing reproduction first, repair at the layer of the cause, regression test, issue closed. Use on an explicit request to fix in the code (« corrige ce bug dans le code », « répare #12 »), or to lift a reproduction's #[ignore].
+description: Fix a StokesForge bug — failing reproduction first, repair at the layer of the cause, regression test, issue closed. Use on an explicit request to fix in the code (« corrige ce bug dans le code », « répare #12 », « traite #12 », « lance #12 » for a bug issue), or to lift a reproduction's #[ignore].
 ---
 
 Reproduce, then fix. A fix written before the reproduction does not know what it fixes.
@@ -15,6 +15,7 @@ Reproduce, then fix. A fix written before the reproduction does not know what it
 6. **Never weaken the net.** An architecture guard that fails means the fix crossed a boundary: redo the fix, not the test (`docs/tests.md` § Les garde-fous à ne pas casser). Read the témoins of `mesure.rs` / `accord.rs` before touching them.
 7. **Lock it.** The reproduction becomes the guard (remove `#[ignore]`); the regression test sits at the cause's level; a disagreement between two surfaces gets a test that compares both.
 8. **Close it where it is tracked**: commit message with `Closes #<n>`, or `glab issue close <n>` with a comment citing the commit when the push is not on `main`. No issue: create no `.md`.
-9. **Verify and report** with `stokesforge-verification`; update the module `//!` ("the previous hypothesis was wrong because…") and the `docs/` page if described behaviour changed.
+9. **Look before saying « fixed »**: a display or gesture defect is not closed without a capture read after the fix (`run-stokesforge`). What the tool cannot show (native Wayland, drag, `rfd`): write « non vérifié à l'écran » and ask the user for a screenshot.
+10. **Verify and report** with `stokesforge-verification`; update the module `//!` ("the previous hypothesis was wrong because…") and the `docs/` page if described behaviour changed.
 
 Done when the reproduction was seen failing then passing, no test was weakened, the issue is closed or its closing is in the commit message, and the report states what was run and what remains unvalidated (native Wayland, `rfd`, drag).

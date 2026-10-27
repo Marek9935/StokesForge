@@ -93,6 +93,15 @@ de `window_detach.rs` ; le moteur Python reste dans l’AppState principal.
   plat. Les cases se limitent aux vraies bascules d'affichage et laissent les
   menus ouverts ; une action ou un choix exclusif ferme la chaîne. Ne pas
   créer de voie de mutation parallèle.
+- Barre de menus (#343) : la bascule au survol d'un titre à l'autre est un helper
+  unique, `bascule_au_survol` (`app/menus.rs`), appelé après tous les titres
+  (chaque `*_menu` rend la `Response` de son titre) ; egui ne la fait pas pour
+  les titres de la barre. Un titre ouvert se reconnaît par l'identifiant de son
+  popup (`Popup::is_id_open(ctx, Popup::default_response_id(titre))`), jamais
+  par `Popup::is_any_open` (un menu contextuel ouvert ferait basculer la
+  barre) ; pas d'état dans `AppState`. Ne pas confier la tolérance de
+  diagonale à `Rect::intersects_ray` seul : il ignore l'autre axe quand la
+  direction est exactement horizontale ou verticale (garde dans le helper).
 
 ## Graphes neufs et fenêtres détachées
 
@@ -192,6 +201,8 @@ faux ou ambigu se corrige dans le catalogue (`en`), pas dans le crate du dessous
 - `pyst` : **API figée V1 (#331)**. La liste de référence (noms, signatures, exceptions, clés d'options, clés des dictionnaires rendus, valeurs énumérées) est la section « API figée V1 » de `docs/python-et-script.md`, en blocs `pyst-api` lus par `stokesforge-script/tests/surface_figee.rs`. Toute modification de cette liste — ajout compris — est une décision explicite (issue ou accord de l'utilisateur) prise **dans le même commit** que le code : on met d'abord la liste à jour. Une option ajoutée à `plot`, `set_graph` ou `set_column_meta` entre dans sa constante (`PLOT_OPTIONS`, `SET_GRAPH_OPTIONS`, `COLUMN_META_FIELDS`, qui alimentent le message de clé inconnue) et dans le bloc `options` ; un paramètre se nomme en anglais (`path`, `handle`, `values`) ; les docstrings restent en français, les messages d'erreur en anglais.
 
 ## Rendu : pièges silencieux
+
+- Rendu : **un repère d'écran** (cadre rouge, poignées, surbrillance de sélection) se peint par-dessus la figure en cache, dans l'application : il n'entre ni dans la clé de cache ni dans le pipeline, donc jamais dans l'export SVG/PDF/PNG (`docs/rendu.md`, § poignées de sélection).
 
 - Rendu : `plotters` est pris **sans ses fonts** (`default-features = false`). Un `DrawingBackend` qui ne surcharge pas `draw_text` **panique** à la première graduation, et un qui ne surcharge pas `estimate_text_size` mesure le texte au nombre d'octets UTF-8 — silencieusement. Toute mesure passe par `stokesforge_render::text` et par nulle part ailleurs (`architecture-choisie.md` §4.3/§4.4).
 - Rendu : **une fonctionnalité de tracé n'entre jamais dans un seul backend** — elle va dans `stokesforge-render`, qui est générique sur le backend. Corollaire du même piège : les éléments de Plotters qui mesurent du texte eux-mêmes (`configure_series_labels`, `MultiLineText`) passent par `FontData::estimate_layout`, donc par l'heuristique naïve, **pas** par `estimate_text_size` — la légende est écrite à la main pour cette raison (`stokesforge_render::legend`).

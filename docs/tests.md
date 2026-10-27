@@ -448,10 +448,11 @@ cargo test -p stokesforge-app-state --features python --test script_panel --test
 ## CI (GitHub Actions pour Linux et Windows)
 
 Les contrôles Linux s'exécutent sur le miroir GitHub
-(`.github/workflows/ci.yml`), Windows aussi (runner hébergé `windows-latest`). Les commandes
-de `.gitlab-ci.yml` restent la référence ; les deux configurations évoluent
-ensemble. Les travaux Linux GitLab sont désactivés par défaut pour ne plus
-attendre un runner absent. `STOKESFORGE_CI_LINUX=gitlab` les réactive si un
+(`.github/workflows/ci.yml`), Windows aussi (runner hébergé `windows-latest`) :
+GitHub exécute tout, publication comprise. `.gitlab-ci.yml` ne garde que la
+définition de référence des travaux Linux, que les deux configurations
+suivent ensemble ; ils y sont désactivés par défaut pour ne plus attendre un
+runner absent. `STOKESFORGE_CI_LINUX=gitlab` les réactive si un
 runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 
 | Travail | Bloquant | Ce qu'il fait |
@@ -462,9 +463,20 @@ runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 | `test` | oui | `cargo test --workspace` |
 | `robustesse` | non | `cargo test -p stokesforge-robustesse -- --ignored` |
 | `test-python` | oui, automatique | vendorise CPython + numpy, puis `scripts/python-test.sh` |
-| `release-linux` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN` (le `-rcN` ne crée pas de release) | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, téléverse l'archive dans le registre de paquets GitLab, sans release GitHub (#333) |
-| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatique sur `main` et sur un tag, bloquants (#333) | mêmes contrôles sur un poste propre ; sur un tag, `dist-windows` téléverse l'installeur dans le registre GitLab (`scripts/release-televerser.sh windows`) |
+| `release-linux` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN` (sur un `-rcN`, `publier` crée la release puis la supprime ; aucune release ne reste) | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, téléverse l'archive dans le registre de paquets GitLab, sans release GitHub (#333) |
+| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatique sur `main`, `vN`, `release/**` et sur un tag (pas sur `feature/**`), bloquants (#333) | mêmes contrôles sur un poste propre ; sur un tag, `dist-windows` téléverse l'installeur dans le registre GitLab (`scripts/release-televerser.sh windows`) |
 | `publier` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN`, après tous les contrôles bloquants et les deux téléversements de paquets | release GitLab avec les notes du CHANGELOG (#333) ; un `-rcN` crée puis supprime la release (essai) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
+
+Les travaux Linux tournent sur les branches poussées `main`, `feature/**`,
+`v[0-9]*`, `release/**` et sur les tags `v*`. `release-linux` et `publier`
+refusent un tag dont le commit n'est ancêtre ni de `origin/main` ni d'une
+branche `release/*`.
+
+**Réglages hors dépôt** (à faire à la main, rien dans le code ne les pose) :
+- `main` protégée, sans force-push, sur GitLab et sur GitHub ;
+- tags `v*` protégés (création réservée au rôle Maintainer) sur GitLab ;
+- `main` branche par défaut sur GitLab : c'est ce qui rend « Closes #N »
+  opérant.
 
 **Ce qu'un pipeline vert ne prouve pas**, et c'est écrit en tête du fichier CI :
 `fmt`, `clippy` et `test` n'activent **jamais** la feature `python`. Tout ce qui
@@ -518,8 +530,20 @@ poste de l'auteur n'a plus besoin d'être allumé (l'ancien runner GitLab
 tests en parallèle ; seules les captures (`egui_kittest` + wgpu) s'excluent entre
 elles (voir plus bas). Le travail pose `core.longpaths` avant l'extraction :
 sans lui, le `git clean` échoue sur `.cargo/registry` (« Filename too long »).
-Ces travaux n'étant pas dans la liste de `gitlab-status.py`, leur résultat se lit
-sur GitHub, pas dans `ci-statuts.sh`.
+Ces travaux, comme `release-linux` et `publier`, n'étant pas dans la liste de
+`gitlab-status.py`, leur résultat se lit sur GitHub, pas dans `ci-statuts.sh`.
+L'API GitHub **sans connexion** est limitée à 60 requêtes par heure et par
+adresse : ne pas la scruter en boucle (une attente de CI se fait sur GitLab,
+`glab`, ou à intervalle long) ; au-delà, elle répond 403 jusqu'à l'heure suivante.
+
+**Tag et miroir.** Un tag poussé vers GitLab arrive parfois en retard sur GitHub
+(la CI n'y démarre qu'à son arrivée). Forcer l'envoi : bouton de synchronisation
+du miroir, ou `glab api -X POST projects/86104040/remote_mirrors/<id>/sync`.
+
+**Téléversement des paquets.** `scripts/release-televerser.sh` passe le jeton à
+`curl` par `-K -` (entrée standard), pas par substitution de processus : sous
+Git Bash (Windows) celle-ci échoue (curl code 26). Le jeton ne figure jamais
+dans les arguments de la commande.
 
 **Reproduire un échec Linux chez soi.** Le runner (`ubuntu-latest`) diffère d'un
 poste de développement par trois points qui ont déjà causé des échecs :
@@ -607,7 +631,11 @@ Le dépôt GitHub `Marek9935/StokesForge` et l'identifiant du projet GitLab
 dans `gitlab-status.yml` (condition `github.repository`) et dans
 `scripts/ci-statuts.sh`. Renommer l'un des deux dépôts oblige à les changer.
 
-**Maintenance.** Le jeton GitLab `github-ci-status` **expire** : à son échéance,
+**Maintenance.** Le jeton de projet GitLab du secret GitHub `GITLAB_RELEASE_TOKEN`
+(rôle Developer, portée `api` ; téléversement des paquets et création de la
+release, #333) **expire** aussi : passé l'échéance, `release-linux`, `dist-windows`
+et `publier` échouent. Le recréer dans GitLab (`Paramètres > Jetons
+d'accès`) et remplacer le secret. Le jeton GitLab `github-ci-status` **expire** : à son échéance,
 `Résultats GitLab` échoue sur GitHub (« Retour GitLab impossible ») et plus aucun
 statut n'arrive. Créer un jeton neuf (étape 1) et remplacer le secret
 `GITLAB_STATUS_TOKEN` (étape 2). Le jeton GitHub du miroir (étape 0) **expire aussi**

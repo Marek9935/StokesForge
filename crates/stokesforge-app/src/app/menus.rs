@@ -84,16 +84,21 @@ impl StokesForgeApp {
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
                 )
                 .ui(ui, |ui| {
-                    self.file_menu(ui, ctx, actions);
-                    self.edit_menu(ui, ctx, actions);
-                    self.workbook_menu(ui, ctx, actions);
+                    let mut titres = vec![self.file_menu(ui, ctx, actions)];
+                    titres.push(self.edit_menu(ui, ctx, actions));
+                    titres.extend(self.workbook_menu(ui, ctx, actions));
                     if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
-                        self.graph_menu(ui, ctx, graph, actions, &mut object_requests);
+                        titres.push(self.graph_menu(ui, ctx, graph, actions, &mut object_requests));
                     }
-                    self.analysis_menu(ui, actions, active_graph(active_tab_kind(active_tab)));
-                    self.view_menu(ui, actions);
-                    self.window_menu(ui);
-                    help_menu(ui, actions);
+                    titres.push(self.analysis_menu(
+                        ui,
+                        actions,
+                        active_graph(active_tab_kind(active_tab)),
+                    ));
+                    titres.push(self.view_menu(ui, actions));
+                    titres.push(self.window_menu(ui));
+                    titres.push(help_menu(ui, actions));
+                    bascule_au_survol(ctx, &titres);
                 });
         });
         if let Some(graph) = active_graph(active_tab_kind(active_tab)) {
@@ -105,7 +110,12 @@ impl StokesForgeApp {
 
     // Chaque fonction garde les mêmes Ui de menu : extraire du Rust ne doit
     // ajouter aucun scope egui ni déplacer l'application différée des demandes.
-    fn file_menu(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    fn file_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        actions: &mut Vec<Action>,
+    ) -> egui::Response {
         ui.menu_button(tr!("menu-file"), |ui| {
             let mut sections = MenuSections::new();
             sections.section(ui, true, |ui| {
@@ -257,10 +267,16 @@ impl StokesForgeApp {
                     ui.close();
                 }
             });
-        });
+        })
+        .response
     }
 
-    fn edit_menu(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, actions: &mut Vec<Action>) {
+    fn edit_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        actions: &mut Vec<Action>,
+    ) -> egui::Response {
         ui.menu_button(tr!("menu-edit"), |ui| {
             // Le libellé complet (« Undo Edit Cells in Column A ») et le
             // grisage sont deux lignes distinctes ici ; Qt les tenait
@@ -346,17 +362,24 @@ impl StokesForgeApp {
                     );
                 });
             });
-        });
+        })
+        .response
     }
 
-    fn workbook_menu(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, actions: &mut Vec<Action>) {
-        if let Some(book) = self.active_book() {
-            if let Some(sheet) = self.state.selected_sheet_in(book) {
-                ui.menu_button(tr!("menu-workbook"), |ui| {
-                    workbook_menu(ui, ctx, &self.state, book, sheet, actions);
-                });
-            }
-        }
+    fn workbook_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        actions: &mut Vec<Action>,
+    ) -> Option<egui::Response> {
+        let book = self.active_book()?;
+        let sheet = self.state.selected_sheet_in(book)?;
+        Some(
+            ui.menu_button(tr!("menu-workbook"), |ui| {
+                workbook_menu(ui, ctx, &self.state, book, sheet, actions);
+            })
+            .response,
+        )
     }
 
     /// Menu Analysis (#181, #210) : la sélection du graphe actif prend
@@ -366,7 +389,7 @@ impl StokesForgeApp {
         ui: &mut egui::Ui,
         actions: &mut Vec<Action>,
         graph: Option<NodeId>,
-    ) {
+    ) -> egui::Response {
         let book = self.active_book();
         let sheet = book.and_then(|book| self.state.selected_sheet_in(book));
         let columns = sheet
@@ -414,7 +437,8 @@ impl StokesForgeApp {
                 }),
             };
             super::analysis_menu::analysis_menu_contents(ui, &self.state, actions, target);
-        });
+        })
+        .response
     }
 
     fn graph_menu(
@@ -424,7 +448,7 @@ impl StokesForgeApp {
         graph: NodeId,
         actions: &mut Vec<Action>,
         object_requests: &mut Vec<ObjectManagerRequest>,
-    ) {
+    ) -> egui::Response {
         ui.menu_button(tr!("menu-graph"), |ui| {
             let spec = stokesforge_core::compose::current_plot_spec(self.state.tree(), graph);
             let shown = stokesforge_app_state::object_manager::Shown::from(
@@ -664,10 +688,11 @@ impl StokesForgeApp {
                     graph_properties_menu(ui, graph, actions);
                 });
             });
-        });
+        })
+        .response
     }
 
-    fn view_menu(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+    fn view_menu(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) -> egui::Response {
         ui.menu_button(tr!("menu-view"), |ui| {
             // Ni panneaux ni barres d'outils à masquer : le menu ne porte que
             // les réglages de chaque panneau (Object Manager, plus tard
@@ -675,10 +700,11 @@ impl StokesForgeApp {
             ui.menu_button(tr!("action-object-manager"), |ui| {
                 object_manager_settings_menu(ui, self.state.object_manager_settings(), actions);
             });
-        });
+        })
+        .response
     }
 
-    fn window_menu(&mut self, ui: &mut egui::Ui) {
+    fn window_menu(&mut self, ui: &mut egui::Ui) -> egui::Response {
         ui.menu_button(tr!("menu-window"), |ui| {
             let mut sections = MenuSections::new();
             sections.section(ui, true, |ui| {
@@ -741,7 +767,8 @@ impl StokesForgeApp {
             // à gauche ou à droite — le côté droit et le
             // repositionnement par glisser sont un travail futur
             // délibérément hors périmètre).
-        });
+        })
+        .response
     }
 
     /// Barre d'état : le dernier message, à trois niveaux (S-M4) ; un clic ouvre
@@ -878,9 +905,57 @@ pub(super) fn status_line(ui: &mut egui::Ui, status: &stokesforge_app_state::sta
     }
 }
 
+/// Bascule au survol (#343) : un titre de la barre est déjà ouvert et le
+/// pointeur passe sur un autre titre, celui-ci s'ouvre et l'ouvert se ferme,
+/// sans clic. egui ne le fait que pour les sous-menus. Barre au repos : rien
+/// (pas d'ouverture au simple survol). Le titre ouvert est reconnu par
+/// l'identifiant de son popup, jamais par `Popup::is_any_open` (un menu
+/// contextuel ouvert ne doit rien faire basculer). Quand le pointeur se
+/// dirige vers le popup ouvert (diagonale vers une entrée), on ne bascule pas
+/// et on repeint pour détecter la fin du geste, comme egui pour ses
+/// sous-menus.
+fn bascule_au_survol(ctx: &egui::Context, titres: &[egui::Response]) {
+    let popup_de = |titre: &egui::Response| egui::Popup::default_response_id(titre);
+    let Some(ouvert) = titres
+        .iter()
+        .find(|titre| egui::Popup::is_id_open(ctx, popup_de(titre)))
+    else {
+        return;
+    };
+    let Some(pos) = ctx.input(|input| input.pointer.hover_pos()) else {
+        return;
+    };
+    let Some(cible) = titres
+        .iter()
+        .find(|titre| titre.id != ouvert.id && titre.rect.contains(pos))
+    else {
+        return;
+    };
+    let vers_le_popup = ctx
+        .memory(|mem| mem.area_rect(popup_de(ouvert)))
+        .is_some_and(|rect| {
+            ctx.input(|input| {
+                let pointer = &input.pointer;
+                // `Rect::intersects_ray` ignore l'autre axe quand la
+                // direction est exactement horizontale ou verticale : on
+                // écarte ces cas ici (le rayon manque le rectangle).
+                let direction = pointer.direction();
+                let manque = (direction.y == 0.0 && !(rect.min.y..=rect.max.y).contains(&pos.y))
+                    || (direction.x == 0.0 && !(rect.min.x..=rect.max.x).contains(&pos.x));
+                !manque && pointer.is_moving_towards_rect(&rect)
+            })
+        });
+    if vers_le_popup {
+        ctx.request_repaint();
+        return;
+    }
+    egui::Popup::open_id(ctx, popup_de(cible));
+    ctx.request_repaint();
+}
+
 /// Menu Help (#231, S-K5) : l'aide qui se génère du code, aujourd'hui les
 /// raccourcis clavier. Une seule entrée, directe.
-fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) -> egui::Response {
     ui.menu_button(tr!("menu-help"), |ui| {
         let mut sections = MenuSections::new();
         sections.section(ui, true, |ui| {
@@ -893,7 +968,8 @@ fn help_menu(ui: &mut egui::Ui, actions: &mut Vec<Action>) {
                 ui.close();
             }
         });
-    });
+    })
+    .response
 }
 
 #[cfg(test)]
@@ -1208,6 +1284,127 @@ mod tests {
         visibles.sort();
         fermes.sort();
         assert_eq!(visibles, fermes, "le choix ferme tous les niveaux");
+    }
+
+    /// Une image par position : le pointeur glisse sans cliquer. Rend la
+    /// sortie de la dernière image.
+    fn glisse(
+        app: &mut StokesForgeApp,
+        ctx: &egui::Context,
+        tab: Option<Tab>,
+        positions: &[egui::Pos2],
+    ) -> egui::FullOutput {
+        let mut sortie = None;
+        for pos in positions {
+            sortie = Some(peint(app, ctx, tab, vec![egui::Event::PointerMoved(*pos)]).0);
+        }
+        sortie.expect("au moins une position")
+    }
+
+    /// #343 : un menu de la barre est ouvert, le pointeur glisse à l'horizontale
+    /// sur le titre voisin : celui-ci s'ouvre, le premier se ferme.
+    #[test]
+    fn le_survol_d_un_autre_titre_bascule_le_menu_ouvert() {
+        let (session, mut app, _) = banc();
+        let tab = app.floating_tabs.last().copied();
+        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-file"));
+        let fichier = active(&menu, &tr!("menu-file")).center;
+        let edition = active(&menu, &tr!("menu-edit")).center;
+        assert!(entree(&menu, &tr!("action-save")).is_some(), "témoin");
+        let sortie = glisse(
+            &mut app,
+            &ctx,
+            tab,
+            &[
+                fichier,
+                egui::pos2((fichier.x + edition.x) / 2.0, fichier.y),
+                edition,
+                edition,
+            ],
+        );
+        drop(sortie);
+        let apres = entrees(&peint(&mut app, &ctx, tab, Vec::new()).0);
+        assert!(
+            entree(&apres, &tr!("action-save")).is_none(),
+            "Fichier fermé"
+        );
+        assert!(
+            entree(&apres, &tr!("history-undo")).is_some(),
+            "Édition ouvert : {apres:#?}"
+        );
+        session.shutdown().unwrap();
+    }
+
+    /// #343 : barre au repos, le survol seul n'ouvre rien.
+    #[test]
+    fn le_survol_d_une_barre_au_repos_n_ouvre_rien() {
+        let (session, mut app, _) = banc();
+        let tab = app.floating_tabs.last().copied();
+        let ctx = contexte();
+        let (sortie, _) = peint(&mut app, &ctx, tab, Vec::new());
+        let edition = active(&entrees(&sortie), &tr!("menu-edit")).center;
+        glisse(
+            &mut app,
+            &ctx,
+            tab,
+            &[edition - egui::vec2(30.0, 0.0), edition, edition],
+        );
+        assert_ferme(&mut app, &ctx, tab);
+        session.shutdown().unwrap();
+    }
+
+    /// Les entrées visibles après `images` images sans mouvement : la vitesse
+    /// du pointeur retombe, il finit par être immobile.
+    fn attend(
+        app: &mut StokesForgeApp,
+        ctx: &egui::Context,
+        tab: Option<Tab>,
+        images: usize,
+    ) -> Vec<Entree> {
+        let mut sortie = None;
+        for _ in 0..images {
+            sortie = Some(peint(app, ctx, tab, Vec::new()).0);
+        }
+        entrees(&sortie.expect("au moins une image"))
+    }
+
+    /// #343 : en visant le popup ouvert (diagonale qui traverse le titre
+    /// voisin), le menu ouvert reste ; une fois le pointeur immobile sur le
+    /// voisin, la bascule se fait.
+    #[test]
+    fn la_diagonale_vers_le_popup_ne_bascule_pas_puis_l_immobilite_bascule() {
+        let (session, mut app, _) = banc();
+        let tab = app.floating_tabs.last().copied();
+        let (ctx, menu) = ouvre(&mut app, tab, &tr!("menu-file"));
+        let edition = active(&menu, &tr!("menu-edit")).center;
+        let sortie = glisse(
+            &mut app,
+            &ctx,
+            tab,
+            &[
+                edition + egui::vec2(-34.0, -3.0),
+                edition + egui::vec2(-17.0, 2.0),
+                edition + egui::vec2(0.0, 7.0),
+            ],
+        );
+        drop(sortie);
+        let en_route = attend(&mut app, &ctx, tab, 1);
+        assert!(
+            entree(&en_route, &tr!("action-save")).is_some(),
+            "Fichier reste ouvert : {en_route:#?}"
+        );
+        assert!(entree(&en_route, &tr!("history-undo")).is_none());
+
+        let apres = attend(&mut app, &ctx, tab, 40);
+        assert!(
+            entree(&apres, &tr!("action-save")).is_none(),
+            "Fichier fermé"
+        );
+        assert!(
+            entree(&apres, &tr!("history-undo")).is_some(),
+            "Édition ouvert"
+        );
+        session.shutdown().unwrap();
     }
 
     /// Les extractions de menus gardent leur ordre ; changer le contenu
