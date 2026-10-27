@@ -206,18 +206,48 @@ impl Form<'_> {
             false,
         );
         let title = title.into();
-        let toggled = self.field(|ui| {
-            // La flèche bascule l'état d'elle-même : seul un clic sur le titre
-            // le bascule ici, sans quoi un clic sur la flèche compterait deux
-            // fois. Le titre n'est pas sélectionnable (S-L8).
-            state.show_toggle_button(ui, egui::collapsing_header::paint_default_icon);
-            let text = ui.add(
-                egui::Label::new(title)
-                    .selectable(false)
-                    .sense(egui::Sense::click()),
-            );
-            text.clicked()
-        });
+        // Flèche et titre sont une seule zone cliquable, dans la colonne des
+        // libellés comme « Tick direction » : aucun espace mort entre eux, et
+        // le titre n'est pas sélectionnable (S-L8).
+        let (toggled, width) = self
+            .ui
+            .horizontal(|ui| {
+                let font = egui::TextStyle::Body.resolve(ui.style());
+                let galley = ui
+                    .painter()
+                    .layout_no_wrap(title, font, ui.visuals().text_color());
+                let icon = ui.spacing().icon_width;
+                let gap = ui.spacing().icon_spacing;
+                let size = egui::vec2(
+                    icon + gap + galley.size().x,
+                    galley.size().y.max(ui.spacing().interact_size.y),
+                );
+                let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+                let icon_rect = egui::Rect::from_center_size(
+                    egui::pos2(rect.left() + icon / 2.0, rect.center().y),
+                    egui::vec2(icon, icon),
+                );
+                let icon_response =
+                    ui.interact(icon_rect, response.id.with("icon"), egui::Sense::hover());
+                let openness = if state.is_open() { 1.0 } else { 0.0 };
+                egui::collapsing_header::paint_default_icon(ui, openness, &icon_response);
+                let color = if response.hovered() {
+                    ui.visuals().strong_text_color()
+                } else {
+                    ui.visuals().text_color()
+                };
+                ui.painter().galley(
+                    egui::pos2(
+                        rect.left() + icon + gap,
+                        rect.center().y - galley.size().y / 2.0,
+                    ),
+                    galley,
+                    color,
+                );
+                (response.clicked(), rect.width())
+            })
+            .inner;
+        self.widest = self.widest.max(width);
         if toggled {
             state.toggle(self.ui);
         }

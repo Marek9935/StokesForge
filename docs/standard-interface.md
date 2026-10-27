@@ -656,7 +656,9 @@ Historique : #226.
   Une seule exception, le bloc **« Avancé »** (S-L8, #344, `Form::collapsible`) :
   fermé par défaut, au bas de sa section, pour des réglages tous Auto par
   défaut (longueur, épaisseur et couleur des tirets de graduation) ; sa flèche
-  et son titre sont une rangée du formulaire, ses champs restent alignés sur la
+  et son titre forment une seule zone cliquable, sans espace mort, dans la
+  colonne des libellés (comme « Tick direction »), le titre n'étant pas
+  sélectionnable ; ses champs restent alignés sur la
   grille ; l'état ouvert/fermé n'est gardé que le temps de la session.
 - **Trois niveaux de texte** (S-L6, #170) : `theme::section_heading` (titre de
   section, gras), `theme::table_header` (en-tête de colonne d'un tableau, gras

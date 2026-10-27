@@ -1591,36 +1591,42 @@ mod tests {
         assert!(!est_peint(&peints, &avances[0]), "second clic : refermé");
     }
 
-    /// #344 : un clic sur la flèche du bloc « Avancé » l'ouvre une seule fois
-    /// (la flèche bascule d'elle-même ; la basculer aussi à la main
+    /// #344 : le bloc « Avancé » s'ouvre une seule fois à un clic sur la
+    /// flèche ou dans l'espace entre la flèche et le titre (une seule zone
+    /// cliquable : la flèche qui basculerait d'elle-même, en plus du titre,
     /// l'ouvrirait puis la refermerait au même passage).
     #[test]
     fn un_clic_sur_la_fleche_du_bloc_avance_l_ouvre_une_fois() {
-        let mut banc = banc(|_| {});
-        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
-        let context = contexte();
-        let titre = texte_exact(
-            &defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines")),
-            &tr!("plot-axes-advanced"),
-        )
-        .centre;
-        // La flèche précède le titre : on vise à gauche de son bord.
-        let largeur = context.fonts_mut(|fonts| {
-            fonts
-                .layout_no_wrap(
-                    tr!("plot-axes-advanced"),
-                    egui::FontId::proportional(14.0),
-                    egui::Color32::WHITE,
-                )
-                .size()
-                .x
-        });
-        let fleche = egui::pos2(titre.x - largeur / 2.0 - 10.0, titre.y);
-        cliquer(&context, fleche, egui::PointerButton::Primary, |ui| {
-            plot_settings_window(ui.ctx(), &mut banc.state)
-        });
-        let peints = defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"));
-        assert!(est_peint(&peints, &tr!("plot-axes-tick-length")), "ouvert");
+        for decalage in [10.0, 2.0] {
+            let mut banc = banc(|_| {});
+            banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+            let context = contexte();
+            let titre = texte_exact(
+                &defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines")),
+                &tr!("plot-axes-advanced"),
+            )
+            .centre;
+            let largeur = context.fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(
+                        tr!("plot-axes-advanced"),
+                        egui::FontId::proportional(14.0),
+                        egui::Color32::WHITE,
+                    )
+                    .size()
+                    .x
+            });
+            // À gauche du bord du titre : la flèche, puis l'espace qui la sépare.
+            let point = egui::pos2(titre.x - largeur / 2.0 - decalage, titre.y);
+            cliquer(&context, point, egui::PointerButton::Primary, |ui| {
+                plot_settings_window(ui.ctx(), &mut banc.state)
+            });
+            let peints = defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"));
+            assert!(
+                est_peint(&peints, &tr!("plot-axes-tick-length")),
+                "ouvert à {decalage} px du titre"
+            );
+        }
     }
 
     /// Publie les bornes que le tracé aurait retenues pour l'axe du bas.
