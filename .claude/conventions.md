@@ -93,6 +93,15 @@ de `window_detach.rs` ; le moteur Python reste dans l’AppState principal.
   plat. Les cases se limitent aux vraies bascules d'affichage et laissent les
   menus ouverts ; une action ou un choix exclusif ferme la chaîne. Ne pas
   créer de voie de mutation parallèle.
+- Barre de menus (#343) : la bascule au survol d'un titre à l'autre est un helper
+  unique, `bascule_au_survol` (`app/menus.rs`), appelé après tous les titres
+  (chaque `*_menu` rend la `Response` de son titre) ; egui ne la fait pas pour
+  les titres de la barre. Un titre ouvert se reconnaît par l'identifiant de son
+  popup (`Popup::is_id_open(ctx, Popup::default_response_id(titre))`), jamais
+  par `Popup::is_any_open` (un menu contextuel ouvert ferait basculer la
+  barre) ; pas d'état dans `AppState`. Ne pas confier la tolérance de
+  diagonale à `Rect::intersects_ray` seul : il ignore l'autre axe quand la
+  direction est exactement horizontale ou verticale (garde dans le helper).
 
 ## Graphes neufs et fenêtres détachées
 
