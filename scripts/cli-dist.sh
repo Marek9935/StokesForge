@@ -12,7 +12,7 @@ PYO3_CONFIG_FILE="$("$REPO_ROOT/scripts/python-config.sh")"
 export PYO3_CONFIG_FILE
 export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/lib'
 cd "$REPO_ROOT"
-cargo build -p stokesforge-cli --features python --release
+cargo build --locked -p stokesforge-cli --features python --release
 TARGET_DIR="${CARGO_TARGET_DIR:-$REPO_ROOT/target}"
 [[ "$TARGET_DIR" = /* ]] || TARGET_DIR="$REPO_ROOT/$TARGET_DIR"
 

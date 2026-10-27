@@ -458,20 +458,28 @@ runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 
 | Travail | Bloquant | Ce qu'il fait |
 |---|---|---|
-| `fmt` | oui | `cargo fmt --all -- --check`, plus `scripts/release-notes-test.sh` et `scripts/versions-alignees.sh` (tous les crates dans une même version `X.Y.Z`, #349/#350) |
+| `fmt` | oui | `cargo fmt --all -- --check`, plus `scripts/release-notes-test.sh`, `scripts/release-tag-test.sh` et `scripts/versions-alignees.sh` (tous les crates dans une même version `X.Y.Z`, #349/#350 ; section `[package]` seule lue, dépendances internes `stokesforge-x = { version = … }` égales à cette version, `Cargo.lock` à jour, `FORMAT_VERSION` = N exige `tests/temoins/vN/projet.stf`, #351/#352/#353) |
 | `licenses` | oui | politique et génération des notices tierces |
 | `clippy` | oui | `cargo clippy --workspace --all-targets -- -D warnings` |
 | `test` | oui | `cargo test --workspace` |
 | `robustesse` | non | `cargo test -p stokesforge-robustesse -- --ignored` |
 | `test-python` | oui, automatique | vendorise CPython + numpy, puis `scripts/python-test.sh` |
-| `release-linux` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN` (sur un `-rcN`, `publier` crée la release puis la supprime ; aucune release ne reste) | vérifie le tag (`scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, téléverse l'archive dans le registre de paquets GitLab, sans release GitHub (#333) |
+| `release-linux` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN` (sur un `-rcN`, `publier` crée la release puis la supprime ; aucune release ne reste) | vérifie le tag (`scripts/release-tag-sur-main.sh`, `scripts/release-tag-croissant.sh`, `scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, téléverse l'archive dans le registre de paquets GitLab, sans release GitHub (#333) |
 | `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatique sur `main`, `vN`, `release/**` et sur un tag (pas sur `feature/**`), bloquants (#333) | mêmes contrôles sur un poste propre ; sur un tag, `dist-windows` téléverse l'installeur dans le registre GitLab (`scripts/release-televerser.sh windows`) |
 | `publier` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN`, après tous les contrôles bloquants et les deux téléversements de paquets | release GitLab avec les notes du CHANGELOG (#333) ; un `-rcN` crée puis supprime la release (essai) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
 
 Les travaux Linux tournent sur les branches poussées `main`, `feature/**`,
 `v[0-9]*`, `release/**` et sur les tags `v*`. `release-linux` et `publier`
 refusent un tag dont le commit n'est ancêtre ni de `origin/main` ni d'une
-branche `release/*`.
+branche `release/*` (`scripts/release-tag-sur-main.sh`, #354), ou qui ne
+dépasse pas les tags existants (`scripts/release-tag-croissant.sh`, #355) :
+une finale doit dépasser toute finale existante ; un `-rcN` doit dépasser les
+`-rc` de sa version et ne pas viser une version déjà finale ; un commit qui
+n'est que sur `release/N.x` n'est comparé qu'aux tags de majeure N. Les scripts
+de distribution construisent avec `--locked`.
+Conséquence : relancer le pipeline d'un ancien tag échoue dès qu'un tag plus
+récent existe. Un tag existant reposé sur une autre cible n'est pas détectable
+en CI ; seule la protection des tags `v*` de GitLab le tient.
 
 **Réglages hors dépôt** (à faire à la main, rien dans le code ne les pose) :
 - `main` protégée, sans force-push, sur GitLab et sur GitHub ;
@@ -494,7 +502,7 @@ requis.
 
 Typst n'est plus une feature (issue #29) : Clippy le compile, les tests du
 workspace l'exercent, y compris les exports (#34). `fmt` ne compile rien ; il contrôle aussi l'alignement des versions des crates
-(`scripts/versions-alignees.sh`, à chaque push, pas seulement au tag).
+(`scripts/versions-alignees.sh`, à chaque push, pas seulement au tag), y compris dépendances internes, `Cargo.lock` et témoin du format `.stf`, sans cargo.
 
 ### Utiliser la CI au quotidien
 

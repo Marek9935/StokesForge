@@ -50,10 +50,10 @@ export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/lib'
 
 echo "[dist] construction release de stokesforge-app (feature python)"
 cd "$REPO_ROOT"
-cargo build -p stokesforge-app --features python --release --bin stokesforge-app
+cargo build --locked -p stokesforge-app --features python --release --bin stokesforge-app
 
 echo "[dist] construction release de stokesforge-selftest (feature python)"
-cargo build -p stokesforge-script --features python --release --bin stokesforge-selftest
+cargo build --locked -p stokesforge-script --features python --release --bin stokesforge-selftest
 
 # --- 2. Assemblage ----------------------------------------------------------
 echo "[dist] assemblage de $DIST"

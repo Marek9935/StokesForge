@@ -207,7 +207,7 @@ du format N+1 change le schéma.
 Quand le numéro monte (V → V+1) : copier le schéma de V en `schema/vV.rs`, y
 ajouter la fonction `vV → courant`, ajouter son bras dans `version::decode_body`,
 figer le témoin (`tests/temoins/vV/`, jamais modifié) et créer le témoin
-`vV+1/`. `FORMAT_VERSION` ne se change jamais « pour essayer ».
+`vV+1/`. `FORMAT_VERSION` ne se change jamais « pour essayer » : la CI (`scripts/versions-alignees.sh`, travail `fmt`) exige le fichier `tests/temoins/vN/projet.stf` dès que `FORMAT_VERSION` = N.
 
 **Fichiers témoins** (`tests/fichiers_temoins.rs`, `tests/temoins/v1/projet.stf`) :
 le projet témoin exerce tous les types de nœuds, de colonnes et de séries, avec

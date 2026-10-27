@@ -64,6 +64,7 @@ fmt:
     - cargo fmt --all -- --check
     - scripts/release-notes-test.sh
     - scripts/versions-alignees.sh
+    - scripts/release-tag-test.sh
 
 # #129 : politique et notices, toutes plateformes et feature python comprise,
 # sans compilation du workspace. Versions partagées avec la distribution.

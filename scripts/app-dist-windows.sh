@@ -76,9 +76,9 @@ export PYO3_CONFIG_FILE
 
 cd "$REPO_ROOT"
 echo "[dist] construction release de stokesforge-app (feature python)"
-cargo build -p stokesforge-app --features python --release --bin stokesforge-app
+cargo build --locked -p stokesforge-app --features python --release --bin stokesforge-app
 echo "[dist] construction release de stokesforge-selftest (feature python)"
-cargo build -p stokesforge-script --features python --release --bin stokesforge-selftest
+cargo build --locked -p stokesforge-script --features python --release --bin stokesforge-selftest
 
 echo "[dist] assemblage de $DIST"
 rm -rf "$DIST"

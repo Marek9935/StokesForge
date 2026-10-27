@@ -105,7 +105,11 @@ Chaque ligne se constate par une commande ou une page ; aucune ne se déclare
 Les travaux de publication refusent un tag incohérent avant tout téléversement :
 forme `vX.Y.Z`, versions des crates, section du CHANGELOG (`scripts/release-notes.sh`).
 L'alignement des versions des crates est déjà contrôlé à chaque push par `fmt`
-(`scripts/versions-alignees.sh`) : le tag n'ajoute que la forme et le CHANGELOG.
+(`scripts/versions-alignees.sh` : crates, dépendances internes, `Cargo.lock` —
+un `cargo update --workspace` oublié échoue —, témoin du format) : le tag
+ajoute la forme, le CHANGELOG, le refus d'un tag hors `main`/`release/*`
+(`scripts/release-tag-sur-main.sh`) et d'un tag qui ne dépasse pas les tags
+existants (`scripts/release-tag-croissant.sh`).
 
 **Ce qui a été éprouvé, et ce qui ne l'a pas été.** Les tags `v1.0.0-rc1` à
 `-rc6` ont servi d'essais et restent comme trace (`rc1` rouge, corrigé par
