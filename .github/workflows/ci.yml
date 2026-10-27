@@ -154,6 +154,8 @@ jobs:
           fetch-depth: 0
       - name: Le commit tagué est sur main ou sur une branche release
         run: scripts/release-tag-sur-main.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
+      - name: Le tag dépasse les tags existants
+        run: scripts/release-tag-croissant.sh "$GITHUB_REF_NAME"
       - name: Tag et notes
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
       - uses: Swatinem/rust-cache@v2
@@ -291,6 +293,8 @@ jobs:
           fetch-depth: 0
       - name: Le commit tagué est sur main ou sur une branche release
         run: scripts/release-tag-sur-main.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
+      - name: Le tag dépasse les tags existants
+        run: scripts/release-tag-croissant.sh "$GITHUB_REF_NAME"
       - name: Release GitLab
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
