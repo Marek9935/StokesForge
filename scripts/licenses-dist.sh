@@ -71,7 +71,7 @@ TEMP_DIR="$(mktemp -d "$PACKAGE_DIR/.licenses-XXXXXX")"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 "$REPO_ROOT/scripts/licenses-rust.sh" "$TEMP_DIR/THIRD-PARTY-LICENSES.txt"
 
-cp LICENSE LICENSE-EXCEPTION "$PACKAGE_DIR/"
+cp LICENSE "$PACKAGE_DIR/"
 mkdir -p "$PACKAGE_DIR/licenses/fonts" "$PACKAGE_DIR/licenses/epaint-default-fonts" \
     "$PACKAGE_DIR/licenses/phosphor" \
     "$PACKAGE_DIR/licenses/winit" "$PACKAGE_DIR/licenses/smithay-clipboard" \

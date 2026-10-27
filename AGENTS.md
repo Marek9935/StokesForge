@@ -22,10 +22,8 @@ confirmation pour les choix courants couverts par la demande.
   « enlève » ou « supprime ». Ne passer au code que sur demande explicite
   d'implémentation dans le dépôt ; voir la règle de contexte du skill
   `stokesforge-bug-report`.
-- La licence du dépôt est GPL-3.0-or-later avec la permission de
-  `LICENSE-EXCEPTION`. Toute nouvelle interface couverte s'ajoute par commit
-  explicite à la liste fermée de `docs/licence-et-extensions.md` (`pyst`
-  aujourd'hui). Conserver les notices tierces et les actualiser avec les
+- La licence du dépôt est GPL-3.0-or-later pure (#348, exception retirée ;
+  un CLA doit précéder toute contribution extérieure). Conserver les notices tierces et les actualiser avec les
   dépendances ou le runtime ; `scripts/licenses-dist.sh` les livre et le
   travail CI `licenses` contrôle la politique par `cargo deny check licenses`.
   Les compléments de `vendor/crate-license-notices/` sont liés au verrou

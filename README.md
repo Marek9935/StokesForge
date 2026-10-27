@@ -43,14 +43,15 @@ dépendance ferme, toujours compilée. Voir
 ## Licence et contributions
 
 Copyright © 2026 Aliocha Skrzypczak. Cette branche est sous
-**[GPL-3.0-or-later](LICENSE) avec [exception d'extension](LICENSE-EXCEPTION)**.
-Les scripts utilisant uniquement l'API publique `pyst`, sans incorporer ni
-lier le code de StokesForge dans leur propre programme, peuvent être publiés
-sous la licence choisie par leur auteur. La liste fermée des interfaces
-couvertes et les notices tierces sont décrites dans
-[`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
+**[GPL-3.0-or-later](LICENSE)**, sans permission supplémentaire.
 
-Les distributions livrent `LICENSE`, `LICENSE-EXCEPTION`,
+**Usage non couvert par la GPL** (par exemple un connecteur propriétaire pour
+un appareil) : une permission supplémentaire ou une licence séparée peut être
+demandée à l'auteur, qui l'étudie au cas par cas et l'accorde, le cas échéant,
+par écrit. Aucune n'est accordée par défaut. Les notices tierces sont décrites
+dans [`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
+
+Les distributions livrent `LICENSE`,
 `THIRD-PARTY-LICENSES.txt` et un dossier `licenses/` (polices, icônes, patches,
 CPython, numpy et scipy). Les outils de contrôle et de génération des notices
 doivent être installés avant d'exécuter les scripts de distribution ; voir
@@ -58,5 +59,7 @@ la page de licence. Le travail CI `licenses` vérifie la politique et génère
 les notices.
 
 Les contributions extérieures suivent [`CONTRIBUTING.md`](CONTRIBUTING.md)
-et le [DCO 1.1](DCO). Ce changement de licence concerne `main` ;
+et le [DCO 1.1](DCO) en attendant un CLA (#348). Cette licence concerne `main` ;
 l'ancienne implémentation Python/Qt (tag `legacy-python`) conserve son statut propre.
+La version 1.0.0 portait une exception d'extension pour `pyst` ; elle n'a pas
+été reprise après 1.0.0.
