@@ -42,6 +42,7 @@ jobs:
       - run: python3 scripts/gitlab-status-test.py
       - run: scripts/release-notes-test.sh
       - run: scripts/versions-alignees.sh
+      - run: scripts/release-tag-test.sh
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
 
@@ -152,15 +153,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Le commit tagué est sur main ou sur une branche release
-        run: |
-          ok=0
-          for ref in origin/main $(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/release/*'); do
-            if git merge-base --is-ancestor "$GITHUB_SHA" "$ref"; then ok=1; fi
-          done
-          if [ "$ok" != 1 ]; then
-            echo "::error title=tag hors main::le commit $GITHUB_SHA du tag $GITHUB_REF_NAME n'est ancêtre ni de origin/main ni d'une branche release/* : tag posé sur une branche de travail"
-            exit 1
-          fi
+        run: scripts/release-tag-sur-main.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
       - name: Tag et notes
         run: scripts/release-notes.sh "$GITHUB_REF_NAME" > /dev/null
       - uses: Swatinem/rust-cache@v2
@@ -297,15 +290,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Le commit tagué est sur main ou sur une branche release
-        run: |
-          ok=0
-          for ref in origin/main $(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/release/*'); do
-            if git merge-base --is-ancestor "$GITHUB_SHA" "$ref"; then ok=1; fi
-          done
-          if [ "$ok" != 1 ]; then
-            echo "::error title=tag hors main::le commit $GITHUB_SHA du tag $GITHUB_REF_NAME n'est ancêtre ni de origin/main ni d'une branche release/* : tag posé sur une branche de travail"
-            exit 1
-          fi
+        run: scripts/release-tag-sur-main.sh "$GITHUB_REF_NAME" "$GITHUB_SHA"
       - name: Release GitLab
         env:
           GITLAB_RELEASE_TOKEN: ${{ secrets.GITLAB_RELEASE_TOKEN }}
