@@ -42,6 +42,8 @@ l'interface, mais son mot est déjà fixé.
 
 ## 2. Glossaire
 
+Avant de proposer un synonyme ou un terme neuf, relire § 4 Décisions : un terme déjà tranché (par exemple *Sheet* partout, Q4) ne se rediscute pas, et une entorse à « une notion = un mot » se signale à l'utilisateur.
+
 ### 2.1 Projet et fenêtres
 
 | Anglais | Français | Définition | Refusés | Réf. |

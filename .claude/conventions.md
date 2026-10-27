@@ -202,6 +202,8 @@ faux ou ambigu se corrige dans le catalogue (`en`), pas dans le crate du dessous
 
 ## Rendu : pièges silencieux
 
+- Rendu : **un repère d'écran** (cadre rouge, poignées, surbrillance de sélection) se peint par-dessus la figure en cache, dans l'application : il n'entre ni dans la clé de cache ni dans le pipeline, donc jamais dans l'export SVG/PDF/PNG (`docs/rendu.md`, § poignées de sélection).
+
 - Rendu : `plotters` est pris **sans ses fonts** (`default-features = false`). Un `DrawingBackend` qui ne surcharge pas `draw_text` **panique** à la première graduation, et un qui ne surcharge pas `estimate_text_size` mesure le texte au nombre d'octets UTF-8 — silencieusement. Toute mesure passe par `stokesforge_render::text` et par nulle part ailleurs (`architecture-choisie.md` §4.3/§4.4).
 - Rendu : **une fonctionnalité de tracé n'entre jamais dans un seul backend** — elle va dans `stokesforge-render`, qui est générique sur le backend. Corollaire du même piège : les éléments de Plotters qui mesurent du texte eux-mêmes (`configure_series_labels`, `MultiLineText`) passent par `FontData::estimate_layout`, donc par l'heuristique naïve, **pas** par `estimate_text_size` — la légende est écrite à la main pour cette raison (`stokesforge_render::legend`).
 - Rendu : **tout titre, titre d'axe et entrée de légende passe par Typst, les graduations jamais** (issue #32). Le rôle est décidé dans le pipeline par le style (`formula::rich_style`), et les deux backends aiguillent sur `formula::is_rich` à la mesure **et** au dessin — jamais sur la présence de `$`. Ces textes sont donc du markup Typst : un texte repris automatiquement (nom de colonne) doit être échappé en amont.
