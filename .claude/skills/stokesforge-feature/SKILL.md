@@ -1,6 +1,6 @@
 ---
 name: stokesforge-feature
-description: Implement a StokesForge feature end to end — layer, menus, shortcut, texts, tests, docs. Use for any change made in the repo, even one line (« ajoute », « implémente », « fais que… »); during issue reporting, only once implementation is explicitly asked.
+description: Implement a StokesForge feature end to end — layer, menus, toolbars, icons, shortcut, texts, tests, docs. Use for any change made in the repo, even one line (« ajoute », « implémente », « fais que… », « traite #N » for an évolution issue); during issue reporting, only once implementation is explicitly asked.
 ---
 
 A feature almost always spans several layers. This skill keeps each piece in the right one and none forgotten.
@@ -9,7 +9,7 @@ A feature almost always spans several layers. This skill keeps each piece in the
 
 ## 1. Before writing code
 
-Branch `feature/<n>-<sujet>`, one per issue, short; merge `main` into it, then merge it into `main` with `--no-ff` (`docs/criteres-v1.md` § Branches et versions).
+Branch `feature/<n>-<sujet>`, one per issue, short; merge `main` into it, then merge it into `main` with `--no-ff` (`docs/criteres-v1.md` § Branches et versions). Work in a worktree created from an up-to-date `main`; run `git worktree list` first, other agents may work in parallel, and keep out of their files.
 
 1. `git status --short`, then `git diff` on the target files: preserve the user's work in progress.
 2. Read the domain page first, never the whole workspace: `.claude/rules.md` § Routage, `docs/invariants.md`, then the domain section of `.claude/conventions.md` (table in `CLAUDE.md`).
