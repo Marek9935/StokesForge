@@ -112,7 +112,7 @@ Les chemins de ce tableau sont relatifs à la racine du dépôt.
 | Tests et robustesse | `docs/tests.md` | tests du crate ; index `stokesforge-robustesse/src/lib.rs`, puis batterie `bN` concernée |
 | CI Linux GitHub, Windows GitLab et retour des résultats | `docs/tests.md` (§ CI et Résultats GitHub visibles dans GitLab) | `.gitlab-ci.yml`, `.github/workflows/{ci,gitlab-status}.yml`, `scripts/gitlab-status{,-test}.py` |
 | Distribution | `crates/stokesforge-python/README.md`, `docs/application/etat-et-console.md` | `scripts/app-dist.sh`, `scripts/cli-dist.sh`, `scripts/pyhello-dist.sh`, `vendor/python/lock.env` |
-| Licence, contributions et interfaces d'extension | `docs/licence-et-extensions.md`, `CONTRIBUTING.md` | `LICENSE`, `LICENSE-EXCEPTION`, `deny.toml`, `about.toml`, `scripts/licenses-{tools.env,rust.sh,dist.sh,test.sh}`, `scripts/licenses.hbs`, `vendor/{crate-license-notices,epaint-default-fonts,python/licenses-{linux,windows}}/` |
+| Licence, contributions et interfaces d'extension | `docs/licence-et-extensions.md`, `CONTRIBUTING.md` | `LICENSE`, `deny.toml`, `about.toml`, `scripts/licenses-{tools.env,rust.sh,dist.sh,test.sh}`, `scripts/licenses.hbs`, `vendor/{crate-license-notices,epaint-default-fonts,python/licenses-{linux,windows}}/` |
 
 Les noms de crates désignent `crates/<nom>/`. Le manifeste racine inclut
 `stokesforge-import`, même si certaines anciennes pages ne le recensent pas.
@@ -130,11 +130,9 @@ l'ancienne implémentation reste accessible sous le tag `legacy-python`.
 - Les clients soumettent les mutations métier via
   `SessionHandle::execute(Command)` ; l'acteur possède le modèle, les clients
   lisent des instantanés. Préserver undo/redo, macros, révisions et identifiants.
-- La permission supplémentaire de `LICENSE-EXCEPTION` ne couvre que la liste
-  fermée de `docs/licence-et-extensions.md` (`pyst`). Une nouvelle interface
-  couverte exige un commit explicite dans cette liste et son contrat public.
-  Les composants tiers gardent leurs licences ; ne pas leur appliquer la GPL
-  ou l'exception du projet en remplaçant leurs notices.
+- La licence du projet est GPL-3.0-or-later pure, sans permission
+  supplémentaire (#348). Les composants tiers gardent leurs licences ; ne pas
+  leur appliquer la GPL du projet en remplaçant leurs notices.
 - `SessionHandle::new_project`, comme `load`, remplace l'identité du projet
   et vide l'historique et les géométries ; il refuse une macro ouverte.
   La confirmation avant perte de travail appartient à `AppState`.

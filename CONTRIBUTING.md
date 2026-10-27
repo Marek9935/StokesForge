@@ -16,8 +16,7 @@ nomme `feature/<n>-<sujet>`, reste courte et reçoit `main` avant la fusion
 ## Licence des contributions
 
 Toute contribution originale à cette branche doit être proposée sous
-**GPL-3.0-or-later avec la permission supplémentaire de
-[`LICENSE-EXCEPTION`](LICENSE-EXCEPTION)**. Ne proposer que des éléments dont
+**GPL-3.0-or-later**. Ne proposer que des éléments dont
 vous détenez les droits nécessaires ; conserver les notices des composants
 tiers et indiquer leur provenance. Les contributions à une copie tierce
 vendorisée conservent sa licence, et leurs modifications doivent être
@@ -32,10 +31,13 @@ Signed-off-by: Prénom Nom <adresse@example.org>
 ```
 
 La signature confirme votre droit de proposer la contribution sous sa
-licence ; elle ne transfère pas votre copyright. Aucun CLA de cession ou de
-relicenciement n'est actuellement mis en place. Une éventuelle double licence
-commerciale nécessiterait l'accord des titulaires concernés ou un CLA séparé
-convenu avant intégration ; le DCO ne remplace pas cet accord.
+licence ; elle ne transfère pas votre copyright. Aucun CLA n'est encore en
+place. Le projet veut pouvoir accorder plus tard une permission supplémentaire
+(par exemple pour un connecteur propriétaire) : une contribution acceptée avant
+un CLA de licence (le contributeur garde son copyright et accorde le droit de
+redistribuer sous d'autres conditions) l'empêcherait sans l'accord de son
+auteur. Le CLA est suivi dans #348 et doit exister avant la première
+contribution extérieure fusionnée.
 
 ## Vérifications
 

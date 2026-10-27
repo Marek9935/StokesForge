@@ -59,7 +59,7 @@ enchaînements : [`.claude/skills/README.md`](.claude/skills/README.md).
 
 ## Conventions
 
-- Licence (#129) : GPL-3.0-or-later avec `LICENSE-EXCEPTION`, limitée aux interfaces de la liste fermée `docs/licence-et-extensions.md` (`pyst` aujourd'hui). Une nouvelle interface couverte exige un commit explicite dans cette liste. Préserver les licences des composants tiers ; une dépendance ou un runtime modifié actualise les notices et passe `cargo deny check licenses`. Les distributions utilisent `scripts/licenses-dist.sh`. Les contributions extérieures portent le DCO de `CONTRIBUTING.md` ; il ne remplace pas un CLA pour un futur relicenciement.
+- Licence (#129) : GPL-3.0-or-later pure (#348 : l'exception d'extension de 1.0.0 est retirée ; une permission supplémentaire ne s'accorde que par écrit, au cas par cas, et exige un CLA de licence pour le code des contributeurs). Préserver les licences des composants tiers ; une dépendance ou un runtime modifié actualise les notices et passe `cargo deny check licenses`. Les distributions utilisent `scripts/licenses-dist.sh`. Les contributions extérieures portent le DCO de `CONTRIBUTING.md` ; **ne fusionner aucune contribution extérieure avant le CLA de licence** (#348).
 - Notices Rust : `scripts/licenses-rust.sh` ajoute les copyrights amont manquants de `vendor/crate-license-notices/`. Leur empreinte lie le rapport au `Cargo.lock` exact ; toute modification du verrou exige de revalider ces compléments avant de générer les notices.
 - `rustfmt` + `clippy -D warnings` obligatoires (CI GitHub `.github/workflows/ci.yml`).
 - CI : `.github/workflows/ci.yml` (Linux et Windows, runners hébergés) reprend

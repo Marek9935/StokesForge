@@ -111,7 +111,7 @@ rm -rf "$DIST/lib/python/Lib/site-packages/pip" \
 SUFFIX=""
 if [[ "${STOKESFORGE_DIST_SKIP_LICENSES:-0}" == "1" ]]; then
     echo "[dist] ATTENTION : notices de licences NON livrées (STOKESFORGE_DIST_SKIP_LICENSES=1)" >&2
-    cp LICENSE LICENSE-EXCEPTION "$DIST/"
+    cp LICENSE "$DIST/"
     SUFFIX="-NO-NOTICES"
 else
     "$REPO_ROOT/scripts/licenses-dist.sh" "$DIST"
