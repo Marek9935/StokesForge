@@ -1,53 +1,36 @@
 # Licence et interfaces d'extension
 
 Copyright © 2026 Aliocha Skrzypczak. Le code original de StokesForge de la
-branche `main` est distribué sous **GNU GPL version 3 ou ultérieure**,
-avec la permission supplémentaire de [`LICENSE-EXCEPTION`](../LICENSE-EXCEPTION).
-Le texte officiel de la GPLv3 est reproduit sans modification dans
+branche `main` est distribué sous **GNU GPL version 3 ou ultérieure**, sans
+permission supplémentaire (#348). Le texte officiel de la GPLv3 est reproduit sans modification dans
 [`LICENSE`](../LICENSE). Les composants tiers conservent leurs licences.
 Cette décision ne change pas le statut du tag `legacy-python`, l'ancienne version
 Python/Qt, ni celui des versions antérieures à ce changement.
 
 La GPL autorise les distributions commerciales ; la distribution du
 programme ou d'une version modifiée doit respecter ses conditions, notamment
-la fourniture du code source correspondant. La permission supplémentaire
-relève de la [section 7 de la GPLv3](https://www.gnu.org/licenses/gpl-3.0.html#section7).
-Le texte de l'exception reprend la décision de l'issue #129 ; sa relecture
-par un juriste reste recommandée avant publication.
+la fourniture du code source correspondant.
 
-## Liste fermée des interfaces couvertes
+## Permission supplémentaire : retirée, demandable
 
-| Interface d'extension documentée | Contrat public | Utilisation |
-|---|---|---|
-| `pyst`, API de script Python fournie par StokesForge | [`python-et-script.md`](python-et-script.md), liste figée « API figée V1 » (noms, signatures, clés, valeurs ; tout changement est une décision explicite, #331) | Scripts exécutés dans la console de l'application ou par `stokesforge-cli run` |
+La version 1.0.0 portait une exception d'extension pour `pyst` (#129, section 7
+de la GPLv3). Elle est retirée (#348) : aucune demande ne la justifiait, et elle
+a des défauts de rédaction (renvoi à un document non livré, liste mouvante). Un
+destinataire de 1.0.0 garde les droits de cette version ; les suivantes sont
+sous GPL pure.
 
-Un script ou module qui utilise uniquement cette interface, sans compiler,
-incorporer ni lier du code source ou objet de StokesForge dans son propre
-programme, peut être distribué sous la licence choisie par son auteur.
-Le chargement du module `pyst` fourni par l'hôte est l'usage de l'interface
-couvert par cette permission. Les dépendances propres au script conservent
-leurs conditions.
-
-L'exception ne couvre pas les modifications de StokesForge, la réutilisation
-de ses sources ou une bibliothèque ou un binaire lié aux crates Rust de
-StokesForge. Les API Rust internes, le format `.stf` et les interfaces des
-dépendances tierces ne sont pas ajoutés à cette liste par leur seule présence
-dans la documentation.
-
-**Une nouvelle interface n'est couverte qu'après un commit explicite qui
-l'ajoute à cette table et décrit son contrat public.** Ajouter une fonction
-à l'API `pyst` existante actualise son contrat ; cela ne crée pas une nouvelle
-interface. Ne pas appliquer l'exception par analogie à une future liaison.
+Un usage que la GPL ne couvre pas, par exemple un connecteur propriétaire d'un
+constructeur d'appareils, se traite par une permission supplémentaire ou une
+licence séparée, accordée par écrit à la demande. Elle suppose que l'auteur
+détienne ou puisse accorder les droits sur tout le code concerné, donc un **CLA
+de licence** (le contributeur garde son copyright et autorise la redistribution
+sous d'autres conditions) avant toute contribution extérieure fusionnée. Sa
+rédaction et celle de la permission passent par un juriste.
 
 ## Métadonnées Cargo
 
-Le workspace déclare
-`GPL-3.0-or-later WITH AdditionRef-StokesForge-Extension` ; les vingt
-crates héritent de `license`. Les textes sont `LICENSE` et `LICENSE-EXCEPTION`.
-`AdditionRef-StokesForge-Extension` identifie cette permission supplémentaire.
-La syntaxe [SPDX 3.0](https://spdx.github.io/spdx-spec/v3.0.1/annexes/spdx-license-expressions/)
-utilise `AdditionRef-` après `WITH` pour un ajout personnalisé ; `LicenseRef-`
-désigne une licence entière et ne convient pas à cet emplacement.
+Le workspace déclare `GPL-3.0-or-later` ; les vingt crates héritent de
+`license`. Le texte est `LICENSE`.
 
 Les licences Apache-2.0 de `vendor/winit` et MIT de
 `vendor/smithay-clipboard` restent intactes, y compris pour les modifications
@@ -101,7 +84,7 @@ Les outils doivent être installés avant de les lancer. La génération peut
 consulter les sources amont pour récupérer un texte absent du paquet Cargo.
 Chaque distribution contient :
 
-- `LICENSE` et `LICENSE-EXCEPTION` pour StokesForge ;
+- `LICENSE` pour StokesForge ;
 - `THIRD-PARTY-LICENSES.txt`, textes des dépendances Rust transitives,
   notamment Typst (Apache-2.0), avec leurs noms et versions ;
 - `licenses/fonts/<famille>/OFL.txt` et `licenses/phosphor/LICENSE` ;
@@ -130,8 +113,8 @@ fichier de notices n'est pas une archive de sources.
 ## Contributions
 
 Voir [`CONTRIBUTING.md`](../CONTRIBUTING.md) : toute contribution extérieure
-doit être proposée sous les conditions GPL avec cette exception et porter
-le `Signed-off-by` du [DCO 1.1](../DCO). Les auteurs gardent leurs droits.
-Le DCO ne donne pas, à lui seul, le droit de relicencier leurs contributions
-pour une double licence commerciale. Une telle décision nécessiterait leur
-accord ou un CLA séparé, explicite, à convenir avant intégration.
+doit être proposée sous GPL-3.0-or-later et porter le `Signed-off-by` du
+[DCO 1.1](../DCO). Les auteurs gardent leurs droits. Le DCO ne donne pas le
+droit d'accorder une permission supplémentaire ni de relicencier : cela exige
+un CLA de licence, à mettre en place **avant** la première contribution
+extérieure fusionnée (#348).

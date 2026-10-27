@@ -248,7 +248,7 @@ de la console de script (tâche 5.4).
 
 ```
 dist/pyhello/
-├── LICENSE, LICENSE-EXCEPTION                licence de StokesForge
+├── LICENSE                                   licence de StokesForge
 ├── THIRD-PARTY-LICENSES.txt                  textes des dépendances Rust
 ├── licenses/                                ressources, patches, CPython, numpy
 ├── pyhello                                  binaire release (0,7 Mo)

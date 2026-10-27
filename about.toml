@@ -16,7 +16,7 @@ accepted = [
     "BSL-1.0",
     "0BSD",
     "OFL-1.1",
-    "GPL-3.0-or-later WITH AdditionRef-StokesForge-Extension",
+    "GPL-3.0-or-later",
 ]
 
 [epaint_default_fonts]
