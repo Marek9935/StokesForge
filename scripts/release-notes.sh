@@ -7,7 +7,8 @@
 # Refuse (code 1) si :
 #   - le tag n'a pas la forme vX.Y.Z ou vX.Y.Z-rcN ;
 #   - un crate du workspace n'est pas à la version X.Y.Z (le tag décrit le
-#     code, pas l'inverse) ;
+#     code, pas l'inverse) : contrôle délégué à scripts/versions-alignees.sh,
+#     qui tourne aussi à chaque push (travail `fmt`) ;
 #   - pour vX.Y.Z seulement, CHANGELOG.md n'a pas de section `## [X.Y.Z]` non
 #     vide, ou la section porte encore « à dater » dans son titre (toléré sur
 #     un -rcN, la date n'étant posée qu'au vrai tag).
@@ -31,15 +32,7 @@ fi
 VERSION="${BASH_REMATCH[1]}"
 PRERELEASE="${BASH_REMATCH[2]}"
 
-bad=0
-for manifest in "$REPO_ROOT"/crates/*/Cargo.toml; do
-    found="$(sed -n 's/^version = "\(.*\)"/\1/p' "$manifest" | head -1)"
-    if [ "$found" != "$VERSION" ]; then
-        echo "[release] ERREUR : $(basename "$(dirname "$manifest")") est en $found, le tag demande $VERSION" >&2
-        bad=1
-    fi
-done
-[ "$bad" = 0 ] || exit 1
+"$(dirname "${BASH_SOURCE[0]}")/versions-alignees.sh" "$VERSION" >/dev/null
 [ -z "$PRERELEASE" ] || exit 0
 
 notes="$(awk -v header="## [$VERSION]" '
