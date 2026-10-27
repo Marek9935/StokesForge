@@ -244,3 +244,31 @@ fn chaque_cle_annoncee_par_l_erreur_est_reellement_acceptee() {
         );
     }
 }
+
+/// #344 : le sens se lit sur l'ordre des bornes. `x_inverted=True` sur des
+/// bornes croissantes les échange ; `x_from > x_to` donne un axe inversé ;
+/// les clés `pyst` elles-mêmes ne changent pas.
+#[test]
+fn set_graph_oriente_les_axes_d_apres_l_ordre_des_bornes() {
+    let b = banc();
+    run(&b, GRAPH);
+    run(
+        &b,
+        "pyst.set_graph(pyst.resolve('[G]'), x_from=1, x_to=5, y_from=7, y_to=2)",
+    );
+    let panel = &graph_spec(&b).panels[0];
+    assert!(!panel.bottom.inverted);
+    assert!(panel.left.inverted, "y_from=7 > y_to=2 : axe inversé");
+    assert_eq!(
+        (panel.left.range_min, panel.left.range_max),
+        (Some(7.0), Some(2.0))
+    );
+    run(&b, "pyst.set_graph(pyst.resolve('[G]'), x_inverted=True)");
+    let panel = &graph_spec(&b).panels[0];
+    assert!(panel.bottom.inverted);
+    assert_eq!(
+        (panel.bottom.range_min, panel.bottom.range_max),
+        (Some(5.0), Some(1.0)),
+        "(1, 5) devient (5, 1)"
+    );
+}

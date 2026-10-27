@@ -23,6 +23,38 @@ fichier le perd sans message, voir `docs/persistance.md`).
 
 ## [Non publié]
 
+### Ajouté
+
+- Sous-graduations des axes (#344) : une case « Afficher les sous-graduations »
+  par axe (allumée sur un graphe neuf, éteinte dans un fichier existant), seules
+  ou avec les graduations, leur nombre entre deux graduations, et « Un nombre
+  sur » n pour n'écrire qu'une graduation sur n. Champs additifs du format `.stf`
+  (`minor_ticks`, `minor_tick_count`, `label_every`) : une version plus ancienne
+  qui réenregistre le fichier les perd.
+- Bloc repliable « Avancé » de la section Graduations (#344), fermé par
+  défaut, par axe (miroirs compris) : longueur des grands et des petits tirets
+  (px), épaisseur (pt) et couleur des tirets, tous Auto tant qu'on n'y touche
+  pas (le petit tiret Auto vaut la moitié du grand). Champs additifs du format
+  `.stf` (`tick_length`, `minor_tick_length`, `tick_width`,
+  `tick_mark_color`) : une version plus ancienne qui réenregistre le fichier
+  les perd.
+
+### Modifié
+
+- Page Axes des propriétés (#344) : les cases « Axe inversé » et « Plage
+  auto » disparaissent. Le sens de l'axe se lit sur l'ordre des bornes (De >
+  À inverse l'axe) ; De et À sont toujours éditables, suivent les données tant
+  qu'on n'a rien saisi, et une saisie fige les deux bornes (le bouton « Auto »
+  de la rangée les rend aux données, sens conservé). Les graduations ont leur
+  section « Graduations ».
+- À l'ouverture d'un fichier `.stf`, un axe qui porte `inverted` à côté de
+  bornes croissantes voit ses bornes échangées (le champ `inverted` reste
+  écrit dans le fichier, la figure ne change pas) ; la surface `pyst`
+  (`x_inverted`, `x_auto_range`…) ne change pas, mais `x_inverted=True` échange
+  aussi les bornes.
+- La case « Cadre fermé » (page Axes et menu du calque) disparaît de
+  l'interface ; ses réglages se font par axe (miroirs, graduations).
+
 ## [1.0.0] - 2026-10-27
 
 Première version publiée. Portage de StokesForge de Python/Qt vers Rust

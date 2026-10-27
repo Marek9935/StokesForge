@@ -768,14 +768,10 @@ plot-axes-scale-section = Scale
 plot-axes-log-scale =
     Log scale
     .hint = Base-10 logarithm
-plot-axes-reverse =
-    Reverse axis
-    .hint = Values decrease in the reading direction
-plot-axes-auto-range =
-    Auto range
-    .hint = Computed from the data
-    .disabled = Uncheck Auto range to set the bounds
 plot-axes-from = From
+plot-axes-from-auto = Auto
+    .hint = Bounds follow the data again. The axis keeps its direction
+    .disabled = The bounds already follow the data
 plot-axes-display-section = Display
 plot-axes-decimal-comma = Decimal comma on tick labels
     .hint = Writes 1,5 instead of 1.5 on every axis of this graph, on screen and in exports
@@ -783,7 +779,19 @@ plot-axes-show-axis = Show axis
 plot-axes-show-gridlines = Show gridlines
 plot-axes-show-tick-labels = Show tick labels
 plot-axes-show-ticks = Show ticks
-plot-axes-frame-section = Frame
+plot-axes-show-minor-ticks = Show minor ticks
+plot-axes-minor-tick-count = Minor ticks per interval
+    .auto = Auto
+    .hint = Number of small ticks between two main ticks. Leave empty for Auto. Ignored on a log scale, which always shows 2 to 9
+plot-axes-ticks-section = Ticks
+plot-axes-advanced = Advanced
+plot-axes-tick-length = Major tick length (px)
+plot-axes-minor-tick-length = Minor tick length (px)
+plot-axes-tick-width = Tick width (pt)
+plot-axes-tick-mark-color = Tick color
+    .auto = Auto (axis color)
+plot-axes-label-every = Label every
+    .hint = Write only one tick label out of this many, starting with the first. 1 writes them all
 plot-axes-tick-direction = Tick direction
 plot-axes-tick-out = Outward
 plot-axes-tick-in = Inward
@@ -1161,9 +1169,6 @@ action-move-series-up = Move Up
 action-move-series-down = Move Down
 action-show-content = Show
 action-hide-content = Hide
-action-closed-frame = Closed Frame
-    .hint = Shows the top and right axes as mirrors with no tick labels, copying the ticks of the bottom and left axes. Uncheck to hide them again. With a series on the right axis, only the top is closed
-    .disabled = An overlaid layer has its own axes
 action-delete-content = Delete
 object-properties-title = Object Properties
 object-coordinate = { $coordinate }
@@ -1693,7 +1698,7 @@ field-clamped-min = Set to the minimum, { $limit }
 field-clamped-max = Set to the maximum, { $limit }
 field-refused-number = Enter a number
 field-refused-integer = Enter a whole number
-field-refused-use-auto = Use Auto range
+field-refused-use-auto = Type Auto to follow the data
 field-refused-name-empty = The name cannot be empty
 field-refused-name-taken = This name is already used
 
@@ -1732,6 +1737,7 @@ disabled-color-invalid = Enter a valid color first
 disabled-gradient-min-colors = A gradient needs at least two colors
 disabled-mirror-off = Turn on the mirror axis first
 disabled-ticks-off = Show the ticks first
+disabled-minor-ticks-off = Show the minor ticks first
 disabled-analysis-issues = Fix the problem shown in the form first
 
 ## Help › Keyboard Shortcuts (#231, S-K5). The lists are generated from the key

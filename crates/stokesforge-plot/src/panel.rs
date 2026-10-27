@@ -234,7 +234,7 @@ impl PanelSpec {
     /// Ferme ou rouvre le cadre (#344), d'un seul geste. Fermer règle le haut
     /// (et la droite, si aucune série n'y est rattachée) en miroir sans
     /// nombres, et **copie une fois** les tirets du bas (haut) et de gauche
-    /// (droite) : présence et sens ; ils se règlent ensuite séparément. Rouvrir
+    /// (droite) : présence, sens et sous-graduations ; ils se règlent ensuite séparément. Rouvrir
     /// éteint ces miroirs et rend leurs nombres. Sans effet sur un calque
     /// superposé (qui a ses propres axes, #167).
     pub fn set_frame_closed(&mut self, closed: bool) {
@@ -249,6 +249,8 @@ impl PanelSpec {
             if closed {
                 mirror.ticks = source.ticks;
                 mirror.tick_direction = source.tick_direction;
+                mirror.minor_ticks = source.minor_ticks;
+                mirror.minor_tick_count = source.minor_tick_count;
             }
         };
         set(&mut self.top, &bottom);

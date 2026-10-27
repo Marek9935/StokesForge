@@ -18,7 +18,7 @@ use stokesforge_plot::{
 use crate::color_picker::{ColorUsage, PickerEnv, SavedColorEdit};
 use crate::field_state::{self, FieldIssue};
 use crate::icons::ICON_SIZE;
-use crate::number_field::number_field;
+use crate::number_field::{auto_number_field, number_field};
 use crate::theme::{table_header, FieldWidth};
 use stokesforge_app_state::quantities;
 use stokesforge_app_state::state::{
@@ -32,7 +32,7 @@ use super::dialogs::{
 };
 use super::form::{choice, form, ChoiceOption, Form};
 use super::graph_window::{published_axis_bounds, PanelBounds};
-use super::hover_help::{help_beside, hover_help};
+use super::hover_help::hover_help;
 use super::tab_strip::{tab_strip, TabStripSide};
 
 /// Fenêtre des propriétés d'un graphe : un dialogue flottant (même famille
@@ -402,7 +402,6 @@ pub(super) fn axes_settings_page(
     decimal_comma: &mut bool,
     env: &mut PickerEnv,
 ) -> bool {
-    let mut commit = false;
     let mut axes = vec![PlotAxis::Bottom, PlotAxis::Left];
     if panel.overlay.is_none() {
         // Haut et droite : les axes miroirs (#176), toujours proposés.
@@ -444,9 +443,9 @@ pub(super) fn axes_settings_page(
         PlotAxis::Left => bounds.left,
         _ => bounds.right,
     });
-    commit |= form(ui, "plot_axis_page", |form| {
+    form(ui, "plot_axis_page", |form| {
         let mut commit = if mirror {
-            mirror_axis_editor(form, axis)
+            mirror_axis_editor(form, axis, env)
         } else {
             axis_editor(form, axis, computed, env)
         };
@@ -457,29 +456,7 @@ pub(super) fn axes_settings_page(
             Some(tr!("plot-axes-decimal-comma", "hint")),
         );
         commit
-    });
-    // Raccourci du calque (#344) : une bascule qui règle d'un coup le haut et
-    // la droite ; le brouillon la valide comme tout autre réglage.
-    commit |= form(ui, "plot_frame_page", |form| {
-        form.section(tr!("plot-axes-frame-section"));
-        let mut closed = panel.frame_closed();
-        let enabled = panel.overlay.is_none();
-        let changed = form.field(|ui| {
-            help_beside(ui, tr!("action-closed-frame", "hint"), |ui| {
-                ui.add_enabled(
-                    enabled,
-                    egui::Checkbox::new(&mut closed, tr!("action-closed-frame")),
-                )
-                .on_disabled_hover_text(tr!("action-closed-frame", "disabled"))
-                .changed()
-            })
-        });
-        if changed {
-            panel.set_frame_closed(closed);
-        }
-        changed
-    });
-    commit
+    })
 }
 
 /// Onglet « Thème » : fond, couleur du texte et couleur des axes, réglés
@@ -609,9 +586,10 @@ fn formula_field(form: &mut Form<'_>, label: &str, hint: &str, value: &mut Strin
 }
 
 /// Édite un axe miroir (#176) : il reprend l'échelle de l'axe opposé et n'a ni
-/// titre ni couleur propres ; on choisit seulement de l'afficher, avec ou sans
-/// étiquettes de graduation.
-fn mirror_axis_editor(form: &mut Form<'_>, axis: &mut AxisSpec) -> bool {
+/// titre ni couleur d'axe propres ; on choisit de l'afficher, avec ou sans
+/// étiquettes de graduation, et de régler ses graduations (comme tout axe,
+/// chacun pour soi).
+fn mirror_axis_editor(form: &mut Form<'_>, axis: &mut AxisSpec, env: &mut PickerEnv) -> bool {
     form.section(tr!("plot-axes-display-section"));
     let mut commit = form.checkbox(&mut axis.mirror, tr!("plot-axes-show-mirror"), None);
     commit |= form.field(|ui| {
@@ -622,6 +600,9 @@ fn mirror_axis_editor(form: &mut Form<'_>, axis: &mut AxisSpec) -> bool {
         .on_disabled_hover_text(tr!("disabled-mirror-off"))
         .changed()
     });
+    commit |= label_every_row(form, axis, axis.mirror);
+    form.note(tr!("plot-axes-mirror-note"));
+    form.section(tr!("plot-axes-ticks-section"));
     commit |= form.field(|ui| {
         ui.add_enabled(
             axis.mirror,
@@ -631,8 +612,159 @@ fn mirror_axis_editor(form: &mut Form<'_>, axis: &mut AxisSpec) -> bool {
         .changed()
     });
     commit |= tick_direction_row(form, axis, axis.mirror, tr!("disabled-mirror-off"));
-    form.note(tr!("plot-axes-mirror-note"));
+    commit |= minor_ticks_rows(form, axis, axis.mirror, tr!("disabled-mirror-off"));
+    commit |= advanced_ticks_block(form, axis, axis.mirror, tr!("disabled-mirror-off"), env);
     commit
+}
+
+/// Les réglages des sous-graduations (#344) : la case, puis leur nombre entre
+/// deux graduations principales (Auto par défaut ; sans effet en échelle
+/// logarithmique, grisé). `enabled` faux (miroir éteint) grise le tout, avec
+/// `reason`.
+fn minor_ticks_rows(
+    form: &mut Form<'_>,
+    axis: &mut AxisSpec,
+    enabled: bool,
+    reason: String,
+) -> bool {
+    let mut commit = form.field(|ui| {
+        ui.add_enabled(
+            enabled,
+            egui::Checkbox::new(&mut axis.minor_ticks, tr!("plot-axes-show-minor-ticks")),
+        )
+        .on_disabled_hover_text(&reason)
+        .changed()
+    });
+    let counted = enabled && axis.minor_ticks && axis.scale == stokesforge_plot::AxisScale::Linear;
+    commit |= form.row(tr!("plot-axes-minor-tick-count"), |ui| {
+        let shown = ui.add_enabled_ui(counted, |ui| {
+            auto_number_field(
+                ui,
+                "axis_minor_tick_count",
+                &mut axis.minor_tick_count,
+                &quantities::MINOR_TICK_COUNT,
+                &tr!("plot-axes-minor-tick-count", "auto"),
+            )
+            .changed
+        });
+        shown.response.on_disabled_hover_text(reason);
+        shown.inner
+    });
+    commit
+}
+
+/// « Un nombre sur n » (#344) : grisé quand les nombres sont masqués.
+fn label_every_row(form: &mut Form<'_>, axis: &mut AxisSpec, enabled: bool) -> bool {
+    form.row(tr!("plot-axes-label-every"), |ui| {
+        let shown = ui.add_enabled_ui(enabled && axis.tick_labels, |ui| {
+            number_field(
+                ui,
+                "axis_label_every",
+                &mut axis.label_every,
+                &quantities::LABEL_EVERY,
+            )
+            .changed
+        });
+        shown.inner
+    })
+}
+
+/// Une rangée « nombre ou Auto » de la section Avancé (#344) : `None` montre
+/// « Auto » en gris, vider le champ la rend automatique. Grisée avec `reason`
+/// quand `enabled` est faux (S-G4).
+fn auto_value_row(
+    form: &mut Form<'_>,
+    label: String,
+    id_salt: &'static str,
+    value: &mut Option<f64>,
+    quantity: &quantities::Quantity,
+    enabled: bool,
+    reason: String,
+) -> bool {
+    form.row(label, |ui| {
+        let shown = ui.add_enabled_ui(enabled, |ui| {
+            auto_number_field(ui, id_salt, value, quantity, &tr!("common-auto")).changed
+        });
+        shown.response.on_disabled_hover_text(reason);
+        shown.inner
+    })
+}
+
+/// Le bloc repliable « Avancé » des graduations (#344), fermé par défaut :
+/// longueur des grands et des petits tirets, épaisseur et couleur, tous
+/// Auto tant qu'on n'y touche pas. Par axe, jamais recopié sur les autres.
+/// `enabled` faux (miroir éteint) grise le tout, avec `reason`.
+fn advanced_ticks_block(
+    form: &mut Form<'_>,
+    axis: &mut AxisSpec,
+    enabled: bool,
+    reason: String,
+    env: &mut PickerEnv,
+) -> bool {
+    form.collapsible(
+        "plot_axis_advanced_ticks",
+        tr!("plot-axes-advanced"),
+        |form| {
+            let major = enabled && axis.ticks;
+            let minor = enabled && axis.minor_ticks;
+            let major_reason = if enabled {
+                tr!("disabled-ticks-off")
+            } else {
+                reason.clone()
+            };
+            let minor_reason = if enabled {
+                tr!("disabled-minor-ticks-off")
+            } else {
+                reason.clone()
+            };
+            let mut commit = auto_value_row(
+                form,
+                tr!("plot-axes-tick-length"),
+                "axis_tick_length",
+                &mut axis.tick_length,
+                &quantities::TICK_LENGTH,
+                major,
+                major_reason.clone(),
+            );
+            commit |= auto_value_row(
+                form,
+                tr!("plot-axes-minor-tick-length"),
+                "axis_minor_tick_length",
+                &mut axis.minor_tick_length,
+                &quantities::TICK_LENGTH,
+                minor,
+                minor_reason,
+            );
+            let any = major || minor;
+            let any_reason = if enabled {
+                tr!("disabled-ticks-off")
+            } else {
+                reason
+            };
+            commit |= auto_value_row(
+                form,
+                tr!("plot-axes-tick-width"),
+                "axis_tick_width",
+                &mut axis.tick_width,
+                &quantities::TICK_WIDTH,
+                any,
+                any_reason,
+            );
+            commit |= form
+                .enabled(any, |form| {
+                    form.color(
+                        &tr!("plot-axes-tick-mark-color"),
+                        &mut axis.tick_mark_color,
+                        ColorUsage::Text,
+                        Some(&tr!("plot-axes-tick-mark-color", "auto")),
+                        env,
+                    )
+                })
+                .inner;
+            commit
+        },
+    )
+    .unwrap_or(false)
 }
 
 /// Le sens des graduations (#344) : vers l'extérieur, l'intérieur ou des deux
@@ -669,9 +801,10 @@ fn tick_direction_row(
     })
 }
 
-/// Édite un [`AxisSpec`], en trois groupes : le titre de l'axe (libellé,
-/// unité), son échelle (logarithmique, inversée, bornes) et son affichage
-/// (axe, grille). Rend `true` si le brouillon doit être validé — voir la doc
+/// Édite un [`AxisSpec`], en quatre groupes : le titre de l'axe (libellé,
+/// unité), son échelle (logarithmique, bornes De/À : le sens de l'axe se lit
+/// sur leur ordre), son affichage (axe, nombres, grille, couleur) et ses
+/// graduations (tirets, sens, sous-graduations, bloc « Avancé »). Rend `true` si le brouillon doit être validé — voir la doc
 /// de tête de [`plot_settings_window`].
 fn axis_editor(
     form: &mut Form<'_>,
@@ -715,29 +848,20 @@ fn axis_editor(
         };
         commit = true;
     }
-    commit |= form.checkbox(
-        &mut axis.inverted,
-        tr!("plot-axes-reverse"),
-        Some(tr!("plot-axes-reverse", "hint")),
-    );
-    let auto_changed = form.checkbox(
-        &mut axis.auto_range,
-        tr!("plot-axes-auto-range"),
-        Some(tr!("plot-axes-auto-range", "hint")),
-    );
-    commit |= auto_changed;
-    if auto_changed && !axis.auto_range {
-        // Décocher reprend les bornes calculées comme valeurs (S-G4).
-        if let Some((low, high)) = computed {
-            axis.range_min = Some(low);
-            axis.range_max = Some(high);
-        }
-    }
-    // De et à restent visibles : grisés sous « Auto range », avec les
-    // bornes calculées (#221, #170 §1).
+    // De et À : toujours éditables (#344). Sous Auto, ils montrent les bornes
+    // calculées, dans l'ordre d'affichage ; une saisie fige les deux bornes
+    // (l'autre est prise du calcul) et le sens suit l'ordre : De > À = axe
+    // inversé. Le bouton « Auto » rend les bornes aux données, sens conservé.
     let auto = axis.auto_range;
     let (mut min, mut max) = if auto {
         computed
+            .map(|(low, high)| {
+                if axis.inverted {
+                    (high, low)
+                } else {
+                    (low, high)
+                }
+            })
             .or(axis.range_min.zip(axis.range_max))
             .unwrap_or((0.0, 0.0))
     } else {
@@ -745,26 +869,33 @@ fn axis_editor(
     };
     let mut changed = false;
     let mut auto_asked = false;
-    form.enabled(!auto, |form| {
-        // « De … à … » sur une seule rangée ; l'ordre est libre (un axe peut
-        // être inversé), contrairement aux plages d'analyse (S-N11).
-        let (first, second) = form.row(tr!("plot-axes-from"), |ui| {
-            let first = number_field(ui, "axis_min", &mut min, &quantities::AXIS_BOUND);
-            ui.label(tr!("analysis-field-to"));
-            let second = number_field(ui, "axis_max", &mut max, &quantities::AXIS_BOUND);
-            (first, second)
-        });
+    // « De … à … » sur une seule rangée ; l'ordre est libre, contrairement aux
+    // plages d'analyse (S-N11).
+    form.row(tr!("plot-axes-from"), |ui| {
+        let first = number_field(ui, "axis_min", &mut min, &quantities::AXIS_BOUND);
+        ui.label(tr!("analysis-field-to"));
+        let second = number_field(ui, "axis_max", &mut max, &quantities::AXIS_BOUND);
         changed |= first.changed || second.changed;
         auto_asked |= first.auto || second.auto;
-    })
-    .response
-    .on_disabled_hover_text(tr!("plot-axes-auto-range", "disabled"));
+        if ui
+            .add_enabled(!auto, egui::Button::new(tr!("plot-axes-from-auto")))
+            .on_hover_text(tr!("plot-axes-from-auto", "hint"))
+            .on_disabled_hover_text(tr!("plot-axes-from-auto", "disabled"))
+            .clicked()
+        {
+            auto_asked = true;
+        }
+    });
     if auto_asked {
         axis.auto_range = true;
+        // Les bornes mémorisées reprennent le sens de l'axe.
+        *axis = axis.orient();
         commit = true;
-    } else if !auto && changed {
+    } else if changed {
+        axis.auto_range = false;
         axis.range_min = Some(min);
         axis.range_max = Some(max);
+        axis.inverted = min > max;
         commit = true;
     }
 
@@ -775,8 +906,7 @@ fn axis_editor(
         tr!("plot-axes-show-tick-labels"),
         None,
     );
-    commit |= form.checkbox(&mut axis.ticks, tr!("plot-axes-show-ticks"), None);
-    commit |= tick_direction_row(form, axis, true, String::new());
+    commit |= label_every_row(form, axis, true);
     commit |= form.checkbox(&mut axis.grid, tr!("plot-axes-show-gridlines"), None);
     commit |= form.color(
         &tr!("plot-axes-color"),
@@ -786,6 +916,12 @@ fn axis_editor(
         env,
     );
     form.note(tr!("plot-axes-color-note"));
+
+    form.section(tr!("plot-axes-ticks-section"));
+    commit |= form.checkbox(&mut axis.ticks, tr!("plot-axes-show-ticks"), None);
+    commit |= tick_direction_row(form, axis, true, String::new());
+    commit |= minor_ticks_rows(form, axis, true, String::new());
+    commit |= advanced_ticks_block(form, axis, true, String::new(), env);
     commit
 }
 
@@ -1141,6 +1277,38 @@ mod tests {
         peindre_fenetre(context, state, Vec::new())
     }
 
+    /// Fait défiler la page des axes jusqu'en bas (la molette sur le texte
+    /// `survol`, peint avant le défilement) ; le décalage est gardé par egui
+    /// pour les images suivantes.
+    fn defiler(context: &egui::Context, state: &mut AppState, survol: &str) -> Vec<Texte> {
+        let peints = peindre_fenetre(context, state, Vec::new());
+        let pos = texte_exact(&peints, survol).centre;
+        peindre_fenetre(
+            context,
+            state,
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    phase: egui::TouchPhase::Move,
+                    delta: egui::vec2(0.0, -1000.0),
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        peindre_fenetre(context, state, Vec::new())
+    }
+
+    /// Le texte `cherche` peint sur la même rangée que `rangee` (à quelques
+    /// points de hauteur près) : « Auto » y figure plusieurs fois.
+    fn dans_la_rangee<'a>(textes: &'a [Texte], rangee: &str, cherche: &str) -> &'a Texte {
+        let y = texte_exact(textes, rangee).centre.y;
+        textes
+            .iter()
+            .find(|t| t.texte == cherche && (t.centre.y - y).abs() < 4.0)
+            .unwrap_or_else(|| panic!("{cherche:?} absent de la rangée {rangee:?} : {textes:?}"))
+    }
+
     // -- Chaque onglet, dans chaque langue ----------------------------------
 
     /// Un libellé propre à chaque onglet : peint sur sa page, absent des
@@ -1372,51 +1540,214 @@ mod tests {
         assert!(!est_peint(&peints, &tr!("plot-axes-show-mirror")));
     }
 
-    /// #344 : la bascule « Cadre fermé » de la page des axes règle le haut et
-    /// la droite d'un coup, valide **une** entrée d'historique, et rouvre le
-    /// cadre au second clic. Un calque superposé la voit grisée.
+    /// #344 : la page d'un axe n'a plus ni « Axe inversé » ni « Plage auto »
+    /// (le sens se lit sur l'ordre De / À, le bouton Auto rend aux données),
+    /// ni « Cadre fermé » ; elle a une section « Graduations » dont le bloc
+    /// « Avancé » est fermé, puis ouvert au clic (et de nouveau fermé).
     #[test]
-    fn la_bascule_du_cadre_ferme_valide_une_entree_et_se_defait() {
-        let mut banc = banc(|spec| {
-            let panel = panneau(spec);
-            panel.bottom.tick_direction = TickDirection::Both;
-            let mut over = PanelSpec::at(0, 0);
-            over.overlay = Some(stokesforge_plot::OverlaySpec::default());
-            spec.panels.push(over);
-        });
-        // L'onglet du haut : page courte, la bascule y est peinte.
-        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Top));
-        let original = banc.modele();
+    fn la_page_d_un_axe_a_ses_graduations_et_un_bloc_avance_replie() {
+        let mut banc = banc(|_| {});
+        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
         let context = contexte();
         let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
-        assert!(est_peint(&peints, &tr!("action-closed-frame")));
-        assert_eq!(banc.modele(), original, "peindre ne modifie rien");
+        assert!(est_peint(&peints, &tr!("plot-axes-from")));
+        assert!(est_peint(&peints, &tr!("plot-axes-from-auto")));
+        for retire in ["Reverse axis", "Auto range", "Closed Frame"] {
+            assert!(!est_peint(&peints, retire), "{retire:?} n'existe plus");
+        }
+        let peints = defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"));
+        assert!(est_peint(&peints, &tr!("plot-axes-ticks-section")));
+        assert!(est_peint(&peints, &tr!("plot-axes-show-minor-ticks")));
+        assert!(est_peint(&peints, &tr!("plot-axes-advanced")));
+        let avances = [
+            tr!("plot-axes-tick-length"),
+            tr!("plot-axes-minor-tick-length"),
+            tr!("plot-axes-tick-width"),
+            tr!("plot-axes-tick-mark-color"),
+        ];
+        for libelle in &avances {
+            assert!(
+                !est_peint(&peints, libelle),
+                "{libelle:?} : fermé par défaut"
+            );
+        }
+        let cliquer_avance = |banc: &mut Banc| {
+            let pos = texte_exact(
+                &defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines")),
+                &tr!("plot-axes-advanced"),
+            )
+            .centre;
+            cliquer(&context, pos, egui::PointerButton::Primary, |ui| {
+                plot_settings_window(ui.ctx(), &mut banc.state)
+            });
+            defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"))
+        };
+        let peints = cliquer_avance(&mut banc);
+        for libelle in &avances {
+            assert!(est_peint(&peints, libelle), "{libelle:?} : ouvert au clic");
+        }
+        assert_eq!(banc.modele(), banc.brouillon(), "ouvrir ne modifie rien");
+        let peints = cliquer_avance(&mut banc);
+        assert!(!est_peint(&peints, &avances[0]), "second clic : refermé");
+    }
 
-        cliquer_libelle(&context, &mut banc.state, &tr!("action-closed-frame"));
-        let fermé = banc.modele();
-        let panel = &fermé.panels[0];
-        assert!(panel.frame_closed());
-        assert!(!panel.top.tick_labels && !panel.right.tick_labels);
-        assert_eq!(
-            panel.top.tick_direction,
-            TickDirection::Both,
-            "copié du bas"
-        );
-        assert_eq!(
-            fermé.panels[1], original.panels[1],
-            "l'autre calque ne bouge pas"
-        );
+    /// #344 : un clic sur la flèche du bloc « Avancé » l'ouvre une seule fois
+    /// (la flèche bascule d'elle-même ; la basculer aussi à la main
+    /// l'ouvrirait puis la refermerait au même passage).
+    #[test]
+    fn un_clic_sur_la_fleche_du_bloc_avance_l_ouvre_une_fois() {
+        let mut banc = banc(|_| {});
+        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        let context = contexte();
+        let titre = texte_exact(
+            &defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines")),
+            &tr!("plot-axes-advanced"),
+        )
+        .centre;
+        // La flèche précède le titre : on vise à gauche de son bord.
+        let largeur = context.fonts_mut(|fonts| {
+            fonts
+                .layout_no_wrap(
+                    tr!("plot-axes-advanced"),
+                    egui::FontId::proportional(14.0),
+                    egui::Color32::WHITE,
+                )
+                .size()
+                .x
+        });
+        let fleche = egui::pos2(titre.x - largeur / 2.0 - 10.0, titre.y);
+        cliquer(&context, fleche, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut banc.state)
+        });
+        let peints = defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"));
+        assert!(est_peint(&peints, &tr!("plot-axes-tick-length")), "ouvert");
+    }
 
-        cliquer_libelle(&context, &mut banc.state, &tr!("action-closed-frame"));
+    /// Publie les bornes que le tracé aurait retenues pour l'axe du bas.
+    fn publier_bornes_du_bas(context: &egui::Context, banc: &Banc, bornes: (f64, f64)) {
+        super::super::graph_window::set_published_axis_bounds(
+            context,
+            banc.graph,
+            vec![super::super::graph_window::PanelBounds {
+                index: 0,
+                bottom: Some(bornes),
+                ..Default::default()
+            }],
+        );
+    }
+
+    /// Tape `saisi` dans le champ numérique qui affiche `valeur`, valide à
+    /// Entrée.
+    fn saisir(context: &egui::Context, banc: &mut Banc, valeur: &str, saisi: &str) {
+        focaliser(context, &mut banc.state, valeur);
+        une_image(
+            context,
+            &mut banc.state,
+            vec![egui::Event::Text(saisi.into())],
+        );
+        une_image(context, &mut banc.state, vec![touche(egui::Key::Enter)]);
+        une_image(context, &mut banc.state, Vec::new());
+    }
+
+    /// #344 : sous Auto, De et À montrent les bornes calculées ; saisir l'une
+    /// fige les deux (l'autre est prise du calcul), en **une** entrée
+    /// d'historique, et le sens suit l'ordre : De > À inverse l'axe.
+    #[test]
+    fn saisir_une_borne_sous_auto_fige_les_deux_et_le_sens_suit_l_ordre() {
+        let context = contexte();
+        for (valeur, saisi, bornes, inverse) in [
+            ("5", "3", (3.0, 20.0), false),
+            ("20", "1", (5.0, 1.0), true),
+            ("5", "30", (30.0, 20.0), true),
+        ] {
+            let mut banc = banc(|_| {});
+            banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+            publier_bornes_du_bas(&context, &banc, (5.0, 20.0));
+            let original = banc.modele();
+            assert!(original.panels[0].bottom.auto_range);
+            let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+            assert!(
+                est_peint(&peints, "5") && est_peint(&peints, "20"),
+                "{peints:?}"
+            );
+
+            saisir(&context, &mut banc, valeur, saisi);
+            let axe = banc.modele().panels[0].bottom.clone();
+            assert!(!axe.auto_range, "{valeur}->{saisi} : la saisie fige");
+            assert_eq!(
+                (axe.range_min, axe.range_max),
+                (Some(bornes.0), Some(bornes.1)),
+                "{valeur}->{saisi}"
+            );
+            assert_eq!(axe.inverted, inverse, "{valeur}->{saisi} : sens");
+            banc.state.close_plot_settings();
+            banc.state.dispatch(Action::Undo);
+            assert_eq!(banc.modele(), original, "une seule entrée d'historique");
+        }
+    }
+
+    /// #344 : le bouton Auto rend les bornes aux données et **garde le sens** ;
+    /// un axe inversé sous Auto montre sa borne haute dans le champ De.
+    #[test]
+    fn le_bouton_auto_rend_aux_donnees_en_gardant_le_sens() {
+        let context = contexte();
+        let mut banc = banc(|spec| {
+            let axe = &mut panneau(spec).bottom;
+            axe.auto_range = false;
+            axe.inverted = true;
+            axe.range_min = Some(20.0);
+            axe.range_max = Some(5.0);
+        });
+        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        publier_bornes_du_bas(&context, &banc, (5.0, 20.0));
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
+        let bouton =
+            dans_la_rangee(&peints, &tr!("plot-axes-from"), &tr!("plot-axes-from-auto")).centre;
+        cliquer(&context, bouton, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut banc.state)
+        });
+        let axe = banc.modele().panels[0].bottom.clone();
+        assert!(axe.auto_range);
+        assert!(axe.inverted, "le sens est conservé");
+        assert_eq!((axe.range_min, axe.range_max), (Some(20.0), Some(5.0)));
+        let peints = peindre_fenetre(&context, &mut banc.state, Vec::new());
         assert!(
-            !banc.modele().panels[0].frame_closed(),
-            "second clic : rouvert"
+            texte_exact(&peints, "20").centre.x < texte_exact(&peints, "5").centre.x,
+            "axe inversé : De montre la borne haute"
         );
-        // Les validations d'une même fenêtre se fusionnent : un Annuler rend
-        // le graphe d'avant l'ouverture.
-        banc.state.close_plot_settings();
-        banc.state.dispatch(Action::Undo);
-        assert_eq!(banc.modele(), original);
+    }
+
+    /// #344 : les réglages « Avancé » (longueur des tirets, épaisseur) s'écrivent
+    /// dans l'axe ; vider un champ le rend Auto ; ils sont propres à l'axe
+    /// choisi.
+    #[test]
+    fn les_reglages_avances_des_tirets_s_ecrivent_par_axe() {
+        let context = contexte();
+        let mut banc = banc(|_| {});
+        banc.ouvrir(PlotSettingsTab::Axes, Some(PlotAxis::Bottom));
+        let ouvrir = defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"));
+        let pos = texte_exact(&ouvrir, &tr!("plot-axes-advanced")).centre;
+        cliquer(&context, pos, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut banc.state)
+        });
+        let peints = defiler(&context, &mut banc.state, &tr!("plot-axes-show-gridlines"));
+        let champ =
+            dans_la_rangee(&peints, &tr!("plot-axes-tick-length"), &tr!("common-auto")).centre;
+        cliquer(&context, champ, egui::PointerButton::Primary, |ui| {
+            plot_settings_window(ui.ctx(), &mut banc.state)
+        });
+        une_image(
+            &context,
+            &mut banc.state,
+            vec![egui::Event::Text("9".into())],
+        );
+        une_image(&context, &mut banc.state, vec![touche(egui::Key::Enter)]);
+        une_image(&context, &mut banc.state, Vec::new());
+        let panneau = &banc.modele().panels[0];
+        assert_eq!(panneau.bottom.tick_length, Some(9.0));
+        assert_eq!(panneau.left.tick_length, None, "propre à l'axe du bas");
+        assert_eq!(panneau.bottom.minor_tick_length, None);
+        assert_eq!(panneau.bottom.tick_width, None);
     }
 
     /// #344 : les graduations et leur sens se règlent par axe, miroirs compris ;
@@ -1460,6 +1791,33 @@ mod tests {
         assert_eq!(
             banc.modele().panels[0].top.tick_direction,
             TickDirection::In
+        );
+
+        // Les sous-graduations : allumées par défaut, indépendantes des tirets.
+        assert!(est_peint(&peints, &tr!("plot-axes-show-minor-ticks")));
+        assert!(banc.modele().panels[0].top.minor_ticks);
+        cliquer_libelle(
+            &context,
+            &mut banc.state,
+            &tr!("plot-axes-show-minor-ticks"),
+        );
+        assert!(!banc.modele().panels[0].top.minor_ticks);
+        cliquer_libelle(
+            &context,
+            &mut banc.state,
+            &tr!("plot-axes-show-minor-ticks"),
+        );
+        assert!(banc.modele().panels[0].top.minor_ticks);
+        cliquer_libelle(&context, &mut banc.state, &tr!("plot-axes-show-ticks"));
+        assert!(!banc.modele().panels[0].top.ticks);
+        cliquer_libelle(
+            &context,
+            &mut banc.state,
+            &tr!("plot-axes-show-minor-ticks"),
+        );
+        assert!(
+            !banc.modele().panels[0].top.minor_ticks,
+            "sans tirets principaux, les sous-graduations se règlent encore"
         );
     }
 
@@ -2292,25 +2650,37 @@ mod tests {
         (commit, peints)
     }
 
-    /// #221 : sous « Auto range », De et à restent visibles (grisés) et
-    /// montrent les bornes calculées, sans les écrire dans le spec. Témoin :
-    /// hors Auto, ils montrent les bornes saisies et non les calculées.
+    /// #221, #344 : sous Auto, De et À montrent les bornes calculées, dans
+    /// l'ordre d'affichage (un axe inversé montre la borne haute en premier),
+    /// sans les écrire dans le spec. Témoin : hors Auto, ils montrent les bornes
+    /// saisies et non les calculées.
     #[test]
-    fn sous_auto_range_min_et_max_montrent_les_bornes_calculees() {
+    fn sous_auto_de_et_a_montrent_les_bornes_calculees_dans_l_ordre_d_affichage() {
         let context = contexte();
         let mut axe = stokesforge_plot::AxisSpec::default();
         assert!(axe.auto_range);
-        let (commit, peints) = peindre_axe(&context, &mut axe, Some((0.0, 4000.0)));
+        let (commit, peints) = peindre_axe(&context, &mut axe, Some((7.0, 4000.0)));
         assert!(!commit, "peindre ne valide rien");
         assert!(est_peint(&peints, &tr!("plot-axes-from")));
         assert!(est_peint(&peints, "4000"), "{peints:?}");
+        assert!(texte_exact(&peints, "7").centre.x < texte_exact(&peints, "4000").centre.x);
         assert_eq!((axe.range_min, axe.range_max), (None, None));
 
+        axe.inverted = true;
+        let (commit, peints) = peindre_axe(&context, &mut axe, Some((7.0, 4000.0)));
+        assert!(!commit);
+        assert!(
+            texte_exact(&peints, "4000").centre.x < texte_exact(&peints, "7").centre.x,
+            "axe inversé : la borne haute d'abord"
+        );
+        assert_eq!((axe.range_min, axe.range_max), (None, None));
+
+        axe.inverted = false;
         axe.auto_range = false;
         axe.range_min = Some(-5.0);
-        axe.range_max = Some(7.0);
-        let (_, peints) = peindre_axe(&context, &mut axe, Some((0.0, 4000.0)));
-        assert!(est_peint(&peints, "7"), "{peints:?}");
+        axe.range_max = Some(8.0);
+        let (_, peints) = peindre_axe(&context, &mut axe, Some((7.0, 4000.0)));
+        assert!(est_peint(&peints, "8"), "{peints:?}");
         assert!(!est_peint(&peints, "4000"), "{peints:?}");
     }
 

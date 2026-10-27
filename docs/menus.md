@@ -102,7 +102,7 @@ copie la figure que sans sélection, #149).
 
 | Cible | Menu |
 |---|---|
-| Nœud | le menu de l'objet de la figure (`object_node_menu`) ; calque et groupe « Axes » : Closed Frame ☐ (bascule, #344 ; équivalent : page Axes des propriétés, pas dans Graph) |
+| Nœud | le menu de l'objet de la figure (`object_node_menu`) ; calque et groupe « Axes » : plus de Closed Frame (#344 : retiré de l'interface, `Action::SetClosedFrame` n'a plus d'entrée de menu) |
 | Fond | Show Axes ☐ · Show Objects ☑ · Expand by Default ▸ (5 cases) ─ Reset Settings |
 
 View ne contient que « Object Manager ▸ » (plus de Panels ni de Toolbars : panneaux et barres ne se masquent pas par menu ; les réglages du Project Manager et de la console viendront s'y ajouter) ; il enveloppe le même contenu (`object_manager_settings_contents`).

@@ -92,6 +92,29 @@ pub struct AxisSpec {
     pub ticks: bool,
     /// Sens des tirets (#344).
     pub tick_direction: TickDirection,
+    /// Sous-graduations tracées entre les graduations principales (#344),
+    /// avec ou sans les tirets principaux. Vrai pour un axe neuf ; un ancien
+    /// fichier, qui n'en avait pas, se relit faux.
+    pub minor_ticks: bool,
+    /// Sous-graduations entre deux graduations principales (#344) ; `None` =
+    /// automatique (4 ou 5 subdivisions selon le pas). Sans effet en échelle
+    /// logarithmique, où ce sont les multiples 2 à 9.
+    pub minor_tick_count: Option<u8>,
+    /// Un nombre sur `label_every` est écrit, le premier toujours (#344) ; 1 =
+    /// tous. 0 se lit comme 1.
+    pub label_every: u8,
+    /// Longueur des grands tirets en pixels de figure (#344, section
+    /// « Avancé ») ; `None` = automatique. La valeur brute est gardée telle
+    /// quelle : le rendu la borne.
+    pub tick_length: Option<f64>,
+    /// Longueur des petits tirets en pixels de figure ; `None` = la moitié du
+    /// grand tiret effectif.
+    pub minor_tick_length: Option<f64>,
+    /// Épaisseur des tirets en points ; `None` = automatique (1).
+    pub tick_width: Option<f64>,
+    /// Couleur des tirets (`#RRGGBB`), distincte de [`AxisSpec::tick_color`]
+    /// (ligne et nombres). Vide = la couleur de l'échelle.
+    pub tick_mark_color: String,
 }
 
 impl AxisSpec {
@@ -111,6 +134,36 @@ impl AxisSpec {
             (true, false) => format!("({})", self.unit),
             (true, true) => String::new(),
         }
+    }
+
+    /// L'axe dans sa forme canonique : le sens se lit sur l'ordre des bornes
+    /// (De > À = axe inversé), le champ [`AxisSpec::inverted`] n'est que sa
+    /// trace dans le fichier.
+    ///
+    /// `inverted` devient vrai quand les bornes sont **utilisées** et que
+    /// `range_min > range_max` ; un axe inversé remet ses bornes mémorisées
+    /// dans l'ordre décroissant, que `auto_range` soit vrai ou non (en
+    /// automatique, les bornes mémorisées sont inertes, mais elles reprennent
+    /// le sens de l'axe). Des bornes mémorisées décroissantes sous
+    /// `auto_range` n'inversent donc rien : l'axe d'origine ne les lisait
+    /// pas. Une borne manquante ou non finie ne bouge pas. **Le rendu est
+    /// identique** à celui de l'axe d'origine (`axis_range` lit « l'un ou
+    /// l'autre »).
+    #[must_use]
+    pub fn orient(&self) -> Self {
+        let mut axis = self.clone();
+        if let (Some(min), Some(max)) = (axis.range_min, axis.range_max) {
+            if !(min.is_finite() && max.is_finite()) {
+                return axis;
+            }
+            if min > max {
+                axis.inverted |= !axis.auto_range;
+            } else if axis.inverted && min < max {
+                axis.range_min = Some(max);
+                axis.range_max = Some(min);
+            }
+        }
+        axis
     }
 
     /// Vrai quand le cadrage manuel est à la fois demandé et complet : les
@@ -141,6 +194,13 @@ impl Default for AxisSpec {
             tick_labels: true,
             ticks: true,
             tick_direction: TickDirection::Out,
+            minor_ticks: true,
+            minor_tick_count: None,
+            label_every: 1,
+            tick_length: None,
+            minor_tick_length: None,
+            tick_width: None,
+            tick_mark_color: String::new(),
         }
     }
 }
@@ -148,6 +208,55 @@ impl Default for AxisSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn axis(auto: bool, inverted: bool, bounds: (Option<f64>, Option<f64>)) -> AxisSpec {
+        AxisSpec {
+            auto_range: auto,
+            inverted,
+            range_min: bounds.0,
+            range_max: bounds.1,
+            ..AxisSpec::default()
+        }
+    }
+
+    /// Table : (auto, inversé, bornes) -> (inversé, bornes) après `orient`.
+    #[test]
+    fn orient_lit_le_sens_sur_l_ordre_des_bornes() {
+        let b = |a, z| (Some(a), Some(z));
+        let table = [
+            // explicite ou automatique : mêmes règles sur les bornes mémorisées.
+            (false, false, b(1.0, 5.0), false, b(1.0, 5.0)),
+            (false, false, b(5.0, 1.0), true, b(5.0, 1.0)),
+            (false, true, b(1.0, 5.0), true, b(5.0, 1.0)),
+            (false, true, b(5.0, 1.0), true, b(5.0, 1.0)),
+            (true, false, b(1.0, 5.0), false, b(1.0, 5.0)),
+            (true, false, b(5.0, 1.0), false, b(5.0, 1.0)),
+            (true, true, b(1.0, 5.0), true, b(5.0, 1.0)),
+            (true, true, b(5.0, 1.0), true, b(5.0, 1.0)),
+            // bornes égales, absentes ou partielles : le sens ne change pas.
+            (false, true, b(3.0, 3.0), true, b(3.0, 3.0)),
+            (true, true, (None, None), true, (None, None)),
+            (true, false, (None, None), false, (None, None)),
+            (false, true, (Some(1.0), None), true, (Some(1.0), None)),
+            (
+                false,
+                false,
+                (Some(f64::INFINITY), Some(1.0)),
+                false,
+                (Some(f64::INFINITY), Some(1.0)),
+            ),
+        ];
+        for (auto, inverted, bounds, want_inverted, want_bounds) in table {
+            let got = axis(auto, inverted, bounds).orient();
+            assert_eq!(
+                (got.inverted, (got.range_min, got.range_max)),
+                (want_inverted, want_bounds),
+                "auto={auto} inversé={inverted} bornes={bounds:?}"
+            );
+            assert_eq!(got.auto_range, auto, "orient ne touche pas auto_range");
+            assert_eq!(got.orient(), got, "idempotente");
+        }
+    }
 
     #[test]
     fn hidden_only_flips_visibility() {

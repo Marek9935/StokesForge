@@ -509,9 +509,17 @@ réellement dans `stokesforge-plot` (lu avant d'écrire, comme demandé) :
 - **Axes** : pour l'axe du bas, celui de gauche, et celui de droite si
   `PanelSpec::uses_right_axis()` (l'axe du haut, masqué par défaut et sans
   UI dans ce banc pour l'activer, n'a pas de section) : `AxisSpec::label`,
-  `unit`, `scale` (`AxisScale::Linear`/`Log`), `visible`, `grid`,
-  `inverted`, `auto_range`, et `range_min`/`range_max` quand `auto_range`
-  est décoché ;
+  `unit`, `scale` (`AxisScale::Linear`/`Log`), `visible`, `grid`, les
+  bornes De / À (#344 : **ni case « Axe inversé » ni case « Plage auto »** ;
+  De et À sont toujours éditables, montrent les bornes calculées tant que
+  `auto_range` est vrai — dans l'ordre d'affichage, la borne haute d'abord
+  sur un axe inversé —, une saisie fige les deux bornes (`auto_range` faux,
+  `inverted = De > À`), le bouton « Auto » rend `auto_range` vrai en gardant
+  le sens), puis la section « Graduations » (tirets, sens, sous-graduations)
+  et son bloc repliable « Avancé » (`tick_length`, `minor_tick_length`,
+  `tick_width`, `tick_mark_color`, fermé par défaut, `Form::collapsible`) ;
+  `app/plot_settings.rs`, `axis_editor` et `mirror_axis_editor` (mêmes
+  sections, chacun pour soi) ;
 - **Séries** (#179 : fenêtre à part, `app/curve_settings.rs` ; `PlotSettingsTab::Series`
   n'est plus dans `PlotSettingsTab::ALL` mais choisit cette page dans
   `plot_settings_window` — même brouillon, autre titre `curve-window-title`, autre

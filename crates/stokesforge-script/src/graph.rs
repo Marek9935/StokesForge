@@ -364,6 +364,10 @@ pub(crate) fn update_axis(
             "logarithmic axis bounds must be positive".into(),
         ));
     }
+    // Le sens se lit sur l'ordre des bornes (#344) : `x_inverted=True` sur
+    // (1, 5) donne (5, 1), `x_from=5, x_to=1` donne un axe inversé. La surface
+    // `pyst` (`x_inverted`, `x_auto_range`) ne change pas.
+    *axis = axis.orient();
     Ok(())
 }
 

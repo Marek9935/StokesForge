@@ -807,4 +807,66 @@ fn les_tirets_maison_s_accordent_et_changent_la_figure() {
         }
         vues.push(pixels);
     }
+
+    // #344 : les sous-graduations (allumées par défaut), sur les quatre côtés,
+    // s'accordent ; éteintes, un autre nombre, ou un nombre sur deux, la
+    // figure change.
+    let mut changes = Vec::new();
+    for (quoi, regle) in [
+        ("sans sous-graduations", 0),
+        ("un seul sous-tiret", 1),
+        ("un nombre sur deux", 2),
+    ] {
+        let mut spec = base.clone();
+        let panel = spec.panels.get_mut(0).unwrap();
+        for axe in [
+            &mut panel.bottom,
+            &mut panel.left,
+            &mut panel.top,
+            &mut panel.right,
+        ] {
+            match regle {
+                0 => axe.minor_ticks = false,
+                1 => axe.minor_tick_count = Some(1),
+                _ => axe.label_every = 2,
+            }
+        }
+        let (pixels, _) = accord(tree, &spec, SIZE, quoi);
+        assert!(
+            !vues.contains(&pixels) && !changes.contains(&pixels),
+            "{quoi} : la figure ne change pas"
+        );
+        changes.push(pixels);
+    }
+
+    // #344 « Avancé » : longueur et épaisseur des tirets, sur les quatre
+    // côtés, s'accordent (tracés par le pipeline) et changent la figure ;
+    // la couleur, que cette comparaison ne voit pas, est gardée par
+    // `render-svg/tests/miroirs.rs`.
+    for (quoi, regle) in [
+        ("grands tirets à 10", 0),
+        ("petits tirets à 8", 1),
+        ("tirets épais", 2),
+    ] {
+        let mut spec = base.clone();
+        let panel = spec.panels.get_mut(0).unwrap();
+        for axe in [
+            &mut panel.bottom,
+            &mut panel.left,
+            &mut panel.top,
+            &mut panel.right,
+        ] {
+            match regle {
+                0 => axe.tick_length = Some(10.0),
+                1 => axe.minor_tick_length = Some(8.0),
+                _ => axe.tick_width = Some(3.0),
+            }
+        }
+        let (pixels, _) = accord(tree, &spec, SIZE, quoi);
+        assert!(
+            !vues.contains(&pixels) && !changes.contains(&pixels),
+            "{quoi} : la figure ne change pas"
+        );
+        changes.push(pixels);
+    }
 }

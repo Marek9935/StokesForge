@@ -21,7 +21,9 @@
 //! formulaire n'a pas à le régler.
 //!
 //! Pas de section repliable dans un formulaire (S-L5) : trop long, il passe en
-//! onglets (`tab_strip`). Les largeurs de champ sont celles de
+//! onglets (`tab_strip`). Seule exception, [`Form::collapsible`] (S-L8, #344) :
+//! un bloc « Avancé » fermé par défaut, pour des réglages qu'on ne touche
+//! presque jamais et dont le défaut est Auto. Les largeurs de champ sont celles de
 //! [`theme::FieldWidth`] (S-L2) ; les écarts, [`theme::SPACE_ITEM`] et
 //! [`theme::SPACE_SECTION`] (S-L4).
 
@@ -180,6 +182,48 @@ impl Form<'_> {
         });
         self.widest = widest;
         response
+    }
+
+    /// Un bloc repliable (S-L8, #344), **fermé par défaut** : une flèche et son
+    /// titre sur une rangée, puis les rangées de `add` — dans la même grille,
+    /// donc alignées sur les champs d'au-dessus — quand il est ouvert. Rend
+    /// `None` fermé. L'état ouvert/fermé vit dans la mémoire d'egui sous
+    /// `id_salt` : il se garde le temps de la session, jamais dans le fichier.
+    /// Réservé aux réglages « Avancé » dont tous les défauts sont Auto ; un
+    /// formulaire trop long passe toujours en onglets (S-L5).
+    pub(super) fn collapsible<R>(
+        &mut self,
+        id_salt: impl Hash + std::fmt::Debug,
+        title: impl Into<String>,
+        add: impl FnOnce(&mut Form<'_>) -> R,
+    ) -> Option<R> {
+        let id = self
+            .ui
+            .make_persistent_id(("stokesforge_form_fold", id_salt));
+        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+            self.ui.ctx(),
+            id,
+            false,
+        );
+        let title = title.into();
+        let toggled = self.field(|ui| {
+            // La flèche bascule l'état d'elle-même : seul un clic sur le titre
+            // le bascule ici, sans quoi un clic sur la flèche compterait deux
+            // fois. Le titre n'est pas sélectionnable (S-L8).
+            state.show_toggle_button(ui, egui::collapsing_header::paint_default_icon);
+            let text = ui.add(
+                egui::Label::new(title)
+                    .selectable(false)
+                    .sense(egui::Sense::click()),
+            );
+            text.clicked()
+        });
+        if toggled {
+            state.toggle(self.ui);
+        }
+        let open = state.is_open();
+        state.store(self.ui.ctx());
+        open.then(|| add(self))
     }
 
     /// Le retrait de la colonne des champs : la colonne des libellés et

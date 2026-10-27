@@ -19,7 +19,8 @@
 //! ([`forward`]) et l'étiquetage ([`format_tick`]). Le prix payé est réel et
 //! se dit en une ligne : les graduations sont des **décades** (et leurs
 //! sous-multiples si Plotters juge bon d'en intercaler), pas les
-//! graduations mineures logarithmiques que `LogRange` sait poser. Aucun
+//! graduations mineures logarithmiques que `LogRange` sait poser — celles-ci
+//! sont tracées par le pipeline ([`minor_key_points`], #344). Aucun
 //! autre morceau du rendu — séries, barres, légende, axe secondaire — n'a à
 //! savoir laquelle des deux échelles est en vigueur.
 //!
@@ -87,6 +88,87 @@ pub fn linear_key_points(range: (f64, f64), labels: usize) -> Vec<f64> {
     RangedCoordf64::from(range.0..range.1).key_points(BoldPoints(labels))
 }
 
+/// Les sous-graduations d'un axe (#344), dans l'espace transformé : celles que
+/// l'on trace entre les graduations principales de [`linear_key_points`], sans
+/// jamais en recouvrir une.
+///
+/// Linéaire : `count` sous-graduations entre deux principales ; sans `count`, le
+/// pas principal est coupé en 5, ou en 4 quand sa mantisse est 2 (0,2 → 0,05) ; Plotters ne produit que les mantisses 1, 2 et 5, et un pas
+/// de 0,4 entre deux sous-graduations serait laid. Les sous-graduations
+/// prolongent aussi au-delà des graduations principales extrêmes, jusqu'aux
+/// bornes de l'axe. Logarithmique (`count` sans effet) : les multiples 2 à 9 de chaque décade ; quand
+/// le pas principal dépasse une décade, les décades intercalées. Vide sous une
+/// décade de pas (intervalle étroit : aucun repère « rond » à poser), ou si
+/// l'intervalle n'est pas fini ou est nul.
+pub fn minor_key_points(scale: AxisScale, range: (f64, f64), count: Option<u8>) -> Vec<f64> {
+    let (low, high) = if range.0 <= range.1 {
+        range
+    } else {
+        (range.1, range.0)
+    };
+    if !low.is_finite() || !high.is_finite() || high <= low {
+        return Vec::new();
+    }
+    let majors = linear_key_points(range, label_count(scale, range));
+    let [first, second, ..] = majors[..] else {
+        return Vec::new();
+    };
+    let step = (second - first).abs();
+    if step <= 0.0 || !step.is_finite() {
+        return Vec::new();
+    }
+    let tolerance = step * 1e-6;
+    let is_major = |value: f64| {
+        majors
+            .iter()
+            .any(|major| (major - value).abs() <= tolerance)
+    };
+    let inside = |value: f64| value >= low - tolerance && value <= high + tolerance;
+    let mut points = Vec::new();
+    match scale {
+        AxisScale::Linear => {
+            let exponent = step.log10().floor();
+            let mantissa = step / 10f64.powf(exponent);
+            let divisions = match count {
+                Some(count) => f64::from(count.clamp(1, 99)) + 1.0,
+                None if (mantissa - 2.0).abs() < 0.01 => 4.0,
+                None => 5.0,
+            };
+            let sub = step / divisions;
+            let origin = first.min(second);
+            let from = ((low - origin) / sub).floor() as i64;
+            let to = ((high - origin) / sub).ceil() as i64;
+            for index in from..=to {
+                let value = origin + index as f64 * sub;
+                if inside(value) && !is_major(value) {
+                    points.push(value);
+                }
+            }
+        }
+        AxisScale::Log => {
+            if step < 0.99 {
+                return Vec::new();
+            }
+            let lowest = low.floor() as i64 - 1;
+            let highest = high.ceil() as i64;
+            for decade in lowest..=highest {
+                let decade = decade as f64;
+                if step < 1.5 {
+                    for multiple in 2..=9 {
+                        let value = decade + f64::from(multiple).log10();
+                        if inside(value) && !is_major(value) {
+                            points.push(value);
+                        }
+                    }
+                } else if inside(decade) && !is_major(decade) {
+                    points.push(decade);
+                }
+            }
+        }
+    }
+    points
+}
+
 /// Le plus petit nombre de décimales qui écrit toutes les graduations d'un
 /// axe sans les altérer : 0 quand elles sont toutes entières.
 fn decimals_for(points: &[f64]) -> usize {
@@ -109,6 +191,11 @@ pub struct TickFormat {
     scale: AxisScale,
     decimals: usize,
     comma: bool,
+    /// Un nombre sur `every` est écrit, à partir de `origin` par pas de `step`
+    /// (#344) ; `every` à 1 les écrit tous.
+    every: u32,
+    origin: f64,
+    step: f64,
 }
 
 impl TickFormat {
@@ -122,7 +209,23 @@ impl TickFormat {
             scale,
             decimals,
             comma: false,
+            every: 1,
+            origin: 0.0,
+            step: 0.0,
         }
+    }
+
+    /// N'écrit qu'un nombre sur `every` (#344) : le premier des graduations
+    /// principales de `range`, puis un tous les `every`. 0 et 1 les écrivent
+    /// tous.
+    pub fn with_label_every(mut self, every: u8, range: (f64, f64)) -> Self {
+        let majors = linear_key_points(range, label_count(self.scale, range));
+        if let [first, second, ..] = majors[..] {
+            self.every = u32::from(every.max(1));
+            self.origin = first;
+            self.step = second - first;
+        }
+        self
     }
 
     /// Écrit la virgule comme séparateur décimal (#223, réglage du graphe).
@@ -133,6 +236,12 @@ impl TickFormat {
 
     /// L'étiquette d'une graduation, dans l'espace transformé.
     pub fn format(&self, t: f64) -> String {
+        if self.every > 1 && self.step != 0.0 {
+            let index = ((t - self.origin) / self.step).round() as i64;
+            if index.rem_euclid(i64::from(self.every)) != 0 {
+                return String::new();
+            }
+        }
         let text = match self.scale {
             AxisScale::Linear => format_linear_tick(t, self.decimals),
             AxisScale::Log => format_decade(t),
@@ -324,6 +433,97 @@ fn format_plain(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn un_nombre_sur_n_est_ecrit_en_commencant_par_le_premier() {
+        let range = (0.0, 10.0);
+        let all = TickFormat::new(AxisScale::Linear, range);
+        let thin = all.with_label_every(3, range);
+        let shown: Vec<f64> = linear_key_points(range, DEFAULT_LABELS)
+            .into_iter()
+            .filter(|&t| !thin.format(t).is_empty())
+            .collect();
+        assert_eq!(shown, vec![0.0, 3.0, 6.0, 9.0]);
+        assert_eq!(all.with_label_every(1, range).format(1.0), "1");
+        assert_eq!(all.with_label_every(0, range).format(1.0), "1");
+    }
+
+    #[test]
+    fn un_nombre_de_sous_graduations_impose_les_subdivisions() {
+        let minor = minor_key_points(AxisScale::Linear, (0.0, 10.0), Some(1));
+        assert_eq!(minor.len(), 10, "une au milieu de chaque pas");
+        assert!((minor[0] - 0.5).abs() < 1e-9);
+        let nine = minor_key_points(AxisScale::Linear, (0.0, 10.0), Some(9));
+        assert_eq!(nine.len(), 90);
+    }
+
+    fn approx(points: &[f64], wanted: &[f64]) -> bool {
+        points.len() == wanted.len() && points.iter().zip(wanted).all(|(a, b)| (a - b).abs() < 1e-9)
+    }
+
+    #[test]
+    fn les_sous_graduations_lineaires_coupent_le_pas_en_cinq() {
+        let minor = minor_key_points(AxisScale::Linear, (0.0, 10.0), None);
+        assert_eq!(minor.len(), 40);
+        assert!(approx(&minor[..4], &[0.2, 0.4, 0.6, 0.8]));
+        let majors = linear_key_points((0.0, 10.0), DEFAULT_LABELS);
+        assert!(minor
+            .iter()
+            .all(|m| majors.iter().all(|major| (major - m).abs() > 1e-9)));
+    }
+
+    #[test]
+    fn un_pas_de_mantisse_deux_se_coupe_en_quatre() {
+        let majors = linear_key_points((0.0, 1.6), DEFAULT_LABELS);
+        assert!((majors[1] - majors[0] - 0.2).abs() < 1e-9, "{majors:?}");
+        let minor = minor_key_points(AxisScale::Linear, (0.0, 1.6), None);
+        assert_eq!(minor.len(), 24);
+        assert!(approx(&minor[..3], &[0.05, 0.1, 0.15]));
+    }
+
+    #[test]
+    fn les_sous_graduations_prolongent_jusqu_aux_bornes() {
+        let minor = minor_key_points(AxisScale::Linear, (-0.5, 10.5), None);
+        assert!(minor.iter().any(|m| (m + 0.4).abs() < 1e-9));
+        assert!(minor.iter().any(|m| (m - 10.4).abs() < 1e-9));
+        assert!(minor.iter().all(|m| (-0.5..=10.5).contains(m)));
+    }
+
+    #[test]
+    fn un_axe_inverse_a_les_memes_sous_graduations() {
+        let mut direct = minor_key_points(AxisScale::Linear, (0.0, 10.0), None);
+        let mut inverse = minor_key_points(AxisScale::Linear, (10.0, 0.0), None);
+        direct.sort_by(f64::total_cmp);
+        inverse.sort_by(f64::total_cmp);
+        assert!(approx(&direct, &inverse));
+    }
+
+    #[test]
+    fn les_sous_graduations_logarithmiques_sont_les_multiples_de_deux_a_neuf() {
+        let minor = minor_key_points(AxisScale::Log, (0.0, 3.0), None);
+        assert_eq!(minor.len(), 24);
+        assert!((minor[0] - 2f64.log10()).abs() < 1e-9);
+        assert!((minor[7] - 9f64.log10()).abs() < 1e-9);
+        assert!((minor[8] - (1.0 + 2f64.log10())).abs() < 1e-9);
+    }
+
+    #[test]
+    fn au_dela_d_une_decade_de_pas_les_sous_graduations_sont_les_decades_intercalees() {
+        let majors = linear_key_points((0.0, 20.0), label_count(AxisScale::Log, (0.0, 20.0)));
+        assert!(majors[1] - majors[0] >= 1.5, "{majors:?}");
+        let minor = minor_key_points(AxisScale::Log, (0.0, 20.0), None);
+        assert!(!minor.is_empty());
+        assert!(minor.iter().all(|m| (m - m.round()).abs() < 1e-9));
+        assert!(minor
+            .iter()
+            .all(|m| majors.iter().all(|major| (major - m).abs() > 1e-9)));
+    }
+
+    #[test]
+    fn un_intervalle_degenere_n_a_pas_de_sous_graduations() {
+        assert!(minor_key_points(AxisScale::Linear, (5.0, 5.0), None).is_empty());
+        assert!(minor_key_points(AxisScale::Linear, (f64::NAN, 1.0), None).is_empty());
+    }
     use super::*;
 
     #[test]

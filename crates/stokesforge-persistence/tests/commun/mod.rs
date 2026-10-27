@@ -229,6 +229,15 @@ pub fn non_trivial_spec(
             // #344 : tirets coupés, sens vers l'intérieur (hors défaut).
             ticks: false,
             tick_direction: stokesforge_plot::TickDirection::In,
+            // #344 : sous-graduations allumées (hors défaut).
+            minor_ticks: true,
+            minor_tick_count: Some(3),
+            label_every: 2,
+            // #344 « Avancé » : tirets réglés à la main (hors défaut).
+            tick_length: Some(8.0),
+            minor_tick_length: Some(3.5),
+            tick_width: Some(2.0),
+            tick_mark_color: "#cc3300".to_string(),
         },
         title_visible: true,
         title_anchor: Some(stokesforge_plot::TextAnchor {

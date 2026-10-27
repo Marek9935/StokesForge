@@ -497,7 +497,49 @@ de `scale::linear_key_points`, projetées par le repère principal (bas, gauche)
 ou secondaire (haut, droite : l'arrondi y diffère parfois d'un pixel). Longueur =
 celle de Plotters (`tick_length`, 5 px au plus). Dans un maillage « maison », un
 axe voisin resté par défaut a ses tirets `Out` tracés aussi par le pipeline, au
-même pixel. Tests : `miroirs.rs` (SVG), `accord.rs`
+même pixel. **Sous-graduations (#344).** `AxisSpec::minor_ticks` (**vrai** pour un axe neuf ;
+un ancien fichier qui n'a pas le champ se relit faux ; indépendant de `ticks` :
+on peut les tracer seules) trace des tirets de la moitié de la longueur des
+principaux (`draw_minor_ticks`, arrondie au-dessus), dans le même sens, même
+quand les tirets principaux restent à Plotters (`custom_ticks` faux). Leur nombre entre deux
+principales est `AxisSpec::minor_tick_count` (`None` = automatique ; sans effet en
+échelle logarithmique). `AxisSpec::label_every` n'écrit qu'un nombre sur n, le
+premier toujours (`TickFormat::with_label_every`, formateur par axe : le haut a
+le sien). Positions
+par `scale::minor_key_points`, en valeurs puis projetées comme les graduations
+principales : linéaire, le pas principal coupé en 5 (en 4 pour la mantisse 2 :
+0,2 → 0,05), prolongé jusqu'aux bornes ; logarithmique, les multiples 2 à 9 de
+chaque décade, ou les décades intercalées quand le pas dépasse une décade ;
+aucune sous une décade de pas. Jamais sur une graduation principale ; aucune
+sur les axes d'un calque superposé. Le quadrillage léger de Plotters n'y est pas
+aligné. Tests : `scale.rs`, `miroirs.rs`, `accord.rs`.
+
+**Réglages « Avancé » des tirets (#344).** `AxisSpec::tick_length` (grands
+tirets), `minor_tick_length` (petits), `tick_width` et `tick_mark_color`
+(`None` / vide = Auto). Unités : pixels de figure pour les longueurs, points
+pour l'épaisseur (arrondie à l'entier par Plotters). Auto : les grands tirets
+gardent la longueur de Plotters (`tick_length`, 5 px au plus), les petits en
+valent la moitié **du grand tiret effectif** (grand à 10 → petit à 5), 1 pt, la
+couleur de l'échelle (`tick_color`, distincte de la couleur des tirets : ligne
+et nombres gardent la leur). Le style est posé **dans `draw_marks` seulement**
+(`MarkStyle`, invariant 5) ; une longueur non finie se lit Auto, une longueur
+négative vaut 0 (aucun tiret) et `MAX_TICK_LENGTH` (50 px) la borne, l'épaisseur
+passe par `paint::stroke_width` (1 à 64) : la valeur brute reste dans le fichier,
+le rendu la borne (invariant 10). Un réglage fait passer l'axe aux tirets maison
+(`custom_ticks`), comme un sens autre que « vers l'extérieur » ; les nombres
+gardent alors leur écart d'origine, donc un tiret long (vers l'extérieur) peut
+les toucher. Tests : `miroirs.rs` (longueur, petit Auto, couleur, épaisseur,
+valeurs hors bornes), `accord.rs` (écran = export ; la couleur y est invisible,
+elle est gardée par `miroirs.rs`).
+
+**Sens de l'axe.** `axis_range` lit toujours « l'un ou l'autre » (`inverted`
+ou `range_min > range_max`), sans s'additionner. `AxisSpec::orient` (crate
+`stokesforge-plot`) ramène un axe à sa forme canonique sans changer le rendu :
+`inverted` vrai dès que les bornes **utilisées** (hors Auto) sont décroissantes,
+et un axe inversé remet ses bornes mémorisées en ordre décroissant ; test
+`un_axe_oriente_se_trace_comme_l_axe_d_origine` (`geometrie.rs`).
+
+Tests : `miroirs.rs` (SVG), `accord.rs`
 (`les_tirets_maison_s_accordent_et_changent_la_figure`).
 
 Les échelles linéaires propres d'un calque superposé sont **jointes** à celles

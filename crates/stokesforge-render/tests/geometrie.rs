@@ -879,3 +879,44 @@ fn les_axes_de_plusieurs_calques_superposes_s_empilent_vers_l_exterieur() {
         sans.panels[3].axis_areas.top.size
     );
 }
+
+/// `AxisSpec::orient` ne change pas la figure : le cadrage tracé d'un axe est
+/// celui de son équivalent orienté, quels que soient auto, sens et ordre des
+/// bornes (#344). Témoin : les cas ne sont pas tous au même cadrage.
+#[test]
+fn un_axe_oriente_se_trace_comme_l_axe_d_origine() {
+    let bornes = [
+        (None, None),
+        (Some(1.0), Some(5.0)),
+        (Some(5.0), Some(1.0)),
+        (Some(3.0), Some(3.0)),
+        (Some(2.0), None),
+    ];
+    let mut cadrages = Vec::new();
+    for auto_range in [true, false] {
+        for inverted in [false, true] {
+            for (range_min, range_max) in bornes {
+                let axe = AxisSpec {
+                    auto_range,
+                    inverted,
+                    range_min,
+                    range_max,
+                    ..AxisSpec::default()
+                };
+                let trace = |axe: AxisSpec| {
+                    let d = geometrie(&[("Y", vec![0.0, 10.0])], |ids| {
+                        un_panneau(SeriesSpec::new(ids[0]), |p| p.left = axe.clone())
+                    });
+                    d.y_range()
+                };
+                let avant = trace(axe.clone());
+                let apres = trace(axe.orient());
+                assert_eq!(avant, apres, "{axe:?}");
+                cadrages.push(format!("{avant:?}"));
+            }
+        }
+    }
+    cadrages.sort();
+    cadrages.dedup();
+    assert!(cadrages.len() >= 4, "le témoin couvre plusieurs cadrages");
+}

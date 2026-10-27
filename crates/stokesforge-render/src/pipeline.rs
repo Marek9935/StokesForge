@@ -1097,6 +1097,51 @@ fn draw_panel<DB: DrawingBackend>(
     })
     .collect();
 
+    // Les sous-graduations (#344) : positions calculées en valeurs, puis
+    // projetées comme les graduations principales (jamais interpolées entre
+    // les pixels de celles-ci : arrondi, axe inversé, échelle log).
+    let minor_of = |axis: &AxisSpec, scale: AxisScale, range: (f64, f64)| -> Vec<f64> {
+        if axis.minor_ticks {
+            scale::minor_key_points(scale, range, axis.minor_tick_count)
+        } else {
+            Vec::new()
+        }
+    };
+    let x_minor_px: Vec<i32> = minor_of(&spec.bottom, x_scale, x_range)
+        .into_iter()
+        .map(|v| chart.plotting_area().map_coordinate(&(v, y_range.0)).0)
+        .collect();
+    let y_minor_px: Vec<i32> = minor_of(&spec.left, y_scale, y_range)
+        .into_iter()
+        .map(|v| chart.plotting_area().map_coordinate(&(x_range.0, v)).1)
+        .collect();
+    let x2_minor_px: Vec<i32> = minor_of(&spec.top, x_scale, x_range)
+        .into_iter()
+        .map(|v| {
+            chart
+                .secondary_plotting_area()
+                .map_coordinate(&(v, secondary.0))
+                .0
+        })
+        .collect();
+    let y2_minor_px: Vec<i32> = minor_of(
+        &spec.right,
+        if y2_range.is_some() {
+            y2_scale
+        } else {
+            y_scale
+        },
+        y2_range.unwrap_or(y_range),
+    )
+    .into_iter()
+    .map(|v| {
+        chart
+            .secondary_plotting_area()
+            .map_coordinate(&(x_range.0, v))
+            .1
+    })
+    .collect();
+
     // 4 — les axes. Chaque axe a ses couleurs (titre, échelle), et le
     // `configure_mesh` de Plotters n'a qu'un style de titre et qu'un style
     // de ligne d'axe pour les deux : l'axe du bas et celui de gauche sont
@@ -1123,22 +1168,28 @@ fn draw_panel<DB: DrawingBackend>(
     let tick_y = scale::TickFormat::new(y_scale, y_range).with_decimal_comma(decimal_comma);
     let format_x = |value: &f64| tick_x.format(*value);
     let format_y = |value: &f64| tick_y.format(*value);
-    // Sans libellés (#176) : les tirets restent, les nombres disparaissent.
-    let blank = |_: &f64| String::new();
-    let shown_x = |shown: bool| -> &dyn Fn(&f64) -> String {
-        if shown {
-            &format_x
+    // Les nombres d'un axe : aucun (#176, les tirets restent), tous, ou un sur
+    // n (#344).
+    let shown_x = |axis: &AxisSpec| -> Box<dyn Fn(&f64) -> String> {
+        if axis.tick_labels {
+            let format = tick_x.with_label_every(axis.label_every, x_range);
+            Box::new(move |value| format.format(*value))
         } else {
-            &blank
+            Box::new(|_| String::new())
         }
     };
-    let shown_y = |shown: bool| -> &dyn Fn(&f64) -> String {
-        if shown {
-            &format_y
+    let shown_y = |axis: &AxisSpec| -> Box<dyn Fn(&f64) -> String> {
+        if axis.tick_labels {
+            let format = tick_y.with_label_every(axis.label_every, y_range);
+            Box::new(move |value| format.format(*value))
         } else {
-            &blank
+            Box::new(|_| String::new())
         }
     };
+    let labels_bottom = shown_x(&spec.bottom);
+    let labels_top = shown_x(&spec.top);
+    let labels_left = shown_y(&spec.left);
+    let labels_right = shown_y(&spec.right);
     // Un calque superposé n'a ni axe en bas ni axe à gauche : ses axes
     // s'affichent en haut et à droite, par les axes secondaires de Plotters
     // (même repère que le calque lui-même, voir plus bas).
@@ -1164,7 +1215,7 @@ fn draw_panel<DB: DrawingBackend>(
             if pass.zero_ticks {
                 mesh.set_all_tick_mark_size(0);
             }
-            mesh.x_label_formatter(shown_x(spec.bottom.tick_labels))
+            mesh.x_label_formatter(&*labels_bottom)
                 .x_labels(pass.count(scale::label_count(x_scale, x_range)));
             mesh.draw()?;
         }
@@ -1174,6 +1225,16 @@ fn draw_panel<DB: DrawingBackend>(
                 PlotAxisSide::Bottom,
                 &spec.bottom,
                 &x_ticks_px,
+                frame,
+                colors.ticks,
+            )?;
+        }
+        if spec.bottom.visible {
+            draw_minor_ticks(
+                canvas,
+                PlotAxisSide::Bottom,
+                &spec.bottom,
+                &x_minor_px,
                 frame,
                 colors.ticks,
             )?;
@@ -1201,7 +1262,7 @@ fn draw_panel<DB: DrawingBackend>(
             if pass.zero_ticks {
                 mesh.set_all_tick_mark_size(0);
             }
-            mesh.y_label_formatter(shown_y(spec.left.tick_labels))
+            mesh.y_label_formatter(&*labels_left)
                 .y_labels(pass.count(scale::label_count(y_scale, y_range)));
             mesh.draw()?;
         }
@@ -1215,10 +1276,22 @@ fn draw_panel<DB: DrawingBackend>(
                 colors.ticks,
             )?;
         }
+        if spec.left.visible {
+            draw_minor_ticks(
+                canvas,
+                PlotAxisSide::Left,
+                &spec.left,
+                &y_minor_px,
+                frame,
+                colors.ticks,
+            )?;
+        }
     }
 
     if let Some(range) = y2_range {
-        let tick_y2 = scale::TickFormat::new(y2_scale, range).with_decimal_comma(decimal_comma);
+        let tick_y2 = scale::TickFormat::new(y2_scale, range)
+            .with_decimal_comma(decimal_comma)
+            .with_label_every(spec.right.label_every, range);
         let format_y2 = |value: &f64| {
             if spec.right.tick_labels {
                 tick_y2.format(*value)
@@ -1250,7 +1323,7 @@ fn draw_panel<DB: DrawingBackend>(
             mesh.y_label_formatter(&format_y2)
                 .y_labels(pass.count(scale::label_count(y2_scale, range)));
             if mirror_top {
-                mesh.x_label_formatter(shown_x(spec.top.tick_labels))
+                mesh.x_label_formatter(&*labels_top)
                     .x_labels(pass.count(scale::label_count(x_scale, x_range)));
             }
             mesh.draw()?;
@@ -1275,6 +1348,24 @@ fn draw_panel<DB: DrawingBackend>(
                 )?;
             }
         }
+        draw_minor_ticks(
+            canvas,
+            PlotAxisSide::Right,
+            &spec.right,
+            &y2_minor_px,
+            frame,
+            colors.ticks,
+        )?;
+        if mirror_top {
+            draw_minor_ticks(
+                canvas,
+                PlotAxisSide::Top,
+                &spec.top,
+                &x2_minor_px,
+                frame,
+                colors.ticks,
+            )?;
+        }
     }
 
     // Les axes miroirs (#176) : mêmes échelle, bornes et graduations que le
@@ -1298,13 +1389,13 @@ fn draw_panel<DB: DrawingBackend>(
                 mesh.set_all_tick_mark_size(0);
             }
             if mirror_top {
-                mesh.x_label_formatter(shown_x(spec.top.tick_labels))
+                mesh.x_label_formatter(&*labels_top)
                     .x_labels(pass.count(scale::label_count(x_scale, x_range)));
             } else {
                 mesh.x_labels(0);
             }
             if mirror_right {
-                mesh.y_label_formatter(shown_y(spec.right.tick_labels))
+                mesh.y_label_formatter(&*labels_right)
                     .y_labels(pass.count(scale::label_count(y_scale, y_range)));
             } else {
                 mesh.y_labels(0);
@@ -1332,6 +1423,26 @@ fn draw_panel<DB: DrawingBackend>(
                     colors.ticks,
                 )?;
             }
+        }
+        if mirror_top {
+            draw_minor_ticks(
+                canvas,
+                PlotAxisSide::Top,
+                &spec.top,
+                &x2_minor_px,
+                frame,
+                colors.ticks,
+            )?;
+        }
+        if mirror_right {
+            draw_minor_ticks(
+                canvas,
+                PlotAxisSide::Right,
+                &spec.right,
+                &y2_minor_px,
+                frame,
+                colors.ticks,
+            )?;
         }
     }
 
@@ -2312,11 +2423,16 @@ const GRID_LIGHT_OPACITY: f64 = 0.1;
 /// Teinte sans effet : Plotters saute les tracés d'alpha nul (egui comme SVG).
 const NO_INK: RGBAColor = RGBAColor(0, 0, 0, 0.0);
 
-/// Les tirets de cet axe ne sont pas ceux de Plotters (#344) : coupés, ou
-/// d'un autre sens que vers l'extérieur. Le défaut reste celui de Plotters,
-/// pour que les figures existantes ne bougent pas d'un pixel.
+/// Les tirets de cet axe ne sont pas ceux de Plotters (#344) : coupés, d'un
+/// autre sens que vers l'extérieur, ou réglés dans « Avancé » (longueur,
+/// épaisseur, couleur). Le défaut reste celui de Plotters, pour que les
+/// figures existantes ne bougent pas d'un pixel.
 fn custom_ticks(axis: &AxisSpec) -> bool {
-    !axis.ticks || axis.tick_direction != TickDirection::Out
+    !axis.ticks
+        || axis.tick_direction != TickDirection::Out
+        || axis.tick_length.is_some()
+        || axis.tick_width.is_some()
+        || !axis.tick_mark_color.is_empty()
 }
 
 /// Une passe de `configure_mesh` / `configure_secondary_axes` sur un axe.
@@ -2389,6 +2505,49 @@ fn tick_length(size: (u32, u32)) -> i32 {
     ((f64::from(size.0.min(size.1)) * 0.05).round() as i32).min(5)
 }
 
+/// Plafond d'une longueur de tiret demandée à la main (#344) : une valeur venue
+/// d'un fichier ou d'un script peut valoir n'importe quoi (invariant 10).
+const MAX_TICK_LENGTH: f64 = 50.0;
+
+/// Les tirets d'un côté, réglages « Avancé » résolus (#344) : longueur en pixels,
+/// épaisseur et couleur. Le style n'est posé que par [`draw_marks`].
+#[derive(Clone, Copy)]
+struct MarkStyle {
+    len: i32,
+    width: u32,
+    color: (u8, u8, u8, u8),
+}
+
+impl MarkStyle {
+    /// Les grands tirets : la longueur demandée si elle est un nombre fini
+    /// (bornée à `0..=MAX_TICK_LENGTH`), sinon l'automatique.
+    fn major(axis: &AxisSpec, plot_size: (u32, u32), ink: (u8, u8, u8, u8)) -> Self {
+        let len = match axis.tick_length {
+            Some(len) if len.is_finite() => len.clamp(0.0, MAX_TICK_LENGTH).round() as i32,
+            _ => tick_length(plot_size),
+        };
+        Self::with_len(axis, len, ink)
+    }
+
+    /// Les petits tirets : la longueur demandée, sinon la moitié (arrondie au-dessus)
+    /// des grands tirets effectifs.
+    fn minor(axis: &AxisSpec, plot_size: (u32, u32), ink: (u8, u8, u8, u8)) -> Self {
+        let len = match axis.minor_tick_length {
+            Some(len) if len.is_finite() => len.clamp(0.0, MAX_TICK_LENGTH).round() as i32,
+            _ => (Self::major(axis, plot_size, ink).len + 1) / 2,
+        };
+        Self::with_len(axis, len, ink)
+    }
+
+    fn with_len(axis: &AxisSpec, len: i32, ink: (u8, u8, u8, u8)) -> Self {
+        Self {
+            len,
+            width: axis.tick_width.map_or(1, paint::stroke_width),
+            color: rgba_or(&axis.tick_mark_color, ink),
+        }
+    }
+}
+
 /// Trace les tirets d'un côté : un segment par graduation, de part et d'autre
 /// de la ligne d'axe selon [`TickDirection`]. Même géométrie que Plotters
 /// pour « vers l'extérieur » (la ligne est à un pixel de la zone de tracé).
@@ -2403,8 +2562,56 @@ fn draw_ticks<DB: DrawingBackend>(
     if !axis.ticks {
         return Ok(());
     }
+    draw_marks(
+        canvas,
+        side,
+        axis.tick_direction,
+        positions,
+        frame,
+        MarkStyle::major(axis, frame.1, ink),
+    )
+}
+
+/// Trace les sous-graduations d'un côté (#344) : moitié de la longueur des
+/// tirets principaux (arrondie au-dessus) sauf réglage « Avancé », même sens.
+/// Rien quand les sous-graduations sont éteintes.
+fn draw_minor_ticks<DB: DrawingBackend>(
+    canvas: &DrawingArea<DB, Shift>,
+    side: PlotAxisSide,
+    axis: &AxisSpec,
+    positions: &[i32],
+    frame: ((i32, i32), (u32, u32)),
+    ink: (u8, u8, u8, u8),
+) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+    if !axis.minor_ticks {
+        return Ok(());
+    }
+    draw_marks(
+        canvas,
+        side,
+        axis.tick_direction,
+        positions,
+        frame,
+        MarkStyle::minor(axis, frame.1, ink),
+    )
+}
+
+/// Un segment de longueur `style.len` par position, de part et d'autre de la
+/// ligne d'axe selon `direction`. Le seul endroit qui pose le style des tirets
+/// (invariant 5 : une seule écriture pour les deux backends).
+fn draw_marks<DB: DrawingBackend>(
+    canvas: &DrawingArea<DB, Shift>,
+    side: PlotAxisSide,
+    direction: TickDirection,
+    positions: &[i32],
+    frame: ((i32, i32), (u32, u32)),
+    style: MarkStyle,
+) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+    let MarkStyle { len, width, color } = style;
+    if len == 0 {
+        return Ok(());
+    }
     let ((x0, y0), size) = frame;
-    let len = tick_length(size);
     let (w, h) = (size.0 as i32, size.1 as i32);
     // Sens du dehors sur la perpendiculaire, et pixel de la ligne.
     let (outward, line) = match side {
@@ -2413,7 +2620,7 @@ fn draw_ticks<DB: DrawingBackend>(
         PlotAxisSide::Top => (-1, y0 - 1),
         PlotAxisSide::Bottom => (1, y0 + h),
     };
-    let (from, to) = match axis.tick_direction {
+    let (from, to) = match direction {
         TickDirection::Out => (0, outward * len),
         TickDirection::In => (0, -outward * len),
         TickDirection::Both => (-len, len),
@@ -2431,7 +2638,14 @@ fn draw_ticks<DB: DrawingBackend>(
         } else {
             vec![(a, p), (b, p)]
         };
-        canvas.draw(&PathElement::new(points, rgba(ink)))?;
+        canvas.draw(&PathElement::new(
+            points,
+            ShapeStyle {
+                color: rgba(color).to_rgba(),
+                filled: false,
+                stroke_width: width,
+            },
+        ))?;
     }
     Ok(())
 }
