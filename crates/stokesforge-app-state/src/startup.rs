@@ -9,7 +9,9 @@
 //! Le développement garde la démonstration à chaque lancement par
 //! `STOKESFORGE_DEMO=1` (captures, essais, mesures) : le binaire lit
 //! l'environnement et passe le drapeau à [`plan`], qui n'y touche jamais, pour
-//! se tester sans `set_var`.
+//! se tester sans `set_var`. Cette démonstration est jetable : le binaire règle
+//! aussi [`crate::state::AppState::set_quit_without_prompt`], et la fermeture
+//! ne demande plus d'enregistrer (New et Open… demandent toujours).
 //!
 //! Règles, dans l'ordre :
 //! 1. un chemin existant est chargé, toujours ;

@@ -2854,6 +2854,10 @@ pub struct AppState {
     /// L'acteur de session est mort (panic, #310) : le modèle est perdu, plus
     /// rien ne s'enregistre ni ne s'ouvre ; on ne peut que fermer.
     session_lost: bool,
+    /// Fermer sans poser « Discard Changes · Cancel · Save » : la démonstration
+    /// forcée par `STOKESFORGE_DEMO=1` (développement, captures) est jetable.
+    /// Ne vaut que pour Quit ; New et Open… demandent toujours.
+    quit_without_prompt: bool,
     /// Où écrire la copie de secours quand l'acteur meurt ; `None` : aucune
     /// (tests). Voir [`crate::recovery`].
     recovery_dir: Option<PathBuf>,
@@ -2991,6 +2995,7 @@ impl AppState {
             recalc_since: None,
             applied_revision: 0,
             session_lost: false,
+            quit_without_prompt: false,
             recovery_dir: crate::recovery::default_dir(),
             last_import: None,
             recent_to_record: Vec::new(),
@@ -4853,6 +4858,8 @@ impl AppState {
                 if self.session_lost {
                     // Rien à enregistrer ni à demander : le modèle n'existe plus.
                     self.quit_ready = true;
+                } else if self.quit_without_prompt {
+                    self.perform_unsaved(UnsavedGesture::Quit);
                 } else {
                     self.request_unsaved(UnsavedGesture::Quit, pending_edits);
                 }
@@ -6882,6 +6889,13 @@ impl AppState {
     /// remplace pour ne rien écrire hors de son dossier temporaire.
     pub fn set_recovery_dir(&mut self, dir: Option<PathBuf>) {
         self.recovery_dir = dir;
+    }
+
+    /// Quitter sans demander d'enregistrer (démonstration forcée par
+    /// `STOKESFORGE_DEMO=1`, voir [`crate::startup`]) : le binaire l'active, rien
+    /// d'autre. La copie de secours s'en va comme pour un Discard.
+    pub fn set_quit_without_prompt(&mut self, on: bool) {
+        self.quit_without_prompt = on;
     }
 
     /// L'acteur de session est-il mort (#310) ? La fenêtre n'a alors plus qu'à

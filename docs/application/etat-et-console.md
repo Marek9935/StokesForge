@@ -117,7 +117,7 @@ chemin, et le démarrage n'échoue pas. La décision est
 `main.rs` l'exécute. **`STOKESFORGE_DEMO=1`** (développement, captures, pilote
 `run-stokesforge`) garde la démonstration en mémoire à chaque lancement, **sans**
 chemin (#315 : le titre porte « Untitled project », le premier Ctrl+S ouvre le
-sélecteur) et sans poser le marqueur ; un `demo.stf` du dossier courant n'est
+sélecteur), sans poser le marqueur et **sans demander d'enregistrer à la fermeture** ; un `demo.stf` du dossier courant n'est
 jamais pris pour le projet ni écrasé sans contrôle. Le script d'exemple de la
 console n'est prérempli qu'avec la démonstration (il lit `[Book1]Sheet1!A`). **File › Save** et le bouton de
 la barre sont grisés pendant l'exécution d'un script (`disabled-script-running`).

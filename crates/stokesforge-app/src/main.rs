@@ -67,6 +67,11 @@ fn main() -> anyhow::Result<()> {
     // Copies de secours de processus disparus (#317) : la fenêtre racine seule
     // les propose.
     state.scan_recovery();
+    // La démonstration forcée est jetable : pas de question à la fermeture. Un
+    // projet existant passé en argument, lui, garde la question.
+    state.set_quit_without_prompt(
+        demo_forced && matches!(startup.source, StartupSource::DemoMemory(_)),
+    );
     if startup.example_script {
         state.set_script_source(EXAMPLE_SCRIPT.to_string());
     }

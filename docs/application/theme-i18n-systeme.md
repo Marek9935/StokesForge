@@ -89,7 +89,10 @@ textes se redessinent à l'image suivante) et l'écrit dans `preferences.json` ;
 
 **Variable de développement `STOKESFORGE_DEMO=1`** (#333) : ouvre la démonstration
 en mémoire à chaque lancement, au lieu de la seule première ouverture (voir
-`etat-et-console.md`, « Binaire »). Posée par le pilote `run-stokesforge`.
+`etat-et-console.md`, « Binaire »). Posée par le pilote `run-stokesforge`. La
+fermeture ne demande alors **pas** d'enregistrer (`set_quit_without_prompt`) ;
+New et Open… demandent toujours, et un projet existant passé en argument garde
+la question.
 
 **Dossier de configuration** (#332) : la variable `STOKESFORGE_CONFIG_DIR`,
 si elle est posée et non vide, désigne le dossier tel quel (sans suffixe) ;

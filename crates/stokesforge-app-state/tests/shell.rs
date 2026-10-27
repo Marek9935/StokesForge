@@ -293,6 +293,42 @@ fn la_reponse_save_enregistre_puis_poursuit_le_geste() {
     session.shutdown().unwrap();
 }
 
+/// `STOKESFORGE_DEMO=1` : la démonstration forcée se ferme sans question, même
+/// modifiée ; New et Open… continuent de demander. Témoin : sans le réglage,
+/// la même fermeture pose la question.
+#[test]
+fn la_demo_forcee_se_ferme_sans_demander_d_enregistrer() {
+    let dir = tempfile::tempdir().unwrap();
+    let (session, mut state) = start_demo(dir.path());
+    state.dispatch(Action::AddGraph);
+    state.dispatch(Action::Quit {
+        pending_edits: false,
+    });
+    assert_eq!(
+        state.unsaved_pending(),
+        Some(&UnsavedGesture::Quit),
+        "témoin : sans le réglage, la question est posée"
+    );
+    state.dispatch(Action::ConfirmUnsaved(UnsavedChoice::Cancel));
+
+    state.set_quit_without_prompt(true);
+    state.dispatch(Action::Quit {
+        pending_edits: true,
+    });
+    assert!(state.unsaved_pending().is_none());
+    assert!(state.take_quit_ready(), "fermeture directe");
+
+    state.dispatch(Action::NewProject {
+        pending_edits: false,
+    });
+    assert_eq!(
+        state.unsaved_pending(),
+        Some(&UnsavedGesture::NewProject),
+        "New project demande encore"
+    );
+    session.shutdown().unwrap();
+}
+
 /// S-F3 (#229) : Quit et Open… demandent seulement s'il y a du travail à
 /// perdre ; Discard poursuit. Un projet illisible garde le projet **et** le
 /// chemin courants (S-M8).
