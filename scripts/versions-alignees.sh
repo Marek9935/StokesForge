@@ -7,9 +7,9 @@
 #   avec argument : ils doivent tous être en X.Y.Z.
 #
 # Refuse (code 1) si un crate dérive (liste de chaque crate et sa version), si
-# aucun crate n'est trouvé, ou si un crate n'a pas de ligne `version = "…"`
-# (par ex. `version.workspace = true`, non lu ici). Les dépendances internes
-# ne sont pas couvertes (#353).
+# aucun crate n'est trouvé, ou si la section [package] d'un crate n'a pas
+# exactement une ligne `version = "…"` (`version.workspace = true` refusé :
+# non lu ici). Seule la section [package] est lue (#352).
 # Appelé par le travail `fmt` (GitHub et GitLab) et par scripts/release-notes.sh.
 # STOKESFORGE_REPO_ROOT (essais) remplace la racine du dépôt.
 set -euo pipefail
@@ -23,9 +23,33 @@ bad=0
 for manifest in "$REPO_ROOT"/crates/*/Cargo.toml; do
     [ -e "$manifest" ] || continue
     name="$(basename "$(dirname "$manifest")")"
-    found="$(sed -n 's/^version = "\(.*\)"/\1/p' "$manifest" | head -1)"
+    # Section [package] seule : du [package] au prochain en-tête de section.
+    found="$(awk '
+        /^\[/ { in_pkg = ($0 ~ /^\[package\][[:space:]]*(#.*)?$/); next }
+        in_pkg && /^version\.workspace[[:space:]]*=/ { ws = 1 }
+        in_pkg && /^version[[:space:]]*=[[:space:]]*"/ {
+            v = $0
+            sub(/^version[[:space:]]*=[[:space:]]*"/, "", v)
+            sub(/".*$/, "", v)
+            n++; val = v
+        }
+        END {
+            if (ws) { print "WORKSPACE"; exit }
+            if (n > 1) { print "DOUBLE"; exit }
+            if (n == 1) print val
+        }' "$manifest")"
+    if [ "$found" = WORKSPACE ]; then
+        echo "[versions] ERREUR : $name hérite de « version.workspace = true », non lu ici : écrire « version = \"X.Y.Z\" » dans [package]" >&2
+        bad=1
+        continue
+    fi
+    if [ "$found" = DOUBLE ]; then
+        echo "[versions] ERREUR : $name a plusieurs lignes « version = » dans [package]" >&2
+        bad=1
+        continue
+    fi
     if [ -z "$found" ]; then
-        echo "[versions] ERREUR : $name n'a pas de ligne « version = \"X.Y.Z\" »" >&2
+        echo "[versions] ERREUR : $name n'a pas de ligne « version = \"X.Y.Z\" » dans [package]" >&2
         bad=1
         continue
     fi

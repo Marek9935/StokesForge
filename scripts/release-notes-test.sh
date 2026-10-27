@@ -51,7 +51,17 @@ attend 1 "crate b désaligné, -rc" v1.2.3-rc1
 aligne 1 "b désaligné, sans argument"
 printf '[package]\nname = "b"\nversion.workspace = true\n' > "$tmp/crates/b/Cargo.toml"
 aligne 1 "b sans ligne version"
+grep -q "version.workspace" "$tmp/err" || { echo "ECHEC : message « version.workspace » absent" >&2; fail=1; }
+printf '[package]\nname = "b"\n' > "$tmp/crates/b/Cargo.toml"
+aligne 1 "b sans version"
 grep -q "pas de ligne" "$tmp/err" || { echo "ECHEC : message « pas de ligne version » absent" >&2; fail=1; }
+printf '[package]\nname = "b"\n[dependencies.x]\nversion = "1.2.3"\n' > "$tmp/crates/b/Cargo.toml"
+aligne 1 "version hors [package] ignorée"
+printf '[package]\nname = "b"\nedition = "2021"\nversion = "1.2.3"\n' > "$tmp/crates/b/Cargo.toml"
+aligne 0 "version après edition dans [package]"
+printf '[package]\nname = "b"\nversion = "1.2.3"\nversion = "1.2.3"\n' > "$tmp/crates/b/Cargo.toml"
+aligne 1 "deux lignes version"
+grep -q "plusieurs" "$tmp/err" || { echo "ECHEC : message « plusieurs » absent" >&2; fail=1; }
 printf '[package]\nname = "b"\nversion = "1.2.3"\n' > "$tmp/crates/b/Cargo.toml"
 
 # versions-alignees.sh seul : ni tag ni CHANGELOG lus.
