@@ -40,6 +40,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 scripts/gitlab-status-test.py
+      - run: scripts/release-notes-test.sh
+      - run: scripts/versions-alignees.sh
       - run: rustup component add rustfmt
       - run: cargo fmt --all -- --check
 

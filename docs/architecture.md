@@ -161,7 +161,7 @@ Les `scripts/*.sh` de la racine assemblent et relancent les distributions
 **Publication (#333).** `scripts/release-linux.sh` empaquette `dist/stokesforge-app`
 (déjà éprouvé par `app-dist.sh`) en `StokesForge-<version>-linux-x86_64.tar.gz` ;
 `scripts/release-notes.sh` vérifie qu'un tag `vX.Y.Z` correspond aux versions des
-crates et à une section de `CHANGELOG.md`, et imprime les notes ;
+crates (alignement par `scripts/versions-alignees.sh`, aussi lancé à chaque push par `fmt`) et à une section de `CHANGELOG.md`, et imprime les notes ;
 `scripts/release-televerser.sh linux|windows` envoie l'archive ou l'installeur dans
 le registre de paquets GitLab ; `scripts/release-publier.sh` crée la release
 GitLab, qui lie les deux. Linux et Windows se construisent sur GitHub

@@ -456,7 +456,7 @@ runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
 
 | Travail | Bloquant | Ce qu'il fait |
 |---|---|---|
-| `fmt` | oui | `cargo fmt --all -- --check` |
+| `fmt` | oui | `cargo fmt --all -- --check`, plus `scripts/release-notes-test.sh` et `scripts/versions-alignees.sh` (tous les crates dans une même version `X.Y.Z`, #349/#350) |
 | `licenses` | oui | politique et génération des notices tierces |
 | `clippy` | oui | `cargo clippy --workspace --all-targets -- -D warnings` |
 | `test` | oui | `cargo test --workspace` |
@@ -491,7 +491,8 @@ spike Matplotlib restent des essais explicites. Aucun Python système n'est
 requis.
 
 Typst n'est plus une feature (issue #29) : Clippy le compile, les tests du
-workspace l'exercent, y compris les exports (#34). `fmt` ne compile rien.
+workspace l'exercent, y compris les exports (#34). `fmt` ne compile rien ; il contrôle aussi l'alignement des versions des crates
+(`scripts/versions-alignees.sh`, à chaque push, pas seulement au tag).
 
 ### Utiliser la CI au quotidien
 
@@ -671,7 +672,7 @@ Configuration initiale (une seule fois) :
    `GitLab > Build > Pipelines`, étage `external`.
 
 Tests du rapporteur, sans réseau ni jeton réel :
-`python3 scripts/gitlab-status-test.py` (aussi lancé par le travail `fmt`). Ils couvrent les résultats, la
+`python3 scripts/gitlab-status-test.py` (aussi lancé par le travail `fmt`, avec `scripts/release-notes-test.sh`, qui éprouve `release-notes.sh` et `versions-alignees.sh` sur un dépôt factice). Ils couvrent les résultats, la
 reproduction tolérée (y compris une étape échouée sous une conclusion tolérée),
 les annulations, les travaux absents, les PR/forks exclus, les anciennes
 tentatives, la pagination, la sélection du pipeline et les reprises HTTP.
