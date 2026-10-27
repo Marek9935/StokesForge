@@ -1,6 +1,6 @@
 [package]
 name = "stokesforge-app"
-version = "1.0.0"
+version = "1.0.1"
 edition.workspace = true
 license.workspace = true
 description = "Coquille UI minimale (banc d'essai eframe) : fait tourner une fois la boucle modèle → commande → annulation → sauvegarde → rechargement."

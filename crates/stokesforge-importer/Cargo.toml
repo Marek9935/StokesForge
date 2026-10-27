@@ -1,6 +1,6 @@
 [package]
 name = "stokesforge-importer"
-version = "1.0.0"
+version = "1.0.1"
 edition.workspace = true
 license.workspace = true
 description = "Du résultat de stokesforge-import aux colonnes du modèle : plan de feuilles et construction des colonnes, sans interface ni commandes."

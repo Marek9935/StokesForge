@@ -1,6 +1,6 @@
 [package]
 name = "stokesforge-commands"
-version = "1.0.0"
+version = "1.0.1"
 edition.workspace = true
 license.workspace = true
 description = "Commandes du modèle et pile d'historique à deux natures (snapshot de structure / delta de données)."

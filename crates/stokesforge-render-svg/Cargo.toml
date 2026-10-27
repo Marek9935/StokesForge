@@ -1,6 +1,6 @@
 [package]
 name = "stokesforge-render-svg"
-version = "1.0.0"
+version = "1.0.1"
 edition.workspace = true
 license.workspace = true
 description = "Export SVG d'un graphe StokesForge : le SVGBackend de plotters, dont estimate_text_size est surchargé sur la mesure partagée du chantier."

@@ -1,6 +1,6 @@
 [package]
 name = "stokesforge-clipboard"
-version = "1.0.0"
+version = "1.0.1"
 edition.workspace = true
 license.workspace = true
 description = "Offre d'un même contenu au presse-papiers système sous plusieurs types MIME (figure SVG, PNG, PDF)."

@@ -1,6 +1,6 @@
 [package]
 name = "stokesforge-session"
-version = "1.0.0"
+version = "1.0.1"
 edition.workspace = true
 license.workspace = true
 description = "Acteur qui possède le Project de StokesForge et le sert à ses clients (UI, script) par un canal FIFO."
@@ -13,7 +13,7 @@ stokesforge-analysis = { path = "../stokesforge-analysis" }
 stokesforge-core = { path = "../stokesforge-core" }
 stokesforge-commands = { path = "../stokesforge-commands" }
 thiserror = "2"
-stokesforge-persistence = { version = "1.0.0", path = "../stokesforge-persistence" }
+stokesforge-persistence = { version = "1.0.1", path = "../stokesforge-persistence" }
 
 [dev-dependencies]
 stokesforge-arch-guard = { path = "../stokesforge-arch-guard" }

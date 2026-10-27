@@ -1,6 +1,6 @@
 [package]
 name = "stokesforge-render"
-version = "1.0.0"
+version = "1.0.1"
 edition.workspace = true
 license.workspace = true
 description = "Socle des deux backends de rendu : la source unique de mesure de texte (epaint) et le pipeline Plotters neutre vis-à-vis du backend."

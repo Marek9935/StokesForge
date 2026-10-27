@@ -23,6 +23,13 @@ fichier le perd sans message, voir `docs/persistance.md`).
 
 ## [Non publié]
 
+## [1.0.1] - 2026-10-27
+
+Correctif de licence uniquement (#348), sans changement de code : StokesForge
+est sous GPL-3.0-or-later pure, sans permission supplémentaire. L'exception
+d'extension pour `pyst` de la 1.0.0 est retirée (`LICENSE-EXCEPTION` supprimé).
+Une permission supplémentaire se demande à l'auteur, au cas par cas.
+
 ## [1.0.0] - 2026-10-27
 
 Première version publiée. Portage de StokesForge de Python/Qt vers Rust
