@@ -938,6 +938,35 @@ pub(crate) struct AxisSpecRecord {
     /// Libellés des graduations (#176).
     #[serde(default = "visible_by_default")]
     pub(crate) tick_labels: bool,
+    /// Tirets des graduations (#344) ; vrai par défaut, sinon les anciens
+    /// fichiers perdraient leurs tirets.
+    #[serde(default = "visible_by_default")]
+    pub(crate) ticks: bool,
+    /// Sens des tirets (#344).
+    #[serde(default)]
+    pub(crate) tick_direction: TickDirectionRecord,
+    /// Sous-graduations (#344) ; faux par défaut : un ancien fichier n'en avait pas.
+    #[serde(default)]
+    pub(crate) minor_ticks: bool,
+    /// Sous-graduations entre deux principales (#344) ; absent = automatique.
+    #[serde(default)]
+    pub(crate) minor_tick_count: Option<u8>,
+    /// Un nombre sur n écrit (#344) ; 1 par défaut.
+    #[serde(default = "one")]
+    pub(crate) label_every: u8,
+    /// Longueur des grands tirets, en pixels (#344, « Avancé ») ; absent =
+    /// automatique. La valeur brute est gardée : le rendu la borne.
+    #[serde(default)]
+    pub(crate) tick_length: Option<f64>,
+    /// Longueur des petits tirets ; absent = la moitié des grands.
+    #[serde(default)]
+    pub(crate) minor_tick_length: Option<f64>,
+    /// Épaisseur des tirets, en points ; absent = automatique.
+    #[serde(default)]
+    pub(crate) tick_width: Option<f64>,
+    /// Couleur des tirets ; vide = celle de l'échelle.
+    #[serde(default)]
+    pub(crate) tick_mark_color: String,
 }
 
 impl AxisSpecRecord {
@@ -970,8 +999,30 @@ impl Default for AxisSpecRecord {
             tick_color: String::new(),
             mirror: false,
             tick_labels: true,
+            ticks: true,
+            tick_direction: TickDirectionRecord::Out,
+            // Un axe absent du fichier prend les défauts d'un axe neuf ; un axe
+            // présent sans le champ (`#[serde(default)]`) n'en avait pas.
+            minor_ticks: true,
+            minor_tick_count: None,
+            label_every: 1,
+            tick_length: None,
+            minor_tick_length: None,
+            tick_width: None,
+            tick_mark_color: String::new(),
         }
     }
+}
+
+/// [`stokesforge_plot::TickDirection`], à plat. Une valeur inconnue se lit
+/// `Out` (dégradation gracieuse, invariant 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub(crate) enum TickDirectionRecord {
+    In,
+    Both,
+    #[default]
+    #[serde(other)]
+    Out,
 }
 
 /// [`stokesforge_plot::AxisScale`], à plat.
@@ -1178,9 +1229,31 @@ fn visible_by_default() -> bool {
     true
 }
 
+// Un axe d'un fichier antérieur écrivait tous ses nombres (#344).
+fn one() -> u8 {
+    1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Un sens de tirets inconnu (fichier d'une version plus récente) se lit
+    /// « vers l'extérieur », sans échec (invariant 10).
+    #[test]
+    fn un_sens_de_tirets_inconnu_se_lit_vers_l_exterieur() {
+        #[derive(Serialize)]
+        enum Futur {
+            Diagonale,
+            In,
+        }
+        let inconnu = rmp_serde::to_vec_named(&Futur::Diagonale).expect("encodage");
+        let relu: TickDirectionRecord = rmp_serde::from_slice(&inconnu).expect("relecture");
+        assert_eq!(relu, TickDirectionRecord::Out);
+        let connu = rmp_serde::to_vec_named(&Futur::In).expect("encodage");
+        let relu: TickDirectionRecord = rmp_serde::from_slice(&connu).expect("relecture");
+        assert_eq!(relu, TickDirectionRecord::In);
+    }
 
     /// Un fichier écrit avant l'ajout des couleurs de texte (titre du
     /// graphe, titre et échelle des axes) se relit : les champs absents
@@ -1222,6 +1295,20 @@ mod tests {
         assert_eq!(relu.title_color, "");
         assert_eq!(relu.tick_color, "");
         assert!(relu.title_visible, "un ancien axe garde son titre visible");
+        // #344 : un ancien axe garde ses tirets, vers l'extérieur.
+        assert!(relu.ticks, "un ancien axe garde ses tirets");
+        assert_eq!(relu.tick_direction, TickDirectionRecord::Out);
+        assert!(
+            !relu.minor_ticks,
+            "un ancien axe n'a pas de sous-graduations"
+        );
+        assert_eq!(relu.minor_tick_count, None);
+        assert_eq!(relu.label_every, 1, "un ancien axe écrit tous ses nombres");
+        // #344 : les réglages « Avancé » des tirets sont absents = automatiques.
+        assert_eq!(relu.tick_length, None);
+        assert_eq!(relu.minor_tick_length, None);
+        assert_eq!(relu.tick_width, None);
+        assert_eq!(relu.tick_mark_color, "");
 
         let spec = AncienSpec {
             title: "Ancien".to_string(),

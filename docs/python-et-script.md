@@ -433,9 +433,9 @@ surface lira. Les clés Y visent l'axe `axis` (`left` par défaut, `right`).
 | `title_visible`, `stale_warning`, `decimal_comma` | booléens (graphe) |
 | `title_color`, `background` | `#RRGGBB` ou `#RRGGBBAA` ; `""` = automatique (titre) ou blanc (fond) |
 | `x_scale`, `y_scale` | `linear` ou `log` |
-| `x_from`/`x_to`, `y_from`/`y_to` | les deux ensemble, finies et différentes, positives sur un axe log ; `from > to` trace l'axe à l'envers ; passent le cadrage en manuel |
+| `x_from`/`x_to`, `y_from`/`y_to` | les deux ensemble, finies et différentes, positives sur un axe log ; `from > to` trace l'axe à l'envers (et marque l'axe inversé, #344) ; passent le cadrage en manuel |
 | `x_auto_range`, `y_auto_range` | `True` rend le cadrage automatique (contradictoire avec des bornes données dans le même appel) |
-| `x_inverted`, `y_inverted`, `x_grid`, `y_grid`, `x_visible`, `y_visible` | booléens |
+| `x_inverted`, `y_inverted`, `x_grid`, `y_grid`, `x_visible`, `y_visible` | booléens ; `x_inverted=True` sur des bornes croissantes les échange (le sens se lit sur leur ordre, `AxisSpec::orient`, #344) ; la surface elle-même ne change pas |
 | `legend_visible`, `legend_position` | booléen ; `top_left`, `top_right`, `bottom_left`, `bottom_right` (légende du panneau `panel`) |
 
 Hors de `set_graph` pour l'instant (rien ne les empêche techniquement, ils

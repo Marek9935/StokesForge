@@ -745,3 +745,128 @@ fn titres_masques_accord_et_temoins_avec_et_sans_ancre() {
         }
     }
 }
+
+/// Tirets en dedans, des deux côtés ou coupés (#344) : tracés par le
+/// pipeline, donc les deux backends s'accordent, sur les quatre côtés et
+/// avec ou sans nombres. Témoin : chaque réglage change la figure.
+#[test]
+fn les_tirets_maison_s_accordent_et_changent_la_figure() {
+    use stokesforge_plot::TickDirection;
+    let fixture = minimal();
+    let tree = fixture.project.tree();
+    let mut base = fixture.spec.clone();
+    {
+        let panel = base.panels.get_mut(0).unwrap();
+        panel.top.mirror = true;
+        panel.right.mirror = true;
+    }
+    let (baseline, _) = accord(tree, &base, SIZE, "cadre fermé par défaut");
+    // (nom, sens, nombres des miroirs, tirets)
+    let regles: [(&str, TickDirection, bool, bool); 6] = [
+        ("dedans", TickDirection::In, true, true),
+        ("des deux côtés", TickDirection::Both, true, true),
+        ("dedans sans nombres", TickDirection::In, false, true),
+        (
+            "des deux côtés sans nombres",
+            TickDirection::Both,
+            false,
+            true,
+        ),
+        ("coupés", TickDirection::Out, true, false),
+        ("coupés sans nombres", TickDirection::Out, false, false),
+    ];
+    let mut vues = vec![baseline];
+    for (quoi, sens, nombres_miroirs, tirets) in regles {
+        let mut spec = base.clone();
+        let panel = spec.panels.get_mut(0).unwrap();
+        for axe in [
+            &mut panel.bottom,
+            &mut panel.left,
+            &mut panel.top,
+            &mut panel.right,
+        ] {
+            axe.tick_direction = sens;
+            axe.ticks = tirets;
+        }
+        panel.top.tick_labels = nombres_miroirs;
+        panel.right.tick_labels = nombres_miroirs;
+        let (pixels, _) = accord(tree, &spec, SIZE, quoi);
+        assert!(!vues.contains(&pixels), "{quoi} : la figure ne change pas");
+        if !tirets {
+            // Sans tirets : les quatre lignes restent, les traits de repère
+            // (de bas en haut, les graduations) ont disparu.
+            let traits = |p: &[Primitive]| {
+                p.iter()
+                    .filter(|p| matches!(p, Primitive::Segment(..)))
+                    .count()
+            };
+            assert!(
+                traits(&pixels) + 20 < traits(&vues[0]),
+                "{quoi} : les tirets doivent disparaître"
+            );
+        }
+        vues.push(pixels);
+    }
+
+    // #344 : les sous-graduations (allumées par défaut), sur les quatre côtés,
+    // s'accordent ; éteintes, un autre nombre, ou un nombre sur deux, la
+    // figure change.
+    let mut changes = Vec::new();
+    for (quoi, regle) in [
+        ("sans sous-graduations", 0),
+        ("un seul sous-tiret", 1),
+        ("un nombre sur deux", 2),
+    ] {
+        let mut spec = base.clone();
+        let panel = spec.panels.get_mut(0).unwrap();
+        for axe in [
+            &mut panel.bottom,
+            &mut panel.left,
+            &mut panel.top,
+            &mut panel.right,
+        ] {
+            match regle {
+                0 => axe.minor_ticks = false,
+                1 => axe.minor_tick_count = Some(1),
+                _ => axe.label_every = 2,
+            }
+        }
+        let (pixels, _) = accord(tree, &spec, SIZE, quoi);
+        assert!(
+            !vues.contains(&pixels) && !changes.contains(&pixels),
+            "{quoi} : la figure ne change pas"
+        );
+        changes.push(pixels);
+    }
+
+    // #344 « Avancé » : longueur et épaisseur des tirets, sur les quatre
+    // côtés, s'accordent (tracés par le pipeline) et changent la figure ;
+    // la couleur, que cette comparaison ne voit pas, est gardée par
+    // `render-svg/tests/miroirs.rs`.
+    for (quoi, regle) in [
+        ("grands tirets à 10", 0),
+        ("petits tirets à 8", 1),
+        ("tirets épais", 2),
+    ] {
+        let mut spec = base.clone();
+        let panel = spec.panels.get_mut(0).unwrap();
+        for axe in [
+            &mut panel.bottom,
+            &mut panel.left,
+            &mut panel.top,
+            &mut panel.right,
+        ] {
+            match regle {
+                0 => axe.tick_length = Some(10.0),
+                1 => axe.minor_tick_length = Some(8.0),
+                _ => axe.tick_width = Some(3.0),
+            }
+        }
+        let (pixels, _) = accord(tree, &spec, SIZE, quoi);
+        assert!(
+            !vues.contains(&pixels) && !changes.contains(&pixels),
+            "{quoi} : la figure ne change pas"
+        );
+        changes.push(pixels);
+    }
+}

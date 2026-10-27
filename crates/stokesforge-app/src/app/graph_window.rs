@@ -445,6 +445,17 @@ fn publish_axis_bounds(ctx: &egui::Context, view: &GraphView, graph: NodeId) {
     ctx.data_mut(|data| data.insert_temp(axis_bounds_id(graph), bounds));
 }
 
+/// Publie des bornes à la main : les tests de la fenêtre des propriétés, qui
+/// n'ont pas de vue peinte, en ont besoin pour les champs De / À sous Auto.
+#[cfg(test)]
+pub(super) fn set_published_axis_bounds(
+    ctx: &egui::Context,
+    graph: NodeId,
+    bounds: Vec<PanelBounds>,
+) {
+    ctx.data_mut(|data| data.insert_temp(axis_bounds_id(graph), bounds));
+}
+
 /// Les bornes publiées pour le calque `panel` de `graph` ; `None` faute de vue
 /// peinte.
 pub(super) fn published_axis_bounds(
@@ -2492,12 +2503,12 @@ pub(super) mod tests {
         })
     }
 
-    /// #170, point 1 : sous « Auto range », les champs de bornes restent
-    /// visibles (grisés) avec les bornes calculées — pour un axe logarithmique
-    /// de 1 à 1000, les valeurs et non leurs logarithmes — et les survoler dit
-    /// pourquoi ils sont grisés.
+    /// #170, point 1 (#344) : sous Auto, les champs de bornes montrent les
+    /// bornes calculées — pour un axe logarithmique de 1 à 1000, les valeurs et
+    /// non leurs logarithmes — et le bouton Auto, déjà actif, est grisé : le
+    /// survoler dit pourquoi.
     #[test]
-    fn les_champs_de_bornes_grises_montrent_les_bornes_et_leur_raison_au_survol() {
+    fn les_champs_de_bornes_montrent_les_bornes_et_le_bouton_auto_grise_dit_pourquoi() {
         use super::super::test_support::textes;
         let (session, graph, drawn_context, _view) = graphe_peint(&[1.0, 10.0, 1000.0], |panel| {
             panel.bottom.scale = stokesforge_plot::AxisScale::Log;
@@ -2520,19 +2531,24 @@ pub(super) mod tests {
             "la borne haute calculée s'affiche : {:?}",
             peints.iter().map(|t| &t.texte).collect::<Vec<_>>()
         );
-        let raison = tr!("plot-axes-auto-range", "disabled");
+        // Le bouton Auto, déjà actif : grisé, et le survol dit pourquoi.
+        let raison = tr!("plot-axes-from-auto", "disabled");
         assert!(
             !peints.iter().any(|t| t.texte == raison),
             "témoin : sans survol, pas d'explication"
         );
-        let champ = peints.iter().find(|t| t.texte == "1000").unwrap().centre;
+        let bouton = peints
+            .iter()
+            .find(|t| t.texte == tr!("plot-axes-from-auto"))
+            .unwrap()
+            .centre;
         let mut vus = Vec::new();
         for _ in 0..4 {
-            vus = textes(&peindre_axes(&context, graph, &mut panel, Some(champ)));
+            vus = textes(&peindre_axes(&context, graph, &mut panel, Some(bouton)));
         }
         assert!(
             vus.iter().any(|t| t.texte == raison),
-            "le survol du champ grisé dit pourquoi : {:?}",
+            "le survol du bouton grisé dit pourquoi : {:?}",
             vus.iter().map(|t| &t.texte).collect::<Vec<_>>()
         );
         assert_eq!(panel.bottom.range_max, None, "rien n'est écrit sans geste");

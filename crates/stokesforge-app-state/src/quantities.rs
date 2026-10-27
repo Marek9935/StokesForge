@@ -119,7 +119,29 @@ impl Quantity {
 /// Une valeur libre : abscisse, ordonnée, borne d'axe, paramètre d'ajustement.
 pub const FREE: Quantity = Quantity::real(0.1, 1.0, 8);
 
-/// Une borne d'axe : libre, et liée à la case « Auto range » de son axe.
+/// Sous-graduations entre deux graduations principales (#344) : 1 à 9, ou Auto.
+pub const MINOR_TICK_COUNT: Quantity = Quantity::whole(4.0)
+    .between(1.0, 9.0)
+    .with_auto(AutoKind::Field);
+
+/// Un nombre de graduation sur n est écrit (#344) : 1 les écrit tous.
+pub const LABEL_EVERY: Quantity = Quantity::whole(1.0).between(1.0, 99.0);
+
+/// Longueur d'un tiret de graduation, en pixels de figure (#344, « Avancé ») :
+/// 0 à 50 (le plafond du rendu, `MAX_TICK_LENGTH`), entier (les tirets se
+/// tracent au pixel), Auto par défaut.
+pub const TICK_LENGTH: Quantity = Quantity::whole(5.0)
+    .between(0.0, 50.0)
+    .with_auto(AutoKind::Field);
+
+/// Épaisseur des tirets de graduation, en points (#344, « Avancé ») : entière
+/// (Plotters trace en pixels entiers), 1 à 20, Auto par défaut.
+pub const TICK_WIDTH: Quantity = Quantity::whole(1.0)
+    .between(1.0, 20.0)
+    .with_auto(AutoKind::Field);
+
+/// Une borne d'axe : libre. Le mot `auto` (ou le bouton « Auto » de la rangée
+/// De / À) rend les deux bornes aux données ; un champ vidé est refusé (#344).
 pub const AXIS_BOUND: Quantity = FREE.with_auto(AutoKind::Group);
 
 /// Épaisseur d'un trait de série, en points : 0 à 20, décimales au clavier.

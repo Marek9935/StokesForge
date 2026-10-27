@@ -72,6 +72,7 @@ use plotters::prelude::*;
 use stokesforge_core::resolve::{ResolvedPanel, ResolvedPlot};
 use stokesforge_plot::{
     AxisScale, AxisSide as PlotAxisSide, AxisSpec, PlotSpec, SeriesAxis, TextAnchor, TextTarget,
+    TickDirection,
 };
 
 use crate::clip::{self, PixelBounds};
@@ -1050,6 +1051,97 @@ fn draw_panel<DB: DrawingBackend>(
         ),
     };
 
+    // Positions en pixels des graduations, pour les tirets que le pipeline
+    // trace lui-même (#344) : celles que Plotters donne à ses libellés, sur
+    // le même intervalle, projetées par la zone de tracé.
+    let frame = {
+        let plotting = chart.plotting_area();
+        (plotting.get_base_pixel(), plotting.dim_in_pixel())
+    };
+    let ticks_of = |scale: AxisScale, range: (f64, f64)| -> Vec<f64> {
+        scale::linear_key_points(range, scale::label_count(scale, range))
+    };
+    let x_ticks_px: Vec<i32> = ticks_of(x_scale, x_range)
+        .into_iter()
+        .map(|v| chart.plotting_area().map_coordinate(&(v, y_range.0)).0)
+        .collect();
+    let y_ticks_px: Vec<i32> = ticks_of(y_scale, y_range)
+        .into_iter()
+        .map(|v| chart.plotting_area().map_coordinate(&(x_range.0, v)).1)
+        .collect();
+    // Les axes du haut et de droite se projettent par le repère secondaire,
+    // dont l'arrondi diffère parfois d'un pixel de celui du repère principal.
+    let x2_ticks_px: Vec<i32> = ticks_of(x_scale, x_range)
+        .into_iter()
+        .map(|v| {
+            chart
+                .secondary_plotting_area()
+                .map_coordinate(&(v, secondary.0))
+                .0
+        })
+        .collect();
+    let y2_ticks_px: Vec<i32> = ticks_of(
+        if y2_range.is_some() {
+            y2_scale
+        } else {
+            y_scale
+        },
+        y2_range.unwrap_or(y_range),
+    )
+    .into_iter()
+    .map(|v| {
+        chart
+            .secondary_plotting_area()
+            .map_coordinate(&(x_range.0, v))
+            .1
+    })
+    .collect();
+
+    // Les sous-graduations (#344) : positions calculées en valeurs, puis
+    // projetées comme les graduations principales (jamais interpolées entre
+    // les pixels de celles-ci : arrondi, axe inversé, échelle log).
+    let minor_of = |axis: &AxisSpec, scale: AxisScale, range: (f64, f64)| -> Vec<f64> {
+        if axis.minor_ticks {
+            scale::minor_key_points(scale, range, axis.minor_tick_count)
+        } else {
+            Vec::new()
+        }
+    };
+    let x_minor_px: Vec<i32> = minor_of(&spec.bottom, x_scale, x_range)
+        .into_iter()
+        .map(|v| chart.plotting_area().map_coordinate(&(v, y_range.0)).0)
+        .collect();
+    let y_minor_px: Vec<i32> = minor_of(&spec.left, y_scale, y_range)
+        .into_iter()
+        .map(|v| chart.plotting_area().map_coordinate(&(x_range.0, v)).1)
+        .collect();
+    let x2_minor_px: Vec<i32> = minor_of(&spec.top, x_scale, x_range)
+        .into_iter()
+        .map(|v| {
+            chart
+                .secondary_plotting_area()
+                .map_coordinate(&(v, secondary.0))
+                .0
+        })
+        .collect();
+    let y2_minor_px: Vec<i32> = minor_of(
+        &spec.right,
+        if y2_range.is_some() {
+            y2_scale
+        } else {
+            y_scale
+        },
+        y2_range.unwrap_or(y_range),
+    )
+    .into_iter()
+    .map(|v| {
+        chart
+            .secondary_plotting_area()
+            .map_coordinate(&(x_range.0, v))
+            .1
+    })
+    .collect();
+
     // 4 — les axes. Chaque axe a ses couleurs (titre, échelle), et le
     // `configure_mesh` de Plotters n'a qu'un style de titre et qu'un style
     // de ligne d'axe pour les deux : l'axe du bas et celui de gauche sont
@@ -1076,62 +1168,130 @@ fn draw_panel<DB: DrawingBackend>(
     let tick_y = scale::TickFormat::new(y_scale, y_range).with_decimal_comma(decimal_comma);
     let format_x = |value: &f64| tick_x.format(*value);
     let format_y = |value: &f64| tick_y.format(*value);
-    // Sans libellés (#176) : les tirets restent, les nombres disparaissent.
-    let blank = |_: &f64| String::new();
-    let shown_x = |shown: bool| -> &dyn Fn(&f64) -> String {
-        if shown {
-            &format_x
+    // Les nombres d'un axe : aucun (#176, les tirets restent), tous, ou un sur
+    // n (#344).
+    let shown_x = |axis: &AxisSpec| -> Box<dyn Fn(&f64) -> String> {
+        if axis.tick_labels {
+            let format = tick_x.with_label_every(axis.label_every, x_range);
+            Box::new(move |value| format.format(*value))
         } else {
-            &blank
+            Box::new(|_| String::new())
         }
     };
-    let shown_y = |shown: bool| -> &dyn Fn(&f64) -> String {
-        if shown {
-            &format_y
+    let shown_y = |axis: &AxisSpec| -> Box<dyn Fn(&f64) -> String> {
+        if axis.tick_labels {
+            let format = tick_y.with_label_every(axis.label_every, y_range);
+            Box::new(move |value| format.format(*value))
         } else {
-            &blank
+            Box::new(|_| String::new())
         }
     };
+    let labels_bottom = shown_x(&spec.bottom);
+    let labels_top = shown_x(&spec.top);
+    let labels_left = shown_y(&spec.left);
+    let labels_right = shown_y(&spec.right);
     // Un calque superposé n'a ni axe en bas ni axe à gauche : ses axes
     // s'affichent en haut et à droite, par les axes secondaires de Plotters
     // (même repère que le calque lui-même, voir plus bas).
     if overlay.is_none() {
         let colors = AxisColors::of(&spec.bottom, ink, figure_width);
-        let mut mesh = chart.configure_mesh();
-        colors.apply(&mut mesh);
-        mesh.x_desc(plotters_desc(&spec.bottom, bottom_anchor))
-            .disable_y_mesh()
-            .disable_y_axis();
-        if !spec.bottom.grid {
-            mesh.disable_x_mesh();
+        let custom = custom_ticks(&spec.bottom);
+        for pass in mesh_passes(custom, spec.bottom.tick_labels) {
+            let mut mesh = chart.configure_mesh();
+            colors.apply(&mut mesh);
+            mesh.disable_y_mesh().disable_y_axis();
+            if pass.rest {
+                mesh.x_desc(plotters_desc(&spec.bottom, bottom_anchor));
+            }
+            if !pass.rest || !spec.bottom.grid {
+                mesh.disable_x_mesh();
+            }
+            if !spec.bottom.visible {
+                mesh.disable_x_axis();
+            }
+            if !pass.line {
+                mesh.axis_style(NO_INK);
+            }
+            if pass.zero_ticks {
+                mesh.set_all_tick_mark_size(0);
+            }
+            mesh.x_label_formatter(&*labels_bottom)
+                .x_labels(pass.count(scale::label_count(x_scale, x_range)));
+            mesh.draw()?;
         }
-        if !spec.bottom.visible {
-            mesh.disable_x_axis();
+        if custom && spec.bottom.visible {
+            draw_ticks(
+                canvas,
+                PlotAxisSide::Bottom,
+                &spec.bottom,
+                &x_ticks_px,
+                frame,
+                colors.ticks,
+            )?;
         }
-        mesh.x_label_formatter(shown_x(spec.bottom.tick_labels))
-            .x_labels(scale::label_count(x_scale, x_range));
-        mesh.draw()?;
+        if spec.bottom.visible {
+            draw_minor_ticks(
+                canvas,
+                PlotAxisSide::Bottom,
+                &spec.bottom,
+                &x_minor_px,
+                frame,
+                colors.ticks,
+            )?;
+        }
     }
     if overlay.is_none() {
         let colors = AxisColors::of(&spec.left, ink, figure_width);
-        let mut mesh = chart.configure_mesh();
-        colors.apply(&mut mesh);
-        mesh.y_desc(plotters_desc(&spec.left, left_anchor))
-            .disable_x_mesh()
-            .disable_x_axis();
-        if !spec.left.grid {
-            mesh.disable_y_mesh();
+        let custom = custom_ticks(&spec.left);
+        for pass in mesh_passes(custom, spec.left.tick_labels) {
+            let mut mesh = chart.configure_mesh();
+            colors.apply(&mut mesh);
+            mesh.disable_x_mesh().disable_x_axis();
+            if pass.rest {
+                mesh.y_desc(plotters_desc(&spec.left, left_anchor));
+            }
+            if !pass.rest || !spec.left.grid {
+                mesh.disable_y_mesh();
+            }
+            if !spec.left.visible {
+                mesh.disable_y_axis();
+            }
+            if !pass.line {
+                mesh.axis_style(NO_INK);
+            }
+            if pass.zero_ticks {
+                mesh.set_all_tick_mark_size(0);
+            }
+            mesh.y_label_formatter(&*labels_left)
+                .y_labels(pass.count(scale::label_count(y_scale, y_range)));
+            mesh.draw()?;
         }
-        if !spec.left.visible {
-            mesh.disable_y_axis();
+        if custom && spec.left.visible {
+            draw_ticks(
+                canvas,
+                PlotAxisSide::Left,
+                &spec.left,
+                &y_ticks_px,
+                frame,
+                colors.ticks,
+            )?;
         }
-        mesh.y_label_formatter(shown_y(spec.left.tick_labels))
-            .y_labels(scale::label_count(y_scale, y_range));
-        mesh.draw()?;
+        if spec.left.visible {
+            draw_minor_ticks(
+                canvas,
+                PlotAxisSide::Left,
+                &spec.left,
+                &y_minor_px,
+                frame,
+                colors.ticks,
+            )?;
+        }
     }
 
     if let Some(range) = y2_range {
-        let tick_y2 = scale::TickFormat::new(y2_scale, range).with_decimal_comma(decimal_comma);
+        let tick_y2 = scale::TickFormat::new(y2_scale, range)
+            .with_decimal_comma(decimal_comma)
+            .with_label_every(spec.right.label_every, range);
         let format_y2 = |value: &f64| {
             if spec.right.tick_labels {
                 tick_y2.format(*value)
@@ -1140,18 +1300,72 @@ fn draw_panel<DB: DrawingBackend>(
             }
         };
         let colors = AxisColors::of(&spec.right, ink, figure_width);
-        let mut mesh = chart.configure_secondary_axes();
-        mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
-            .axis_desc_style(colors.title_style.clone())
-            .axis_style(rgba(colors.ticks))
-            .y_desc(plotters_desc(&spec.right, right_anchor));
-        mesh.y_label_formatter(&format_y2)
-            .y_labels(scale::label_count(y2_scale, range));
-        if mirror_top {
-            mesh.x_label_formatter(shown_x(spec.top.tick_labels))
-                .x_labels(scale::label_count(x_scale, x_range));
+        // Les tirets du haut ne comptent que si le miroir du haut est tracé.
+        let top_custom = mirror_top && custom_ticks(&spec.top);
+        let custom = custom_ticks(&spec.right) || top_custom;
+        for pass in mesh_passes(
+            custom,
+            spec.right.tick_labels || (mirror_top && spec.top.tick_labels),
+        ) {
+            let mut mesh = chart.configure_secondary_axes();
+            mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
+                .axis_desc_style(colors.title_style.clone())
+                .axis_style(rgba(colors.ticks));
+            if pass.rest {
+                mesh.y_desc(plotters_desc(&spec.right, right_anchor));
+            }
+            if !pass.line {
+                mesh.axis_style(NO_INK);
+            }
+            if pass.zero_ticks {
+                mesh.set_all_tick_mark_size(0);
+            }
+            mesh.y_label_formatter(&format_y2)
+                .y_labels(pass.count(scale::label_count(y2_scale, range)));
+            if mirror_top {
+                mesh.x_label_formatter(&*labels_top)
+                    .x_labels(pass.count(scale::label_count(x_scale, x_range)));
+            }
+            mesh.draw()?;
         }
-        mesh.draw()?;
+        if custom {
+            draw_ticks(
+                canvas,
+                PlotAxisSide::Right,
+                &spec.right,
+                &y2_ticks_px,
+                frame,
+                colors.ticks,
+            )?;
+            if mirror_top {
+                draw_ticks(
+                    canvas,
+                    PlotAxisSide::Top,
+                    &spec.top,
+                    &x2_ticks_px,
+                    frame,
+                    colors.ticks,
+                )?;
+            }
+        }
+        draw_minor_ticks(
+            canvas,
+            PlotAxisSide::Right,
+            &spec.right,
+            &y2_minor_px,
+            frame,
+            colors.ticks,
+        )?;
+        if mirror_top {
+            draw_minor_ticks(
+                canvas,
+                PlotAxisSide::Top,
+                &spec.top,
+                &x2_minor_px,
+                frame,
+                colors.ticks,
+            )?;
+        }
     }
 
     // Les axes miroirs (#176) : mêmes échelle, bornes et graduations que le
@@ -1159,22 +1373,77 @@ fn draw_panel<DB: DrawingBackend>(
     // plus haut ; seul le miroir du haut s'ajoute alors.
     if (mirror_top || mirror_right) && y2_range.is_none() {
         let colors = AxisColors::of(&spec.bottom, ink, figure_width);
-        let mut mesh = chart.configure_secondary_axes();
-        mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
-            .axis_style(rgba(colors.ticks));
+        let custom_top = mirror_top && custom_ticks(&spec.top);
+        let custom_right = mirror_right && custom_ticks(&spec.right);
+        let custom = custom_top || custom_right;
+        let labels =
+            (mirror_top && spec.top.tick_labels) || (mirror_right && spec.right.tick_labels);
+        for pass in mesh_passes(custom, labels) {
+            let mut mesh = chart.configure_secondary_axes();
+            mesh.label_style(text_style(LABEL_SIZE, colors.ticks))
+                .axis_style(rgba(colors.ticks));
+            if !pass.line {
+                mesh.axis_style(NO_INK);
+            }
+            if pass.zero_ticks {
+                mesh.set_all_tick_mark_size(0);
+            }
+            if mirror_top {
+                mesh.x_label_formatter(&*labels_top)
+                    .x_labels(pass.count(scale::label_count(x_scale, x_range)));
+            } else {
+                mesh.x_labels(0);
+            }
+            if mirror_right {
+                mesh.y_label_formatter(&*labels_right)
+                    .y_labels(pass.count(scale::label_count(y_scale, y_range)));
+            } else {
+                mesh.y_labels(0);
+            }
+            mesh.draw()?;
+        }
+        if custom {
+            if mirror_top {
+                draw_ticks(
+                    canvas,
+                    PlotAxisSide::Top,
+                    &spec.top,
+                    &x2_ticks_px,
+                    frame,
+                    colors.ticks,
+                )?;
+            }
+            if mirror_right {
+                draw_ticks(
+                    canvas,
+                    PlotAxisSide::Right,
+                    &spec.right,
+                    &y2_ticks_px,
+                    frame,
+                    colors.ticks,
+                )?;
+            }
+        }
         if mirror_top {
-            mesh.x_label_formatter(shown_x(spec.top.tick_labels))
-                .x_labels(scale::label_count(x_scale, x_range));
-        } else {
-            mesh.x_labels(0);
+            draw_minor_ticks(
+                canvas,
+                PlotAxisSide::Top,
+                &spec.top,
+                &x2_minor_px,
+                frame,
+                colors.ticks,
+            )?;
         }
         if mirror_right {
-            mesh.y_label_formatter(shown_y(spec.right.tick_labels))
-                .y_labels(scale::label_count(y_scale, y_range));
-        } else {
-            mesh.y_labels(0);
+            draw_minor_ticks(
+                canvas,
+                PlotAxisSide::Right,
+                &spec.right,
+                &y2_minor_px,
+                frame,
+                colors.ticks,
+            )?;
         }
-        mesh.draw()?;
     }
 
     // Les axes d'un calque superposé : chacun dans une zone « axe seul » qui
@@ -2150,6 +2419,236 @@ fn font_style(
 const GRID_BOLD_OPACITY: f64 = 0.2;
 /// Opacité des lignes secondaires de la grille.
 const GRID_LIGHT_OPACITY: f64 = 0.1;
+
+/// Teinte sans effet : Plotters saute les tracés d'alpha nul (egui comme SVG).
+const NO_INK: RGBAColor = RGBAColor(0, 0, 0, 0.0);
+
+/// Les tirets de cet axe ne sont pas ceux de Plotters (#344) : coupés, d'un
+/// autre sens que vers l'extérieur, ou réglés dans « Avancé » (longueur,
+/// épaisseur, couleur). Le défaut reste celui de Plotters, pour que les
+/// figures existantes ne bougent pas d'un pixel.
+fn custom_ticks(axis: &AxisSpec) -> bool {
+    !axis.ticks
+        || axis.tick_direction != TickDirection::Out
+        || axis.tick_length.is_some()
+        || axis.tick_width.is_some()
+        || !axis.tick_mark_color.is_empty()
+}
+
+/// Une passe de `configure_mesh` / `configure_secondary_axes` sur un axe.
+///
+/// Plotters ne trace les tirets qu'avec la ligne d'axe, et place les nombres
+/// à deux fois la longueur des tirets : sans tirets, ils collent à la ligne.
+/// Un axe aux tirets maison passe donc en deux passes : les nombres seuls
+/// (ligne et tirets d'alpha nul, écart d'origine), puis la ligne seule
+/// (tirets de longueur nulle, nombres vides). Le pipeline trace ensuite les
+/// tirets ([`draw_ticks`]).
+#[derive(Debug, Clone, Copy)]
+struct MeshPass {
+    /// Grille et titre : une seule passe les trace.
+    rest: bool,
+    /// Les nombres sont écrits (sinon aucune graduation demandée).
+    labels: bool,
+    /// La ligne d'axe est tracée (sinon d'alpha nul).
+    line: bool,
+    /// Tirets de longueur nulle.
+    zero_ticks: bool,
+}
+
+impl MeshPass {
+    /// Nombre de graduations à demander : aucune dans la passe « ligne
+    /// seule », qui n'écrit rien (pas même un texte vide).
+    fn count(self, count: usize) -> usize {
+        if self.labels {
+            count
+        } else {
+            0
+        }
+    }
+}
+
+fn mesh_passes(custom: bool, labels: bool) -> Vec<MeshPass> {
+    match (custom, labels) {
+        (false, _) => vec![MeshPass {
+            rest: true,
+            labels: true,
+            line: true,
+            zero_ticks: false,
+        }],
+        (true, true) => vec![
+            MeshPass {
+                rest: true,
+                labels: true,
+                line: false,
+                zero_ticks: false,
+            },
+            MeshPass {
+                rest: false,
+                labels: false,
+                line: true,
+                zero_ticks: true,
+            },
+        ],
+        (true, false) => vec![MeshPass {
+            rest: true,
+            labels: false,
+            line: true,
+            zero_ticks: true,
+        }],
+    }
+}
+
+/// Longueur des tirets de Plotters : 5 % du plus petit côté de la zone de
+/// tracé, plafonnée à 5 px (`(5u32).percent().max(5)` : `max` borne par le
+/// haut, il ne garantit pas un minimum).
+fn tick_length(size: (u32, u32)) -> i32 {
+    ((f64::from(size.0.min(size.1)) * 0.05).round() as i32).min(5)
+}
+
+/// Plafond d'une longueur de tiret demandée à la main (#344) : une valeur venue
+/// d'un fichier ou d'un script peut valoir n'importe quoi (invariant 10).
+const MAX_TICK_LENGTH: f64 = 50.0;
+
+/// Les tirets d'un côté, réglages « Avancé » résolus (#344) : longueur en pixels,
+/// épaisseur et couleur. Le style n'est posé que par [`draw_marks`].
+#[derive(Clone, Copy)]
+struct MarkStyle {
+    len: i32,
+    width: u32,
+    color: (u8, u8, u8, u8),
+}
+
+impl MarkStyle {
+    /// Les grands tirets : la longueur demandée si elle est un nombre fini
+    /// (bornée à `0..=MAX_TICK_LENGTH`), sinon l'automatique.
+    fn major(axis: &AxisSpec, plot_size: (u32, u32), ink: (u8, u8, u8, u8)) -> Self {
+        let len = match axis.tick_length {
+            Some(len) if len.is_finite() => len.clamp(0.0, MAX_TICK_LENGTH).round() as i32,
+            _ => tick_length(plot_size),
+        };
+        Self::with_len(axis, len, ink)
+    }
+
+    /// Les petits tirets : la longueur demandée, sinon la moitié (arrondie au-dessus)
+    /// des grands tirets effectifs.
+    fn minor(axis: &AxisSpec, plot_size: (u32, u32), ink: (u8, u8, u8, u8)) -> Self {
+        let len = match axis.minor_tick_length {
+            Some(len) if len.is_finite() => len.clamp(0.0, MAX_TICK_LENGTH).round() as i32,
+            _ => (Self::major(axis, plot_size, ink).len + 1) / 2,
+        };
+        Self::with_len(axis, len, ink)
+    }
+
+    fn with_len(axis: &AxisSpec, len: i32, ink: (u8, u8, u8, u8)) -> Self {
+        Self {
+            len,
+            width: axis.tick_width.map_or(1, paint::stroke_width),
+            color: rgba_or(&axis.tick_mark_color, ink),
+        }
+    }
+}
+
+/// Trace les tirets d'un côté : un segment par graduation, de part et d'autre
+/// de la ligne d'axe selon [`TickDirection`]. Même géométrie que Plotters
+/// pour « vers l'extérieur » (la ligne est à un pixel de la zone de tracé).
+fn draw_ticks<DB: DrawingBackend>(
+    canvas: &DrawingArea<DB, Shift>,
+    side: PlotAxisSide,
+    axis: &AxisSpec,
+    positions: &[i32],
+    frame: ((i32, i32), (u32, u32)),
+    ink: (u8, u8, u8, u8),
+) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+    if !axis.ticks {
+        return Ok(());
+    }
+    draw_marks(
+        canvas,
+        side,
+        axis.tick_direction,
+        positions,
+        frame,
+        MarkStyle::major(axis, frame.1, ink),
+    )
+}
+
+/// Trace les sous-graduations d'un côté (#344) : moitié de la longueur des
+/// tirets principaux (arrondie au-dessus) sauf réglage « Avancé », même sens.
+/// Rien quand les sous-graduations sont éteintes.
+fn draw_minor_ticks<DB: DrawingBackend>(
+    canvas: &DrawingArea<DB, Shift>,
+    side: PlotAxisSide,
+    axis: &AxisSpec,
+    positions: &[i32],
+    frame: ((i32, i32), (u32, u32)),
+    ink: (u8, u8, u8, u8),
+) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+    if !axis.minor_ticks {
+        return Ok(());
+    }
+    draw_marks(
+        canvas,
+        side,
+        axis.tick_direction,
+        positions,
+        frame,
+        MarkStyle::minor(axis, frame.1, ink),
+    )
+}
+
+/// Un segment de longueur `style.len` par position, de part et d'autre de la
+/// ligne d'axe selon `direction`. Le seul endroit qui pose le style des tirets
+/// (invariant 5 : une seule écriture pour les deux backends).
+fn draw_marks<DB: DrawingBackend>(
+    canvas: &DrawingArea<DB, Shift>,
+    side: PlotAxisSide,
+    direction: TickDirection,
+    positions: &[i32],
+    frame: ((i32, i32), (u32, u32)),
+    style: MarkStyle,
+) -> Result<(), DrawingAreaErrorKind<DB::ErrorType>> {
+    let MarkStyle { len, width, color } = style;
+    if len == 0 {
+        return Ok(());
+    }
+    let ((x0, y0), size) = frame;
+    let (w, h) = (size.0 as i32, size.1 as i32);
+    // Sens du dehors sur la perpendiculaire, et pixel de la ligne.
+    let (outward, line) = match side {
+        PlotAxisSide::Left => (-1, x0 - 1),
+        PlotAxisSide::Right => (1, x0 + w),
+        PlotAxisSide::Top => (-1, y0 - 1),
+        PlotAxisSide::Bottom => (1, y0 + h),
+    };
+    let (from, to) = match direction {
+        TickDirection::Out => (0, outward * len),
+        TickDirection::In => (0, -outward * len),
+        TickDirection::Both => (-len, len),
+    };
+    let (low, high) = match side {
+        PlotAxisSide::Left | PlotAxisSide::Right => (y0, y0 + h - 1),
+        PlotAxisSide::Top | PlotAxisSide::Bottom => (x0, x0 + w - 1),
+    };
+    let horizontal_axis = matches!(side, PlotAxisSide::Top | PlotAxisSide::Bottom);
+    // « Both » est symétrique : `from` négatif suffit quel que soit le côté.
+    let (a, b) = (line + from, line + to);
+    for &p in positions.iter().filter(|&&p| p >= low && p <= high) {
+        let points = if horizontal_axis {
+            vec![(p, a), (p, b)]
+        } else {
+            vec![(a, p), (b, p)]
+        };
+        canvas.draw(&PathElement::new(
+            points,
+            ShapeStyle {
+                color: rgba(color).to_rgba(),
+                filled: false,
+                stroke_width: width,
+            },
+        ))?;
+    }
+    Ok(())
+}
 
 /// Couleurs effectives d'un axe : celles du spec, ou l'encre automatique
 /// quand elles sont vides.

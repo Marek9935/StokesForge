@@ -266,9 +266,12 @@ pub enum PlotEditKind {
     RemoveGroup,
     /// Un groupe de séries déplacé en bloc (#197).
     ReorderGroup,
+    /// Cadre fermé ou rouvert d'un calque : haut et droite en miroir, tirets
+    /// copiés (#344).
+    ClosedFrame,
 }
 impl PlotEditKind {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Visibility,
         Self::RenameSeries,
         Self::ReorderSeries,
@@ -280,6 +283,7 @@ impl PlotEditKind {
         Self::DissolveGroup,
         Self::RemoveGroup,
         Self::ReorderGroup,
+        Self::ClosedFrame,
     ];
 }
 impl std::fmt::Display for PlotEditKind {
@@ -296,6 +300,7 @@ impl std::fmt::Display for PlotEditKind {
             Self::DissolveGroup => "Ungroup Series",
             Self::RemoveGroup => "Delete Group",
             Self::ReorderGroup => "Reorder Group",
+            Self::ClosedFrame => "Change Closed Frame",
         })
     }
 }

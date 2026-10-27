@@ -347,12 +347,29 @@ remplace « Enregistré » et dit comment la relever.
 - Tout nouveau champ porte `#[serde(default)]`. Sans lui, le fichier de la
   veille devient illisible.
   Exemple : `AxisSpecRecord::mirror` / `tick_labels` (#176, ce dernier vrai par
-  défaut) ; les couleurs de texte (`PlotSpecRecord::title_color`,
+  défaut) ; `ticks` (#344, **vrai** par défaut, sinon un ancien fichier perdrait
+  ses tirets), `minor_ticks` (#344, faux si le champ manque : un ancien fichier n'a pas
+  de sous-graduations ; vrai pour un axe absent du fichier, comme un axe neuf),
+  `minor_tick_count` (`Option`, `None` = automatique) et `label_every` (1 par
+  défaut), `tick_length` / `minor_tick_length` / `tick_width` (`Option`,
+  `None` = automatique) et `tick_mark_color` (vide = couleur de l'échelle),
+  les réglages « Avancé » des tirets (#344 ; la valeur brute est gardée, le
+  rendu la borne), et `tick_direction` (`TickDirectionRecord`, valeur inconnue lue
+  `Out`, test `un_sens_de_tirets_inconnu_se_lit_vers_l_exterieur`) ; les couleurs de texte (`PlotSpecRecord::title_color`,
   `AxisSpecRecord::title_color`/`tick_color`) — un fichier plus ancien se
   relit avec des chaînes vides, c'est-à-dire en couleur automatique (test
   `un_spec_anterieur_aux_couleurs_de_texte_se_relit_en_automatique`). Ou
   `FileBody::saved_colors` (couleurs enregistrées du projet), placé avant
   `window_geometries` et `save_counter`, qui doit rester le dernier champ.
+- **Le sens d'un axe (#344) n'est pas normalisé par la persistance.**
+  `AxisSpecRecord::inverted` reste écrit tel quel, et `range_min` /
+  `range_max` aussi : le fichier rend ce qu'on lui a donné, octet pour octet
+  (témoin commun inchangé : `inverted` avec des bornes (-1, 10)). Le sens se
+  lit sur l'ordre des bornes (De > À = axe inversé) ; c'est `AxisSpec::orient`
+  qui ramène un axe à sa forme canonique, appelée **à l'ouverture** par la
+  session (`load_project`, projet pas encore installé : pas de commande, pas
+  d'historique) et par `pyst.set_graph` / `pyst.plot`. Le rendu d'un axe et
+  celui de son équivalent orienté sont identiques.
 - `tests/roundtrip.rs` vérifie l'aller-retour ; côté robustesse, `b2`
   (persistance), `b3` (fichiers malformés puis sémantiquement hostiles), `b13`
   (bornes d'un `PlotSpec` venu du disque), `b19` (fichier écrit par une version

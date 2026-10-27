@@ -638,3 +638,57 @@ fn a_handle_with_a_new_identity_cannot_write_into_anothers_macro() {
     let snapshot = session.handle().snapshot().unwrap();
     assert!(snapshot.history.undo_label.is_none(), "rien d'annulable");
 }
+
+/// #344 : un fichier qui porte `inverted` à côté de bornes croissantes
+/// s'ouvre avec ses bornes échangées, sans entrée d'historique ; le fichier
+/// lui-même n'est pas touché par la lecture.
+#[test]
+fn load_swaps_the_bounds_of_an_inverted_axis_without_history() {
+    use stokesforge_core::NodeKind;
+    use stokesforge_plot::{AxisSpec, PanelSpec, PlotSpec};
+
+    let (mut project, _sheet, _a) = fixture();
+    let root = project.root();
+    let axis = AxisSpec {
+        auto_range: false,
+        inverted: true,
+        range_min: Some(-1.0),
+        range_max: Some(10.0),
+        ..AxisSpec::default()
+    };
+    let panel = PanelSpec {
+        bottom: axis.clone(),
+        left: AxisSpec {
+            auto_range: false,
+            range_min: Some(4.0),
+            range_max: Some(2.0),
+            ..AxisSpec::default()
+        },
+        ..PanelSpec::default()
+    };
+    let graph = project
+        .add_graph(root, Some("Fig1"), PlotSpec::default().with_panels(panel))
+        .expect("graphe");
+    let dir = tempfile::tempdir().expect("répertoire temporaire");
+    let path = dir.path().join("sens.stf");
+    stokesforge_persistence::save(&project, &path).expect("sauvegarde");
+    let octets = std::fs::read(&path).expect("lecture");
+
+    let (vide, _, _) = fixture();
+    let session = Session::spawn(vide, None).expect("thread de l'acteur démarré");
+    let handle = session.handle();
+    handle.load(&path).expect("chargement réussi");
+    let snap = handle.snapshot().expect("snapshot");
+    let NodeKind::Graph { spec, .. } = snap.tree.node(graph).expect("graphe").kind() else {
+        panic!("un graphe");
+    };
+    let bas = &spec.panels[0].bottom;
+    assert!(bas.inverted);
+    assert_eq!((bas.range_min, bas.range_max), (Some(10.0), Some(-1.0)));
+    let gauche = &spec.panels[0].left;
+    assert!(gauche.inverted, "De > À lu comme un axe inversé");
+    assert_eq!((gauche.range_min, gauche.range_max), (Some(4.0), Some(2.0)));
+    assert!(!snap.history.can_undo && !snap.history.can_redo);
+    assert_eq!(std::fs::read(&path).expect("relecture"), octets);
+    session.shutdown().expect("arrêt propre");
+}

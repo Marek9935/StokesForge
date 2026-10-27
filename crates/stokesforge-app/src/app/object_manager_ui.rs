@@ -183,6 +183,7 @@ pub(super) fn analysis_sources(
 /// 2. organiser — Rename (courbe, groupe), Move Up/Down (courbe, groupe),
 ///    Ungroup (groupe), Hide (courbe), Bring to Front / Send to Back (objet),
 ///    Hide (texte, axe, groupe) ;
+///    Closed Frame (calque et groupe d'axes, bascule, #344) ;
 /// 3. supprimer — Delete (courbe, texte libre, objet), Delete Group (groupe
 ///    et ses séries) ;
 /// 4. `Properties…`, toujours en dernier.

@@ -745,6 +745,13 @@ pub enum Action {
         target: crate::object_manager::VisibilityTarget,
         visible: bool,
     },
+    /// Ferme ou rouvre le cadre d'un calque (#344) : une seule entrée
+    /// d'historique, que l'Annuler défait d'un bloc.
+    SetClosedFrame {
+        graph: NodeId,
+        panel: usize,
+        closed: bool,
+    },
     /// Retire un contenu du graphe par la même voie depuis menu et arbre.
     RemovePlotObject {
         graph: NodeId,
@@ -5133,6 +5140,16 @@ impl AppState {
                     }
                 }
             }
+            Action::SetClosedFrame {
+                graph,
+                panel,
+                closed,
+            } => self.edit_plot_object(graph, PlotEditKind::ClosedFrame, |spec| {
+                spec.panels.get_mut(panel).is_some_and(|panel| {
+                    panel.set_frame_closed(closed);
+                    true
+                })
+            }),
             Action::PlaceSeries {
                 graph,
                 source,

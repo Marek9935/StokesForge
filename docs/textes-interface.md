@@ -166,9 +166,9 @@ Avant de proposer un synonyme ou un terme neuf, relire § 4 Décisions : un term
 | Linear / Log scale | Linéaire / Échelle log | Les deux échelles actuelles (Log10) | Logarithmique | O |
 | Reciprocal† | Inverse | Échelle en 1/x (spectres en nombre d'onde) | Réciproque | O |
 | Range | Plage | Intervalle de valeurs montré sur l'axe | Bornes, Étendue | O |
-| Auto range | Plage auto | Plage calculée d'après les données | Bornes automatiques | O |
+| Auto range | Plage auto | Plage calculée d'après les données ; **plus de case** depuis #344 : De et À suivent les données tant qu'on n'a rien saisi, et le bouton « Auto » de la rangée les y ramène | Bornes automatiques | O |
 | Min / Max | Min / Max | Extrémités de la plage | De / À | O |
-| Reverse axis | Axe inversé | Valeurs décroissantes dans le sens de lecture | Axe retourné | O |
+| Reverse axis | Axe inversé | Valeurs décroissantes dans le sens de lecture ; **plus de case** depuis #344 : De > À inverse l'axe | Axe retourné | O |
 | Legend | Légende | Liste des séries avec leur style | — | G |
 | Legend entry | Entrée de légende | Une ligne de la légende | Libellé de légende | G |
 | Position | Position | Coin de la légende : Top left… ; Reset Position / Réinitialiser la position : remet un titre ou la légende à sa place par défaut | Emplacement | G |
@@ -381,6 +381,11 @@ partout, **sauf Q14 et Q22** où l'alternative l'emporte (marquées ✔).
 | Graph texts | Textes du graphique | Titres du graphique, des calques et des axes, et légende : jamais listés dans l'Object Manager (#214) : édition par double-clic ou dans les propriétés |
 | Show Axes | Afficher les axes | Les axes d'un calque (ligne, graduations, libellés), listés dans l'Object Manager si la bascule « Show Axes » est active (#111, #147) ; ce filtre ne modifie pas leur visibilité sur la figure ; une ligne « X (bottom) Axis » / « Axe X (bas) » par axe, dont Secondary X (top) / X secondaire (haut) |
 | Mirror axis | Axe miroir | Axe du haut ou de droite d'un calque ordinaire qui reprend l'échelle de celui du bas ou de gauche, sans titre (#176) |
+| Closed frame | Cadre fermé | Bascule d'un calque (`Action::SetClosedFrame`) : haut et droite en axes miroirs sans étiquettes de graduation, graduations copiées du bas et de gauche (#344). **Sans commande dans l'interface** depuis la page Axes allégée : les clés `action-closed-frame*` sont retirées |
+| Minor ticks | Sous-graduations | Petits tirets tracés entre les graduations principales d'un axe, dans le même sens ; leur nombre par intervalle (Auto ou 1 à 9) ; « Un nombre sur n » n'écrit qu'un nombre de graduation sur n (#344) |
+| Advanced | Avancé | Bloc repliable, fermé par défaut, au bas de la section Graduations d'un axe : longueur des grands et des petits tirets (px), épaisseur (pt), couleur ; tous Auto (S-L8, #344) |
+| Ticks (section) | Graduations | Section de la page d'un axe : tirets, sens, sous-graduations, bloc Avancé (#344) ; « Afficher les nombres » et « Un nombre sur » restent dans Affichage |
+| Tick direction | Sens des graduations | Vers l'extérieur (Outward), vers l'intérieur (Inward) ou des deux côtés (Both sides) de la ligne d'axe (#344) |
 | Axes | Axes | Le groupe qui réunit les quatre axes d'un calque dans l'Object Manager (#111, #147) |
 | Detach / Reattach | Détacher / Rattacher | Ouvrir une fenêtre système / replacer le panneau à son emplacement fixe (#100) |
 

@@ -21,7 +21,9 @@
 //! formulaire n'a pas à le régler.
 //!
 //! Pas de section repliable dans un formulaire (S-L5) : trop long, il passe en
-//! onglets (`tab_strip`). Les largeurs de champ sont celles de
+//! onglets (`tab_strip`). Seule exception, [`Form::collapsible`] (S-L8, #344) :
+//! un bloc « Avancé » fermé par défaut, pour des réglages qu'on ne touche
+//! presque jamais et dont le défaut est Auto. Les largeurs de champ sont celles de
 //! [`theme::FieldWidth`] (S-L2) ; les écarts, [`theme::SPACE_ITEM`] et
 //! [`theme::SPACE_SECTION`] (S-L4).
 
@@ -180,6 +182,78 @@ impl Form<'_> {
         });
         self.widest = widest;
         response
+    }
+
+    /// Un bloc repliable (S-L8, #344), **fermé par défaut** : une flèche et son
+    /// titre sur une rangée, puis les rangées de `add` — dans la même grille,
+    /// donc alignées sur les champs d'au-dessus — quand il est ouvert. Rend
+    /// `None` fermé. L'état ouvert/fermé vit dans la mémoire d'egui sous
+    /// `id_salt` : il se garde le temps de la session, jamais dans le fichier.
+    /// Réservé aux réglages « Avancé » dont tous les défauts sont Auto ; un
+    /// formulaire trop long passe toujours en onglets (S-L5).
+    pub(super) fn collapsible<R>(
+        &mut self,
+        id_salt: impl Hash + std::fmt::Debug,
+        title: impl Into<String>,
+        add: impl FnOnce(&mut Form<'_>) -> R,
+    ) -> Option<R> {
+        let id = self
+            .ui
+            .make_persistent_id(("stokesforge_form_fold", id_salt));
+        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+            self.ui.ctx(),
+            id,
+            false,
+        );
+        let title = title.into();
+        // Flèche et titre sont une seule zone cliquable, dans la colonne des
+        // libellés comme « Tick direction » : aucun espace mort entre eux, et
+        // le titre n'est pas sélectionnable (S-L8).
+        let (toggled, width) = self
+            .ui
+            .horizontal(|ui| {
+                let font = egui::TextStyle::Body.resolve(ui.style());
+                let galley = ui
+                    .painter()
+                    .layout_no_wrap(title, font, ui.visuals().text_color());
+                let icon = ui.spacing().icon_width;
+                let gap = ui.spacing().icon_spacing;
+                let size = egui::vec2(
+                    icon + gap + galley.size().x,
+                    galley.size().y.max(ui.spacing().interact_size.y),
+                );
+                let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+                let icon_rect = egui::Rect::from_center_size(
+                    egui::pos2(rect.left() + icon / 2.0, rect.center().y),
+                    egui::vec2(icon, icon),
+                );
+                let icon_response =
+                    ui.interact(icon_rect, response.id.with("icon"), egui::Sense::hover());
+                let openness = if state.is_open() { 1.0 } else { 0.0 };
+                egui::collapsing_header::paint_default_icon(ui, openness, &icon_response);
+                let color = if response.hovered() {
+                    ui.visuals().strong_text_color()
+                } else {
+                    ui.visuals().text_color()
+                };
+                ui.painter().galley(
+                    egui::pos2(
+                        rect.left() + icon + gap,
+                        rect.center().y - galley.size().y / 2.0,
+                    ),
+                    galley,
+                    color,
+                );
+                (response.clicked(), rect.width())
+            })
+            .inner;
+        self.widest = self.widest.max(width);
+        if toggled {
+            state.toggle(self.ui);
+        }
+        let open = state.is_open();
+        state.store(self.ui.ctx());
+        open.then(|| add(self))
     }
 
     /// Le retrait de la colonne des champs : la colonne des libellés et

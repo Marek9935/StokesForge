@@ -17,5 +17,6 @@ stokesforge-persistence = { version = "1.0.0", path = "../stokesforge-persistenc
 
 [dev-dependencies]
 stokesforge-arch-guard = { path = "../stokesforge-arch-guard" }
+stokesforge-plot = { path = "../stokesforge-plot" }
 tempfile = "3"
 toml = "0.8"

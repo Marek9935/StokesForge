@@ -11,7 +11,7 @@ use stokesforge_core::{
 use stokesforge_plot::{
     AnnotationSpec, AxisScale, AxisSpec, LegendPosition, LegendSpec, LineSpec, LineStyle,
     PanelSpec, PlotSpec, PlotType, SeriesAxis, SeriesSpec, ShapeKind, ShapeSpec, SymbolShape,
-    SymbolSpec,
+    SymbolSpec, TickDirection,
 };
 
 use stokesforge_import::recipe::ImportRecipe;
@@ -23,9 +23,9 @@ use crate::schema::{
     LineStyleRecord, NodeRecord, OverlaySpecRecord, PanelSpecRecord, PlotSpecRecord,
     PlotTypeRecord, RoleRecord, SavedColorsRecord, SavedGradientRecord, SeriesAxisRecord,
     SeriesSpecRecord, ShapeKindRecord, ShapeSpecRecord, SymbolShapeRecord, SymbolSpecRecord,
-    TextAlignRecord, TextAnchorRecord, TextFontRecord, TypeRecord, ValuesRecord,
-    WindowGeometryRecord, WindowModeRecord, WindowViewRecord, MIXED_TAG_EMPTY, MIXED_TAG_NUMBER,
-    MIXED_TAG_TEXT,
+    TextAlignRecord, TextAnchorRecord, TextFontRecord, TickDirectionRecord, TypeRecord,
+    ValuesRecord, WindowGeometryRecord, WindowModeRecord, WindowViewRecord, MIXED_TAG_EMPTY,
+    MIXED_TAG_NUMBER, MIXED_TAG_TEXT,
 };
 
 /// Borne haute d'une coordonnée (`row`/`column`) de panneau lue d'un fichier
@@ -402,6 +402,19 @@ impl From<&AxisSpec> for AxisSpecRecord {
             tick_color: value.tick_color.clone(),
             mirror: value.mirror,
             tick_labels: value.tick_labels,
+            ticks: value.ticks,
+            minor_ticks: value.minor_ticks,
+            minor_tick_count: value.minor_tick_count,
+            label_every: value.label_every,
+            tick_length: value.tick_length,
+            minor_tick_length: value.minor_tick_length,
+            tick_width: value.tick_width,
+            tick_mark_color: value.tick_mark_color.clone(),
+            tick_direction: match value.tick_direction {
+                TickDirection::Out => TickDirectionRecord::Out,
+                TickDirection::In => TickDirectionRecord::In,
+                TickDirection::Both => TickDirectionRecord::Both,
+            },
         }
     }
 }
@@ -425,6 +438,19 @@ impl From<AxisSpecRecord> for AxisSpec {
             tick_color: value.tick_color,
             mirror: value.mirror,
             tick_labels: value.tick_labels,
+            ticks: value.ticks,
+            minor_ticks: value.minor_ticks,
+            minor_tick_count: value.minor_tick_count,
+            label_every: value.label_every,
+            tick_length: value.tick_length,
+            minor_tick_length: value.minor_tick_length,
+            tick_width: value.tick_width,
+            tick_mark_color: value.tick_mark_color,
+            tick_direction: match value.tick_direction {
+                TickDirectionRecord::Out => TickDirection::Out,
+                TickDirectionRecord::In => TickDirection::In,
+                TickDirectionRecord::Both => TickDirection::Both,
+            },
         }
     }
 }

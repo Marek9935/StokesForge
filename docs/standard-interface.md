@@ -50,7 +50,7 @@ mécanique.
 | S-N8 | `grandeur-une-definition` | Une table unique des grandeurs donne bornes, pas, décimales, unité et valeurs proposées. |
 | S-N9 | `barres-outils-listes-editables` | Les listes éditables des barres d'outils (corps, épaisseur : choisir 12 ou taper 15) passent par la même brique. |
 | S-N10 | `unite-dans-le-libelle` | L'unité est dans le libellé (« Line width (pt) »), jamais en suffixe du champ. |
-| S-N11 | `champs-couples` | « de » ≤ « à » : la contrainte entre deux champs est refusée, sur le second ; exception : Min/Max d'un axe. |
+| S-N11 | `champs-couples` | « de » ≤ « à » : la contrainte entre deux champs est refusée, sur le second ; exception : De / À d'un axe (De > À est l'axe inversé). |
 | S-N12 | `aucun-slider` | Aucun slider : l'opacité est un champ, comme R, G et B. |
 | S-D1 | `chiffres-resultats-et-graduations` | Résultats et graduations : 3 chiffres significatifs, notation `e` hors de [1e−4, 1e6). |
 | S-D2 | `chiffres-grille-et-champs` | Grille et champs : 6 chiffres significatifs ; en édition, la valeur complète. |
@@ -98,9 +98,10 @@ mécanique.
 | S-L2 | `quatre-largeurs-de-champ` | Quatre largeurs de champ nommées dans `theme.rs` : quelques chiffres, courte, moyenne, pleine. |
 | S-L3 | `titre-de-section-entre-blocs` | Un titre de section entre deux blocs, jamais un trait seul. |
 | S-L4 | `deux-espacements` | Deux constantes d'espacement dans `theme.rs` ; aucun `add_space` numérique ailleurs. |
-| S-L5 | `pas-de-section-repliable` | Pas de section repliable dans un formulaire ; trop long, on passe en onglets. |
+| S-L5 | `pas-de-section-repliable` | Pas de section repliable dans un formulaire ; trop long, on passe en onglets. Seule exception : le bloc « Avancé » (S-L8). |
 | S-L6 | `trois-niveaux-de-texte` | Trois niveaux de texte nommés dans `theme.rs` : titre de section, en-tête de tableau, texte secondaire ; jamais `bold(…).small()` écrit sur place. |
 | S-L7 | `hauteur-de-ligne-unique` | Une ligne de liste ou d'arbre a une seule hauteur, `LIST_ROW_HEIGHT`, composée ou non. |
+| S-L8 | `bloc-avance-replie` | Les réglages qu'on ne touche presque jamais, tous Auto par défaut, vont dans un bloc repliable « Avancé », fermé par défaut, au bas de leur section ; jamais de réglage courant ni sans Auto. |
 | S-K1 | `registre-des-touches` | Toutes les touches sont dans le registre de `app/shortcuts.rs` ; aucun `consume_key` ailleurs. |
 | S-K2 | `suppr-immediat-annulable` | Suppr supprime la sélection tout de suite, annulable, partout (la grille vide d'abord). |
 | S-K3 | `double-clic-par-sorte` | Double-clic : texte ou nom → édition sur place ; objet → Properties ; fond vide d'un graphe → vue réinitialisée ; Project Manager → active la fenêtre, ne la ferme jamais, et replie un dossier. |
@@ -224,8 +225,8 @@ proposées). Une grandeur neuve s'ajoute à la table, jamais à l'appel ; les 28
 - **Aucun slider** (S-N12 → S-R16) : l'opacité est un champ, comme R, G et B.
 - **Champs couplés** (S-N11, en place, #240) : « de » ≤ « à » (plages de
   l'analyse, `analysis_forms::flag_pair_refusal`), erreur sur le **second** champ.
-  **Exception : Min/Max d'un axe** — un axe peut être inversé (cm⁻¹), aucune
-  contrainte, aucune erreur. Une contrainte entre deux champs est refusée ; seule une
+  **Exception : De / À d'un axe** — un axe peut être inversé (cm⁻¹), aucune
+  contrainte, aucune erreur : De > À *est* l'axe inversé (#344). Une contrainte entre deux champs est refusée ; seule une
   borne fixe est ramenée.
 
 Historique : #220 (brique), #233–#235 (molette, aspect d'un champ à liste), #240 (S-N9, S-N11).
@@ -243,10 +244,14 @@ a son entrée « Auto » (liste éditable, S-C4).
 - Choix dans une liste : entrée « Auto » en tête.
 - Nombre ou texte qui a un Auto : champ vidé = Auto, affiché « Auto (0–4000) »
   en gris (valeur calculée). Nombre **sans** Auto : champ vidé refusé.
-- Groupe lié (Min/Max d'axe) : une case « Auto range » commune ; vider Min ou
-  Max est refusé (cadre rouge, bulle « Use Auto range »). Sous « Auto range »,
-  Min et Max sont **grisés** et montrent les bornes **calculées** ; décocher
-  les reprend comme valeurs.
+- Groupe lié (De / À d'un axe, #344) : plus de case « Auto range » ; De et À
+  sont **toujours éditables**. Tant que rien n'a été saisi, ils montrent les
+  bornes **calculées** au tracé, dans l'ordre d'affichage (un axe inversé
+  montre sa borne haute en De) ; saisir l'une **fige les deux** (l'autre est
+  prise du calcul) et le sens de l'axe suit l'ordre (De > À = inversé, plus de
+  case « Axe inversé »). Le bouton « Auto » de la rangée (ou le mot `auto`
+  tapé) rend les deux bornes aux données et **garde le sens**. Vider De ou À est
+  refusé (cadre rouge, bulle « Type Auto to follow the data »).
 - Le mot `auto` tapé au clavier est accepté par un champ dont la grandeur a
   un Auto (Auto du groupe compris), et aucun autre texte ; ailleurs, c'est une
   saisie illisible. Les nombres facultatifs de l'analyse (paramètres
@@ -626,7 +631,7 @@ Historique : #229.
 - **Undo/Redo** (S-G3) : grisés, « Nothing to undo » ; actifs, « Undo Rename »
   (libellé d'historique).
 - **Champ qui dépend d'une case** (S-G4) : grisé, valeur visible et conservée ;
-  masqué seulement si toute la section perd son sens (Min/Max : voir Auto).
+  masqué seulement si toute la section perd son sens (De / À d'un axe : voir Auto).
 
 Historique : #226.
 
@@ -648,6 +653,13 @@ Historique : #226.
 - **Deux constantes d'espacement** dans `theme.rs`, aucun `add_space`
   numérique ailleurs (S-L4).
 - **Pas de section repliable** dans un formulaire ; trop long → onglets (S-L5).
+  Une seule exception, le bloc **« Avancé »** (S-L8, #344, `Form::collapsible`) :
+  fermé par défaut, au bas de sa section, pour des réglages tous Auto par
+  défaut (longueur, épaisseur et couleur des tirets de graduation) ; sa flèche
+  et son titre forment une seule zone cliquable, sans espace mort, dans la
+  colonne des libellés (comme « Tick direction »), le titre n'étant pas
+  sélectionnable ; ses champs restent alignés sur la
+  grille ; l'état ouvert/fermé n'est gardé que le temps de la session.
 - **Trois niveaux de texte** (S-L6, #170) : `theme::section_heading` (titre de
   section, gras), `theme::table_header` (en-tête de colonne d'un tableau, gras
   en petit corps), `theme::secondary_text` (atténué, petit corps). Garde

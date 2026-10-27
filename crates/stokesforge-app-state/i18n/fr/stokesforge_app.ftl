@@ -764,20 +764,34 @@ plot-axes-scale-section = Échelle
 plot-axes-log-scale =
     Échelle log
     .hint = Logarithme en base 10
-plot-axes-reverse =
-    Axe inversé
-    .hint = Les valeurs décroissent dans le sens de lecture
-plot-axes-auto-range =
-    Plage auto
-    .hint = Calculée d'après les données
-    .disabled = Décochez Plage auto pour fixer les bornes
 plot-axes-from = De
+plot-axes-from-auto = Auto
+    .hint = Les bornes suivent de nouveau les données. L'axe garde son sens
+    .disabled = Les bornes suivent déjà les données
 plot-axes-display-section = Affichage
 plot-axes-decimal-comma = Virgule décimale sur les graduations
     .hint = Écrit 1,5 au lieu de 1.5 sur tous les axes de ce graphe, à l'écran et dans les exports
 plot-axes-show-axis = Afficher l'axe
 plot-axes-show-gridlines = Afficher le quadrillage
 plot-axes-show-tick-labels = Afficher les étiquettes de graduation
+plot-axes-show-ticks = Afficher les graduations
+plot-axes-show-minor-ticks = Afficher les sous-graduations
+plot-axes-minor-tick-count = Sous-graduations par intervalle
+    .auto = Auto
+    .hint = Nombre de petits tirets entre deux graduations principales. Vide = Auto. Sans effet en échelle logarithmique, qui montre toujours 2 à 9
+plot-axes-ticks-section = Graduations
+plot-axes-advanced = Avancé
+plot-axes-tick-length = Longueur des grands tirets (px)
+plot-axes-minor-tick-length = Longueur des petits tirets (px)
+plot-axes-tick-width = Épaisseur des tirets (pt)
+plot-axes-tick-mark-color = Couleur des tirets
+    .auto = Auto (couleur de l'axe)
+plot-axes-label-every = Un nombre sur
+    .hint = N'écrit qu'un nombre sur ce nombre, en commençant par le premier. 1 les écrit tous
+plot-axes-tick-direction = Sens des graduations
+plot-axes-tick-out = Vers l'extérieur
+plot-axes-tick-in = Vers l'intérieur
+plot-axes-tick-both = Des deux côtés
 plot-axes-show-mirror = Afficher l'axe miroir
 plot-axes-mirror-note = Reprend l'échelle de l'axe opposé (bas ou gauche), sans titre
 plot-axes-color = Couleur de l'axe
@@ -1165,6 +1179,7 @@ history-plot-rename-group = Renommer le groupe
 history-plot-dissolve-group = Dissoudre le groupe
 history-plot-remove-group = Supprimer le groupe
 history-plot-reorder-group = Réordonner le groupe
+history-plot-closed-frame = Modifier le cadre fermé
 
 # Panneaux fixes et fenêtres détachées (#100)
 panel-expand = Déployer le panneau
@@ -1679,7 +1694,7 @@ field-clamped-min = Ramené au minimum, { $limit }
 field-clamped-max = Ramené au maximum, { $limit }
 field-refused-number = Saisissez un nombre
 field-refused-integer = Saisissez un nombre entier
-field-refused-use-auto = Utilisez Plage auto
+field-refused-use-auto = Tapez Auto pour suivre les données
 field-refused-name-empty = Le nom ne peut pas être vide
 field-refused-name-taken = Ce nom est déjà utilisé
 
@@ -1717,6 +1732,8 @@ disabled-script-not-running = Aucun script en cours
 disabled-color-invalid = Saisissez d'abord une couleur valide
 disabled-gradient-min-colors = Un dégradé a besoin d'au moins deux couleurs
 disabled-mirror-off = Activez d'abord l'axe miroir
+disabled-ticks-off = Affichez d'abord les graduations
+disabled-minor-ticks-off = Affichez d'abord les sous-graduations
 disabled-analysis-issues = Corrigez d'abord le problème signalé dans le formulaire
 
 ## Aide › Raccourcis clavier (#231, S-K5). Les listes sont générées du registre

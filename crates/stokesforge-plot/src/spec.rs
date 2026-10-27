@@ -206,6 +206,22 @@ impl PlotSpec {
             .saturating_add(1)
     }
 
+    /// Ramène chaque axe de chaque panneau à sa forme canonique
+    /// ([`AxisSpec::orient`]). À l'ouverture d'un fichier et après un script ;
+    /// le rendu d'un spec orienté est celui du spec d'origine.
+    pub fn orient_axes(&mut self) {
+        for panel in self.panels.iter_mut() {
+            for axis in [
+                &mut panel.bottom,
+                &mut panel.left,
+                &mut panel.right,
+                &mut panel.top,
+            ] {
+                *axis = axis.orient();
+            }
+        }
+    }
+
     /// Toutes les séries du graphe, avec leur adresse, panneau par panneau.
     pub fn iter_series(&self) -> impl Iterator<Item = (SeriesRef, &SeriesSpec)> {
         self.panels.iter().enumerate().flat_map(|(panel, spec)| {

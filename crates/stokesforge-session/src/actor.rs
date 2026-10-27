@@ -7,7 +7,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
 use stokesforge_commands::{Command, CommandError, CommandResult, History, MacroKind};
-use stokesforge_core::{NodeId, Project};
+use stokesforge_core::{NodeId, NodeKind, Project};
 
 use crate::error::{SessionError, SessionResult};
 use crate::gauge::{RecalcEnd, RecalcGauge};
@@ -609,7 +609,8 @@ fn load_project(
     if history.in_macro() {
         return Err(SessionError::Command(CommandError::MacroOpen("load")));
     }
-    let (loaded, view, report) = stokesforge_persistence::load_with_limits(path, limits)?;
+    let (mut loaded, view, report) = stokesforge_persistence::load_with_limits(path, limits)?;
+    orient_graphs(&mut loaded);
     *project = loaded;
     *geometries = view.window_geometries;
     *column_widths = view.column_widths;
@@ -619,6 +620,26 @@ fn load_project(
     // `unwrap`/`expect`, bannis hors tests.
     let _ = history.clear();
     Ok(report)
+}
+
+/// Ramène les axes de chaque graphe d'un projet qui vient d'être lu à leur
+/// forme canonique (#344) : le sens se lit sur l'ordre des bornes, un fichier
+/// qui portait `inverted` à côté de bornes croissantes les reçoit échangées
+/// (`AxisSpec::orient`). Le rendu ne change pas. Le projet n'est pas encore
+/// installé et personne n'en détient une copie : pas de commande ni
+/// d'historique (invariant 1), et la persistance ne normalise rien.
+fn orient_graphs(project: &mut Project) {
+    for id in project.tree().walk_all() {
+        let Some(NodeKind::Graph { spec, .. }) = project.tree().node(id).map(|n| n.kind()) else {
+            continue;
+        };
+        let mut oriented = spec.clone();
+        oriented.orient_axes();
+        if oriented != *spec {
+            // `id` est un graphe : `set_plot_spec` ne peut pas refuser.
+            let _ = project.set_plot_spec(id, oriented);
+        }
+    }
 }
 
 /// Retire de `geometries` toute entrée dont le `NodeId` n'existe plus dans

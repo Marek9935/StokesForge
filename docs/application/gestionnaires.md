@@ -168,8 +168,18 @@ droite quand aucune série n'y est rattachée, elle commande `AxisSpec::mirror`
 occupe ce côté (`AxisRef::blocked`). La case du groupe
 « Axes » commande ses axes et reste mixte tant qu'un miroir est décoché ; ses
 Propriétés ouvrent l'onglet Axes (pages Haut et Droite : `mirror_axis_editor`,
-« afficher l'axe miroir » et « afficher les étiquettes de graduation », ni
-titre ni couleur). Un **calque superposé** (#171)
+« afficher l'axe miroir », « afficher les étiquettes de graduation », « afficher
+les graduations », leur sens, les sous-graduations et le bloc « Avancé » des
+tirets, ni titre ni couleur d'axe). **Cadre fermé** (#344) :
+`PanelSpec::frame_closed` / `set_frame_closed`, `Action::SetClosedFrame`, motif
+d'historique `PlotEditKind::ClosedFrame` (**une** entrée annulable) existent
+toujours, mais **plus aucune commande de l'interface** ne les déclenche (ni le
+menu du calque, ni la page Axes : un axe se règle par lui-même, miroirs
+compris). Mise à jour de l'état seule : le retrait de l'action et de son motif
+d'historique est différé (É5, `state.rs`). `set_frame_closed` met le haut, et la
+droite tant qu'aucune série n'y est rattachée, en miroir sans nombres et copie
+**une fois** présence, sens et sous-graduations des graduations du bas et de gauche ; elle est
+sans effet sur un calque superposé. Un **calque superposé** (#171)
 ne liste que les axes qu'il affiche (`object_manager::axis_sides`) : son axe X
 nommé « X (haut) » si `x_top`, son axe Y nommé « Y (droite) » si `y_right`,
 chacun commandant l'`AxisSpec` `bottom` / `left` qui le porte ; ses lignes
