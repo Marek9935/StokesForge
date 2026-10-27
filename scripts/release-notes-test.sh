@@ -9,6 +9,10 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/crates/a" "$tmp/crates/b"
 printf '[package]\nname = "a"\nversion = "1.2.3"\n' > "$tmp/crates/a/Cargo.toml"
 printf '[package]\nname = "b"\nversion = "1.2.3"\n' > "$tmp/crates/b/Cargo.toml"
+pers="$tmp/crates/stokesforge-persistence"
+mkdir -p "$pers/src" "$pers/tests/temoins/v1"
+printf 'pub(crate) const FORMAT_VERSION: u32 = 1;\n' > "$pers/src/schema.rs"
+: > "$pers/tests/temoins/v1/projet.stf"
 
 fail=0
 attend() { # attend <code> <description> <tag>
@@ -63,6 +67,39 @@ printf '[package]\nname = "b"\nversion = "1.2.3"\nversion = "1.2.3"\n' > "$tmp/c
 aligne 1 "deux lignes version"
 grep -q "plusieurs" "$tmp/err" || { echo "ECHEC : message « plusieurs » absent" >&2; fail=1; }
 printf '[package]\nname = "b"\nversion = "1.2.3"\n' > "$tmp/crates/b/Cargo.toml"
+
+# Dépendances internes (#353).
+B_OK='[package]\nname = "b"\nversion = "1.2.3"\n'
+printf "$B_OK"'[dependencies]\na = { version = "1.2.2", path = "../a" }\n' > "$tmp/crates/b/Cargo.toml"
+aligne 0 "dépendance non interne ignorée"
+printf "$B_OK"'[dependencies]\nstokesforge-a = { version = "1.2.2", path = "../a" }\n' > "$tmp/crates/b/Cargo.toml"
+aligne 1 "dépendance interne désalignée"
+grep -q "b : dépendance stokesforge-a en 1.2.2" "$tmp/err" || { echo "ECHEC : message de dépendance désalignée absent" >&2; fail=1; }
+printf "$B_OK"'[target.'"'"'cfg(unix)'"'"'.dev-dependencies]\nstokesforge-a = { version = "1.2.2", path = "../a", optional = true }\n' > "$tmp/crates/b/Cargo.toml"
+aligne 1 "dépendance interne désalignée en target dev-dependencies"
+printf "$B_OK"'[dependencies]\nstokesforge-a = { version = "1.2.3", path = "../a" }\n' > "$tmp/crates/b/Cargo.toml"
+aligne 0 "dépendance interne alignée"
+printf "$B_OK"'[dependencies]\nstokesforge-a = { path = "../a" }\n' > "$tmp/crates/b/Cargo.toml"
+aligne 0 "dépendance interne par chemin seul"
+printf "$B_OK"'[dependencies.stokesforge-a]\nversion = "1.2.3"\npath = "../a"\n' > "$tmp/crates/b/Cargo.toml"
+aligne 1 "dépendance interne en table refusée"
+grep -q "forme non lue" "$tmp/err" || { echo "ECHEC : message « forme non lue » absent" >&2; fail=1; }
+printf "$B_OK"'[dependencies]\nx = { package = "stokesforge-a", version = "1.2.3", path = "../a" }\n' > "$tmp/crates/b/Cargo.toml"
+aligne 1 "dépendance interne renommée refusée"
+printf "$B_OK" > "$tmp/crates/b/Cargo.toml"
+
+# Version de format et témoin (#353).
+printf 'pub const FORMAT_VERSION: u32 = 2;\n' > "$pers/src/schema.rs"
+aligne 1 "FORMAT_VERSION = 2 sans témoin v2"
+grep -q "FORMAT_VERSION = 2" "$tmp/err" || { echo "ECHEC : message de témoin absent" >&2; fail=1; }
+mkdir "$pers/tests/temoins/v2"
+aligne 1 "dossier v2 vide, sans projet.stf"
+: > "$pers/tests/temoins/v2/projet.stf"
+aligne 0 "FORMAT_VERSION = 2 avec témoin v2"
+printf '// rien\n' > "$pers/src/schema.rs"
+aligne 1 "FORMAT_VERSION introuvable"
+grep -q "FORMAT_VERSION introuvable" "$tmp/err" || { echo "ECHEC : message « introuvable » absent" >&2; fail=1; }
+printf 'pub(crate) const FORMAT_VERSION: u32 = 1;\n' > "$pers/src/schema.rs"
 
 # versions-alignees.sh seul : ni tag ni CHANGELOG lus.
 aligne 0 "crates alignés, sans argument"
