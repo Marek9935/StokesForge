@@ -9,6 +9,10 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/crates/a" "$tmp/crates/b"
 printf '[package]\nname = "a"\nversion = "1.2.3"\n' > "$tmp/crates/a/Cargo.toml"
 printf '[package]\nname = "b"\nversion = "1.2.3"\n' > "$tmp/crates/b/Cargo.toml"
+lock() { # lock <version de a> <version de b>
+    printf '[[package]]\nname = "a"\nversion = "%s"\n\n[[package]]\nname = "b"\nversion = "%s"\n' "$1" "$2" > "$tmp/Cargo.lock"
+}
+lock 1.2.3 1.2.3
 pers="$tmp/crates/stokesforge-persistence"
 mkdir -p "$pers/src" "$pers/tests/temoins/v1"
 printf 'pub(crate) const FORMAT_VERSION: u32 = 1;\n' > "$pers/src/schema.rs"
@@ -101,6 +105,16 @@ aligne 1 "FORMAT_VERSION introuvable"
 grep -q "FORMAT_VERSION introuvable" "$tmp/err" || { echo "ECHEC : message « introuvable » absent" >&2; fail=1; }
 printf 'pub(crate) const FORMAT_VERSION: u32 = 1;\n' > "$pers/src/schema.rs"
 
+# Cargo.lock (#351).
+lock 1.2.3 1.2.2
+aligne 1 "Cargo.lock en retard pour b"
+grep -q "cargo update --workspace" "$tmp/err" || { echo "ECHEC : message « cargo update » absent" >&2; fail=1; }
+lock 1.2.3 1.2.3
+rm "$tmp/Cargo.lock"
+aligne 1 "Cargo.lock absent"
+grep -q "Cargo.lock absent" "$tmp/err" || { echo "ECHEC : message « Cargo.lock absent » absent" >&2; fail=1; }
+lock 1.2.3 1.2.3
+
 # versions-alignees.sh seul : ni tag ni CHANGELOG lus.
 aligne 0 "crates alignés, sans argument"
 aligne 0 "crates alignés, bon argument" 1.2.3
@@ -123,6 +137,7 @@ mv "$tmp/crates.off" "$tmp/crates"
 # Argument 1.2.3 alors que les crates sont en 1.2.4.
 printf '[package]\nname = "a"\nversion = "1.2.4"\n' > "$tmp/crates/a/Cargo.toml"
 printf '[package]\nname = "b"\nversion = "1.2.4"\n' > "$tmp/crates/b/Cargo.toml"
+lock 1.2.4 1.2.4
 aligne 1 "crates en 1.2.4, argument 1.2.3" 1.2.3
 aligne 0 "crates en 1.2.4 alignés" 
 

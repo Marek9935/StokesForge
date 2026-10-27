@@ -14,6 +14,8 @@
 # la même version (path seul permis ; table [dependencies.stokesforge-x] et
 # `package = "stokesforge-…"` refusés, non lus), et FORMAT_VERSION de
 # stokesforge-persistence exige le témoin tests/temoins/vN/projet.stf (#353).
+# Cargo.lock doit porter chaque crate du workspace à la même version (#351) :
+# refus (code 1) si le verrou est absent ou en retard (`cargo update --workspace`).
 # Appelé par le travail `fmt` (GitHub et GitLab) et par scripts/release-notes.sh.
 # STOKESFORGE_REPO_ROOT (essais) remplace la racine du dépôt.
 set -euo pipefail
@@ -137,6 +139,29 @@ else
         echo "[versions] ERREUR : FORMAT_VERSION = $fv sans témoin $temoin (invariant 12, docs/persistance.md)" >&2
         bad=1
     fi
+fi
+
+# Cargo.lock : l'entrée de chaque crate du workspace porte la version de
+# référence. Un `cargo update --workspace` oublié après un changement de version
+# (règle #333) laisse l'ancienne version dans le verrou (#351), sans cargo.
+LOCK="$REPO_ROOT/Cargo.lock"
+if [ ! -f "$LOCK" ]; then
+    echo "[versions] ERREUR : Cargo.lock absent ($LOCK), versionné pour des constructions reproductibles" >&2
+    bad=1
+else
+    for name in "${names[@]}"; do
+        locked="$(awk -v n="$name" '
+            $0 == "name = \"" n "\"" { want = 1; next }
+            want && /^version = "/ { v = $0; sub(/^version = "/, "", v); sub(/".*$/, "", v); print v; exit }
+            /^\[\[package\]\]/ { want = 0 }' "$LOCK")"
+        if [ -z "$locked" ]; then
+            echo "[versions] ERREUR : $name absent de Cargo.lock : lancer « cargo update --workspace »" >&2
+            bad=1
+        elif [ "$locked" != "$reference" ]; then
+            echo "[versions] ERREUR : Cargo.lock porte $name en $locked, attendu $reference : lancer « cargo update --workspace »" >&2
+            bad=1
+        fi
+    done
 fi
 
 [ "$bad" = 0 ] || exit 1

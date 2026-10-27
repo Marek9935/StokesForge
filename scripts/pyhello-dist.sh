@@ -28,7 +28,7 @@ export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/lib'
 
 echo "[dist] construction release de stokesforge-pyhello"
 cd "$REPO_ROOT"
-cargo build -p stokesforge-python --features python --release --bin stokesforge-pyhello
+cargo build --locked -p stokesforge-python --features python --release --bin stokesforge-pyhello
 
 # --- 2. Assemblage ----------------------------------------------------------
 echo "[dist] assemblage de $DIST"
