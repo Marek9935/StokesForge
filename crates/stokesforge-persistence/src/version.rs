@@ -5,7 +5,7 @@
 //! (retrait, renommage, changement de sens d'un champ), `FORMAT_VERSION`
 //! monte, le type de l'ancienne version est copié ici (`schema/v1.rs`…) et
 //! son bras du `match` le migre vers le `FileBody` courant. `docs/persistance.md`,
-//! « Règle de version », dit quand monter le numéro et quand rester additif.
+//! « Version rule », dit quand monter le numéro et quand rester additif.
 
 use crate::schema::{FileBody, FORMAT_VERSION, MAGIC};
 

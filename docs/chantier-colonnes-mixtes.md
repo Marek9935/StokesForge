@@ -1,182 +1,182 @@
-# Chantier « colonnes à types mixtes » — note de passation
+# Work package "mixed-type columns" — handover note
 
-**Ce document n'est pas une page de référence.** Contrairement au reste de
-`docs/`, qui décrit le code tel qu'il est, celui-ci décrit un *chantier* : ce
-qu'il visait, ce qu'il a trouvé en chemin, et ce qu'il laisse ouvert. Il a une
-durée de vie limitée — quand la colonne « reste à faire » sera vide, il rejoint
+**This document is not a reference page.** Unlike the rest of
+`docs/`, which describes the code as it is, this one describes a *work package*: what
+it aimed at, what it found along the way, and what it leaves open. It has a limited
+lifetime — when the "remaining" column is empty, it moves to
 `docs/archive/`.
 
-Le *quoi* et le *pourquoi* du résultat, eux, vivent dans les pages normales :
-[`modele-de-donnees.md`](modele-de-donnees.md) (le type et ses règles),
-[`persistance.md`](persistance.md) (le format et la compatibilité),
-[`commandes-et-historique.md`](commandes-et-historique.md) (les deux écritures
-de cellules), [`application/grille.md`](application/grille.md) (la saisie).
+The *what* and the *why* of the result live in the normal pages:
+[`modele-de-donnees.md`](modele-de-donnees.md) (the type and its rules),
+[`persistance.md`](persistance.md) (the format and compatibility),
+[`commandes-et-historique.md`](commandes-et-historique.md) (the two cell
+writes), [`application/grille.md`](application/grille.md) (input).
 
-## L'objectif
+## The goal
 
-Une colonne avait un type unique pour toute sa longueur : `Numeric`,
-`DateTime` ou `Text`. Le but du chantier : **qu'une même colonne porte du texte
-et des nombres selon les lignes**.
+A column had a single type for its whole length: `Numeric`,
+`DateTime` or `Text`. The goal of the work package: **that a single column holds text
+and numbers depending on the row**.
 
-Le besoin vient d'un import réel. Une colonne de mesures qui porte
-`1,2 / 1,3 / n/a / 1,5` n'avait que deux issues, mauvaises toutes les deux :
+The need comes from a real import. A column of measurements holding
+`1,2 / 1,3 / n/a / 1,5` had only two outcomes, both bad:
 
-- **tout en nombres** — le `n/a` devient un `NaN`, indiscernable d'une mesure
-  simplement absente ; l'information « l'instrument a répondu *n/a* ici » est
-  perdue à la lecture du fichier, définitivement ;
-- **tout en texte** — rien ne se trace plus, et les 999 autres lignes paient
-  pour la première.
+- **all numbers** — the `n/a` becomes a `NaN`, indistinguishable from a measurement
+  that is simply missing; the information "the instrument answered *n/a* here" is
+  lost when the file is read, for good;
+- **all text** — nothing can be plotted anymore, and the other 999 rows pay
+  for the first one.
 
-La contrainte qui a guidé la conception : **minimiser la casse**. Le format
-`.stf` déjà écrit, les commandes existantes, le rendu qui suppose une colonne
-homogène, et la vue numpy sans copie du pont Python devaient tous survivre.
+The constraint that guided the design: **minimize breakage**. The `.stf`
+format already written, the existing commands, the rendering that assumes a homogeneous column,
+and the zero-copy numpy view of the Python bridge all had to survive.
 
-## Ce qui est en place
+## What is in place
 
-| Crate | Ce qui a changé |
+| Crate | What changed |
 |---|---|
-| `stokesforge-core` | `ColumnType::Mixed`, `MixedCell { Empty, Number, Text }`, `ColumnValues::Mixed`, `ValueBlock::Mixed`, les six mutateurs, les conversions dans les deux sens, `Column::cell`, `Column::numeric_view`, `ColumnValues::number_at` ; `accepts_child` corrigé (voir les bugs) |
-| `stokesforge-commands` | `Command::SetCellsPromoting` et ses trois chemins ; `check_writable_cells`/`write_cells` factorisés ; empreinte mémoire d'un buffer mixte |
-| `stokesforge-persistence` | `TypeRecord::Mixed`, `ValuesRecord::Mixed` en trois tableaux parallèles, et les deux erreurs de cohérence qui vont avec |
-| `stokesforge-session` | `write_formula_column` conforme son bloc au type de la colonne |
-| `stokesforge-app` | saisie tolérante, affichage d'une cellule mixte, collage TSV, suffixe de type |
-| `stokesforge-script` | messages d'erreur qui nomment le vrai type |
-| `stokesforge-render` | **rien** — c'est le résultat, pas un oubli |
+| `stokesforge-core` | `ColumnType::Mixed`, `MixedCell { Empty, Number, Text }`, `ColumnValues::Mixed`, `ValueBlock::Mixed`, the six mutators, the conversions in both directions, `Column::cell`, `Column::numeric_view`, `ColumnValues::number_at`; `accepts_child` fixed (see the bugs) |
+| `stokesforge-commands` | `Command::SetCellsPromoting` and its three paths; `check_writable_cells`/`write_cells` factored out; memory footprint of a mixed buffer |
+| `stokesforge-persistence` | `TypeRecord::Mixed`, `ValuesRecord::Mixed` as three parallel arrays, and the two consistency errors that go with them |
+| `stokesforge-session` | `write_formula_column` conforms its block to the column's type |
+| `stokesforge-app` | tolerant input, display of a mixed cell, TSV paste, type suffix |
+| `stokesforge-script` | error messages that name the real type |
+| `stokesforge-render` | **nothing** — that is the result, not an oversight |
 
-Le fait que `stokesforge-render` soit vide dans ce tableau est la propriété qui
-compte : la traduction « cellule mixte → `f64` traçable » a lieu une fois, dans
-`Column::numeric_view`, et le pipeline — donc les deux backends — n'a rien
-appris de nouveau (invariant 5).
+The fact that `stokesforge-render` is empty in this table is the property that
+matters: the translation "mixed cell → plottable `f64`" happens once, in
+`Column::numeric_view`, and the pipeline — hence both backends — learned nothing
+new (invariant 5).
 
-## Les bugs rencontrés en chemin
+## The bugs met along the way
 
-Trois, dont un sérieux. Aucun n'était causé par ce chantier ; les trois étaient
-là avant, et c'est le chantier qui les a mis en lumière.
+Three, one of them serious. None was caused by this work package; all three were
+there before, and the work package brought them to light.
 
-### 1. Une nature non reconnue sous une feuille perdait tout le fichier
+### 1. An unrecognised nature under a sheet lost the whole file
 
-**Sérieux, corrigé.** C5 (niveau 2) promet qu'une variante inconnue lue d'un
-`.stf` borne sa perte à *ce nœud* (invariant 10). La promesse ne tenait que
-pour un nœud rangé dans un **dossier** : `NodeKind::Unknown` compte comme
-fenêtre, donc `Folder::accepts_child` l'acceptait — mais `Workbook` et
-`Worksheet`, non. `unknown.rs` faisait correctement son travail, rangeait le
-nœud en `Unknown`, et la validation d'arbre de `load` le refusait aussitôt :
-`InvalidModel`, fichier entier perdu.
+**Serious, fixed.** C5 (level 2) promises that an unknown variant read from a
+`.stf` limits its loss to *that node* (invariant 10). The promise held only
+for a node stored in a **folder**: `NodeKind::Unknown` counts as a
+window, so `Folder::accepts_child` accepted it — but `Workbook` and
+`Worksheet` did not. `unknown.rs` did its job correctly, stored the
+node as `Unknown`, and the tree validation of `load` refused it right away:
+`InvalidModel`, whole file lost.
 
-Découvert en écrivant le test qui devait *prouver* la stratégie de migration —
-lequel a échoué du premier coup, avec le message « nœud 5 est mal rangé : une
-feuille ne contient que des colonnes ». Sans ce test, la note de compatibilité
-de [`persistance.md`](persistance.md) aurait été fausse et personne ne l'aurait
-su avant qu'un utilisateur n'ouvre un fichier d'un collègue.
+Discovered while writing the test that was supposed to *prove* the migration strategy —
+which failed on the first run, with the message « nœud 5 est mal rangé : une
+feuille ne contient que des colonnes ». Without that test, the compatibility note of
+[`persistance.md`](persistance.md) would have been false and nobody would have
+known until a user opened a colleague's file.
 
-Les trois conteneurs acceptent désormais une nature non reconnue.
+The three containers now accept an unrecognised nature.
 
-### 2. Un recalcul de formule avalé en silence
+### 2. A formula recalculation swallowed silently
 
-**Latent, corrigé.** `actor::write_formula_column` écrivait toujours un
-`ValueBlock::Float`, et `let _ = project.set_values(...)` jetait le refus. Tant
-que toutes les colonnes étaient numériques, le refus n'arrivait jamais ; une
-formule posée sur une colonne mixte l'aurait rendu réel — et invisible. Le bloc
-est maintenant conformé au type de la colonne avant l'écriture.
+**Latent, fixed.** `actor::write_formula_column` always wrote a
+`ValueBlock::Float`, and `let _ = project.set_values(...)` threw away the refusal. As long
+as all columns were numeric, the refusal never happened; a formula placed on a mixed
+column would have made it real — and invisible. The block is now conformed to the
+column's type before the write.
 
-### 3. « la colonne est de type texte » pour une colonne qui ne l'est pas
+### 3. "The column is of text type" for a column that is not
 
-**Cosmétique, corrigé.** `pyst.column` et `pyst.set_column` refusaient toute
-colonne sans buffer `f64` avec le message « est de type texte ». Exact tant que
-`Text` était le seul cas ; faux ensuite. Les deux messages nomment le vrai
-type, via un `ColumnType::type_name` ajouté au cœur.
+**Cosmetic, fixed.** `pyst.column` and `pyst.set_column` refused any
+column without an `f64` buffer with the message "is of text type". Accurate as long as
+`Text` was the only case; false afterwards. The two messages now name the real
+type, through a `ColumnType::type_name` added to the core.
 
-### Ce qui n'était pas un bug
+### What was not a bug
 
-Deux tests figeaient l'ancien comportement (`shell.rs`,
-`invalid_numeric_input_reports_an_error_and_sends_no_command` ; `b15`,
-`..._est_refuse_sans_ecrire`). Ils ont été **réécrits, pas supprimés** : ils
-gardent la propriété qui compte — aucune donnée ne disparaît — et affirment
-désormais l'inverse en surface, parce que le comportement a délibérément
-changé.
+Two tests froze the old behavior (`shell.rs`,
+`invalid_numeric_input_reports_an_error_and_sends_no_command`; `b15`,
+`..._est_refuse_sans_ecrire`). They were **rewritten, not deleted**: they
+keep the property that matters — no data disappears — and now assert
+the opposite at the surface, because the behavior was deliberately
+changed.
 
-Par ailleurs, les six plafonds de
-`docs/archive/rustrewrite/questions-ouvertes.md` §11 ont été vérifiés avant
-toute chose : `MAX_COLUMN_ROWS` est le seul que ce chantier touche, il
-s'applique aux colonnes mixtes par la même fonction (`write_block`,
-générique), et rien n'a été « corrigé » qui n'était qu'un plafond documenté.
+Besides, the six caps of
+`docs/archive/rustrewrite/questions-ouvertes.md` §11 were checked before
+anything else: `MAX_COLUMN_ROWS` is the only one this work package touches, it
+applies to mixed columns through the same function (`write_block`,
+generic), and nothing was "fixed" that was merely a documented cap.
 
-## Ce qui reste
+## What remains
 
-### Côté test
+### Test side
 
-Les trous de test recensés à la clôture du chantier sont comblés, sauf un —
-la feature `python`, restée **non vérifiée** (voir la note dédiée après le
-tableau, pas un problème de code mais d'accès réseau dans la sandbox qui a
-traité cette tâche). Le détail, gardé pour mémoire :
+The test gaps listed at the close of the work package are filled, except one —
+the `python` feature, which stayed **unverified** (see the dedicated note after the
+table, not a code problem but a network access problem in the sandbox that
+handled this task). The detail, kept for the record:
 
-| Où | Ce qui manquait | État |
+| Where | What was missing | State |
 |---|---|---|
-| `b16` (séries résolues) | aucun cas mixte : le préfixe commun, les colonnes d'erreur trop courtes et la troncature ne sont éprouvés que sur des colonnes homogènes | **comblé** — trois cas ajoutés (colonne mixte complète, colonne mixte comme X plus courte que Y avec texte/vide au milieu, colonne d'erreur mixte trop courte, colonne d'erreur mixte vide) ; les deux anomalies déjà documentées (troncature du signal, série disparue) se reproduisent à l'identique une fois passées par `numeric_view` |
-| `b17` (coût des opérations) | `numeric_view` est **la seule lecture du modèle qui copie**, et rien ne le mesure ni ne garde-fou contre une régression — par exemple quelqu'un qui l'appellerait par point de tracé au lieu d'une fois par résolution | **comblé** — un garde-fou compare le coût d'une résolution complète à celui d'un unique appel à `numeric_view`, et à celui d'un contre-exemple simulant des rappels par point |
-| `b21` (coût et identité) | `SetCellsPromoting` absente. La propriété « le chemin coûteux n'a lieu qu'une fois par colonne » n'est aujourd'hui affirmée que par un test de `shell.rs`, jamais **mesurée** | **comblé** — mesure directement que le chemin 3 (promotion) coûte proportionnellement à la taille de la colonne, et que les chemins 1/2 (colonne déjà mixte) n'en dépendent pas |
-| `memory_pinning` | aucun scénario avec une colonne mixte ; `mixed_buffer_bytes` est une estimation calquée sur `text_buffer_bytes`, non éprouvée | **comblé** — scénario 8 : une colonne mixte supprimée reste retenue tant que son entrée est sur la pile puis libérée à l'éviction (même schéma que le scénario 6), et `History::retained_bytes()` correspond exactement à l'estimation de `mixed_buffer_bytes`, recalculée indépendamment dans le test |
-| `b10` (compteur de version) | pas de cas mixte | **comblé** — la saisie tolérante qui promeut une colonne, puis une seconde saisie sur une colonne déjà mixte, avancent toutes deux le compteur |
-| `b2` (persistance) | le cas mixte vit dans `roundtrip.rs`, pas dans la batterie | **comblé** — ajouté à `b2_aller_retour_preserve_tout`, qui compare déjà type/méta/version/cellules nœud par nœud |
-| feature `python` | **non compilée par défaut, donc non vérifiée.** `float_values()` rend `None` pour une colonne mixte, ce qui *devrait* donner le refus attendu côté `pyst`, mais aucun test ne l'exerce. À lancer avec `scripts/python-test.sh` | **toujours ouvert** — voir la note dédiée ci-dessous |
-| feature `typst` (supprimée depuis : Typst est une dépendance ferme, issue #29) | non compilée non plus. Aucun code sous `typst` ne touche aux colonnes (vérifié), donc risque faible — mais non nul | **vérifié** — `cargo build`/`cargo test` avec `--features typst` sur `stokesforge-render`, `stokesforge-render-svg` et `stokesforge-render-egui` passent tous, sans aucun changement de code requis : confirme que rien sous `typst` ne touche aux colonnes |
+| `b16` (resolved series) | no mixed case: the common prefix, the too-short error columns and the truncation are tested only on homogeneous columns | **filled** — three cases added (complete mixed column, mixed column as X shorter than Y with text/empty in the middle, too-short mixed error column, empty mixed error column); the two anomalies already documented (signal truncation, vanished series) reproduce identically once passed through `numeric_view` |
+| `b17` (cost of operations) | `numeric_view` is **the only read of the model that copies**, and nothing measures it nor guards against a regression — for example someone calling it per plot point instead of once per resolution | **filled** — a guard compares the cost of a full resolution to that of a single call to `numeric_view`, and to that of a counter-example simulating per-point calls |
+| `b21` (cost and identity) | `SetCellsPromoting` absent. The property "the costly path happens only once per column" is today asserted only by a test in `shell.rs`, never **measured** | **filled** — directly measures that path 3 (promotion) costs proportionally to the column size, and that paths 1/2 (column already mixed) do not depend on it |
+| `memory_pinning` | no scenario with a mixed column; `mixed_buffer_bytes` is an estimate modeled on `text_buffer_bytes`, not tested | **filled** — scenario 8: a deleted mixed column stays retained as long as its entry is on the stack then is released on eviction (same pattern as scenario 6), and `History::retained_bytes()` matches exactly the estimate of `mixed_buffer_bytes`, recomputed independently in the test |
+| `b10` (version counter) | no mixed case | **filled** — the tolerant input that promotes a column, then a second input on an already mixed column, both advance the counter |
+| `b2` (persistence) | the mixed case lives in `roundtrip.rs`, not in the battery | **filled** — added to `b2_aller_retour_preserve_tout`, which already compares type/meta/version/cells node by node |
+| `python` feature | **not compiled by default, hence unverified.** `float_values()` returns `None` for a mixed column, which *should* give the expected refusal on the `pyst` side, but no test exercises it. To run with `scripts/python-test.sh` | **still open** — see the dedicated note below |
+| `typst` feature (removed since: Typst is a firm dependency, issue #29) | not compiled either. No code under `typst` touches columns (checked), so the risk is low — but not zero | **verified** — `cargo build`/`cargo test` with `--features typst` on `stokesforge-render`, `stokesforge-render-svg` and `stokesforge-render-egui` all pass, with no code change required: confirms that nothing under `typst` touches columns |
 
-**Note sur la feature `python`.** `scripts/python-test.sh` exige un
-interpréteur CPython embarqué que `scripts/python-vendor.sh` télécharge
-(`vendor/python/lock.env` : CPython 3.12.14, ~90 Mo, plus une roue numpy
-épinglée). La sandbox qui a traité cette tâche a un accès réseau vers
-`github.com` (vérifié par un simple `curl`), mais le débit vers
-`objects.githubusercontent.com` (où GitHub redirige le téléchargement de
-l'archive de release) était de l'ordre de 100 à 150 Ko/s — l'archive seule
-n'a pas fini de télécharger après plusieurs minutes, et le script échoue si
-interrompu à mi-chemin (pas de reprise : il réécrit `$ARCHIVE.part` depuis
-zéro). Le test qui manque (`float_values()` rend `None` pour une colonne
-mixte → `pyst.column`/`pyst.set_column` doivent le refuser en nommant le bon
-type, comme les deux autres refus déjà couverts pour `Text`) **n'a donc pas
-pu être écrit ni exécuté sous cette feature dans cette tâche.** Le code visé
-(`stokesforge-python`/`stokesforge-script`) n'a pas changé depuis la clôture du
-chantier ; rien n'indique un problème de correction, seulement une lacune de
-couverture qui reste à combler dès qu'un environnement avec un débit réseau
-suffisant (ou l'interpréteur déjà vendorisé) est disponible.
+**Note on the `python` feature.** `scripts/python-test.sh` requires an embedded
+CPython interpreter that `scripts/python-vendor.sh` downloads
+(`vendor/python/lock.env`: CPython 3.12.14, ~90 MB, plus a pinned numpy wheel).
+The sandbox that handled this task has network access to
+`github.com` (checked with a simple `curl`), but the throughput to
+`objects.githubusercontent.com` (where GitHub redirects the download of the
+release archive) was around 100 to 150 KB/s — the archive alone
+did not finish downloading after several minutes, and the script fails if
+interrupted halfway (no resume: it rewrites `$ARCHIVE.part` from
+scratch). The missing test (`float_values()` returns `None` for a mixed
+column → `pyst.column`/`pyst.set_column` must refuse it while naming the right
+type, like the two other refusals already covered for `Text`) **could therefore not
+be written or run under this feature in this task.** The code concerned
+(`stokesforge-python`/`stokesforge-script`) has not changed since the close of the
+work package; nothing points to a correctness problem, only a coverage gap that
+remains to be filled as soon as an environment with enough network throughput
+(or the interpreter already vendored) is available.
 
-### Côté fonctionnalité
+### Feature side
 
-- **L'import ne produit jamais de colonne mixte.** `stokesforge_import::ParsedColumn`
-  porte un `Vec<f64>` : un jeton illisible y devient `NaN`, exactement la perte
-  que ce chantier existe pour éviter. C'est **le** cas d'usage motivant, et il
-  n'en profite pas encore — il relève du chantier 2 (prévisualisation d'import),
-  délibérément hors périmètre ici. C'est la première chose à faire.
-- **Aucune UI pour changer le type d'une colonne.** `Command::SetColumnType`
-  n'est dispatché nulle part dans `stokesforge-app` ; on ne peut rendre une colonne
-  mixte que par la saisie tolérante, un script ou un fichier. Antérieur à ce
-  chantier, mais plus visible maintenant qu'il y a un quatrième type.
-- **`format_f64_for_display` existe en double** — dans `stokesforge-core::column` et
-  dans `stokesforge-app::state`, avec des seuils différents. Le guide de robustesse
-  (§F8, « une seule table, deux directions ») demandait leur unification une
-  fois les deux moitiés du correctif C4 fusionnées ; elles le sont, l'unification
-  ne l'est pas. Sans rapport avec les colonnes mixtes, mais c'est le moment de
-  le noter.
-- **Le pont Python refuse les colonnes mixtes**, délibérément (voir plus bas).
-  Si un besoin apparaît, la bonne réponse est une surface distincte qui dit
-  qu'elle copie, pas un assouplissement de `pyst.column`.
+- **Import never produces a mixed column.** `stokesforge_import::ParsedColumn`
+  holds a `Vec<f64>`: an unreadable token becomes `NaN` there, exactly the loss
+  that this work package exists to avoid. This is **the** motivating use case, and
+  it does not benefit yet — it belongs to work package 2 (import preview),
+  deliberately out of scope here. It is the first thing to do.
+- **No UI to change a column's type.** `Command::SetColumnType`
+  is dispatched nowhere in `stokesforge-app`; a column can only be made
+  mixed through tolerant input, a script or a file. Predates this
+  work package, but more visible now that there is a fourth type.
+- **`format_f64_for_display` exists twice** — in `stokesforge-core::column` and
+  in `stokesforge-app::state`, with different thresholds. The robustness guide
+  (§F8, « une seule table, deux directions ») asked for their unification once
+  the two halves of fix C4 were merged; they are, the unification
+  is not. Unrelated to mixed columns, but this is the time to
+  note it.
+- **The Python bridge refuses mixed columns**, deliberately (see below).
+  If a need appears, the right answer is a distinct surface that says
+  it copies, not a loosening of `pyst.column`.
 
-## Décisions à ne pas rouvrir sans raison nouvelle
+## Decisions not to reopen without a new reason
 
-- **`Mixed` est un quatrième type, pas une refonte des trois autres.** Faire de
-  toute colonne un `Vec<MixedCell>` coûterait 32 octets par ligne au lieu de 8
-  et retirerait le buffer contigu dont dépendent la vue numpy sans copie et la
-  résolution zéro-copie.
-- **`FORMAT_VERSION` ne bouge pas.** L'ajout est additif et la dégradation d'un
-  lecteur antérieur est testée. Incrémenter aurait rendu illisibles par les
-  anciens lecteurs *tous* les fichiers suivants, colonne mixte ou pas.
-- **Trois tableaux parallèles au disque, pas un tableau d'énumérations.**
-  `to_vec_named` écrit le *nom* d'une variante : sept octets de `"Number"`
-  devant chaque valeur de huit.
-- **`Cell` est inchangé.** Une cellule mixte se lit dans le vocabulaire commun
-  (`Column::get`) ou telle qu'elle est stockée (`Column::cell`) ; ajouter une
-  troisième variante à `Cell` aurait touché tous ses lecteurs pour une
-  distinction dont un seul a besoin.
-- **`pyst.column` refuse une colonne mixte.** Elle rend une vue *sans copie* ;
-  lui rendre la copie matérialisée de `numeric_view` serait une vue qui ne suit
-  plus la colonne — un piège silencieux pour un script qui croirait tenir le
+- **`Mixed` is a fourth type, not an overhaul of the other three.** Making
+  every column a `Vec<MixedCell>` would cost 32 bytes per row instead of 8
+  and would remove the contiguous buffer on which the zero-copy numpy view and the
+  zero-copy resolution depend.
+- **`FORMAT_VERSION` does not move.** The addition is additive and the degradation of
+  an earlier reader is tested. Incrementing would have made *all* following files
+  unreadable by the old readers, mixed column or not.
+- **Three parallel arrays on disk, not an array of enums.**
+  `to_vec_named` writes the *name* of a variant: seven bytes of `"Number"`
+  in front of each eight-byte value.
+- **`Cell` is unchanged.** A mixed cell is read in the common vocabulary
+  (`Column::get`) or as it is stored (`Column::cell`); adding a
+  third variant to `Cell` would have touched all its readers for a
+  distinction that only one of them needs.
+- **`pyst.column` refuses a mixed column.** It returns a *zero-copy* view;
+  giving it the materialized copy of `numeric_view` would be a view that no longer
+  follows the column — a silent trap for a script that thinks it holds the
   buffer.

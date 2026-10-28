@@ -1,7 +1,7 @@
-# Rendu
+# Rendering
 
-Trois crates, et une règle qui explique leur découpage : **une fonctionnalité
-de tracé n'entre jamais dans un seul backend** (invariant 5).
+Three crates, and one rule that explains how they are split: **a plotting
+feature never goes into a single backend** (invariant 5).
 
 ```text
 stokesforge-render          tout le rendu, générique sur DrawingBackend
@@ -10,964 +10,961 @@ stokesforge-render-egui    stokesforge-render-svg
   (écran)              (SVG → PDF, PNG)
 ```
 
-Les deux backends ne diffèrent que par **la façon de poser des pixels**. Tout
-le reste — types de série, échelles, primitives, légende, décimation, rognage,
-formules — est dans `stokesforge-render`.
+The two backends differ only in **how they put pixels down**. Everything
+else — series types, scales, primitives, legend, decimation, clipping,
+formulas — is in `stokesforge-render`.
 
-**Qui fait quoi pour l'interaction (#262).** Tout calcul en `f64` — pixel ↔
-données, zoom, pan, rectangle élastique, cadrage d'un geste, point le plus
-proche — vit dans `stokesforge-render` (`interact`, `view`, `hit`,
-`series_selection`) et se teste sans egui. `stokesforge-render-egui` n'en garde
-que ce qui touche egui : lire la molette et le glisser (`handle_navigation`),
-convertir `Pos2` ↔ `(f64, f64)` (`nearest_point` y est un adaptateur qui
-applique `HIT_RADIUS` et rend un `PointHit` en `Pos2`), poser les `Shape`
-(`backend`, `scaled`, `cache`, `shape_tools`, `typst_screen`) et le
-*feathering*. `GraphView` porte un `ViewState` comme champ et appelle
-`ViewState::commit_gesture` avec les panneaux de la dernière figure tracée.
+**Who does what for interaction (#262).** Every `f64` computation — pixel ↔
+data, zoom, pan, rubber-band rectangle, framing from a gesture, nearest
+point — lives in `stokesforge-render` (`interact`, `view`, `hit`,
+`series_selection`) and is tested without egui. `stokesforge-render-egui` keeps
+only what touches egui: reading the wheel and the drag (`handle_navigation`),
+converting `Pos2` ↔ `(f64, f64)` (`nearest_point` is an adapter there: it
+applies `HIT_RADIUS` and returns a `PointHit` as a `Pos2`), putting down the
+`Shape`s (`backend`, `scaled`, `cache`, `shape_tools`, `typst_screen`) and
+*feathering*. `GraphView` holds a `ViewState` as a field and calls
+`ViewState::commit_gesture` with the panels of the last plotted figure.
 
-## `stokesforge-render` — le socle commun
+## `stokesforge-render` — the common base
 
-| Module | Ce qu'il porte |
+| Module | What it holds |
 |---|---|
-| `text` | **la source unique de mesure de texte** (invariant 4) |
-| `fonts` | choix de police, trois paires embarquées ou une police système |
-| `pipeline` | la suite d'appels Plotters, écrite une fois |
-| `series` | les six `PlotType` traduits en géométrie |
-| `scale` | les échelles d'axe, dont la logarithmique |
-| `paint` | les primitives en pixels : traits au sous-pixel, marqueurs, barres, moustaches |
-| `clip` | rognage géométrique d'une polyligne contre le rectangle de tracé |
-| `legend` | la légende, mise en page à la main |
+| `text` | **the single source of text measurement** (invariant 4) |
+| `fonts` | font choice, three embedded pairs or one system font |
+| `pipeline` | the sequence of Plotters calls, written once |
+| `series` | the six `PlotType`s translated into geometry |
+| `scale` | the axis scales, including the logarithmic one |
+| `paint` | the pixel primitives: sub-pixel strokes, markers, bars, whiskers |
+| `clip` | geometric clipping of a polyline against the plot rectangle |
+| `legend` | the legend, laid out by hand |
 | `decimate` | LTTB |
-| `interact` | correspondance pixel ↔ données d'un panneau tracé (`PanelTransform`, `Gesture`) et point le plus proche du curseur (`nearest_point`, curseur en `(f64, f64)`, #262). Pour un appelant qui peint lui-même (aperçu d'analyse, #261) : `PanelTransform::new` (zone fractionnaire en `f64`, bornes dans l'ordre d'affichage), `fit_range` / `axis_frame` (cadre initial : marge de 5 % dans l'espace transformé, bornes mémorisées, inversion) et `snap_to_curve` (point le plus proche en X, moyenne sur *n* points ; `snap_to_curve_zone` rend en plus la zone moyennée, abscisses min et max et nombre réel de points, #334). `scale::axis_ticks` donne les graduations et leur libellé par le chemin du pipeline (`linear_key_points` + `label_count` + `TickFormat`) |
-| `view` | l'état de vue — zoom et pan (`ViewState`, `Framing`) — et le cadrage qu'un geste donne (`commit_gesture`, `commit_axis_gesture`), sans egui (#262) |
-| `hit` | composant (titre, zone de tracé, axe, titre d'axe) sous un pixel, sur la géométrie allouée par Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
-| `series_selection` | série sous un pixel, sur ses pixels réellement tracés, et poignées de la série sélectionnée (#98) |
-| `color` | lecture des couleurs `#RRGGBB` du spec (adaptateur de `stokesforge_plot::parse_hex`, **source unique** partagée avec le sélecteur de l'interface), et l'encre automatique contrastée avec le fond (`auto_ink`) |
-| `formula` | Typst (dépendance ferme, pas une feature) : le style « texte riche » des titres, titres d'axe et légende, la compilation, le cache |
-| `sample` | deux figures témoins à titres explicites |
+| `interact` | pixel ↔ data mapping of a plotted panel (`PanelTransform`, `Gesture`) and the point nearest the cursor (`nearest_point`, cursor as `(f64, f64)`, #262). For a caller that paints by itself (analysis preview, #261): `PanelTransform::new` (fractional area in `f64`, bounds in display order), `fit_range` / `axis_frame` (initial frame: 5 % margin in the transformed space, remembered bounds, inversion) and `snap_to_curve` (nearest point in X, average over *n* points; `snap_to_curve_zone` also returns the averaged zone, min and max abscissas and the real number of points, #334). `scale::axis_ticks` gives the ticks and their label through the pipeline path (`linear_key_points` + `label_count` + `TickFormat`) |
+| `view` | the view state — zoom and pan (`ViewState`, `Framing`) — and the framing a gesture gives (`commit_gesture`, `commit_axis_gesture`), without egui (#262) |
+| `hit` | component (title, plot area, axis, axis title) under a pixel, on the geometry allocated by Plotters (`DrawnPlot::title_height`, `DrawnPanel::axis_areas`) |
+| `series_selection` | series under a pixel, on its actually plotted pixels, and handles of the selected series (#98) |
+| `color` | reading of the spec's `#RRGGBB` colors (adapter of `stokesforge_plot::parse_hex`, the **single source** shared with the interface's picker), and the automatic ink contrasting with the background (`auto_ink`) |
+| `formula` | Typst (a firm dependency, not a feature): the "rich text" style of titles, axis titles and legend, compilation, the cache |
+| `sample` | two witness figures with explicit titles |
 
-Les courbes conservent leurs coordonnées fractionnaires après projection et
-rognage, puis sont tracées au seizième de pixel à l'écran et dans les exports
-SVG/PDF/PNG (#150). Les tirets suivent la même précision. Cela évite les
-marches artificielles au dézoom sans lisser les données ; la décimation LTTB
-reste inchangée. `stokesforge-render-egui/tests/jasco_dezoom.rs` vérifie les
-deux cadrages du fichier réel `test/import/JascoUV_vis.csv`, la fidélité aux
-mesures et l'accord des sommets écran/SVG. Pour regarder les mêmes figures :
+Curves keep their fractional coordinates after projection and clipping, then
+are plotted to one sixteenth of a pixel on screen and in the SVG/PDF/PNG
+exports (#150). Dashes follow the same precision. This avoids artificial
+steps when zooming out, without smoothing the data; LTTB decimation is
+unchanged. `stokesforge-render-egui/tests/jasco_dezoom.rs` checks the two
+framings of the real file `test/import/JascoUV_vis.csv`, fidelity to the
+measurements and agreement of the screen/SVG vertices. To look at the same
+figures:
 
 ```sh
 STOKESFORGE_JASCO_CAPTURE=/tmp/jasco150 cargo test -p stokesforge-render-egui --test jasco_dezoom
 ```
 
-Les titres de `sample::minimal()` et `sample::realistic()` sont conservés
-pour exercer les bandes de titre et la mesure du texte dans les tests
-d'accord écran/export et les bancs de rendu (#103). Ces exemples n'installent
-pas un titre par défaut : les graphes créés par l'application, démo comprise,
-ou par `pyst.plot` sans option `title` sont sans titre. Le pipeline ne réserve
-aucune bande quand `PlotSpec::title` est vide.
+The titles of `sample::minimal()` and `sample::realistic()` are kept
+to exercise the title bands and text measurement in the screen/export
+agreement tests and the rendering benches (#103). These samples do not install
+a default title: graphs created by the application, demo included,
+or by `pyst.plot` without a `title` option have no title. The pipeline reserves
+no band when `PlotSpec::title` is empty.
 
-### Transparence
+### Transparency
 
-Toute couleur du spec peut porter une opacité (`#RRGGBBAA`,
-`color::rgba_or`) : traits, marqueurs, barres, texte, échelles, fond. Le
-fond par défaut d'un graphe est sans couleur (`stokesforge_plot::TRANSPARENT`).
-Un fond d'opacité nulle n'est **pas peint** : l'export SVG, PNG ou PDF n'a pas
-de fond (`stokesforge-render-svg`, test `un_fond_sans_couleur_donne_un_png_transparent`).
-À l'écran, `stokesforge-app` peint un blanc sous la figure
-(`app::graph_window::display_backdrop`) :
-ce blanc vit dans l'application, jamais dans ce crate, sinon il serait exporté.
-Pour choisir l'encre automatique, un fond (semi-)transparent est jugé
-composé sur du blanc (`color::over_white`).
+Any color of the spec can carry an opacity (`#RRGGBBAA`,
+`color::rgba_or`): strokes, markers, bars, text, scales, background. A graph's
+default background has no color (`stokesforge_plot::TRANSPARENT`).
+A background of zero opacity is **not painted**: the SVG, PNG or PDF export has
+no background (`stokesforge-render-svg`, test `un_fond_sans_couleur_donne_un_png_transparent`).
+On screen, `stokesforge-app` paints a white under the figure
+(`app::graph_window::display_backdrop`):
+this white lives in the application, never in this crate, or it would be exported.
+To choose the automatic ink, a (semi-)transparent background is judged
+composited on white (`color::over_white`).
 
-### Couleurs du texte et des échelles : l'encre automatique
+### Text and scale colors: automatic ink
 
-Le titre du graphe (`PlotSpec::title_color`), le titre de chaque axe
-(`AxisSpec::title_color`) et son échelle (`AxisSpec::tick_color` : ligne
-d'axe, graduations, libellés, et la grille reprise à 20 % / 10 % d'opacité)
-ont leur couleur. Une chaîne vide veut dire **automatique** :
-`color::auto_ink(fond)`, blanche sur un fond sombre, sombre sur un fond clair
-(le choix au meilleur rapport de contraste WCAG). La même encre sert au titre
-du panneau, au cadre et au texte de la légende, et au contour des barres. Un
-fond sombre fait donc passer d'un coup en blanc tout ce qui est en couleur
-automatique — à l'écran comme à l'export, puisque le pipeline est commun
+The graph title (`PlotSpec::title_color`), the title of each axis
+(`AxisSpec::title_color`) and its scale (`AxisSpec::tick_color`: axis line,
+ticks, labels, and the grid, taken at 20 % / 10 % opacity)
+have their own color. An empty string means **automatic**:
+`color::auto_ink(fond)`, white on a dark background, dark on a light one
+(the choice with the best WCAG contrast ratio). The same ink is used for the
+panel title, the frame and text of the legend, and the outline of bars. A dark
+background therefore turns everything in automatic color to white at once —
+on screen as in the export, since the pipeline is shared
 (`stokesforge-render-svg/tests/couleurs.rs`).
 
-Largeur d'un texte libre, d'un titre ou d'un titre d'axe (#244) : `AnnotationSpec::width` / `TextFont::width` est une fraction de la
-figure (bornée à `[MIN_WIDTH, 1]`, `effective_width`), `align` un `TextAlign`. Le
-pipeline en tire une largeur en pixels de backend (arrondie : le nom de famille
-est retenu pour toujours) qui voyage dans la **famille du style**, après la
-police (`formula::family_with_layout`, séparateur `\u{1f}`) ; `formula::source`
-enveloppe alors le texte dans `#box(width: …pt)[#align(…)[…]]` (dans la rotation
-le cas échéant). La boîte entière est la page : la taille rendue à la sélection
-est celle de la boîte, l'ancrage reste son centre. Les deux backends passent
-par `source`. Pour une zone, `pipeline::font_style` prend la largeur de la figure (aussi pour un titre vertical) ; la légende ne s'en sert pas. Tests : `la_largeur_d_un_titre_d_axe_le_fait_passer_a_la_ligne`, `une_largeur_fixee_fait_passer_le_texte_a_la_ligne`
+Width of a free text, a title or an axis title (#244): `AnnotationSpec::width` / `TextFont::width` is a fraction of the
+figure (bounded to `[MIN_WIDTH, 1]`, `effective_width`), `align` a `TextAlign`. The
+pipeline derives a width in backend pixels from it (rounded: the family name
+is kept forever), which travels in the **style family**, after the
+font (`formula::family_with_layout`, separator `\u{1f}`); `formula::source`
+then wraps the text in `#box(width: …pt)[#align(…)[…]]` (inside the rotation
+if there is one). The whole box is the page: the size rendered at selection
+is that of the box, the anchor stays its center. Both backends go
+through `source`. For an area, `pipeline::font_style` takes the width of the figure (also for a vertical title); the legend does not use it. Tests: `la_largeur_d_un_titre_d_axe_le_fait_passer_a_la_ligne`, `une_largeur_fixee_fait_passer_le_texte_a_la_ligne`
 (`render-egui/tests/annotations.rs`), `tirer_la_poignee_fixe_la_largeur`
 (`cache_session.rs`).
 
-Police d'une zone de texte (issues #77, #78) : la police et le corps d'un
-titre, d'un titre d'axe, de la légende et d'un texte libre sont des champs de la
-zone (`stokesforge_plot::TextFont`), pas du contenu. Le pipeline en tire le style
-(`pipeline::font_style`, corps borné à 4-200) et la police voyage dans la
-**famille du style** (`formula::rich_style_font` : `stokesforge-typst|Fira Sans`, comme
-l'angle d'un texte tourné) ; `formula::source` pose alors `#set text(font: …)`
-et `#show math.equation: set text(font: …)` avant le texte, les deux backends
-l'ignorant. La police Math suit (`math_family_for`) : Libertinus Sans →
-Libertinus Math, Fira Sans → Fira Math, Noto Sans → Noto Sans Math, une police
-système → Noto Sans Math (repli). Tests : `formula.rs`
+Font of a text area (issues #77, #78): the font and size of a
+title, an axis title, the legend and a free text are fields of the
+area (`stokesforge_plot::TextFont`), not content. The pipeline derives the style from it
+(`pipeline::font_style`, size bounded to 4-200) and the font travels in the
+**style family** (`formula::rich_style_font`: `stokesforge-typst|Fira Sans`, like
+the angle of a rotated text); `formula::source` then puts `#set text(font: …)`
+and `#show math.equation: set text(font: …)` before the text, and both backends
+ignore it. The Math font follows (`math_family_for`): Libertinus Sans →
+Libertinus Math, Fira Sans → Fira Math, Noto Sans → Noto Sans Math, a
+system font → Noto Sans Math (fallback). Tests: `formula.rs`
 (`la_police_d_une_zone_est_posee_dans_le_source_avec_sa_math`), `geometrie.rs`
 (`le_corps_d_une_zone_de_texte_change_sa_taille`), `stokesforge-render-svg/tests/typst.rs`.
 
-Le titre et la légende se **sélectionnent** au clic (`GraphView::selected_text`,
-cadre bleu comme un texte libre, issue #77) ; une entrée de légende désigne la
-légende entière, qui se déplace aussi en la glissant par une entrée.
+The title and the legend are **selected** by a click (`GraphView::selected_text`,
+blue frame like a free text, issue #77); a legend entry designates the
+whole legend, which can also be moved by dragging it from an entry.
 
-Polices dans le texte (issue #63, **remplacé** pour le choix de police par ce
-qui précède — la barre ne pose plus de balise de police ; un `#text(font: …)`
-saisi à la main reste lu) : un texte peut nommer sa police,
-`#text(font: "Fira Sans")[…]`. Le `World` Typst (`formula::requested_fonts`)
-lit ces noms dans le markup et charge la famille demandée, embarquée
-(Libertinus Sans, Fira Sans, Noto Sans) sinon installée sur la machine
-(`fonts::available_families`, base `fontdb` scannée une fois). Introuvable :
-Typst retombe sur la police du document, le texte ne disparaît pas — mais la
-figure change d'une machine à l'autre, puisque seules les polices embarquées
-voyagent. Le gras vient de l'axe `wght` de Noto Sans ; l'italique de la face
-italique de Noto Sans embarquée avec lui (Typst ne fabrique pas d'italique) ;
-Fira et Libertinus n'ont que le régulier.
+Fonts in text (issue #63, **replaced** for the choice of font by what
+precedes — the bar no longer puts down a font tag; a `#text(font: …)`
+typed by hand is still read): a text can name its font,
+`#text(font: "Fira Sans")[…]`. The Typst `World` (`formula::requested_fonts`)
+reads these names in the markup and loads the requested family, embedded
+(Libertinus Sans, Fira Sans, Noto Sans) otherwise installed on the machine
+(`fonts::available_families`, `fontdb` database scanned once). Not found:
+Typst falls back to the document font, the text does not disappear — but the
+figure changes from one machine to another, since only the embedded fonts
+travel. Bold comes from the `wght` axis of Noto Sans; italic from the
+italic face of Noto Sans embedded with it (Typst does not fake italics);
+Fira and Libertinus have only the regular.
 
-`formula::diagnose(texte)` rend le message d'erreur Typst d'un texte riche (ou
-`None`), mémorisé par texte : le rendu retombe seul sur le texte brut, l'interface
-(`plot_settings::formula_field`, #240) s'en sert pour peindre le champ en rouge.
+`formula::diagnose(texte)` returns the Typst error message of a rich text (or
+`None`), memoized per text: rendering falls back to plain text by itself, and the interface
+(`plot_settings::formula_field`, #240) uses it to paint the field red.
 
-Une formule Typst suit la même couleur (issue #30) : les backends passent
-`style.color()` à la compilation (`formula::ink`), qui pose
-`#set text(fill: rgb(…))`. La couleur est donc **dans l'image rastérisée** ou
-dans le fragment SVG, pas une teinte appliquée après coup : une couleur écrite
-dans la formule elle-même (`#text(fill: red)[…]`) reste prioritaire. Un texte
-d'opacité nulle ne dessine rien, formule comprise.
+A Typst formula follows the same color (issue #30): the backends pass
+`style.color()` to the compilation (`formula::ink`), which puts
+`#set text(fill: rgb(…))`. The color is therefore **in the rasterized image** or
+in the SVG fragment, not a tint applied afterwards: a color written in the
+formula itself (`#text(fill: red)[…]`) keeps priority. A text of
+zero opacity draws nothing, formula included.
 
-`configure_mesh` de Plotters n'a qu'un style de titre d'axe et qu'un style de
-ligne d'axe pour les deux axes principaux : l'axe du bas et celui de gauche
-sont donc tracés en **deux passes**, chacune coupant l'autre axe
-(`pipeline::AxisColors`). La géométrie n'en dépend pas.
+Plotters' `configure_mesh` has only one axis-title style and one
+axis-line style for the two main axes: the bottom axis and the left one
+are therefore plotted in **two passes**, each cutting out the other axis
+(`pipeline::AxisColors`). The geometry does not depend on it.
 
-### L'ordre dans lequel un panneau se trace
+### The order in which a panel is plotted
 
-Cet ordre n'est pas arbitraire ; chaque étape dépend de ce que la précédente a
-appris.
+This order is not arbitrary; each step depends on what the previous one
+learned.
 
-1. **préparer** chaque série en géométrie (`series`) — l'échelle de son axe est
-   appliquée, les histogrammes sont classés. Le cadrage et le tracé liront
-   ensuite **la même** géométrie, donc ne pourront pas la lire différemment ;
-2. **cadrer** les axes sur cette géométrie ;
-3. **construire** la zone de tracé — c'est seulement là que la largeur en
-   pixels existe ;
-4. **décimer** (`decimate`), qui a besoin de cette largeur ;
-5. **peindre**, en pixels (`paint`) ;
-6. **la légende** en dernier, par-dessus, et mesurée par le même chemin que les
+1. **prepare** each series into geometry (`series`) — the scale of its axis is
+   applied, histograms are binned. Framing and plotting will then read
+   **the same** geometry, so they cannot read it differently;
+2. **frame** the axes on this geometry;
+3. **build** the plot area — only here does the width in
+   pixels exist;
+4. **decimate** (`decimate`), which needs this width;
+5. **paint**, in pixels (`paint`);
+6. **the legend** last, on top, and measured by the same path as the
    axes.
 
-Rien de tout cela ne connaît le type des colonnes tracées : le pipeline reçoit
-des `ResolvedValues`, c'est-à-dire des `f64`, et il écarte déjà les points non
-finis. C'est ce qui a permis aux **colonnes à types mixtes** d'entrer sans
-qu'une ligne de rendu bouge : `stokesforge_core::Column::numeric_view` donne `NaN`
-pour une cellule texte ou vide, et une colonne mixte trace donc exactement ses
-cellules numériques (`stokesforge-render/tests/geometrie.rs`,
-`une_colonne_mixte_ne_trace_que_ses_cellules_numeriques`). L'endroit correct
-pour ce genre de traduction est toujours celui-là — en amont, une fois — et
-jamais un backend (invariant 5).
+None of this knows the type of the plotted columns: the pipeline receives
+`ResolvedValues`, that is `f64`s, and it already discards non-finite points.
+This is what let **mixed-type columns** come in
+without a line of rendering moving: `stokesforge_core::Column::numeric_view` gives `NaN`
+for a text or empty cell, so a mixed column plots exactly its
+numeric cells (`stokesforge-render/tests/geometrie.rs`,
+`une_colonne_mixte_ne_trace_que_ses_cellules_numeriques`). The right place
+for this kind of translation is always that one — upstream, once — and
+never a backend (invariant 5).
 
-### Deux pièges Plotters, à connaître avant de toucher au rendu
+### Two Plotters traps, to know before touching rendering
 
-`plotters` est pris **sans ses fonts** (`default-features = false`).
+`plotters` is taken **without its fonts** (`default-features = false`).
 
-- Un `DrawingBackend` qui ne surcharge pas `draw_text` **panique** à la
-  première graduation.
-- Un qui ne surcharge pas `estimate_text_size` mesure le texte au **nombre
-  d'octets UTF-8** — silencieusement.
+- A `DrawingBackend` that does not override `draw_text` **panics** at the
+  first tick.
+- One that does not override `estimate_text_size` measures text by the
+  **number of UTF-8 bytes** — silently.
 
-Et l'angle mort qui suit : `configure_series_labels` et `MultiLineText`
-mesurent le texte **eux-mêmes**, par `FontData::estimate_layout`, donc par
-l'heuristique naïve, **jamais** par `estimate_text_size`. C'est pour cette
-raison précise que `legend` est écrite à la main plutôt que déléguée.
+And the blind spot that follows: `configure_series_labels` and `MultiLineText`
+measure the text **themselves**, through `FontData::estimate_layout`, hence by the
+naive heuristic, **never** through `estimate_text_size`. This is the precise
+reason why `legend` is written by hand rather than delegated.
 
-Où la mesure entre dans la géométrie, concrètement : `DrawingArea::titled` —
-appelé dès qu'un graphe ou un panneau a un titre — demande la hauteur du titre
-à `estimate_text_size`, puis fait **descendre le haut de la zone de tracé** de
-cette hauteur. Une mesure fausse de quelques pixels déplace la zone entière,
-axes compris, sans lever la moindre erreur.
+Where measurement enters the geometry, concretely: `DrawingArea::titled` —
+called as soon as a graph or panel has a title — asks `estimate_text_size` for the
+height of the title, then **lowers the top of the plot area** by that
+height. A measurement that is wrong by a few pixels moves the whole area, axes
+included, without raising any error.
 
-### Pourquoi le tracé descend en pixels
+### Why plotting goes down to pixels
 
-Trois besoins ne passent pas par `ChartContext::draw_series` :
+Three needs do not go through `ChartContext::draw_series`:
 
-- **les styles de trait** — un tiret se mesure en pixels, pas en unités de
-  données, et `DashedLineSeries` ne connaît qu'un motif à deux temps ;
-- **les marqueurs** — Plotters n'a d'élément tout fait ni pour le carré, ni
-  pour le losange, ni pour la croix droite ;
-- **la légende**, pour la raison ci-dessus.
+- **stroke styles** — a dash is measured in pixels, not in data
+  units, and `DashedLineSeries` knows only a two-beat pattern;
+- **markers** — Plotters has no ready-made element for the square, the
+  diamond or the straight cross;
+- **the legend**, for the reason above.
 
-Descendre en pixels ne coûte ni fidélité ni accord : c'est le même code, dans
-le pipeline commun, qui calcule les coordonnées entières ; les deux backends ne
-voient qu'un `draw_path`, un `draw_rect` ou un `draw_circle` déjà résolu.
+Going down to pixels costs neither fidelity nor agreement: it is the same code, in
+the shared pipeline, that computes the integer coordinates; the two backends
+see only a `draw_path`, a `draw_rect` or a `draw_circle` already resolved.
 
-### L'échelle logarithmique transforme les données, pas le type
+### The logarithmic scale transforms the data, not the type
 
-Plotters sait faire un axe log (`LogRange`) et ce n'est **pas** ce qui est
-fait : `LogRange` change le *type* de la coordonnée, donc le type du
-`ChartContext`. Avec deux axes, deux échelles et un axe secondaire, la fonction
-qui trace un panneau existerait en **huit** monomorphisations — exactement la
-divergence que le pipeline unique existe pour empêcher, rentrée par la porte du
-système de types.
+Plotters can do a log axis (`LogRange`) and that is **not** what is
+done: `LogRange` changes the *type* of the coordinate, hence the type of the
+`ChartContext`. With two axes, two scales and a secondary axis, the function
+that plots a panel would exist in **eight** monomorphizations — exactly the
+divergence the single pipeline exists to prevent, coming back in through the
+type system's door.
 
-Ici : un seul type de coordonnée, `f64` linéaire, et l'échelle appliquée **aux
-valeurs**. Seuls deux endroits savent qu'il y a une échelle : l'entrée
-(`forward`) et l'étiquetage (`format_tick`). Le prix, dit en une ligne : les
-graduations sont des **décades**, pas les graduations mineures que `LogRange`
-sait poser.
+Here: a single coordinate type, linear `f64`, and the scale applied **to the
+values**. Only two places know there is a scale: the input
+(`forward`) and the labeling (`format_tick`). The price, in one line: the
+ticks are **decades**, not the minor ticks that `LogRange`
+knows how to put down.
 
-Sur une échelle log, zéro et les négatifs n'ont pas d'image : ils sont retirés
-du tracé, comme le sont déjà les `NaN`.
+On a log scale, zero and negatives have no image: they are removed from the
+plot, as `NaN`s already are.
 
-### Rognage : en pixels, pas en données
+### Clipping: in pixels, not in data
 
-Un axe logarithmique n'est linéaire que dans l'espace transformé ; une droite
-en coordonnées de données n'y est donc pas forcément une droite — mais elle
-**redevient** une droite dès qu'elle est projetée en pixels, la projection
-pixel ↔ transformé étant toujours affine. Une intersection segment/rectangle
-est une opération sur des droites : elle doit se faire après la projection.
+A logarithmic axis is linear only in the transformed space; a straight line
+in data coordinates is therefore not necessarily a straight line there — but it
+**becomes** a straight line again once projected to pixels, the
+pixel ↔ transformed projection always being affine. A segment/rectangle
+intersection is an operation on straight lines: it must be done after the projection.
 
-Algorithme : Liang-Barsky sur un rectangle aligné aux axes (le rectangle de
-tracé n'est jamais incliné).
+Algorithm: Liang-Barsky on an axis-aligned rectangle (the plot
+rectangle is never tilted).
 
-### LTTB : ce qu'il règle, et ce qu'il ne règle pas
+### LTTB: what it fixes, and what it does not
 
-C'est écrit ici plutôt que dilué ailleurs, parce que la mesure contredit
-l'intuition :
+This is written here rather than diluted elsewhere, because the measurement contradicts
+intuition:
 
-| séries | points/série | total | tessellation | ce que le LTTB retire |
+| series | points/series | total | tessellation | what LTTB removes |
 |---|---|---|---|---|
-| 50 | 6 000 | 300 k | 18,3 ms | ~73 % des points |
-| 500 | 600 | 300 k | 22,7 ms | **rien** |
+| 50 | 6,000 | 300 k | 18.3 ms | ~73 % of the points |
+| 500 | 600 | 300 k | 22.7 ms | **nothing** |
 
-600 points étalés sur 1 600 px sont déjà sous-échantillonnés. Le cas de charge
-du document — 500 spectres de 600 points — tient sa charge du **nombre de
-séries**, pas de leur longueur ; le levier qui le couvre est le *feathering*,
-pas celui-ci. Le LTTB sert **l'autre cas** : quelques séries très longues, celui
-de l'acquisition.
+600 points spread over 1,600 px are already undersampled. The document's load
+case — 500 spectra of 600 points — gets its load from the **number of
+series**, not their length; the lever that covers it is *feathering*,
+not this one. LTTB serves **the other case**: a few very long series, the one
+of acquisition.
 
-*Largest Triangle Three Buckets* choisit dans chaque tranche le point formant
-le plus grand triangle avec le point retenu à gauche et la moyenne de la
-tranche de droite : concrètement, **il garde les pics**, là où « un point sur
-N » les perd.
+*Largest Triangle Three Buckets* picks in each slice the point forming
+the largest triangle with the point kept on the left and the average of the
+right slice: concretely, **it keeps the peaks**, where "one point in
+N" loses them.
 
-### Banc des grandes courbes (#141)
+### Large-curve bench (#141)
 
-Le test manuel `stokesforge-render-egui/tests/mesure_courbes.rs` compare
-100 000, 1 000 000 et 10 000 000 points **au total**, répartis en une ou dix
-séries. Il utilise le pipeline partagé, `ShapeCache`, `ViewState` et la
-vraie tessellation egui, sans fenêtre ni renderer GPU. Le banc conservé appelle
-`pipeline::draw_on`, avec le LTTB normal. Le mode expérimental sans LTTB a été
-retiré après les mesures : aucune API publique dédiée au banc n'est ajoutée.
-Ses résultats historiques restent consignés ci-dessous ; ils ne sont plus
-rejoués par cette commande. Les tests d'accord écran/SVG existants couvrent la
-décimation de production. Le banc est `#[ignore]`, hors de la CI ordinaire.
+The manual test `stokesforge-render-egui/tests/mesure_courbes.rs` compares
+100,000, 1,000,000 and 10,000,000 points **in total**, spread over one or ten
+series. It uses the shared pipeline, `ShapeCache`, `ViewState` and the
+real egui tessellation, without a window or a GPU renderer. The kept bench calls
+`pipeline::draw_on`, with normal LTTB. The experimental mode without LTTB was
+removed after the measurements: no public API dedicated to the bench is added.
+Its historical results stay recorded below; they are no longer
+replayed by this command. The existing screen/SVG agreement tests cover
+production decimation. The bench is `#[ignore]`, outside ordinary CI.
 
 ```sh
 cargo test -p stokesforge-render-egui --release --test mesure_courbes mesure_courbes_gros_volumes -- --ignored --nocapture --test-threads=1
 ```
 
-`STOKESFORGE_BENCH_POINTS=100000,1000000` limite les volumes ;
-`STOKESFORGE_BENCH_FRAMES=5` choisit le nombre d'images par régime (au moins
-3). Chaque ligne `IMAGE` donne les médianes du pipeline (résolution,
-préparation, cadrage, LTTB, projection, rognage, Plotters et collecte), de
-l'image egui avant tessellation, de la tessellation et du total CPU, puis le
-maximum du total, les octets des maillages et les points retirés. Les médianes
-par phase ne s'additionnent pas nécessairement à la médiane du total.
+`STOKESFORGE_BENCH_POINTS=100000,1000000` limits the volumes;
+`STOKESFORGE_BENCH_FRAMES=5` sets the number of frames per regime (at least
+3). Each `IMAGE` line gives the medians of the pipeline (resolution,
+preparation, framing, LTTB, projection, clipping, Plotters and collection), of
+the egui frame before tessellation, of the tessellation and of the CPU total, then
+the maximum of the total, the mesh bytes and the removed points. The medians
+per phase do not necessarily add up to the median of the total.
 
-Protocole : figure 800 × 600, échelle 1, colonnes numériques, abscisses
-partagées, signal déterministe avec deux fréquences, sans titre ni légende
-(donc sans compilation Typst). Une image d'échauffement est exclue. « Froid »
-désigne le **cache de formes invalidé**, pas les polices ni les caches CPU.
-Le zoom varie un cadrage central d'environ 80 % avec anticrénelage complet ;
-le pan déplace ce cadrage avec la frange coupée, comme pendant un glisser.
-Les images « chaud » répètent le dernier cadrage sans changer la génération ;
-elles correspondent à une image repeinte pendant une pause du geste.
-`fenetre_chaud` conserve le cadrage initial et la clé (coût du graphe lors du
-déplacement de sa fenêtre ; le chrome de l'application est exclu).
+Protocol: 800 × 600 figure, scale 1, numeric columns, shared
+abscissas, deterministic signal with two frequencies, no title or legend
+(hence no Typst compilation). One warm-up frame is excluded. "Cold"
+means the **shape cache invalidated**, not the fonts or the CPU caches.
+The zoom varies a central framing of about 80 % with full anti-aliasing;
+the pan moves this framing with the cut fringe, as during a drag.
+The "warm" frames repeat the last framing without changing the generation;
+they correspond to a frame repainted during a pause of the gesture.
+`fenetre_chaud` keeps the initial framing and the key (cost of the graph when
+its window is moved; the application chrome is excluded).
 
-Les lignes `PHASES` mesurent séparément `series::prepare` et le LTTB isolé
-sur sa géométrie, au seuil réel de la zone de tracé. Elles aident à identifier
-le coût CPU, mais **ne doivent pas être soustraites** du pipeline : les
-allocations et la localité mémoire diffèrent. Les octets de maillages sont
-une quantité à téléverser, **pas un temps GPU** : ni soumission, ni pilote,
-ni rastérisation, ni présentation/vsync ne sont mesurés. Le total exclut aussi
-la libération des maillages après mesure, le modèle et le démarrage.
+The `PHASES` lines measure `series::prepare` and the isolated LTTB separately
+on its geometry, at the real threshold of the plot area. They help identify
+the CPU cost, but **must not be subtracted** from the pipeline: allocations
+and memory locality differ. The mesh bytes are
+a quantity to upload, **not a GPU time**: neither submission, nor driver,
+nor rasterization, nor presentation/vsync is measured. The total also excludes
+freeing the meshes after measurement, the model and startup.
 
-#### Mesures du 6 octobre 2026
+#### Measurements of 6 October 2026
 
-Intel Core Ultra 7 155H (22 processeurs logiques), Linux x86-64, Rust 1.98.1,
-egui 0.36.2, profil `release`, cinq images par régime. Machine de travail
-non dédiée, fréquence et affinité CPU non fixées. Les tableaux ci-dessous
-proviennent de la seconde passe, après la fin de nos compilations ; ce ne
-sont pas des garanties pour d'autres machines ni un débit natif de fenêtre.
+Intel Core Ultra 7 155H (22 logical processors), Linux x86-64, Rust 1.98.1,
+egui 0.36.2, `release` profile, five frames per regime. Non-dedicated
+work machine, CPU frequency and affinity not fixed. The tables below
+come from the second pass, after our builds finished; they are not
+guarantees for other machines nor a native window throughput.
 
-Avec LTTB (temps CPU médians en ms ; préparation et LTTB isolés hors total) :
+With LTTB (median CPU times in ms; isolated preparation and LTTB outside the total):
 
-| Points au total | Séries | Préparation isolée | LTTB isolé | Pipeline zoom | Tessellation zoom | Total zoom froid | Total pan froid | Fenêtre, cache chaud |
+| Total points | Series | Isolated preparation | Isolated LTTB | Zoom pipeline | Zoom tessellation | Cold zoom total | Cold pan total | Window, warm cache |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 100 000 | 1 | 0.27 | 0.17 | 1.03 | 0.04 | 1.08 | 1.06 | 0.05 |
-| 100 000 | 10 | 0.28 | 0.36 | 1.42 | 0.53 | 1.97 | 1.91 | 0.75 |
-| 250 000 | 1 | 1.84 | 0.78 | 4.78 | 0.10 | 4.94 | 3.43 | 0.11 |
-| 250 000 | 10 | 1.37 | 1.21 | 5.57 | 1.52 | 7.21 | 3.44 | 1.53 |
-| 500 000 | 1 | 1.81 | 1.22 | 7.33 | 0.08 | 7.44 | 7.71 | 0.10 |
-| 500 000 | 10 | 2.22 | 1.66 | 8.25 | 0.88 | 9.20 | 9.53 | 1.48 |
-| 1 000 000 | 1 | 3.03 | 1.74 | 10.48 | 0.05 | 10.55 | 10.36 | 0.05 |
-| 1 000 000 | 10 | 2.90 | 2.08 | 10.95 | 0.61 | 11.59 | 11.40 | 0.68 |
-| 2 000 000 | 1 | 6.75 | 4.35 | 23.93 | 0.06 | 24.02 | 24.20 | 0.07 |
-| 2 000 000 | 10 | 6.56 | 4.11 | 23.20 | 0.86 | 24.09 | 24.22 | 0.89 |
-| 5 000 000 | 1 | 34.82 | 9.01 | 80.70 | 0.07 | 80.83 | 79.43 | 0.06 |
-| 5 000 000 | 10 | 34.15 | 9.67 | 79.73 | 0.75 | 80.54 | 81.20 | 0.87 |
-| 10 000 000 | 1 | 66.97 | 17.43 | 159.85 | 0.06 | 159.96 | 153.72 | 0.05 |
-| 10 000 000 | 10 | 71.69 | 18.92 | 163.00 | 0.93 | 163.94 | 163.88 | 0.86 |
+| 100,000 | 1 | 0.27 | 0.17 | 1.03 | 0.04 | 1.08 | 1.06 | 0.05 |
+| 100,000 | 10 | 0.28 | 0.36 | 1.42 | 0.53 | 1.97 | 1.91 | 0.75 |
+| 250,000 | 1 | 1.84 | 0.78 | 4.78 | 0.10 | 4.94 | 3.43 | 0.11 |
+| 250,000 | 10 | 1.37 | 1.21 | 5.57 | 1.52 | 7.21 | 3.44 | 1.53 |
+| 500,000 | 1 | 1.81 | 1.22 | 7.33 | 0.08 | 7.44 | 7.71 | 0.10 |
+| 500,000 | 10 | 2.22 | 1.66 | 8.25 | 0.88 | 9.20 | 9.53 | 1.48 |
+| 1,000,000 | 1 | 3.03 | 1.74 | 10.48 | 0.05 | 10.55 | 10.36 | 0.05 |
+| 1,000,000 | 10 | 2.90 | 2.08 | 10.95 | 0.61 | 11.59 | 11.40 | 0.68 |
+| 2,000,000 | 1 | 6.75 | 4.35 | 23.93 | 0.06 | 24.02 | 24.20 | 0.07 |
+| 2,000,000 | 10 | 6.56 | 4.11 | 23.20 | 0.86 | 24.09 | 24.22 | 0.89 |
+| 5,000,000 | 1 | 34.82 | 9.01 | 80.70 | 0.07 | 80.83 | 79.43 | 0.06 |
+| 5,000,000 | 10 | 34.15 | 9.67 | 79.73 | 0.75 | 80.54 | 81.20 | 0.87 |
+| 10,000,000 | 1 | 66.97 | 17.43 | 159.85 | 0.06 | 159.96 | 153.72 | 0.05 |
+| 10,000,000 | 10 | 71.69 | 18.92 | 163.00 | 0.93 | 163.94 | 163.88 | 0.86 |
 
-Le témoin sans LTTB confirme son utilité (temps CPU médians en ms) :
+The witness without LTTB confirms its usefulness (median CPU times in ms):
 
-| Points au total | Séries | Zoom froid | Pan froid | Fenêtre, cache chaud | Maillages fenêtre (Mo décimaux) |
+| Total points | Series | Cold zoom | Cold pan | Window, warm cache | Window meshes (decimal MB) |
 |---:|---:|---:|---:|---:|---:|
-| 100 000 | 1 | 7.24 | 3.66 | 5.20 | 15.58 |
-| 100 000 | 10 | 11.10 | 4.54 | 10.47 | 19.03 |
-| 1 000 000 | 1 | 82.03 | 55.58 | 53.97 | 152.36 |
-| 1 000 000 | 10 | 80.85 | 80.28 | 63.36 | 155.74 |
-| 10 000 000 | 1 | 971.67 | 821.00 | 633.80 | 1520.35 |
-| 10 000 000 | 10 | 821.90 | 732.42 | 525.63 | 1523.50 |
+| 100,000 | 1 | 7.24 | 3.66 | 5.20 | 15.58 |
+| 100,000 | 10 | 11.10 | 4.54 | 10.47 | 19.03 |
+| 1,000,000 | 1 | 82.03 | 55.58 | 53.97 | 152.36 |
+| 1,000,000 | 10 | 80.85 | 80.28 | 63.36 | 155.74 |
+| 10,000,000 | 1 | 971.67 | 821.00 | 633.80 | 1520.35 |
+| 10,000,000 | 10 | 821.90 | 732.42 | 525.63 | 1523.50 |
 
-**Lecture pour la décision CPU/GPU.** Le budget de 60 images/s est
-16,7 ms pour **toute** l'image, dont le banc ne mesure que la partie CPU du
-graphe. Le million de points reste sous ce budget dans la passe de référence ;
-les cas à deux millions et au-delà le dépassent. Le franchissement observé
-est donc encadré entre un et deux millions de points au total sur cette
-machine, pour ces courbes et cette largeur. Il ne définit pas un plafond
-du modèle : les données restent traçables, l'interaction ralentit.
+**Reading for the CPU/GPU decision.** The 60 frames/s budget is
+16.7 ms for the **whole** frame, of which the bench measures only the CPU part of the
+graph. The million points stay under this budget in the reference pass;
+the cases of two million and above exceed it. The observed crossing
+is therefore bracketed between one and two million points in total on this
+machine, for these curves and this width. It does not define a cap
+of the model: the data stay plottable, the interaction slows down.
 
-À dix millions, plus de 99 % du total CPU pendant zoom/pan avec LTTB appartient
-à l'image avant tessellation. Le seuil est 1 424 points par série : le maillage
-final est petit, mais préparer, cadrer et décimer reparcourt toujours les
-données entières à chaque génération. Les images à cache chaud avec LTTB
-restent petites ; sans LTTB le cache conserve des chemins énormes qu'egui
-retessèle et clone à chaque image (jusqu'à environ 1,52 Go de maillages au
-cadrage initial).
+At ten million, more than 99 % of the CPU total during zoom/pan with LTTB belongs
+to the frame before tessellation. The threshold is 1,424 points per series: the final
+mesh is small, but preparing, framing and decimating still walk over the whole
+data at each generation. The warm-cache frames with LTTB
+stay small; without LTTB the cache keeps huge paths that egui
+re-tessellates and clones at each frame (up to about 1.52 GB of meshes at the
+initial framing).
 
-Une première passe pendant les compilations donnait environ 30–32 ms au
-million de points (une série) et 191–410 ms à dix millions ; la seconde donne
-environ 10–11 ms et 154–160 ms. Cette dispersion justifie de garder des
-mesures manuelles et des médianes, plutôt qu'une assertion de temps en CI.
+A first pass during builds gave about 30–32 ms at
+a million points (one series) and 191–410 ms at ten million; the second gives
+about 10–11 ms and 154–160 ms. This spread justifies keeping manual
+measurements and medians, rather than a timing assertion in CI.
 
-**Décision :** le passage GPU est écarté à l'issue de cette expérience (#141).
-Ces mesures ne justifient pas de développer Vello ou un
-chemin wgpu direct pour les longues courbes déjà décimées : remplacer seulement
-la tessellation ne retire presque rien au coût CPU mesuré. La piste à étudier
-ensemble est la réutilisation de la géométrie préparée et/ou une décimation
-à plusieurs niveaux, en conservant la fidélité scientifique et l'accord des
-backends. Aucune optimisation ni chemin GPU n'est implémenté ici.
+**Decision:** the GPU path is dropped at the end of this experiment (#141).
+These measurements do not justify developing Vello or a direct wgpu
+path for the already-decimated long curves: replacing only
+the tessellation removes almost nothing of the measured CPU cost. The lead to study
+together is the reuse of the prepared geometry and/or a multi-level
+decimation, keeping scientific fidelity and backend agreement.
+No optimization or GPU path is implemented here.
 
-L'envoi GPU réel reste **non mesuré** ; sa séparation exige un banc avec un
-renderer natif et un protocole de synchronisation. Le pipeline regroupe encore
-préparation/cadrage/projection/rognage et appels Plotters : les mesures annexes
-isolent les algorithmes, pas exactement leur part dans chaque image. La
-conclusion porte sur quelques longues courbes ; elle ne tranche pas le cas
-de centaines de petites séries, ni le coût de Typst, des colonnes mixtes ou
-d'un rendu en haute résolution.
+The real GPU upload remains **unmeasured**; separating it requires a bench with a
+native renderer and a synchronization protocol. The pipeline still groups
+preparation/framing/projection/clipping and Plotters calls: the side measurements
+isolate the algorithms, not exactly their share in each frame. The
+conclusion concerns a few long curves; it does not settle the case
+of hundreds of small series, nor the cost of Typst, of mixed columns or
+of high-resolution rendering.
 
-### Polices
+### Fonts
 
-Trois paires texte + Math embarquées (Libertinus, Fira, Noto — SIL OFL 1.1,
-provenance dans `vendor/fonts/README.md`), ou une police système par son nom
-avec repli sur Noto.
+Three embedded text + Math pairs (Libertinus, Fira, Noto — SIL OFL 1.1,
+provenance in `vendor/fonts/README.md`), or a system font by its name
+with fallback on Noto.
 
-`text::font_definitions` reste la source unique de mesure : ce module lui donne
-un **paramètre** (`FontChoice`) au lieu de la figer. D'où un unique point
-d'entrée `fonts::resolve`, et non deux fonctions « pour l'écran » / « pour
-l'export » — un appelant qui changerait de police d'un seul côté reproduirait
-exactement le défaut que `text.rs` existe pour empêcher.
+`text::font_definitions` stays the single source of measurement: this module gives it
+a **parameter** (`FontChoice`) instead of freezing it. Hence a single entry
+point `fonts::resolve`, and not two functions "for the screen" / "for
+the export" — a caller that changed font on one side only would reproduce
+exactly the defect `text.rs` exists to prevent.
 
-## `stokesforge-render-egui` — l'écran
+## `stokesforge-render-egui` — the screen
 
-`GraphView` est ce que l'UI tient réellement : un cache, plus la mise en
-relation d'un `Snapshot` de session et d'un nœud `Graph`.
+`GraphView` is what the UI really holds: a cache, plus the link between a
+session `Snapshot` and a `Graph` node.
 
-### Le backend collecte, il ne peint pas
+### The backend collects, it does not paint
 
-`EguiBackend` ne tient pas de `Painter` : il écrit dans un `&mut Vec<Shape>`
-qu'on lui prête. egui est en mode immédiat — il repeint à chaque mouvement de
-souris. Un backend qui dessinerait dans un `Painter` rejouerait tout le
-pipeline Plotters à **chaque image**, même immobile. Avec un collecteur, le
-résultat se met en cache et une image sans changement coûte un
+`EguiBackend` holds no `Painter`: it writes into a `&mut Vec<Shape>`
+that is lent to it. egui is in immediate mode — it repaints at every mouse
+movement. A backend that drew into a `Painter` would replay the whole
+Plotters pipeline at **every frame**, even a still one. With a collector, the
+result is cached and a frame without change costs one
 `painter.extend(...)`.
 
-### La clé de cache a exactement quatre termes
+### The cache key has exactly four terms
 
 `(revision, rect, pixels_per_point, view_generation)`
 
-- **`revision`** — le compteur de `stokesforge-session` ; le renderer devient un
-  client de plus du même protocole, il n'y avait rien à inventer ;
-- **`rect`** — le rectangle logique passé au pipeline ; un appel direct peut
-  changer sa taille, alors que l'application garde `DEFAULT_FIGURE_SIZE` et
-  transforme les formes en sortie pour redimensionner la fenêtre sans
-  redisposer les axes et les textes ;
-- **`pixels_per_point`** — l'exception qu'`epaint` documente lui-même :
-  `Shape::Text` en dépend et doit être reconstruit quand il change ;
-- **`view_generation`** — le compteur de `ViewState`, qui monte à chaque zoom,
-  pan ou rectangle élastique commis. Le zoom **change la géométrie tracée**,
-  donc doit invalider. Un compteur plutôt que les bornes : un entier suffit à
-  invalider, la valeur du cadrage n'a pas à transiter par là.
+- **`revision`** — the counter of `stokesforge-session`; the renderer becomes
+  one more client of the same protocol, there was nothing to invent;
+- **`rect`** — the logical rectangle passed to the pipeline; a direct call can
+  change its size, whereas the application keeps `DEFAULT_FIGURE_SIZE` and
+  transforms the shapes on output to resize the window without
+  re-laying out the axes and texts;
+- **`pixels_per_point`** — the exception that `epaint` itself documents:
+  `Shape::Text` depends on it and must be rebuilt when it changes;
+- **`view_generation`** — the counter of `ViewState`, which goes up at each
+  committed zoom, pan or rubber-band rectangle. Zoom **changes the plotted geometry**,
+  so it must invalidate. A counter rather than the bounds: an integer is enough to
+  invalidate, the framing value does not have to pass through there.
 
-Ce qui n'y est délibérément **pas** : le *feathering* (invariant 6).
+What is deliberately **not** in it: *feathering* (invariant 6).
 
-### Zoom et pan ne sont pas des mutations du modèle
+### Zoom and pan are not model mutations
 
-Un zoom molette est un **cadrage de vue éphémère**. Le faire passer par une
-commande annulable en ferait une entrée d'historique au même titre qu'un
-renommage — et personne ne veut annuler un zoom avec `Ctrl+Z`.
+A wheel zoom is an **ephemeral view framing**. Sending it through an
+undoable command would make it a history entry just like a
+rename — and nobody wants to undo a zoom with `Ctrl+Z`.
 
-`ViewState` (`stokesforge_render::view`) vit donc à côté du modèle, sur `GraphView`, et ne touche jamais au
-`PlotSpec` stocké dans le `Tree`. Le mécanisme réutilise ce qui existait déjà :
-`AxisSpec::has_explicit_range` fait primer un cadrage explicite sur les données
-calculées ; `ViewState::apply` pose `auto_range = false` et les deux bornes sur
-un **clone** du spec, juste avant de résoudre. Seul le déclenchement est
-nouveau.
+`ViewState` (`stokesforge_render::view`) therefore lives next to the model, on `GraphView`, and never touches the
+`PlotSpec` stored in the `Tree`. The mechanism reuses what already existed:
+`AxisSpec::has_explicit_range` makes an explicit framing win over the computed
+data; `ViewState::apply` sets `auto_range = false` and the two bounds on
+a **clone** of the spec, just before resolving. Only the trigger is
+new.
 
-**Calques superposés (#167).** Un `PanelSpec` portant `overlay: Some(OverlaySpec
-{ x_top, y_right })` recouvre le dernier calque ordinaire de sa case (même
-`row`/`column`). Le pipeline réserve pour chaque case l'**union** des aires de
-graduation demandées par ses calques (`CellPlan`), si bien que tous ont la même
-zone de tracé (dimension liée) ; le calque superposé hérite de l'aire du calque
-recouvert (`BaseFrame`), n'a ni titre ni fond. Son axe `bottom` est son axe X,
-affiché **en haut** avec une échelle propre si `x_top` (sinon l'échelle X est
-celle du calque recouvert), de même `left` / `y_right` pour l'axe Y à droite.
-Ses axes sont tracés par les axes secondaires de Plotters ; ses séries
-n'ont pas d'ordonnée secondaire. `DrawnPanel::axis_areas.top` porte l'aire du
-haut ; `PlotComponent::Axis` garde le côté **du spec** (`Bottom`/`Left`) même
-quand l'axe est affiché en haut ou à droite. Test : `geometrie.rs`,
+**Overlaid layers (#167).** A `PanelSpec` carrying `overlay: Some(OverlaySpec
+{ x_top, y_right })` covers the last ordinary layer of its cell (same
+`row`/`column`). For each cell, the pipeline reserves the **union** of the tick
+areas requested by its layers (`CellPlan`), so that all of them have the same
+plot area (linked dimension); the overlaid layer inherits the area of the
+covered layer (`BaseFrame`), and has neither title nor background. Its `bottom` axis
+is its X axis, displayed **on top** with its own scale if `x_top` (otherwise the X scale
+is that of the covered layer), likewise `left` / `y_right` for the Y axis on the right.
+Its axes are plotted by Plotters' secondary axes; its series
+have no secondary ordinate. `DrawnPanel::axis_areas.top` holds the top
+area; `PlotComponent::Axis` keeps the side **of the spec** (`Bottom`/`Left`) even
+when the axis is displayed on top or on the right. Test: `geometrie.rs`,
 `stokesforge-render-svg/tests/calques.rs`.
 
-**Axes empilés (#168).** Plusieurs calques superposés d'une même case peuvent
-afficher un axe du même côté : chacun a sa **bande** (aire de la case divisée
-par le nombre de calques qui y affichent un axe, `CellPlan::top_levels` /
-`right_slots`, plafonnée comme toute aire au tiers de la case), placée vers
-l'extérieur dans l'**ordre des calques** — le plus ancien contre la zone de
-tracé. Le rang vient de cet ordre (`ranks` dans `draw_on`), jamais d'un niveau
-stocké : un calque sans axe affiché ou supprimé ne laisse pas de bande vide.
-Plotters collant l'axe secondaire à la zone de tracé, chaque axe de calque est
-tracé dans une zone « axe seul » (`area.shrink`) qui reprend les bords de la
-zone de tracé dans le sens de l'axe et se place à sa bande.
-`AxisArea::offset` est la distance de la bande à la zone de tracé, que
-`hit::axis_component_at` compte. Limite connue : un axe de droite à données
-(`SeriesAxis::Right`) du calque ordinaire garde son titre au bord extérieur de
-toute l'aire. Test : `geometrie.rs`, `calques.rs`, `hit.rs`.
+**Stacked axes (#168).** Several overlaid layers of the same cell can
+display an axis on the same side: each has its **band** (area of the cell divided
+by the number of layers displaying an axis there, `CellPlan::top_levels` /
+`right_slots`, capped like any area at a third of the cell), placed outward in
+**layer order** — the oldest against the plot area. The rank comes from this order (`ranks` in `draw_on`), never from a stored
+level: a layer with no displayed axis, or a deleted one, leaves no empty band.
+Since Plotters sticks the secondary axis to the plot area, each layer axis is
+plotted in an "axis only" area (`area.shrink`) that takes the edges of the
+plot area along the axis direction and is placed at its band.
+`AxisArea::offset` is the distance from the band to the plot area, which
+`hit::axis_component_at` counts. Known limit: a data right axis
+(`SeriesAxis::Right`) of the ordinary layer keeps its title at the outer edge of
+the whole area. Test: `geometrie.rs`, `calques.rs`, `hit.rs`.
 
-**Légende commune (#172).** La légende d'un calque ordinaire liste d'abord ses
-courbes puis, calque par calque dans l'ordre de `PlotSpec::panels`, celles des
-calques superposés qui le recouvrent (`overlays_of` dans `draw_on`, préparées
-par `draw_panel` avec les échelles propres de chaque calque). La légende du
-calque superposé reste masquée à sa création ; l'afficher en produit une
-seconde, limitée à ses courbes. Les lignes ajoutées n'ont pas de rang dans le
-calque ordinaire : `DrawnPlot::legend_rows` ne les désigne pas (pas de glisser
-ni de sélection par elles). Test : `geometrie.rs`.
+**Shared legend (#172).** The legend of an ordinary layer lists its
+curves first, then, layer by layer in the order of `PlotSpec::panels`, those of the
+overlaid layers that cover it (`overlays_of` in `draw_on`, prepared
+by `draw_panel` with the own scales of each layer). The legend of the
+overlaid layer stays hidden when it is created; showing it produces a
+second one, limited to its curves. The added rows have no rank in the
+ordinary layer: `DrawnPlot::legend_rows` does not designate them (no drag
+or selection through them). Test: `geometrie.rs`.
 
-**Axes miroirs (#176).** Sur un calque ordinaire, `AxisSpec::mirror` du haut
-(`top`) et de la droite (`right`, quand aucune série n'y est rattachée) trace
-un axe qui reprend l'échelle, les bornes et les graduations du bas et de la
-gauche, **sans titre**, par les axes secondaires de Plotters. Un calque
-superposé de la case qui occupe ce côté prime (`CellPlan::mirror_top` /
-`mirror_right`). `AxisSpec::tick_labels` faux garde la ligne et les tirets sans
-les nombres (formateur vide) ; l'aire de graduation d'un miroir sans libellés
-n'est que `BARE_LABEL_AREA`. Test : `stokesforge-render-svg/tests/miroirs.rs`.
+**Mirror axes (#176).** On an ordinary layer, `AxisSpec::mirror` of the top
+(`top`) and the right (`right`, when no series is attached there) plots
+an axis that takes the scale, bounds and ticks of the bottom and
+left, **without a title**, through Plotters' secondary axes. An overlaid
+layer of the cell that occupies this side wins (`CellPlan::mirror_top` /
+`mirror_right`). `AxisSpec::tick_labels` false keeps the line and the tick marks without
+the numbers (empty formatter); the tick area of a mirror without labels
+is only `BARE_LABEL_AREA`. Test: `stokesforge-render-svg/tests/miroirs.rs`.
 
-**Tirets et sens des tirets (#344).** `AxisSpec::ticks` (tirets tracés) et
-`AxisSpec::tick_direction` (`TickDirection` : `Out` défaut, `In`, `Both`)
-valent pour les quatre côtés d'un calque ordinaire (pas pour les axes d'un calque
-superposé). Le défaut (`ticks` vrai, `Out`) reste **entièrement à Plotters**
-(`custom_ticks` faux) : les figures existantes sont identiques au pixel. Sinon :
-Plotters ne trace les tirets qu'avec la ligne d'axe et place les nombres à deux
-fois leur longueur (`tick_size < 0` déplace même la ligne) ; l'axe passe donc en
-deux passes de maillage (`mesh_passes`) : les nombres seuls (ligne d'alpha nul,
-écart d'origine), puis la ligne seule (tirets de longueur nulle, aucune
-graduation demandée). Le pipeline trace ensuite les tirets lui-même
-(`draw_ticks`, `PathElement`, donc identiques en egui et en SVG) aux graduations
-de `scale::linear_key_points`, projetées par le repère principal (bas, gauche)
-ou secondaire (haut, droite : l'arrondi y diffère parfois d'un pixel). Longueur =
-celle de Plotters (`tick_length`, 5 px au plus). Dans un maillage « maison », un
-axe voisin resté par défaut a ses tirets `Out` tracés aussi par le pipeline, au
-même pixel. **Sous-graduations (#344).** `AxisSpec::minor_ticks` (**vrai** pour un axe neuf ;
-un ancien fichier qui n'a pas le champ se relit faux ; indépendant de `ticks` :
-on peut les tracer seules) trace des tirets de la moitié de la longueur des
-principaux (`draw_minor_ticks`, arrondie au-dessus), dans le même sens, même
-quand les tirets principaux restent à Plotters (`custom_ticks` faux). Leur nombre entre deux
-principales est `AxisSpec::minor_tick_count` (`None` = automatique ; sans effet en
-échelle logarithmique). `AxisSpec::label_every` n'écrit qu'un nombre sur n, le
-premier toujours (`TickFormat::with_label_every`, formateur par axe : le haut a
-le sien). Positions
-par `scale::minor_key_points`, en valeurs puis projetées comme les graduations
-principales : linéaire, le pas principal coupé en 5 (en 4 pour la mantisse 2 :
-0,2 → 0,05), prolongé jusqu'aux bornes ; logarithmique, les multiples 2 à 9 de
-chaque décade, ou les décades intercalées quand le pas dépasse une décade ;
-aucune sous une décade de pas. Jamais sur une graduation principale ; aucune
-sur les axes d'un calque superposé. Le quadrillage léger de Plotters n'y est pas
-aligné. Tests : `scale.rs`, `miroirs.rs`, `accord.rs`.
+**Tick marks and tick direction (#344).** `AxisSpec::ticks` (plotted tick marks) and
+`AxisSpec::tick_direction` (`TickDirection`: `Out` default, `In`, `Both`)
+apply to the four sides of an ordinary layer (not to the axes of an overlaid
+layer). The default (`ticks` true, `Out`) stays **entirely with Plotters**
+(`custom_ticks` false): existing figures are pixel-identical. Otherwise:
+Plotters plots tick marks only with the axis line and places the numbers at twice
+their length (`tick_size < 0` even moves the line); the axis therefore goes through
+two mesh passes (`mesh_passes`): the numbers alone (line of zero alpha,
+original gap), then the line alone (tick marks of zero length, no tick
+requested). The pipeline then plots the tick marks itself
+(`draw_ticks`, `PathElement`, hence identical in egui and SVG) at the ticks
+of `scale::linear_key_points`, projected by the primary frame (bottom, left)
+or secondary frame (top, right: rounding there sometimes differs by a pixel). Length =
+that of Plotters (`tick_length`, 5 px at most). In a "home-made" mesh, a
+neighboring axis left at default has its `Out` tick marks plotted by the pipeline too, at the
+same pixel. **Minor ticks (#344).** `AxisSpec::minor_ticks` (**true** for a new axis;
+an old file that lacks the field reads back false; independent of `ticks`:
+they can be plotted alone) plots tick marks of half the length of the
+major ones (`draw_minor_ticks`, rounded up), in the same direction, even
+when the major tick marks stay with Plotters (`custom_ticks` false). Their number between two
+major ones is `AxisSpec::minor_tick_count` (`None` = automatic; no effect on a
+logarithmic scale). `AxisSpec::label_every` writes only one number in n, the
+first always (`TickFormat::with_label_every`, formatter per axis: the top has
+its own). Positions
+by `scale::minor_key_points`, in values then projected like the major
+ticks: linear, the major step cut in 5 (in 4 for mantissa 2:
+0.2 → 0.05), extended to the bounds; logarithmic, the multiples 2 to 9 of
+each decade, or the interleaved decades when the step exceeds a decade;
+none under a decade of step. Never on a major tick; none
+on the axes of an overlaid layer. Plotters' light grid is not
+aligned with them. Tests: `scale.rs`, `miroirs.rs`, `accord.rs`.
 
-**Réglages « Avancé » des tirets (#344).** `AxisSpec::tick_length` (grands
-tirets), `minor_tick_length` (petits), `tick_width` et `tick_mark_color`
-(`None` / vide = Auto). Unités : pixels de figure pour les longueurs, points
-pour l'épaisseur (arrondie à l'entier par Plotters). Auto : les grands tirets
-gardent la longueur de Plotters (`tick_length`, 5 px au plus), les petits en
-valent la moitié **du grand tiret effectif** (grand à 10 → petit à 5), 1 pt, la
-couleur de l'échelle (`tick_color`, distincte de la couleur des tirets : ligne
-et nombres gardent la leur). Le style est posé **dans `draw_marks` seulement**
-(`MarkStyle`, invariant 5) ; une longueur non finie se lit Auto, une longueur
-négative vaut 0 (aucun tiret) et `MAX_TICK_LENGTH` (50 px) la borne, l'épaisseur
-passe par `paint::stroke_width` (1 à 64) : la valeur brute reste dans le fichier,
-le rendu la borne (invariant 10). Un réglage fait passer l'axe aux tirets maison
-(`custom_ticks`), comme un sens autre que « vers l'extérieur » ; les nombres
-gardent alors leur écart d'origine, donc un tiret long (vers l'extérieur) peut
-les toucher. Tests : `miroirs.rs` (longueur, petit Auto, couleur, épaisseur,
-valeurs hors bornes), `accord.rs` (écran = export ; la couleur y est invisible,
-elle est gardée par `miroirs.rs`).
+**« Avancé » settings for tick marks (#344).** `AxisSpec::tick_length` (major
+tick marks), `minor_tick_length` (minor ones), `tick_width` and `tick_mark_color`
+(`None` / empty = Auto). Units: figure pixels for lengths, points
+for the thickness (rounded to the integer by Plotters). Auto: major tick marks
+keep Plotters' length (`tick_length`, 5 px at most), minor ones are
+half of **the effective major tick mark** (major at 10 → minor at 5), 1 pt, the
+scale color (`tick_color`, distinct from the tick mark color: line
+and numbers keep theirs). The style is set **in `draw_marks` only**
+(`MarkStyle`, invariant 5); a non-finite length reads as Auto, a negative
+length is 0 (no tick mark) and `MAX_TICK_LENGTH` (50 px) bounds it, the thickness
+goes through `paint::stroke_width` (1 to 64): the raw value stays in the file,
+rendering bounds it (invariant 10). A setting moves the axis to home-made tick marks
+(`custom_ticks`), like a direction other than "outward"; the numbers
+then keep their original gap, so a long tick mark (outward) can
+touch them. Tests: `miroirs.rs` (length, Auto minor, color, thickness,
+out-of-bounds values), `accord.rs` (screen = export; the color is invisible there,
+it is guarded by `miroirs.rs`).
 
-**Sens de l'axe.** `axis_range` lit toujours « l'un ou l'autre » (`inverted`
-ou `range_min > range_max`), sans s'additionner. `AxisSpec::orient` (crate
-`stokesforge-plot`) ramène un axe à sa forme canonique sans changer le rendu :
-`inverted` vrai dès que les bornes **utilisées** (hors Auto) sont décroissantes,
-et un axe inversé remet ses bornes mémorisées en ordre décroissant ; test
+**Axis direction.** `axis_range` always reads "one or the other" (`inverted`
+or `range_min > range_max`), without adding them. `AxisSpec::orient` (crate
+`stokesforge-plot`) brings an axis to its canonical form without changing the rendering:
+`inverted` true as soon as the **used** bounds (non-Auto) are decreasing,
+and an inverted axis puts its remembered bounds back in decreasing order; test
 `un_axe_oriente_se_trace_comme_l_axe_d_origine` (`geometrie.rs`).
 
-Tests : `miroirs.rs` (SVG), `accord.rs`
+Tests: `miroirs.rs` (SVG), `accord.rs`
 (`les_tirets_maison_s_accordent_et_changent_la_figure`).
 
-Les échelles linéaires propres d'un calque superposé sont **jointes** à celles
-du calque recouvert (#174) : sans étendue fixée à la main, `scale::aligned_range`
-choisit un pas rond et une position telle que l'intervalle enveloppe les données
-du calque et que ses graduations tombent aux mêmes fractions de l'axe que
-celles du calque recouvert (le 0 du haut en face du 0 du bas) ; chaque candidat
-est vérifié avec les graduations que Plotters posera réellement. Sans solution,
-échelle logarithmique ou étendue explicite (zoom compris) : cadrage
-indépendant. Les graduations linéaires s'écrivent sans décimale quand elles
-sont toutes entières, avec le même nombre de décimales sinon
-(`scale::TickFormat`, #175) ; tous les axes passent par un formateur. Les coins où deux axes tracés se
-rejoignent sont comblés (segment en L de 1 px par coin, `draw_panel`, test
+The own linear scales of an overlaid layer are **joined** to those of the
+covered layer (#174): without a hand-fixed extent, `scale::aligned_range`
+chooses a round step and a position such that the interval encloses the data
+of the layer and its ticks fall at the same fractions of the axis as
+those of the covered layer (the top 0 facing the bottom 0); each candidate
+is checked against the ticks Plotters will really put down. With no solution,
+a logarithmic scale or an explicit extent (zoom included): independent
+framing. Linear ticks are written without decimals when they
+are all integers, with the same number of decimals otherwise
+(`scale::TickFormat`, #175); all axes go through a formatter. The corners where two plotted axes
+meet are filled (1 px L-shaped segment per corner, `draw_panel`, test
 `les_axes_se_rejoignent_aux_coins`).
 
-Un calque est identifié par son **indice dans `PlotSpec::panels`**
-(`DrawnPanel::index`), **pas par son rang dans `DrawnPlot::panels`** : celui-ci
-omet les panneaux trop petits pour être tracés (`MIN_CELL`), ce qui décale ses
-rangs. `(row, column)` ne sert qu'à la grille : plusieurs calques peuvent se
-superposer dans la même case (#167), donc ne l'identifient pas.
+A layer is identified by its **index in `PlotSpec::panels`**
+(`DrawnPanel::index`), **not by its rank in `DrawnPlot::panels`**: the latter
+omits the panels too small to be plotted (`MIN_CELL`), which shifts its
+ranks. `(row, column)` serves only for the grid: several layers can
+overlay in the same cell (#167), so they do not identify them.
 
-Le pan est le même pour tous les outils (#318) : Ctrl + glisser ou clic milieu +
-glisser, une seule échelle si le geste part d'un axe ; il est décidé à la
-pression (`NavDrag`, `decide_nav`) et passe avant les glissers d'objets, de
-rectangle de zoom et de tracé. Le feathering ne se coupe que pendant un geste
-réel (pan, rectangle, objet déplacé ou tracé), pas pour un glisser sans effet.
+The pan is the same for all tools (#318): Ctrl + drag or middle click +
+drag, a single scale if the gesture starts from an axis; it is decided at
+press (`NavDrag`, `decide_nav`) and takes precedence over the drags of objects,
+zoom rectangle and plotting. Feathering is turned off only during a
+real gesture (pan, rectangle, moved or plotted object), not for a drag without effect.
 
-Gestes câblés : Ctrl+molette (zoom ; la molette seule ne fait rien), double-clic
-(réinitialisation), plus réticule et désignation de point (`PointHit`, rayon
-`HIT_RADIUS`). Le glisser principal dépend de l'**outil** de la vue
-(`GraphTool`, issue #62, réglage de vue comme le cadrage, jamais annulable) :
-`Pointer` (défaut) déplace les textes et objets (le glisser simple ne fait plus
-défiler la vue), `ZoomBox` trace le rectangle de zoom élastique, `Text` pose un texte au clic
-(`GraphEvent::PlaceText`, puis retour au pointeur). Le clic droit n'est plus un
-geste de zoom : il ouvre le menu contextuel.
+Wired gestures: Ctrl+wheel (zoom; the wheel alone does nothing), double-click
+(reset), plus crosshair and point designation (`PointHit`, radius
+`HIT_RADIUS`). The main drag depends on the view's **tool**
+(`GraphTool`, issue #62, a view setting like the framing, never undoable):
+`Pointer` (default) moves texts and objects (a plain drag no longer
+scrolls the view), `ZoomBox` plots the rubber-band zoom rectangle, `Text` puts down a text on click
+(`GraphEvent::PlaceText`, then back to the pointer). The right click is no longer a
+zoom gesture: it opens the context menu.
 
-### Le levier d'anticrénelage
+### The anti-aliasing lever
 
-Le *feathering* — la frange d'un pixel qu'`epaint` ajoute à chaque trait — pèse
-**78 % du coût de tessellation** : 22,1 ms par image avec, **4,88 ms sans**, sur
-le même graphe de 300 000 points. C'est le levier le plus rentable du chantier,
-et il n'était pas dans le plan avant la mesure.
+*Feathering* — the one-pixel fringe that `epaint` adds to each stroke — weighs
+**78 % of the tessellation cost**: 22.1 ms per frame with it, **4.88 ms without**, on
+the same graph of 300,000 points. It is the most profitable lever of the work package,
+and it was not in the plan before the measurement.
 
-Il se coupe à l'entrée du glisser et se rétablit au relâchement : le crénelage
-ne se voit pas sur une image qui bouge, et c'est exactement pendant le
-déplacement que les 22,1 ms font mal. Ce n'est donc pas un réglage exposé à
-l'utilisateur, c'est un **état du rendu**.
+It is turned off when the drag starts and restored on release: aliasing
+is not visible on a moving image, and it is exactly during the
+movement that the 22.1 ms hurt. So it is not a setting exposed to the
+user, it is a **state of the rendering**.
 
-`stokesforge-render-egui::feathering` est la seule exception vivante à l'invariant 5,
-et elle n'en est pas vraiment une : `TessellationOptions` est un réglage de la
-pile egui, en aval de la collecte des `Shape`, et un SVG ne triangule rien. Il
-n'y a rien à mettre de l'autre côté.
+`stokesforge-render-egui::feathering` is the only living exception to invariant 5,
+and it is not really one: `TessellationOptions` is a setting of the
+egui stack, downstream of the collection of `Shape`s, and an SVG triangulates nothing. There
+is nothing to put on the other side.
 
-C'est une fonction libre prenant le `Context` — et non une méthode de
-`GraphView` — parce que `TessellationOptions` vaut pour **toute la fenêtre** :
-deux vues qui le poseraient chacune poseraient deux valeurs contradictoires.
+It is a free function taking the `Context` — and not a method of
+`GraphView` — because `TessellationOptions` applies to the **whole window**:
+two views that each set it would set two contradictory values.
 
-## `stokesforge-render-svg` — l'export
+## `stokesforge-render-svg` — the export
 
-> « L'export est au `PlotSpec` ce que la persistance était au modèle : la seule
-> chose qui prouve que la couche neutre est réellement neutre. »
+> "The export is to the `PlotSpec` what persistence was to the model: the only
+> thing that proves the neutral layer is really neutral."
 
-C'est pourquoi il est écrit **en même temps** que le backend écran, pas après.
+That is why it is written **at the same time** as the screen backend, not after.
 
-Ce crate ne connaît ni `egui`, ni `eframe`, ni `winit` (`tests/frontiere.rs`),
-et mesure pourtant le texte exactement comme l'écran — la mesure vient
-d'`epaint`, tiré par `stokesforge-render`. Conséquence pratique : **le rendu se teste
-sans serveur graphique**, donc en intégration continue.
+This crate knows neither `egui`, nor `eframe`, nor `winit` (`tests/frontiere.rs`),
+and yet measures text exactly like the screen — the measurement comes
+from `epaint`, pulled in by `stokesforge-render`. Practical consequence: **rendering is tested
+without a graphics server**, hence in continuous integration.
 
-`MeasuredSvgBackend` est une **enveloppe** autour de `plotters-svg::SVGBackend`,
-pas un backend réécrit : ~800 lignes maintenues en amont font déjà tout ce qu'il
-faut ; il ne leur manque qu'`estimate_text_size`, et c'est précisément celle qui
-compte.
+`MeasuredSvgBackend` is a **wrapper** around `plotters-svg::SVGBackend`,
+not a rewritten backend: ~800 lines maintained upstream already do everything
+needed; they lack only `estimate_text_size`, and that is precisely the one that
+matters.
 
-PDF et PNG ne sont **pas des backends** : ce sont des conversions de la
-`String` que `render_to_string` rend déjà — `usvg` + `svg2pdf` pour l'un,
-`usvg` + `resvg` pour l'autre. Le PNG prend un facteur d'échelle multiplicatif,
-pas une taille de pixels : le document reste vectoriel jusqu'à la
-rasterisation.
+PDF and PNG are **not backends**: they are conversions of the
+`String` that `render_to_string` already returns — `usvg` + `svg2pdf` for one,
+`usvg` + `resvg` for the other. The PNG takes a multiplicative scale factor,
+not a size in pixels: the document stays vector until
+rasterization.
 
-Une décision non annoncée par les plans, prise en écrivant le PDF : **charger
-les polices système à la conversion**. Sans `fontdb`, `usvg` ne signale aucune
-erreur et **abandonne silencieusement tout le texte** — mesuré : 599 opérateurs
-`Tj` deviennent zéro. Un export sans un seul titre ni libellé d'axe n'est pas un
-défaut de fidélité mineur, c'est un graphe muet. Repli sur le filet Noto
-embarqué si aucune police système ne convient ; le PNG réutilise la même
-politique telle quelle.
+A decision not announced by the plans, taken while writing the PDF: **load
+the system fonts at conversion**. Without `fontdb`, `usvg` reports no
+error and **silently drops all the text** — measured: 599 `Tj` operators
+become zero. An export without a single title or axis label is not a
+minor fidelity defect, it is a mute graph. Fallback on the embedded Noto safety net
+if no system font fits; the PNG reuses the same
+policy as is.
 
-**L'export depuis l'application** (issue #34) passe par `export::export_to_file`
-(`ExportFormat` lu sur l'extension : `.svg`, `.pdf`, `.png` à un agrandissement
-donné), **toujours avec Typst** : `render_to_string_with_typst`, puis
-`document_to_pdf` ou `document_to_png` sur ce SVG. L'application lui passe le
-spec cadré par la vue (`GraphView::framed_spec`) : on exporte le zoom courant,
-sans toucher au modèle. `export::export_bytes_many` rend plusieurs formats d'une
-même figure en ne la composant qu'une fois (la copie vers le presse-papiers,
-#149, en demande trois) ; chaque conversion échoue seule. La taille est `DEFAULT_SIZE`, celle où l'écran met la
-figure en page. Le blanc d'affichage d'un fond transparent reste à l'écran.
-Le fragment Typst inliné redéclare `xmlns:xlink` (ses glyphes sont des
-`<use xlink:href>`) : sans lui `usvg` refusait le document, donc tout PDF ou PNG
-d'un graphe à texte Typst (`un_graphe_typst_sexporte_en_svg_pdf_et_png`).
+**Export from the application** (issue #34) goes through `export::export_to_file`
+(`ExportFormat` read from the extension: `.svg`, `.pdf`, `.png` at a given
+enlargement), **always with Typst**: `render_to_string_with_typst`, then
+`document_to_pdf` or `document_to_png` on this SVG. The application passes it the
+spec framed by the view (`GraphView::framed_spec`): the current zoom is exported,
+without touching the model. `export::export_bytes_many` returns several formats of the
+same figure while composing it only once (the copy to the clipboard,
+#149, asks for three); each conversion fails alone. The size is `DEFAULT_SIZE`, the one at which the screen lays
+out the figure. The display white of a transparent background stays on screen.
+The inlined Typst fragment redeclares `xmlns:xlink` (its glyphs are
+`<use xlink:href>`): without it `usvg` refused the document, hence any PDF or PNG
+of a graph with Typst text (`un_graphe_typst_sexporte_en_svg_pdf_et_png`).
 
 ## Typst (R8)
 
-**Tout** titre du graphe ou d'un panneau, tout titre d'axe et toute entrée de
-légende passe par Typst, avec ou sans `$` ; les graduations jamais (issue #32).
-Deux moteurs de texte côte à côte ne s'alignaient pas. Le rôle est décidé par
-le pipeline, dans le style : `formula::rich_style` pose la famille réservée
-`stokesforge-typst`, et les deux backends aiguillent sur `formula::is_rich`, à la
-mesure comme au dessin. Aucun champ n'est ajouté à `stokesforge_plot` : **pas de
-migration du format `.stf`**. Le texte est donc compilé comme du **markup
-Typst** : `$…$` pour le mode mathématique, `*gras*`, `\$` pour un dollar.
+**Every** graph or panel title, every axis title and every legend entry goes through Typst, with or without `$`; tick labels never (issue #32).
+Two text engines side by side did not align. The role is decided by
+the pipeline, in the style: `formula::rich_style` sets the reserved family
+`stokesforge-typst`, and the two backends branch on `formula::is_rich`, for
+measurement as for drawing. No field is added to `stokesforge_plot`: **no
+migration of the `.stf` format**. The text is therefore compiled as **Typst
+markup**: `$…$` for math mode, `*gras*`, `\$` for a dollar.
 
-Pour que des libellés voisins s'alignent, `compile` fait précéder le texte d'un
-**étai** invisible de largeur nulle, borné de l'ascendante à la descendante de la
-police : texte ordinaire, indices et exposants simples ont tous la même boîte et
-la même ligne de base (19,07 pt de haut à 14 pt pour Noto) ; une formule plus
-haute (fraction, somme) agrandit la boîte sans être coupée. Une légende mixte a
-donc des lignes de même hauteur.
+So that neighboring labels align, `compile` puts before the text an invisible
+**strut** of zero width, bounded from the font's ascent to its descent: ordinary text, subscripts and simple superscripts all have the same box and
+the same baseline (19.07 pt high at 14 pt for Noto); a taller formula (fraction,
+sum) enlarges the box without being cut. A mixed legend therefore has
+rows of the same height.
 
-**Textes libres** (issue #35) : tracés en dernier, par-dessus la légende,
-centrés (`HPos`/`VPos::Center`) sur leur point de données projeté comme une
-série (`scale::forward`, même axe secondaire) ; un point ≤ 0 sur un axe log
-n'est pas tracé, mais un point hors du cadrage l'est
-(#163, levée de la décision du 2026-10-01) : le texte peut être posé dans les
-marges, bande du titre ou aire des graduations, à l'écran comme à l'export. Un angle libre ne
-passe pas par Plotters (`FontTransform` : quarts de tour seulement) : il voyage
-dans le style (`formula::rotated_family`, famille `stokesforge-typst@<degrés>`) et
-`formula::source` enveloppe le texte dans `#stokesforge-rotate` (Typst
-`rotate(reflow: true)`, l'étai dans la rotation), dont la page épouse la boîte
-tournée — l'ancrage centré reste le centre du texte. `DrawnPanel::annotations`
-rapporte centre, taille du texte droit et rotation : `hit` désigne le rectangle
-**tourné** (`PlotComponent::Annotation`, prioritaire). Côté écran,
-`GraphView` porte l'aperçu d'une édition ou d'un glisser
-(`set_annotation_preview`, appliqué au clone comme le zoom, compteur ajouté à
-`view_generation`), la sélection et les signaux `GraphEvent` (double-clic,
-texte relâché) ; l'aperçu validé reste affiché jusqu'à ce que le modèle change
-(`hold_preview`). Le champ de saisie de l'éditeur (`annotation_field`, issue
-#37) est posé sur le centre et le corps de ce texte rendu, jamais tourné : un
-angle libre de `DragValue` (fractionnaire, minuscule, négatif) reste une durée
-Typst valide (`formula::source`, issue #36 — l'hypothèse d'un format `1e-7deg`
-était fausse : le format décimal de Rust n'a pas d'exposant). Sans Typst (témoin, repli), le texte est brut et non tourné.
+**Free texts** (issue #35): plotted last, on top of the legend,
+centered (`HPos`/`VPos::Center`) on their data point projected like a
+series (`scale::forward`, same secondary axis); a point ≤ 0 on a log axis
+is not plotted, but a point outside the framing is
+(#163, lifting of the 2026-10-01 decision): the text can be put in the
+margins, title band or tick area, on screen as in the export. A free angle does not
+go through Plotters (`FontTransform`: quarter turns only): it travels
+in the style (`formula::rotated_family`, family `stokesforge-typst@<degrés>`) and
+`formula::source` wraps the text in `#stokesforge-rotate` (Typst
+`rotate(reflow: true)`, the strut inside the rotation), whose page matches the
+rotated box — the centered anchor stays the center of the text. `DrawnPanel::annotations`
+reports center, size of the upright text and rotation: `hit` designates the **rotated**
+rectangle (`PlotComponent::Annotation`, priority). On the screen side,
+`GraphView` holds the preview of an edit or a drag
+(`set_annotation_preview`, applied to the clone like the zoom, counter added to
+`view_generation`), the selection and the `GraphEvent` signals (double-click,
+text released); the validated preview stays displayed until the model changes
+(`hold_preview`). The editor's input field (`annotation_field`, issue
+#37) is put on the center and size of this rendered text, never rotated: a free
+`DragValue` angle (fractional, tiny, negative) remains a valid Typst
+duration (`formula::source`, issue #36 — the assumption of a `1e-7deg` format
+was wrong: Rust's decimal format has no exponent). Without Typst (witness, fallback), the text is plain and not rotated.
 
-**Objets graphiques** (issue #76) : rectangle, ellipse, ligne, flèche
-(`stokesforge_render::shapes`), tracés par le pipeline commun entre la légende et
-les textes libres (étape « 6 bis »), donc identiques à l'écran et à l'export.
-Les deux points sont projetés **sans** test d'appartenance au cadrage
-(`Ranges::forward`) puis rognés en pixels : trait par `clip_polyline`
-(contour fermé), remplissage par Sutherland-Hodgman (`clip_polygon`), pointe de
-flèche omise si elle est hors cadre. L'ellipse est un polygone convexe dont le nombre de côtés suit le rayon en pixels (`ellipse_segments` : corde à moins de 0,1 px de l'arc, #91).
-Le contour (rectangle, ellipse, ligne, hampe de flèche) est tracé **au sous-pixel** : Plotters n'accepte que des coordonnées entières, qui crénelaient le cercle quel que soit le nombre de côtés. Convention lue par les deux backends (`stokesforge_render::subpixel`) : points fixes ×16 et drapeau dans l'épaisseur ; l'écran décode dans `draw_path`, l'export réécrit les `<polyline>` marquées (`stokesforge-render-svg::subpixel::resolve`, appelé par chaque point d'entrée de l'export). `SubpixelPath` passe par un `CoordMapper` sans `Rect::truncate`, qui écraserait les points fixes. Un backend qui ignore la convention trace ces chemins seize fois trop grands.
-`DrawnPanel::shapes` (`DrawnShape`, pixels non rognés) sert à `hit` :
-`PlotComponent::Shape`, désigné **sur son trait** (ou dedans s'il est rempli)
-dans la zone de tracé, sous les textes libres. Côté écran, `GraphView`
-(`shape_tools.rs`) porte l'aperçu (`set_shape_preview`, même mécanisme que les
-textes), la sélection, les huit poignées d'un rectangle ou d'une ellipse (deux
-extrémités pour une ligne), les outils de tracé (`GraphTool::Rectangle`…) et
-le signal unique `GraphEvent::ShapeChanged` au relâchement. Le clic insère une
-forme de taille par défaut en pixels de figure ; Maj contraint le
-redimensionnement au rapport des dimensions projetées au début du geste,
-y compris sur des axes logarithmiques (#153, `shape_tools::resized_points`).
-L'aperçu est converti vers les coordonnées de données avant validation :
-l'export retrouve la même géométrie via le pipeline partagé. Un déplacement sur
-axes linéaires se fait **en données** (les points tracés sont arrondis au
+**Graphic objects** (issue #76): rectangle, ellipse, line, arrow
+(`stokesforge_render::shapes`), plotted by the shared pipeline between the legend and
+the free texts (step "6 bis"), hence identical on screen and in the export.
+The two points are projected **without** a framing membership test
+(`Ranges::forward`) then clipped in pixels: stroke by `clip_polyline`
+(closed outline), fill by Sutherland-Hodgman (`clip_polygon`), arrowhead
+omitted if it is outside the frame. The ellipse is a convex polygon whose number of sides follows the radius in pixels (`ellipse_segments`: chord less than 0.1 px from the arc, #91).
+The outline (rectangle, ellipse, line, arrow shaft) is plotted **at sub-pixel precision**: Plotters accepts only integer coordinates, which aliased the circle whatever the number of sides. Convention read by both backends (`stokesforge_render::subpixel`): fixed points ×16 and a flag in the thickness; the screen decodes in `draw_path`, the export rewrites the marked `<polyline>`s (`stokesforge-render-svg::subpixel::resolve`, called by each export entry point). `SubpixelPath` goes through a `CoordMapper` without `Rect::truncate`, which would crush the fixed points. A backend that ignores the convention plots these paths sixteen times too big.
+`DrawnPanel::shapes` (`DrawnShape`, unclipped pixels) serves `hit`:
+`PlotComponent::Shape`, designated **on its stroke** (or inside it if filled)
+in the plot area, under the free texts. On the screen side, `GraphView`
+(`shape_tools.rs`) holds the preview (`set_shape_preview`, same mechanism as
+texts), the selection, the eight handles of a rectangle or an ellipse (two
+ends for a line), the plotting tools (`GraphTool::Rectangle`…) and
+the single signal `GraphEvent::ShapeChanged` on release. A click inserts a
+shape of default size in figure pixels; Shift constrains the
+resizing to the ratio of the projected dimensions at the start of the gesture,
+including on logarithmic axes (#153, `shape_tools::resized_points`).
+The preview is converted to data coordinates before validation:
+the export finds the same geometry through the shared pipeline. A move on
+linear axes is done **in data** (the plotted points are rounded to the
 pixel).
 
-**Titres et légende déplaçables** (issue #53) : titre du graphe, titre de
-panneau, titres d'axe et cadre de la légende portent une `TextAnchor` optionnelle
-(`stokesforge-plot::text_anchor`, centre en **données** du panneau, pas bornée au
-cadrage : un titre vit hors de la zone de tracé). Sans ancre, Plotters pose le
-texte (bande du titre, aire de graduation, coin de la légende) ; avec une
-ancre, le pipeline le trace lui-même, centré sur le point projeté
-(`Projection::pixel`, sans exiger qu'il soit dans le cadrage), par-dessus les
-séries — **les deux backends, donc l'export SVG/PDF/PNG**. **La mise en page ne
-change pas** : un titre déplacé garde sa bande, vide (`reserve_title_band`,
-même hauteur que `DrawingArea::titled`, verrouillé par un test d'égalité des
-zones de tracé), et un titre d'axe déplacé garde son aire de graduation —
-sinon la zone de tracé changerait au lâcher et le titre, ancré aux données,
-sauterait. Une ancre non finie est ignorée (`TextAnchor::is_finite`) ; si la
-projection échoue (≤ 0 sur un axe log), le texte retombe au centre de la zone
-de tracé. `DrawnPanel::texts`, `DrawnPlot::title` et `DrawnPanel::legend_rows`
-rapportent centre, taille et rotation de chaque texte — **approchés** pour un
-texte à sa place par défaut (Plotters le pose), exacts pour un texte ancré —
-et `hit::component_at` rend `PlotComponent::Text(TextTarget)` /
-`LegendEntry`, avant la zone de tracé qu'ils recouvrent. Côté écran,
-`GraphView::handle_text_drag` déplace le centre du texte avec le pointeur
-(aperçu `set_text_preview`, même motif que les textes libres) et le
-double-clic émet `GraphEvent::EditText` / `EditLegendEntry`. Sur un objet graphique, une courbe ou un axe (#113), il
-émet `OpenShapeProperties` / `OpenSeriesProperties` / `OpenAxisProperties` — l'application
-(`app::graph_window::annotation_interactions`) traduit les axes et courbes en
-`Action::OpenObjectProperties`, comme le
-double-clic d'une ligne de l'Object Manager ; ailleurs, il réinitialise le zoom.
-Pour un axe, l'application lit `DrawnPanel::index` dans le `DrawnPanel` désigné
-et ouvre les propriétés du calque correspondant, même si d'autres panneaux
-ont été omis du rendu. Le menu contextuel conserve cette adresse au clic.
+**Movable titles and legend** (issue #53): graph title, panel title,
+axis titles and legend frame carry an optional `TextAnchor`
+(`stokesforge-plot::text_anchor`, center in panel **data**, not bounded to the
+framing: a title lives outside the plot area). Without an anchor, Plotters puts the
+text down (title band, tick area, legend corner); with an
+anchor, the pipeline plots it itself, centered on the projected point
+(`Projection::pixel`, without requiring it to be inside the framing), on top of the
+series — **both backends, hence the SVG/PDF/PNG export**. **The layout does not
+change**: a moved title keeps its band, empty (`reserve_title_band`,
+same height as `DrawingArea::titled`, locked by an equality test of the
+plot areas), and a moved axis title keeps its tick area —
+otherwise the plot area would change on release and the title, anchored to the data,
+would jump. A non-finite anchor is ignored (`TextAnchor::is_finite`); if the
+projection fails (≤ 0 on a log axis), the text falls back to the center of the plot
+area. `DrawnPanel::texts`, `DrawnPlot::title` and `DrawnPanel::legend_rows`
+report center, size and rotation of each text — **approximate** for a
+text at its default place (Plotters puts it down), exact for an anchored text —
+and `hit::component_at` returns `PlotComponent::Text(TextTarget)` /
+`LegendEntry`, before the plot area that they cover. On the screen side,
+`GraphView::handle_text_drag` moves the center of the text with the pointer
+(preview `set_text_preview`, same pattern as free texts) and the
+double-click emits `GraphEvent::EditText` / `EditLegendEntry`. On a graphic object, a curve or an axis (#113), it
+emits `OpenShapeProperties` / `OpenSeriesProperties` / `OpenAxisProperties` — the application
+(`app::graph_window::annotation_interactions`) translates axes and curves into
+`Action::OpenObjectProperties`, like the
+double-click of a row of the Object Manager; elsewhere, it resets the zoom.
+For an axis, the application reads `DrawnPanel::index` in the designated `DrawnPanel`
+and opens the properties of the matching layer, even if other panels
+were omitted from the rendering. The context menu keeps this address at the click.
 
-**Texte repris automatiquement** (issue #33) : un nom de série laissé vide
-reprend le nom long ou le nom de la colonne, souvent importé d'un appareil
-(`Abs_280 #1`). Lu comme du markup, `_` ouvrirait de l'italique et `#` du code.
-La légende lui donne donc `formula::literal_style` (famille
-`stokesforge-typst-litteral`), comme à la ligne « … et N autres » : la branche Typst
-des backends le passe par `formula::source`, qui l'enveloppe en chaîne Typst
-`#"…"` (`formula::escape`) — composé par Typst, affiché tel quel, sans
-guillemets typographiques ni `...` changé en points de suspension. Le chemin
-sans Typst (témoin des tests, repli) affiche le texte d'origine, jamais
-sa forme échappée. Un nom **saisi** reste du markup voulu.
+**Automatically taken text** (issue #33): a series name left empty
+takes the long name or the column name, often imported from an instrument
+(`Abs_280 #1`). Read as markup, `_` would open italics and `#` code.
+The legend therefore gives it `formula::literal_style` (family
+`stokesforge-typst-litteral`), like the "… and N others" line: the Typst branch
+of the backends passes it through `formula::source`, which wraps it in a Typst string
+`#"…"` (`formula::escape`) — composed by Typst, displayed as is, without
+typographic quotes or `...` turned into an ellipsis. The path
+without Typst (test witness, fallback) displays the original text, never
+its escaped form. A **typed** name stays intended markup.
 
-Le partage suit la même règle que le reste :
+The split follows the same rule as the rest:
 
-| Où | Quoi |
+| Where | What |
 |---|---|
-| `stokesforge-render/formula.rs` | le `World` Typst minimal, la compilation, le cache qui l'amortit entre deux images |
+| `stokesforge-render/formula.rs` | the minimal Typst `World`, the compilation, the cache that amortizes it between two frames |
 | `stokesforge-render-egui/typst_screen.rs` | `typst-render` → RGBA → texture → `Shape::Mesh` |
-| `stokesforge-render-svg/typst_export.rs` | témoins, `splice`, `SvgTextMode` ; fragments `typst-svg` (mode Contours) |
-| `stokesforge-render-svg/typst_text.rs` | émetteur `<text>` d'un `Frame` Typst (mode Texte, #162) |
+| `stokesforge-render-svg/typst_export.rs` | witnesses, `splice`, `SvgTextMode`; `typst-svg` fragments (Outlines mode) |
+| `stokesforge-render-svg/typst_text.rs` | `<text>` emitter of a Typst `Frame` (Text mode, #162) |
 
-Côté export, le mécanisme mérite d'être connu avant d'y toucher : `SVGBackend`
-écrit directement dans sa `String` cible et son champ est privé, donc
-impossible d'injecter du XML au moment de dessiner. La parade est un
-**rectangle-témoin** — une couleur unique par témoin (rouge fixé à une valeur
-invraisemblable, vert et bleu encodant un compteur), posé à la place du texte,
-puis substitué par `splice` une fois le document entier écrit, après
-revérification de la position et de la taille.
+On the export side, the mechanism deserves to be known before touching it: `SVGBackend`
+writes directly into its target `String` and its field is private, so
+it is impossible to inject XML at drawing time. The workaround is a
+**witness rectangle** — a unique color per witness (red fixed to an
+improbable value, green and blue encoding a counter), put in place of the text,
+then substituted by `splice` once the whole document is written, after
+rechecking the position and the size.
 
-**Texte ou contours** (#162, décision du 2026-10-07 ; elle clôt le point ouvert
-n° 6 d'`architecture-choisie.md`). `typst-svg` écrit toujours ses glyphes en
-contours ; pour garder une figure retouchable (Inkscape, Illustrator), le mode
-`SvgTextMode::Text` — **le défaut** — remplace son fragment par celui de
-`typst_text::frame_to_svg`, un émetteur maison qui parcourt le `Frame` compilé :
-un `<text>` par passage, un caractère par glyphe avec la position (`x`/`y`) que
-Typst a calculée, `font-family` nommant la famille suivie d'une famille
-générique (`'Noto Sans', sans-serif`), jamais d'`@font-face` ni de sous-ensemble —
-le lecteur doit avoir la police, sinon son logiciel substitue. Un glyphe que la
-table `cmap` ne relie pas exactement à son caractère (délimiteur étiré, variante
-mathématique, ligature) repasse **en contour, ce glyphe seul** ; les formes
-(trait de fraction, racine) restent des `<path>`. Les témoins et `splice` sont
-inchangés : seul le contenu du fragment change, donc la géométrie aussi peu que
-possible (vérifié par superposition des deux rendus). Les **graduations** portent
-la même famille que les textes Typst (`MeasuredSvgBackend::with_font` ; la
-mesure reste celle d'`epaint` sur la même police). `SvgTextMode::Outlines` garde
-le comportement `typst-svg` et passe aussi les graduations par Typst (texte
-littéral échappé) : aucun `<text>` dans le document.
+**Text or outlines** (#162, decision of 2026-10-07; it closes open point
+no. 6 of `architecture-choisie.md`). `typst-svg` always writes its glyphs as
+outlines; to keep a figure editable (Inkscape, Illustrator), the
+`SvgTextMode::Text` mode — **the default** — replaces its fragment with that of
+`typst_text::frame_to_svg`, a home-made emitter that walks the compiled `Frame`:
+one `<text>` per run, one character per glyph with the position (`x`/`y`) that
+Typst computed, `font-family` naming the family followed by a generic
+family (`'Noto Sans', sans-serif`), never an `@font-face` nor a subset —
+the reader must have the font, otherwise their software substitutes. A glyph that the
+`cmap` table does not link exactly to its character (stretched delimiter, math
+variant, ligature) goes back **to outline, that glyph alone**; shapes
+(fraction bar, root) stay `<path>`s. The witnesses and `splice` are
+unchanged: only the content of the fragment changes, so the geometry as little
+as possible (checked by overlaying the two renderings). The **ticks** carry
+the same family as the Typst texts (`MeasuredSvgBackend::with_font`; the
+measurement stays that of `epaint` on the same font). `SvgTextMode::Outlines` keeps
+the `typst-svg` behavior and also passes the ticks through Typst (escaped
+literal text): no `<text>` in the document.
 
-L'option vit dans `ExportFormat::Svg { text }` et ne s'applique **qu'au SVG** :
-le PDF se tire d'un SVG en mode Texte (texte sélectionnable ; `usvg` doit donc
-trouver les polices embarquées, que `pdf::ensure_embedded_fallback` charge toutes
-dans la `fontdb`), le PNG d'un SVG en contours, indépendant des polices
-installées. `export_bytes_many` compose un SVG par mode demandé. Côté
-application : « Graph › Export › SVG Text » (`Action::SetSvgTextMode`),
-préférence retenue dans `preferences.json` (`svg_text`), jamais dans le `.stf` ;
-la copie vers le presse-papiers (#149) prend toujours Texte. `svg2pdf` ne
-numérote pas ses polices de façon reproductible quand le PDF porte du texte :
-deux PDF du même SVG ont les mêmes longueurs mais pas les mêmes octets.
+The option lives in `ExportFormat::Svg { text }` and applies **only to SVG**:
+the PDF is derived from an SVG in Text mode (selectable text; `usvg` must therefore
+find the embedded fonts, which `pdf::ensure_embedded_fallback` loads all
+into the `fontdb`), the PNG from an SVG in outlines, independent of the installed
+fonts. `export_bytes_many` composes one SVG per requested mode. On the
+application side: "Graph › Export › SVG Text" (`Action::SetSvgTextMode`),
+preference kept in `preferences.json` (`svg_text`), never in the `.stf`;
+the copy to the clipboard (#149) always takes Text. `svg2pdf` does not
+number its fonts reproducibly when the PDF carries text:
+two PDFs of the same SVG have the same lengths but not the same bytes.
 
-Typst n'est plus une feature Cargo (issue #29) : `typst`, `typst-layout`,
-`typst-render` et `typst-svg` (tous `=0.15.1`) sont des dépendances fermes des
-trois crates, toujours compilées, et `cargo test --workspace` exerce ces
-chemins. Ce qui reste optionnel est le **chemin d'exécution du backend** :
-`collect_shapes` (écran) et `render_to_string` (export SVG, donc PDF et PNG qui
-s'appuient dessus) tracent tout en `Shape::Text` / texte brut ;
-`collect_shapes_with_typst`, `render_to_string_with_typst` et `with_typst()`
-passent les formules par Typst. Le chemin en texte brut sert de **témoin** aux
-tests. L'application exporte par `export::export_to_file`, donc avec Typst
-(issue #34) ; `render_to_string`, `render_to_pdf` et `render_to_png` restent le
-chemin brut des tests et de l'exemple `figure`.
+Typst is no longer a Cargo feature (issue #29): `typst`, `typst-layout`,
+`typst-render` and `typst-svg` (all `=0.15.1`) are firm dependencies of the
+three crates, always compiled, and `cargo test --workspace` exercises these
+paths. What remains optional is the **backend's execution path**:
+`collect_shapes` (screen) and `render_to_string` (SVG export, hence PDF and PNG which
+rely on it) plot everything as `Shape::Text` / plain text;
+`collect_shapes_with_typst`, `render_to_string_with_typst` and `with_typst()`
+pass formulas through Typst. The plain-text path serves as the **witness** of the
+tests. The application exports through `export::export_to_file`, hence with Typst
+(issue #34); `render_to_string`, `render_to_pdf` and `render_to_png` remain the
+raw path of the tests and of the `figure` example.
 
-Un texte riche qui ne compile pas ne fait jamais échouer le rendu : le texte
-brut, `$…$` compris, s'affiche tel quel par `epaint`, mesure comprise
-(invariant 10). C'est le seul cas où un titre ou une entrée de légende n'est
-pas composé par Typst.
+A rich text that does not compile never makes the rendering fail: the plain
+text, `$…$` included, is displayed as is by `epaint`, measurement included
+(invariant 10). It is the only case where a title or a legend entry is
+not composed by Typst.
 
-### Côté écran : `GraphView` passe toujours par Typst
+### Screen side: `GraphView` always goes through Typst
 
-`GraphView` (donc `stokesforge-app`) appelle toujours `collect_shapes_with_typst`. Il
-résout les polices Typst **une fois**, à sa création (`TypstScreen::with_fonts`) ;
-si cette résolution échoue, tout reste en texte brut. Il tient un
-`FormulaCache<FormulaTexture>` entre deux reconstructions de la figure, borné par
-`FORMULA_CACHE_LIMIT` (256) : au-delà, le cache est vidé **avant** la
-reconstruction qui suit. Les textures ne sont donc recompilées que si le texte
-d'une formule, sa taille, sa couleur (issue #30) ou le `pixels_per_point`
-change, pas à chaque reconstruction.
+`GraphView` (hence `stokesforge-app`) always calls `collect_shapes_with_typst`. It
+resolves the Typst fonts **once**, at its creation (`TypstScreen::with_fonts`);
+if this resolution fails, everything stays plain text. It holds a
+`FormulaCache<FormulaTexture>` between two rebuilds of the figure, bounded by
+`FORMULA_CACHE_LIMIT` (256): beyond it, the cache is emptied **before** the next
+rebuild. Textures are therefore recompiled only if the text
+of a formula, its size, its color (issue #30) or the `pixels_per_point`
+changes, not at every rebuild.
 
-`TypstScreen::measure` passe par ce même cache, sur **la même entrée** que le
-dessin : mesurer puis dessiner une formule ne la compile qu'une fois (avant,
-chaque mesure recompilait).
+`TypstScreen::measure` goes through this same cache, on **the same entry** as
+drawing: measuring then drawing a formula compiles it only once (before,
+each measurement recompiled).
 
-Deux défauts de R8, restés invisibles tant que l'application n'affichait pas
-Typst, ont été vus à la première capture et corrigés :
+Two R8 defects, which stayed invisible as long as the application did not display
+Typst, were seen at the first capture and fixed:
 
-- **le maillage cisaillait la texture** : `typst_screen::mesh` remplace les
-  sommets de `Mesh::add_rect_with_uv` et doit suivre **son** ordre
-  (haut-gauche, haut-droit, bas-gauche, bas-droit), faute de quoi chaque
-  formule s'affiche en bruit dans une boîte pourtant juste — la boîte
-  englobante ne le voit pas, le test
-  `chaque_sommet_du_maillage_porte_la_texture_de_son_coin` si ;
-- **la page coupait les indices et les jambages** : Typst borne une ligne de
-  la hauteur des capitales à la ligne de base ; `compile` pose
-  `top-edge`/`bottom-edge: "bounds"` pour que la page aille jusqu'au bas de
-  l'encre (`un_indice_ou_un_jambage_nest_pas_coupe_par_la_page`). La hauteur
-  d'un libellé varie donc avec son contenu ; l'alignement des lignes de base
-  entre libellés voisins relève de l'issue #32.
+- **the mesh sheared the texture**: `typst_screen::mesh` replaces the
+  vertices of `Mesh::add_rect_with_uv` and must follow **its** order
+  (top-left, top-right, bottom-left, bottom-right), otherwise each
+  formula is displayed as noise in a box that is nonetheless right — the
+  bounding box does not see it, the test
+  `chaque_sommet_du_maillage_porte_la_texture_de_son_coin` does;
+- **the page cut off subscripts and descenders**: Typst bounds a line from
+  the cap height to the baseline; `compile` sets
+  `top-edge`/`bottom-edge: "bounds"` so that the page goes to the bottom of
+  the ink (`un_indice_ou_un_jambage_nest_pas_coupe_par_la_page`). The height
+  of a label therefore varies with its content; the alignment of baselines
+  between neighboring labels belongs to issue #32.
 
-Une formule agrandie avec la fenêtre (`paint_scaled`) reste nette (issue #31) :
-voir « Agrandir un graphe sans flouter le texte » ci-dessous.
+A formula enlarged with the window (`paint_scaled`) stays sharp (issue #31):
+see "Enlarging a graph without blurring the text" below.
 
-## Ce qu'il faut savoir avant de modifier
+## What to know before modifying
 
-- **Le seul endroit du chantier où un bug est silencieux est la mesure de
-  texte.** Avant d'y toucher, lire `stokesforge-render/src/text.rs` et l'invariant 4.
-- Le filet est `stokesforge-render-egui/tests/accord.rs`. S'il change, lire ses deux
-  familles de **témoins** avant : sans elles, un test d'égalité entre deux
-  chemins passe aussi bien parce que les deux sont justes que parce que les deux
-  sont faux de la même façon.
-- Les graphes d'exemple vivent dans `stokesforge-render::sample`, donc dans un crate
-  de production, parce que le test d'accord (dans `render-egui`) et l'exemple
-  visuel (dans `render-svg`) doivent porter sur **le même** graphe et que les
-  deux crates ne peuvent pas dépendre l'un de l'autre. Le regarder :
+- **The only place in the work package where a bug is silent is text
+  measurement.** Before touching it, read `stokesforge-render/src/text.rs` and invariant 4.
+- The net is `stokesforge-render-egui/tests/accord.rs`. If it changes, read its two
+  families of **witnesses** first: without them, an equality test between two
+  paths passes just as well because both are right as because both
+  are wrong in the same way.
+- The sample graphs live in `stokesforge-render::sample`, hence in a production
+  crate, because the agreement test (in `render-egui`) and the visual
+  example (in `render-svg`) must cover **the same** graph and the
+  two crates cannot depend on each other. To look at it:
   `cargo run -p stokesforge-render-svg --example figure`.
-- Les tests : `render/tests/{mesure,geometrie,frontiere}.rs`,
+- The tests: `render/tests/{mesure,geometrie,frontiere}.rs`,
   `render-egui/tests/{accord,formes,cache_session,feathering,interaction,typst}.rs`,
-  `render-svg/tests/{export,frontiere,pdf,typst}.rs`. Côté Typst :
+  `render-svg/tests/{export,frontiere,pdf,typst}.rs`. On the Typst side:
   `cache_session.rs` (`graph_view_passe_un_titre_formule_par_typst`,
-  `reconstruire_la_figure_ne_recompile_pas_un_titre_inchange`) verrouille que
-  `GraphView` passe par Typst et ne recompile pas un titre inchangé ;
+  `reconstruire_la_figure_ne_recompile_pas_un_titre_inchange`) locks that
+  `GraphView` goes through Typst and does not recompile an unchanged title;
   `typst_screen.rs` (`mesurer_puis_dessiner_partage_une_seule_entree`,
-  `chaque_sommet_du_maillage_porte_la_texture_de_son_coin`) verrouille le
-  partage de l'entrée de cache entre mesure et dessin et l'ordre des sommets ;
-  `formula.rs` (`un_indice_ou_un_jambage_nest_pas_coupe_par_la_page`) la
-  hauteur de page ; `render-egui/tests/typst.rs`
-  (`la_texture_dune_formule_prend_la_couleur_du_texte`) et
+  `chaque_sommet_du_maillage_porte_la_texture_de_son_coin`) locks the
+  sharing of the cache entry between measurement and drawing and the vertex order;
+  `formula.rs` (`un_indice_ou_un_jambage_nest_pas_coupe_par_la_page`) the
+  page height; `render-egui/tests/typst.rs`
+  (`la_texture_dune_formule_prend_la_couleur_du_texte`) and
   `render-svg/tests/couleurs.rs` (`un_titre_typst_prend_l_encre_automatique`,
-  `un_titre_typst_suit_title_color`) la couleur, pixels de la texture et
-  fragment SVG compris ; `render-egui/tests/typst.rs`
+  `un_titre_typst_suit_title_color`) the color, texture pixels and
+  SVG fragment included; `render-egui/tests/typst.rs`
   (`un_titre_sans_dollar_se_mesure_et_se_dessine_par_typst`,
   `ecran_et_export_placent_les_textes_typst_au_meme_endroit`,
-  `une_legende_mixte_a_des_lignes_de_meme_hauteur`) et
-  `formula.rs` (`les_libelles_simples_ont_tous_la_meme_hauteur`) l'aiguillage
-  par rôle et l'étai (#32).
+  `une_legende_mixte_a_des_lignes_de_meme_hauteur`) and
+  `formula.rs` (`les_libelles_simples_ont_tous_la_meme_hauteur`) the routing
+  by role and the strut (#32).
 
-### Agrandir un graphe sans flouter le texte
+### Enlarging a graph without blurring the text
 
-`GraphView::paint_scaled` pose la figure à `DEFAULT_FIGURE_SIZE` puis la met à
-l'échelle de la fenêtre. `Shape::transform` d'epaint étire le maillage d'un
-texte déjà rastérisé à la taille logique : agrandi, il devient flou (issue
-#18). `stokesforge_render_egui::scaled` remet donc chaque `Shape::Text` en page à la
-taille affichée (police × échelle) et garde le résultat par
-`(clé du cache, rectangle affiché)`. Les positions restent celles de la mise
-en page logique : la mesure du texte (invariant 4) n'est pas refaite.
+`GraphView::paint_scaled` lays the figure out at `DEFAULT_FIGURE_SIZE` then scales it to
+the window. epaint's `Shape::transform` stretches the mesh of a text already
+rasterized at the logical size: enlarged, it becomes blurry (issue
+#18). `stokesforge_render_egui::scaled` therefore re-lays out each `Shape::Text` at the
+displayed size (font × scale) and keeps the result by
+`(clé du cache, rectangle affiché)`. Positions stay those of the logical
+layout: the text measurement (invariant 4) is not redone.
 
-Une formule Typst est un `Shape::Mesh` texturé : son maillage est transformé
-comme toute forme (même place, même boîte), mais désigne une **autre texture**,
-la même formule rastérisée à `pixels_per_point × échelle` par
-`FormulaTexture::rerender` à partir du document déjà compilé (issue #31) — pas
-de recompilation, pas de nouvelle mesure. Ces textures agrandies vivent dans
-`ScaledShapes`, hors du `FormulaCache` de la vue (elles ne comptent pas dans
-`FORMULA_CACHE_LIMIT`), et sont reprises tant que l'échelle ne change pas. Une
-image ne dépasse jamais `max_texture_side` : au-delà, la résolution est
-plafonnée. Rastériser directement à l'échelle affichée pendant la collecte a été
-écarté : le rectangle affiché serait entré dans la clé du cache principal, donc
-tout le pipeline rejoué à chaque pas d'un redimensionnement. Tests :
+A Typst formula is a textured `Shape::Mesh`: its mesh is transformed
+like any shape (same place, same box), but designates **another texture**,
+the same formula rasterized at `pixels_per_point × échelle` by
+`FormulaTexture::rerender` from the already compiled document (issue #31) — no
+recompilation, no new measurement. These enlarged textures live in
+`ScaledShapes`, outside the view's `FormulaCache` (they do not count in
+`FORMULA_CACHE_LIMIT`), and are reused as long as the scale does not change. An
+image never exceeds `max_texture_side`: beyond it, the resolution is
+capped. Rasterizing directly at the displayed scale during collection was
+ruled out: the displayed rectangle would have entered the main cache key, hence
+the whole pipeline replayed at each step of a resize. Tests:
 `scaled.rs` (`une_formule_agrandie_est_rasterisee_a_la_taille_affichee`,
-`deplacer_sans_agrandir_ne_rasterise_rien`) et `cache_session.rs`
+`deplacer_sans_agrandir_ne_rasterise_rien`) and `cache_session.rs`
 (`un_graphe_agrandi_peint_ses_formules_a_la_taille_affichee`).
 
-Le maillage d'une formule est en outre **calé sur la grille des pixels
-physiques** (`scaled::snap_to_pixels`, issue #86) : coin haut-gauche sur un pixel
-entier, boîte à la taille exacte de la texture. Posée ou étirée à une fraction de
-pixel, l'image était mélangée à ses voisines par le filtrage linéaire — flou
-surtout visible sur un petit texte (figure réduite), à peine sur un grand. Le
-décalage reste inférieur à un pixel ; la mise en page n'est pas touchée
-(`une_formule_reduite_est_calee_sur_les_pixels`). Hors du chemin `scaled`
-(`paint` avec rectangle logique = rectangle affiché) le calage n'est pas
-appliqué.
+The mesh of a formula is also **snapped to the physical pixel grid**
+(`scaled::snap_to_pixels`, issue #86): top-left corner on a whole
+pixel, box at the exact size of the texture. Placed or stretched at a fraction of a
+pixel, the image was blended with its neighbors by linear filtering — blur
+mostly visible on a small text (reduced figure), barely on a large one. The
+shift stays under one pixel; the layout is not touched
+(`une_formule_reduite_est_calee_sur_les_pixels`). Outside the `scaled` path
+(`paint` with logical rectangle = displayed rectangle) the snapping is not
+applied.
 
-## Séries pas à jour (#198)
+## Out-of-date series (#198)
 
-Le rendu ne sait rien du modèle : le cœur pose `ResolvedSeries.stale`
-(`resolve_series`, annulé par `resolve_spec` quand `PlotSpec::stale_warning`
-est faux) et `series::Prepared.stale` le porte jusqu'au dessin. Une série
-marquée est tracée comme une série brisée (réutilise le paramètre `broken` de
-`paint`, trait gris `STALE_FILL`/`STALE_EDGE`) et reçoit un triangle d'alerte
-fait de primitives (`paint::stale_marker`, sans mesure de texte) juste au-dessus
-de son dernier point (`pipeline::stale_marker_at`, ramené dans la zone de tracé). Les
-deux backends en héritent ; le test de bout en bout est dans
+The rendering knows nothing about the model: the core sets `ResolvedSeries.stale`
+(`resolve_series`, cancelled by `resolve_spec` when `PlotSpec::stale_warning`
+is false) and `series::Prepared.stale` carries it down to drawing. A marked
+series is plotted like a broken series (reuses the `broken` parameter of
+`paint`, grey stroke `STALE_FILL`/`STALE_EDGE`) and gets a warning triangle
+made of primitives (`paint::stale_marker`, without text measurement) just above
+its last point (`pipeline::stale_marker_at`, brought back into the plot area). Both
+backends inherit it; the end-to-end test is in
 `stokesforge-app/src/app/stale_export.rs`.
 
-## Visibilité et sélection (#81–85)
+## Visibility and selection (#81–85)
 
-Le filtre `SeriesSpec::visible` précède préparation, autoscale et légende.
-Les textes libres, formes et titres masqués sont omis avec leur géométrie de
-désignation. `title_visible` vaut pour le titre du graphe, du panneau et de
-l'axe, avec ou sans ancre ; le contenu et la police restent mémorisés. Un
-titre de graphe ou de panneau masqué ne réserve plus sa bande. Les axes
-conservent leur aire de graduation quand seul leur titre est masqué. Cette
-règle vit dans le pipeline partagé, donc vaut aussi en SVG, PDF et PNG.
+The `SeriesSpec::visible` filter precedes preparation, autoscale and legend.
+Hidden free texts, shapes and titles are omitted along with their designation geometry. `title_visible` applies to the title of the graph, the panel and
+the axis, with or without an anchor; the content and font stay remembered. A
+hidden graph or panel title no longer reserves its band. Axes
+keep their tick area when only their title is hidden. This
+rule lives in the shared pipeline, so it applies in SVG, PDF and PNG too.
 
-`DrawnPanel::series_geometry` conserve les pixels des séries après décimation,
-projection sur l'axe gauche ou droit et rognage (tronçons de ligne, moustaches,
-marqueurs, barres et extrémité libre de chaque barre). `series_selection` les
-désigne ; `GraphView` y peint la sélection sans modifier le cache de figure ni
-le modèle. Les rangs restent ceux du spec, même quand une série est masquée.
+`DrawnPanel::series_geometry` keeps the pixels of the series after decimation,
+projection onto the left or right axis and clipping (line runs, whiskers,
+markers, bars and free end of each bar). `series_selection` designates
+them; `GraphView` paints the selection there without modifying the figure cache or
+the model. Ranks stay those of the spec, even when a series is hidden.
 
-Une série sélectionnée n'est **pas surlignée** (#98) : son tracé reste
-intact, et de petits carrés pleins la signalent, comme dans OriginLab —
-`HANDLE_SIDE` (5 px de côté) tous les `HANDLE_SPACING` (50 px), mesurés **le
-long du tracé** et **en pixels d'affichage**, donc indépendants de la densité
-des données, du LTTB, du zoom et de la taille de la fenêtre
-(`series_selection::along_path`, départ et arrivée de chaque tronçon marqués).
-Un nuage sans ligne reçoit ses carrés sur un sous-ensemble régulier de ses
-marqueurs, des barres au milieu de leur extrémité libre, côté valeur
-(`thinned`, même espacement) ; les moustaches n'en portent pas. Couleur :
-`pipeline::figure_ink`, l'encre automatique du fond de la figure (noire sur
-fond clair, blanche sur fond sombre). Le placement et le dessin
-(`paint_handles`, générique sur `DrawingBackend`) vivent dans
-`stokesforge-render` ; `GraphView` les appelle par-dessus la figure en cache,
-avec un `EguiBackend` posé sur le rectangle affiché. Les poignées ne sont donc
-ni dans la clé de cache (sélectionner ne reconstruit rien) ni dans le pipeline
-(l'export SVG/PDF/PNG ne les voit pas) : la sélection est un état de vue,
-comme le zoom. Tests : `series_selection.rs` (espacement, arrivée, échelle
-d'affichage, nuage et barres), `geometrie.rs` (extrémité libre d'une barre
-négative, moustaches hors des tronçons, encre), `render-egui/tests/interaction.rs`
-(`une_serie_selectionnee_porte_des_poignees_sans_changer_son_trace`). La
-sélection d'un objet graphique garde son cadre et ses poignées propres
+A selected series is **not highlighted** (#98): its plot stays
+intact, and small filled squares mark it, as in OriginLab —
+`HANDLE_SIDE` (5 px side) every `HANDLE_SPACING` (50 px), measured **along
+the plot** and **in display pixels**, hence independent of the data density,
+of LTTB, of the zoom and of the window size
+(`series_selection::along_path`, start and end of each run marked).
+A cloud without a line gets its squares on a regular subset of its
+markers, bars at the middle of their free end, value side
+(`thinned`, same spacing); whiskers carry none. Color:
+`pipeline::figure_ink`, the automatic ink of the figure background (black on
+a light background, white on a dark one). The placement and drawing
+(`paint_handles`, generic over `DrawingBackend`) live in
+`stokesforge-render`; `GraphView` calls them on top of the cached figure,
+with an `EguiBackend` set on the displayed rectangle. The handles are therefore
+neither in the cache key (selecting rebuilds nothing) nor in the pipeline
+(the SVG/PDF/PNG export does not see them): the selection is a view state,
+like the zoom. Tests: `series_selection.rs` (spacing, end, display scale,
+cloud and bars), `geometrie.rs` (free end of a negative bar, whiskers
+outside the runs, ink), `render-egui/tests/interaction.rs`
+(`une_serie_selectionnee_porte_des_poignees_sans_changer_son_trace`). The
+selection of a graphic object keeps its own frame and handles
 (`shape_tools.rs`).
-Object Manager utilise `series_swatch`, qui appelle la vignette de légende
-partagée (`legend::series_key`), sans redessiner le style dans l'application.
+Object Manager uses `series_swatch`, which calls the shared legend swatch
+(`legend::series_key`), without redrawing the style in the application.
 
-`GraphView::select_annotation` / `select_text` complètent la sélection de
-série et d'objet depuis l'arbre, y compris pour les contenus masqués ; une
-seule nature est sélectionnée à la fois. La revalidation écarte les adresses
-absentes du spec. Les propriétés et les barres de format réutilisent cette
-même vue en fenêtre détachée.
+`GraphView::select_annotation` / `select_text` complete the selection of
+series and object from the tree, including for hidden contents; only one
+kind is selected at a time. Revalidation discards the addresses
+absent from the spec. The properties and the format bars reuse this
+same view in a detached window.

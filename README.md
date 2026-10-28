@@ -38,7 +38,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 La feature `python` (pont PyO3) est absente de `default` : les commandes
 ci-dessus ne la compilent pas. Typst (notations scientifiques) est une
 dépendance ferme, toujours compilée. Voir
-[`docs/architecture.md`](docs/architecture.md#les-features).
+[`docs/architecture.md`](docs/architecture.md#features).
 
 ## Licence et contributions
 

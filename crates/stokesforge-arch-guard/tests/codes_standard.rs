@@ -1,5 +1,5 @@
 //! Les codes `S-XN` du standard d'interface (`docs/standard-interface.md`,
-//! « Index des règles ») sont cités partout : commentaires, docs, skills,
+//! « Rule index ») sont cités partout : commentaires, docs, skills,
 //! messages de tests. Le préfixe `S-` a été posé par script (#301, F3/F4) ;
 //! rien ne vérifiait les noms. Ce garde-fou lit l'index, puis refuse tout
 //! `S-XN` cité dans le dépôt qui n'y figure pas (faute de frappe, règle

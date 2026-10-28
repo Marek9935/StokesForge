@@ -324,7 +324,7 @@ fn le_format_ecrit_ne_derive_pas_sans_changement_de_version() {
         octets_du_projet_temoin() == fichier,
         "le format écrit a changé : si c'est voulu, monter le numéro de version \
          (retrait, renommage, changement de sens) ou régénérer le témoin \
-         (ajout), voir docs/persistance.md, « Règle de version »"
+         (ajout), voir docs/persistance.md, « Version rule »"
     );
 }
 

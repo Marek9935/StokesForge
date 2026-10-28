@@ -1,26 +1,25 @@
-# Mesurer la fluidité de l'interface (#340, #341)
+# Measuring interface smoothness (#340, #341)
 
-Procédure reproductible pour chiffrer le coût par image de l'application
-pendant le déplacement d'une fenêtre flottante. Elle a servi le 2026-10-23 à
-départager « code lent » et « build debug lent » (résultats plus bas). Rien de
-ce qui suit n'est dans le code de production : les chronomètres sont un patch
-à appliquer puis à retirer.
+A reproducible procedure to measure the per-frame cost of the application
+while a floating window is dragged. It was used on 2026-10-23 to tell "slow
+code" from "slow debug build" (results below). Nothing below is in the
+production code: the timers are a patch to apply and then remove.
 
-## Lancer l'application en release
+## Running the application in release
 
 ```sh
 cargo run --release -p stokesforge-app     # binaire : target/release/stokesforge-app
 ```
 
-`cargo run` seul compile en **debug**, sans aucune optimisation (le
-`Cargo.toml` n'a pas de `[profile.dev]`) : egui, Plotters et Typst y sont
-nettement plus lents. Toute mesure de fluidité se fait en release, ou se compare
-debug/release.
+`cargo run` alone builds in **debug**, with no optimization at all (the
+`Cargo.toml` has no `[profile.dev]`): egui, Plotters and Typst are much slower
+there. Any smoothness measurement is done in release, or compares debug and
+release.
 
-## Refaire la mesure
+## Redoing the measurement
 
-Prérequis : ceux de `.claude/skills/run-stokesforge` (Xwayland, ImageMagick,
-Python avec `python-xlib`).
+Prerequisites: those of `.claude/skills/run-stokesforge` (Xwayland, ImageMagick,
+Python with `python-xlib`).
 
 ```sh
 git apply scripts/perf/instrumentation.patch          # ajoute app/prof.rs et ses appels
@@ -31,54 +30,55 @@ scripts/perf/mesure-fenetres.sh release 6
 git apply -R scripts/perf/instrumentation.patch       # retire les chronomètres
 ```
 
-Le script passe par le pilote `run-stokesforge`, qui pose `STOKESFORGE_DEMO=1`. Le second argument (0 à 6) est le nombre de graphes du projet de démonstration
-ouverts en plus de Book1 et Graph1 : refaire varier ce nombre donne la courbe
-« coût par fenêtre ».
+The script goes through the `run-stokesforge` driver, which sets
+`STOKESFORGE_DEMO=1`. The second argument (0 to 6) is the number of graphs of
+the demo project opened in addition to Book1 and Graph1: varying this number
+gives the "cost per window" curve.
 
-Le script lance l'application sous Xwayland (`driver.py`), ouvre les graphes par
-double-clic dans le Project Manager, glisse la barre de titre d'une fenêtre
-pendant 6 s (`scripts/perf/drag.py`, mouvement sinusoïdal) puis imprime les
-blocs de 2 s pendant le glissement (`scripts/perf/summ.py`). Le glissement est
-parfois perdu, surtout en debug : le script réessaie jusqu'à 3 fois.
+The script starts the application under Xwayland (`driver.py`), opens the graphs
+by double-click in the Project Manager, drags the title bar of a window for 6 s
+(`scripts/perf/drag.py`, sinusoidal motion), then prints the 2 s blocks during
+the drag (`scripts/perf/summ.py`). The drag is sometimes lost, especially in
+debug: the script retries up to 3 times.
 
-`STOKESFORGE_PROF=1` active les chronomètres ; `driver.py` honore `SF_APP`
-(binaire à lancer) pour choisir le profil.
+`STOKESFORGE_PROF=1` turns the timers on; `driver.py` honors `SF_APP` (the
+binary to launch) to choose the profile.
 
-### Lire le tableau
+### Reading the table
 
-Colonnes : nombre d'appels, moyenne, maximum, total, en millisecondes sur 2 s.
+Columns: number of calls, mean, maximum, total, in milliseconds over 2 s.
 
-| Ligne | Ce qu'elle mesure |
+| Line | What it measures |
 |---|---|
-| `00 intervalle entre images` | temps réel entre deux `ui()` ; 8,3 ms = 120 images/s |
-| `00b cpu_usage image precedente` | CPU de l'image entière d'après eframe (`ui()` + tessellation + préparation de la peinture, sans l'attente de synchronisation verticale) |
-| `01 ui total` | `App::ui` en entier |
-| `05 show_workspace` | pile des fenêtres flottantes |
-| `07`, `08` | `sync_window_views` et l'aller-retour `set_window_geometry` vers l'acteur de session |
-| `09`, `10` | par fenêtre flottante : coque et `tab_contents` |
+| `00 intervalle entre images` | real time between two `ui()` calls; 8.3 ms = 120 frames/s |
+| `00b cpu_usage image precedente` | CPU of the whole frame according to eframe (`ui()` + tessellation + paint preparation, without the vertical-sync wait) |
+| `01 ui total` | the whole `App::ui` |
+| `05 show_workspace` | the stack of floating windows |
+| `07`, `08` | `sync_window_views` and the `set_window_geometry` round trip to the session actor |
+| `09`, `10` | per floating window: shell and `tab_contents` |
 
-`cpu_usage − ui total` est la part hors `ui()` (tessellation d'egui, copie des
-formes) ; l'attente GPU n'est pas dedans.
+`cpu_usage − ui total` is the part outside `ui()` (egui tessellation, shape
+copy); the GPU wait is not included.
 
-## Résultats du 2026-10-23 (release et debug, Xwayland + llvmpipe)
+## Results of 2026-10-23 (release and debug, Xwayland + llvmpipe)
 
-Mesures pendant le glissement d'une fenêtre, Core Ultra 7 155H :
+Measurements while dragging a window, Core Ultra 7 155H:
 
-| Build | Fenêtres | Images/s | CPU/image | `ui()` | par fenêtre (`09`) |
+| Build | Windows | Frames/s | CPU/frame | `ui()` | per window (`09`) |
 |---|---|---|---|---|---|
-| debug | 2 | ~75 | 12 ms | 8,7 ms | 1,9 ms |
-| debug | 8 | ~23 | 40 ms | 25,6 ms | 1,3 ms |
-| release | 8 | ~120 | 3,3 ms | 1,1 ms | 0,07 ms |
+| debug | 2 | ~75 | 12 ms | 8.7 ms | 1.9 ms |
+| debug | 8 | ~23 | 40 ms | 25.6 ms | 1.3 ms |
+| release | 8 | ~120 | 3.3 ms | 1.1 ms | 0.07 ms |
 
-Constats :
-- le build debug explique l'essentiel (×10 sur `ui()`, ×7 sur l'image entière) ;
-- `set_window_geometry` (aller-retour avec l'acteur) coûte 0,1 à 0,2 ms : pas en cause ;
-- la clé du cache de rendu ne contient pas la position de la fenêtre : un déplacement ne le relance pas ;
-- en debug, seuls 40 % de `ui()` sont dans les fenêtres flottantes ; le reste vient des panneaux, des barres d'outils et de ce qui est publié à chaque image.
+Findings:
+- the debug build explains most of it (×10 on `ui()`, ×7 on the whole frame);
+- `set_window_geometry` (round trip with the actor) costs 0.1 to 0.2 ms: not the cause;
+- the rendering cache key does not contain the window position: a move does not trigger it;
+- in debug, only 40% of `ui()` is in the floating windows; the rest comes from the panels, the toolbars and what is published on every frame.
 
-## Limites connues
+## Known limits
 
-- Rendu logiciel (llvmpipe) sous Xwayland : la part GPU n'est pas représentative.
-- La fenêtre « Lignes » occupe toute la largeur de la zone de travail et ne se déplace pas : le script cible une autre fenêtre (coordonnées 440,138 du projet de démonstration). Un autre projet ou une autre résolution demande d'adapter ces coordonnées dans `mesure-fenetres.sh`.
-- Pas encore mesuré : un classeur de 10 colonnes × 400 lignes (#341), qui demande un projet à importer (`stokesforge-cli import`) et un geste de pan ou de sélection dans la grille.
-- Pistes de #341 non confirmées par la mesure : `column_staleness` et `is_selected` appelés par cellule (`docs/` n'en dit rien ; voir `grid.rs`).
+- Software rendering (llvmpipe) under Xwayland: the GPU part is not representative.
+- The « Lignes » window takes the full width of the work area and cannot be moved: the script targets another window (coordinates 440,138 of the demo project). Another project or another resolution requires adapting these coordinates in `mesure-fenetres.sh`.
+- Not measured yet: a workbook of 10 columns × 400 rows (#341), which needs a project to import (`stokesforge-cli import`) and a pan or selection gesture in the grid.
+- Leads from #341 not confirmed by measurement: `column_staleness` and `is_selected` called per cell (`docs/` says nothing about it; see `grid.rs`).

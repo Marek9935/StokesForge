@@ -11,7 +11,7 @@ documentation et les messages de commit sont en français.
 Une contribution passe par une merge request vers `main` : une relecture, la CI
 verte exigée. Ni force-push ni rebase sur une branche partagée ; la branche se
 nomme `feature/<n>-<sujet>`, reste courte et reçoit `main` avant la fusion
-(détail : [`docs/criteres-v1.md`](docs/criteres-v1.md), « Branches et versions »).
+(détail : [`docs/criteres-v1.md`](docs/criteres-v1.md), « Branches and versions »).
 
 ## Licence des contributions
 
@@ -50,7 +50,7 @@ dans [`docs/licence-et-extensions.md`](docs/licence-et-extensions.md).
 La CI Linux et Windows tourne sur GitHub (miroir du dépôt) ; les
 résultats se lisent dans le pipeline GitLab du commit ou par
 `scripts/ci-statuts.sh`. Mode d'emploi, pièges du runner et maintenance :
-[`docs/tests.md`](docs/tests.md), « Utiliser la CI au quotidien ».
+[`docs/tests.md`](docs/tests.md), « Using CI day to day ».
 
 Toute nouvelle interface d'extension couverte par l'exception nécessite un
 commit explicite dans la liste fermée de cette même page, avec son contrat

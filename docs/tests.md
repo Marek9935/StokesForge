@@ -1,432 +1,432 @@
-# Tests et intégration continue
+# Tests and continuous integration
 
-## Licences et notices (#129)
+## Licenses and notices (#129)
 
-Le travail automatique et bloquant `licenses` installe les versions de
-`scripts/licenses-tools.env`, exécute `cargo deny --locked check licenses`
-puis produit les notices Rust avec `cargo-about`. La résolution porte sur
-toutes les plateformes et features, y compris `python`, sans compilation :
-ce contrôle ne valide pas le pont Python. L'artefact conserve les textes
-générés à partir du verrou de ce pipeline.
-`scripts/licenses-test.sh` vérifie les témoins de refus : runtime sans notice,
-jeu de notices Python périmé ou d'une autre plateforme (Linux et Windows,
-`STOKESFORGE_LICENSES_PLATFORM`), compléments pour un autre verrou Cargo et
-dépendance GPL-2.0-only hors politique. Ces
-sondes utilisent des répertoires temporaires, sans modifier les sources.
+The automatic, blocking job `licenses` installs the versions in
+`scripts/licenses-tools.env`, runs `cargo deny --locked check licenses`, then
+produces the Rust notices with `cargo-about`. Resolution covers all platforms
+and features, including `python`, without compiling: this check does not
+validate the Python bridge. The artifact keeps the texts generated from the
+lock file of this pipeline.
+`scripts/licenses-test.sh` checks the refusal witnesses: runtime without a
+notice, Python notice set that is stale or from another platform (Linux and
+Windows, `STOKESFORGE_LICENSES_PLATFORM`), supplements for another Cargo lock
+file, and a GPL-2.0-only dependency outside the policy. These
+probes use temporary directories and do not modify the sources.
 
-**Distribution Windows (#332).** `scripts/app-dist-windows.sh` est son propre
-test : fenêtre empaquetée ouverte puis fermée, `stokesforge-selftest` en
-environnement vidé (PATH réduit à System32) et piégé (`PYTHONPATH`,
-`PYTHONHOME`), puis deux témoins de refus (un exécutable seul sans
-`python312.dll`, et `lib/python` déplacé, doivent échouer), l'installeur compilé
-puis installé dans un dossier à espace et accent, selftest relancé depuis
-l'installation, clés `.stf` vérifiées, désinstallation complète. Ce que ces
-épreuves ne prouvent pas : le démarrage sur un poste sans runtime Visual C++
-installé (le poste de développement en a un dans System32) ni, sans terminal
-parent, l'affichage des messages de `console_windows::attach_parent`.
+**Windows distribution (#332).** `scripts/app-dist-windows.sh` is its own
+test: packaged window opened then closed, `stokesforge-selftest` in an
+emptied environment (PATH reduced to System32) and a trapped one (`PYTHONPATH`,
+`PYTHONHOME`), then two refusal witnesses (an executable alone without
+`python312.dll`, and a moved `lib/python`, must fail), the installer built
+then installed in a folder with a space and an accent, selftest run again from
+the installation, `.stf` keys checked, full uninstall. What these
+trials do not prove: startup on a machine without the Visual C++ runtime
+installed (the development machine has one in System32) and, without a parent
+terminal, the display of the messages of `console_windows::attach_parent`.
 
-Les distributions appellent `scripts/licenses-dist.sh`, qui ajoute les textes
-de StokesForge, les notices Rust, OFL et Phosphor, celles des patches, ainsi
-que CPython, ses bibliothèques natives et numpy. Il refuse un verrou Python
-différent du jeu de notices versionné et un runtime sans les licences de
-CPython/numpy. Politique et commandes :
+Distributions call `scripts/licenses-dist.sh`, which adds the texts
+of StokesForge, the Rust, OFL and Phosphor notices, those of the patches, as
+well as CPython, its native libraries and numpy. It refuses a Python lock file
+that differs from the versioned notice set and a runtime without the CPython/numpy
+licenses. Policy and commands:
 [`licence-et-extensions.md`](licence-et-extensions.md).
 
-## Trois familles
+## Three families
 
-| Famille | Où | Ce qu'elle garde |
+| Family | Where | What it guards |
 |---|---|---|
-| **tests unitaires** | `#[cfg(test)]` dans `src/` | un comportement local, au plus près de son code |
-| **tests d'intégration** | `crates/*/tests/` | une propriété de crate : contrat public, frontière, accord entre chemins |
-| **banc de robustesse** | `stokesforge-robustesse/tests/` | le socle aux limites — 22 batteries `b1`…`b22` |
+| **unit tests** | `#[cfg(test)]` in `src/` | a local behavior, as close as possible to its code |
+| **integration tests** | `crates/*/tests/` | a crate property: public contract, boundary, agreement between paths |
+| **robustness bench** | `stokesforge-robustesse/tests/` | the foundation at its limits — 22 batteries `b1`…`b22` |
 
-## Les garde-fous à ne pas casser
+## Guards not to break
 
-Quelques tests ne vérifient pas un comportement mais **une propriété
-d'architecture**. Ils échouent exprès quand quelqu'un franchit une frontière
-par inadvertance, et ce sont eux qu'il faut comprendre avant de les modifier.
+A few tests do not check a behavior but **an architecture property**. They
+fail on purpose when someone crosses a boundary by accident, and they are the
+ones to understand before changing them.
 
-| Test | Ce qu'il tient |
+| Test | What it holds |
 |---|---|
-| `*/tests/no_ui_dependency.rs` (onze crates, dont `stokesforge-app-state` depuis #263 : ni `egui`, ni `eframe`, ni `winit`, ni `stokesforge-clipboard`) | liste blanche de dépendances : toute addition au `Cargo.toml` doit y être ajoutée explicitement (invariant 2). Lecture commune `stokesforge-arch-guard` : dépendances normales, de build, `target.*` et renommées (`package`) ; `dev-dependencies` exclues ; témoins négatifs dans `stokesforge-arch-guard/src/lib.rs` |
-| `stokesforge-persistence/tests/fichiers_temoins.rs` (S4, #323) | le fichier `tests/temoins/v1/projet.stf` se relit en rendant exactement le projet témoin (tous les types de nœuds, de colonnes et de séries, valeurs hors défaut), et l'enregistrement du projet redonne ses octets : le format écrit ne dérive pas sans décision. Témoin : renommer un champ de `schema.rs` ou de `recipe_record.rs` fait échouer les deux tests. Régénération : voir `persistance.md`, « Règle de version » |
-| `stokesforge-arch-guard/tests/renvois_fiches.rs` (F1, #301) | dans tous les skills de projet (`.claude/skills/stokesforge-*` et `run-stokesforge`, `SKILL.md` et `references/*.md`), chaque renvoi « `fichier.md` § Titre » désigne un fichier et un titre qui existent, un `§` sans chemin est refusé ; chaque lien `](references/x)` d'un `SKILL.md` pointe un fichier existant et aucun fichier de `references/` n'est orphelin. Témoins sur des arbres factices (titre ou fichier absent, `§` sans chemin, lien mort, orpheline, skill tiers ignoré) |
-| `stokesforge-arch-guard/tests/codes_standard.rs` (#301) | tout code `S-XN` cité (docs, skills, commentaires, tests) figure dans l'index des règles de `docs/standard-interface.md` ; témoin sur un code inconnu |
-| `stokesforge-arch-guard/tests/config_dir.rs` (#332) | `ProjectDirs::from` n'est appelé que par `stokesforge-import/src/config_dir.rs` (lignes de commentaire ignorées) : tout chemin du profil passe par `config_dir()`, que les tests redirigent par `STOKESFORGE_CONFIG_DIR`. Témoin : une source factice qui l'appelle est refusée, un commentaire non ; mutant éprouvé : l'appel ajouté à `recent.rs` fait échouer la garde |
-| `stokesforge-render-svg/tests/frontiere.rs` | l'export ne voit ni `egui`, ni `eframe`, ni `winit` — donc se teste sans serveur graphique |
-| `stokesforge-render/tests/mesure.rs` | la source unique de mesure de texte (invariant 4) |
-| `stokesforge-render/src/{view,interact}.rs` (modules `tests`) | interaction sans egui (#262) : cadrage d'un geste (zoom, pan, échelle log, axe inversé, calques superposés, axe seul, panneau inconnu), réinitialisation, point le plus proche (courbe, hors de portée, série masquée ou de droite, calque du spec) ; mutants éprouvés (signe du pan, filtre de case, calque lié, rayon, série masquée) ; géométrie de l'aperçu d'analyse (#261) : `PanelTransform::new` (origine fractionnaire, log inversé, zoom, rectangle), cadre initial (`fit_range`, `axis_frame`), `snap_to_curve` (n, bord, `ys` trop court) et `snap_to_curve_zone` (zone moyennée : n impair et pair, bord tronqué, abscisses non triées, #334) et `scale::axis_ticks` (mêmes points que le pipeline, décades, virgule, borne sans image) ; mutants éprouvés (origine arrondie, `1 - fy`, filtre `> 0` en log, demi-fenêtre, `label_count` figé à 5, virgule oubliée, `abs` de la tolérance du clic droit, `.min(ys.len())`, demi-fenêtre de la zone, bornes de la zone prises aux extrémités) ; rond d'aimantation (#334) : `snap_radius` (un point = 6 px, demi-côté, zone asymétrique, axe X inversé, plafond, pixel non fini) et banc de l'aperçu (le rond grandit avec N, texte = nombre réel de points au bord) ; mutants éprouvés (`abs`, `max` → `min`, plancher, plafond, rayon 6.0 en dur, N au lieu du nombre réel) ; `app/analysis_preview.rs` (`zone_tests`) : glisser de zone, clic droit sur axe X inversé ; navigation de l'aperçu (#270, banc `Banc` image par image) : molette seule sans effet, Ctrl + molette et pincement (donnée sous le pointeur gardée), zoom par axe, Maj + molette = moyenne sans zoom, Ctrl + glisser (cadre translaté, aucune zone, axe X inversé, par axe), Ctrl + clic sans point, double-clic recadre, pics (clic = graine, glisser = plage) ; mutants éprouvés (signe du pan, molette seule, `!command` du clic, bornes d'axe, mode du glisser, lecture de la molette sous Maj, facteur inversé, double-clic) ; `app/form.rs` : textes entourés (`toggle_texts` : fond plein de l'option courante, bascule, clic sur la courante) ; `stokesforge-app-state/tests/analysis.rs` : `tool_choices` (seuls les pics ont le choix) |
-| `stokesforge-render-egui/tests/accord.rs` | écran et export placent les mêmes primitives aux mêmes pixels ; graduations dedans / des deux côtés / coupées / sous-graduations sur les quatre côtés (#344), chacune différente de la figure par défaut ; mutant éprouvé (`ticks` ignoré) |
-| `stokesforge-render-svg/tests/miroirs.rs` | réglages « Avancé » des tirets (#344) : grand tiret à 10 contre 5 par défaut, petit Auto = moitié du grand effectif, couleur des seuls tirets (ligne et nombres gardent la leur), épaisseur, longueurs NaN / négative / 1e30 et épaisseurs 0 / NaN / 1e9 bornées sans panique ; mutants éprouvés (`custom_ticks` sans l'épaisseur, moitié figée à 3, couleur ignorée, épaisseur ignorée, longueur non lue) ; axes miroirs (#176) et graduations (#344) vus dans l'export : trait nu (ligne gardée, ni graduations ni nombres), dedans / des deux côtés (moitié extérieure = graduation de Plotters), nombres inchangés sans graduations, voisin resté par défaut ; figure par défaut identique à l'octet près ; mutants éprouvés (`ticks` ignoré, signe du sens, `Both` asymétrique, longueur, écart des nombres) |
-| `stokesforge-render-egui/tests/{interaction,cache_session}.rs` | gestes du graphe rejoués image par image (#318) : glisser simple sans effet (cadrage, génération, cache), Ctrl ou clic milieu + glisser = pan (fond, axe seul, outils Zoom et de forme, au-dessus d'un texte, titre ou forme), Ctrl lu à la pression, Ctrl + clic sans texte ni forme, feathering coupé seulement pendant un geste réel ; mutants éprouvés (pan au glisser simple, bouton milieu, garde d'objet, garde du rectangle, du texte et du tracé, feathering) |
-| `stokesforge-render-egui/tests/feathering.rs` | le feathering n'entre pas dans la clé de cache (invariant 6) |
-| `stokesforge-app-state/tests/script_bridge_lazy.rs` | l'interpréteur Python ne démarre pas à l'ouverture de la fenêtre |
-| `stokesforge-app/tests/libelles.rs` | aucun texte d'interface en dur (`aucun_libelle_en_dur`, garde absolue, sans dérogation, #48), y compris les titres `set_title` et noms visibles `add_filter` des boîtes de fichier (#127 ; extensions et sigles de format techniques préservés) et les fonctions libres `section_title`, `section_heading`, `table_header`, `secondary_text`, `bold`, `list_row`, `list_row_text` (#169, #170) ; la zone #43 (`ZONE_43`) sans aucun littéral, ses fonctions cherchées par leur nom dans toutes les sources — une entrée introuvable échoue ; les dépendances de traduction restent dans `stokesforge-app` et `stokesforge-app-state` ; `aucune_cle_du_catalogue_n_est_morte` (une clé de `en` sans emploi dans les sources des deux crates, témoin `la_garde_des_cles_mortes_lit_les_deux_crates`) ; les clés `history-*` employées ; `notice`/`fail` de `app-state/state.rs` lus (`la_garde_lit_les_messages_d_etat_du_crate_d_etat`) ; les témoins qui prouvent que la garde voit un littéral, y compris dans un sous-dossier de `src/` |
-| `stokesforge-app/tests/gardes.rs` | aucune `egui::Window` brute (`aucune_fenetre_n_est_une_egui_window_brute`) ; la fenêtre des propriétés passe par `modal_dialog` → `modal_dialog_with` → `modal_frame` → `show_window_in_layer` (comme `modal_wizard`, l'assistant d'import, `modal_live_settings` et `modal_read_only`, #228, puis `modal_confirm`, `modal_save_changes` et `modal_alert`, #229) ; aucun import global (`use …::*`) hors du code de test (`aucun_import_global_hors_des_tests`, décision 2 de #115, absolue depuis #117) ; aucun `ui.separator()` dans un menu hors de la brique de sections (`aucun_separateur_brut_dans_un_menu`, #155, absolue) ; bouton sélectionnable d'egui seulement dans un menu, une liste déroulante ou le sélecteur de couleur (`aucun_bouton_selectionnable_hors_d_un_menu`, #169) ; aucune couleur `Color32::from_…` ni teinte nommée hors de `theme.rs` et `color_picker.rs` (`aucune_couleur_en_dur_hors_du_theme`, #169) ; aucun `ui.separator()` juste avant un titre de section ni avant un niveau de texte (`section_heading`, `table_header`) (`aucun_separateur_avant_un_titre_de_section`, #169, #170) ; aucun `bold(…).small()` hors de `theme.rs` (`aucun_gras_petit_hors_du_theme`, témoin `la_garde_du_gras_petit_voit_un_bold_small`, #170) ; ni `DragValue` ni `Slider` (`aucun_champ_numerique_hors_de_la_brique`, #220, absolue) ; aucune bulle nue (`on_hover_text`/`on_hover_ui`) sur une case, un radio, un champ texte ou nombre, un libellé de champ hors menu (`aucune_bulle_nue_sur_un_champ_de_formulaire`, #225, absolue — le rappel passe par `help_beside`/`help_text`) ; tout `add_enabled` porte `.on_disabled_hover_text` (`aucun_element_grise_sans_sa_raison`, #226, absolue) ; aucun `add_space(<nombre>)` hors de `theme.rs` (`aucun_add_space_litteral_hors_du_theme`, #227, absolue — `theme::SPACE_ITEM` / `SPACE_SECTION`) ; un `rfd::` seulement dans `file_picker.rs` de `stokesforge-app-state` (`aucun_selecteur_rfd_hors_du_module`, #192, témoin `la_garde_du_selecteur_voit_un_rfd_hors_du_module`) ; aucun test d'intégration (des deux dossiers `tests/`) n'appelle `AppState::new` (`aucun_test_d_integration_n_utilise_appstate_new`) ; l'ancienne garde « les modules d'état ne nomment pas egui » (`MODULES_SANS_EGUI`, #255) est retirée : depuis #263 le compilateur et `stokesforge-app-state/tests/no_ui_dependency.rs` tiennent la frontière ; aucune taille libre de fenêtre interactive sans `// TAILLE-LIBRE(#300): <justification>` dans les 12 lignes précédentes (`aucune_taille_libre_sans_justification`, #300, S-F11, témoin `la_garde_des_tailles_voit_une_taille_libre_nue`, mutation éprouvée : marqueur retiré) ; tout identifiant `stokesforge_…` passé à un `modal_*` figure dans `docs/fenetres.md` et chaque ligne du catalogue a son appel, sans lire les tailles (`le_catalogue_des_fenetres_et_le_code_concordent`, #300, témoin `la_garde_du_catalogue_voit_un_ecart`, mutation éprouvée : ligne du catalogue retirée) ; les témoins du lecteur de sources |
-| `stokesforge-app/src/app/dialogs.rs` (module `tests`) | natures de fenêtre (#300, S-F11) : `chaque_nature_fixe_son_pied_sa_taille_et_son_focus` (table nature → pied, classe par défaut Petite 480 x 170 / Moyenne 480 x 420 / Grande 640 x 500, focus ; le champ de la variante l'emporte), `le_focus_initial_suit_la_nature` (confirmation → Cancel, enregistrement et alerte → principal, jamais le champ du contenu ; lecture seule → rien ; témoin : le brouillon va au champ), `un_pied_grise_montre_sa_raison_et_non_sa_bulle` (`DialogFooter::gated` / `always`) ; témoin S-F8 gardé (`un_dialogue_rouvert_reprend_sa_taille_et_sa_place`) ; mutants éprouvés (Petite et Moyenne intervertis, confirmation passée au premier champ) |
-| `stokesforge-app/src/theme.rs` (module `tests`) | aucun `ScrollStyle` hors du thème (`aucun_scroll_style_hors_du_theme`) ; aucun `strong()` d'egui, tout gras par `theme::bold` (`aucun_strong_d_egui_hors_du_theme`, #169) ; `bold` élargit vraiment le texte avec les polices embarquées ; trois niveaux de texte (#170) : `chaque_niveau_de_texte_pose_graisse_et_taille` (titre de section gras au corps normal, en-tête de tableau gras en petit corps, secondaire atténué en petit corps) et `section_title_peint_le_niveau_titre_de_section` ; mutants éprouvés (`.small()` retiré de l'en-tête ou du secondaire, gras retiré du titre) |
-| `stokesforge-app/src/app/{list_row,object_manager_ui,project_manager,curve_settings,import_wizard}.rs` (tests) | hauteur de ligne unique et fil d'étapes (#170, points 5 et 8) : `toute_ligne_de_liste_a_la_hauteur_unique` (avec ou sans icône, sélectionnée ou non = `LIST_ROW_HEIGHT`, un libellé nu est plus bas), `la_rangee_composee_prend_la_hauteur_unique_et_la_rend`, `le_fond_reserve_impose_la_hauteur_minimale`, `groupe_serie_et_objet_ont_la_meme_hauteur_de_ligne` (texte centré dans la ligne), `un_dossier_a_la_hauteur_d_une_fenetre` (pas constant dossier/fenêtre), `la_ligne_serie_a_la_hauteur_unique_avec_sa_case`, `le_fil_d_etapes_n_a_plus_de_chevron_de_texte` ; mutants éprouvés (hauteur non imposée à la rangée, à l'en-tête de dossier, à `list_row_sensed`, chevron de texte rétabli) |
-| `stokesforge-app/src/{theme,app/file_drop,app/graph_window}.rs` (tests) | trait de dépôt unique (#170, point 2, S-X5) : `le_trait_de_depot_est_le_vert_de_l_accent` (couleur = accent, vert dominant), `le_survol_d_un_fichier_entoure_la_fenetre_et_le_classeur_survole` (fenêtre et classeur au trait de `theme::drop_stroke`, sans survol rien), `deposer_des_colonnes_sur_le_graphe_ajoute_une_serie_et_ailleurs_rien` (même trait sur le graphe) ; mutant éprouvé : bleu remis dans `drop_stroke` |
-| `stokesforge-app/src/color_picker.rs` (tests) | « Square \| Wheel » en onglets (#170, point 7) : `carre_et_roue_sont_des_onglets_soulignes` (trait d'accent sous l'onglet actif et pas sous l'autre, aucun fond `selection.bg_fill` derrière un libellé, clic sur Wheel change de vue et garde `stokesforge_picker_shape`) ; le test de repli (`le_selecteur_est_replie_par_defaut_et_se_deplie_a_la_demande`) lit toujours « Square » comme texte replié ; mutant éprouvé : `selectable_value` rétabli |
-| `stokesforge-app/src/app/graph_window.rs` (tests) | bornes d'axe publiées au panneau des propriétés (#170, point 1, livré par #221) : `les_bornes_publiees_sont_celles_du_trace_en_ordre_croissant` (axe inversé tracé à l'envers, bornes publiées croissantes, calque inconnu = `None`), `les_champs_de_bornes_grises_montrent_les_bornes_et_leur_raison_au_survol` (axe logarithmique de 1 à 1000 : « 1000 » affiché, grisé, et `plot-axes-auto-range.disabled` au survol seulement) ; mutants éprouvés : `ascending` retiré, `on_disabled_hover_text` retiré, bornes publiées remplacées par les logarithmes |
-| `stokesforge-app/src/app/project_manager.rs` (tests), `stokesforge-app-state/tests/project_objects.rs` | dossiers sélectionnables (#170, point 4) : `un_clic_sur_un_dossier_le_selectionne_et_le_deplie`, `un_clic_sur_un_dossier_ouvert_le_selectionne_sans_le_replier`, `un_double_clic_replie_le_dossier` (fermé ou ouvert au départ), `le_triangle_replie_un_dossier_ouvert`, `un_dossier_selectionne_porte_fond_filet_et_survol_comme_une_fenetre`, `suppr_et_f2_agissent_sur_un_dossier_selectionne` (`DeleteObjects([dossier])`, renommage sur place), `ctrl_v_avec_un_dossier_selectionne_colle_dans_le_dossier` et `le_parent_du_collage_est_le_dossier_seul_ou_la_racine`, `ctrl_c_sur_un_dossier_passe_par_l_etat_qui_le_refuse`, le clic droit d'un dossier (Copy et Duplicate grisés, sans action) ; côté état `copier_ou_dupliquer_un_dossier_est_refuse_avec_sa_raison` (rien au presse-papiers, arbre et historique intacts, avertissement `disabled-copy-folder`, témoin : une note se copie) ; mutants éprouvés : insertion du dossier retirée de la sélection, clic qui bascule au lieu de déplier seulement, double-clic sans repli, clic sans dépli, `paste_parent` toujours à la racine, Copy non grisé, `selected` de la ligne de dossier forcé à faux, garde `refuse_folder_copy` retirée (copie, duplication) |
-| `stokesforge-app/src/app/{project_manager,object_manager_ui,list_row}.rs` (tests) | navigation au clavier des gestionnaires (#170, point 6, S-K9) : `deux_fois_bas_atteignent_la_troisieme_ligne_visible` (dossier replié sauté, bornes), `sans_focus_les_fleches_ne_touchent_pas_au_panneau`, `une_fleche_du_panneau_n_atteint_pas_la_grille` (↓ consommée avant la grille), `maj_et_alt_bas_ne_deplacent_pas_la_selection`, `entree_ouvre_la_fenetre_et_bascule_le_dossier`, `la_ligne_du_curseur_clavier_a_le_contour_de_focus`, `la_ligne_voisine_est_bornee_et_sans_curseur_on_part_d_un_bout` (`neighbour`) ; côté Object Manager `fleches_et_entree_parcourent_les_lignes_de_l_object_manager` (Select voisin, Properties à Entrée, Ctrl+↓ = `MoveSeries` sans sélection) et `la_ligne_selectionnee_a_le_contour_de_focus_quand_le_panneau_est_focalise` ; mutants éprouvés : navigation sur `order` au lieu des lignes visibles, flèche lue sans être consommée, variante Maj ou Alt+↓ non consommée, Entrée retirée, contour de focus retiré (PM et OM), voisine non bornée, voisine sans curseur |
-| `stokesforge-app/tests/support/sources.rs` | pas un test : le **lecteur unique** de toutes les gardes qui lisent le code (`libelles.rs`, `gardes.rs`, et par `src/lib.rs` celles d'`icons` et `theme`). Lit récursivement `src/` des **deux** crates (`stokesforge-app` et `stokesforge-app-state`, ce dernier sous le préfixe `app-state/` : `app-state/state.rs`) ; vue de production sans commentaires ni items `#[cfg(test)]` (chacun, pas seulement le premier ; un `#[cfg(test)] mod x;` rend son fichier entier de test) ; cherche une fonction par son nom, où qu'elle vive (#116). Une garde nouvelle qui lit le code passe par lui, jamais par `include_str!` ni un fichier nommé |
-| `stokesforge-app/src/field_state.rs` (tests) | état de champ (#219) : décision pure du cycle (`decide`), cadre rouge/orange et bulle lus dans les formes peintes, ancienne valeur rendue à la sortie, orange éteint après 2 s, témoin « saisie valide → aucun cadre » ; mutants éprouvés (couleur, champ gardé ouvert, échéance, sortie sans changement, bulle) |
-| `app/busy.rs`, `app/empty_state.rs`, `stokesforge-app-state/tests/shell.rs` (#232) | indicateur absent avant 0,5 s puis mot, Stop seulement après 3 s et seulement si le travail s'interrompt ; phrase d'état vide grisée et centrée ; Stop de l'import : rien créé, aucune entrée d'historique, un import ultérieur va au bout |
-| `stokesforge-app/tests/gardes.rs`, `app/shortcuts.rs`, `app/keyboard_shortcuts_window.rs`, `project_manager.rs` (tests) | clavier et souris (#231) : gardes `aucun_consume_key_hors_du_registre` et `aucun_curseur_hors_du_module_des_curseurs` (témoins), toute constante consommée figure dans `HELP`, fenêtre des raccourcis, menu Help, double-clic du Project Manager (active, ne ferme jamais, deux Ctrl-clics n'ouvrent pas) |
-| `stokesforge-script/tests/surface_figee.rs` (#331, feature `python`) | garde de l'**API figée V1** de `pyst` : **lit** les blocs `pyst-api` de `docs/python-et-script.md` (aucune copie) et les compare au module construit — noms et nature de `pyst` / `pyst.analysis`, `inspect.signature` de chaque fonction (refus net si l'une échoue, sinon le test passerait à vide), `Handle` sans attribut public, docstrings, clés d'options (`plot`, `set_graph`, `set_column_meta`, lues dans le message de clé inconnue), clés des dictionnaires rendus (`info`, `series`, `series_groups`, résultats d'analyse, `readiness`) et valeurs énumérées. Il remplace `la_surface_expose_vingt_huit_appels_et_quatre_erreurs`. Témoins par mutation : appel ajouté, paramètre renommé, défaut changé, clé de dict ajoutée, getter sur `Handle`, clé d'option ajoutée, ligne retirée de la doc. Limite : une valeur *acceptée en entrée* en plus (non listée) n'est vue que si elle est aussi rendue ; les défauts `panel=(0, 0)` et `png_scale=4.0` sont rapprochés de l'`Ellipsis` de PyO3, leur valeur n'est donc pas relue |
-| `stokesforge-app/src/number_field.rs` (tests) | brique « nombre » (#220) : lecture (refus, bornes, entiers), pas et grands pas, liste de valeurs au clavier (Alt+↓, Entrée, Échap), clic = tout sélectionné, molette au survol sans focus qui suit la liste (`step_preset` : hors liste, extrémités), champ sans liste = fenêtre qui défile, flèche pleine dans le cadre (`list_frame` : fonds du thème distincts), cohérence de la table des grandeurs ; dans `plot_settings` : saisie validée à Entrée, crans de molette = une entrée d'historique, Échap rend la valeur puis annule le dialogue |
-| `stokesforge-app/src/app/dialogs.rs` (tests) | brique des dialogues (#228) : ordre des boutons lu dans les formes (dialogue, assistant, lecture seule), décision pure du pied (`footer_message` : l'erreur passe devant la raison) et sa peinture (la raison revient quand l'erreur disparaît, témoin bouton actif), focus initial sur le premier champ texte et aucun focus sans champ, Échap qui sort d'un champ puis annule, géométrie rendue à la fermeture et reprise à l'ouverture ; mutants éprouvés (focus initial, Échap) ; côté état (`tests/shell.rs`) : géométrie écrite dans les préférences hors historique, erreur dans le pied du dialogue ouvert seulement. Confirmations (#229) : Entrée et Échap = Cancel dans `modal_confirm` (le clic du verbe confirme), Entrée = Save et Échap = Cancel dans le trio, Discard Changes à gauche, verbe rouge au survol puis au focus clavier (Tab), pointeur parti au repos ; `modal_alert` : Entrée = Close, action par son bouton ; mutants éprouvés (Entrée de la confirmation, rouge au focus) |
-| `stokesforge-app` : confirmations côté état et fenêtre (#229) | `stokesforge-app-state/tests/shell.rs` : New Project / Quit / Open… ne demandent que s'il y a du travail à perdre, Save enregistre puis poursuit (et un échec ou un sélecteur fermé abandonne le geste), projet illisible : chemin et projet gardés (S-M8), enregistrement raté (S-M8), export dont l'extension ajoutée viserait un fichier existant ; feuille et objets supprimés sans confirmation, message qui nomme les graphes (`tests/project_objects.rs`) ; `app::tests::fermer_la_fenetre_demande_avant_de_perdre_le_travail` (CancelClose, puis Close après Discard) ; `import_wizard::tests::supprimer_un_modele_passe_par_une_confirmation_modale` (Entrée annule sans valider l'assistant) |
-| `stokesforge-core/src/calc.rs` (module `output_name_tests`), `stokesforge-app-state/tests/output_names.rs`, `stokesforge-script/tests/analysis.rs` (#256) | noms des colonnes de sortie d'analyse : la règle (`OutputName::of`, `output_unit`, `wants_output`, `family_english`) se teste dans core ; le **test d'accord** vérifie que le catalogue `en` dit `OutputName::english()` pour chaque variante (liste d'exemples gardée par un `rank()` exhaustif) et `analysis-kind-*` = `family_english` ; `pyst` donne les mêmes nom, unité et commentaire que l'interface, et `peak_columns`/`sum_column` filtrent comme les cases. Une variante nouvelle d'`OutputName` ne compile pas sans clé `analysis-output-*` |
-| `stokesforge-app-state/tests/shell.rs` (copie de la figure) et `stokesforge-app/src/app/figure_copy.rs` (tests), #149/#263 | l'état prépare des octets neutres (`FigureBytes`) dans l'ordre des préférences (SVG, PNG, PDF par défaut ; ordre et cases décochées suivis), sans toucher au modèle ; la fenêtre traduit chaque `ExportFormat` en son type MIME (`mime_of`, témoin : deux types échangés font échouer le test) et chaque `ClipboardError` en phrase qui reprend le détail (`clipboard_error_message`) ; le refus du système remplace le message « copié » |
-| `stokesforge-app-state/src/i18n.rs` (tests) | toute clé de `fr` existe dans `en` avec les mêmes arguments ; la pseudo-langue entoure et allonge chaque message ; complétude bloquante (toute clé de `en` existe dans `fr`) ; pluriels et typographie françaises ; une préférence `fr` ouvre l'interface en français ; choix de la langue sans panique ; `tests/language_switch.rs` : la langue change sans redémarrer |
-| `stokesforge-commands/tests/memory_pinning.rs` | l'historique n'épingle pas indéfiniment de gros buffers |
+| `*/tests/no_ui_dependency.rs` (eleven crates, including `stokesforge-app-state` since #263: no `egui`, no `eframe`, no `winit`, no `stokesforge-clipboard`) | dependency allow-list: every addition to `Cargo.toml` must be added to it explicitly (invariant 2). Shared reading `stokesforge-arch-guard`: normal, build, `target.*` and renamed (`package`) dependencies; `dev-dependencies` excluded; negative witnesses in `stokesforge-arch-guard/src/lib.rs` |
+| `stokesforge-persistence/tests/fichiers_temoins.rs` (S4, #323) | the file `tests/temoins/v1/projet.stf` is read back to give exactly the witness project (all node, column and series types, non-default values), and saving the project gives back its bytes: the written format does not drift without a decision. Witness: renaming a field of `schema.rs` or `recipe_record.rs` fails both tests. Regeneration: see `persistance.md`, "Version rule: every V1 file can be read back up to V3" |
+| `stokesforge-arch-guard/tests/renvois_fiches.rs` (F1, #301) | in all project skills (`.claude/skills/stokesforge-*` and `run-stokesforge`, `SKILL.md` and `references/*.md`), every reference "`fichier.md` § Title" names a file and a heading that exist, a `§` without a path is refused; every link `](references/x)` of a `SKILL.md` points to an existing file and no file of `references/` is orphaned. Witnesses on fake trees (missing heading or file, `§` without a path, dead link, orphan, third-party skill ignored) |
+| `stokesforge-arch-guard/tests/codes_standard.rs` (#301) | every `S-XN` code cited (docs, skills, comments, tests) appears in the rule index of `docs/standard-interface.md`; witness on an unknown code |
+| `stokesforge-arch-guard/tests/config_dir.rs` (#332) | `ProjectDirs::from` is called only by `stokesforge-import/src/config_dir.rs` (comment lines ignored): every profile path goes through `config_dir()`, which tests redirect with `STOKESFORGE_CONFIG_DIR`. Witness: a fake source that calls it is refused, a comment is not; proven mutant: the call added to `recent.rs` fails the guard |
+| `stokesforge-render-svg/tests/frontiere.rs` | the export sees neither `egui`, nor `eframe`, nor `winit` — so it can be tested without a graphics server |
+| `stokesforge-render/tests/mesure.rs` | the single source of text measurement (invariant 4) |
+| `stokesforge-render/src/{view,interact}.rs` (modules `tests`) | interaction without egui (#262): framing of a gesture (zoom, pan, log scale, inverted axis, overlaid layers, axis alone, unknown panel), reset, nearest point (curve, out of range, hidden or right-hand series, layer of the spec); proven mutants (pan sign, box filter, linked layer, radius, hidden series); geometry of the analysis preview (#261): `PanelTransform::new` (fractional origin, inverted log, zoom, rectangle), initial frame (`fit_range`, `axis_frame`), `snap_to_curve` (n, edge, `ys` too short) and `snap_to_curve_zone` (averaged zone: odd and even n, truncated edge, unsorted x values, #334) and `scale::axis_ticks` (same points as the pipeline, decades, comma, bound without an image); proven mutants (rounded origin, `1 - fy`, `> 0` filter in log, half window, `label_count` fixed at 5, forgotten comma, `abs` of the right-click tolerance, `.min(ys.len())`, half window of the zone, zone bounds taken at the extremities); snap circle (#334): `snap_radius` (one point = 6 px, half side, asymmetric zone, inverted X axis, cap, non-finite pixel) and the preview bench (the circle grows with N, text = real number of points at the edge); proven mutants (`abs`, `max` → `min`, floor, cap, hard-coded radius 6.0, N instead of the real number); `app/analysis_preview.rs` (`zone_tests`): zone drag, right-click on an inverted X axis; preview navigation (#270, `Banc` bench frame by frame): wheel alone has no effect, Ctrl + wheel and pinch (data under the pointer kept), zoom per axis, Shift + wheel = average without zoom, Ctrl + drag (frame translated, no zone, inverted X axis, per axis), Ctrl + click without a point, double-click reframes, peaks (click = seed, drag = range); proven mutants (pan sign, wheel alone, `!command` of the click, axis bounds, drag mode, wheel reading under Shift, inverted factor, double-click); `app/form.rs`: surrounded texts (`toggle_texts`: solid background of the current option, toggle, click on the current one); `stokesforge-app-state/tests/analysis.rs`: `tool_choices` (only peaks have the choice) |
+| `stokesforge-render-egui/tests/accord.rs` | screen and export place the same primitives at the same pixels; ticks inside / on both sides / cut / minor ticks on the four sides (#344), each different from the default figure; proven mutant (`ticks` ignored) |
+| `stokesforge-render-svg/tests/miroirs.rs` | « Avancé » settings of the dashes (#344): major dash at 10 against 5 by default, minor Auto = half of the effective major, color of the dashes only (line and numbers keep theirs), thickness, lengths NaN / negative / 1e30 and thicknesses 0 / NaN / 1e9 bounded without panic; proven mutants (`custom_ticks` without the thickness, half fixed at 3, color ignored, thickness ignored, length not read); mirror axes (#176) and ticks (#344) seen in the export: bare line (line kept, no ticks, no numbers), inside / both sides (outer half = Plotters tick), numbers unchanged without ticks, neighbor left at default; default figure identical to the byte; proven mutants (`ticks` ignored, sign of the direction, asymmetric `Both`, length, gap of the numbers) |
+| `stokesforge-render-egui/tests/{interaction,cache_session}.rs` | graph gestures replayed frame by frame (#318): plain drag has no effect (framing, generation, cache), Ctrl or middle click + drag = pan (background, axis alone, Zoom and shape tools, above a text, title or shape), Ctrl read at the press, Ctrl + click without text or shape, feathering cut only during a real gesture; proven mutants (pan on plain drag, middle button, object guard, rectangle guard, text and plot guard, feathering) |
+| `stokesforge-render-egui/tests/feathering.rs` | feathering does not enter the cache key (invariant 6) |
+| `stokesforge-app-state/tests/script_bridge_lazy.rs` | the Python interpreter does not start when the window opens |
+| `stokesforge-app/tests/libelles.rs` | no hard-coded interface text (`aucun_libelle_en_dur`, absolute guard, no exemption, #48), including the `set_title` titles and visible `add_filter` names of file boxes (#127; technical extensions and format acronyms preserved) and the free functions `section_title`, `section_heading`, `table_header`, `secondary_text`, `bold`, `list_row`, `list_row_text` (#169, #170); the #43 zone (`ZONE_43`) with no literal at all, its functions looked up by name in all sources — a missing entry fails; the translation dependencies stay in `stokesforge-app` and `stokesforge-app-state`; `aucune_cle_du_catalogue_n_est_morte` (a key of `en` unused in the sources of both crates, witness `la_garde_des_cles_mortes_lit_les_deux_crates`); the `history-*` keys used; `notice`/`fail` of `app-state/state.rs` read (`la_garde_lit_les_messages_d_etat_du_crate_d_etat`); the witnesses that prove the guard sees a literal, including in a subfolder of `src/` |
+| `stokesforge-app/tests/gardes.rs` | no bare `egui::Window` (`aucune_fenetre_n_est_une_egui_window_brute`); the properties window goes through `modal_dialog` → `modal_dialog_with` → `modal_frame` → `show_window_in_layer` (like `modal_wizard`, the import wizard, `modal_live_settings` and `modal_read_only`, #228, then `modal_confirm`, `modal_save_changes` and `modal_alert`, #229); no global import (`use …::*`) outside test code (`aucun_import_global_hors_des_tests`, decision 2 of #115, absolute since #117); no `ui.separator()` in a menu outside the section building block (`aucun_separateur_brut_dans_un_menu`, #155, absolute); egui selectable button only in a menu, a drop-down list or the color picker (`aucun_bouton_selectionnable_hors_d_un_menu`, #169); no color `Color32::from_…` or named tint outside `theme.rs` and `color_picker.rs` (`aucune_couleur_en_dur_hors_du_theme`, #169); no `ui.separator()` just before a section title or a text level (`section_heading`, `table_header`) (`aucun_separateur_avant_un_titre_de_section`, #169, #170); no `bold(…).small()` outside `theme.rs` (`aucun_gras_petit_hors_du_theme`, witness `la_garde_du_gras_petit_voit_un_bold_small`, #170); neither `DragValue` nor `Slider` (`aucun_champ_numerique_hors_de_la_brique`, #220, absolute); no bare bubble (`on_hover_text`/`on_hover_ui`) on a box, a radio, a text or number field, a field label outside a menu (`aucune_bulle_nue_sur_un_champ_de_formulaire`, #225, absolute — the reminder goes through `help_beside`/`help_text`); every `add_enabled` carries `.on_disabled_hover_text` (`aucun_element_grise_sans_sa_raison`, #226, absolute); no `add_space(<nombre>)` outside `theme.rs` (`aucun_add_space_litteral_hors_du_theme`, #227, absolute — `theme::SPACE_ITEM` / `SPACE_SECTION`); a `rfd::` only in `file_picker.rs` of `stokesforge-app-state` (`aucun_selecteur_rfd_hors_du_module`, #192, witness `la_garde_du_selecteur_voit_un_rfd_hors_du_module`); no integration test (of the two `tests/` folders) calls `AppState::new` (`aucun_test_d_integration_n_utilise_appstate_new`); the old guard "state modules do not name egui" (`MODULES_SANS_EGUI`, #255) is removed: since #263 the compiler and `stokesforge-app-state/tests/no_ui_dependency.rs` hold the boundary; no free size of an interactive window without `// TAILLE-LIBRE(#300): <justification>` in the 12 preceding lines (`aucune_taille_libre_sans_justification`, #300, S-F11, witness `la_garde_des_tailles_voit_une_taille_libre_nue`, proven mutation: marker removed); every `stokesforge_…` identifier passed to a `modal_*` appears in `docs/fenetres.md` and every line of the catalog has its call, without reading the sizes (`le_catalogue_des_fenetres_et_le_code_concordent`, #300, witness `la_garde_du_catalogue_voit_un_ecart`, proven mutation: catalog line removed); the witnesses of the source reader |
+| `stokesforge-app/src/app/dialogs.rs` (module `tests`) | window natures (#300, S-F11): `chaque_nature_fixe_son_pied_sa_taille_et_son_focus` (table nature → footer, default class Small 480 x 170 / Medium 480 x 420 / Large 640 x 500, focus; the field of the variant wins), `le_focus_initial_suit_la_nature` (confirmation → Cancel, save and alert → primary, never the content field; read-only → nothing; witness: the draft goes to the field), `un_pied_grise_montre_sa_raison_et_non_sa_bulle` (`DialogFooter::gated` / `always`); S-F8 witness kept (`un_dialogue_rouvert_reprend_sa_taille_et_sa_place`); proven mutants (Small and Medium swapped, confirmation moved to the first field) |
+| `stokesforge-app/src/theme.rs` (module `tests`) | no `ScrollStyle` outside the theme (`aucun_scroll_style_hors_du_theme`); no egui `strong()`, all bold through `theme::bold` (`aucun_strong_d_egui_hors_du_theme`, #169); `bold` really widens the text with the embedded fonts; three text levels (#170): `chaque_niveau_de_texte_pose_graisse_et_taille` (section title bold at normal size, table header bold at small size, secondary dimmed at small size) and `section_title_peint_le_niveau_titre_de_section`; proven mutants (`.small()` removed from the header or the secondary, bold removed from the title) |
+| `stokesforge-app/src/app/{list_row,object_manager_ui,project_manager,curve_settings,import_wizard}.rs` (tests) | single row height and step trail (#170, points 5 and 8): `toute_ligne_de_liste_a_la_hauteur_unique` (with or without an icon, selected or not = `LIST_ROW_HEIGHT`, a bare label is lower), `la_rangee_composee_prend_la_hauteur_unique_et_la_rend`, `le_fond_reserve_impose_la_hauteur_minimale`, `groupe_serie_et_objet_ont_la_meme_hauteur_de_ligne` (text centered in the row), `un_dossier_a_la_hauteur_d_une_fenetre` (constant step folder/window), `la_ligne_serie_a_la_hauteur_unique_avec_sa_case`, `le_fil_d_etapes_n_a_plus_de_chevron_de_texte`; proven mutants (height not imposed on the row, on the folder header, on `list_row_sensed`, text chevron restored) |
+| `stokesforge-app/src/{theme,app/file_drop,app/graph_window}.rs` (tests) | single drop stroke (#170, point 2, S-X5): `le_trait_de_depot_est_le_vert_de_l_accent` (color = accent, green dominant), `le_survol_d_un_fichier_entoure_la_fenetre_et_le_classeur_survole` (window and workbook at the `theme::drop_stroke` stroke, nothing without hover), `deposer_des_colonnes_sur_le_graphe_ajoute_une_serie_et_ailleurs_rien` (same stroke on the graph); proven mutant: blue put back in `drop_stroke` |
+| `stokesforge-app/src/color_picker.rs` (tests) | "Square \| Wheel" as tabs (#170, point 7): `carre_et_roue_sont_des_onglets_soulignes` (accent stroke under the active tab and not under the other, no `selection.bg_fill` background behind a label, click on Wheel changes the view and keeps `stokesforge_picker_shape`); the fallback test (`le_selecteur_est_replie_par_defaut_et_se_deplie_a_la_demande`) still reads "Square" as collapsed text; proven mutant: `selectable_value` restored |
+| `stokesforge-app/src/app/graph_window.rs` (tests) | axis bounds published to the properties panel (#170, point 1, delivered by #221): `les_bornes_publiees_sont_celles_du_trace_en_ordre_croissant` (inverted axis plotted backwards, published bounds ascending, unknown layer = `None`), `les_champs_de_bornes_grises_montrent_les_bornes_et_leur_raison_au_survol` (logarithmic axis from 1 to 1000: "1000" shown, disabled, and `plot-axes-auto-range.disabled` on hover only); proven mutants: `ascending` removed, `on_disabled_hover_text` removed, published bounds replaced by the logarithms |
+| `stokesforge-app/src/app/project_manager.rs` (tests), `stokesforge-app-state/tests/project_objects.rs` | selectable folders (#170, point 4): `un_clic_sur_un_dossier_le_selectionne_et_le_deplie`, `un_clic_sur_un_dossier_ouvert_le_selectionne_sans_le_replier`, `un_double_clic_replie_le_dossier` (closed or open at the start), `le_triangle_replie_un_dossier_ouvert`, `un_dossier_selectionne_porte_fond_filet_et_survol_comme_une_fenetre`, `suppr_et_f2_agissent_sur_un_dossier_selectionne` (`DeleteObjects([dossier])`, in-place rename), `ctrl_v_avec_un_dossier_selectionne_colle_dans_le_dossier` and `le_parent_du_collage_est_le_dossier_seul_ou_la_racine`, `ctrl_c_sur_un_dossier_passe_par_l_etat_qui_le_refuse`, the right-click of a folder (Copy and Duplicate disabled, no action); state side `copier_ou_dupliquer_un_dossier_est_refuse_avec_sa_raison` (nothing on the clipboard, tree and history intact, warning `disabled-copy-folder`, witness: a note can be copied); proven mutants: folder insertion removed from the selection, click that toggles instead of only expanding, double-click without collapse, click without expand, `paste_parent` always at the root, Copy not disabled, `selected` of the folder row forced to false, guard `refuse_folder_copy` removed (copy, duplication) |
+| `stokesforge-app/src/app/{project_manager,object_manager_ui,list_row}.rs` (tests) | keyboard navigation of the managers (#170, point 6, S-K9): `deux_fois_bas_atteignent_la_troisieme_ligne_visible` (collapsed folder skipped, bounds), `sans_focus_les_fleches_ne_touchent_pas_au_panneau`, `une_fleche_du_panneau_n_atteint_pas_la_grille` (↓ consumed before the grid), `maj_et_alt_bas_ne_deplacent_pas_la_selection`, `entree_ouvre_la_fenetre_et_bascule_le_dossier`, `la_ligne_du_curseur_clavier_a_le_contour_de_focus`, `la_ligne_voisine_est_bornee_et_sans_curseur_on_part_d_un_bout` (`neighbour`); Object Manager side `fleches_et_entree_parcourent_les_lignes_de_l_object_manager` (neighbor Select, Properties on Enter, Ctrl+↓ = `MoveSeries` without selection) and `la_ligne_selectionnee_a_le_contour_de_focus_quand_le_panneau_est_focalise`; proven mutants: navigation on `order` instead of the visible rows, arrow read without being consumed, Shift or Alt+↓ variant not consumed, Enter removed, focus outline removed (PM and OM), neighbor not bounded, neighbor without a cursor |
+| `stokesforge-app/tests/support/sources.rs` | not a test: the **single reader** of all guards that read the code (`libelles.rs`, `gardes.rs`, and through `src/lib.rs` those of `icons` and `theme`). Reads `src/` of **both** crates recursively (`stokesforge-app` and `stokesforge-app-state`, the latter under the prefix `app-state/`: `app-state/state.rs`); production view without comments or `#[cfg(test)]` items (each one, not only the first; a `#[cfg(test)] mod x;` makes its whole file a test file); finds a function by its name, wherever it lives (#116). A new guard that reads the code goes through it, never through `include_str!` or a named file |
+| `stokesforge-app/src/field_state.rs` (tests) | field state (#219): pure decision of the cycle (`decide`), red/orange frame and bubble read in the painted shapes, old value given back on exit, orange cleared after 2 s, witness "valid input → no frame"; proven mutants (color, field kept open, deadline, exit without change, bubble) |
+| `app/busy.rs`, `app/empty_state.rs`, `stokesforge-app-state/tests/shell.rs` (#232) | indicator absent before 0.5 s then the word, Stop only after 3 s and only if the work can be interrupted; empty-state phrase dimmed and centered; import Stop: nothing created, no history entry, a later import runs to the end |
+| `stokesforge-app/tests/gardes.rs`, `app/shortcuts.rs`, `app/keyboard_shortcuts_window.rs`, `project_manager.rs` (tests) | keyboard and mouse (#231): guards `aucun_consume_key_hors_du_registre` and `aucun_curseur_hors_du_module_des_curseurs` (witnesses), every consumed constant appears in `HELP`, shortcuts window, Help menu, double-click in the Project Manager (activates, never closes, two Ctrl-clicks do not open) |
+| `stokesforge-script/tests/surface_figee.rs` (#331, feature `python`) | guard of the **frozen V1 API** of `pyst`: **reads** the `pyst-api` blocks of `docs/python-et-script.md` (no copy) and compares them with the built module — names and kind of `pyst` / `pyst.analysis`, `inspect.signature` of each function (clear refusal if one fails, otherwise the test would pass vacuously), `Handle` without a public attribute, docstrings, option keys (`plot`, `set_graph`, `set_column_meta`, read in the unknown-key message), keys of the returned dictionaries (`info`, `series`, `series_groups`, analysis results, `readiness`) and enumerated values. It replaces `la_surface_expose_vingt_huit_appels_et_quatre_erreurs`. Witnesses by mutation: call added, parameter renamed, default changed, dict key added, getter on `Handle`, option key added, line removed from the doc. Limit: an additional value *accepted as input* (not listed) is seen only if it is also returned; the defaults `panel=(0, 0)` and `png_scale=4.0` are matched to the PyO3 `Ellipsis`, so their value is not read back |
+| `stokesforge-app/src/number_field.rs` (tests) | "number" building block (#220): reading (refusal, bounds, integers), step and large steps, value list on the keyboard (Alt+↓, Enter, Esc), click = all selected, wheel on hover without a focus that follows the list (`step_preset`: off the list, extremities), field without a list = scrolling window, full arrow in the frame (`list_frame`: distinct theme backgrounds), consistency of the quantity table; in `plot_settings`: input validated on Enter, wheel notches = one history entry, Esc gives back the value then cancels the dialog |
+| `stokesforge-app/src/app/dialogs.rs` (tests) | dialog building block (#228): button order read in the shapes (dialog, wizard, read-only), pure decision of the footer (`footer_message`: the error comes before the reason) and its painting (the reason returns when the error disappears, active button witness), initial focus on the first text field and no focus without a field, Esc that leaves a field then cancels, geometry returned on close and taken back on open; proven mutants (initial focus, Esc); state side (`tests/shell.rs`): geometry written to the preferences outside the history, error in the footer of the open dialog only. Confirmations (#229): Enter and Esc = Cancel in `modal_confirm` (the click of the verb confirms), Enter = Save and Esc = Cancel in the trio, Discard Changes on the left, verb red on hover then on keyboard focus (Tab), pointer gone to rest; `modal_alert`: Enter = Close, action by its button; proven mutants (Enter of the confirmation, red on focus) |
+| `stokesforge-app`: confirmations on the state and window side (#229) | `stokesforge-app-state/tests/shell.rs`: New Project / Quit / Open… ask only if there is work to lose, Save saves then continues (and a failure or a closed picker abandons the gesture), unreadable project: path and project kept (S-M8), failed save (S-M8), export whose added extension would target an existing file; sheet and objects deleted without confirmation, message that names the graphs (`tests/project_objects.rs`); `app::tests::fermer_la_fenetre_demande_avant_de_perdre_le_travail` (CancelClose, then Close after Discard); `import_wizard::tests::supprimer_un_modele_passe_par_une_confirmation_modale` (Enter cancels without validating the wizard) |
+| `stokesforge-core/src/calc.rs` (module `output_name_tests`), `stokesforge-app-state/tests/output_names.rs`, `stokesforge-script/tests/analysis.rs` (#256) | names of analysis output columns: the rule (`OutputName::of`, `output_unit`, `wants_output`, `family_english`) is tested in core; the **agreement test** checks that the `en` catalog says `OutputName::english()` for each variant (list of examples guarded by an exhaustive `rank()`) and `analysis-kind-*` = `family_english`; `pyst` gives the same name, unit and comment as the interface, and `peak_columns`/`sum_column` filter like the boxes. A new `OutputName` variant does not compile without an `analysis-output-*` key |
+| `stokesforge-app-state/tests/shell.rs` (figure copy) and `stokesforge-app/src/app/figure_copy.rs` (tests), #149/#263 | the state prepares neutral bytes (`FigureBytes`) in the order of the preferences (SVG, PNG, PDF by default; order and unchecked boxes followed), without touching the model; the window translates each `ExportFormat` into its MIME type (`mime_of`, witness: two swapped types fail the test) and each `ClipboardError` into a sentence that repeats the detail (`clipboard_error_message`); the system's refusal replaces the "copied" message |
+| `stokesforge-app-state/src/i18n.rs` (tests) | every key of `fr` exists in `en` with the same arguments; the pseudo-language surrounds and lengthens every message; blocking completeness (every key of `en` exists in `fr`); French plurals and typography; an `fr` preference opens the interface in French; language choice without panic; `tests/language_switch.rs`: the language changes without restarting |
+| `stokesforge-commands/tests/memory_pinning.rs` | the history does not pin big buffers indefinitely |
 
-### Le témoin, sans lequel un test d'égalité ne prouve rien
+### The witness, without which an equality test proves nothing
 
-C'est la méthode la plus importante du dépôt, et elle vaut au-delà du rendu.
+This is the most important method in the repository, and it applies beyond
+rendering.
 
-Un test qui compare deux chemins peut passer parce que les deux sont justes —
-ou parce que **les deux sont faux de la même façon**. `tests/mesure.rs` et
-`tests/accord.rs` portent donc, chacun, des cas qui doivent être **différents** :
+A test that compares two paths can pass because both are right —
+or because **both are wrong in the same way**. So `tests/mesure.rs` and
+`tests/accord.rs` each carry cases that must be **different**:
 
-- la même figure tracée avec le `SVGBackend` **nu**, celui qui retombe sur
-  l'heuristique par octets UTF-8, doit se placer **ailleurs** ;
-- pour chaque fonctionnalité ajoutée, une variante du graphe qui la change doit
-  produire une figure **différente**.
+- the same figure plotted with the **bare** `SVGBackend`, the one that falls
+  back on the UTF-8 byte heuristic, must be placed **elsewhere**;
+- for each added feature, a variant of the graph that changes it must
+  produce a **different** figure.
 
-Sans eux, une enveloppe qui déléguerait `estimate_text_size` par erreur
-passerait pour correcte. Si vous touchez à ces tests, lisez leurs témoins
-d'abord.
+Without them, a wrapper that delegated `estimate_text_size` by mistake
+would pass as correct. If you touch these tests, read their witnesses
+first.
 
-## Le banc de robustesse
+## The robustness bench
 
-`stokesforge-robustesse` ne contient **aucun code de production**. Il dépend de tout
-le workspace et porte deux choses :
+`stokesforge-robustesse` contains **no production code**. It depends on the
+whole workspace and carries two things:
 
-- **22 batteries** (`tests/b1…b22`) qui éprouvent le socle aux limites :
-  valeurs numériques extrêmes (`b1`), persistance (`b2`), fichiers `.stf`
-  malformés puis sémantiquement hostiles (`b3`), allocateur d'identifiants
-  (`b4`), macros (`b5`), concurrence entre clients (`b6`), frontière
-  Rust ↔ Python (`b7`), propriétés tirées au sort par proptest (`b8`), script
-  sous contrainte (`b9`), compteur de version (`b10`), portée d'unicité des
-  noms (`b11`), commandes acceptées sans effet (`b12`), bornes d'un `PlotSpec`
-  venu du disque (`b13`), balayage revérifiant trois invariants après chaque pas
-  d'une séquence tirée au sort (`b14`), traduction cellule ↔ texte (`b15`),
-  séries aux colonnes de longueurs inégales (`b16`), coût des opérations quand
-  le projet grandit (`b17`), ce qui reste possible pendant qu'une macro est
-  ouverte (`b18`), fichier écrit par une version plus récente (`b19`), deux
-  écrivains sur un même fichier (`b20`), coût et identité sur le chemin
-  d'écriture (`b21`), recalcul ciblé des formules contre le recalcul complet
-  (`b22`, voir « Recalcul ciblé » ci-dessous) ;
-- **deux sondes hors-processus**, `sonde_alloc` et `sonde_pile`, parce que les
-  cas qu'elles éprouvent se terminent par un `abort()` que rien ne rattrape :
-  un échec d'allocation Rust n'est pas une panique rattrapable, et un
-  débordement de pile non plus (le runtime écrit `has overflowed its stack` et
-  appelle `abort()` — ni `catch_unwind` ni `join` ne rendent la main, et le
-  binaire de test mourrait avec).
+- **22 batteries** (`tests/b1…b22`) that test the foundation at its limits:
+  extreme numeric values (`b1`), persistence (`b2`), malformed then
+  semantically hostile `.stf` files (`b3`), identifier allocator
+  (`b4`), macros (`b5`), concurrency between clients (`b6`), Rust ↔ Python
+  boundary (`b7`), properties drawn at random by proptest (`b8`), script
+  under constraint (`b9`), version counter (`b10`), scope of name
+  uniqueness (`b11`), commands accepted without effect (`b12`), bounds of a
+  `PlotSpec` coming from disk (`b13`), sweep rechecking three invariants after
+  each step of a randomly drawn sequence (`b14`), cell ↔ text translation
+  (`b15`), series with columns of unequal lengths (`b16`), cost of operations
+  as the project grows (`b17`), what remains possible while a macro is
+  open (`b18`), file written by a newer version (`b19`), two
+  writers on the same file (`b20`), cost and identity on the write
+  path (`b21`), targeted recalculation of formulas against full recalculation
+  (`b22`, see "Targeted recalculation (#193) — and what to test when relying on it" below);
+- **two out-of-process probes**, `sonde_alloc` and `sonde_pile`, because the
+  cases they test end with an `abort()` that nothing catches:
+  a Rust allocation failure is not a catchable panic, and a stack
+  overflow is not either (the runtime writes `has overflowed its stack` and
+  calls `abort()` — neither `catch_unwind` nor `join` gives control back, and the
+  test binary would die with it).
 
-`sonde_pile` utilise par défaut une pile de 2 Mio : la taille qu'un
-`std::thread` reçoit quand personne ne la fixe, c'est-à-dire celle du fil de
-l'acteur.
+`sonde_pile` uses a 2 MiB stack by default: the size an
+`std::thread` gets when nobody sets it, that is, that of the actor thread.
 
-### Deux natures de test, et comment les distinguer
+### Two natures of test, and how to tell them apart
 
-**Les garde-fous** passent et doivent continuer à passer : ils entrent dans
-`cargo test --workspace` comme les autres.
+**The guards** pass and must keep passing: they go into
+`cargo test --workspace` like the others.
 
-**Les reproductions** échouent délibérément, et sont marquées `#[ignore]` pour
-que le pipeline garde sa valeur de signal — un CI rouge en permanence ne dit
-plus rien. Une reproduction qui se met à **passer** est le signal attendu : le
-correctif est bon, et c'est le moment de retirer son `#[ignore]` pour que le
-garde-fou prenne le relais.
+**The reproductions** fail deliberately, and are marked `#[ignore]` so
+that the pipeline keeps its value as a signal — a permanently red CI says
+nothing anymore. A reproduction that starts to **pass** is the expected signal: the
+fix is good, and it is time to remove its `#[ignore]` so that the
+guard takes over.
 
-La campagne de correction issue des rapports du 2026-09-11 est close : plus
-aucun `#[ignore]` ne reste dans `stokesforge-robustesse`. Le dernier, dans `b9`
-(`b9_course_entre_script_et_interface_sur_la_longueur`), tenait à deux défauts du
-test : le script ne rattrapait pas `ConcurrentWriteError` (le contrat refuse
-l'écriture d'une colonne changée depuis la lecture), et l'« interface » ignorait
-que l'acteur refuse ses commandes tant que la macro du script est ouverte
-(`ForeignMacro`), d'où une dérive de 999 lignes sur la CI Linux. L'oracle compte
-désormais ce que l'interface a réellement réussi (#333, critère « zéro rouge »).
+The correction campaign that came from the reports of 2026-09-11 is closed: no
+`#[ignore]` remains in `stokesforge-robustesse`. The last one, in `b9`
+(`b9_course_entre_script_et_interface_sur_la_longueur`), came from two defects of the
+test: the script did not catch `ConcurrentWriteError` (the contract refuses
+the write of a column changed since the read), and the "interface" ignored
+that the actor refuses its commands while the script's macro is open
+(`ForeignMacro`), hence a drift of 999 rows on Linux CI. The oracle now counts
+what the interface really succeeded in doing (#333, "zero red" criterion).
 
-Mesurer plutôt que chronométrer : `b17` et `b21` comptent des **octets
-alloués**, pas des millisecondes, pour que l'assertion dise « ce coût ne doit
-pas croître avec X » et reste vraie sur n'importe quelle machine.
-Exception assumée (#316) : `b17_charger_un_dossier_a_beaucoup_d_enfants_n_est_pas_quadratique`
-borne un temps (10 s, très large) car un coût quadratique en CPU n'alloue rien.
-Les refus de `MAX_COLUMN_ROWS` à la lecture se testent par `check_rows` et des
-limites minuscules (`convert.rs`), jamais avec 10^8 lignes.
+Measure rather than time: `b17` and `b21` count **allocated bytes**,
+not milliseconds, so that the assertion says "this cost must not
+grow with X" and stays true on any machine.
+Accepted exception (#316): `b17_charger_un_dossier_a_beaucoup_d_enfants_n_est_pas_quadratique`
+bounds a time (10 s, very wide) because a quadratic CPU cost allocates nothing.
+The refusals of `MAX_COLUMN_ROWS` on reading are tested with `check_rows` and tiny
+limits (`convert.rs`), never with 10^8 rows.
 
-## Recalcul ciblé (#193) — et ce qu'il faut tester en s'appuyant dessus
+## Targeted recalculation (#193) — and what to test when relying on it
 
-Depuis #193, l'acteur ne réécrit une colonne-formule que si une donnée de son
-calcul a changé (`stokesforge-session/src/recalc.rs`, [`session.md`](session.md)).
-Ce genre d'optimisation n'a qu'un mode de défaillance, et il est
-**silencieux** : une donnée oubliée dans l'empreinte, et la valeur affichée
-reste fausse sans la moindre erreur. Les tests ci-dessous sont faits pour ce
-cas-là, et c'est sur eux que doit s'appuyer tout ce qui réutilisera le
-mécanisme (analyses recalculées #184, références entre feuilles #186,
-nouvelles fonctions de formule).
+Since #193, the actor rewrites a formula column only if a piece of data of its
+calculation has changed (`stokesforge-session/src/recalc.rs`, [`session.md`](session.md)).
+This kind of optimization has only one failure mode, and it is
+**silent**: one piece of data forgotten in the fingerprint, and the displayed value
+stays wrong without any error. The tests below are made for that
+case, and everything that reuses the mechanism must rely on them (recomputed
+analyses #184, references between sheets #186,
+new formula functions).
 
-### Ce qui le tient aujourd'hui
+### What holds it today
 
-| Test | Ce qu'il tient |
+| Test | What it holds |
 |---|---|
-| `stokesforge-robustesse/tests/b22_recalcul_cible.rs` | **l'oracle** : deux sessions jumelles, l'une ciblée, l'autre en recalcul complet (`FormulaRecalc::Full`, le code d'avant #193), reçoivent les mêmes pas tirés au sort ; mêmes réponses et mêmes arbres exigés après chaque pas. Plus, à chaque pas : la doctrine version ↔ contenu **dans l'acteur** (écritures du recalcul, macros, rechargements compris), et le témoin du « ciblé » — une commande sans rapport ne change la version d'aucune colonne. Un contrôle de couverture final exige des formules calculées, non calculées et épargnées, et **au moins vingt passes par nature de pas** : un geste toujours refusé ne prouverait rien. Le tirage est rejouable à l'identique : aucune cible n'y est choisie dans l'ordre de `Tree::iter` (table de hachage à graine aléatoire) |
-| `stokesforge-session/tests/recalc_cible.rs` | un cas nommé par composante de l'empreinte (formule stockée, appartenance à la feuille et version des sources, longueur du résultat, version propre, issue), les gestes qui les font changer (déplacement dans la feuille ou vers une autre, suppression puis annulation, cycle créé ailleurs, suppression de cellules dans une colonne-formule, macro avortée, feuille dupliquée…), la stabilité d'une chaîne et d'un cycle, l'oubli du mémo par `Load` et `NewProject` sur une coïncidence d'identifiants et de versions **fabriquée et vérifiée**. Chaque assertion « pas réécrite » a son témoin en mode complet |
-| `stokesforge-session/src/lib.rs` (`tests`), `src/recalc.rs` (`tests`) | le recalcul interruptible (#239) : Stop annule la commande et laisse rétablir (arrêt posé d'avance sur le prochain recalcul, donc déterministe), Stop après une commande **sans effet** ne défait rien (`History::execute_recorded`), la mort de l'acteur (panic simulé par `Request::PanicForTest`, ou en plein recalcul) libère la jauge et rend `actor_alive` faux (#310), Stop tardif sans effet sur le suivant, arrêt entre deux colonnes puis passe suivante qui achève sans réécrire ce qui l'est déjà. `stokesforge-app-state/tests/shell.rs` (`heavy`) : le même geste vu de l'interface sur un projet lourd, avec son témoin sans Stop, et la question « enregistrer ? » posée à la fermeture pendant le recalcul |
-| Sens d'un axe et réglages d'axe (#344) | `AxisSpec::orient` : table (auto ou explicite × inversé × ordre des bornes, bornes absentes ou non finies, idempotence) dans `stokesforge-plot/src/axis.rs` ; rendu identique avant et après `orient` (`un_axe_oriente_se_trace_comme_l_axe_d_origine`, `stokesforge-render/tests/geometrie.rs`) ; ouverture d'un fichier avec `inverted` et bornes (-1, 10) : bornes (10, -1), `inverted` vrai, historique vide, fichier non touché (`load_swaps_the_bounds_of_an_inverted_axis_without_history`, `stokesforge-session/tests/session.rs`) ; `pyst.set_graph` (`set_graph_oriente_les_axes_d_apres_l_ordre_des_bornes`, `stokesforge-script/tests/set_graph.rs`) ; page des axes (`stokesforge-app/src/app/plot_settings.rs`, module `tests`) : plus de cases « Axe inversé » / « Plage auto » / « Cadre fermé », bloc « Avancé » fermé puis ouvert au clic (titre ou flèche), saisie d'une borne sous Auto = deux bornes figées en **une** entrée d'historique, De > À inverse l'axe, bouton Auto = données en gardant le sens, De affiche la borne haute d'un axe inversé ; mutants éprouvés (`orient` sans échange des bornes, `load_project` sans `orient_graphs`, saisie qui ne fige pas, bouton Auto qui perd le sens, clic sur la flèche d'« Avancé » compté deux fois) |
-| `stokesforge-session/tests/analyse.rs` (`au_chargement_aucun_calcul_n_est_relance_et_l_empreinte_dit_s_il_est_perime`, `la_confiance_au_chargement_ne_vaut_que_pour_le_chargement`) | A1 (#316) : à l'ouverture aucun calcul (automatique ou manuel) n'est relancé, dans les deux modes (`Full` comme `Targeted`, sinon l'oracle diverge) ; entrée modifiée hors de l'application (octets du fichier) → `Manual` et valeurs du fichier gardées, puis `recalculate` les rend justes ; fichier intact → à jour ; le drapeau `trust_loaded` est à usage unique (un calcul sans mémo après `AddCalculation` reste recalculé). Mutants : drapeau retiré, comparaison d'empreinte toujours vraie, toujours fausse |
-| `stokesforge-session/tests/formula.rs` | le comportement des formules lui-même (antérieur à #193, inchangé) |
-| `stokesforge-robustesse/tests/b14_balayage.rs` | la doctrine version ↔ contenu sur `History` seul, sur laquelle repose tout le mécanisme — y compris pour une colonne ajoutée avec un numéro déjà porté |
-| `stokesforge-core` (`project.rs`, `une_colonne_inseree_fait_passer_le_compteur_au_dela_de_sa_version`) | l'insertion d'une colonne fait passer le compteur au-delà de sa version |
+| `stokesforge-robustesse/tests/b22_recalcul_cible.rs` | **the oracle**: two twin sessions, one targeted, the other in full recalculation (`FormulaRecalc::Full`, the code from before #193), receive the same randomly drawn steps; same answers and same trees required after each step. Plus, at each step: the version ↔ content doctrine **in the actor** (recalculation writes, macros, reloads included), and the "targeted" witness — an unrelated command changes the version of no column. A final coverage check requires formulas that are computed, not computed and spared, and **at least twenty passes per kind of step**: a gesture that is always refused would prove nothing. The draw is replayable identically: no target is chosen in the order of `Tree::iter` (hash table with a random seed) |
+| `stokesforge-session/tests/recalc_cible.rs` | one named case per component of the fingerprint (stored formula, sheet membership and version of the sources, length of the result, own version, outcome), the gestures that make them change (move within the sheet or to another, deletion then undo, cycle created elsewhere, deletion of cells in a formula column, aborted macro, duplicated sheet…), stability of a chain and of a cycle, forgetting of the memo by `Load` and `NewProject` on a coincidence of identifiers and versions that is **manufactured and checked**. Each "not rewritten" assertion has its witness in full mode |
+| `stokesforge-session/src/lib.rs` (`tests`), `src/recalc.rs` (`tests`) | interruptible recalculation (#239): Stop cancels the command and allows redo (stop set in advance on the next recalculation, hence deterministic), Stop after a command **without effect** undoes nothing (`History::execute_recorded`), the death of the actor (panic simulated by `Request::PanicForTest`, or in the middle of a recalculation) frees the gauge and makes `actor_alive` false (#310), late Stop without effect on the next one, stop between two columns then next pass that finishes without rewriting what is already written. `stokesforge-app-state/tests/shell.rs` (`heavy`): the same gesture seen from the interface on a heavy project, with its witness without Stop, and the question "save?" asked at close during the recalculation |
+| Axis direction and axis settings (#344) | `AxisSpec::orient`: table (auto or explicit × inverted × order of the bounds, bounds missing or not finite, idempotence) in `stokesforge-plot/src/axis.rs`; identical rendering before and after `orient` (`un_axe_oriente_se_trace_comme_l_axe_d_origine`, `stokesforge-render/tests/geometrie.rs`); opening a file with `inverted` and bounds (-1, 10): bounds (10, -1), `inverted` true, empty history, file untouched (`load_swaps_the_bounds_of_an_inverted_axis_without_history`, `stokesforge-session/tests/session.rs`); `pyst.set_graph` (`set_graph_oriente_les_axes_d_apres_l_ordre_des_bornes`, `stokesforge-script/tests/set_graph.rs`); axes page (`stokesforge-app/src/app/plot_settings.rs`, module `tests`): no more « Axe inversé » / « Plage auto » / « Cadre fermé » boxes, « Avancé » block closed then opened on click (title or arrow), input of a bound under Auto = two bounds fixed in **one** history entry, From > To inverts the axis, Auto button = data while keeping the direction, From shows the high bound of an inverted axis; proven mutants (`orient` without swapping the bounds, `load_project` without `orient_graphs`, input that does not fix, Auto button that loses the direction, click on the arrow of « Avancé » counted twice) |
+| `stokesforge-session/tests/analyse.rs` (`au_chargement_aucun_calcul_n_est_relance_et_l_empreinte_dit_s_il_est_perime`, `la_confiance_au_chargement_ne_vaut_que_pour_le_chargement`) | A1 (#316): on opening no calculation (automatic or manual) is rerun, in both modes (`Full` as well as `Targeted`, otherwise the oracle diverges); input modified outside the application (file bytes) → `Manual` and file values kept, then `recalculate` makes them right; intact file → up to date; the `trust_loaded` flag is single-use (a calculation without a memo after `AddCalculation` is still recalculated). Mutants: flag removed, fingerprint comparison always true, always false |
+| `stokesforge-session/tests/formula.rs` | the behavior of formulas itself (before #193, unchanged) |
+| `stokesforge-robustesse/tests/b14_balayage.rs` | the version ↔ content doctrine on `History` alone, on which the whole mechanism rests — including for a column added with a number already used |
+| `stokesforge-core` (`project.rs`, `une_colonne_inseree_fait_passer_le_compteur_au_dela_de_sa_version`) | inserting a column moves the counter beyond its version |
 
-L'oracle ne voit pas une erreur **commune** aux deux modes (ordre de calcul,
-évaluation, type de sortie) : elles partagent tout le code sauf la décision
-« propre / à recalculer ». Ce sont les cas nommés et `formula.rs` qui gardent
-le calcul lui-même.
+The oracle does not see an error **common** to both modes (calculation order,
+evaluation, output type): they share all the code except the decision
+"clean / to recalculate". The named cases and `formula.rs` guard
+the calculation itself.
 
-### Mutants éprouvés (#193)
+### Proven mutants (#193)
 
-Chaque composante a été cassée tour à tour par une mutation temporaire du
-code, retirée avant livraison ; le tableau dit ce qui a été cassé et quels
-tests le voient.
+Each component was broken in turn by a temporary mutation of the
+code, removed before delivery; the table says what was broken and which
+tests see it.
 
-| Mutant (ce qui est cassé) | Vu par |
+| Mutant (what is broken) | Seen by |
 |---|---|
-| texte de la formule retiré de l'empreinte | `changer_le_texte_de_la_formule_recalcule`, `b22` |
-| longueur du résultat retirée (revu par #194 : pour une formule calculée, elle découle des versions des sources ; elle ne compte que pour les autres issues et les constantes) | `un_cycle_suit_la_longueur_de_la_feuille`, `une_constante_suit_les_colonnes_ordinaires`, `une_formule_illisible_suit_la_feuille_puis_se_corrige`, `b22` |
-| longueur retirée pour une formule bloquée seulement | `un_cycle_suit_la_longueur_de_la_feuille`, `b22` |
-| version propre ignorée (des deux côtés) | `une_colonne_formule_modifiee_directement_est_recalculee`, `une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite`, `b22` |
-| version propre ignorée pour une formule bloquée, ou illisible, seulement | `une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite`, `b22` |
-| version propre notée **avant** l'écriture, ou jamais | les cas « ciblé » (`une_commande_sans_rapport_ne_reecrit_aucune_formule`, `une_chaine_recalculee_est_stable_a_la_commande_suivante`, `un_cycle_stable_ne_se_reecrit_pas`…), `b22` (propriété 3) |
-| versions des sources retirées | huit cas nommés (propagation, macro avortée, source promue…), `b22` |
-| résolution des identifiants **par position** au lieu de l'identifiant (#321, le bug #320) | `deplacer_une_source_dans_la_feuille_la_formule_suit`, `une_analyse_qui_insere_ses_sorties_ne_change_pas_ce_que_lit_une_formule` |
-| appartenance à la feuille absente de l'empreinte (la version d'une colonne lue est prise dans tout l'arbre) | `deplacer_une_source_vers_une_autre_feuille` — pas `b22` |
-| un calcul automatique `Manual` lu d'un fichier est recalculé par le mode complet (arme `Manual` de `update_calculation`) | `un_automatique_perime_au_chargement_attend_un_geste_meme_en_mode_complet`, `b22` ; la comparaison de **contenu** (`Renumber`) : `un_automatique_perime_qui_lit_une_formule_reste_perime_en_mode_complet` |
-| mémo non vidé par `Load` | `le_chargement_oublie_le_memo_du_projet_remplace` seul — le tirage ne fabrique pas de coïncidence entre projets |
-| mémo non vidé par `NewProject` | `un_nouveau_projet_oublie_le_memo_de_l_ancien` seul (un collage comme première requête : sinon la purge d'une passe ordinaire suffit) |
-| insertion d'une colonne sans faire passer le compteur au-delà de sa version (`Project::insert_node`) | `une_colonne_ajoutee_avec_sa_version_ne_fait_pas_resservir_ce_numero`, le test unitaire de `core`, `b14` — pas `b22`, dont le tirage ne retombe pas sur le numéro |
-| tout recalculer (le « ciblé » n'en est plus un) | les cas « ciblé » et leurs témoins, `b22` (propriété 3) |
-| présence dans le mémo au lieu de l'égalité d'empreinte | quinze cas nommés, `b22` |
-| auto-référence | refusée à la saisie (`Tree::formula_from_letters` : `SelfReference`, test de `core`) ; un fichier fabriqué qui la porte finit dans le cycle, jamais dans `evaluate_formula` |
-| purge du mémo retirée | **personne, par construction** : un identifiant n'est jamais réattribué dans un projet, et `forget` couvre le remplacement. Hygiène mémoire |
+| formula text removed from the fingerprint | `changer_le_texte_de_la_formule_recalcule`, `b22` |
+| length of the result removed (revised by #194: for a computed formula, it follows from the versions of the sources; it matters only for the other outcomes and constants) | `un_cycle_suit_la_longueur_de_la_feuille`, `une_constante_suit_les_colonnes_ordinaires`, `une_formule_illisible_suit_la_feuille_puis_se_corrige`, `b22` |
+| length removed for a blocked formula only | `un_cycle_suit_la_longueur_de_la_feuille`, `b22` |
+| own version ignored (on both sides) | `une_colonne_formule_modifiee_directement_est_recalculee`, `une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite`, `b22` |
+| own version ignored for a blocked, or unreadable, formula only | `une_formule_bloquee_ou_illisible_modifiee_directement_est_reecrite`, `b22` |
+| own version noted **before** the write, or never | the "targeted" cases (`une_commande_sans_rapport_ne_reecrit_aucune_formule`, `une_chaine_recalculee_est_stable_a_la_commande_suivante`, `un_cycle_stable_ne_se_reecrit_pas`…), `b22` (property 3) |
+| versions of the sources removed | eight named cases (propagation, aborted macro, promoted source…), `b22` |
+| resolution of identifiers **by position** instead of by identifier (#321, bug #320) | `deplacer_une_source_dans_la_feuille_la_formule_suit`, `une_analyse_qui_insere_ses_sorties_ne_change_pas_ce_que_lit_une_formule` |
+| sheet membership missing from the fingerprint (the version of a column that is read is taken in the whole tree) | `deplacer_une_source_vers_une_autre_feuille` — not `b22` |
+| an automatic `Manual` calculation read from a file is recalculated by full mode (`Manual` arm of `update_calculation`) | `un_automatique_perime_au_chargement_attend_un_geste_meme_en_mode_complet`, `b22`; the **content** comparison (`Renumber`): `un_automatique_perime_qui_lit_une_formule_reste_perime_en_mode_complet` |
+| memo not cleared by `Load` | `le_chargement_oublie_le_memo_du_projet_remplace` alone — the draw does not manufacture a coincidence between projects |
+| memo not cleared by `NewProject` | `un_nouveau_projet_oublie_le_memo_de_l_ancien` alone (a paste as first request: otherwise the purge of an ordinary pass is enough) |
+| insertion of a column without moving the counter beyond its version (`Project::insert_node`) | `une_colonne_ajoutee_avec_sa_version_ne_fait_pas_resservir_ce_numero`, the unit test of `core`, `b14` — not `b22`, whose draw does not land on the number |
+| recalculate everything (the "targeted" is no longer targeted) | the "targeted" cases and their witnesses, `b22` (property 3) |
+| presence in the memo instead of fingerprint equality | fifteen named cases, `b22` |
+| self-reference | refused on input (`Tree::formula_from_letters`: `SelfReference`, test of `core`); a fabricated file that carries it ends up in the cycle, never in `evaluate_formula` |
+| memo purge removed | **nobody, by construction**: an identifier is never reassigned in a project, and `forget` covers replacement. Memory hygiene |
 
-Une première version mettait dans l'empreinte d'une formule bloquée les
-colonnes qu'elle désigne : aucun mutant ne la voyait manquer, et pour cause,
-un bloc `NaN` ne les lit pas. Elle a été retirée — c'est l'usage de ce
-tableau : une composante qu'aucun test ne voit est morte ou non couverte.
-La relecture critique de #193 (agent indépendant) a ajouté trois lignes : les
-composantes « par issue », que seul `b22` voyait, ont reçu leurs cas
-nommés, et l'insertion d'une colonne numérotée, un vrai faux « propre »
-latent, a été corrigée dans `core`.
+A first version put in the fingerprint of a blocked formula the
+columns it names: no mutant saw it missing, and for good reason,
+a `NaN` block does not read them. It was removed — that is the use of this
+table: a component that no test sees is dead or not covered.
+The critical review of #193 (independent agent) added three lines: the
+"per outcome" components, which only `b22` saw, received their named
+cases, and the insertion of a numbered column, a real latent false "clean",
+was fixed in `core`.
 
-### Mutants éprouvés (#194, longueur du résultat)
+### Proven mutants (#194, result length)
 
-#194 a changé **le calcul**, pas la décision « propre / à recalculer » :
-une formule a la longueur de la plus longue colonne qu'elle lit, à défaut
-celle de la plus longue colonne ordinaire. Ces mutants touchent du code
-commun aux deux modes : `b22` ne peut pas les voir, et ne les voit pas. Seuls
-les cas nommés les tiennent — toute règle de calcul nouvelle doit donc avoir
-les siens.
+#194 changed **the calculation**, not the "clean / to recalculate" decision:
+a formula has the length of the longest column it reads, failing that
+that of the longest ordinary column. These mutants touch code
+common to both modes: `b22` cannot see them, and does not. Only
+the named cases hold them — every new calculation rule must therefore have
+its own.
 
-| Mutant (ce qui est cassé) | Vu par |
+| Mutant (what is broken) | Seen by |
 |---|---|
-| retour à la longueur de la feuille (toutes colonnes confondues) | `le_resultat_suit_la_longueur_des_colonnes_lues`, `allonger_une_colonne_non_lue_ne_change_pas_la_formule`, `deplacer_une_source_vers_une_autre_feuille`, `une_colonne_formule_modifiee_directement_est_recalculee`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — pas `b22` |
-| colonnes lues ignorées (toujours la longueur des ordinaires) | `le_resultat_suit_la_longueur_des_colonnes_lues`, `allonger_une_colonne_non_lue_ne_change_pas_la_formule`, `deplacer_une_source_vers_une_autre_feuille`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — pas `b22` |
-| colonnes-formule comptées dans la longueur de repli | `une_constante_suit_les_colonnes_ordinaires`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — pas `b22` |
+| back to the length of the sheet (all columns together) | `le_resultat_suit_la_longueur_des_colonnes_lues`, `allonger_une_colonne_non_lue_ne_change_pas_la_formule`, `deplacer_une_source_vers_une_autre_feuille`, `une_colonne_formule_modifiee_directement_est_recalculee`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — not `b22` |
+| columns read ignored (always the length of the ordinary ones) | `le_resultat_suit_la_longueur_des_colonnes_lues`, `allonger_une_colonne_non_lue_ne_change_pas_la_formule`, `deplacer_une_source_vers_une_autre_feuille`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — not `b22` |
+| formula columns counted in the fallback length | `une_constante_suit_les_colonnes_ordinaires`, `une_formule_illisible_suit_la_feuille_puis_se_corrige` — not `b22` |
 
-### Fiabilité des ajustements (#203, #205)
+### Reliability of fits (#203, #205)
 
-`stokesforge-analysis/tests/indetermine.rs` : paramètre sans effet (avertit, les
-autres gardent leur incertitude), X tous égaux (pente indéterminée), aucun
-paramètre déterminé (`SingularSystem`), ajustement bien posé (aucun
-avertissement), ligne à σ vide ou nul écartée et comptée.
+`stokesforge-analysis/tests/indetermine.rs`: parameter without effect (warns, the
+others keep their uncertainty), X all equal (slope undetermined), no determined
+parameter (`SingularSystem`), well-posed fit (no
+warning), line with empty or zero σ discarded and counted.
 
-### Ajustements sur un X décalé (#282, #293, #294)
+### Fits on a shifted X (#282, #293, #294)
 
-`stokesforge-analysis/tests/decalage.rs` : droite libre `a + b*x` et gaussienne
-sur un X décalé de 1e3 à 1e10, comparées au modèle `Linear` et au repère centré
-(valeurs **et** incertitudes). Témoins par mutation : sans raffinement du pas
-de différence, `une_gaussienne_decalee_de_un_million_retrouve_ses_parametres` et
+`stokesforge-analysis/tests/decalage.rs`: free line `a + b*x` and Gaussian
+on an X shifted from 1e3 to 1e10, compared with the `Linear` model and the centered frame
+(values **and** uncertainties). Witnesses by mutation: without refinement of the
+difference step, `une_gaussienne_decalee_de_un_million_retrouve_ses_parametres` and
 `une_gaussienne_bruitee_decalee_de_un_million_a_les_incertitudes_du_repere_centre`
-échouent ; sans le pas de vérification non amorti,
-`un_pas_amorti_minuscule_n_est_pas_une_convergence` (`solver.rs`) et
-`au_dela_le_resultat_est_celui_du_modele_lineaire` échouent ; avec l'ancien seuil
-d'indétermination (1e-6), `le_cas_de_l_issue_donne_les_incertitudes_du_modele_lineaire`
-échoue. Au-delà de X ≈ 3e7, la pente d'une droite libre est déclarée indéterminée
-(incertitude omise, avertissement) : le bruit des différences finies (≈ 2e-10)
-n'y sépare plus la direction faible.
+fail; without the undamped verification step,
+`un_pas_amorti_minuscule_n_est_pas_une_convergence` (`solver.rs`) and
+`au_dela_le_resultat_est_celui_du_modele_lineaire` fail; with the old
+indetermination threshold (1e-6), `le_cas_de_l_issue_donne_les_incertitudes_du_modele_lineaire`
+fails. Beyond X ≈ 3e7, the slope of a free line is declared undetermined
+(uncertainty omitted, warning): the noise of the finite differences (≈ 2e-10)
+no longer separates the weak direction there.
 
-### Déterminisme numérique d'analyse (#332)
+### Numerical determinism of analysis (#332)
 
-`stokesforge-analysis/tests/determinisme.rs` : résultats figés **au bit près** (`to_bits()`) pour toutes les plateformes, parce que les fonctions transcendantes passent par le crate `libm` ; la CI Linux les confirme. Décomposition en pics de la série en paliers de cinq lignes (20 valeurs, R² compris) ; la dent de scie de #290 ne converge sur aucune plateforme (`NotConverged { iterations: 400 }`) ; cinq valeurs d'expression (`exp`, `ln`, `sin`, `pow`, `atan2`) et un balayage de 256 abscisses par fonction (empreinte FNV-1a des bits). Garde : `crates/stokesforge-analysis/clippy.toml` (`disallowed-methods`, vérifié par `cargo clippy -p stokesforge-analysis --all-targets -- -D warnings`). Mutants éprouvés : `x.exp()` réintroduit dans `peaks.rs` (clippy échoue) ; `Func::Exp` calculé par `exp2(a * LOG2_E)` (les cinq valeurs isolées ne le voyaient pas, le balayage oui : d'où le balayage).
+`stokesforge-analysis/tests/determinisme.rs`: results frozen **to the bit** (`to_bits()`) for all platforms, because the transcendental functions go through the `libm` crate; Linux CI confirms them. Peak decomposition of the series in steps of five rows (20 values, R² included); the sawtooth of #290 converges on no platform (`NotConverged { iterations: 400 }`); five expression values (`exp`, `ln`, `sin`, `pow`, `atan2`) and a sweep of 256 abscissas per function (FNV-1a fingerprint of the bits). Guard: `crates/stokesforge-analysis/clippy.toml` (`disallowed-methods`, checked by `cargo clippy -p stokesforge-analysis --all-targets -- -D warnings`). Proven mutants: `x.exp()` reintroduced in `peaks.rs` (clippy fails); `Func::Exp` computed by `exp2(a * LOG2_E)` (the five isolated values did not see it, the sweep did: hence the sweep).
 
-### Bornes, prérequis et réglages d'analyse (#260)
+### Bounds, prerequisites and settings of analysis (#260)
 
-`stokesforge-analysis/tests/limites.rs` : `Model::compile` refuse un degré hors
-plafond (`u32::MAX`) sans rien allouer (le test s'exécute sous `ulimit -v` pour
-voir l'échec d'un `compile` sans plafond plutôt qu'un blocage) ; `MAX_*` et
-leurs bords dans `validate` (100 pics, pas 50) ; `validate` refuse un
-ajustement sans paramètre libre (aucun, ou tous fixés) ; `Operation::readiness`
-a un cas par variante (`NeedsPoints` avec son `have`, `NeedsZone`,
-`BadExpression`, `NoParameter`, `Invalid`) ; `forget_positions` efface
-exactement plages, positions, `initial`/`fixed`/`min`/`max`/`shared`, fenêtre
-de reconvolution, et garde la méthode ; `FitSpec::auto_initial` filtre la plage
-(bornes dans le désordre), ignore les paramètres fixés et les modèles illisibles.
-`stokesforge-app` : `number_field.rs` (le champ « Max peaks » monte à 100 et
-chaque grandeur d'analyse suit la constante du crate), `tests/analysis.rs` (point
-ou zone uniques manquants, degré énorme = prérequis refusé, « Auto » lit la
-plage), `analysis_recent.rs` (la réouverture oublie `fixed`/`shared`, un degré
-énorme des préférences ne fabrique rien).
+`stokesforge-analysis/tests/limites.rs`: `Model::compile` refuses a degree beyond
+the cap (`u32::MAX`) without allocating anything (the test runs under `ulimit -v` to
+see the failure of a `compile` without a cap rather than a hang); `MAX_*` and
+their edges in `validate` (100 peaks, not 50); `validate` refuses a fit
+without a free parameter (none, or all fixed); `Operation::readiness`
+has one case per variant (`NeedsPoints` with its `have`, `NeedsZone`,
+`BadExpression`, `NoParameter`, `Invalid`); `forget_positions` erases
+exactly ranges, positions, `initial`/`fixed`/`min`/`max`/`shared`, reconvolution
+window, and keeps the method; `FitSpec::auto_initial` filters the range
+(bounds in disorder), ignores fixed parameters and unreadable models.
+`stokesforge-app`: `number_field.rs` (the "Max peaks" field goes up to 100 and
+each analysis quantity follows the constant of the crate), `tests/analysis.rs` (single point
+or zone missing, huge degree = prerequisite refused, "Auto" reads the
+range), `analysis_recent.rs` (reopening forgets `fixed`/`shared`, a huge
+degree in the preferences fabricates nothing).
 
-| Mutant (ce qui est cassé) | Vu par |
+| Mutant (what is broken) | Seen by |
 |---|---|
-| `compile` sans plafond | `compile_refuse_un_degre_hors_plafond_sans_allouer` |
-| `readiness` oublie `NeedsZone` | `readiness_dit_ce_qui_manque_a_une_ligne_de_base` |
-| `forget_positions` garde `shared` | `forget_positions_efface_les_plages_et_les_reglages_par_parametre`, `rouvrir_une_entree_oublie_aussi_les_reglages_fixes_et_partages` |
-| `MAX_PEAKS` à 50 | `les_plafonds_sont_ceux_de_la_table_des_grandeurs`, `les_champs_d_analyse_suivent_les_plafonds_du_crate_d_analyse` |
-| `auto_initial` sans filtre de plage | `auto_initial_suit_le_modele_sur_les_points_de_la_plage`, `auto_reads_only_the_fitted_range` |
-| `validate` sans « zéro paramètre libre » | `validate_refuse_un_ajustement_sans_parametre_libre` |
-| `validate` laisse passer plage, graine, proéminence, décalage ou fenêtre non finis (#278) | `validate_refuse_une_plage_non_finie`, `validate_refuse_une_graine_ou_une_proeminence_non_finie`, `validate_refuse_un_decalage_ou_une_fenetre_non_finis`, `validate_refuse_chaque_champ_non_fini_et_accepte_le_fini_qui_fait_l_aller_retour` (table champ par champ, NaN/±inf, aller-retour du fini) |
-| `add_/update_calculation` sans `Operation::validate` (#278) | `une_operation_non_finie_est_refusee_a_l_ajout_et_a_la_mise_a_jour` (core), `toute_operation_non_finie_est_refusee_sans_toucher_l_arbre` (douze familles, add/update/replace, arbre et identifiants intacts), `la_session_refuse_une_operation_non_finie_sans_rien_changer` (session) |
-| calcul illisible écarté sans rapport (#278) | `un_calcul_illisible_est_nomme_par_le_rapport_et_le_reste_se_charge` (persistance), `loading_a_file_with_an_unreadable_calculation_warns` (app-state), `plusieurs_calculs_ecartes_sont_tous_listes_dans_l_ordre_et_les_sains_se_chargent`, `un_fichier_sans_calcul_ecarte_rend_un_rapport_vide`, `un_identifiant_hors_borne_ecarte_le_calcul` (borne, tous les champs d'id), `le_chargement_relaie_les_calculs_ecartes_de_la_persistance` (session), `the_discarded_calculations_warning_counts_and_abbreviates` (singulier/pluriel, 5 ids puis « … », fr/en), `une_entree_a_nombre_non_fini_ne_se_relit_jamais_non_finie` (préférences) ; #309 : `une_forme_invalide_ecarte_et_nomme_le_calcul`, `une_trace_ecartee_est_comptee`, `une_trace_de_correction_illisible_est_comptee_par_le_rapport` (persistance), `le_chargement_relaie_les_traces_de_correction_ecartees` (session), `mark_loaded_avertit_des_calculs_ecartes_du_rapport` (app-state), `un_doublon_d_identifiant_garde_le_premier_et_compte_le_second` (persistance, F4), `le_rapport_compte_les_traces_et_les_calculs_dans_un_seul_message` (F1), `run_project_avertit_des_ecarts_puis_execute_le_script` (CLI, feature python, F2), confirmation à l'enregistrement (F3, app-state `shell.rs`) : `enregistrer_sur_la_source_avec_ecarts_demande_puis_ecrit`, `refuser_l_ecrasement_n_ecrit_rien_et_oublie_le_geste`, `quitter_enregistrer_accepter_enregistre_puis_quitte`, `enregistrer_sous_ailleurs_ne_demande_rien_mais_revenir_a_la_source_oui`, `un_fichier_propre_ou_un_nouveau_projet_n_ouvre_aucune_question`, `le_chargement_du_demarrage_pose_le_repere_de_la_source`, `le_demarrage_rend_le_rapport_des_calculs_ecartes` (main) ; `un_nan_edite_a_la_main_dans_le_fichier_ecarte_et_signale_le_calcul` (persistance, #291 : `validate` appelé au chargement) |
+| `compile` without a cap | `compile_refuse_un_degre_hors_plafond_sans_allouer` |
+| `readiness` forgets `NeedsZone` | `readiness_dit_ce_qui_manque_a_une_ligne_de_base` |
+| `forget_positions` keeps `shared` | `forget_positions_efface_les_plages_et_les_reglages_par_parametre`, `rouvrir_une_entree_oublie_aussi_les_reglages_fixes_et_partages` |
+| `MAX_PEAKS` at 50 | `les_plafonds_sont_ceux_de_la_table_des_grandeurs`, `les_champs_d_analyse_suivent_les_plafonds_du_crate_d_analyse` |
+| `auto_initial` without range filter | `auto_initial_suit_le_modele_sur_les_points_de_la_plage`, `auto_reads_only_the_fitted_range` |
+| `validate` without "zero free parameters" | `validate_refuse_un_ajustement_sans_parametre_libre` |
+| `validate` lets a non-finite range, seed, prominence, shift or window through (#278) | `validate_refuse_une_plage_non_finie`, `validate_refuse_une_graine_ou_une_proeminence_non_finie`, `validate_refuse_un_decalage_ou_une_fenetre_non_finis`, `validate_refuse_chaque_champ_non_fini_et_accepte_le_fini_qui_fait_l_aller_retour` (field-by-field table, NaN/±inf, round trip of the finite value) |
+| `add_/update_calculation` without `Operation::validate` (#278) | `une_operation_non_finie_est_refusee_a_l_ajout_et_a_la_mise_a_jour` (core), `toute_operation_non_finie_est_refusee_sans_toucher_l_arbre` (twelve families, add/update/replace, tree and identifiers intact), `la_session_refuse_une_operation_non_finie_sans_rien_changer` (session) |
+| unreadable calculation discarded without a report (#278) | `un_calcul_illisible_est_nomme_par_le_rapport_et_le_reste_se_charge` (persistence), `loading_a_file_with_an_unreadable_calculation_warns` (app-state), `plusieurs_calculs_ecartes_sont_tous_listes_dans_l_ordre_et_les_sains_se_chargent`, `un_fichier_sans_calcul_ecarte_rend_un_rapport_vide`, `un_identifiant_hors_borne_ecarte_le_calcul` (bound, all id fields), `le_chargement_relaie_les_calculs_ecartes_de_la_persistance` (session), `the_discarded_calculations_warning_counts_and_abbreviates` (singular/plural, 5 ids then "…", fr/en), `une_entree_a_nombre_non_fini_ne_se_relit_jamais_non_finie` (preferences); #309: `une_forme_invalide_ecarte_et_nomme_le_calcul`, `une_trace_ecartee_est_comptee`, `une_trace_de_correction_illisible_est_comptee_par_le_rapport` (persistence), `le_chargement_relaie_les_traces_de_correction_ecartees` (session), `mark_loaded_avertit_des_calculs_ecartes_du_rapport` (app-state), `un_doublon_d_identifiant_garde_le_premier_et_compte_le_second` (persistence, F4), `le_rapport_compte_les_traces_et_les_calculs_dans_un_seul_message` (F1), `run_project_avertit_des_ecarts_puis_execute_le_script` (CLI, feature python, F2), confirmation on save (F3, app-state `shell.rs`): `enregistrer_sur_la_source_avec_ecarts_demande_puis_ecrit`, `refuser_l_ecrasement_n_ecrit_rien_et_oublie_le_geste`, `quitter_enregistrer_accepter_enregistre_puis_quitte`, `enregistrer_sous_ailleurs_ne_demande_rien_mais_revenir_a_la_source_oui`, `un_fichier_propre_ou_un_nouveau_projet_n_ouvre_aucune_question`, `le_chargement_du_demarrage_pose_le_repere_de_la_source`, `le_demarrage_rend_le_rapport_des_calculs_ecartes` (main); `un_nan_edite_a_la_main_dans_le_fichier_ecarte_et_signale_le_calcul` (persistence, #291: `validate` called on load) |
 
-### Séries pas à jour sur le graphe (#198)
+### Out-of-date series on the graph (#198)
 
-`stokesforge-core/tests/calculations.rs` (`une_serie_tracee_depuis_un_calcul_perime…` :
-drapeau posé, levé au recalcul, éteint par `stale_warning`) ;
-`stokesforge-persistence/tests/calculations.rs` et `schema.rs` (aller-retour du
-réglage, fichier ancien = actif) ; `stokesforge-app/src/app/stale_export.rs`
-(les quatre réponses de la confirmation, SVG grisé `#9a9a9a` ou non, graphe sans
-avertissement exporté sans demander, ligne de l'Object Manager marquée).
+`stokesforge-core/tests/calculations.rs` (`une_serie_tracee_depuis_un_calcul_perime…`:
+flag set, cleared on recalculation, turned off by `stale_warning`);
+`stokesforge-persistence/tests/calculations.rs` and `schema.rs` (round trip of the
+setting, old file = active); `stokesforge-app/src/app/stale_export.rs`
+(the four answers of the confirmation, SVG greyed `#9a9a9a` or not, graph without
+warning exported without asking, Object Manager row marked).
 
-### Ligne de base constante (#211)
+### Constant baseline (#211)
 
-`stokesforge-analysis/src/baseline.rs` et `tests/ops.rs` comparent le point
-libre à la moyenne d’une zone, gardent une pente exactement nulle, vérifient
-les bornes inclusives, les lignes écartées et la division par zéro. Les
-réglages non finis et la zone sans donnée sont refusés.
-`stokesforge-app-state/tests/analysis.rs` vérifie le point et la zone uniques,
-leurs poignées et la réouverture du calcul ;
-`stokesforge-persistence/tests/calculations.rs` traverse le `.stf` avec les
-deux variantes. `stokesforge-script/tests/analysis.rs` exerce les mêmes
-méthodes via `pyst`, leurs refus et l’annulation du script (feature `python`).
+`stokesforge-analysis/src/baseline.rs` and `tests/ops.rs` compare the free
+point with the average of a zone, keep an exactly zero slope, check
+the inclusive bounds, the discarded rows and the division by zero. Non-finite
+settings and the zone without data are refused.
+`stokesforge-app-state/tests/analysis.rs` checks the single point and zone,
+their handles and the reopening of the calculation;
+`stokesforge-persistence/tests/calculations.rs` goes through the `.stf` with the
+two variants. `stokesforge-script/tests/analysis.rs` exercises the same
+methods through `pyst`, their refusals and the cancelation of the script (feature `python`).
 
-### Mutants éprouvés (#181, calculs d'analyse)
+### Proven mutants (#181, analysis calculations)
 
-Même mécanisme, autre mémo (`CalcFingerprint`, `CalcMemo`). `b22` joue les pas
-`AjouterCalcul` (ajustement ou correction, automatique ou manuel), `RetirerCalcul`
-et `RecalculerPerimes` à côté des formules ; `stokesforge-session/tests/analyse.rs`
-nomme les comportements.
+Same mechanism, another memo (`CalcFingerprint`, `CalcMemo`). `b22` plays the steps
+`AjouterCalcul` (fit or correction, automatic or manual), `RetirerCalcul`
+and `RecalculerPerimes` next to the formulas; `stokesforge-session/tests/analyse.rs`
+names the behaviors.
 
-| Mutant (ce qui est cassé) | Vu par |
+| Mutant (what is broken) | Seen by |
 |---|---|
-| versions des entrées retirées de l'empreinte d'un calcul automatique | `b22`, `un_calcul_automatique_suit_ses_entrees` |
-| manuel : comparaison par le contenu (`seen`) supprimée | `b22` (le recalcul complet réécrit les formules, donc leurs versions) |
-| garde des boucles calcul → formule → calcul retirée | `b22` (propriété 3 : une commande sans rapport réécrit des colonnes) |
-| manuel : changement de définition non « cru » (`Trust`) | `modifier_un_calcul_manuel_perime_le_met_a_jour_sans_le_reperimer` seul |
+| versions of the inputs removed from the fingerprint of an automatic calculation | `b22`, `un_calcul_automatique_suit_ses_entrees` |
+| manual: comparison by content (`seen`) removed | `b22` (full recalculation rewrites the formulas, hence their versions) |
+| guard of the calculation → formula → calculation loops removed | `b22` (property 3: an unrelated command rewrites columns) |
+| manual: definition change not "trusted" (`Trust`) | `modifier_un_calcul_manuel_perime_le_met_a_jour_sans_le_reperimer` alone |
 
-### Mutants éprouvés (#313, avertissements et erreurs d'analyse)
+### Proven mutants (#313, analysis warnings and errors)
 
-Calcul pur, hors fingerprint : les avertissements viennent de `ops::run`, que le
-recalcul ciblé et le complet appellent identiquement (`b22` et `b19` restent
-verts). Les cas sont nommés dans `stokesforge-analysis` (`solver.rs`, `deconv.rs`,
-`correct.rs` en `mod tests`, `tests/plateau.rs`, `tests/ops.rs`), `stokesforge-core/tests/calculations.rs`
-(C4) et les trois tables de transport des `Warning` (persistance, `analysis_dialog.rs`,
+Pure calculation, outside the fingerprint: the warnings come from `ops::run`, which
+targeted and full recalculation call identically (`b22` and `b19` stay
+green). The cases are named in `stokesforge-analysis` (`solver.rs`, `deconv.rs`,
+`correct.rs` in `mod tests`, `tests/plateau.rs`, `tests/ops.rs`), `stokesforge-core/tests/calculations.rs`
+(C4) and the three transport tables of `Warning` (persistence, `analysis_dialog.rs`,
 `analysis_warning_text.rs`).
 
-| Mutant (ce qui est cassé) | Vu par |
+| Mutant (what is broken) | Seen by |
 |---|---|
-| arrêt sans pas accepté toujours « convergé » (`stalled` jamais levé) | `un_solveur_sans_pas_accepte_et_a_pente_forte_est_marque_bloque`, `un_solveur_bloque_sur_une_pointe_avertit_non_converge` |
-| test de non-fini retiré avant le pli `max` (pente `NaN` lue comme « convergé ») | `une_pente_non_finie_est_une_erreur_modele_non_evaluable` (solveur et `tests/plateau.rs`), `largeur_imposee_minuscule_ou_non_finie_n_est_pas_jugee_par_decompose` |
-| dérivée non finie remise à 0 (case « sans effet ») | mêmes cas (l'erreur redevient `SingularSystem`) |
-| seuil d'ajustement exact retiré (cosinus lu sur du bruit d'arrondi) | `un_ajustement_sain_ou_bruite_ne_previent_pas` (`tests/indetermine.rs`) |
-| IRF coupée : seuil 1 % déplacé (0,5 % ou 2 %), bords ou points hors fenêtre ignorés | `une_irf_coupee_au_dessus_d_un_pour_cent_de_son_pic_est_signalee` (0,5 / 0,9 / 1,1 / 5 %), `un_point_d_irf_hors_de_la_fenetre_est_signale_selon_le_decalage`, `la_deconvolution_directe_dit_une_irf_coupee_et_garde_la_renormalisation` |
-| trou de la référence : comptage retiré, point exactement sur un point gardé compté | `un_trou_de_la_reference_est_enjambe_et_compte`, `un_trou_au_milieu_de_la_reference_est_enjambe_et_dit`, `un_trou_en_fin_ou_sans_position_n_est_pas_un_enjambement` |
-| division par zéro : compte de tout non-fini (débordement compris), ligne de base non comptée, `±inf` de `sat/sa` | `la_division_par_une_reference_nulle_est_comptee_pas_le_debordement`, `une_ligne_de_base_passant_par_zero_compte_la_division`, `un_denominateur_nul_donne_nan_et_pas_l_infini`, `des_amplitudes_de_somme_nulle_donnent_des_durees_moyennes_nan` |
-| longueur de X remplacée par la plus longue des colonnes (C4) | `la_sortie_a_la_longueur_de_x_quand_x_est_donne`, `sans_x_la_sortie_a_la_longueur_de_y` |
-| refus « source length » rétabli pour une sortie plus courte que Y | `le_remplacement_avec_y_plus_long_que_x_garde_les_cellules_au_dela_de_x` |
+| stop without an accepted step always "converged" (`stalled` never raised) | `un_solveur_sans_pas_accepte_et_a_pente_forte_est_marque_bloque`, `un_solveur_bloque_sur_une_pointe_avertit_non_converge` |
+| non-finite test removed before the `max` fold (slope `NaN` read as "converged") | `une_pente_non_finie_est_une_erreur_modele_non_evaluable` (solver and `tests/plateau.rs`), `largeur_imposee_minuscule_ou_non_finie_n_est_pas_jugee_par_decompose` |
+| non-finite derivative reset to 0 ("no effect" box) | same cases (the error becomes `SingularSystem` again) |
+| exact-fit threshold removed (cosine read on rounding noise) | `un_ajustement_sain_ou_bruite_ne_previent_pas` (`tests/indetermine.rs`) |
+| cut IRF: 1% threshold moved (0.5% or 2%), edges or points outside the window ignored | `une_irf_coupee_au_dessus_d_un_pour_cent_de_son_pic_est_signalee` (0.5 / 0.9 / 1.1 / 5%), `un_point_d_irf_hors_de_la_fenetre_est_signale_selon_le_decalage`, `la_deconvolution_directe_dit_une_irf_coupee_et_garde_la_renormalisation` |
+| hole in the reference: count removed, point exactly on a kept point counted | `un_trou_de_la_reference_est_enjambe_et_compte`, `un_trou_au_milieu_de_la_reference_est_enjambe_et_dit`, `un_trou_en_fin_ou_sans_position_n_est_pas_un_enjambement` |
+| division by zero: count of every non-finite (overflow included), baseline not counted, `±inf` of `sat/sa` | `la_division_par_une_reference_nulle_est_comptee_pas_le_debordement`, `une_ligne_de_base_passant_par_zero_compte_la_division`, `un_denominateur_nul_donne_nan_et_pas_l_infini`, `des_amplitudes_de_somme_nulle_donnent_des_durees_moyennes_nan` |
+| length of X replaced by the longest of the columns (C4) | `la_sortie_a_la_longueur_de_x_quand_x_est_donne`, `sans_x_la_sortie_a_la_longueur_de_y` |
+| "source length" refusal restored for an output shorter than Y | `le_remplacement_avec_y_plus_long_que_x_garde_les_cellules_au_dela_de_x` |
 
-Mutant équivalent connu : `h >= lo && h <= hi` dans `bridges_hole` (un trou
-à la même abscisse qu'un point gardé suppose un X dupliqué).
+Known equivalent mutant: `h >= lo && h <= hi` in `bridges_hole` (a hole
+at the same abscissa as a kept point assumes a duplicated X).
 
-### Ajouter une fonctionnalité qui en dépend : les tests à écrire
+### Adding a feature that depends on it: the tests to write
 
-**A. Une donnée de plus entre dans le calcul d'une formule** (fonction
-`row()`, référence par nom de colonne, unité, colonne d'une autre feuille
-#186, paramètre d'analyse…).
+**A. One more piece of data enters the calculation of a formula** (function
+`row()`, reference by column name, unit, column of another sheet
+#186, analysis parameter…).
 
-1. L'ajouter à l'empreinte (`Fingerprint`, ou une variante d'`Outcome`) :
-   *toute donnée que lit le calcul y entre*. Attention à ce que la version
-   d'une colonne **ne couvre pas** : elle ne change qu'avec le type et les
-   valeurs, jamais avec le nom, l'unité, la formule, la position ni la
-   feuille — une telle donnée se compare directement.
-2. Un cas nommé dans `recalc_cible.rs` qui ne change **que** cette donnée et
-   exige la nouvelle valeur.
-3. Un pas dans le tirage de `b22` qui la fait changer. Sans lui, l'oracle ne
-   peut pas voir l'oubli : il ne compare que ce que le tirage produit.
-4. Mutation : retirer la composante doit faire échouer le cas nommé **et**
-   `b22`. Une composante qu'aucun test ne voit manquer est soit morte (la
-   retirer), soit non couverte (ajouter le pas) — l'écrire dans le tableau
-   ci-dessus dans un cas comme dans l'autre.
+1. Add it to the fingerprint (`Fingerprint`, or a variant of `Outcome`):
+   *every piece of data the calculation reads enters it*. Beware of what the version
+   of a column **does not cover**: it changes only with the type and the
+   values, never with the name, the unit, the formula, the position or the
+   sheet — such a piece of data is compared directly.
+2. A named case in `recalc_cible.rs` that changes **only** this piece of data and
+   requires the new value.
+3. A step in the draw of `b22` that makes it change. Without it, the oracle cannot
+   see the omission: it compares only what the draw produces.
+4. Mutation: removing the component must fail the named case **and**
+   `b22`. A component that no test sees missing is either dead (remove
+   it) or not covered (add the step) — write it in the table
+   above in either case.
 
-**B. Une nouvelle voie d'écriture des données d'une colonne** (primitive de
-`core`, commande, import, pont Python, recalcul d'un autre type).
+**B. A new way to write the data of a column** (primitive of
+`core`, command, import, Python bridge, recalculation of another kind).
 
-1. Elle tire un numéro neuf de `Project::next_column_version` : sans lui, un
-   même numéro peut désigner deux contenus, et le recalcul ciblé croit une
-   formule à jour. Une voie qui **insère** une colonne déjà numérotée (fichier,
-   presse-papiers, instantané gardé par un client) passe par
-   `Project::insert_node`, qui fait avancer le compteur au-delà.
-2. L'ajouter aux tirages de `b14` (doctrine sur `History`) et de `b22`
-   (doctrine et oracle dans l'acteur).
-3. Si elle peut viser une colonne-formule (comme `DeleteCells` et
-   `SetColumnType` aujourd'hui), un cas nommé : la colonne est réécrite par sa
-   formule.
+1. It draws a new number from `Project::next_column_version`: without it, the
+   same number can designate two contents, and targeted recalculation believes a
+   formula is up to date. A path that **inserts** an already numbered column (file,
+   clipboard, snapshot kept by a client) goes through
+   `Project::insert_node`, which moves the counter beyond it.
+2. Add it to the draws of `b14` (doctrine on `History`) and of `b22`
+   (doctrine and oracle in the actor).
+3. If it can target a formula column (like `DeleteCells` and
+   `SetColumnType` today), a named case: the column is rewritten by its
+   formula.
 
-Le remplacement par une correction (#212) est exercé par le pas
-`RemplacerCorrection` dans `b14` et `b22` : colonne numérique ordinaire,
-constante soustraite par `compute`, commande `ReplaceAnalysisData` avec les
-versions de ses entrées. `b14` vérifie aussi la trace dans l’aller-retour `.stf` ;
-`b22` exige au moins vingt passes pour ce geste, en conservant son oracle
-ciblé/complet et son témoin « sans rapport ». Les gardes de concurrence
-prennent les versions propres à chaque jumelle, dont les compteurs peuvent
-diverger ; le résultat calculé soumis aux deux reste identique.
+Replacement by a correction (#212) is exercised by the step
+`RemplacerCorrection` in `b14` and `b22`: ordinary numeric column,
+constant subtracted by `compute`, `ReplaceAnalysisData` command with the
+versions of its inputs. `b14` also checks the trace in the `.stf` round trip;
+`b22` requires at least twenty passes for this gesture, keeping its targeted/full
+oracle and its "unrelated" witness. The concurrency guards
+take the own versions of each twin, whose counters can
+diverge; the calculated result submitted to both stays identical.
 
-**C. Un nouveau calcul dérivé réutilise le mécanisme** (analyses #184).
+**C. A new derived calculation reuses the mechanism** (analyses #184).
 
-1. Même règle d'empreinte (A.1), même ordre de passe : aucune écriture après
-   qu'un lecteur a pris son empreinte, sans quoi une seconde passe réécrit et
-   le « ciblé » ne l'est plus.
-2. Garder un mode complet qui partage **tout** le code sauf la décision, et
-   une batterie jumelle sur le modèle de `b22`, avec ses trois propriétés
-   (oracle, version ↔ contenu, commande sans rapport sans réécriture) et son
-   contrôle de couverture **par nature de pas**. Le tirage doit rester
-   rejouable : ne jamais choisir une cible dans l'ordre de `Tree::iter`, et
-   ne pas comparer des versions de part et d'autre d'un chargement (le
-   compteur y repart du fichier, une coïncidence n'y prouve rien).
-3. Les cas nommés de la famille « ciblé » avec leur **témoin** en mode
-   complet : sans témoin, une version inchangée ne prouve rien.
-4. Un résultat en erreur stable (cycle, ajustement qui ne converge pas) ne se
-   réécrit pas à chaque passe : un cas nommé le vérifie.
-5. Le mémo est vidé quand le projet est remplacé (`Load`, `NewProject`) : un
-   cas nommé fabrique une coïncidence d'identifiants et de versions, la
-   **vérifie**, puis exige le recalcul.
-6. Si le calcul coûte (ajustement), mesurer qu'une commande sans rapport ne
-   le relance pas — en comptant, comme `b17`/`b21`, pas en chronométrant.
-7. Relancer les mutants de chaque composante, et compléter le tableau.
+1. Same fingerprint rule (A.1), same pass order: no write after
+   a reader has taken its fingerprint, otherwise a second pass rewrites and
+   the "targeted" is no longer targeted.
+2. Keep a full mode that shares **all** the code except the decision, and
+   a twin battery on the model of `b22`, with its three properties
+   (oracle, version ↔ content, unrelated command without rewrite) and its
+   coverage check **per kind of step**. The draw must stay
+   replayable: never choose a target in the order of `Tree::iter`, and
+   do not compare versions on either side of a load (the
+   counter restarts from the file there, a coincidence proves nothing there).
+3. The named cases of the "targeted" family with their **witness** in full
+   mode: without a witness, an unchanged version proves nothing.
+4. A stable error result (cycle, fit that does not converge) is not
+   rewritten at every pass: a named case checks it.
+5. The memo is cleared when the project is replaced (`Load`, `NewProject`): a named
+   case manufactures a coincidence of identifiers and versions, **checks**
+   it, then requires the recalculation.
+6. If the calculation is expensive (fit), measure that an unrelated command does not
+   rerun it — by counting, like `b17`/`b21`, not by timing.
+7. Rerun the mutants of each component, and complete the table.
 
-**D. Toucher à la passe elle-même** (ordre des étapes, mise en cache des
-formules analysées, nouvelle étape) : relancer `b22` à plus de cas
-(`runner(…)`) et les mutants ; une étape qui écrit après qu'une autre a pris
-son empreinte se voit par la propriété « sans rapport » de `b22` et par
+**D. Touching the pass itself** (order of the steps, caching of the parsed
+formulas, new step): rerun `b22` with more cases
+(`runner(…)`) and the mutants; a step that writes after another has taken
+its fingerprint is seen by the "unrelated" property of `b22` and by
 `une_chaine_recalculee_est_stable_a_la_commande_suivante`.
 
-## Lancer
+## Running
 
 ```sh
 cargo test --workspace                        # tout, sauf #[ignore]
@@ -437,610 +437,610 @@ scripts/python-test.sh                        # pont Python, scripts, robustesse
 scripts/python-test.sh -- --ignored           # + les reproductions de la frontière Python
 ```
 
-Les tests de console `script_panel` et de démarrage paresseux
-`script_bridge_lazy` (dans `stokesforge-app-state/tests/`) exigent aussi la feature Python de `stokesforge-app-state`.
-Avec l'environnement embarqué décrit dans [`.codex/README.md`](../.codex/README.md),
-`scripts/python-test.sh` les inclut ; pour les isoler :
+The console tests `script_panel` and the lazy-start tests
+`script_bridge_lazy` (in `stokesforge-app-state/tests/`) also require the Python feature of `stokesforge-app-state`.
+With the embedded environment described in [`.codex/README.md`](../.codex/README.md),
+`scripts/python-test.sh` includes them; to run them alone:
 
 ```sh
 cargo test -p stokesforge-app-state --features python --test script_panel --test script_bridge_lazy
 ```
 
-## CI (GitHub Actions pour Linux et Windows)
+## CI (GitHub Actions for Linux and Windows)
 
-Les contrôles Linux s'exécutent sur le miroir GitHub
-(`.github/workflows/ci.yml`), Windows aussi (runner hébergé `windows-latest`) :
-GitHub exécute tout, publication comprise. `.gitlab-ci.yml` ne garde que la
-définition de référence des travaux Linux, que les deux configurations
-suivent ensemble ; ils y sont désactivés par défaut pour ne plus attendre un
-runner absent. `STOKESFORGE_CI_LINUX=gitlab` les réactive si un
-runner Linux est enregistré ; Windows n'est pas affecté par ce choix.
+The Linux checks run on the GitHub mirror
+(`.github/workflows/ci.yml`), Windows too (hosted runner `windows-latest`):
+GitHub runs everything, release included. `.gitlab-ci.yml` keeps only the
+reference definition of the Linux jobs, which the two configurations
+follow together; they are disabled there by default so as not to wait for an absent
+runner. `STOKESFORGE_CI_LINUX=gitlab` re-enables them if a
+Linux runner is registered; Windows is not affected by this choice.
 
-| Travail | Bloquant | Ce qu'il fait |
+| Job | Blocking | What it does |
 |---|---|---|
-| `fmt` | oui | `cargo fmt --all -- --check`, plus `scripts/release-notes-test.sh`, `scripts/release-tag-test.sh` et `scripts/versions-alignees.sh` (tous les crates dans une même version `X.Y.Z`, #349/#350 ; section `[package]` seule lue, dépendances internes `stokesforge-x = { version = … }` égales à cette version, `Cargo.lock` à jour, `FORMAT_VERSION` = N exige `tests/temoins/vN/projet.stf`, #351/#352/#353) |
-| `licenses` | oui | politique et génération des notices tierces |
-| `clippy` | oui | `cargo clippy --workspace --all-targets -- -D warnings` |
-| `test` | oui | `cargo test --workspace` |
-| `robustesse` | non | `cargo test -p stokesforge-robustesse -- --ignored` |
-| `test-python` | oui, automatique | vendorise CPython + numpy, puis `scripts/python-test.sh` |
-| `release-linux` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN` (sur un `-rcN`, `publier` crée la release puis la supprime ; aucune release ne reste) | vérifie le tag (`scripts/release-tag-sur-main.sh`, `scripts/release-tag-croissant.sh`, `scripts/release-notes.sh`), assemble et éprouve `scripts/app-dist.sh`, téléverse l'archive dans le registre de paquets GitLab, sans release GitHub (#333) |
-| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatique sur `main`, `vN`, `release/**` et sur un tag (pas sur `feature/**`), bloquants (#333) | mêmes contrôles sur un poste propre ; sur un tag, `dist-windows` téléverse l'installeur dans le registre GitLab (`scripts/release-televerser.sh windows`) |
-| `publier` (GitHub) | sur un tag `vX.Y.Z` ou `vX.Y.Z-rcN`, après tous les contrôles bloquants et les deux téléversements de paquets | release GitLab avec les notes du CHANGELOG (#333) ; un `-rcN` crée puis supprime la release (essai) ; procédure et critères : [`criteres-v1.md`](criteres-v1.md) |
+| `fmt` | yes | `cargo fmt --all -- --check`, plus `scripts/release-notes-test.sh`, `scripts/release-tag-test.sh` and `scripts/versions-alignees.sh` (all crates in the same version `X.Y.Z`, #349/#350; only the `[package]` section is read, internal dependencies `stokesforge-x = { version = … }` equal to this version, `Cargo.lock` up to date, `FORMAT_VERSION` = N requires `tests/temoins/vN/projet.stf`, #351/#352/#353) |
+| `licenses` | yes | policy and generation of third-party notices |
+| `clippy` | yes | `cargo clippy --workspace --all-targets -- -D warnings` |
+| `test` | yes | `cargo test --workspace` |
+| `robustesse` | no | `cargo test -p stokesforge-robustesse -- --ignored` |
+| `test-python` | yes, automatic | vendors CPython + numpy, then `scripts/python-test.sh` |
+| `release-linux` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN` (on an `-rcN`, `publier` creates the release then deletes it; no release remains) | checks the tag (`scripts/release-tag-sur-main.sh`, `scripts/release-tag-croissant.sh`, `scripts/release-notes.sh`), assembles and tests `scripts/app-dist.sh`, uploads the archive to the GitLab package registry, without a GitHub release (#333) |
+| `test-python-windows`, `dist-windows` (GitHub, `windows-latest`) | automatic on `main`, `vN`, `release/**` and on a tag (not on `feature/**`), blocking (#333) | same checks on a clean machine; on a tag, `dist-windows` uploads the installer to the GitLab registry (`scripts/release-televerser.sh windows`) |
+| `publier` (GitHub) | on a tag `vX.Y.Z` or `vX.Y.Z-rcN`, after all blocking checks and the two package uploads | GitLab release with the notes of the CHANGELOG (#333); an `-rcN` creates then deletes the release (trial); procedure and criteria: [`criteres-v1.md`](criteres-v1.md) |
 
-Les travaux Linux tournent sur les branches poussées `main`, `feature/**`,
-`v[0-9]*`, `release/**` et sur les tags `v*`. `release-linux` et `publier`
-refusent un tag dont le commit n'est ancêtre ni de `origin/main` ni d'une
-branche `release/*` (`scripts/release-tag-sur-main.sh`, #354), ou qui ne
-dépasse pas les tags existants (`scripts/release-tag-croissant.sh`, #355) :
-une finale doit dépasser toute finale existante ; un `-rcN` doit dépasser les
-`-rc` de sa version et ne pas viser une version déjà finale ; un commit qui
-n'est que sur `release/N.x` n'est comparé qu'aux tags de majeure N. Les scripts
-de distribution construisent avec `--locked`.
-Conséquence : relancer le pipeline d'un ancien tag échoue dès qu'un tag plus
-récent existe. Un tag existant reposé sur une autre cible n'est pas détectable
-en CI ; seule la protection des tags `v*` de GitLab le tient.
+The Linux jobs run on the pushed branches `main`, `feature/**`,
+`v[0-9]*`, `release/**` and on the tags `v*`. `release-linux` and `publier`
+refuse a tag whose commit is an ancestor neither of `origin/main` nor of a
+`release/*` branch (`scripts/release-tag-sur-main.sh`, #354), or that does not
+exceed the existing tags (`scripts/release-tag-croissant.sh`, #355):
+a final tag must exceed every existing final; an `-rcN` must exceed the
+`-rc` tags of its version and not target a version that is already final; a commit that
+is only on `release/N.x` is compared only with the tags of major N. The distribution
+scripts build with `--locked`.
+Consequence: rerunning the pipeline of an old tag fails as soon as a more recent
+tag exists. An existing tag set again on another target cannot be detected
+in CI; only the protection of the `v*` tags of GitLab holds it.
 
-**Réglages hors dépôt** (à faire à la main, rien dans le code ne les pose) :
-- `main` protégée, sans force-push, sur GitLab et sur GitHub ;
-- tags `v*` protégés (création réservée au rôle Maintainer) sur GitLab ;
-- `main` branche par défaut sur GitLab : c'est ce qui rend « Closes #N »
-  opérant.
+**Settings outside the repository** (to be done by hand, nothing in the code sets them):
+- `main` protected, no force-push, on GitLab and on GitHub;
+- `v*` tags protected (creation reserved to the Maintainer role) on GitLab;
+- `main` default branch on GitLab: this is what makes "Closes #N"
+  work.
 
-**Ce qu'un pipeline vert ne prouve pas**, et c'est écrit en tête du fichier CI :
-`fmt`, `clippy` et `test` n'activent **jamais** la feature `python`. Tout ce qui
-touche à PyO3 y est compilé **vide** — le pont Python, la partie la plus risquée
-de l'architecture, n'est ni compilé, ni vérifié par clippy, ni testé par ces
-trois travaux.
+**What a green pipeline does not prove**, and it is written at the top of the CI file:
+`fmt`, `clippy` and `test` **never** enable the `python` feature. Everything that
+touches PyO3 is compiled **empty** there — the Python bridge, the riskiest part
+of the architecture, is neither compiled, nor checked by clippy, nor tested by these
+three jobs.
 
-L'interpréteur n'est pas versionné. `test-python` le télécharge à froid et
-le garde en cache selon `vendor/python/lock.env` ; ses artefacts Cargo ont
-une clé distincte des travaux Rust purs. Il couvre automatiquement pont,
-scripts, robustesse, application et CLI. Les reproductions ignorées et le
-spike Matplotlib restent des essais explicites. Aucun Python système n'est
-requis.
+The interpreter is not versioned. `test-python` downloads it cold and
+keeps it in cache according to `vendor/python/lock.env`; its Cargo artifacts have
+a key distinct from the pure Rust jobs. It automatically covers bridge,
+scripts, robustness, application and CLI. The ignored reproductions and the
+Matplotlib spike remain explicit trials. No system Python is
+required.
 
-Typst n'est plus une feature (issue #29) : Clippy le compile, les tests du
-workspace l'exercent, y compris les exports (#34). `fmt` ne compile rien ; il contrôle aussi l'alignement des versions des crates
-(`scripts/versions-alignees.sh`, à chaque push, pas seulement au tag), y compris dépendances internes, `Cargo.lock` et témoin du format `.stf`, sans cargo.
+Typst is no longer a feature (issue #29): Clippy compiles it, the tests of the
+workspace exercise it, exports included (#34). `fmt` compiles nothing; it also checks the alignment of crate versions
+(`scripts/versions-alignees.sh`, at every push, not only at the tag), including internal dependencies, `Cargo.lock` and the `.stf` format witness, without cargo.
 
-### Utiliser la CI au quotidien
+### Using CI day to day
 
-**Qui fait quoi.** GitLab est le dépôt de référence ; un miroir le recopie vers
-`github.com/Marek9935/StokesForge`, où `ci.yml` tourne dès qu'un `push` de `main`
-(ou un tag `v*`) arrive. Un second workflow, `Résultats GitLab`, renvoie ensuite
-les résultats dans le pipeline GitLab du même commit. **On ne consulte donc que
-GitLab** ; les journaux complets restent sur GitHub (lien dans chaque statut).
+**Who does what.** GitLab is the reference repository; a mirror copies it to
+`github.com/Marek9935/StokesForge`, where `ci.yml` runs as soon as a `push` of `main`
+(or a tag `v*`) arrives. A second workflow, `Résultats GitLab`, then sends
+the results back to the GitLab pipeline of the same commit. **So only GitLab is consulted**;
+the full logs stay on GitHub (link in each status).
 
-**Pousser.** `git push origin main` (GitLab). Compter une quinzaine de minutes
-pour que la CI Linux finisse, puis quelques instants pour le rapport. Un push plus
-récent sur la même référence annule la série en cours. Les pull requests lancent
-la CI GitHub mais ne remontent rien dans GitLab (voulu, voir plus bas).
+**Pushing.** `git push origin main` (GitLab). Count about fifteen minutes
+for Linux CI to finish, then a few moments for the report. A more recent push
+on the same reference cancels the running series. Pull requests start
+GitHub CI but report nothing to GitLab (intended, see below).
 
-**Lire le résultat.**
+**Reading the result.**
 
 ```sh
 scripts/ci-statuts.sh [commit]      # HEAD par défaut ; exige glab connecté
 ```
 
-Ou dans l'interface GitLab : `Build > Pipelines`, étage `external`. Une ligne par
-travail ; en cas d'échec, l'étape fautive et la première erreur sont dans la
-description, et un **commentaire du commit** donne une cinquantaine de lignes de
-journal (le script les affiche). « Pas de pipeline pour ce commit » veut dire que
-la CI GitHub n'a pas fini ou que le miroir n'a pas encore reçu le commit.
+Or in the GitLab interface: `Build > Pipelines`, stage `external`. One line per
+job; on failure, the faulty step and the first error are in the
+description, and a **comment on the commit** gives about fifty lines of
+log (the script displays them). "No pipeline for this commit" means that
+GitHub CI has not finished or that the mirror has not yet received the commit.
 
-**Windows** est automatique, sur GitHub : un push sur `main` ou un tag de version
-lance `test-python-windows` (contrôles) et `dist-windows` (installeur) sur un
-runner hébergé `windows-latest`, en parallèle de Linux (Git Bash,
-`shell: bash` : mêmes scripts que partout). Ils sont bloquants, `publier` les
-attend ; en cas d'échec, les premières erreurs sont posées en **annotation** (lisible par
-l'API sans connexion, voir ci-dessous). Plus aucun runner GitLab n'y sert : le
-poste de l'auteur n'a plus besoin d'être allumé (l'ancien runner GitLab
-`windows` et ses travaux, #333, sont retirés). `test-python-windows` lance les
-tests en parallèle ; seules les captures (`egui_kittest` + wgpu) s'excluent entre
-elles (voir plus bas). Le travail pose `core.longpaths` avant l'extraction :
-sans lui, le `git clean` échoue sur `.cargo/registry` (« Filename too long »).
-Ces travaux, comme `release-linux` et `publier`, n'étant pas dans la liste de
-`gitlab-status.py`, leur résultat se lit sur GitHub, pas dans `ci-statuts.sh`.
-L'API GitHub **sans connexion** est limitée à 60 requêtes par heure et par
-adresse : ne pas la scruter en boucle (une attente de CI se fait sur GitLab,
-`glab`, ou à intervalle long) ; au-delà, elle répond 403 jusqu'à l'heure suivante.
+**Windows** is automatic, on GitHub: a push on `main` or a version tag
+starts `test-python-windows` (checks) and `dist-windows` (installer) on a
+hosted `windows-latest` runner, in parallel with Linux (Git Bash,
+`shell: bash`: same scripts as everywhere). They are blocking, `publier` waits
+for them; on failure, the first errors are set as an **annotation** (readable by
+the API without login, see below). No GitLab runner serves there anymore: the
+author's machine no longer needs to be on (the old GitLab runner
+`windows` and its jobs, #333, are removed). `test-python-windows` runs the
+tests in parallel; only the captures (`egui_kittest` + wgpu) exclude each other
+(see below). The job sets `core.longpaths` before the checkout:
+without it, `git clean` fails on `.cargo/registry` ("Filename too long").
+These jobs, like `release-linux` and `publier`, not being in the list of
+`gitlab-status.py`, their result is read on GitHub, not in `ci-statuts.sh`.
+The GitHub API **without login** is limited to 60 requests per hour and per
+address: do not poll it in a loop (a CI wait is done on GitLab,
+`glab`, or at a long interval); beyond that, it answers 403 until the next hour.
 
-**Tag et miroir.** Un tag poussé vers GitLab arrive parfois en retard sur GitHub
-(la CI n'y démarre qu'à son arrivée). Forcer l'envoi : bouton de synchronisation
-du miroir, ou `glab api -X POST projects/86104040/remote_mirrors/<id>/sync`.
+**Tag and mirror.** A tag pushed to GitLab sometimes arrives late on GitHub
+(CI starts there only on its arrival). Force the push: mirror synchronization
+button, or `glab api -X POST projects/86104040/remote_mirrors/<id>/sync`.
 
-**Téléversement des paquets.** `scripts/release-televerser.sh` passe le jeton à
-`curl` par `-K -` (entrée standard), pas par substitution de processus : sous
-Git Bash (Windows) celle-ci échoue (curl code 26). Le jeton ne figure jamais
-dans les arguments de la commande.
+**Package upload.** `scripts/release-televerser.sh` passes the token to
+`curl` through `-K -` (standard input), not through process substitution: under
+Git Bash (Windows) the latter fails (curl code 26). The token never appears
+in the arguments of the command.
 
-**Reproduire un échec Linux chez soi.** Le runner (`ubuntu-latest`) diffère d'un
-poste de développement par trois points qui ont déjà causé des échecs :
+**Reproducing a Linux failure at home.** The runner (`ubuntu-latest`) differs from a
+development machine in three ways that have already caused failures:
 
-- **Rust stable plus récent** que celui du poste (`rust-toolchain.toml` demande
-  `stable`) : un lint nouveau de Clippy peut faire échouer `clippy` sans rien
-  avoir changé. Corriger le code, ne pas figer la version.
-- **Pas de GPU** : les captures (`egui_kittest` + wgpu) cherchent un adaptateur
-  Vulkan. `ci.yml` installe le pilote logiciel `mesa-vulkan-drivers libvulkan1`
-  (travaux `test` et `test-python`).
-- **Paquets de développement absents** : `test-python` compile `wayland-sys` avec
-  pkg-config et installe `libwayland-dev`. Une erreur `failed to run custom build
-  command for …-sys` signale un paquet manquant : l'ajouter à l'étape `apt-get`
-  du travail concerné dans `ci.yml`.
+- **A newer stable Rust** than the machine's (`rust-toolchain.toml` asks for
+  `stable`): a new Clippy lint can make `clippy` fail without anything
+  having changed. Fix the code, do not pin the version.
+- **No GPU**: the captures (`egui_kittest` + wgpu) look for a Vulkan
+  adapter. `ci.yml` installs the software driver `mesa-vulkan-drivers libvulkan1`
+  (jobs `test` and `test-python`).
+- **Development packages missing**: `test-python` compiles `wayland-sys` with
+  pkg-config and installs `libwayland-dev`. An error `failed to run custom build
+  command for …-sys` signals a missing package: add it to the `apt-get` step
+  of the job concerned in `ci.yml`.
 
-Pour rejouer dans un Ubuntu neuf : un conteneur `ubuntu:24.04` avec
-`build-essential pkg-config curl git`, `rustup` (profil minimal) et les paquets
-ci-dessus, en montant le dépôt en lecture seule et en copiant sa source ailleurs.
-**Mettre `CARGO_TARGET_DIR` sur le disque**, jamais sous `/tmp` : c'est un tmpfs en
-mémoire vive, et une compilation du workspace y pèse plus de 10 Go.
+To replay in a fresh Ubuntu: an `ubuntu:24.04` container with
+`build-essential pkg-config curl git`, `rustup` (minimal profile) and the packages
+above, mounting the repository read-only and copying its source elsewhere.
+**Put `CARGO_TARGET_DIR` on disk**, never under `/tmp`: it is a tmpfs in
+RAM, and a build of the workspace weighs more than 10 GB there.
 
-**Place pour les tests lourds de `stokesforge-app-state`** (#342). Trois tests
-écrivent le « projet lourd » de `tests/shell.rs` (`heavy_formula_project`, 150
-colonnes de 200 000 valeurs, environ 240 Mo) dans `tempfile::tempdir()`, donc
-sous `TMPDIR` : `saving_during_a_heavy_recalculation_clears_the_unsaved_mark`,
-`a_dead_session_raises_one_blocking_alert_with_a_recovery_copy` et
-`autosave::pendant_un_recalcul_l_echeance_saute`. Il faut environ 1 Go libre
-dans `TMPDIR` ; sur un `/tmp` plein (`Disk quota exceeded`), poser `TMPDIR` sur
-le disque. L'application remonte l'erreur au lieu de perdre des données : ce
-n'est pas un bug. Les assertions de ces tests joignent les messages de la barre
-d'état (`status_messages`), où se lit l'erreur d'écriture. La taille du projet
-n'est pas réduite : elle fixe la durée du recalcul que les tests observent
-(attente de 200 ms dépassée).
+**Room for the heavy tests of `stokesforge-app-state`** (#342). Three tests
+write the "heavy project" of `tests/shell.rs` (`heavy_formula_project`, 150
+columns of 200,000 values, about 240 MB) in `tempfile::tempdir()`, hence
+under `TMPDIR`: `saving_during_a_heavy_recalculation_clears_the_unsaved_mark`,
+`a_dead_session_raises_one_blocking_alert_with_a_recovery_copy` and
+`autosave::pendant_un_recalcul_l_echeance_saute`. About 1 GB must be free
+in `TMPDIR`; on a full `/tmp` (`Disk quota exceeded`), set `TMPDIR` on
+disk. The application reports the error instead of losing data: this is
+not a bug. The assertions of these tests join the messages of the status
+bar (`status_messages`), where the write error is read. The size of the project
+is not reduced: it sets the duration of the recalculation that the tests observe
+(wait of 200 ms exceeded).
 
-**Garder les deux CI d'accord.** Toute commande modifiée dans `.gitlab-ci.yml` ou
-`ci.yml` se répercute dans l'autre (voir la table plus haut). Un nouveau travail
-Linux s'ajoute aussi à `JOBS` dans `scripts/gitlab-status.py`, sinon son
-résultat n'est pas publié. Exception connue : `release-linux`, `publier` et les
-travaux Windows de GitHub n'y figurent pas ; leur échec se lit sur GitHub
-(annotations lisibles par l'API sans connexion).
+**Keeping the two CIs in agreement.** Every command changed in `.gitlab-ci.yml` or
+`ci.yml` is carried over to the other (see the table above). A new Linux
+job is also added to `JOBS` in `scripts/gitlab-status.py`, otherwise its
+result is not published. Known exception: `release-linux`, `publier` and the
+Windows jobs of GitHub do not appear there; their failure is read on GitHub
+(annotations readable by the API without login).
 
-### Résultats GitHub visibles dans GitLab
+### GitHub results visible in GitLab
 
-`.github/workflows/gitlab-status.yml` se déclenche quand `CI` est terminée,
-même en échec ou après annulation. `scripts/gitlab-status.py` publie les six
-statuts `github-actions/<travail>` sur le SHA testé, dans le même pipeline
-GitLab, avec un lien vers les journaux GitHub de chaque travail. Les résultats
-arrivent après la fin de l'ensemble de la CI ; les journaux et les artefacts
-restent sur GitHub. Les anciennes pipelines ne sont pas corrigées rétroactivement.
+`.github/workflows/gitlab-status.yml` triggers when `CI` is finished,
+even on failure or after cancelation. `scripts/gitlab-status.py` publishes the six
+statuses `github-actions/<travail>` on the tested SHA, in the same GitLab
+pipeline, with a link to the GitHub logs of each job. The results
+arrive after the whole CI has ended; the logs and artifacts
+stay on GitHub. Old pipelines are not corrected retroactively.
 
-Une reproduction `robustesse` échouée est marquée `skipped`, avec la description
-« Échec non bloquant des reproductions » : l'API des statuts externes n'offre
-pas de paramètre `allow_failure`. Les autres échecs sont rouges, une annulation
-reste annulée, et un travail manquant n'est jamais déclaré réussi.
+A failed `robustesse` reproduction is marked `skipped`, with the description
+« Échec non bloquant des reproductions »: the external statuses API offers
+no `allow_failure` parameter. The other failures are red, a cancelation
+stays canceled, and a missing job is never declared successful.
 
-Pour un travail en échec, la description du statut donne l'étape fautive et la
-première cause lue dans son journal GitHub (erreur `rustc`/`clippy` avec son
-fichier, panique de test avec son message, erreur de script), tronquée à 255
-caractères. Le journal est lu avec `GITHUB_TOKEN` (`actions: read`) ; s'il est
-indisponible, l'étape seule est publiée, et le rapport n'échoue jamais pour cela.
+For a failed job, the status description gives the faulty step and the
+first cause read in its GitHub log (`rustc`/`clippy` error with its
+file, test panic with its message, script error), truncated to 255
+characters. The log is read with `GITHUB_TOKEN` (`actions: read`); if it is
+unavailable, the step alone is published, and the report never fails because of it.
 
-Le même échec est aussi posté en **commentaire du commit GitLab** : une
-cinquantaine de lignes autour de la première cause (10 avant, le reste après) et
-le lien vers le journal complet. Se lit par
-`glab api projects/86104040/repository/commits/<sha>/comments`, comme les
-statuts par GraphQL (l'API REST ne liste pas les statuts externes) :
+The same failure is also posted as a **comment on the GitLab commit**: about
+fifty lines around the first cause (10 before, the rest after) and
+the link to the full log. Read with
+`glab api projects/86104040/repository/commits/<sha>/comments`, like the
+statuses by GraphQL (the REST API does not list external statuses):
 `pipeline(iid){stages{nodes{name jobs{nodes{name status detailedStatus{label}}}}}}`.
 
-Quand `licenses` réussit, le rapport `THIRD-PARTY-LICENSES.txt` (artefact GitHub
-`third-party-licenses`) est déposé dans le registre de paquets génériques de
-GitLab : paquet `third-party-licenses`, version = 12 premiers caractères du SHA.
-Un fichier d'environ 600 Ko par push de `main` consomme le quota de stockage du
-projet ; les journaux complets ne sont volontairement pas déposés. Les
-redirections de téléchargement GitHub sont suivies sans renvoyer le jeton. Un
-commentaire ou un dépôt refusé est signalé sur stderr sans faire échouer le
-rapport : les statuts sont déjà publiés.
+When `licenses` succeeds, the report `THIRD-PARTY-LICENSES.txt` (GitHub artifact
+`third-party-licenses`) is deposited in the GitLab generic package registry:
+package `third-party-licenses`, version = first 12 characters of the SHA.
+A file of about 600 KB per push of `main` consumes the storage quota of the
+project; the full logs are deliberately not deposited. GitHub download
+redirects are followed without sending the token again. A refused comment or
+deposit is reported on stderr without failing the
+report: the statuses are already published.
 
-Le rapporteur ignore les pull requests et les forks, et lit son script depuis
-`main`, jamais depuis le code d'une PR. Il ignore aussi une tentative dont une
-relance plus récente existe. Une panne de publication fait échouer le workflow
-`Résultats GitLab` sur GitHub, sans transformer les résultats des tests.
+The reporter ignores pull requests and forks, and reads its script from
+`main`, never from the code of a PR. It also ignores an attempt for which a more recent
+rerun exists. A publication outage makes the workflow
+`Résultats GitLab` fail on GitHub, without turning the test results.
 
-Le dépôt GitHub `Marek9935/StokesForge` et l'identifiant du projet GitLab
-(`86104040`) sont écrits dans `scripts/gitlab-status.py` (`REPOSITORY`, `GITLAB`),
-dans `gitlab-status.yml` (condition `github.repository`) et dans
-`scripts/ci-statuts.sh`. Renommer l'un des deux dépôts oblige à les changer.
+The GitHub repository `Marek9935/StokesForge` and the GitLab project identifier
+(`86104040`) are written in `scripts/gitlab-status.py` (`REPOSITORY`, `GITLAB`),
+in `gitlab-status.yml` (condition `github.repository`) and in
+`scripts/ci-statuts.sh`. Renaming either repository requires changing them.
 
-**Maintenance.** Le jeton de projet GitLab du secret GitHub `GITLAB_RELEASE_TOKEN`
-(rôle Developer, portée `api` ; téléversement des paquets et création de la
-release, #333) **expire** aussi : passé l'échéance, `release-linux`, `dist-windows`
-et `publier` échouent. Le recréer dans GitLab (`Paramètres > Jetons
-d'accès`) et remplacer le secret. Le jeton GitLab `github-ci-status` **expire** : à son échéance,
-`Résultats GitLab` échoue sur GitHub (« Retour GitLab impossible ») et plus aucun
-statut n'arrive. Créer un jeton neuf (étape 1) et remplacer le secret
-`GITLAB_STATUS_TOKEN` (étape 2). Le jeton GitHub du miroir (étape 0) **expire aussi**
-(créé le 17 octobre 2026, échéance le 17 octobre 2027) : passé ce délai, le miroir
-ne pousse plus et la CI ne démarre jamais. Le régénérer sur GitHub (`Regenerate
-token`), puis recoller sa valeur dans le miroir GitLab. Un droit manquant (surtout
-`Workflows`) a le même effet : le miroir échoue en silence côté GitHub.
+**Maintenance.** The GitLab project token of the GitHub secret `GITLAB_RELEASE_TOKEN`
+(Developer role, scope `api`; package upload and creation of the
+release, #333) also **expires**: after the deadline, `release-linux`, `dist-windows`
+and `publier` fail. Recreate it in GitLab (`Paramètres > Jetons
+d'accès`) and replace the secret. The GitLab token `github-ci-status` **expires**: at its deadline,
+`Résultats GitLab` fails on GitHub (« Retour GitLab impossible ») and no
+status arrives anymore. Create a new token (step 1) and replace the secret
+`GITLAB_STATUS_TOKEN` (step 2). The GitHub token of the mirror (step 0) **also expires**
+(created on 17 October 2026, deadline 17 October 2027): after that time, the mirror
+no longer pushes and CI never starts. Regenerate it on GitHub (`Regenerate
+token`), then paste its value again in the GitLab mirror. A missing right (especially
+`Workflows`) has the same effect: the mirror fails silently on the GitHub side.
 
-Configuration initiale (une seule fois) :
+Initial configuration (once only):
 
-0. **Miroir GitLab → GitHub.** Sur GitHub, créer un jeton **fine-grained**
+0. **GitLab → GitHub mirror.** On GitHub, create a **fine-grained** token
    (`Settings > Developer settings > Personal access tokens > Fine-grained`),
-   limité au seul dépôt `Marek9935/StokesForge`, avec ces droits :
-   `Contents` lecture et écriture, **`Workflows` lecture et écriture** (sans lui,
-   GitHub refuse tout push qui touche `.github/workflows/`), `Metadata` lecture
-   seule (imposé). Dans GitLab, `Paramètres > Dépôt > Dépôts miroirs`
-   (`Settings > Repository > Mirroring repositories`) : direction « Poussée »
-   vers `https://<utilisateur>:<jeton>@github.com/Marek9935/StokesForge.git`
-   (GitLab masque ensuite les identifiants). Le bouton de synchronisation de la
-   ligne force un envoi immédiat. Sur GitHub, `main` doit être la branche par défaut (un `workflow_run`
-   ne se déclenche que depuis elle) et `Settings > Actions > General` autoriser
-   les actions.
-1. Dans les **paramètres du compte GitLab**, créer un jeton personnel dédié
-   (`Access > Personal access tokens > Legacy token`), nommé
-   `github-ci-status`, avec portée `api` et date d'expiration. Le compte doit
-   pouvoir publier des statuts dans le projet StokesForge. Un jeton de projet
-   avec rôle Developer et portée `api` peut être utilisé si l'abonnement le permet.
-2. Dans les **paramètres du dépôt GitHub** `Marek9935/StokesForge`, ouvrir
-   `Secrets and variables > Actions > New repository secret`. Nom exact :
-   `GITLAB_STATUS_TOKEN`. Valeur : le jeton GitLab, saisi directement ici.
-   Aucun jeton n'est committé ni demandé dans la conversation.
-3. Pousser un commit GitLab et attendre son miroir, ou relancer la CI GitHub.
-   Le workflow `Résultats GitLab` publie ensuite les états dans
-   `GitLab > Build > Pipelines`, étage `external`.
+   limited to the single repository `Marek9935/StokesForge`, with these rights:
+   `Contents` read and write, **`Workflows` read and write** (without it,
+   GitHub refuses any push that touches `.github/workflows/`), `Metadata` read
+   only (mandatory). In GitLab, `Paramètres > Dépôt > Dépôts miroirs`
+   (`Settings > Repository > Mirroring repositories`): direction "Push"
+   to `https://<utilisateur>:<jeton>@github.com/Marek9935/StokesForge.git`
+   (GitLab then hides the credentials). The synchronization button of the
+   line forces an immediate push. On GitHub, `main` must be the default branch (a `workflow_run`
+   triggers only from it) and `Settings > Actions > General` must allow
+   actions.
+1. In the **GitLab account settings**, create a dedicated personal token
+   (`Access > Personal access tokens > Legacy token`), named
+   `github-ci-status`, with scope `api` and an expiration date. The account must
+   be able to publish statuses in the StokesForge project. A project token
+   with Developer role and scope `api` can be used if the plan allows it.
+2. In the **settings of the GitHub repository** `Marek9935/StokesForge`, open
+   `Secrets and variables > Actions > New repository secret`. Exact name:
+   `GITLAB_STATUS_TOKEN`. Value: the GitLab token, typed directly here.
+   No token is committed or asked for in the conversation.
+3. Push a GitLab commit and wait for its mirror, or rerun GitHub CI.
+   The workflow `Résultats GitLab` then publishes the states in
+   `GitLab > Build > Pipelines`, stage `external`.
 
-Tests du rapporteur, sans réseau ni jeton réel :
-`python3 scripts/gitlab-status-test.py` (aussi lancé par le travail `fmt`, avec `scripts/release-notes-test.sh`, qui éprouve `release-notes.sh` et `versions-alignees.sh` sur un dépôt factice). Ils couvrent les résultats, la
-reproduction tolérée (y compris une étape échouée sous une conclusion tolérée),
-les annulations, les travaux absents, les PR/forks exclus, les anciennes
-tentatives, la pagination, la sélection du pipeline et les reprises HTTP.
+Reporter tests, without network or real token:
+`python3 scripts/gitlab-status-test.py` (also run by the `fmt` job, with `scripts/release-notes-test.sh`, which tests `release-notes.sh` and `versions-alignees.sh` on a fake repository). They cover the results, the
+tolerated reproduction (including a failed step under a tolerated conclusion),
+cancelations, absent jobs, excluded PRs/forks, old
+attempts, pagination, pipeline selection and HTTP retries.
 
-## Ce qu'il faut savoir avant d'écrire un test
+## What to know before writing a test
 
-- Un test qui compare deux chemins a besoin d'un **témoin** qui doit différer.
-- Un plafond qui ressemble à un bug n'en est probablement pas un : les
-  plafonds et compteurs déjà arbitrés sont documentés à l'endroit de leur
-  constante, et recensés dans
+- A test that compares two paths needs a **witness** that must differ.
+- A cap that looks like a bug is probably not one: the
+  caps and counters already decided are documented where their
+  constant is, and listed in
   `docs/archive/rustrewrite/questions-ouvertes.md` §11.
-- **Captures d'écran** (`harness.snapshot`, `egui_kittest`, références dans
-  `crates/*/tests/snapshots/`) : les références viennent de **Linux**. Un autre
-  pilote graphique rasterise le texte fin au pixel près différemment (constaté
-  sous Windows : `preferences_proto_analysis`, 1 pixel hors seuil sur 573
-  écarts). `kittest.toml` à la racine règle la tolérance par système : Linux
-  garde le défaut strict (seuil 0.6, 0 pixel hors seuil), Windows et macOS
-  tolèrent `max_failed_pixels = 10`. Une vraie régression en touche des
-  centaines. Ne **jamais** régénérer une référence (`UPDATE_SNAPSHOTS=1`) hors
-  Linux : elle cesserait de correspondre à la CI. Un échec de capture est un
-  `panicked` au `Drop` du banc, pas un plantage ; le test laisse `*.new.png` et
-  `*.diff.png` à côté de la référence (à ne pas committer).
-- **Captures en parallèle sous Windows** : deux instances wgpu simultanées
-  plantent le rasteriseur logiciel `d3d10warp.dll` (`0xc0000005`, #333 ; module
-  fautif lu dans le journal d'événements Windows, trois fois, dont une sur le
-  poste de l'utilisateur). Tout test qui appelle `snapshot` prend d'abord
-  `verrou_captures()` (`app/preferences_proto.rs`) ; un nouveau fichier de
-  captures doit partager ce verrou (le déplacer dans un module commun).
-- La langue de l'interface est un état **global** du processus
-  (`i18n::set_language`) : un test unitaire qui doit peindre dans une langue
-  précise (`en`, `en-XA`) se relance en sous-processus avec `STOKESFORGE_LANG`
-  posé, et vérifie que le fils a bien peint dans cette langue (modèle :
+- **Screenshots** (`harness.snapshot`, `egui_kittest`, references in
+  `crates/*/tests/snapshots/`): the references come from **Linux**. Another
+  graphics driver rasterizes thin text differently at the pixel level (seen
+  under Windows: `preferences_proto_analysis`, 1 pixel over the threshold out of 573
+  differences). `kittest.toml` at the root sets the tolerance per system: Linux
+  keeps the strict default (threshold 0.6, 0 pixels over the threshold), Windows and macOS
+  tolerate `max_failed_pixels = 10`. A real regression touches
+  hundreds. **Never** regenerate a reference (`UPDATE_SNAPSHOTS=1`) outside
+  Linux: it would stop matching CI. A capture failure is a
+  `panicked` at the `Drop` of the bench, not a crash; the test leaves `*.new.png` and
+  `*.diff.png` next to the reference (not to be committed).
+- **Captures in parallel under Windows**: two simultaneous wgpu instances
+  crash the software rasterizer `d3d10warp.dll` (`0xc0000005`, #333; faulty
+  module read in the Windows event log, three times, one of them on the
+  user's machine). Any test that calls `snapshot` first takes
+  `verrou_captures()` (`app/preferences_proto.rs`); a new capture file
+  must share this lock (move it to a common module).
+- The interface language is a **global** state of the process
+  (`i18n::set_language`): a unit test that must paint in a
+  given language (`en`, `en-XA`) reruns in a subprocess with `STOKESFORGE_LANG`
+  set, and checks that the child did paint in this language (model:
   `chaque_onglet_se_peint_en_anglais_et_en_pseudo_langue`,
   `src/app/plot_settings.rs`, #119).
-- Un menu egui se teste ouvert pour de vrai (clic sur son titre), et se lit
-  dans l'arbre d'accessibilité qu'egui publie (`ctx.enable_accesskit()`,
-  `platform_output.accesskit_update`) : libellé, grisage, case cochée et
-  rectangle de chaque entrée, sans supposer de position ni comparer de
-  couleur (modèle : `entrees`, `src/app/menus.rs`, #122).
-- Accessibilité (#170) : les pastilles de calque et les poignées de fenêtre
-  publient leur nom et leur rôle par `Response::widget_info`. Les tests de
-  `graph_window.rs` lisent le numéro et les deux états de sélection des
-  pastilles ; ceux de `window_chrome.rs` lisent les huit directions des
-  poignées flottantes et détachées. Retirer la publication d'une surface doit
-  faire échouer son test : une assertion sur une liste vide ne suffit pas.
-- Dans `stokesforge-app` et `stokesforge-app-state`, un test suit le code qu'il éprouve (#115) : une
-  décision d'`AppState` dans `stokesforge-app-state/tests/shell.rs` (compile sans egui), un geste peint dans le module
-  `tests` de sa surface (`src/app/<surface>.rs`) ; celui d'`app.rs` n'éprouve
-  que l'orchestration (ordre des panneaux, application différée,
-  confirmations, raccourcis globaux, restauration des fenêtres). Une aide de
-  test que plusieurs surfaces recopieraient (contexte aux polices et au thème,
-  image d'egui, touche, clic en trois images, texte peint, `colonnes_xy`) vit
-  dans `src/app/test_support.rs` (#128), importée par nom ; une aide propre à
-  une surface reste `pub(in crate::app)` dans le module de tests qui la porte
-  (`graph_window::tests::graphe`, `project_manager::tests::click_at`). Une
-  assertion de vide (« la table est vidée ») a besoin du témoin qui montre que
-  la table était pleine avant (modèle :
+- An egui menu is tested really opened (click on its title), and is read
+  in the accessibility tree that egui publishes (`ctx.enable_accesskit()`,
+  `platform_output.accesskit_update`): label, disabled state, checked box
+  and rectangle of each entry, without assuming a position or comparing a
+  color (model: `entrees`, `src/app/menus.rs`, #122).
+- Accessibility (#170): layer badges and window handles
+  publish their name and role through `Response::widget_info`. The tests of
+  `graph_window.rs` read the number and the two selection states of the
+  badges; those of `window_chrome.rs` read the eight directions of the
+  floating and detached handles. Removing the publication of a surface must
+  fail its test: an assertion on an empty list is not enough.
+- In `stokesforge-app` and `stokesforge-app-state`, a test follows the code it tests (#115): a
+  decision of `AppState` in `stokesforge-app-state/tests/shell.rs` (compiles without egui), a painted gesture in the module
+  `tests` of its surface (`src/app/<surface>.rs`); that of `app.rs` tests
+  only the orchestration (panel order, deferred application,
+  confirmations, global shortcuts, window restoration). A test
+  helper that several surfaces would copy (context with fonts and theme,
+  egui image, key, three-frame click, painted text, `colonnes_xy`) lives
+  in `src/app/test_support.rs` (#128), imported by name; a helper specific to
+  one surface stays `pub(in crate::app)` in the test module that carries it
+  (`graph_window::tests::graphe`, `project_manager::tests::click_at`). An
+  assertion of emptiness ("the table is emptied") needs the witness that shows that
+  the table was full before (model:
   `ctrl_n_confirme_et_oublie_les_vues_du_projet_precedent`, #123).
-- Un test ne dispatche pas une action qui écrit le `preferences.json` de la
-  machine (`SetObjectManagerOpen`, `SetObjectManagerShowTexts`…) : il pose
-  l'état en mémoire (`AppState::set_object_manager_open_for_test`), ou ne
-  vérifie que l'action poussée. Pour exercer les actions de réglage (#139),
-  `AppState::new_with_preferences` injecte un `Preferences::load_from` sur
-  un fichier de dossier temporaire, sans modifier l'environnement global.
-- Règle (#250) : un test n'écrit jamais dans les vraies préférences. Les tests
-  unitaires de `stokesforge-app-state` n'en ont aucune (`default_path` rend `None`
-  sous `cfg(test)`) ; ceux de `stokesforge-app`, qui bâtissent un `AppState` par
-  `new`, n'en ont aucune non plus grâce à la feature `test-support`, que la
-  dev-dependency de l'app active (`cfg(test)` ne passe pas la frontière du
-  crate, #263 ; retirer la feature fait échouer
-  `stokesforge-app/tests/isolation_preferences.rs`) ; les tests d'intégration
-  (`tests/`) construisent leur
-  état par `AppState::new_with_preferences(…, Preferences::load_from(None))`,
-  jamais `AppState::new` (garde dans `stokesforge-app/tests/gardes.rs`, qui lit
-  les deux dossiers `tests/`). L'écriture du fichier
-  est atomique (temporaire + renommage).
-- Un test ne lit pas non plus les modèles d'import ni les fichiers récents de
-  la machine (`import_recipes.json`, `import_recent.json`) : un modèle
-  enregistré « Jasco » passait devant le modèle intégré et faisait échouer le
-  choix automatique (#195). Il redirige le dossier de configuration vers un
-  dossier temporaire en posant `STOKESFORGE_CONFIG_DIR` **et**
-  `XDG_CONFIG_HOME` (#332 : `directories` n'honore que la seconde, et
-  seulement sous Linux ; sous Windows les tests écrivaient dans le vrai
-  `%APPDATA%\StokesForge\config\` et se disputaient le fichier, « Access is
-  denied ») — sous verrou si le test restaure les valeurs
+- A test does not dispatch an action that writes the machine's `preferences.json`
+  (`SetObjectManagerOpen`, `SetObjectManagerShowTexts`…): it sets the
+  state in memory (`AppState::set_object_manager_open_for_test`), or only
+  checks the pushed action. To exercise the setting actions (#139),
+  `AppState::new_with_preferences` injects a `Preferences::load_from` on
+  a file of a temporary folder, without modifying the global environment.
+- Rule (#250): a test never writes to the real preferences. The unit
+  tests of `stokesforge-app-state` have none (`default_path` returns `None`
+  under `cfg(test)`); those of `stokesforge-app`, which build an `AppState` with
+  `new`, have none either thanks to the `test-support` feature, which the
+  dev-dependency of the app enables (`cfg(test)` does not cross the boundary of the
+  crate, #263; removing the feature fails
+  `stokesforge-app/tests/isolation_preferences.rs`); the integration tests
+  (`tests/`) build their
+  state with `AppState::new_with_preferences(…, Preferences::load_from(None))`,
+  never `AppState::new` (guard in `stokesforge-app/tests/gardes.rs`, which reads
+  the two `tests/` folders). The write of the file
+  is atomic (temporary + rename).
+- A test does not read the machine's import templates or recent files either
+  (`import_recipes.json`, `import_recent.json`): a saved template "Jasco"
+  came before the built-in template and made the automatic choice fail
+  (#195). It redirects the configuration folder to a temporary
+  folder by setting `STOKESFORGE_CONFIG_DIR` **and**
+  `XDG_CONFIG_HOME` (#332: `directories` honors only the latter,
+  and only under Linux; under Windows the tests wrote to the real
+  `%APPDATA%\StokesForge\config\` and fought over the file, "Access is
+  denied") — under a lock if the test restores the values
   (`stokesforge-import/src/store.rs`, `tests/builtin.rs`,
-  `stokesforge-app-state/tests/shell.rs`), ou une seule fois par processus
-  avant tout banc (`configuration_hermetique`,
-  `stokesforge-script/tests/script.rs` ; `isolated`,
-  `stokesforge-cli/tests/import.rs`). Règle unique `config_dir` ; formes pures
-  `config_dir_from`/`recovery_dir_from` testées sans `set_var`
-  (`stokesforge-import/src/config_dir.rs`, mutants éprouvés : filtre du vide,
-  suffixe `recovery`, variable ignorée, `data_dir` remplacé par `config_dir`) ;
-  de bout en bout, `l_isolation_redirige_le_dossier_de_config_et_l_enregistrement_y_ecrit`
-  (`shell.rs`, mutant éprouvé : `ProjectDirs` remis dans `store.rs`).
-  Limite connue : `UserColors::load()` (`state.rs`) n'a pas d'isolation
-  `cfg(test)`, un test qui enregistre une couleur d'utilisateur écrirait dans
-  le vrai `couleurs.json`.
-- `stokesforge-clipboard` (#149) : la décision des réponses X11 (`x11::answer`) et les noms de formats Windows/macOS se testent sans serveur ; l'offre X11 se teste contre un **vrai serveur** (`tests/x11.rs`, `#[ignore]`, `DISPLAY` requis, XWayland suffit : `cargo test -p stokesforge-clipboard --test x11 -- --ignored`). Windows se teste de même contre le **vrai presse-papiers** (`tests/windows.rs`, `#[ignore]`, bureau interactif requis : `cargo test -p stokesforge-clipboard --test windows -- --ignored` ; témoin : un `windows_format_name` qui rend le MIME pour PNG fait échouer la relecture du format « PNG »). Wayland et macOS n'ont pas de test automatique : Wayland exige un compositeur et une entrée réelle (serial), macOS n'est que compilé (`cargo check --target …`). Un test X11 d'un destinataire ne teste pas `response_type` d'un `SelectionNotify` : un événement venu de `SendEvent` porte le bit 0x80.
-- Les tests et leurs commentaires sont en français, comme le reste.
+  `stokesforge-app-state/tests/shell.rs`), or once per process
+  before any bench (`configuration_hermetique`,
+  `stokesforge-script/tests/script.rs`; `isolated`,
+  `stokesforge-cli/tests/import.rs`). Single rule `config_dir`; pure forms
+  `config_dir_from`/`recovery_dir_from` tested without `set_var`
+  (`stokesforge-import/src/config_dir.rs`, proven mutants: empty filter,
+  `recovery` suffix, variable ignored, `data_dir` replaced by `config_dir`);
+  end to end, `l_isolation_redirige_le_dossier_de_config_et_l_enregistrement_y_ecrit`
+  (`shell.rs`, proven mutant: `ProjectDirs` put back in `store.rs`).
+  Known limit: `UserColors::load()` (`state.rs`) has no `cfg(test)`
+  isolation, a test that saves a user color would write to
+  the real `couleurs.json`.
+- `stokesforge-clipboard` (#149): the decision of X11 answers (`x11::answer`) and the Windows/macOS format names are tested without a server; the X11 offer is tested against a **real server** (`tests/x11.rs`, `#[ignore]`, `DISPLAY` required, XWayland is enough: `cargo test -p stokesforge-clipboard --test x11 -- --ignored`). Windows is tested likewise against the **real clipboard** (`tests/windows.rs`, `#[ignore]`, interactive desktop required: `cargo test -p stokesforge-clipboard --test windows -- --ignored`; witness: a `windows_format_name` that returns the MIME for PNG fails the read-back of the "PNG" format). Wayland and macOS have no automatic test: Wayland requires a compositor and a real input (serial), macOS is only compiled (`cargo check --target …`). An X11 test of a recipient does not test `response_type` of a `SelectionNotify`: an event coming from `SendEvent` carries the bit 0x80.
+- Tests and their comments are in French, like the rest.
 
-**À lire** : `stokesforge-robustesse/src/lib.rs` (l'index des batteries), puis la
-tête du fichier `b*` visé.
+**To read**: `stokesforge-robustesse/src/lib.rs` (the index of the batteries), then the
+head of the targeted `b*` file.
 
-## Redécoupe des fonctions d'interface (#124)
+## Re-split of interface functions (#124)
 
-Les bancs des surfaces gardent les mêmes événements et rectangles : menus,
-grille, pages des propriétés, assistant d'import, Object Manager et bande
-d'onglets. Les cas ajoutés vérifient notamment la plage visée par le menu de
-type, le maintien des paramètres de format, le calque et la série réellement
-édités, le repli indépendant des groupes de l'arbre et l'ordre des callbacks.
-Le callback détaché de la note collecte son édition et sa fermeture avant leur
-application par la racine.
+The surface benches keep the same events and rectangles: menus,
+grid, properties pages, import wizard, Object Manager and tab
+strip. The added cases check in particular the range targeted by the type
+menu, the keeping of the format parameters, the layer and series actually
+edited, the independent collapse of the tree groups and the order of the callbacks.
+The detached callback of the note collects its edit and its close before their
+application by the root.
 
-Dans `app.rs`, les phases extraites sont éprouvées aussi directement : une
-confirmation vide les actions récoltées, arrête le dispatch de celles qui
-suivent, et une commande de tracé sans effet n'ouvre aucun onglet. Dans
-`window_stack.rs`, masquer un graphe garde sa place mais saute contenu et
-publication de géométrie ; le témoin visible les retrouve.
+In `app.rs`, the extracted phases are also tested directly: a
+confirmation empties the collected actions, stops the dispatch of those that
+follow, and a plot command without effect opens no tab. In
+`window_stack.rs`, hiding a graph keeps its place but skips content and
+geometry publication; the visible witness finds them again.
 
-Les nouveaux cas sont éprouvés par des mutations temporaires retirées avant
-livraison. Les comparaisons de formes egui avant/après (texte, positions,
-couleurs, rognage) complètent les tests de gestes ; elles ne remplacent pas une
-validation interactive des fenêtres OS détachées ou des sélecteurs natifs.
+The new cases are tested by temporary mutations removed before
+delivery. The before/after comparisons of egui shapes (text, positions,
+colors, clipping) complete the gesture tests; they do not replace an
+interactive validation of detached OS windows or native pickers.
 
-## Groupes de séries (#196, #197, #209)
+## Series groups (#196, #197, #209)
 
-Les gestes passent par les événements egui, jamais par un appel direct de la
-méthode de `PanelSpec` qu'ils déclenchent : un test qui appelle
-`set_series_group` lui-même ne voit pas l'éditeur perdre sa série.
+Gestures go through egui events, never through a direct call of the
+`PanelSpec` method they trigger: a test that calls
+`set_series_group` itself does not see the editor lose its series.
 
-| Mutant (ce qui est cassé) | Vu par |
+| Mutant (what is broken) | Seen by |
 |---|---|
-| `membership_editor` : la sélection ne suit plus la série déplacée (`*index = moved` retiré) | `la_liste_deroulante_fait_rejoindre_un_groupe_et_l_editeur_suit_la_serie` (`app/curve_settings.rs`) |
-| graphe : la branche « groupe sélectionné » sautée, Suppr vise la première série | `les_raccourcis_d_un_groupe_selectionne_visent_le_groupe` (`app/graph_window.rs`) |
-| Ctrl+↑/↓ sans la borne `can_move_group` | idem |
-| F2 n'ouvre plus le renommage du groupe | idem |
-| `.stf` : noms de groupe vides gardés au chargement | `un_nom_de_groupe_vide_est_ecarte_au_chargement` (`stokesforge-persistence/src/convert.rs`) |
-| `.stf` : `#[serde(default)]` retiré de `group_names` (ancien fichier illisible) | `un_calque_sans_noms_de_groupe_se_relit_avec_ses_groupes` |
+| `membership_editor`: the selection no longer follows the moved series (`*index = moved` removed) | `la_liste_deroulante_fait_rejoindre_un_groupe_et_l_editeur_suit_la_serie` (`app/curve_settings.rs`) |
+| graph: the "group selected" branch skipped, Del targets the first series | `les_raccourcis_d_un_groupe_selectionne_visent_le_groupe` (`app/graph_window.rs`) |
+| Ctrl+↑/↓ without the `can_move_group` bound | same |
+| F2 no longer opens the group rename | same |
+| `.stf`: empty group names kept on load | `un_nom_de_groupe_vide_est_ecarte_au_chargement` (`stokesforge-persistence/src/convert.rs`) |
+| `.stf`: `#[serde(default)]` removed from `group_names` (old file unreadable) | `un_calque_sans_noms_de_groupe_se_relit_avec_ses_groupes` |
 
-## Copier/coller de cellules (#259)
+## Copy/paste of cells (#259)
 
-| Mutant (ce qui est cassé) | Vu par |
+| Mutant (what is broken) | Seen by |
 |---|---|
-| `tsv::needs_quotes` toujours faux (simple `join("\t")`) | `stokesforge-core/src/tsv.rs` (aller-retour tab, saut de ligne, guillemet) ; `a_multiline_text_cell_pastes_into_another_session_without_shifting_anything` (`stokesforge-app-state/tests/shell.rs`) |
-| `decode` sans gestion des guillemets | idem + `a_single_multiline_text_cell_pastes_as_one_cell` |
-| `decode` sans `\r\n` | `un_tableur_windows_termine_ses_lignes_par_crlf`, `external_clipboard_from_text_lit_le_format_des_tableurs` |
-| `cell_copy_text_in` qui retire `MISSING_TEXT_DISPLAY` après coup | `a_typed_non_breaking_space_survives_copy_and_paste` |
-| case absente lue comme vide (`unwrap_or("")`, plus de `value_block_keeping_absent_cells`) | `a_pasted_row_shorter_than_the_others_keeps_the_existing_cell`, `a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo` (#311) |
-| case présente et vide traitée comme absente | `a_present_but_empty_pasted_cell_is_still_a_missing_value`, `pure_data_copy_paste_keeps_working_without_header_markers` |
-| bloc non coupé après la dernière case présente (colonne allongée) | `a_short_last_row_does_not_lengthen_the_shorter_column` |
-| statut `status-paste-columns-dropped` retiré / posé sans débordement | `a_paste_wider_than_the_sheet_reports_the_dropped_columns`, `a_paste_that_fits_the_sheet_width_reports_nothing` |
-| `looks_like_thousands_separator` élargi à `\d+,\d+` (ou à `1,5`) | `la_forme_milliers_est_reconnue_exactement` (`stokesforge-core/src/number_format.rs`) |
-| avis `status-cell-decimal-comma` retiré, ou posé au collage | `typing_a_thousands_looking_number_in_a_numeric_cell_notices_the_decimal_comma`, `the_decimal_comma_notice_also_applies_to_a_mixed_cell`, `pasting_a_thousands_looking_number_does_not_notice` (#311) |
-| rangées d'en-tête jetées non comptées (`status-paste-fields-dropped`) / message combiné cassé | `a_header_field_paste_anchored_low_counts_the_rows_beyond_formula`, `a_header_field_paste_anchored_on_long_name_reports_nothing`, `columns_and_header_fields_dropped_together_give_one_combined_notice` (#311) |
-| « 2026 » en Date/Time lu autrement que 2026 secondes | `from_texts_datetime_lit_un_nombre_nu_comme_des_secondes` (`stokesforge-core/src/column.rs`) |
+| `tsv::needs_quotes` always false (plain `join("\t")`) | `stokesforge-core/src/tsv.rs` (round trip tab, line break, quote); `a_multiline_text_cell_pastes_into_another_session_without_shifting_anything` (`stokesforge-app-state/tests/shell.rs`) |
+| `decode` without quote handling | same + `a_single_multiline_text_cell_pastes_as_one_cell` |
+| `decode` without `\r\n` | `un_tableur_windows_termine_ses_lignes_par_crlf`, `external_clipboard_from_text_lit_le_format_des_tableurs` |
+| `cell_copy_text_in` that removes `MISSING_TEXT_DISPLAY` afterwards | `a_typed_non_breaking_space_survives_copy_and_paste` |
+| absent cell read as empty (`unwrap_or("")`, no more `value_block_keeping_absent_cells`) | `a_pasted_row_shorter_than_the_others_keeps_the_existing_cell`, `a_short_row_pasted_over_a_mixed_column_keeps_its_cell_in_one_undo` (#311) |
+| present and empty cell treated as absent | `a_present_but_empty_pasted_cell_is_still_a_missing_value`, `pure_data_copy_paste_keeps_working_without_header_markers` |
+| block not cut after the last present cell (column lengthened) | `a_short_last_row_does_not_lengthen_the_shorter_column` |
+| status `status-paste-columns-dropped` removed / set without overflow | `a_paste_wider_than_the_sheet_reports_the_dropped_columns`, `a_paste_that_fits_the_sheet_width_reports_nothing` |
+| `looks_like_thousands_separator` widened to `\d+,\d+` (or to `1,5`) | `la_forme_milliers_est_reconnue_exactement` (`stokesforge-core/src/number_format.rs`) |
+| notice `status-cell-decimal-comma` removed, or set on paste | `typing_a_thousands_looking_number_in_a_numeric_cell_notices_the_decimal_comma`, `the_decimal_comma_notice_also_applies_to_a_mixed_cell`, `pasting_a_thousands_looking_number_does_not_notice` (#311) |
+| discarded header rows not counted (`status-paste-fields-dropped`) / combined message broken | `a_header_field_paste_anchored_low_counts_the_rows_beyond_formula`, `a_header_field_paste_anchored_on_long_name_reports_nothing`, `columns_and_header_fields_dropped_together_give_one_combined_notice` (#311) |
+| "2026" in Date/Time read as anything other than 2026 seconds | `from_texts_datetime_lit_un_nombre_nu_comme_des_secondes` (`stokesforge-core/src/column.rs`) |
 
-Le collage rejoue la structure interne quand le texte est celui qu'on a poussé :
-pour éprouver le chemin « texte externe », coller dans une **autre** session.
+Paste replays the internal structure when the text is the one that was pushed:
+to test the "external text" path, paste into **another** session.
 
-## Saisie et collage de cellules : une seule règle (#258)
+## Cell input and paste: a single rule (#258)
 
-| Mutant (ce qui est cassé) | Vu par |
+| Mutant (what is broken) | Seen by |
 |---|---|
-| le bloc élargi repasse par `MixedCell::from_text` (date perdue, `inf` lu en nombre) | `from_texts_datetime_garde_la_date_comme_valeur_dans_un_bloc_elargi`, `from_texts_numeric_garde_infini_et_debordement_en_texte`, `from_texts_en_colonne_vaut_case_par_case_pour_les_trois_types` (`stokesforge-core/src/column.rs`) ; `a_pasted_date_keeps_its_value_when_the_column_widens_to_mixed` (`stokesforge-app-state/tests/shell.rs`) |
-| la branche `Mixed` lit `inf` / `nan` en nombre (sans `from_texts`) | `from_texts_mixed_ne_lit_ni_infini_ni_nan` ; `typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text` |
-| `parse_f64_text` au lieu de `parse_input` | `from_texts_mixed_ne_lit_ni_infini_ni_nan`, `from_texts_en_colonne_vaut_case_par_case_pour_les_trois_types`, `typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text` |
-| garde `kind == DateTime` retirée (`Numeric` lit les dates) | `from_texts_numeric_ne_lit_pas_les_dates` |
-| case vide lue `Text("")` au lieu de manquante | `from_texts_case_vide_est_une_valeur_manquante_pas_un_texte`, `pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo` |
-| repromotion après collage retirée (aux trois points de collage) | `pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo`, `a_multi_column_paste_with_a_repromotion_is_one_undo`, `single_value_and_full_column_pastes_also_repromote_a_mixed_column` |
-| repromotion appelée après `end_grouped_macro` (deux entrées d'historique) | `a_multi_column_paste_with_a_repromotion_is_one_undo`, `undo_state_is_fresh_right_after_a_grouped_paste` |
-| macro propre ouverte même sans repromotion | `a_paste_that_leaves_a_mixed_column_mixed_is_a_plain_entry` |
+| the widened block goes through `MixedCell::from_text` again (date lost, `inf` read as a number) | `from_texts_datetime_garde_la_date_comme_valeur_dans_un_bloc_elargi`, `from_texts_numeric_garde_infini_et_debordement_en_texte`, `from_texts_en_colonne_vaut_case_par_case_pour_les_trois_types` (`stokesforge-core/src/column.rs`); `a_pasted_date_keeps_its_value_when_the_column_widens_to_mixed` (`stokesforge-app-state/tests/shell.rs`) |
+| the `Mixed` branch reads `inf` / `nan` as a number (without `from_texts`) | `from_texts_mixed_ne_lit_ni_infini_ni_nan`; `typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text` |
+| `parse_f64_text` instead of `parse_input` | `from_texts_mixed_ne_lit_ni_infini_ni_nan`, `from_texts_en_colonne_vaut_case_par_case_pour_les_trois_types`, `typing_or_pasting_inf_and_nan_in_a_mixed_column_keeps_text` |
+| guard `kind == DateTime` removed (`Numeric` reads dates) | `from_texts_numeric_ne_lit_pas_les_dates` |
+| empty cell read as `Text("")` instead of missing | `from_texts_case_vide_est_une_valeur_manquante_pas_un_texte`, `pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo` |
+| repromotion after paste removed (at the three paste points) | `pasting_numbers_over_a_mixed_column_makes_it_numeric_again_in_one_undo`, `a_multi_column_paste_with_a_repromotion_is_one_undo`, `single_value_and_full_column_pastes_also_repromote_a_mixed_column` |
+| repromotion called after `end_grouped_macro` (two history entries) | `a_multi_column_paste_with_a_repromotion_is_one_undo`, `undo_state_is_fresh_right_after_a_grouped_paste` |
+| own macro opened even without repromotion | `a_paste_that_leaves_a_mixed_column_mixed_is_a_plain_entry` |
 
-`SetCellsPromoting` (stokesforge-commands) est inchangé : seul le bloc qu'on lui
-passe vient désormais de `from_texts`.
+`SetCellsPromoting` (stokesforge-commands) is unchanged: only the block passed to it
+now comes from `from_texts`.
 
-## Composition des graphes (#257)
+## Composition of graphs (#257)
 
-| Mutant (ce qui est cassé) | Vu par |
+| Mutant (what is broken) | Seen by |
 |---|---|
-| appariement au X le plus proche à **droite** (ou le premier à gauche) | `chaque_y_prend_le_x_le_plus_proche_a_sa_gauche_meme_non_selectionne`, `un_y2_s_apparie_a_x2_et_va_au_second_calque`, `x_for_suit_la_meme_regle_que_series_from_columns` (`stokesforge-core/src/compose.rs`) |
-| `x_for` ne distingue plus Y2 → X2 | `x_for_suit_la_meme_regle_que_series_from_columns` |
-| palette sans décalage de rang (`start_index`, séries « ligne », rang du panneau dans `pyst`) | `la_palette_suit_le_rang_avec_le_decalage_de_chaque_calque`, `les_series_ligne_prennent_la_palette_du_rang_et_le_nom_donne` ; `plusieurs_colonnes_forment_un_groupe_et_une_seule_non` (`stokesforge-script/tests/graphs.rs`) |
-| second calque confondu avec le calque des lignes, ou calque de base cherché parmi les superposés | `le_second_calque_est_celui_des_deux_axes_pas_celui_des_lignes`, `un_calque_superpose_recouvre_le_dernier_calque_ordinaire_de_sa_case` |
-| `spec_has_x` sans les séries « ligne » ; x' non fini accepté | `le_graphe_a_un_x_par_une_colonne_x_ou_une_serie_ligne`, `les_colonnes_x_prime_sont_celles_dont_la_valeur_est_finie` |
-| `y3_et_y4_s_apparient_a_leur_x_et_vont_a_leur_calque` : Y3 apparié à X2, ou rangé dans le calque 2 | `stokesforge-core/src/compose.rs` |
-| décalage de bande ignoré (axe du calque 3 sur celui du calque 2) | `les_axes_de_plusieurs_calques_superposes_s_empilent_vers_l_exterieur` (`geometrie.rs`), `une_bande_decalee_ne_designe_que_son_calque` (`hit.rs`) |
-| constructeur `OverlaySpec::new` inversé, `TOP_X` qui affiche aussi Y | `les_calques_nommes_disent_quels_axes_ils_affichent` (`stokesforge-plot/src/panel.rs`) |
-| `PanelSpec::remove_series` qui ne retire rien ou accepte un rang hors borne | `remove_series_retire_la_serie_designee_et_pas_une_autre` ; `object_manager_supprime_une_courbe_sans_toucher_aux_donnees` (`stokesforge-app-state/tests/shell.rs`) |
-| `pyst.plot(y)` sans `x=` qui garde l'indice de ligne malgré une colonne X à gauche | `plot_sans_x_prend_la_colonne_x_a_gauche_par_role` (`stokesforge-script/tests/graphs.rs`, feature `python`) |
-| `aux_for` qui perd le X apparié | `reference_candidates_exclude_the_processed_series_and_pair_their_x` (`stokesforge-app-state/tests/analysis.rs`) |
+| pairing with the nearest X on the **right** (or the first on the left) | `chaque_y_prend_le_x_le_plus_proche_a_sa_gauche_meme_non_selectionne`, `un_y2_s_apparie_a_x2_et_va_au_second_calque`, `x_for_suit_la_meme_regle_que_series_from_columns` (`stokesforge-core/src/compose.rs`) |
+| `x_for` no longer distinguishes Y2 → X2 | `x_for_suit_la_meme_regle_que_series_from_columns` |
+| palette without rank offset (`start_index`, "line" series, rank of the panel in `pyst`) | `la_palette_suit_le_rang_avec_le_decalage_de_chaque_calque`, `les_series_ligne_prennent_la_palette_du_rang_et_le_nom_donne`; `plusieurs_colonnes_forment_un_groupe_et_une_seule_non` (`stokesforge-script/tests/graphs.rs`) |
+| second layer confused with the line layer, or base layer looked up among the overlaid ones | `le_second_calque_est_celui_des_deux_axes_pas_celui_des_lignes`, `un_calque_superpose_recouvre_le_dernier_calque_ordinaire_de_sa_case` |
+| `spec_has_x` without the "line" series; non-finite x' accepted | `le_graphe_a_un_x_par_une_colonne_x_ou_une_serie_ligne`, `les_colonnes_x_prime_sont_celles_dont_la_valeur_est_finie` |
+| `y3_et_y4_s_apparient_a_leur_x_et_vont_a_leur_calque`: Y3 paired with X2, or placed in layer 2 | `stokesforge-core/src/compose.rs` |
+| band offset ignored (axis of layer 3 on that of layer 2) | `les_axes_de_plusieurs_calques_superposes_s_empilent_vers_l_exterieur` (`geometrie.rs`), `une_bande_decalee_ne_designe_que_son_calque` (`hit.rs`) |
+| constructor `OverlaySpec::new` inverted, `TOP_X` that also shows Y | `les_calques_nommes_disent_quels_axes_ils_affichent` (`stokesforge-plot/src/panel.rs`) |
+| `PanelSpec::remove_series` that removes nothing or accepts an out-of-bounds rank | `remove_series_retire_la_serie_designee_et_pas_une_autre`; `object_manager_supprime_une_courbe_sans_toucher_aux_donnees` (`stokesforge-app-state/tests/shell.rs`) |
+| `pyst.plot(y)` without `x=` that keeps the row index despite an X column on the left | `plot_sans_x_prend_la_colonne_x_a_gauche_par_role` (`stokesforge-script/tests/graphs.rs`, feature `python`) |
+| `aux_for` that loses the paired X | `reference_candidates_exclude_the_processed_series_and_pair_their_x` (`stokesforge-app-state/tests/analysis.rs`) |
 
-Les tests de l'app (`plot_columns_*`, `add_layer_*`, `plot_rows_*`) gardent le
-câblage : `compose` rend les séries, l'app les envoie en une commande.
+The app tests (`plot_columns_*`, `add_layer_*`, `plot_rows_*`) guard the
+wiring: `compose` returns the series, the app sends them in one command.
 
-### R² faible (#288)
+### Low R² (#288)
 
-`app-state/src/r_squared.rs` tient les paliers (0,95 / 0,8 / 0,6 pile,
-négatif, `NaN`). `app-state/tests/analysis_state.rs` (fin du fichier) tient la
-boîte : ouverte à l'application (valeurs gardées ou non) et au recalcul
-automatique, muette pour un bon R², préférence coupée, réglage du calcul coupé,
-aperçu, ouverture d'un projet, alerte déjà là, plusieurs calculs. Mutants
-éprouvés : garde d'alerte, préférence, réglage du calcul (deux endroits),
-empreinte, bornes strictes.
+`app-state/src/r_squared.rs` holds the levels (0.95 / 0.8 / 0.6 exactly,
+negative, `NaN`). `app-state/tests/analysis_state.rs` (end of the file) holds the
+box: opened on apply (values kept or not) and on automatic
+recalculation, silent for a good R², preference off, calculation setting off,
+preview, opening of a project, alert already there, several calculations. Proven
+mutants: alert guard, preference, calculation setting (two places),
+fingerprint, strict bounds.
 
-Boîte groupée et pastille (#290) : `app-state/tests/analysis_state.rs` (fin du
-fichier) tient l'état « R² faibles du projet » — compté malgré le réglage du
-calcul coupé, la préférence coupée, une alerte déjà ouverte ; resté après la
-boîte ; absent pour un calcul « Show » et pour un bon R² ; revenu à 0 après un
-recalcul qui remonte R² ou la suppression du calcul (et rétabli par l'annulation) ;
-compté par série ; deux types dans l'ordre fixe ; liste ouverte/fermée sans
-toucher `alert`. `app-state/tests/low_r2_text.rs` tient le texte (fusion et
-ordre des groupes, singulier/pluriel fr+en, chaque type nommé). Mutants
-éprouvés : réglage du calcul qui filtre la pastille, compte par calcul au lieu
-de par série, absence de rafraîchissement à l'instantané, ordre des types,
-fermeture automatique de la liste. La peinture de la pastille (position à droite,
-teinte, clic) n'a pas de test : seule l'action qu'elle pousse est gardée par
-l'état. La peinture egui (gras, teinte, bulle) n'a pas de
-test d'image : seul `theme::r_squared_color` est testé.
+Grouped box and badge (#290): `app-state/tests/analysis_state.rs` (end of the
+file) holds the state "low R² of the project" — counted despite the calculation
+setting off, the preference off, an alert already open; kept after the
+box; absent for a "Show" calculation and for a good R²; back to 0 after a
+recalculation that raises R² or the deletion of the calculation (and restored by undo);
+counted per series; two types in the fixed order; list open/closed without
+touching `alert`. `app-state/tests/low_r2_text.rs` holds the text (merge and
+order of the groups, singular/plural fr+en, each type named). Proven
+mutants: calculation setting that filters the badge, count per calculation instead
+of per series, no refresh at the snapshot, order of the types,
+automatic closing of the list. The painting of the badge (position on the right,
+tint, click) has no test: only the action it pushes is guarded
+by the state. The egui painting (bold, tint, bubble) has no
+image test: only `theme::r_squared_color` is tested.
 
-### Remplacement définitif d'une correction (#212)
+### Final replacement of a correction (#212)
 
-`commands/tests/calculations.rs` tient l'atomicité données/trace, undo/redo,
-longueur et positions, conflit de versions, refus des colonnes en lecture seule
-et corrections contradictoires sur un Y partagé. `persistence/tests/calculations.rs`
-garde les traces successives et l'allocateur après rechargement.
-`session/tests/analyse.rs` vérifie que les calculs dépendants suivent le
-remplacement et son annulation. `stokesforge-app-state/tests/analysis_state.rs` exerce la
-confirmation des sources partagées ; `app::form::tests` refuse les options
-grisées dans les radios et les listes. `script/tests/analysis.rs` vérifie le
-retour de la poignée originale et la macro Script avec `replace_original=True`.
+`commands/tests/calculations.rs` holds the data/trace atomicity, undo/redo,
+length and positions, version conflict, refusal of read-only columns
+and contradictory corrections on a shared Y. `persistence/tests/calculations.rs`
+guards the successive traces and the allocator after reload.
+`session/tests/analyse.rs` checks that dependent calculations follow the
+replacement and its undo. `stokesforge-app-state/tests/analysis_state.rs` exercises the
+confirmation of shared sources; `app::form::tests` refuses the disabled
+options in radios and lists. `script/tests/analysis.rs` checks the
+return of the original handle and the Script macro with `replace_original=True`.
 
-## Colonne utilisée par un calcul (#306)
+## Column used by a calculation (#306)
 
-`stokesforge-app-state/tests/column_use.rs`. Chaque règle a son témoin, vérifié par mutation.
+`stokesforge-app-state/tests/column_use.rs`. Each rule has its witness, checked by mutation.
 
-| Règle | Témoin |
+| Rule | Witness |
 |---|---|
-| une formule qui lit une colonne supprimée est listée ; celle dont seule une lettre glisse ne l'est pas (#321 : lecture par identifiant) | `supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_rien`, `les_lettres_qui_glissent_ne_comptent_pas_seule_la_colonne_lue_compte` (la liste de toute formule dès qu'une colonne part : rouge) |
-| une colonne sans lecteur n'ouvre rien | `une_colonne_sans_lecteur_n_ouvre_rien` |
-| un calcul d'analyse est nommé par sa famille et sa première sortie | `un_calcul_d_analyse_est_liste_par_sa_famille_et_sa_premiere_sortie` |
-| un calcul dont une sortie disparaît avec le geste n'est pas listé | `supprimer_un_classeur_emporte_ses_calculs_sans_rien_signaler` (sans l'exclusion : rouge) |
-| plusieurs colonnes, une liste, un seul Undo | `undo_rend_la_colonne_et_la_formule_en_un_pas_et_plusieurs_colonnes_font_une_liste` |
-| Close ne rend rien | `supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_rien` |
-| Ctrl+Maj+C pose la question seulement si une colonne a une formule ; Valeurs vide la ligne Formule | `ctrl_maj_c_sur_une_colonne_formule_pose_la_question`, `ctrl_maj_c_sans_formule_copie_directement` |
+| a formula that reads a deleted column is listed; one in which only a letter slides is not (#321: reading by identifier) | `supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_rien`, `les_lettres_qui_glissent_ne_comptent_pas_seule_la_colonne_lue_compte` (the list of any formula as soon as a column leaves: red) |
+| a column without a reader opens nothing | `une_colonne_sans_lecteur_n_ouvre_rien` |
+| an analysis calculation is named by its family and its first output | `un_calcul_d_analyse_est_liste_par_sa_famille_et_sa_premiere_sortie` |
+| a calculation whose output disappears with the gesture is not listed | `supprimer_un_classeur_emporte_ses_calculs_sans_rien_signaler` (without the exclusion: red) |
+| several columns, one list, a single Undo | `undo_rend_la_colonne_et_la_formule_en_un_pas_et_plusieurs_colonnes_font_une_liste` |
+| Close gives nothing back | `supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_rien` |
+| Ctrl+Shift+C asks the question only if a column has a formula; Values empties the Formula row | `ctrl_maj_c_sur_une_colonne_formule_pose_la_question`, `ctrl_maj_c_sans_formule_copie_directement` |
 
-Limites : le déplacement d'une colonne (#319) n'ouvre aucune fenêtre : le témoin est `column_move.rs` (« Déplacer des colonnes », plus bas) ; ses effets sur les formules sont aussi tenus au niveau de la session (`recalc_cible.rs`) ; la référence cachée d'une correction (`aux`) est exclue par construction, sans témoin dédié.
+Limits: moving a column (#319) opens no window: the witness is `column_move.rs` ("Moving columns", further down); its effects on formulas are also held at the session level (`recalc_cible.rs`); the hidden reference of a correction (`aux`) is excluded by construction, without a dedicated witness.
 
-## Formules par identifiant (#321, #320)
+## Formulas by identifier (#321, #320)
 
-Une formule retient ses colonnes par identifiant ; les lettres ne sont qu'aux frontières. Chaque règle a son témoin, vérifié par mutation.
+A formula keeps its columns by identifier; letters exist only at the boundaries. Each rule has its witness, checked by mutation.
 
-| Règle | Témoin |
+| Rule | Witness |
 |---|---|
-| lettres vers identifiants : refus d'une lettre inconnue, de la colonne elle-même, de `#REF` ; l'exposant n'est pas une colonne | `stokesforge-core`, `formula::tests::from_letters_*` |
-| `#REF` à l'affichage pour une colonne hors feuille | `a_column_outside_the_sheet_is_written_ref` |
-| dupliquer une feuille fait lire à la copie ses propres colonnes ; une référence rompue reste `#REF` ; un identifiant lu n'est jamais réattribué au chargement | `project::tests` (`dupliquer_une_feuille_…`, `une_reference_rompue_…`, `from_tree_ne_reattribue_pas_…`) |
-| une analyse qui insère ses sorties au milieu ne change pas ce que lit une formule (#320) ; déplacer, supprimer puis annuler | `analyse.rs` (`une_analyse_qui_insere_…`), `recalc_cible.rs` (`deplacer_une_source_*`, `supprimer_une_source_donne_ref_…`) |
-| `.stf` : `formula_parts` aller-retour, id hors feuille chargé en `#REF`, id hors borne refusé, ancienne clé `formula` ignorée | `roundtrip.rs` (`a_formula_*`, `a_legacy_letters_formula_…`) |
-| saisie : lettre inconnue, auto-lecture, `#REF` modifié refusés dans `app-state` (`header_edit_refusal`), jamais une erreur de syntaxe ; `#REF` non modifié n'écrit rien ; `formula_issue` pour la case | `shell.rs` (`a_formula_reading_its_own_column_is_refused_while_typing`, `a_ref_formula_is_refused_only_when_its_text_is_changed`, `a_formula_naming_a_missing_column_…`) |
-| collage : la formule refusée seule n'est pas collée, la barre d'état dit le refus après les écritures ; Ctrl+Maj+C copie des lettres relues dans la feuille d'arrivée | `a_refused_formula_in_a_paste_…`, `copied_formulas_travel_as_letters_…` |
-| `pyst` : lettres en lecture et en écriture, refus d'une lettre inconnue et de `#REF`, un autre champ ne touche pas la formule | `script/tests/navigation.rs` (`les_formules_se_lisent_…`), `mutations.rs` |
+| letters to identifiers: refusal of an unknown letter, of the column itself, of `#REF`; the exponent is not a column | `stokesforge-core`, `formula::tests::from_letters_*` |
+| `#REF` on display for a column outside the sheet | `a_column_outside_the_sheet_is_written_ref` |
+| duplicating a sheet makes the copy read its own columns; a broken reference stays `#REF`; a read identifier is never reassigned on load | `project::tests` (`dupliquer_une_feuille_…`, `une_reference_rompue_…`, `from_tree_ne_reattribue_pas_…`) |
+| an analysis that inserts its outputs in the middle does not change what a formula reads (#320); move, delete then undo | `analyse.rs` (`une_analyse_qui_insere_…`), `recalc_cible.rs` (`deplacer_une_source_*`, `supprimer_une_source_donne_ref_…`) |
+| `.stf`: `formula_parts` round trip, id outside the sheet loaded as `#REF`, out-of-bounds id refused, old `formula` key ignored | `roundtrip.rs` (`a_formula_*`, `a_legacy_letters_formula_…`) |
+| input: unknown letter, self-reading, modified `#REF` refused in `app-state` (`header_edit_refusal`), never a syntax error; unmodified `#REF` writes nothing; `formula_issue` for the box | `shell.rs` (`a_formula_reading_its_own_column_is_refused_while_typing`, `a_ref_formula_is_refused_only_when_its_text_is_changed`, `a_formula_naming_a_missing_column_…`) |
+| paste: the refused formula alone is not pasted, the status bar says the refusal after the writes; Ctrl+Shift+C copies letters re-read in the destination sheet | `a_refused_formula_in_a_paste_…`, `copied_formulas_travel_as_letters_…` |
+| `pyst`: letters on read and write, refusal of an unknown letter and of `#REF`, another field does not touch the formula | `script/tests/navigation.rs` (`les_formules_se_lisent_…`), `mutations.rs` |
 
-Limite : le cadre rouge, la bulle et le champ qui reste ouvert (grille) ne sont pas testables sans fenêtre : la décision (`header_edit_refusal`, `inplace_edit::resolve`) l'est, la peinture est relue à l'écran.
+Limit: the red frame, the bubble and the field that stays open (grid) cannot be tested without a window: the decision (`header_edit_refusal`, `inplace_edit::resolve`) can, the painting is re-read on screen.
 
-## Largeur des colonnes (#325)
+## Column width (#325)
 
-Table `NodeId -> f32` de l'acteur, hors modèle et hors historique, enregistrée dans le `.stf`. Chaque règle a son témoin, vérifié par mutation.
+`NodeId -> f32` table of the actor, outside the model and outside the history, saved in the `.stf`. Each rule has its witness, checked by mutation.
 
-| Règle | Témoin |
+| Rule | Witness |
 |---|---|
-| poser une largeur n'avance que `geometry_revision` ; la même largeur, NaN, ≤ 0, ∞ : ignorées | `session/tests/largeurs.rs` `poser_une_largeur_n_avance_que_geometry_revision` (passer par `revision` : rouge) |
-| la largeur d'une colonne supprimée revient avec Ctrl+Z | `la_largeur_revient_avec_la_colonne_apres_annulation` (purger les largeurs à la mutation : rouge) |
-| aller-retour `.stf` ; `NewProject` vide | `les_largeurs_font_l_aller_retour_du_fichier` (ne pas écrire le champ : rouge) |
-| l'écriture n'émet pas la clé d'une colonne disparue | `la_sauvegarde_n_ecrit_pas_la_largeur_d_une_colonne_supprimee`, `persistence` `save_drops_dead_keys_and_invalid_widths` (retirer le filtre : rouge) |
-| fichier sans le champ → table vide ; clé orpheline, NaN, ∞, 0, négatif écartés un à un ; identifiant > `MAX_NODE_ID` refusé | `persistence` `a_file_without_the_widths_block_*`, `hostile_column_widths_*`, `a_column_width_key_above_the_id_ceiling_*`, `robustesse/b3` `b3_largeurs_de_colonne_hostiles` (lecture sans filtre, sans `check_node_id` : rouge) |
-| l'état pose la largeur par l'acteur sans historique, y compris une vue détachée | `app-state/tests/column_width.rs` |
-| le `.stf` donne sa largeur à l'instantané de démarrage | `main.rs` `le_demarrage_restaure_les_largeurs_de_colonne_du_fichier` |
-| la poignée tirée ne pousse la largeur qu'au relâchement | `grid::tests::un_redimensionnement_a_la_main_envoie_la_largeur_a_la_fin_seulement` |
-| ouvrir et peindre n'envoie rien, ne marque pas le projet modifié | `ouvrir_la_feuille_n_envoie_aucune_largeur` (pousser la largeur rendue à chaque image : rouge) |
-| Add Column : les largeurs gardées, la neuve à 54 ; Delete puis Ctrl+Z | `la_largeur_de_chaque_colonne_survit_a_l_ajout_d_une_colonne`, `supprimer_puis_annuler_rend_la_colonne_et_ses_voisines_a_leur_largeur` (largeur par position : rouge ; sans `reset()` quand la liste change à nombre égal : rouge) |
+| setting a width advances only `geometry_revision`; the same width, NaN, ≤ 0, ∞: ignored | `session/tests/largeurs.rs` `poser_une_largeur_n_avance_que_geometry_revision` (going through `revision`: red) |
+| the width of a deleted column comes back with Ctrl+Z | `la_largeur_revient_avec_la_colonne_apres_annulation` (purging widths at the mutation: red) |
+| `.stf` round trip; `NewProject` empties | `les_largeurs_font_l_aller_retour_du_fichier` (not writing the field: red) |
+| writing does not emit the key of a vanished column | `la_sauvegarde_n_ecrit_pas_la_largeur_d_une_colonne_supprimee`, `persistence` `save_drops_dead_keys_and_invalid_widths` (removing the filter: red) |
+| file without the field → empty table; orphan key, NaN, ∞, 0, negative discarded one by one; identifier > `MAX_NODE_ID` refused | `persistence` `a_file_without_the_widths_block_*`, `hostile_column_widths_*`, `a_column_width_key_above_the_id_ceiling_*`, `robustesse/b3` `b3_largeurs_de_colonne_hostiles` (reading without a filter, without `check_node_id`: red) |
+| the state sets the width through the actor without history, including a detached view | `app-state/tests/column_width.rs` |
+| the `.stf` gives its width to the startup snapshot | `main.rs` `le_demarrage_restaure_les_largeurs_de_colonne_du_fichier` |
+| the dragged handle pushes the width only on release | `grid::tests::un_redimensionnement_a_la_main_envoie_la_largeur_a_la_fin_seulement` |
+| opening and painting sends nothing, does not mark the project modified | `ouvrir_la_feuille_n_envoie_aucune_largeur` (pushing the rendered width at every frame: red) |
+| Add Column: widths kept, the new one at 54; Delete then Ctrl+Z | `la_largeur_de_chaque_colonne_survit_a_l_ajout_d_une_colonne`, `supprimer_puis_annuler_rend_la_colonne_et_ses_voisines_a_leur_largeur` (width by position: red; without `reset()` when the list changes with equal count: red) |
 
-| la largeur par défaut est la même flottante, maximisée, puis restaurée (#337) | `window_stack::tests::la_largeur_par_defaut_d_une_colonne_est_la_meme_flottante_et_maximisee` (ne pas oublier l'état de la table après la passe de mesure du `Window` : rouge, 58 au lieu de 62) |
+| the default width is the same floating, maximized, then restored (#337) | `window_stack::tests::la_largeur_par_defaut_d_une_colonne_est_la_meme_flottante_et_maximisee` (not forgetting the table state after the measurement pass of the `Window`: red, 58 instead of 62) |
 
-La largeur se lit dans le banc sur l'aplat de la lettre de colonne (`largeur_peinte`). Le banc de la grille peint `book_contents` hors de tout `Window` : il ne voit pas la passe de mesure, d'où le test au niveau de `show_workspace`.
+The width is read in the bench on the flat fill of the column letter (`largeur_peinte`). The grid bench paints `book_contents` outside any `Window`: it does not see the measurement pass, hence the test at the level of `show_workspace`.
 
-### Remettre au défaut (#330)
+### Reset to default (#330)
 
-| Garde | Test (témoin) |
+| Guard | Test (witness) |
 |---|---|
-| remise : clé retirée, `geometry_revision` +1 seulement si elle existait, ni `revision` ni historique | `session/tests/largeurs.rs` `remettre_au_defaut_retire_la_cle_et_n_avance_que_si_elle_existait` (`+= 1` inconditionnel : rouge) |
-| remise puis enregistrement : plus de clé dans le fichier | `une_colonne_remise_au_defaut_n_est_plus_dans_le_fichier` (poser 54 au lieu de retirer : rouge) |
-| l'action retire la largeur de la copie locale avant rafraîchissement | `app-state/tests/column_width.rs` `l_action_de_remise_retire_la_largeur_sans_historique` (clé gardée dans la copie locale : rouge) |
-| B remise à 54, A et C gardent la leur | `grid::tests::remettre_une_colonne_au_defaut_ne_touche_pas_les_autres` (largeurs hors clé de mise en page : rouge) |
-| la gouttière garde sa largeur après un glisser et une remise de colonne, revient à 90 pour la feuille | `un_glisser_de_colonne_garde_la_largeur_de_la_gouttiere` (gouttière non mémorisée : rouge) |
-| entrée après Role ▸, grisée sans largeur, sélection entière | `l_entree_de_remise_suit_role_et_se_grise_sans_largeur`, `la_remise_traite_toute_la_selection` (`add_enabled(true)` : rouge ; ne viser que la colonne cliquée : rouge) |
-| entrée de feuille : onglet, Workbook ▸ Sheet, Workbook ▸ Columns | `le_clic_droit_de_l_onglet_remet_toute_la_feuille`, `menus::tests::la_remise_des_largeurs_est_dans_workbook_sheet_et_columns` (entrée toujours active, ou une seule colonne visée pour la feuille ou l'onglet : rouge) |
+| reset: key removed, `geometry_revision` +1 only if it existed, neither `revision` nor history | `session/tests/largeurs.rs` `remettre_au_defaut_retire_la_cle_et_n_avance_que_si_elle_existait` (unconditional `+= 1`: red) |
+| reset then save: no more key in the file | `une_colonne_remise_au_defaut_n_est_plus_dans_le_fichier` (setting 54 instead of removing: red) |
+| the action removes the width from the local copy before refresh | `app-state/tests/column_width.rs` `l_action_de_remise_retire_la_largeur_sans_historique` (key kept in the local copy: red) |
+| B reset to 54, A and C keep theirs | `grid::tests::remettre_une_colonne_au_defaut_ne_touche_pas_les_autres` (widths outside the layout key: red) |
+| the gutter keeps its width after a drag and a column reset, returns to 90 for the sheet | `un_glisser_de_colonne_garde_la_largeur_de_la_gouttiere` (gutter not remembered: red) |
+| entry after Role ▸, disabled without a width, whole selection | `l_entree_de_remise_suit_role_et_se_grise_sans_largeur`, `la_remise_traite_toute_la_selection` (`add_enabled(true)`: red; targeting only the clicked column: red) |
+| sheet entry: tab, Workbook ▸ Sheet, Workbook ▸ Columns | `le_clic_droit_de_l_onglet_remet_toute_la_feuille`, `menus::tests::la_remise_des_largeurs_est_dans_workbook_sheet_et_columns` (entry always active, or a single column targeted for the sheet or the tab: red) |
 
-## Déplacer des colonnes (#319)
+## Moving columns (#319)
 
-Sous-menu `Move ▸` (First · Left · Right · Last). Chaque règle a son témoin, vérifié par mutation.
+Submenu `Move ▸` (First · Left · Right · Last). Each rule has its witness, checked by mutation.
 
-| Règle | Témoin |
+| Rule | Witness |
 |---|---|
-| Left/Right gardent l'écart (`A [B] C [D] E` → `B A D C E` / `A C B E D`), First/Last regroupent dans l'ordre | `column_move::tests::left_keeps_the_gap_*`, `first_and_last_gather_*` (resserrer le bloc : rouge) |
-| tout ou rien : `[A] C` et `[A] [C]` Left → `None` ; geste sans effet → `None` | `a_column_that_cannot_move_greys_*`, `a_gesture_that_changes_nothing_*` (ne bouger que C : rouge) |
-| la suite de `Move` rejouée (index après retrait) donne l'ordre cible, toutes sélections de six colonnes, quatre sens ; seules les colonnes sélectionnées bougent | `the_steps_reach_the_target_order_for_every_selection` (index +1 : rouge) |
-| un enfant `Unknown` garde sa place, index dans la liste complète | `an_unknown_child_keeps_its_place_*` (index = rang visible : rouge) |
-| un seul Undo pour plusieurs colonnes, libellé « Move Columns » ; une colonne : `Move “B”` | `app-state/tests/column_move.rs` `deux_colonnes_deplacees_*` (sans macro : rouge), `une_colonne_seule_*` |
-| aucune fenêtre « Colonne utilisée », valeurs de formule inchangées | `deplacer_une_colonne_lue_par_une_formule_*` (appeler `open_column_use` : rouge) |
-| la barre d'état dit le libellé du **groupe** (« Move Columns ») à la clôture, comme l'annulation, pour tout groupe fermé par `end_grouped_macro` (la dernière étape ne reste pas affichée) ; une colonne seule garde `Move “B”` | `la_barre_d_etat_dit_le_libelle_du_groupe_*` (retirer le remplacement dans `end_grouped_macro` : rouge) |
-| la sélection couvre les mêmes colonnes après le geste | `la_selection_reste_sur_les_colonnes_deplacees` (vider la sélection : rouge) |
-| `Move ▸` entre le presse-papiers et `Type ▸`, quatre entrées ; grisage tout ou rien (A seule, C seule, A et C, lignes entières) ; l'entrée active pousse `MoveColumns` | `grid::tests::move_est_place_*`, `les_entrees_de_move_sont_grisees_*`, `une_entree_de_move_pousse_*` (grisage supprimé, entrée retirée : rouge) |
-| même sous-menu et même grisage dans Workbook › Columns | `menus::tests::le_menu_colonnes_porte_move_*` (retirer `Move ▸` de la peinture partagée : rouge) |
-| la largeur suit la colonne déplacée (#325) | `grid::tests::la_largeur_suit_la_colonne_deplacee` (stockage par position : rouge) |
+| Left/Right keep the gap (`A [B] C [D] E` → `B A D C E` / `A C B E D`), First/Last gather in order | `column_move::tests::left_keeps_the_gap_*`, `first_and_last_gather_*` (tightening the block: red) |
+| all or nothing: `[A] C` and `[A] [C]` Left → `None`; gesture without effect → `None` | `a_column_that_cannot_move_greys_*`, `a_gesture_that_changes_nothing_*` (moving only C: red) |
+| the replayed `Move` sequence (index after removal) gives the target order, all selections of six columns, four directions; only the selected columns move | `the_steps_reach_the_target_order_for_every_selection` (index +1: red) |
+| an `Unknown` child keeps its place, index in the full list | `an_unknown_child_keeps_its_place_*` (index = visible rank: red) |
+| a single Undo for several columns, label "Move Columns"; one column: `Move “B”` | `app-state/tests/column_move.rs` `deux_colonnes_deplacees_*` (without a macro: red), `une_colonne_seule_*` |
+| no « Colonne utilisée » window, formula values unchanged | `deplacer_une_colonne_lue_par_une_formule_*` (calling `open_column_use`: red) |
+| the status bar says the label of the **group** ("Move Columns") at closing, like undo, for any group closed by `end_grouped_macro` (the last step does not stay displayed); a single column keeps `Move “B”` | `la_barre_d_etat_dit_le_libelle_du_groupe_*` (removing the replacement in `end_grouped_macro`: red) |
+| the selection covers the same columns after the gesture | `la_selection_reste_sur_les_colonnes_deplacees` (emptying the selection: red) |
+| `Move ▸` between the clipboard and `Type ▸`, four entries; all-or-nothing disabling (A alone, C alone, A and C, whole rows); the active entry pushes `MoveColumns` | `grid::tests::move_est_place_*`, `les_entrees_de_move_sont_grisees_*`, `une_entree_de_move_pousse_*` (disabling removed, entry removed: red) |
+| same submenu and same disabling in Workbook › Columns | `menus::tests::le_menu_colonnes_porte_move_*` (removing `Move ▸` from the shared painting: red) |
+| the width follows the moved column (#325) | `grid::tests::la_largeur_suit_la_colonne_deplacee` (storage by position: red) |
 
-Limite : l'aspect du sous-menu et le texte des bulles se relisent à l'écran.
+Limit: the look of the submenu and the text of the bubbles are re-read on screen.
 
-## Polynôme contraint sur un X décalé (#296)
+## Constrained polynomial on a shifted X (#296)
 
-`fit::tests::polynome_contraint_sur_x_tres_decale_est_signale` : signalé (`shifted_x`) pour un polynôme fixé ou à valeur initiale sur X ≈ 1e4 ; témoins non signalés : X centré, décalage modéré (1e2), polynôme sans contrainte (QR centré). Transport `.stf` : `shifted_x` dans `persistence/src/calculations.rs` (tests d'aller-retour et de noms figés).
+`fit::tests::polynome_contraint_sur_x_tres_decale_est_signale`: flagged (`shifted_x`) for a fixed polynomial or one with an initial value on X ≈ 1e4; unflagged witnesses: centered X, moderate shift (1e2), unconstrained polynomial (centered QR). `.stf` transport: `shifted_x` in `persistence/src/calculations.rs` (round-trip and frozen-name tests).
 
-## Projet de démonstration (`demo/`)
+## Demo project (`demo/`)
 
-**Démarrage (#333).** `stokesforge-app-state/src/startup.rs` (`tests`) : la
-décision première ouverture / lancements suivants / démonstration forcée /
-chemin existant ou absent, sans fenêtre ; `preferences.rs` : le marqueur
-`first_run_done` (absent ou illisible = à faire, écrit en gardant les champs
-inconnus). `main.rs` (`startup_tests`, `cargo test -p stokesforge-app --bin
-stokesforge-app`) : `demo.stf` écrit puis relu sans rien écarter, repli en
-mémoire si le dossier ne peut pas se créer, projet vide sans classeur. Témoins
-éprouvés par mutation : l'écriture du fichier retirée, le marqueur ignoré.
-`scripts/app-dist.sh` et `app-dist-windows.sh` donnent un dossier de
-configuration jetable à la fenêtre empaquetée et exigent ensuite `demo.stf` et le
-marqueur : la première ouverture de production est éprouvée à chaque
+**Startup (#333).** `stokesforge-app-state/src/startup.rs` (`tests`): the
+decision first opening / later launches / forced demo /
+existing or absent path, without a window; `preferences.rs`: the marker
+`first_run_done` (absent or unreadable = to do, written while keeping the unknown
+fields). `main.rs` (`startup_tests`, `cargo test -p stokesforge-app --bin
+stokesforge-app`): `demo.stf` written then read back without discarding anything, in-memory fallback
+if the folder cannot be created, empty project without a workbook. Witnesses
+proven by mutation: the file write removed, the marker ignored.
+`scripts/app-dist.sh` and `app-dist-windows.sh` give a throwaway configuration
+folder to the packaged window and then require `demo.stf` and the
+marker: the first production opening is tested at each
 distribution.
 
-`crates/stokesforge-app/src/demo/tests.rs` (module du **binaire** : `cargo test -p stokesforge-app --bin stokesforge-app`). Chaque test a son témoin, vérifié par mutation (graine changée, titre donné à un graphe, colonne supprimée sous un graphe, amplitude du jeu gaussien changée, `recalculate` retiré de `session_for_project`) : noms de fenêtre uniques dans tout le projet, aucun titre de graphe (#103), chaque graphe résolu sans référence brisée et dessiné, axes logarithmiques sur données strictement positives (invariant 10), chaque jeu d'analyse retrouve ses paramètres connus par `core::compute` (`Attendu`, tolérance), les huit familles d'`OperationKind::ALL` couvertes (dont le lissage, jeu `Smooth`), bruit à graine fixe épinglé, colonnes à formule calculées dès le démarrage, aller-retour `.stf` par la session (rapport propre, mêmes specs), tous les `PlotType` (sans `Unknown`).
+`crates/stokesforge-app/src/demo/tests.rs` (module of the **binary**: `cargo test -p stokesforge-app --bin stokesforge-app`). Each test has its witness, checked by mutation (seed changed, title given to a graph, column deleted under a graph, amplitude of the Gaussian set changed, `recalculate` removed from `session_for_project`): unique window names across the whole project, no graph title (#103), each graph resolved without a broken reference and drawn, logarithmic axes on strictly positive data (invariant 10), each analysis set finds its known parameters through `core::compute` (`Attendu`, tolerance), the eight families of `OperationKind::ALL` covered (including smoothing, `Smooth` set), noise with a fixed seed pinned, formula columns computed from startup, `.stf` round trip through the session (clean report, same specs), all `PlotType` (without `Unknown`).
 
-## Analyser des lignes (#253)
+## Analyzing rows (#253)
 
-Une couche, un fichier, un témoin éprouvé par mutation :
+One layer, one file, one witness tested by mutation:
 
-- `stokesforge-core/tests/transpose.rs` : création (nom, place, colonnes, métadonnées),
-  réutilisation d'une ligne, colonne courte, refus nommant la lettre sans rien créer,
-  texte, collision de nom, états dérivés (périmée : valeur, x', colonne ajoutée ou
-  supprimée ; modifiée : seulement une édition de valeurs), remise à jour (version neuve,
-  colonne supprimée recréée), vie du lien (renommage, suppression, copie). Mutants :
-  `stale` forcé à faux, empreinte des lignes ignorée, `prune_transposes` retiré.
-- `stokesforge-commands/tests/transpose.rs` : une entrée annulable par commande, refus sans
-  entrée, groupe `AnalyzeRows` défait d'un bloc ; `tests/labels.rs` et
-  `stokesforge-app-state/tests/history_text.rs` : les deux libellés.
-- `stokesforge-persistence/tests/transposes.rs` : aller-retour des liens et des états dérivés ;
-  `hostile_links_are_dropped_one_by_one` (lien orphelin, hors borne).
-- `stokesforge-app-state/tests/row_analysis.rs` : un seul Ctrl+Z défait feuille et calcul,
-  Cancel n'en laisse rien (et aucun groupe resté ouvert), refus par lettre, deuxième ligne
-  dans la même feuille, courbe de graphe, confirmation avant d'écraser. Mutants : l'avortement
-  du groupe à Close et sa clôture à Apply.
-- `stokesforge-app/src/app/transpose_ui.rs` : la police embarquée porte « ᵀ »
-  (proportionnelle seulement : la chasse fixe ne l'a pas), la bande et ses boutons, la
+- `stokesforge-core/tests/transpose.rs`: creation (name, place, columns, metadata),
+  reuse of a row, short column, refusal naming the letter without creating anything,
+  text, name collision, derived states (stale: value, x', column added or
+  deleted; modified: only a value edit), update (new version,
+  deleted column recreated), life of the link (rename, deletion, copy). Mutants:
+  `stale` forced to false, fingerprint of the rows ignored, `prune_transposes` removed.
+- `stokesforge-commands/tests/transpose.rs`: one undoable entry per command, refusal without
+  an entry, `AnalyzeRows` group undone as a block; `tests/labels.rs` and
+  `stokesforge-app-state/tests/history_text.rs`: the two labels.
+- `stokesforge-persistence/tests/transposes.rs`: round trip of the links and derived states;
+  `hostile_links_are_dropped_one_by_one` (orphan link, out of bounds).
+- `stokesforge-app-state/tests/row_analysis.rs`: a single Ctrl+Z undoes sheet and calculation,
+  Cancel leaves nothing of it (and no group left open), refusal by letter, second row
+  in the same sheet, graph curve, confirmation before overwriting. Mutants: the group
+  abort on Close and its closing on Apply.
+- `stokesforge-app/src/app/transpose_ui.rs`: the embedded font carries "ᵀ"
+  (proportional only: the monospace one does not have it), the strip and its buttons, the
   confirmation.

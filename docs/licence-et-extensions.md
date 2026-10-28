@@ -1,59 +1,59 @@
-# Licence et interfaces d'extension
+# License and extension interfaces
 
-Copyright © 2026 Aliocha Skrzypczak. Le code original de StokesForge de la
-branche `main` est distribué sous **GNU GPL version 3 ou ultérieure**, sans
-permission supplémentaire (#348). Le texte officiel de la GPLv3 est reproduit sans modification dans
-[`LICENSE`](../LICENSE). Les composants tiers conservent leurs licences.
-Cette décision ne change pas le statut du tag `legacy-python`, l'ancienne version
-Python/Qt, ni celui des versions antérieures à ce changement.
+Copyright © 2026 Aliocha Skrzypczak. The original StokesForge code of the
+`main` branch is distributed under the **GNU GPL version 3 or later**, with no
+additional permission (#348). The official text of the GPLv3 is reproduced
+without modification in [`LICENSE`](../LICENSE). Third-party components keep
+their licenses. This decision does not change the status of the `legacy-python`
+tag, the old Python/Qt version, nor that of the versions before this change.
 
-La GPL autorise les distributions commerciales ; la distribution du
-programme ou d'une version modifiée doit respecter ses conditions, notamment
-la fourniture du code source correspondant.
+The GPL allows commercial distributions; the distribution of the program or of
+a modified version must respect its conditions, notably the supply of the
+corresponding source code.
 
-## Permission supplémentaire : retirée, demandable
+## Additional permission: withdrawn, can be requested
 
-La version 1.0.0 portait une exception d'extension pour `pyst` (#129, section 7
-de la GPLv3). Elle est retirée (#348) : aucune demande ne la justifiait, et elle
-a des défauts de rédaction (renvoi à un document non livré, liste mouvante). Un
-destinataire de 1.0.0 garde les droits de cette version ; les suivantes sont
-sous GPL pure.
+Version 1.0.0 carried an extension exception for `pyst` (#129, section 7 of
+the GPLv3). It is withdrawn (#348): no request justified it, and it has
+drafting defects (reference to a document that is not delivered, a moving
+list). A recipient of 1.0.0 keeps the rights of that version; the following
+versions are under pure GPL.
 
-Un usage que la GPL ne couvre pas, par exemple un connecteur propriétaire d'un
-constructeur d'appareils, se traite par une permission supplémentaire ou une
-licence séparée, accordée par écrit à la demande. Elle suppose que l'auteur
-détienne ou puisse accorder les droits sur tout le code concerné, donc un **CLA
-de licence** (le contributeur garde son copyright et autorise la redistribution
-sous d'autres conditions) avant toute contribution extérieure fusionnée. Sa
-rédaction et celle de la permission passent par un juriste.
+A use that the GPL does not cover, for example a proprietary connector from an
+instrument maker, is handled by an additional permission or a separate license,
+granted in writing on request. It assumes that the author holds or can grant
+the rights on all the code concerned, so a **license CLA** (the contributor
+keeps their copyright and allows redistribution under other conditions) before
+any external contribution is merged. Its drafting and that of the permission go
+through a lawyer.
 
-## Métadonnées Cargo
+## Cargo metadata
 
-Le workspace déclare `GPL-3.0-or-later` ; les vingt crates héritent de
-`license`. Le texte est `LICENSE`.
+The workspace declares `GPL-3.0-or-later`; the twenty crates inherit
+`license`. The text is `LICENSE`.
 
-Les licences Apache-2.0 de `vendor/winit` et MIT de
-`vendor/smithay-clipboard` restent intactes, y compris pour les modifications
-locales décrites dans [`vendor/winit/STOKESFORGE.md`](../vendor/winit/STOKESFORGE.md).
+The Apache-2.0 licenses of `vendor/winit` and MIT of
+`vendor/smithay-clipboard` remain intact, including for the local modifications
+described in [`vendor/winit/STOKESFORGE.md`](../vendor/winit/STOKESFORGE.md).
 
-## Licences tierces et distribution
+## Third-party licenses and distribution
 
-La politique [`deny.toml`](../deny.toml) contrôle toutes les plateformes et
-features Cargo, y compris `python` et les dépendances de test, sans compiler
-l'interpréteur. Les licences
-admises sont explicites. MPL-2.0 (`option-ext` 0.2.0, et `colored` 2.2.0, tirée seulement par les tests
-d'interface `egui_kittest` → `dify` et jamais livrée) et Ubuntu-font-1.0
-(`epaint_default_fonts` 0.36.2) sont autorisées seulement pour ces versions.
-Les six familles de polices de `vendor/fonts` portent chacune leur OFL-1.1 ;
-la paire Noto Sans inclut aussi sa face italique. Phosphor porte sa notice MIT.
-Les polices embarquées par egui ont également des notices complémentaires
-dans `vendor/epaint-default-fonts/`, notamment Bitstream Vera pour Hack,
-absente des métadonnées Cargo. Leur provenance est vérifiée séparément ;
-le contrôle des manifestes ne remplace pas celui des ressources.
-Le manifeste de `brotli-decompressor` 5.0.3 annonce MIT, mais son `LICENSE`
-porte BSD-3-Clause : les deux outils le clarifient avec l'empreinte de ce texte.
+The policy [`deny.toml`](../deny.toml) checks all platforms and Cargo
+features, including `python` and the test dependencies, without compiling the
+interpreter. The accepted licenses
+are explicit. MPL-2.0 (`option-ext` 0.2.0, and `colored` 2.2.0, pulled in only by the
+`egui_kittest` → `dify` interface tests and never shipped) and Ubuntu-font-1.0
+(`epaint_default_fonts` 0.36.2) are allowed only for these versions.
+The six font families of `vendor/fonts` each carry their OFL-1.1;
+the Noto Sans pair also includes its italic face. Phosphor carries its MIT notice.
+The fonts embedded by egui also have supplementary notices
+in `vendor/epaint-default-fonts/`, notably Bitstream Vera for Hack,
+absent from the Cargo metadata. Their provenance is verified separately;
+the check of the manifests does not replace that of the resources.
+The manifest of `brotli-decompressor` 5.0.3 announces MIT, but its `LICENSE`
+carries BSD-3-Clause: both tools clarify it with the fingerprint of this text.
 
-Installation des outils figés, depuis la racine :
+Installation of the pinned tools, from the root:
 
 ```sh
 source scripts/licenses-tools.env
@@ -62,59 +62,59 @@ cargo install cargo-about --locked --features cli --version "$CARGO_ABOUT_VERSIO
 cargo deny --locked check licenses
 ```
 
-`cargo-about` produit les textes à partir de `Cargo.lock` et de
-[`about.toml`](../about.toml), avec le gabarit
-[`scripts/licenses.hbs`](../scripts/licenses.hbs). Le travail CI `licenses`
-est automatique et bloquant : il exécute le contrôle puis génère les notices,
-conservées comme artefact. Il exerce aussi les témoins de refus de
-`scripts/licenses-test.sh` (notices manquantes/périmées, verrou Cargo différent,
-licence interdite).
-Il ne remplace pas les tests Python.
+`cargo-about` produces the texts from `Cargo.lock` and
+[`about.toml`](../about.toml), with the template
+[`scripts/licenses.hbs`](../scripts/licenses.hbs). The CI job `licenses`
+is automatic and blocking: it runs the check then generates the notices,
+kept as an artifact. It also exercises the refusal witnesses of
+`scripts/licenses-test.sh` (missing/stale notices, different Cargo lock,
+forbidden license).
+It does not replace the Python tests.
 
-[`scripts/licenses-rust.sh`](../scripts/licenses-rust.sh) produit le même
-rapport en CI et dans les distributions. Il ajoute les notices/copyrights
-absents des paquets crates.io, conservés dans
+[`scripts/licenses-rust.sh`](../scripts/licenses-rust.sh) produces the same
+report in CI and in the distributions. It adds the notices/copyrights
+missing from the crates.io packages, kept in
 [`vendor/crate-license-notices/`](../vendor/crate-license-notices/README.md)
-avec leurs références exactes et empreintes. Il refuse un verrou Cargo
-différent tant que ces compléments n'ont pas été relus et actualisés.
+with their exact references and fingerprints. It refuses a different Cargo lock
+as long as these supplements have not been reread and updated.
 
-Les trois scripts `app-dist.sh`, `cli-dist.sh` et `pyhello-dist.sh` appellent
-[`scripts/licenses-dist.sh`](../scripts/licenses-dist.sh) après assemblage.
-Les outils doivent être installés avant de les lancer. La génération peut
-consulter les sources amont pour récupérer un texte absent du paquet Cargo.
-Chaque distribution contient :
+The three scripts `app-dist.sh`, `cli-dist.sh` and `pyhello-dist.sh` call
+[`scripts/licenses-dist.sh`](../scripts/licenses-dist.sh) after assembly.
+The tools must be installed before running them. The generation may
+consult the upstream sources to retrieve a text missing from the Cargo package.
+Each distribution contains:
 
-- `LICENSE` pour StokesForge ;
-- `THIRD-PARTY-LICENSES.txt`, textes des dépendances Rust transitives,
-  notamment Typst (Apache-2.0), avec leurs noms et versions ;
-- `licenses/fonts/<famille>/OFL.txt` et `licenses/phosphor/LICENSE` ;
-- `licenses/epaint-default-fonts/`, copyrights et permissions des polices
-  d'egui, dont MIT et Bitstream Vera pour Hack ;
-- `licenses/winit/` et `licenses/smithay-clipboard/`, notices des patches ;
-- `licenses/python/`, textes PSF et historiques de CPython, notices de ses
-  bibliothèques natives, provenance et texte du runtime réellement livré ;
-- `licenses/numpy/`, tous les textes livrés par la roue numpy, y compris
-  ceux de ses composants natifs. Les `.dist-info/licenses` restent aussi
-  dans le runtime ;
-- `licenses/scipy/LICENSE.txt`, le texte de la roue scipy, qui reprend les
-  licences de ses composants natifs (OpenBLAS, libgfortran, libquadmath…).
+- `LICENSE` for StokesForge;
+- `THIRD-PARTY-LICENSES.txt`, texts of the transitive Rust dependencies,
+  notably Typst (Apache-2.0), with their names and versions;
+- `licenses/fonts/<famille>/OFL.txt` and `licenses/phosphor/LICENSE`;
+- `licenses/epaint-default-fonts/`, copyrights and permissions of the egui
+  fonts, including MIT and Bitstream Vera for Hack;
+- `licenses/winit/` and `licenses/smithay-clipboard/`, notices of the patches;
+- `licenses/python/`, PSF texts and history of CPython, notices of its
+  native libraries, provenance and text of the runtime actually shipped;
+- `licenses/numpy/`, all the texts shipped by the numpy wheel, including
+  those of its native components. The `.dist-info/licenses` also remain
+  in the runtime;
+- `licenses/scipy/LICENSE.txt`, the text of the scipy wheel, which includes the
+  licenses of its native components (OpenBLAS, libgfortran, libquadmath…).
 
-Les notices natives de Python viennent de l'archive complète correspondant au
-verrou, sont versionnées et leur mise à jour est décrite dans
+The native notices of Python come from the complete archive matching the
+lock, are versioned and their update is described in
 [`vendor/python/licenses-linux/README.md`](../vendor/python/licenses-linux/README.md)
-(Windows, #332 : [`licenses-windows/`](../vendor/python/licenses-windows/README.md),
-notices dérivées de celles de Linux tant que l'archive complète Windows n'est
-pas recoupée, ce que son README dit).
-Le packaging refuse un jeu de notices qui ne correspond plus au verrou, ou
-un runtime sans les textes de CPython, numpy et scipy. Une livraison doit également
-fournir les sources correspondantes selon les licences applicables ; le
-fichier de notices n'est pas une archive de sources.
+(Windows, #332: [`licenses-windows/`](../vendor/python/licenses-windows/README.md),
+notices derived from those of Linux until the complete Windows archive is
+cross-checked, which its README states).
+The packaging refuses a set of notices that no longer matches the lock, or
+a runtime without the texts of CPython, numpy and scipy. A delivery must also
+provide the corresponding sources according to the applicable licenses; the
+notices file is not a source archive.
 
 ## Contributions
 
-Voir [`CONTRIBUTING.md`](../CONTRIBUTING.md) : toute contribution extérieure
-doit être proposée sous GPL-3.0-or-later et porter le `Signed-off-by` du
-[DCO 1.1](../DCO). Les auteurs gardent leurs droits. Le DCO ne donne pas le
-droit d'accorder une permission supplémentaire ni de relicencier : cela exige
-un CLA de licence, à mettre en place **avant** la première contribution
-extérieure fusionnée (#348).
+See [`CONTRIBUTING.md`](../CONTRIBUTING.md): every external contribution
+must be proposed under GPL-3.0-or-later and carry the `Signed-off-by` of the
+[DCO 1.1](../DCO). Authors keep their rights. The DCO does not give the
+right to grant an additional permission or to relicense: that requires
+a license CLA, to be put in place **before** the first merged external
+contribution (#348).

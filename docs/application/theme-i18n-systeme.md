@@ -1,179 +1,177 @@
-# Application : thème, interface multilingue, sélecteur de fichiers
+# Application: theme, multilingual interface, file picker
 
-Suite du sommaire [`README.md`](README.md). Contenu : thème, interface multilingue (Fluent), sélecteur de fichiers natif.
+Continuation of the table of contents [`README.md`](README.md). Contents: theme, multilingual interface (Fluent), native file picker.
 
-### Thème
+### Theme
 
-L'appli **ne suit pas** le thème clair/sombre du système : `stokesforge-app::theme`
-pose, une seule fois au démarrage (`main.rs`, dans la fermeture de création
-d'`eframe::run_native`, aux côtés du réglage des polices), une palette maison
-dérivée de `egui::Visuals::light()` — jamais du sombre. `Context::set_theme`
-verrouille la préférence sur `Theme::Light` (empêche egui de re-suivre le
-système à la moindre notification `winit`), puis `Context::set_visuals`
-applique la palette (`theme::visuals`) : accent vert forêt (sélection,
-liens, contours des widgets actifs/survolés), coins légèrement moins arrondis
-que le défaut egui. Le reste (gris de fond, contrastes de texte) vient tel
-quel du thème clair d'egui, déjà calibré pour la lisibilité.
+The app **does not follow** the system light/dark theme: `stokesforge-app::theme`
+sets, once at startup (`main.rs`, in the creation closure of
+`eframe::run_native`, next to the font setup), a house palette derived from
+`egui::Visuals::light()` — never from the dark one. `Context::set_theme`
+locks the preference on `Theme::Light` (this stops egui from following the
+system again at the slightest `winit` notification), then `Context::set_visuals`
+applies the palette (`theme::visuals`): forest-green accent (selection,
+links, outlines of active/hovered widgets), corners slightly less rounded
+than the egui default. The rest (background grey, text contrast) comes
+as is from egui's light theme, already tuned for readability.
 
-Deux raisons à ce choix, documentées en tête de `theme.rs` : `stokesforge-render`
-dessine les tracés sur un fond clair implicite (axes, grilles, texte noir) —
-un thème sombre romprait ce contraste sans qu'aucun code de rendu n'en soit
-informé ; et un thème qui change avec le système est un thème qu'on ne peut
-pas garantir en capture d'écran ni en support.
+There are two reasons for this choice, documented at the top of `theme.rs`: `stokesforge-render`
+draws plots on an implicit light background (axes, grids, black text) —
+a dark theme would break this contrast without any rendering code being
+told; and a theme that changes with the system is a theme that cannot
+be guaranteed in a screenshot or in support.
 
-**Barres de défilement : un seul standard.** Toutes les barres de
-l'application (espace de travail, grille, panneaux, fenêtres d'import et de
-script, fenêtres détachées) ont le même aspect : 10 points d'épaisseur,
-poignée gris foncé atténuée, qui passe à la couleur de survol puis à l'accent
-pendant le glisser. `theme::scroll_style` le définit, `theme::install` le pose
-une fois sur le style global d'egui ; changer les constantes `SCROLL_BAR_*` de
-`theme.rs` change toutes les barres d'un coup. Règle pour le code futur : ne
-jamais construire ni modifier un `ScrollStyle` hors de `theme.rs` ; une zone
-qui doit réserver la place d'une barre la lit par
-`theme::scroll_bar_allocated_width`. Le test `aucun_scroll_style_hors_du_theme`
-fait échouer la CI sinon.
+**Scroll bars: one standard.** All the bars of the
+application (workspace, grid, panels, import and script
+windows, detached windows) look the same: 10 points thick,
+muted dark grey handle, which turns to the hover color then to the accent
+during a drag. `theme::scroll_style` defines it, `theme::install` sets it
+once on egui's global style; changing the `SCROLL_BAR_*` constants of
+`theme.rs` changes all the bars at once. Rule for future code: never
+build or modify a `ScrollStyle` outside `theme.rs`; an area
+that must reserve room for a bar reads it through
+`theme::scroll_bar_allocated_width`. The test `aucun_scroll_style_hors_du_theme`
+fails the CI otherwise.
 
-**Icônes.** Phosphor duotone, un seul composant (`icons.rs` : `icon_image`,
-`icon_button`, taille unique, info-bulle obligatoire), couleur « neutre par
-défaut, rare ensuite » : règles et marche à suivre dans [`icones.md`](../icones.md).
-Le test `aucune_icone_hors_du_composant` interdit tout chargement d'icône
-ailleurs.
+**Icons.** Phosphor duotone, a single component (`icons.rs`: `icon_image`,
+`icon_button`, single size, mandatory tooltip), color "neutral by
+default, rare afterwards": rules and procedure in [`icones.md`](../icones.md).
+The test `aucune_icone_hors_du_composant` forbids loading any icon
+elsewhere.
 
-### Interface multilingue (Fluent)
+### Multilingual interface (Fluent)
 
-L'interface s'écrit **d'abord en anglais** ; le français en est une traduction
-(chantier #39). Seule l'application traduit : Fluent (`i18n-embed`,
-`i18n-embed-fl`, `rust-embed`, plus `fluent-syntax` pour la pseudo-langue) est
-une dépendance de `stokesforge-app-state` (catalogues, chargeur, `tr!`) et de `stokesforge-app` (la vérification de `fl!` à la compilation) et d'aucun autre crate — `core`, `commands`,
-`session` et les autres rendent des données structurées que l'application met
-en phrase (#46, #47). Le pourquoi du choix de Fluent (clé et arguments vérifiés
-à la compilation) est en tête de `stokesforge-app-state/src/i18n.rs`.
+The interface is written **in English first**; French is a translation of it
+(work package #39). Only the application translates: Fluent (`i18n-embed`,
+`i18n-embed-fl`, `rust-embed`, plus `fluent-syntax` for the pseudo-language) is
+a dependency of `stokesforge-app-state` (catalogs, loader, `tr!`) and of `stokesforge-app` (the compile-time check of `fl!`) and of no other crate — `core`, `commands`,
+`session` and the others return structured data that the application turns
+into sentences (#46, #47). The reason for choosing Fluent (key and arguments checked
+at compile time) is at the top of `stokesforge-app-state/src/i18n.rs`.
 
-| Où | Quoi |
+| Where | What |
 |---|---|
-| `crates/stokesforge-app-state/i18n/en/stokesforge_app.ftl` | le catalogue de référence ; une clé absente d'ici n'existe pas |
-| `crates/stokesforge-app-state/i18n/fr/stokesforge_app.ftl` | la traduction française, complète (#49) : même ensemble de clés que `en`, même commit |
-| `crates/stokesforge-app-state/i18n.toml`, `crates/stokesforge-app/i18n.toml` | `fallback_language = "en"`, dossier des catalogues ; `fl!` lit l'`i18n.toml` du crate **appelant**, donc les deux fixent `domain = "stokesforge_app"` et celui de l'app pointe le catalogue d'`app-state` |
-| `stokesforge-app-state/src/i18n.rs` | chargeur, langue courante, macro `tr!` ; `src/i18n/pseudo.rs` : la pseudo-langue |
-| `stokesforge-app-state/src/preferences.rs` | `preferences.json`, même dossier de configuration que `couleurs.json` |
-| `stokesforge-import/src/config_dir.rs` | la règle unique du dossier de configuration (`STOKESFORGE_CONFIG_DIR`, #332) |
-| `stokesforge-app-state/src/history_text.rs` | les libellés d'historique (`HistoryLabel`) en phrases, clés `history-*` (#46) |
-| `stokesforge-app/tests/libelles.rs` | la garde `aucun_libelle_en_dur` (absolue : aucune dérogation), qui lit les sources des deux crates, et les clés mortes |
+| `crates/stokesforge-app-state/i18n/en/stokesforge_app.ftl` | the reference catalog; a key missing from here does not exist |
+| `crates/stokesforge-app-state/i18n/fr/stokesforge_app.ftl` | the French translation, complete (#49): same set of keys as `en`, same commit |
+| `crates/stokesforge-app-state/i18n.toml`, `crates/stokesforge-app/i18n.toml` | `fallback_language = "en"`, catalog folder; `fl!` reads the `i18n.toml` of the **calling** crate, so both set `domain = "stokesforge_app"` and the app's one points to the `app-state` catalog |
+| `stokesforge-app-state/src/i18n.rs` | loader, current language, `tr!` macro; `src/i18n/pseudo.rs`: the pseudo-language |
+| `stokesforge-app-state/src/preferences.rs` | `preferences.json`, same configuration folder as `couleurs.json` |
+| `stokesforge-import/src/config_dir.rs` | the single rule for the configuration folder (`STOKESFORGE_CONFIG_DIR`, #332) |
+| `stokesforge-app-state/src/history_text.rs` | the history labels (`HistoryLabel`) as sentences, `history-*` keys (#46) |
+| `stokesforge-app/tests/libelles.rs` | the `aucun_libelle_en_dur` guard (absolute: no exemption), which reads the sources of both crates, and the dead keys |
 
-**`tr!` est l'unique point d'entrée** : `tr!("menu-file")`, ou avec arguments
-nommés `tr!("history-insert-rows", count = n)`. Il enveloppe `fl!` ; une clé ou un
-argument inconnu de `en` ne compile pas. Aucun littéral dans un libellé. Pour l'infobulle d'un contrôle (attribut `.hint` de sa clé) : `tr!("project-manager-open", "hint")`. Un test
-qui compare une langue précise passe son chargeur : `tr!(in loader; "clé")`
-(`build_loader`), pour ne pas dépendre de `STOKESFORGE_LANG` ; un test qui cherche un texte peint le demande à `tr!`, jamais un littéral.
+**`tr!` is the single entry point**: `tr!("menu-file")`, or with named
+arguments `tr!("history-insert-rows", count = n)`. It wraps `fl!`; a key or an
+argument unknown to `en` does not compile. No literal in a label. For the tooltip of a control (`.hint` attribute of its key): `tr!("project-manager-open", "hint")`. A test
+that compares a specific language passes its loader: `tr!(in loader; "clé")`
+(`build_loader`), so as not to depend on `STOKESFORGE_LANG`; a test that looks for a painted text asks `tr!` for it, never a literal.
 
-**Menus et actions (#42)** : une action a **un** libellé, la clé `action-*`, partagé
-par la barre de menus, les menus contextuels, la barre d'état et le bouton de
-fenêtre détachée (`action-reopen-last-import`, `action-reset-zoom`…) ; les
-menus eux-mêmes sont `menu-*`. L'infobulle (l'effet, pas le raccourci, que le
-menu dessine déjà) est l'attribut `.hint` (`tr!("action-save", "hint")`) ;
-l'infobulle d'une entrée grisée, qui dit pourquoi, est `.disabled`. Les noms
-de touches (`shortcut-backspace`, `shortcut-delete`) sont aussi des clés. 
-La barre de menus et la barre d'état sont `StokesForgeApp::menu_bar` et
-`StokesForgeApp::status_bar` (`app/menus.rs`, #122) ; leurs tests ouvrent
-chaque menu de haut niveau pour de vrai et lisent libellés, grisage et cases
-à cocher dans l'arbre d'accessibilité qu'egui publie (AccessKit), sans
-supposer de position.
+**Menus and actions (#42)**: an action has **one** label, the `action-*` key, shared
+by the menu bar, the context menus, the status bar and the detached
+window button (`action-reopen-last-import`, `action-reset-zoom`…); the
+menus themselves are `menu-*`. The tooltip (the effect, not the shortcut, which the
+menu already draws) is the `.hint` attribute (`tr!("action-save", "hint")`);
+the tooltip of a disabled entry, which says why, is `.disabled`. The key
+names (`shortcut-backspace`, `shortcut-delete`) are keys too. 
+The menu bar and the status bar are `StokesForgeApp::menu_bar` and
+`StokesForgeApp::status_bar` (`app/menus.rs`, #122); their tests open
+every top-level menu for real and read labels, disabled state and checkboxes
+in the accessibility tree that egui publishes (AccessKit), without
+assuming any position.
 
-**Langue** : la variable `STOKESFORGE_LANG` (`en`, `fr`, `en-XA`), puis la
-préférence `language` de `preferences.json`, sinon l'anglais. La langue du
-système n'est **pas** suivie (décision du 2026-10-01). Une valeur inconnue ou
-un fichier corrompu passe au niveau suivant, sans panique (invariant 10).
-Menu **Fichier › Langue** : change la langue tout de suite (`set_language`, les
-textes se redessinent à l'image suivante) et l'écrit dans `preferences.json` ;
-`STOKESFORGE_LANG` l'emporte encore au prochain démarrage.
+**Language**: the `STOKESFORGE_LANG` variable (`en`, `fr`, `en-XA`), then the
+`language` preference of `preferences.json`, otherwise English. The system
+language is **not** followed (decision of 2026-10-01). An unknown value or
+a corrupted file falls to the next level, without panic (invariant 10).
+The menu **File › Language** changes the language right away (`set_language`, texts
+are redrawn at the next frame) and writes it to `preferences.json`;
+`STOKESFORGE_LANG` still wins at the next startup.
 
-**Variable de développement `STOKESFORGE_DEMO=1`** (#333) : ouvre la démonstration
-en mémoire à chaque lancement, au lieu de la seule première ouverture (voir
-`etat-et-console.md`, « Binaire »). Posée par le pilote `run-stokesforge`. La
-fermeture ne demande alors **pas** d'enregistrer (`set_quit_without_prompt`) ;
-New et Open… demandent toujours, et un projet existant passé en argument garde
-la question.
+**Development variable `STOKESFORGE_DEMO=1`** (#333): opens the in-memory
+demonstration at every launch, instead of only at the first opening (see
+`etat-et-console.md`, "Binary"). Set by the `run-stokesforge` driver. Closing
+then does **not** ask to save (`set_quit_without_prompt`); New and Open… still ask, and an
+existing project passed as an argument keeps the question.
 
-**Dossier de configuration** (#332) : la variable `STOKESFORGE_CONFIG_DIR`,
-si elle est posée et non vide, désigne le dossier tel quel (sans suffixe) ;
-sinon le dossier du système (`directories::ProjectDirs`, `…\StokesForge\config`
-sous Windows). `preferences.json`, `couleurs.json`, `import_recipes.json` et
-`import_recent.json` y vivent ; les copies de secours dans
-`<STOKESFORGE_CONFIG_DIR>/recovery`, sinon `recovery/` du dossier de données.
-Utile pour une installation portable, et c'est ce par quoi les tests
-s'isolent du vrai profil (`docs/tests.md`, « Règle (#250) »). Règle et fonctions :
+**Configuration folder** (#332): the `STOKESFORGE_CONFIG_DIR` variable,
+if set and non-empty, designates the folder as is (no suffix);
+otherwise the system folder (`directories::ProjectDirs`, `…\StokesForge\config`
+on Windows). `preferences.json`, `couleurs.json`, `import_recipes.json` and
+`import_recent.json` live there; the backup copies in
+`<STOKESFORGE_CONFIG_DIR>/recovery`, otherwise `recovery/` of the data folder.
+Useful for a portable installation, and this is how tests
+isolate themselves from the real profile (`docs/tests.md`, "Rule (#250)"). Rule and functions:
 `stokesforge_import::config_dir`.
 
-**Pseudo-langue `en-XA`** : fabriquée à la volée depuis `en` (accents, `[[ ]]`,
-+30 %), sans fichier. `STOKESFORGE_LANG=en-XA` : un texte sans `[[ ]]` n'est pas passé
-par le catalogue, un `]]` manquant signale un texte tronqué.
+**Pseudo-language `en-XA`**: built on the fly from `en` (accents, `[[ ]]`,
++30%), without a file. With `STOKESFORGE_LANG=en-XA`: a text without `[[ ]]` has not gone
+through the catalog, a missing `]]` signals a truncated text.
 
-**Garde `aucun_libelle_en_dur`** (`tests/libelles.rs`) : aucun littéral textuel
-dans `label`, `button`, `menu_button`, `checkbox`, `radio_value`,
-`selectable_value`, `selectable_label`, `on_hover_text`, `heading`, ni dans les
-`Button::new(…)`/`RichText::new(…)`, ni dans les tables `fn label()`/`fn title()`.
-Elle est **absolue** : aucune dérogation (les 213 littéraux d'avant #41 ont été
-convertis, #42 à #45, et la liste supprimée à #48). Elle voit aussi `strong`,
-`weak`, `small`, `monospace`, `colored_label`, et ignore les champs de format
-(`{code}`). Les boîtes de fichier natives sont gardées aussi (#127) :
-`set_title` pour le titre, `add_filter` pour le nom visible du filtre ; les
-extensions et les sigles de format (`SVG`, `PDF`, `PNG`) restent techniques.
-Les titres d'ouverture et d'enregistrement ainsi que le filtre du projet
-passent par `tr!`, dans la langue courante au moment d'ouvrir la boîte.
-La zone #43 (propriétés du graphe, éditeur de texte, pied des
-dialogues, export) reste gardée plus strictement (`ZONE_43` : aucun littéral
-textuel dans ses fonctions, quelle que soit la forme de l'appel). Une clé du
-catalogue `en` qu'aucun source de `src/` n'emploie fait échouer
-`aucune_cle_du_catalogue_n_est_morte` (`tests/libelles.rs`, qui lit `src/` des deux crates). Mécanique détaillée : skill
+**Guard `aucun_libelle_en_dur`** (`tests/libelles.rs`): no text literal
+in `label`, `button`, `menu_button`, `checkbox`, `radio_value`,
+`selectable_value`, `selectable_label`, `on_hover_text`, `heading`, nor in the
+`Button::new(…)`/`RichText::new(…)`, nor in the `fn label()`/`fn title()` tables.
+It is **absolute**: no exemption (the 213 literals from before #41 were
+converted, #42 to #45, and the list was removed at #48). It also sees `strong`,
+`weak`, `small`, `monospace`, `colored_label`, and ignores format fields
+(`{code}`). The native file boxes are guarded too (#127):
+`set_title` for the title, `add_filter` for the visible name of the filter; the
+extensions and the format acronyms (`SVG`, `PDF`, `PNG`) stay technical.
+The open and save titles as well as the project filter
+go through `tr!`, in the current language at the moment the box opens.
+Zone #43 (graph properties, text editor, dialog footer,
+export) is guarded more strictly (`ZONE_43`: no text
+literal in its functions, whatever the form of the call). A key of the
+`en` catalog that no source in `src/` uses makes
+`aucune_cle_du_catalogue_n_est_morte` fail (`tests/libelles.rs`, which reads `src/` of both crates). Detailed mechanics: skill
 `stokesforge-textes-interface`.
 
-**Erreurs affichées (#47).** Les crates du dessous rendent des erreurs
-structurées dont le `Display` (`#[error(...)]`) est en **anglais brut** — ce que
-lisent le CLI, `pyst` et les journaux — et que personne ne traduit. L'application
-les met en phrase par `stokesforge-app-state/src/errors.rs` : une fonction `error_message` par
-famille (`model` pour `CoreError`, `commands`, `session`, `file` pour
-`PersistenceError`, `import`, `formula`, `render`, `export`, et `script` avec la
-feature `python`), qui associe chaque variante à une clé `error-*` du catalogue
-`en` avec ses champs en arguments. Le `match` est exhaustif, sans `_` : une
-variante nouvelle ne compile pas tant qu'elle n'est pas associée (ou renvoyée
-volontairement à son `Display` par `errors::fallback`). Le test de chaque
-famille construit une valeur de chaque variante et vérifie que la phrase n'est
-pas vide, sans jargon interne, sans point final. Toute erreur montrée à
-l'utilisateur passe par ces fonctions, jamais par `to_string()` ni `{err}`.
-Les champs `detail` (cause décrite par le crate d'origine) et les messages du
-système restent en anglais dans la phrase. `stokesforge-importer` rend un
-`ImportFailure` structuré (fichier + cause) pour la même raison.
+**Displayed errors (#47).** The crates below return structured errors
+whose `Display` (`#[error(...)]`) is in **raw English** — what
+the CLI, `pyst` and the logs read — and which nobody translates. The application
+turns them into sentences through `stokesforge-app-state/src/errors.rs`: one `error_message` function per
+family (`model` for `CoreError`, `commands`, `session`, `file` for
+`PersistenceError`, `import`, `formula`, `render`, `export`, and `script` with the
+`python` feature), which maps each variant to an `error-*` key of the `en`
+catalog with its fields as arguments. The `match` is exhaustive, without `_`: a
+new variant does not compile until it is mapped (or deliberately sent back
+to its `Display` by `errors::fallback`). The test of each
+family builds one value of each variant and checks that the sentence
+is not empty, has no internal jargon, and has no final period. Every error shown to the
+user goes through these functions, never through `to_string()` or `{err}`.
+The `detail` fields (cause described by the originating crate) and the system
+messages stay in English in the sentence. `stokesforge-importer` returns a structured
+`ImportFailure` (file + cause) for the same reason.
 
-Règle de conduite (chaîne complète, mise en phrase) : `.claude/conventions.md`, section « Erreurs : texte brut anglais en bas, phrase du catalogue dans l'application ».
+Rule of conduct (full chain, turned into a sentence): `.claude/conventions.md`, section "Erreurs : texte brut anglais en bas, phrase du catalogue dans l'application".
 
-### Sélecteur de fichiers natif
+### Native file picker
 
-Le bandeau de fichier a été supprimé : Ouvrir, Enregistrer et Enregistrer
-sous sont réunis dans le menu File. Les clics et leurs raccourcis
-partagent le même routage. Ouvrir (Ctrl+O) affiche un `rfd::FileDialog` ;
-Enregistrer sous (Ctrl+Maj+S) demande une destination ; Enregistrer
-(Ctrl+S) utilise la destination courante.
+The file banner was removed: Open, Save and Save As
+are gathered in the File menu. Clicks and their shortcuts
+share the same routing. Open (Ctrl+O) shows an `rfd::FileDialog`;
+Save As (Ctrl+Shift+S) asks for a destination; Save
+(Ctrl+S) uses the current destination.
 
-**Fil à part (#192).** Tous les sélecteurs (Open, Save As, export du graphe,
-assistant d'import) passent par `Action::PickFile(PickRequest)` et
-`file_picker.rs` (dans `stokesforge-app-state`) : `rfd` s'exécute sur un fil dédié, la réponse revient par un
-canal sondé à chaque image (`StokesForgeApp::poll_file_picker`). Avant, l'appel
-synchrone sur le fil d'egui gelait l'application quand le sélecteur se fermait
-sans que le portail ne réponde (`wait_for_response` de `rfd` n'a pas de délai) ;
-désormais, au pire, la demande reste en attente. Un seul sélecteur suivi à la fois : une nouvelle demande remplace
-l'ancienne, sinon un sélecteur fermé sans réponse du portail bloquerait
-Ouvrir ensuite (le fil abandonné reste bloqué dans `rfd`, sans effet).
-Garde : `aucun_selecteur_rfd_hors_du_module`. À valider sur un vrai bureau
-GNOME/Wayland (clic sur l'application pendant le sélecteur) ; sur macOS, les
-sélecteurs hors fil principal restent à vérifier. Le sélecteur n'est pas encore
-attaché à la fenêtre (`set_parent`), pas nécessaire au dégel.
+**Separate thread (#192).** All the pickers (Open, Save As, graph export,
+import wizard) go through `Action::PickFile(PickRequest)` and
+`file_picker.rs` (in `stokesforge-app-state`): `rfd` runs on a dedicated thread, the answer comes back through a
+channel polled at every frame (`StokesForgeApp::poll_file_picker`). Before, the
+synchronous call on the egui thread froze the application when the picker closed
+without the portal answering (`wait_for_response` of `rfd` has no timeout);
+now, at worst, the request stays pending. Only one picker is tracked at a time: a new request replaces
+the old one, otherwise a picker closed without an answer from the portal would block
+Open afterwards (the abandoned thread stays blocked in `rfd`, with no effect).
+Guard: `aucun_selecteur_rfd_hors_du_module`. To be validated on a real GNOME/Wayland
+desktop (click on the application while the picker is open); on macOS, the
+pickers off the main thread remain to be checked. The picker is not yet
+attached to the window (`set_parent`), not needed for the unfreeze.
 
-`rfd` (feature par défaut `xdg-portal` + `wayland`) compile et se lie sans
-portail système présent : le portail (`xdg-desktop-portal`, D-Bus) n'est
-qu'une dépendance d'exécution. Vérifié par une compilation `cargo build` et
-`cargo build --release` réussies dans un bac à sable sans session graphique
-garantie. L'ouverture réelle du sélecteur sur un vrai bureau Wayland reste à
-valider interactivement — ce qu'aucun outil de ce dépôt ne peut faire à la
-place d'un humain devant un écran : `run-stokesforge` pilote l'application en
-X11 (Xwayland), pas en Wayland natif, et n'ouvre pas le sélecteur `rfd`.
-
+`rfd` (default feature `xdg-portal` + `wayland`) compiles and links without a
+system portal present: the portal (`xdg-desktop-portal`, D-Bus) is
+only a runtime dependency. Verified by successful `cargo build` and
+`cargo build --release` in a sandbox without a guaranteed graphical session.
+The real opening of the picker on a real Wayland desktop remains to be
+validated interactively — something no tool of this repository can do
+in place of a human in front of a screen: `run-stokesforge` drives the application
+in X11 (Xwayland), not in native Wayland, and does not open the `rfd` picker.

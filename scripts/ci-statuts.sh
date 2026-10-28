@@ -6,7 +6,7 @@
 # Affiche un statut par travail `github-actions/<travail>` (avec l'étape fautive
 # et la première cause en cas d'échec), puis les commentaires de commit posés par
 # le rapporteur (≈50 lignes de journal par échec). Voir docs/tests.md,
-# « Utiliser la CI au quotidien ». Exige `glab` connecté à gitlab.com.
+# « Using CI day to day ». Exige `glab` connecté à gitlab.com.
 set -euo pipefail
 
 PROJECT_ID=86104040

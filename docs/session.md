@@ -1,29 +1,29 @@
-# Session — l'acteur et la concurrence
+# Session — the actor and concurrency
 
-`stokesforge-session` rend concrète la décision qui tient tout le socle : **le
-`Project` vit sur son propre thread**.
+`stokesforge-session` makes concrete the decision that holds the whole
+foundation together: **the `Project` lives on its own thread**.
 
-L'acteur détient le `&mut Project` **de la session** : un client n'a qu'un
-`Arc<Tree>` figé et ne peut muter que par `SessionHandle::execute(Command)`.
-« Aucune mutation hors d'une commande » est donc une propriété de propriété
-**pour les clients d'une session**, pas une garantie du compilateur pour tout le
-code : les primitives publiques de `stokesforge-core` servent aussi à *construire* un
-projet avant `Session::spawn`, aux tests, et au CLI (qui manipule un `Project`
-avec un `History`, sans session). Hors historique **par choix** : le recalcul des
-colonnes-formule (`Project::set_length`/`set_values` dans l'acteur, voir
-ci-dessous), la géométrie et l'état des fenêtres, le cadrage de vue.
+The actor holds the `&mut Project` **of the session**. A client has only a frozen
+`Arc<Tree>` and can mutate only through `SessionHandle::execute(Command)`.
+"No mutation outside a command" is therefore an ownership property **for the
+clients of a session**, not a compiler guarantee for all the code. The public
+primitives of `stokesforge-core` also serve to *build* a project before
+`Session::spawn`, in tests, and in the CLI (which handles a `Project` with a
+`History`, without a session). Outside the history **by choice**: the
+recalculation of formula columns (`Project::set_length`/`set_values` in the
+actor, see below), window geometry and state, view framing.
 
-## Le protocole
+## The protocol
 
-Un canal de requêtes **FIFO** (`std::sync::mpsc`, ordre déterministe). Chaque
-requête reçoit **une** réponse, sur un canal à usage unique créé par le client
-pour cette requête.
+A **FIFO** request channel (`std::sync::mpsc`, deterministic order). Each
+request gets **one** response, on a single-use channel that the client creates
+for that request.
 
-L'UI et le fil de script sont deux clients **symétriques** : ils envoient des
-requêtes et reçoivent des instantanés immuables. L'UI garde le dernier
-`Snapshot` reçu et peint depuis lui **sans verrou** ; elle sait que son
-instantané est périmé en comparant la `revision` — un compteur monotone —
-jamais en comparant les arbres entre eux.
+The UI and the script thread are two **symmetric** clients: they send requests
+and receive immutable snapshots. The UI keeps the last `Snapshot` it received
+and paints from it **without a lock**. It knows its snapshot is stale by
+comparing the `revision` — a monotonic counter — never by comparing trees with
+each other.
 
 ```rust
 Session::spawn(project, history_limit) -> Session   // démarre le fil
@@ -31,189 +31,190 @@ session.handle()                       -> SessionHandle  // clonable, à donner 
 session.shutdown()                     -> Project        // rend le projet
 ```
 
-`SessionHandle` : `execute`, `undo`, `redo`, `begin_macro`, `end_macro`,
+`SessionHandle`: `execute`, `undo`, `redo`, `begin_macro`, `end_macro`,
 `abort_macro`, `snapshot`, `save`, `load`, `new_project`.
 
-## Ce qu'un instantané porte
+## What a snapshot carries
 
 ```rust
 Snapshot { tree: Arc<Tree>, revision, history: HistoryState, epoch }
 ```
 
-Le cloner est bon marché : deux `Arc` et une poignée de champs. **L'arbre n'est
-jamais recopié, seulement partagé.**
+Cloning it is cheap: two `Arc`s and a handful of fields. **The tree is never
+copied, only shared.**
 
-L'instantané porte aussi, hors de l'arbre, `window_geometries` et
-`column_widths` (#325, largeur des colonnes de feuille par `NodeId`), avec
-`geometry_revision`, compteur commun de ces deux tables : une pose de largeur
-n'avance ni `revision` ni l'historique. Seule la table des géométries est purgée
-à la mutation ; celle des largeurs **ne l'est pas** (Ctrl+Z rend la colonne
-supprimée avec sa largeur, invariant 7), la sauvegarde filtre les clés mortes.
-`Load` et `NewProject` remplacent ou vident les deux.
+The snapshot also carries, outside the tree, `window_geometries` and
+`column_widths` (#325, width of sheet columns by `NodeId`), with
+`geometry_revision`, the counter shared by these two tables. Setting a width
+advances neither `revision` nor the history. Only the geometry table is purged
+on mutation. The width table **is not** (Ctrl+Z gives back the deleted column
+with its width, invariant 7); saving filters out the dead keys.
+`Load` and `NewProject` replace or empty both.
 `Request::ResetColumnWidths { columns }` (#330, `SessionHandle::reset_column_widths`)
-**retire les clés** des colonnes (le défaut est une constante de l'application,
-la session n'écrit rien) ; `geometry_revision` n'avance que si une clé a
-vraiment été retirée ; ni `revision` ni historique.
+**removes the keys** of the columns (the default is an application constant,
+the session writes nothing). `geometry_revision` advances only if a key was
+really removed; neither `revision` nor the history moves.
 
-`HistoryState` donne à l'UI ce qu'il lui faut pour ses menus — `can_undo`,
-`can_redo`, les deux libellés, `in_macro` — sans exposer la pile.
+`HistoryState` gives the UI what it needs for its menus — `can_undo`,
+`can_redo`, the two labels, `in_macro` — without exposing the stack.
 
-`epoch` est distinct de `revision` et répond à une question que `revision` ne
-peut pas trancher : **est-ce encore le même projet ?** C'est un compteur local
-à l'acteur, jamais persisté, incrémenté quand un `Load` ou `NewProject` réussit.
-Les deux incrémentent **aussi** `revision` : elle reste monotone sur toute la vie de
-la session. Ce qu'elle ne dit pas, c'est que le projet a été remplacé ; `epoch`,
-lui, a changé. `stokesforge-script` s'en
-sert pour détecter qu'une poignée désigne un `NodeId` d'un projet qui n'est plus
-celui qui l'a produite — avant même de chercher ce `NodeId` dans l'arbre, où il
-pourrait, par coïncidence, désigner un autre objet.
+`epoch` is distinct from `revision` and answers a question that `revision`
+cannot settle: **is it still the same project?** It is a counter local to the
+actor, never persisted, incremented when a `Load` or `NewProject` succeeds.
+Both **also** increment `revision`: it stays monotonic over the whole life of
+the session. What it does not say is that the project was replaced; `epoch`,
+for its part, has changed. `stokesforge-script` uses it to detect that a handle
+designates a `NodeId` of a project that is no longer the one that produced
+it — even before looking up that `NodeId` in the tree, where by coincidence it
+could designate another object.
 
-## `save`, `load` et `new_project`
+## `save`, `load` and `new_project`
 
-`save` et `load` passent par `stokesforge-persistence`
+`save` and `load` go through `stokesforge-persistence`
 ([`persistance.md`](persistance.md)).
 
-- `save` écrit le projet courant **sans toucher** à la révision ni à
-  l'historique ;
-- `load` **remplace** le projet courant et **réinitialise l'historique**
-  (`undo`/`redo` redeviennent vides). Un ancien instantané n'a alors plus aucun
-  rapport avec l'arbre courant, y compris ses identifiants de nœud, qui
-  repartent de la valeur persistée dans le fichier.
+- `save` writes the current project **without touching** the revision or the
+  history;
+- `load` **replaces** the current project and **resets the history**
+  (`undo`/`redo` become empty again). An old snapshot then has no relation to
+  the current tree, including its node identifiers, which restart from the
+  value persisted in the file.
 
-`new_project` remplace le projet par `Project1` vide, sans entrée annulable.
-Comme `load`, il vide l'historique et les géométries, et avance révision,
-époque et révision de géométrie. La confirmation appartient à l'application,
-pas à l'acteur.
+`new_project` replaces the project with an empty `Project1`, with no undoable
+entry. Like `load`, it empties the history and the geometries, and advances the
+revision, the epoch and the geometry revision. The confirmation belongs to the
+application, not to the actor.
 
-Les trois sont refusés pendant une macro ouverte. En cas d'échec, ni le projet
-ni l'historique ne sont modifiés.
+All three are refused while a macro is open. On failure, neither the project
+nor the history is modified.
 
-## Une macro ouverte, et l'identité de l'émetteur
+## An open macro, and the identity of the sender
 
-Chaque `SessionHandle` porte une identité stable (`ClientId`, privée au crate).
-Deux `.clone()` d'une même poignée restent **le même** émetteur — un script qui
-clone sa poignée pour un thread reste « lui-même » ; deux appels
-**indépendants** à `Session::handle()` sont deux émetteurs **distincts**, même
-dans le même processus. `SessionHandle::with_new_identity()` donne une poignée
-vers la même session avec une identité **neuve** : c'est ce qu'emploient les
-vues détachées (`AppState::fork_for_detached_view`, dans `stokesforge-app-state`) et le moteur de script, pour
-que leurs écritures soient refusées (`ForeignMacro`) pendant une macro ouverte
-par l'interface — au lieu d'y être absorbées puis annulées avec elle (issue
-#21).
+Each `SessionHandle` carries a stable identity (`ClientId`, private to the
+crate). Two `.clone()`s of the same handle remain **the same** sender — a script
+that clones its handle for a thread stays "itself". Two **independent** calls to
+`Session::handle()` are two **distinct** senders, even in the same process.
+`SessionHandle::with_new_identity()` gives a handle to the same session with a
+**new** identity. This is what the detached views
+(`AppState::fork_for_detached_view`, in `stokesforge-app-state`) and the script
+engine use, so that their writes are refused (`ForeignMacro`) while a macro is
+open by the interface — instead of being absorbed into it and then undone with
+it (issue #21).
 
-Cette identité existe pour une raison précise : sans elle, le travail d'un
-client s'infiltrait dans la macro d'un autre, et un `abort_macro` pouvait
-défaire silencieusement le travail déjà validé de quelqu'un d'autre.
+This identity exists for a precise reason: without it, one client's work leaked
+into another's macro, and an `abort_macro` could silently undo someone else's
+already approved work.
 
-| Requête | Pendant une macro ouverte |
+| Request | During an open macro |
 |---|---|
-| `Execute` | **refusée** (`ForeignMacro`) si l'émetteur n'est pas le propriétaire ; absorbée dans la macro sinon |
-| `Undo` / `Redo` | refusées pour **quiconque** (`MacroOpen`) — annuler pendant une macro, la sienne ou celle d'un autre, laisserait un état incohérent |
-| `BeginMacro` | **refusée** si une macro est déjà ouverte par un *autre* émetteur ; un même émetteur peut imbriquer la sienne |
-| `EndMacro` | **refusée** si l'émetteur n'est pas le propriétaire (`NotInMacro` reste réservé au cas où aucune macro n'est ouverte) |
-| `AbortMacro` | **refusée** si l'émetteur n'est pas le propriétaire |
-| `Save` / `Load` / `NewProject` | refusées pour quiconque — écrire l'état intermédiaire d'une macro que quelqu'un pourrait encore avorter reste interdit à tous |
-| `Snapshot` | toujours servie : lecture pure |
-| `Shutdown` | annule (plutôt que de commettre) toute macro encore ouverte, niveau par niveau |
+| `Execute` | **refused** (`ForeignMacro`) if the sender is not the owner; otherwise absorbed into the macro |
+| `Undo` / `Redo` | refused for **anyone** (`MacroOpen`) — undoing during a macro, one's own or another's, would leave an inconsistent state |
+| `BeginMacro` | **refused** if a macro is already open by an *other* sender; the same sender can nest its own |
+| `EndMacro` | **refused** if the sender is not the owner (`NotInMacro` stays reserved for the case where no macro is open) |
+| `AbortMacro` | **refused** if the sender is not the owner |
+| `Save` / `Load` / `NewProject` | refused for anyone — writing the intermediate state of a macro that someone could still abort stays forbidden to all |
+| `Snapshot` | always served: pure read |
+| `Shutdown` | undoes (rather than commits) any macro still open, level by level |
 
-Le dernier point mérite son détail : une macro n'empêche jamais `Project` d'être
-muté — elle ne fait que **différer l'entrée d'historique**. Sans garde, un
-`Shutdown` rendait le projet avec ces mutations **commises en silence**, sans
-qu'elles soient jamais devenues une entrée annulable. Une macro ouverte à
-l'arrêt est donc désormais annulée.
+The last point deserves detail: a macro never prevents `Project` from being
+mutated — it only **defers the history entry**. Without a guard, a `Shutdown`
+returned the project with these mutations **silently committed**, without them
+ever having become an undoable entry. A macro left open at shutdown is therefore
+now undone.
 
-La table complète, avec ce qu'elle corrige et pourquoi, est en tête de
+The full table, with what it fixes and why, is at the top of
 `stokesforge-session/src/lib.rs`.
 
-## Deux invariants tenus par construction
+## Two invariants held by construction
 
-1. **L'acteur ne touche jamais à Python.** Ce crate ne dépend d'aucun crate
-   Python, et `tests/no_ui_dependency.rs` force une décision consciente à toute
-   nouvelle dépendance. C'est le troisième pilier de l'invariant 9 : sans lui,
-   le blocage mutuel entre GIL et acteur serait structurel.
-2. **Aucun objet non-`Send` ne traverse le canal.** Requêtes et réponses sont
-   du Rust pur, `Send + 'static` — vérifié par une assertion de compilation
+1. **The actor never touches Python.** This crate depends on no Python crate,
+   and `tests/no_ui_dependency.rs` forces a conscious decision for any new
+   dependency. This is the third pillar of invariant 9: without it, the mutual
+   blocking between the GIL and the actor would be structural.
+2. **No non-`Send` object crosses the channel.** Requests and responses are
+   pure Rust, `Send + 'static` — checked by a compile-time assertion
    (`assert_send`).
 
-## Le principe qui gouverne les refus
+## The principle that governs refusals
 
-Tout ce qu'un client sait du projet est une copie **potentiellement périmée**.
-Donc : toute hypothèse doit voyager dans la requête et être vérifiée par
-l'acteur **au moment de l'appliquer**, jamais avant.
+Everything a client knows about the project is a **potentially stale** copy.
+So: every assumption must travel in the request and be checked by the actor
+**at the moment of applying it**, never before.
 
-C'est le même principe que `Command::SetCells { expected_version }`
-([`commandes-et-historique.md`](commandes-et-historique.md)) : ne rien vérifier
-côté client, tout vérifier côté acteur.
+This is the same principle as `Command::SetCells { expected_version }`
+([`commandes-et-historique.md`](commandes-et-historique.md)): check nothing on
+the client side, check everything on the actor side.
 
-## Le recalcul des colonnes-formule (#193)
+## Recalculation of formula columns (#193)
 
-Après chaque `Execute`, `Undo`, `Redo`, `AbortMacro` réussi et après chaque
-`Load`, l'acteur passe sur les colonnes-formule (`src/recalc.rs`). Il ne
-**réécrit** que celles dont une donnée du calcul a changé depuis leur dernier
-calcul : il garde pour chacune une *empreinte* — la formule stockée (texte et
-identifiants de colonnes, #321), la version de chaque colonne lue de la feuille
-(ou son absence : supprimée, ou dans une autre feuille), longueur du résultat,
-version de la colonne elle-même, issue (calculée, illisible, prise dans un
-cycle) — et la compare à l'état courant. Une
-commande sans rapport (une couleur de courbe, un dossier) ne réécrit donc
-aucune colonne ; modifier A ne réécrit que ce qui lit A, puis, par la
-version de ce qui vient d'être réécrit, ce qui le lit à son tour.
+After each successful `Execute`, `Undo`, `Redo`, `AbortMacro` and after each
+`Load`, the actor goes over the formula columns (`src/recalc.rs`). It
+**rewrites** only those for which some data of the computation has changed since
+their last computation. For each one it keeps a *fingerprint* — the stored
+formula (text and column identifiers, #321), the version of each column read
+from the sheet (or its absence: deleted, or in another sheet), the length of the
+result, the version of the column itself, the outcome (computed, unreadable,
+caught in a cycle) — and compares it with the current state. An unrelated
+command (a curve color, a folder) therefore rewrites no column; modifying A
+rewrites only what reads A, then, through the version of what has just been
+rewritten, what reads that in turn.
 
-**Longueur du résultat (#194).** Une colonne-formule a la longueur de la
-plus longue des colonnes qu'elle lit ; au-delà de la longueur d'une colonne
-plus courte, la ligne vaut `NaN`. À défaut de colonne lue — constante,
-formule illisible, prise dans un cycle —, elle prend la longueur de la plus
-longue colonne **ordinaire** (sans formule) de la feuille, jamais celle d'une
-autre colonne-formule : une formule ne s'allonge donc ni avec une colonne
-qu'elle ne lit pas, ni avec une autre formule, et redevient courte quand on
-annule l'allongement de sa source.
+**Result length (#194).** A formula column has the length of the longest of the
+columns it reads; beyond the length of a shorter column, the row is `NaN`. When
+it reads no column — constant, unreadable formula, caught in a cycle — it takes
+the length of the longest **ordinary** column (without a formula) of the sheet,
+never that of another formula column. A formula therefore does not grow with a
+column it does not read, nor with another formula, and becomes short again when
+the growth of its source is undone.
 
 | | |
 |---|---|
-| où vit le mémo | dans l'acteur, à côté du `Project` (`Recalculator`) : ni historique, ni `.stf` |
-| ce qui le vide | `Load` (les valeurs d'un fichier ne sont pas crues sur parole) et `NewProject` |
-| sur quoi il repose | la doctrine des versions : un numéro ne désigne jamais deux contenus d'une même colonne (type + valeurs, pas les métadonnées) |
-| l'oracle | `FormulaRecalc::Full`, le recalcul complet d'avant #193, par `Session::spawn_with_recalc` — jamais en production |
-| ce qui le tient | `tests/recalc_cible.rs` (un cas nommé par composante, avec témoin) et `stokesforge-robustesse` `b22` (deux sessions jumelles, mêmes arbres à chaque pas) |
+| where the memo lives | in the actor, next to the `Project` (`Recalculator`): neither history nor `.stf` |
+| what empties it | `Load` (the values of a file are not taken on trust) and `NewProject` |
+| what it rests on | the versions doctrine: a number never designates two contents of the same column (type + values, not the metadata) |
+| the oracle | `FormulaRecalc::Full`, the full recalculation from before #193, through `Session::spawn_with_recalc` — never in production |
+| what holds it | `tests/recalc_cible.rs` (one named case per component, with witness) and `stokesforge-robustesse` `b22` (two twin sessions, same trees at each step) |
 
-### Recalcul interruptible (#239)
+### Interruptible recalculation (#239)
 
-`SessionHandle::execute_interruptible` répond dès la commande appliquée, puis
-recalcule les formules en pouvant être arrêté ; `execute` reste de bout en
-bout bloquant (scripts, CLI, tests). Seul `AppState::execute` l'emploie.
+`SessionHandle::execute_interruptible` answers as soon as the command is
+applied, then recalculates the formulas in a way that can be stopped; `execute`
+stays blocking from end to end (scripts, CLI, tests). Only `AppState::execute`
+uses it.
 
-| Pièce | Rôle |
+| Piece | Role |
 |---|---|
-| `gauge.rs` (`RecalcGauge`) | seul état partagé **hors du canal FIFO** : numéro du recalcul en cours, drapeau Stop, condition « fini ». Pendant un recalcul l'acteur ne lit plus ses requêtes : un Stop ou un instantané passés par le canal attendraient la fin |
-| `SessionHandle::actor_alive` (#310) | le fil de l'acteur tourne-t-il encore ? Une garde `Drop` de `actor::run` appelle `RecalcGauge::abandon` à la sortie de la boucle, **panic compris** : `running` repasse à `None` (plus d'indicateur de recalcul éternel), les attentes sont réveillées, `actor_alive` devient faux. Le modèle, lui, est perdu avec le fil : l'application écrit une copie de secours du dernier instantané (`stokesforge-app-state::recovery`) et annonce la mort par un dialogue bloquant (`AlertKind::SessionLost`). La sauvegarde automatique (#317) passe aussi par l'acteur : `SessionHandle::save` vers l'emplacement de secours du processus, sans entrée d'historique ni changement de révision, refusée pendant une macro (l'application saute alors l'échéance) |
-| `SessionHandle::recalc_running`, `wait_recalc`, `stop_recalc(id)`, `take_recalc_end` | lecture et écriture de la jauge, sans l'acteur, donc sans jamais bloquer |
-| `Recalculator::run_interruptible` | contrôle l'arrêt entre deux feuilles, deux colonnes, deux calculs, deux tours — jamais au milieu d'une colonne. Une passe interrompue laisse un état cohérent : les colonnes écrites sont dans le mémo, les autres seront vues périmées |
-| Stop | `history.undo` (comme Ctrl+Z : la commande reste rétablissable) puis un recalcul complet normal ; `RecalcEnd::Stopped`. Seulement si la commande a rangé une entrée (`History::execute_recorded`) : une commande sans effet n'en range pas, Stop ne défait alors **rien** (jamais l'action précédente) et le recalcul s'achève (`Done`). Dans une macro l'annulation est refusée : la commande reste, le recalcul s'achève (`Done`) |
+| `gauge.rs` (`RecalcGauge`) | the only shared state **outside the FIFO channel**: number of the running recalculation, Stop flag, "done" condition. During a recalculation the actor no longer reads its requests: a Stop or a snapshot sent through the channel would wait for the end |
+| `SessionHandle::actor_alive` (#310) | is the actor thread still running? A `Drop` guard in `actor::run` calls `RecalcGauge::abandon` when the loop exits, **panic included**: `running` goes back to `None` (no more everlasting recalculation indicator), the waits are woken, `actor_alive` becomes false. The model, for its part, is lost with the thread: the application writes a backup copy of the last snapshot (`stokesforge-app-state::recovery`) and announces the death with a blocking dialog (`AlertKind::SessionLost`). Autosave (#317) also goes through the actor: `SessionHandle::save` to the process's recovery location, with no history entry and no revision change, refused during a macro (the application then skips the deadline) |
+| `SessionHandle::recalc_running`, `wait_recalc`, `stop_recalc(id)`, `take_recalc_end` | read and write the gauge, without the actor, so never blocking |
+| `Recalculator::run_interruptible` | checks for the stop between two sheets, two columns, two computations, two rounds — never in the middle of a column. An interrupted pass leaves a consistent state: the columns written are in the memo, the others will be seen as stale |
+| Stop | `history.undo` (like Ctrl+Z: the command stays redoable) then a normal full recalculation; `RecalcEnd::Stopped`. Only if the command stored an entry (`History::execute_recorded`): a command with no effect stores none, so Stop then undoes **nothing** (never the previous action) and the recalculation completes (`Done`). In a macro the undo is refused: the command stays, the recalculation completes (`Done`) |
 
-Le numéro évite qu'un Stop tardif arrête le recalcul suivant. La révision
-rendue par `execute_interruptible` est celle d'avant recalcul ; **la fin du
-recalcul en ajoute une** (les formules changent sous la même révision, et un
-cache de rendu indexé par révision resterait périmé). Les autres requêtes
-(`undo`, `save`, `snapshot`…) attendent toujours la fin du recalcul : côté
-interface, `AppState::refresh` saute l'instantané tant qu'un recalcul court.
-Seul `Execute` est interruptible ; `Undo`, `Redo`, `Load` recalculent d'un bloc.
+The number prevents a late Stop from stopping the next recalculation. The
+revision returned by `execute_interruptible` is the one from before
+recalculation; **the end of the recalculation adds one** (the formulas change
+under the same revision, and a rendering cache indexed by revision would stay
+stale). The other requests (`undo`, `save`, `snapshot`…) always wait for the end
+of the recalculation: on the interface side, `AppState::refresh` skips the
+snapshot while a recalculation is running. Only `Execute` is interruptible;
+`Undo`, `Redo`, `Load` recalculate in one block.
 
-La règle à ne pas casser : **toute donnée qui entre dans le calcul d'une
-formule entre dans son empreinte**. Un calcul qui lirait une donnée de plus
-sans l'y ajouter afficherait une valeur fausse sans erreur. Les tests à
-écrire quand on étend le mécanisme (nouvelle fonction de formule, référence
-entre feuilles #186, analyses recalculées #184) :
-[`tests.md`](tests.md), « Recalcul ciblé ».
+The rule not to break: **any data that enters the computation of a formula
+enters its fingerprint**. A computation that read one more piece of data
+without adding it there would display a wrong value without an error. The tests
+to write when the mechanism is extended (new formula function, cross-sheet
+reference #186, recalculated analyses #184):
+[`tests.md`](tests.md), "Targeted recalculation".
 
-## Ce qu'il faut savoir avant de modifier
+## What to know before modifying
 
-- Ajouter une requête, c'est décider sa ligne dans la table ci-dessus. Une
-  requête mutante qui n'y figure pas est un trou.
-- `tests/session.rs` porte les cas nommés ; côté robustesse, `b6`
-  (concurrence entre clients), `b18` (ce qui reste possible pendant qu'une
-  macro est ouverte) et `b22` (recalcul ciblé contre recalcul complet).
-- Une requête qui remplace le projet doit vider le mémo du recalcul
-  (`Recalculator::forget`), comme `Load` et `NewProject`.
+- Adding a request means deciding its row in the table above. A mutating
+  request that is not listed there is a hole.
+- `tests/session.rs` carries the named cases; on the robustness side, `b6`
+  (concurrency between clients), `b18` (what stays possible while a macro is
+  open) and `b22` (targeted recalculation against full recalculation).
+- A request that replaces the project must empty the recalculation memo
+  (`Recalculator::forget`), like `Load` and `NewProject`.
 
-**À lire** : `stokesforge-session/src/lib.rs` (tête, et sa table), `src/actor.rs`,
+**To read**: `stokesforge-session/src/lib.rs` (the top, and its table), `src/actor.rs`,
 `src/recalc.rs`, `src/gauge.rs`, `src/snapshot.rs`.

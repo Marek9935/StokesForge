@@ -6,7 +6,7 @@ Shared by `stokesforge-bug-report` (to classify) and `stokesforge-bug-fix` (befo
 
 - **Arbitrated limit.** Name length, `MAX_NODE_ID`, `MAX_CELLS`, histogram bins, history limits: documented at their constant and listed in `docs/archive/rustrewrite/questions-ouvertes.md` §11. A refusal at the bound is not a bug.
 - **Assumed limit.** `stokesforge-app` is still called an integration bench, but its capabilities move fast. Check each limit in `docs/application/README.md` **and in the code**; never reuse a remembered list of missing features.
-- **Deliberate degradation.** A grey series annotated "broken reference", an unknown enum variant kept as is, a Typst formula shown as raw text: expected (`docs/invariants.md` § 10. Un défaut de donnée dégrade, il ne plante pas).
+- **Deliberate degradation.** A grey series annotated "broken reference", an unknown enum variant kept as is, a Typst formula shown as raw text: expected (`docs/invariants.md` § 10. A data defect degrades, it does not crash).
 
 ## A documented choice closes one option, not all
 

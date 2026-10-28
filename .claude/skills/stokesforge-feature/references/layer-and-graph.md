@@ -4,10 +4,10 @@ Read when the feature touches a graph (continuous gesture, free text, adding ser
 
 ## Where the rule lives
 
-- State / shell split: `docs/application/coquille-et-code.md` § Deux crates : l'état et la coquille ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes.
-- Action that needs the view state (zoom): `docs/application/graphe.md` § Propriétés des graphiques (`GraphView::framed_spec`, `Action::ExportGraph`).
-- Continuous gesture, in-place text editing: `docs/application/graphe.md` § Propriétés des graphiques (`annotation_interactions`) ; `docs/rendu.md` § Couleurs du texte et des échelles : l'encre automatique.
-- Layer by index, active layer, adding series: `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue) ; `docs/application/graphe.md` § Glisser une sélection de colonnes vers un graphe.
+- State / shell split: `docs/application/coquille-et-code.md` § Two crates: the state and the shell ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes.
+- Action that needs the view state (zoom): `docs/application/graphe.md` § Graph properties (`GraphView::framed_spec`, `Action::ExportGraph`).
+- Continuous gesture, in-place text editing: `docs/application/graphe.md` § Graph properties (`annotation_interactions`) ; `docs/rendu.md` § Text and scale colors: automatic ink.
+- Layer by index, active layer, adding series: `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue) ; `docs/application/graphe.md` § Dragging a column selection to a graph.
 - New graph without a title: `.claude/conventions.md` § Graphes neufs et fenêtres détachées.
 - Composing series from columns: `.claude/conventions.md` § Graphes neufs et fenêtres détachées (point `Composition d'un graphe (#257)`).
 

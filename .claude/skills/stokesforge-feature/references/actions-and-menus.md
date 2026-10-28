@@ -4,15 +4,15 @@ Read for every feature before coding (decide where the user finds it), and whene
 
 ## Where the rule lives
 
-- Grammar (sections, submenus, absent / greyed, bare verbs, separators): `docs/menus.md` § Règles ; `docs/menus.md` § Ordre canonique des sections ; `docs/menus.md` § Ajouter une entrée.
-- Content and envelope: `docs/menus.md` § Le principe : contenu et enveloppe.
+- Grammar (sections, submenus, absent / greyed, bare verbs, separators): `docs/menus.md` § Rules ; `docs/menus.md` § Canonical order of sections ; `docs/menus.md` § Adding an entry.
+- Content and envelope: `docs/menus.md` § The principle: content and envelope.
 - Shared painters, operational summary: `.claude/conventions.md` § Object Manager, panneaux fixes, menus.
-- Menu bar and thematic menus: `docs/application/menus-et-barres.md` § Menus thématiques (#114).
-- Grid context menu, deliberate menu / keyboard gaps: `docs/application/grille.md` § Menus contextuels de la grille.
-- What Qt gave for free: `docs/application/etat-et-console.md` § Ce que Qt donnait gratuitement, et qu'il faut écrire ici.
-- Shortcut registry, `SHORTCUT_*`, cursors: `docs/standard-interface.md` § Clavier et souris ; `docs/gestes.md` § Le modèle.
-- Tab, arrows and `GRID_KEYS`: `docs/application/grille.md` § Tab et flèches appartiennent à la grille (#38).
-- Labels: `docs/textes-interface.md` § 1. Règles (skill `stokesforge-textes-interface`).
+- Menu bar and thematic menus: `docs/application/menus-et-barres.md` § Themed menus (#114).
+- Grid context menu, deliberate menu / keyboard gaps: `docs/application/grille.md` § Grid context menus.
+- What Qt gave for free: `docs/application/etat-et-console.md` § What Qt gave for free, and must be written here.
+- Shortcut registry, `SHORTCUT_*`, cursors: `docs/standard-interface.md` § Keyboard and mouse ; `docs/gestes.md` § The model.
+- Tab, arrows and `GRID_KEYS`: `docs/application/grille.md` § Tab and arrows belong to the grid (#38).
+- Labels: `docs/textes-interface.md` § 1. Rules (skill `stokesforge-textes-interface`).
 
 ## Check
 

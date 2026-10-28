@@ -4,14 +4,14 @@ Read when creating or changing a content window, dialog, wizard, confirmation or
 
 ## Where the rule lives
 
-- Catalogue, natures and size classes (S-F11), types, model window per type, anatomy: `docs/fenetres.md` § Les natures et les classes de taille ; `docs/fenetres.md` § Les types ; `docs/fenetres.md` § Anatomie d'une fenêtre neuve ; `docs/fenetres.md` § Fenêtre modèle par type.
-- What the building block does alone (size, position, Escape, focus): `docs/fenetres.md` § Taille, position, Échap, focus : ce que la brique fait seule.
-- Dialogs, footer, buttons, errors, confirmations: `docs/standard-interface.md` § Fenêtres et dialogues ; `docs/standard-interface.md` § Confirmations.
+- Catalogue, natures and size classes (S-F11), types, model window per type, anatomy: `docs/fenetres.md` § Natures and size classes ; `docs/fenetres.md` § The types ; `docs/fenetres.md` § Anatomy of a new window ; `docs/fenetres.md` § Reference window by type.
+- What the building block does alone (size, position, Escape, focus): `docs/fenetres.md` § Size, position, Esc, focus: what the building block does by itself.
+- Dialogs, footer, buttons, errors, confirmations: `docs/standard-interface.md` § Windows and dialogs ; `docs/standard-interface.md` § Confirmations.
 - Building blocks (`show_window_in_layer`, `modal_dialog_with`, `modal_wizard`, `modal_live_settings`, `modal_read_only`, `modal_confirm`…): `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `toute fenêtre passe par la brique commune`.
-- Fixed panels: `.claude/conventions.md` § Object Manager, panneaux fixes, menus ; `docs/application/fenetres-et-panneaux.md` § Panneaux rétractables et détachés (#100).
+- Fixed panels: `.claude/conventions.md` § Object Manager, panneaux fixes, menus ; `docs/application/fenetres-et-panneaux.md` § Collapsible and detached panels (#100).
 - Failure of a dialog gesture: `.claude/conventions.md` § Interface : câblage à ne pas oublier (fenêtre détachée, calque, dialogue).
 - History macro of an editing dialog: `docs/commandes-et-historique.md` § Macros.
-- Screenshot to compare: `docs/fenetres.md` § Produire une capture.
+- Screenshot to compare: `docs/fenetres.md` § Taking a screenshot.
 
 ## Check
 

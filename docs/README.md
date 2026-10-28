@@ -1,73 +1,73 @@
-# Documentation StokesForge — branche `main`
+# StokesForge documentation — `main` branch
 
-Portage de StokesForge (analyse et tracé de données scientifiques, façon OriginLab)
-de Python/Qt vers Rust. Tout le code vit dans le workspace Cargo à la racine.
+Port of StokesForge (analysis and plotting of scientific data, OriginLab style)
+from Python/Qt to Rust. All the code lives in the Cargo workspace at the root.
 
-## Ce que cette documentation est, et ce qu'elle n'est pas
+## What this documentation is, and what it is not
 
-Elle **décrit le code tel qu'il est**. Elle ne planifie rien, ne spécifie rien
-et n'arbitre rien : pas de cahier des charges ici.
+It **describes the code as it is**. It plans nothing, specifies nothing
+and arbitrates nothing: there is no requirements document here.
 
-Le raisonnement détaillé — *pourquoi* telle décision plutôt que telle autre,
-ce qui a été mesuré, ce qui a été écarté — vit dans les **commentaires de tête
-de module** (`//!`), au plus près du code qu'il justifie. Ces pages ne le
-recopient pas : elles disent **où le trouver**, et portent seulement ce qui ne
-tient dans aucun module parce que ça les traverse tous.
+The detailed reasoning — *why* this decision rather than that one,
+what was measured, what was discarded — lives in the **module head comments**
+(`//!`), as close as possible to the code it justifies. These pages do not copy
+it: they say **where to find it**, and carry only what fits in no module
+because it crosses all of them.
 
-Règle de lecture qui en découle : ces pages orientent, le code fait foi. Une
-page qui contredit le code a tort.
+The reading rule that follows: these pages guide, the code is authoritative. A
+page that contradicts the code is wrong.
 
-## Par où entrer
+## Where to start
 
-| Je veux… | Lire |
+| I want to… | Read |
 |---|---|
-| comprendre le découpage en crates et pourquoi il est ainsi | [`architecture.md`](architecture.md) |
-| savoir ce que je n'ai pas le droit de casser | [`invariants.md`](invariants.md) |
-| toucher à l'arbre de projet, aux colonnes, au `PlotSpec` | [`modele-de-donnees.md`](modele-de-donnees.md) |
-| toucher à l'undo/redo, aux macros | [`commandes-et-historique.md`](commandes-et-historique.md) |
-| toucher au format `.stf`, à `save`/`load` | [`persistance.md`](persistance.md) |
-| toucher à l'acteur, à la concurrence, aux instantanés | [`session.md`](session.md) |
-| toucher au tracé, aux axes, à l'export SVG/PDF/PNG, aux formules | [`rendu.md`](rendu.md) |
-| toucher au pont PyO3 ou à la surface `pyst` des scripts | [`python-et-script.md`](python-et-script.md) |
-| reproduire les mesures du prototype Matplotlib hors écran | [`python-matplotlib-spike.md`](python-matplotlib-spike.md) |
-| toucher à la fenêtre, aux raccourcis, à la grille | [`application/`](application/README.md) |
-| ajouter ou afficher une icône (rôles de couleur, planche-contact) | [`icones.md`](icones.md) |
-| ajouter ou ranger une entrée de menu ou de clic droit | [`menus.md`](menus.md) (grammaire), puis [`application/menus-et-barres.md`](application/menus-et-barres.md) § Menus thématiques |
-| écrire ou modifier un texte visible (libellé, infobulle, message) | [`textes-interface.md`](textes-interface.md) |
-| poser un champ, un message, un dialogue, une confirmation, un grisage, un geste clavier ou souris | [`standard-interface.md`](standard-interface.md) (comportement, #217) |
-| créer une fenêtre ou un dialogue neuf, ou poser un geste (molette, double-clic) | [`fenetres.md`](fenetres.md) (catalogue des fenêtres), [`principes-ui.md`](principes-ui.md) (principes d'interface), [`gestes.md`](gestes.md) (matrice des gestes) |
-| écrire ou lancer un test, comprendre la CI | [`tests.md`](tests.md) |
-| mesurer la fluidité de l'interface (temps d'image, lancer en release) | [`mesure-performance.md`](mesure-performance.md) |
-| licence, contributions, interfaces d'extension et notices tierces | [`licence-et-extensions.md`](licence-et-extensions.md) |
-| savoir ce qu'exige la V1, ou publier une version | [`criteres-v1.md`](criteres-v1.md) |
+| understand the split into crates and why it is so | [`architecture.md`](architecture.md) |
+| know what I am not allowed to break | [`invariants.md`](invariants.md) |
+| touch the project tree, the columns, the `PlotSpec` | [`modele-de-donnees.md`](modele-de-donnees.md) |
+| touch undo/redo, macros | [`commandes-et-historique.md`](commandes-et-historique.md) |
+| touch the `.stf` format, `save`/`load` | [`persistance.md`](persistance.md) |
+| touch the actor, concurrency, snapshots | [`session.md`](session.md) |
+| touch plotting, axes, SVG/PDF/PNG export, formulas | [`rendu.md`](rendu.md) |
+| touch the PyO3 bridge or the `pyst` surface of scripts | [`python-et-script.md`](python-et-script.md) |
+| reproduce the off-screen measurements of the Matplotlib prototype | [`python-matplotlib-spike.md`](python-matplotlib-spike.md) |
+| touch the window, shortcuts, the grid | [`application/`](application/README.md) |
+| add or display an icon (color roles, contact sheet) | [`icones.md`](icones.md) |
+| add or place a menu or right-click entry | [`menus.md`](menus.md) (grammar), then [`application/menus-et-barres.md`](application/menus-et-barres.md) § Themed menus (#114) |
+| write or change visible text (label, tooltip, message) | [`textes-interface.md`](textes-interface.md) |
+| add a field, a message, a dialog, a confirmation, a greyed-out state, a keyboard or mouse gesture | [`standard-interface.md`](standard-interface.md) (behavior, #217) |
+| create a new window or dialog, or add a gesture (wheel, double-click) | [`fenetres.md`](fenetres.md) (catalog of windows), [`principes-ui.md`](principes-ui.md) (interface principles), [`gestes.md`](gestes.md) (gesture matrix) |
+| write or run a test, understand the CI | [`tests.md`](tests.md) |
+| measure the smoothness of the interface (frame time, running in release) | [`mesure-performance.md`](mesure-performance.md) |
+| license, contributions, extension interfaces and third-party notices | [`licence-et-extensions.md`](licence-et-extensions.md) |
+| know what V1 requires, or release a version | [`criteres-v1.md`](criteres-v1.md) |
 
-`.claude/rules.md` complète ce tableau côté **chargement de contexte** : quels
-crates ouvrir, et surtout lesquels ne pas ouvrir, pour chaque domaine.
+`.claude/rules.md` completes this table on the **context loading** side: which
+crates to open, and above all which not to open, for each domain.
 
-Une exception à la règle « ces pages ne planifient rien » :
-[`chantier-colonnes-mixtes.md`](chantier-colonnes-mixtes.md) est une **note de
-passation**, pas une page de référence — ce qu'un chantier a trouvé en chemin
-et ce qu'il laisse ouvert, surtout côté test. Elle rejoindra `docs/archive/`
-quand sa colonne « reste à faire » sera vide.
+An exception to the rule "these pages plan nothing":
+[`chantier-colonnes-mixtes.md`](chantier-colonnes-mixtes.md) is a
+**handover note**, not a reference page — what a work package found along the
+way and what it leaves open, especially on the test side. It will join
+`docs/archive/` when its "remaining to do" column is empty.
 
-`docs/chantiers/` réunit les mêmes notes pour le travail **en attente** :
+`docs/chantiers/` gathers the same notes for **pending** work:
 
-| Note | Contenu |
+| Note | Contents |
 |---|---|
-| [`retours-2026-09-23-features.md`](chantiers/retours-2026-09-23-features.md) | neuf évolutions à développer, avec les arbitrages déjà rendus |
-| [`prevision-import.md`](chantiers/prevision-import.md) | prévisualisation d'import |
-| [`analyse-maquettes.md`](chantiers/analyse-maquettes.md) | traitement mathématique (#181) : maquettes M1–M15 et choix du 2026-10-09, reportés dans #181–#190 |
+| [`retours-2026-09-23-features.md`](chantiers/retours-2026-09-23-features.md) | nine features to develop, with the decisions already made |
+| [`prevision-import.md`](chantiers/prevision-import.md) | import preview |
+| [`analyse-maquettes.md`](chantiers/analyse-maquettes.md) | mathematical processing (#181): mockups M1–M15 and choices of 2026-10-09, carried over into #181–#190 |
 
-**Les bugs n'y vivent pas** : leur état est suivi dans les issues GitLab du
-projet (`glab issue list --label bug`). Les anciens rapports
-`retours-*-bugs.md` ont été supprimés une fois leurs bugs corrigés ; les
-commentaires du code qui les citent se résolvent dans l'historique git.
+**Bugs do not live there**: their state is tracked in the project's GitLab
+issues (`glab issue list --label bug`). The old `retours-*-bugs.md` reports
+were deleted once their bugs were fixed; the code comments that cite them
+resolve in the git history.
 
-Comme les autres notes de passation, elles **planifient** : le code n'y fait
-pas encore foi, et un « reste à faire » y demande d'être confronté au code
-avant d'être repris.
+Like the other handover notes, they **plan**: the code is not yet
+authoritative there, and a "remaining to do" must be checked against the code
+before being taken up.
 
-## Commandes
+## Commands
 
 ```sh
 cargo build --workspace
@@ -78,26 +78,26 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Les deux dernières sont obligatoires : la CI (`.github/workflows/ci.yml`) les fait
-échouer au premier écart.
+The last two are mandatory: the CI (`.github/workflows/ci.yml`) makes them
+fail at the first deviation.
 
 ## Conventions
 
-- Code, commentaires, commits et documentation **en français**.
-- Un commentaire de tête de module explique **pourquoi**, pas *quoi* : le
-  *quoi* se lit dans la signature juste en dessous.
-- Toute mutation du modèle passe par une commande annulable de
-  `stokesforge-commands`, jamais par une primitive de `stokesforge-core` en direct.
+- Code, comments and commits **in French**; documentation in `docs/` **in English**, `docs/archive/` stays in French (#368).
+- A module head comment explains **why**, not *what*: the
+  *what* can be read in the signature just below.
+- Every mutation of the model goes through an undoable command of
+  `stokesforge-commands`, never through a primitive of `stokesforge-core` directly.
 
-## `docs/archive/` — l'historique, pas la référence
+## `docs/archive/` — the history, not the reference
 
-`docs/archive/` conserve les documents de conception antérieurs : cahier des
-charges technique, roadmaps phasées (socle 0-5, rendu R0-R8), rapports de
-robustesse, options explorées. Ils ont produit le code actuel et gardent leur
-valeur d'archive — notamment parce que **les commentaires du code les citent
-par leur nom de fichier** (`architecture-choisie.md` §4.3,
-`guide-de-correction-robustesse.md` §F6, `roadmap-rendu.md`…). Toute citation
-de ce genre se résout dans `docs/archive/`.
+`docs/archive/` keeps the earlier design documents: technical
+requirements document, phased roadmaps (foundation 0-5, rendering R0-R8),
+robustness reports, explored options. They produced the current code and keep
+their archive value — notably because **the code comments cite them
+by their file name** (`architecture-choisie.md` §4.3,
+`guide-de-correction-robustesse.md` §F6, `roadmap-rendu.md`…). Every citation
+of this kind resolves in `docs/archive/`.
 
-Ils ne sont pas maintenus. Là où ils divergent du code, c'est le code qui a
-raison.
+They are not maintained. Where they diverge from the code, the code is
+right.

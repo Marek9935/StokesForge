@@ -7,7 +7,7 @@ description: Work on importing instrument files (stokesforge-import, stokesforge
 
 ## Read first
 
-The header doc of `crates/stokesforge-import/src/lib.rs`, then `docs/application/projet-et-import.md` § Assistant d'import. `docs/chantier-import-previsualisation.md` is a hand-over note: confront its "to do" with the code before reusing it.
+The header doc of `crates/stokesforge-import/src/lib.rs`, then `docs/application/projet-et-import.md` § Import wizard. `docs/chantier-import-previsualisation.md` is a hand-over note: confront its "to do" with the code before reusing it.
 
 ## Rules
 

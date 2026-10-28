@@ -7,7 +7,7 @@ Rendering is where a bug can be silent: the rules below guard against a wrong fi
 
 ## Read and load
 
-`docs/rendu.md` § Ce qu'il faut savoir avant de modifier, then load `stokesforge-render` **first** and only then the target backend (`.claude/rules.md` § Routage). The silent traps are written once: `.claude/rules.md` § Les pièges qui coûtent le plus cher ; `.claude/conventions.md` § Rendu : pièges silencieux. Read both before writing.
+`docs/rendu.md` § What to know before modifying, then load `stokesforge-render` **first** and only then the target backend (`.claude/rules.md` § Routage). The silent traps are written once: `.claude/rules.md` § Les pièges qui coûtent le plus cher ; `.claude/conventions.md` § Rendu : pièges silencieux. Read both before writing.
 
 ```text
 stokesforge-render            all rendering, generic over DrawingBackend
@@ -23,7 +23,7 @@ stokesforge-render-egui   stokesforge-render-svg
 3. **Leave the cache key alone** — `(revision, rect, pixels_per_point, view_generation)`: feathering never enters it (invariant 6); a selection enters neither the key nor the pipeline; zoom and pan stay in `ViewState`, never in the `PlotSpec`.
 4. **No `f64` rule in `stokesforge-render-egui`**: framing, zoom, pan, nearest point live in `stokesforge-render` (`view`, `interact`); egui keeps only the `Pos2` adapter. A screen painted outside `GraphView` (analysis preview) paints in the app but takes all geometry from `stokesforge-render`.
 5. **Choose a figure text's style in the pipeline**: `rich_style` (Typst) for titles, axis titles and legend entries, `literal_style` for text taken from a column; graduations never go through Typst.
-6. **Add the feature's témoin** to `stokesforge-render-egui/tests/accord.rs`: a variant of the graph that changes the feature must give a different figure. Read the existing témoins of `accord.rs` and `stokesforge-render/tests/mesure.rs` first (`docs/tests.md` § Le témoin, sans lequel un test d'égalité ne prouve rien).
+6. **Add the feature's témoin** to `stokesforge-render-egui/tests/accord.rs`: a variant of the graph that changes the feature must give a different figure. Read the existing témoins of `accord.rs` and `stokesforge-render/tests/mesure.rs` first (`docs/tests.md` § The witness, without which an equality test proves nothing).
 
 Panel drawing order, overlaid layers, Typst paths, preview-then-one-write gestures and the test map: [references/render-details.md](references/render-details.md).
 

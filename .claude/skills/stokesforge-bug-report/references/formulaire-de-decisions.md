@@ -17,7 +17,7 @@ Ask, in one batch, before freezing a classification, a report or code, when:
 
 State what is already established and give concrete options (cost, risk, what breaks), recommendation first. Never an open question that hands the work back. What has an obvious default is not asked: choose it, say so in one line, move on.
 
-"Faithful to what you chose before" is not an argument for an option, unless a general interface rule (`docs/standard-interface.md`, `docs/menus.md`) imposes the consistency. Challenge earlier answers that lead somewhere doubtful (a one-entry submenu…), and check a menu mockup against the submenu rule (`docs/menus.md` § Règles) before proposing it.
+"Faithful to what you chose before" is not an argument for an option, unless a general interface rule (`docs/standard-interface.md`, `docs/menus.md`) imposes the consistency. Challenge earlier answers that lead somewhere doubtful (a one-entry submenu…), and check a menu mockup against the submenu rule (`docs/menus.md` § Rules) before proposing it.
 
 Before offering options on an architecture choice, give the figures the user decides on: memory cost, development cost (how many mechanisms to write), and whether the bugs would be detectable. Each card reads on its own: no bare code (« C2 », « A ») without its question; the user does not remember them. Read the user's answers **before** launching any search agent.
 

@@ -6,7 +6,7 @@
 //! fenêtres de contenu (`window_chrome::show_window_in_layer`).
 //!
 //! Sorti d'`app.rs` tel quel (#117), puis étendu par #228
-//! (`docs/standard-interface.md`, § Fenêtres et dialogues) :
+//! (`docs/standard-interface.md`, § Windows and dialogs) :
 //!
 //! - **nature** (#300, S-F11) : [`DialogNature`] dit ce qu'est la fenêtre —
 //!   réglages, brouillon, choix, assistant, lecture seule, confirmation,

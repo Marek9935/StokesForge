@@ -4,15 +4,15 @@ Read when painting a scroll bar, tabs, a selectable list or tree, a section titl
 
 ## Where the rule lives
 
-- Scroll bars: `docs/application/theme-i18n-systeme.md` § Thème ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes (`theme::scroll_style`).
-- Four roles (tabs, list, exclusive choice, tool toggle): `docs/application/fenetres-et-panneaux.md` § Onglets, listes et sélection : quatre aspects, quatre rôles (#169).
-- Bold, section titles, state colours, grid form, `choice`, spacing: `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `aspect commun (#169)` ; `docs/standard-interface.md` § Choix, disposition.
-- Colour picker, usages, saved colours: `docs/application/graphe.md` § Propriétés des graphiques ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `color_picker::color_field`.
-- Empty colour = automatic, automatic ink: `docs/rendu.md` § Couleurs du texte et des échelles : l'encre automatique.
-- New colour field in the model (`#[serde(default)]`): `docs/persistance.md` § Le format ne s'écrit pas dans le modèle.
-- Icons: `docs/icones.md` § Quand mettre une icône — et quand non ; `docs/icones.md` § Chaque action a son logo (règle posée avec #110) ; `docs/icones.md` § Couleur : neutre par défaut, couleur rare ; `docs/icones.md` § Ajouter une icône ; `docs/icones.md` § Échantillons de couleur (#89).
-- General principle: `docs/principes-ui.md` § 1. Une brique, un geste.
-- Guards: `docs/tests.md` § Les garde-fous à ne pas casser.
+- Scroll bars: `docs/application/theme-i18n-systeme.md` § Theme ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes (`theme::scroll_style`).
+- Four roles (tabs, list, exclusive choice, tool toggle): `docs/application/fenetres-et-panneaux.md` § Tabs, lists and selection: four aspects, four roles (#169).
+- Bold, section titles, state colours, grid form, `choice`, spacing: `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `aspect commun (#169)` ; `docs/standard-interface.md` § Choices, layout.
+- Colour picker, usages, saved colours: `docs/application/graphe.md` § Graph properties ; `.claude/conventions.md` § Application (`stokesforge-app` et `stokesforge-app-state`) : briques et gardes, point `color_picker::color_field`.
+- Empty colour = automatic, automatic ink: `docs/rendu.md` § Text and scale colors: automatic ink.
+- New colour field in the model (`#[serde(default)]`): `docs/persistance.md` § The format is not written into the model.
+- Icons: `docs/icones.md` § When to put an icon — and when not ; `docs/icones.md` § Every action has its logo (rule set with #110) ; `docs/icones.md` § Color: neutral by default, color is rare ; `docs/icones.md` § Adding an icon ; `docs/icones.md` § Color swatches (#89).
+- General principle: `docs/principes-ui.md` § 1. One building block, one gesture.
+- Guards: `docs/tests.md` § Guards not to break.
 
 ## Check
 

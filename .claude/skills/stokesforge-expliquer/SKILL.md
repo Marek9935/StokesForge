@@ -13,7 +13,7 @@ The user is a **chemist**: good Python, no Rust, limited software practice, come
 ## Steps
 
 1. **Check in the code before answering**, both « oui ça existe » and « non » — the second is the easiest to get wrong. Work notes (`docs/chantier-*.md`, `docs/chantiers/`) and `docs/archive/` prove nothing; `docs/` pages may lag a recent commit. Where to check by question family, and the plain-language map: [references/where-to-check.md](references/where-to-check.md).
-2. **Load the domain, not the workspace**: `docs/README.md` § Par où entrer, `.claude/rules.md` § Routage.
+2. **Load the domain, not the workspace**: `docs/README.md` § Where to start, `.claude/rules.md` § Routage.
 3. **Answer in three beats**: yes / no / partly (or the answer) in one or two sentences; the gesture step by step, or the useful detail; the limit or nuance, and the workaround if the answer is no (keyboard, menu, Python script, two gestures instead of one).
 4. **Say what you do not know**: « ce n'est pas décrit et je ne l'ai pas vérifié » beats a plausible reconstruction.
 5. **Stop at the answer.** A gap worth filling: say so and offer `stokesforge-feature`; an abnormal behaviour: offer `stokesforge-bug-report`. Never start coding in an answer.

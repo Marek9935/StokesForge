@@ -1,5 +1,5 @@
-//! La brique « formulaire » (#227, `docs/standard-interface.md`, § Choix,
-//! disposition) : une grille à **deux colonnes** — libellés à gauche, champs
+//! La brique « formulaire » (#227, `docs/standard-interface.md`, § Choices,
+//! layout) : une grille à **deux colonnes** — libellés à gauche, champs
 //! alignés sur une même verticale, cases à cocher et notes dans la colonne des
 //! champs (S-L1) — et le **choix exclusif** qui se peint en boutons radio pour
 //! 2 ou 3 options, en liste déroulante dès 4 (S-C1), radios côte à côte si

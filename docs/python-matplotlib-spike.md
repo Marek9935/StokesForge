@@ -1,9 +1,9 @@
-# Évaluation de Matplotlib — spike #69
+# Matplotlib evaluation — spike #69
 
-Le prototype fonctionne sur Linux x86_64 : Matplotlib s'importe dans CPython
-isolé, lit les colonnes `pyst` via numpy et produit du SVG et du PNG hors écran.
-Le SVG passe aussi par les convertisseurs PNG/PDF déjà utilisés par les exports
-StokesForge. Ce résultat est un fichier exporté, pas un `PlotSpec` éditable.
+The prototype works on Linux x86_64: Matplotlib imports in an isolated CPython,
+reads the `pyst` columns through numpy and produces SVG and PNG off screen.
+The SVG also goes through the PNG/PDF converters already used by the
+StokesForge exports. This result is an exported file, not an editable `PlotSpec`.
 
 ## Reproduction
 
@@ -12,73 +12,74 @@ scripts/python-vendor.sh
 CARGO_BUILD_JOBS=2 scripts/python-matplotlib-spike.sh
 ```
 
-Le script copie le runtime normal dans
-`vendor/python/extracted/matplotlib-spike/python/` (ignoré par Git), puis
-installe uniquement les roues binaires épinglées dans
-`vendor/python/matplotlib-requirements.txt`. numpy vient du verrou normal.
-La copie est renouvelée quand `vendor/python/lock.env` change ; `pip check`
-contrôle la cohérence. Le runtime habituel et les paquets de distribution
-restent ceux de base, sans Matplotlib.
+The script copies the normal runtime into
+`vendor/python/extracted/matplotlib-spike/python/` (ignored by Git), then
+installs only the binary wheels pinned in
+`vendor/python/matplotlib-requirements.txt`. numpy comes from the normal lock.
+The copy is renewed when `vendor/python/lock.env` changes; `pip check`
+checks consistency. The usual runtime and the distribution packages
+remain the base ones, without Matplotlib.
 
-Le test exécutable est `stokesforge-script/examples/matplotlib-spike.rs`, lancé
-explicitement par le script. Il vérifie :
+The executable test is `stokesforge-script/examples/matplotlib-spike.rs`,
+launched explicitly by the script. It checks:
 
-- version 3.11.2, import depuis la copie et `sys.flags.isolated == 1` ;
-- création de colonnes, calcul numpy et tracé depuis leurs vues en lecture seule ;
-- `FigureCanvasSVG` puis `FigureCanvasAgg`, sans fenêtre ni `pyplot` ;
-- deux exports SVG identiques (`svg.hashsalt` fixé et date de métadonnée retirée) ;
-- signatures PNG direct/Agg et PNG/PDF convertis par les exports Rust ;
-- données préservées et annulation du groupe de créations.
+- version 3.11.2, import from the copy and `sys.flags.isolated == 1`;
+- creation of columns, numpy computation and plotting from their read-only views;
+- `FigureCanvasSVG` then `FigureCanvasAgg`, without a window or `pyplot`;
+- two identical SVG exports (`svg.hashsalt` fixed and metadata date removed);
+- direct/Agg PNG signatures and PNG/PDF converted by the Rust exports;
+- data preserved and undo of the creation group.
 
-Les fichiers exportés restent sur disque après undo : l'historique annule le
-modèle, pas les écritures de fichiers arbitraires d'un script. Les artefacts de
-contrôle sont `/tmp/stokesforge69-spike.svg`, `/tmp/stokesforge69-spike.png` et
-`/tmp/stokesforge69-measurements.json`. Aucun artefact généré n'est versionné.
+The exported files stay on disk after undo: the history undoes the model, not
+the writing of arbitrary files by a script. The check artifacts are
+`/tmp/stokesforge69-spike.svg`, `/tmp/stokesforge69-spike.png` and
+`/tmp/stokesforge69-measurements.json`. No generated artifact is versioned.
 
-## Mesures du 2 octobre 2026
+## Measurements of 2 October 2026
 
-CPython 3.12.14 et numpy 2.5.3 du verrou, Matplotlib 3.11.2 et ses neuf
-dépendances épinglées, Linux x86_64, poste de développement partagé.
-Les tailles sont apparentes (`du -sb`), préfixe complet incluant pip ; elles
-ne représentent pas une archive compressée ni la taille d'un installateur.
+CPython 3.12.14 and numpy 2.5.3 of the lock, Matplotlib 3.11.2 and its nine
+pinned dependencies, Linux x86_64, shared development machine.
+Sizes are apparent (`du -sb`), full prefix including pip; they
+do not represent a compressed archive nor the size of an installer.
 
-| Mesure | Résultat |
+| Measurement | Result |
 |---|---:|
-| Runtime de base | 174 605 105 octets (166,5 Mio) |
-| Copie avec Matplotlib | 269 414 669 octets (256,9 Mio) |
-| Surcoût | 94 809 564 octets (90,4 Mio) |
-| Initialisation du moteur embarqué, sans Matplotlib | 65,6 ms |
-| Import numpy + Matplotlib + Figure/SVG/Agg dans le moteur, cache de polices neuf | 1 236 ms |
-| Import Matplotlib + backend SVG en processus frais, premier échantillon | 769 ms |
-| Même import, médiane des cinq processus suivants | 151 ms |
+| Base runtime | 174,605,105 bytes (166.5 MiB) |
+| Copy with Matplotlib | 269,414,669 bytes (256.9 MiB) |
+| Overhead | 94,809,564 bytes (90.4 MiB) |
+| Initialization of the embedded engine, without Matplotlib | 65.6 ms |
+| Import numpy + Matplotlib + Figure/SVG/Agg in the engine, fresh font cache | 1,236 ms |
+| Import Matplotlib + SVG backend in a fresh process, first sample | 769 ms |
+| Same import, median of the next five processes | 151 ms |
 
-La dernière série commence par importer numpy séparément (49–53 ms), puis
-chronomètre Matplotlib et le backend SVG. Chaque processus est neuf ; seul
-`MPLCONFIGDIR` est partagé entre les six lancers. Le premier construit le
-cache de polices ; les cinq suivants le réutilisent. Les caches du système de
-fichiers ne sont pas purgés. L'import embarqué charge aussi Figure et Agg :
-les deux mesures ne sont donc pas directement comparables. Ces valeurs
-situent le coût sur ce poste, sans promettre un temps universel.
+The last series starts by importing numpy separately (49–53 ms), then
+times Matplotlib and the SVG backend. Each process is fresh; only
+`MPLCONFIGDIR` is shared between the six launches. The first builds the
+font cache; the next five reuse it. The file system caches are not
+purged. The embedded import also loads Figure and Agg:
+the two measurements are therefore not directly comparable. These values
+place the cost on this machine, without promising a universal time.
 
-## Ce que le spike permet de décider
+## What the spike lets us decide
 
-Matplotlib convient à un export libre issu d'un script : l'utilisateur
-scientifique peut réutiliser son code de tracé et les backends standards. Le
-coût en taille est sensible, et l'import doit rester paresseux. Le prototype
-n'ajoute pas de fenêtre Matplotlib ni de nouvelle surface native `pyst`.
+Matplotlib suits a free export from a script: the scientific user
+can reuse their plotting code and the standard backends. The
+size cost is noticeable, and the import must stay lazy. The prototype
+adds neither a Matplotlib window nor a new native `pyst` surface.
 
-Les graphes créés par `pyst.plot` gardent leurs séries et références de colonnes
-dans un `PlotSpec`, modifiable dans les propriétés de StokesForge. Un SVG Matplotlib
-est un résultat figé ; il n'offre pas cet historique d'édition. Les deux voies
-ont donc des usages distincts. Le titre du prototype utilise le mathtext de
-Matplotlib ; le rendu Typst des graphes natifs reste celui de StokesForge.
+Graphs created by `pyst.plot` keep their series and column references
+in a `PlotSpec`, editable in the StokesForge properties. A Matplotlib SVG
+is a frozen result; it does not offer this editing history. The two paths
+therefore have distinct uses. The title of the prototype uses Matplotlib's
+mathtext; the Typst rendering of native graphs remains that of StokesForge.
 
-L'essai démontre la voie « export » demandée dans #69. Un affichage dans une
-note, la gestion de figures persistantes ou une fenêtre dédiée ne sont pas
-implémentés par ce prototype. L'intégration éventuelle au runtime distribué
-reste un choix produit ; les mesures et le test permettent de le prendre.
+The trial demonstrates the "export" path requested in #69. Display in a
+note, management of persistent figures or a dedicated window are not
+implemented by this prototype. The possible integration into the distributed
+runtime remains a product choice; the measurements and the test make it
+possible to take it.
 
-Documentation officielle utilisée :
-[dépendances](https://matplotlib.org/stable/install/dependencies.html),
-[backend SVG](https://matplotlib.org/stable/api/backend_svg_api.html),
+Official documentation used:
+[dependencies](https://matplotlib.org/stable/install/dependencies.html),
+[SVG backend](https://matplotlib.org/stable/api/backend_svg_api.html),
 [Figure.savefig](https://matplotlib.org/stable/api/_as_gen/matplotlib.figure.Figure.savefig.html).

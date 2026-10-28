@@ -1,184 +1,183 @@
-# Menus et clics droits : la grammaire (#152, #155)
+# Menus and right-clicks: the grammar (#152, #155)
 
-Source **unique** des règles d'organisation des menus de la barre et des
-clics droits. Une entrée nouvelle se range dans une section de cette
-grammaire ; un menu qui la viole se signale contre cette page. Le *comment*
-(brique, peintures partagées) est dans `crates/stokesforge-app/src/app/menu_sections.rs`
-et `docs/application/menus-et-barres.md` (§ Menus thématiques) ; les termes et les majuscules
-sont dans `docs/textes-interface.md`.
+The **single** source of the rules that organize the menu-bar menus and the
+right-clicks. A new entry goes into a section of this grammar; a menu that
+violates it is reported against this page. The *how* (building block, shared
+paints) is in `crates/stokesforge-app/src/app/menu_sections.rs`
+and `docs/application/menus-et-barres.md` (§ Themed menus (#114)); the terms and capitalization
+are in `docs/textes-interface.md`.
 
-## Le principe : contenu et enveloppe
+## The principle: content and envelope
 
-Un sous-menu qui **porte le nom de la cible** (*Selection*, *Sheet*,
-*Columns*, *Text*, *Objects*) est utile dans la barre de menus, qui doit dire
-sur quoi elle agit, et un niveau de trop au clic droit, qui a déjà désigné la
-cible. Les peintures partagées (`object_menu`, `object_node_menu`,
+A submenu that **bears the name of the target** (*Selection*, *Sheet*,
+*Columns*, *Text*, *Objects*) is useful in the menu bar, which must say what it
+acts on, and one level too many in the right-click, which has already pointed
+at the target. The shared paints (`object_menu`, `object_node_menu`,
 `object_manager_settings_contents`, `columns_menu_contents` /
-`column_type_role_menus` / `plot_menu`, `graph_properties_menu`) peignent donc
-**le contenu** ; le menu du haut l'enveloppe dans son sous-menu, le clic
-droit l'affiche à plat. Il n'y a pas de seconde voie : seul l'emballage change.
-**Un objet a un seul menu** (`object_node_menu`), qu'on le désigne dans la
-figure ou dans l'Object Manager ; Graph › Selection l'enveloppe.
+`column_type_role_menus` / `plot_menu`, `graph_properties_menu`) therefore paint
+**the content**; the top menu wraps it in its submenu, the right-click shows it
+flat. There is no second path: only the packaging changes.
+**An object has a single menu** (`object_node_menu`), whether it is pointed at
+in the figure or in the Object Manager; Graph › Selection wraps it.
 
-## Ordre canonique des sections
+## Canonical order of sections
 
-Une section vide disparaît avec ses séparateurs.
+An empty section disappears with its separators.
 
-1. **Action principale** de la cible : Show Data, Edit Text, Open / Close d'une fenêtre…
-2. **Créer / insérer** : Add Text, Insert Object ▸, Add Column, Add Worksheet, Plot ▸.
-3. **Presse-papiers**, un seul groupe : Cut, Copy et variantes, Paste et variantes.
-4. **Organiser** : Rename, Duplicate, Move Up / Down, Bring to Front…, Hide (objets de graphe), Move ▸ (colonnes), Type ▸, Role ▸.
-5. **Supprimer** : Clear, Delete…
-6. **Sortie** : Export ▸.
-7. **Properties…**, toujours en dernier, action directe qui ouvre la fenêtre
-   existante sur la page de la cible.
+1. **Main action** of the target: Show Data, Edit Text, Open / Close of a window…
+2. **Create / insert**: Add Text, Insert Object ▸, Add Column, Add Worksheet, Plot ▸.
+3. **Clipboard**, a single group: Cut, Copy and variants, Paste and variants.
+4. **Organize**: Rename, Duplicate, Move Up / Down, Bring to Front…, Hide (graph objects), Move ▸ (columns), Type ▸, Role ▸.
+5. **Delete**: Clear, Delete…
+6. **Output**: Export ▸.
+7. **Properties…**, always last, a direct action that opens the existing window
+   on the target's page.
 
-## Règles
+## Rules
 
-- **Séparateurs** : un trait fin entre deux sections présentes, jamais en tête,
-  en fin ni en double. Il se pose **uniquement** par `MenuSections::section(ui,
-  présente, contenu)` ; l'appelant dit si la section existe pour la cible, le
-  trait suit. Garde `aucun_separateur_brut_dans_un_menu` (`tests/gardes.rs`),
-  sans dérogation : aucun `ui.separator()` dans un menu.
-- **Sous-menu** seulement pour un choix exclusif (Type, Role, type de tracé)
-  ou au moins **3** entrées secondaires d'une même famille. Jamais 1 entrée ;
-  2 entrées se posent à plat. Les actions importantes ou fréquentes sont
-  directes.
-- **Choix exclusif** (S-C3, #227) : une **coche seule** devant l'option
-  courante, jamais un bouton radio ni le fond d'un bouton sélectionné ; il se
-  peint par `menu_sections::menu_choice`. Les cases à cocher restent aux
-  bascules d'affichage.
-- **Profondeur 2** : le menu et un sous-menu. Au clic droit c'est strict ;
-  dans la barre, le menu du haut compte comme le menu. Écarts assumés, tous
-  l'enveloppe d'un contenu partagé qui garde sa profondeur 2 au clic droit :
-  View › Object Manager › Expand by Default, et Workbook › Columns › Move ▸ /
-  Type ▸ / Role ▸ (trois niveaux dans la barre : Workbook, Columns, le
-  sous-menu ; #319 pour Move ▸).
-- **Absent ou grisé** : sans objet pour cette cible → **absent** (Show Data
-  hors d'une courbe) ; pertinent mais momentanément
-  impossible → **grisé avec une info-bulle `.disabled`** qui dit pourquoi.
-- **Cible** : un clic droit hors de la sélection la remplace par l'élément
-  visé (une courbe cliquée au clic droit est sélectionnée) ; dedans, il agit
-  sur toute la sélection.
-- **Libellés** : verbes nus (« Copy », « Rename », « Delete »). L'en-tête grisé
-  qui nomme la cible (`PlotTarget::label`) est **réservé au graphe**, où la
-  cible n'est pas évidente.
-- **Raccourci** affiché à droite dès qu'il existe, toujours par
-  `format_shortcut` d'une constante `SHORTCUT_*`, jamais en dur.
-- **Pas d'icône** dans les menus.
-- **Undo / Redo absents des clics droits** : Edit et le clavier seulement.
-- **Fond d'un panneau** : ses réglages au premier niveau, sans enveloppe
-  « Settings ▸ ».
-- **Rien n'est atteignable seulement au clic droit** : toute entrée a son
-  équivalent dans la barre de menus, un raccourci ou une barre d'outils.
-  **Exception assumée (#326)** : *Add Folder* au clic droit d'un dossier crée
-  *dans* ce dossier, destination que File ▸ New ▸ Add Folder et le bouton de la
-  barre File (qui créent à la racine, comme Add Workbook et Add Graph) ne
-  peuvent pas viser. Créer dans un sous-dossier ne passe que par le clic droit.
-- **Fenêtres détachées** : mêmes peintures, mêmes cibles ; les actions
-  remontent à la racine comme les autres.
+- **Separators**: a thin line between two present sections, never at the start,
+  at the end or doubled. It is placed **only** by `MenuSections::section(ui,
+  présente, contenu)`; the caller says whether the section exists for the
+  target, the line follows. Guard `aucun_separateur_brut_dans_un_menu` (`tests/gardes.rs`),
+  with no exemption: no `ui.separator()` in a menu.
+- **Submenu** only for an exclusive choice (Type, Role, plot type)
+  or at least **3** secondary entries of the same family. Never 1 entry;
+  2 entries go flat. Important or frequent actions are direct.
+- **Exclusive choice** (S-C3, #227): a **lone check mark** in front of the
+  current option, never a radio button nor the background of a selected button;
+  it is painted by `menu_sections::menu_choice`. Check boxes stay for display
+  toggles.
+- **Depth 2**: the menu and one submenu. In the right-click this is strict;
+  in the bar, the top menu counts as the menu. Accepted exceptions, all of them
+  the envelope of a shared content that keeps its depth 2 in the right-click:
+  View › Object Manager › Expand by Default, and Workbook › Columns › Move ▸ /
+  Type ▸ / Role ▸ (three levels in the bar: Workbook, Columns, the
+  submenu; #319 for Move ▸).
+- **Absent or disabled**: not applicable to this target → **absent** (Show Data
+  outside a curve); relevant but temporarily
+  impossible → **disabled with a `.disabled` tooltip** that says why.
+- **Target**: a right-click outside the selection replaces it with the element
+  pointed at (a curve right-clicked is selected); inside it, it acts
+  on the whole selection.
+- **Labels**: bare verbs ("Copy", "Rename", "Delete"). The greyed header
+  that names the target (`PlotTarget::label`) is **reserved to the graph**,
+  where the target is not obvious.
+- **Shortcut** displayed on the right as soon as one exists, always through
+  `format_shortcut` of a `SHORTCUT_*` constant, never hard-coded.
+- **No icon** in the menus.
+- **Undo / Redo absent from the right-clicks**: Edit and the keyboard only.
+- **Background of a panel**: its settings at the first level, without a
+  "Settings ▸" envelope.
+- **Nothing is reachable only by right-click**: every entry has its
+  equivalent in the menu bar, a shortcut or a toolbar.
+  **Accepted exception (#326)**: *Add Folder* in the right-click of a folder
+  creates *in* that folder, a destination that File ▸ New ▸ Add Folder and the
+  button of the File bar (which create at the root, like Add Workbook and Add
+  Graph) cannot target. Creating in a subfolder goes only through the
+  right-click.
+- **Detached windows**: same paints, same targets; the actions
+  go up to the root like the others.
 
-## Arborescence par surface
+## Tree by surface
 
-### Graphe (en-tête grisé = cible)
+### Graph (greyed header = target)
 
-| Cible | Menu |
+| Target | Menu |
 |---|---|
-| Fond, zone de tracé | Add Text · Insert Object ▸ (Rectangle, Ellipse, Line, Arrow, posé au point cliqué à la taille par défaut) ─ Export ▸ (Export Graph…, Copy Graph) ─ Properties… |
-| Courbe | Show Data (le classeur de **cette** courbe) ─ Rename · Move Up · Move Down · Hide ─ Delete ─ Properties… |
-| Titre, titre d'axe | Edit Text · Reset Position ─ Hide ─ Properties… |
-| Entrée de légende | Edit Text ─ Properties… |
-| Légende | Reset Position ─ Hide ─ Properties… |
-| Axe | Hide ─ Properties… |
-| Texte libre | Edit Text ─ Delete ─ Properties… |
-| Objet | Bring to Front · Send to Back ─ Delete ─ Properties… |
+| Background, plot area | Add Text · Insert Object ▸ (Rectangle, Ellipse, Line, Arrow, placed at the clicked point at the default size) ─ Export ▸ (Export Graph…, Copy Graph) ─ Properties… |
+| Curve | Show Data (the workbook of **this** curve) ─ Rename · Move Up · Move Down · Hide ─ Delete ─ Properties… |
+| Title, axis title | Edit Text · Reset Position ─ Hide ─ Properties… |
+| Legend entry | Edit Text ─ Properties… |
+| Legend | Reset Position ─ Hide ─ Properties… |
+| Axis | Hide ─ Properties… |
+| Free text | Edit Text ─ Delete ─ Properties… |
+| Object | Bring to Front · Send to Back ─ Delete ─ Properties… |
 
-Reset Zoom n'est pas au clic droit : il reste dans la barre d'outils, le menu
-Graph, le bouton du graphe zoomé et le double-clic. Export ▸ n'est que sur le
-fond et la zone de tracé, jamais sur un objet (cohérent avec Ctrl+C, qui ne
-copie la figure que sans sélection, #149).
+Reset Zoom is not in the right-click: it stays in the toolbar, the Graph menu,
+the button of the zoomed graph and the double-click. Export ▸ is only on the
+background and the plot area, never on an object (consistent with Ctrl+C, which
+copies the figure only with no selection, #149).
 
 ### Object Manager
 
-| Cible | Menu |
+| Target | Menu |
 |---|---|
-| Nœud | le menu de l'objet de la figure (`object_node_menu`) ; calque et groupe « Axes » : plus de Closed Frame (#344 : retiré de l'interface, `Action::SetClosedFrame` n'a plus d'entrée de menu) |
-| Fond | Show Axes ☐ · Show Objects ☑ · Expand by Default ▸ (5 cases) ─ Reset Settings |
+| Node | the menu of the figure's object (`object_node_menu`); layer and group "Axes": no more Closed Frame (#344: removed from the interface, `Action::SetClosedFrame` no longer has a menu entry) |
+| Background | Show Axes ☐ · Show Objects ☑ · Expand by Default ▸ (5 check boxes) ─ Reset Settings |
 
-View ne contient que « Object Manager ▸ » (plus de Panels ni de Toolbars : panneaux et barres ne se masquent pas par menu ; les réglages du Project Manager et de la console viendront s'y ajouter) ; il enveloppe le même contenu (`object_manager_settings_contents`).
-Les cases gardent le menu ouvert (#114).
+View contains only "Object Manager ▸" (no more Panels nor Toolbars: panels and bars are not hidden through a menu; the settings of the Project Manager and of the console will be added there); it wraps the same content (`object_manager_settings_contents`).
+The check boxes keep the menu open (#114).
 
 ### Project Manager
 
-| Cible | Menu |
+| Target | Menu |
 |---|---|
-| Fenêtre(s) | Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete |
-| Dossier | Add Folder (dans ce dossier) ─ Copy (grisé) · Paste (dans ce dossier) ─ Rename (sur place) · Duplicate (grisé) ─ Delete |
+| Window(s) | Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete |
+| Folder | Add Folder (in this folder) ─ Copy (disabled) · Paste (in this folder) ─ Rename (in place) · Duplicate (disabled) ─ Delete |
 
-Selection ▸ ne subsiste que dans Edit.
+Selection ▸ remains only in Edit.
 
-### Grille
+### Grid
 
-| Cible | Menu |
+| Target | Menu |
 |---|---|
-| Cellule, ligne, champ d'en-tête | Cut · Copy · Copy with Header · Paste · Paste in Place ─ Remove Formula, Keep Data (champ Formule portant une formule, #236 ; aussi Workbook › Columns) · Clear · Delete and Shift Up |
-| En-tête de colonne | Plot ▸ · Add Column ─ presse-papiers ─ Move ▸ · Type ▸ · Role ▸ · Reset Width (largeur par défaut de la sélection, grisée sans largeur retenue, #330) ─ Clear · Delete (retire les colonnes ; un seul Annuler les rend) ; Move ▸ = Move to First · Move Left · Move Right · Move to Last, grisées avec leur raison quand le geste ne changerait rien (#319) ; mêmes entrées dans Workbook › Columns |
-| Grille vide, zone blanche | Add Column |
-| Onglet de feuille, bande vide | Add Worksheet ─ Rename · Duplicate · Reset Column Widths (toute la feuille, grisée sans largeur retenue, #330) ─ Delete |
+| Cell, row, header field | Cut · Copy · Copy with Header · Paste · Paste in Place ─ Remove Formula, Keep Data (Formula field holding a formula, #236; also Workbook › Columns) · Clear · Delete and Shift Up |
+| Column header | Plot ▸ · Add Column ─ clipboard ─ Move ▸ · Type ▸ · Role ▸ · Reset Width (default width of the selection, disabled with no stored width, #330) ─ Clear · Delete (removes the columns; a single Undo restores them); Move ▸ = Move to First · Move Left · Move Right · Move to Last, disabled with their reason when the gesture would change nothing (#319); same entries in Workbook › Columns |
+| Empty grid, blank area | Add Column |
+| Sheet tab, empty strip | Add Worksheet ─ Rename · Duplicate · Reset Column Widths (the whole sheet, disabled with no stored width, #330) ─ Delete |
 
-### Colonnes et courbes : Analysis (#181, #210)
+### Columns and curves: Analysis (#181, #210)
 
-Le menu du haut (`analysis_menu_contents`) range les méthodes en
-**catégories** (#248), une fenêtre par catégorie : Data Manipulation ▸
+The top menu (`analysis_menu_contents`) arranges the methods in
+**categories** (#248), one window per category: Data Manipulation ▸
 (Constant… · Linear… · Polynomial… · Anchor Points… · Reference Correction…,
-à plat) · Fitting ▸ (modèles, Custom Model…) · Peaks and Deconvolution ▸
+flat) · Fitting ▸ (models, Custom Model…) · Peaks and Deconvolution ▸
 (Decompose Peaks… · Reconvolution… · Direct Deconvolution…) · Integrate… ─
-Recalculate Out of Date ─ les **trois dernières analyses lancées** (#249),
-numérotées, sous un filet. Un clic sur une dernière analyse ouvre la fenêtre
-pré-remplie ; Ctrl+clic la relance sur la sélection courante (la fenêtre
-s'ouvre si un réglage manque). Le clic droit d'un en-tête de colonne a un
-sous-menu `Analysis ▸` à quatre entrées, une par catégorie (qui rouvre la
-dernière méthode lancée dans cette catégorie), dans la section
-« créer » (après `Plot ▸` et Add Column) — une entrée par méthode aurait dépassé
-la profondeur 2. Sur une colonne que produit un calcul, une section de gestes
-du calcul (Edit · Recalculate · Detach · Delete) suit Type/Role. Les entrées
-sont **grisées** (info-bulle `.disabled`) tant qu'aucune colonne Y n'est
-visée, jamais absentes.
+Recalculate Out of Date ─ the **last three analyses run** (#249),
+numbered, under a rule. A click on a last analysis opens the window
+pre-filled; Ctrl+click re-runs it on the current selection (the window
+opens if a setting is missing). The right-click of a column header has an
+`Analysis ▸` submenu with four entries, one per category (which reopens the
+last method run in that category), in the "create" section (after `Plot ▸` and
+Add Column) — one entry per method would have exceeded depth 2. On a column
+that a calculation produces, a section of calculation gestures (Edit ·
+Recalculate · Detach · Delete) follows Type/Role. The entries are **disabled**
+(`.disabled` tooltip) as long as no Y column is targeted, never absent.
 
-Le clic droit d'une courbe ou d'un groupe, dans le graphique comme dans
-l'Object Manager, propose le même sous-menu `Analysis ▸`, parmi ses actions principales.
-Le menu Analysis du haut prend la courbe ou le groupe sélectionné quand un
-graphique est actif. Un groupe analyse tous ses membres, dans l'ordre du
-tracé ; les séries construites depuis une ligne de feuille sont grisées.
-Les X/Y sont ceux du tracé, y compris dans un classeur caché : l'appariement
-des colonnes de la feuille n'intervient pas. L'aperçu reprend le cadrage et
-les styles de la source ; Add to graph est coché et les résultats rejoignent
-son calque et son groupe.
+The right-click of a curve or of a group, in the graph as in
+the Object Manager, offers the same `Analysis ▸` submenu, among its main actions.
+The top Analysis menu takes the selected curve or group when a
+graph is active. A group analyzes all its members, in plot order; the series built from a sheet row are disabled.
+The X/Y are those of the plot, including in a hidden workbook: the pairing
+of the sheet's columns does not come into play. The preview takes over the
+framing and the styles of the source; Add to graph is checked and the results
+join its layer and its group.
 
-### Barre de menus
+### Menu bar
 
-Les menus du haut rangent leurs sections dans le même ordre ; ce qu'ils
-enveloppent est le contenu des clics droits : Edit › Selection (menu des
-fenêtres du Project Manager), Graph › Selection (menu de l'objet),
-Workbook › Sheet (dont Reset Column Widths) / Columns (dont Reset Width) / Plot, View › Object Manager.
+The top menus arrange their sections in the same order; what they
+wrap is the content of the right-clicks: Edit › Selection (menu of the
+Project Manager's windows), Graph › Selection (menu of the object),
+Workbook › Sheet (including Reset Column Widths) / Columns (including Reset Width) / Plot, View › Object Manager.
 
-**Bascule au survol (#343).** Quand un menu de la barre est déjà ouvert, passer
-le pointeur sur le titre d'un autre menu ouvre celui-ci et ferme le premier,
-sans clic. Barre au repos, le survol n'ouvre rien. Si le pointeur se dirige
-vers le popup ouvert (diagonale vers une entrée qui traverse le titre voisin),
-on ne bascule pas ; la bascule se fait dès que le pointeur ne vise plus le
-popup (tolérance `is_moving_towards_rect`, comme pour les sous-menus d'egui).
-Un seul code, `bascule_au_survol` (`app/menus.rs`), commun à l'onglet actif et
-à la fenêtre détachée. Un clic sur le titre déjà ouvert le referme.
+**Switch on hover (#343).** When a menu of the bar is already open, moving the
+pointer over the title of another menu opens that one and closes the first,
+without a click. With the bar at rest, hovering opens nothing. If the pointer
+heads toward the open popup (a diagonal toward an entry that crosses the
+neighboring title), no switch happens; the switch happens as soon as the
+pointer no longer aims at the popup (`is_moving_towards_rect` tolerance, as for
+egui's submenus). A single piece of code, `bascule_au_survol` (`app/menus.rs`),
+shared by the active tab and the detached window. A click on the title that is
+already open closes it.
 
-## Ajouter une entrée
+## Adding an entry
 
-1. Choisir sa section dans l'ordre canonique ; si aucune ne convient, la
-   grammaire est à discuter, pas à contourner.
-2. Peindre dans la **peinture partagée** de la surface (une seule écriture
-   pour la barre et le clic droit), derrière `MenuSections::section`.
-3. Décider *absente* ou *grisée* (info-bulle `.disabled` pour un grisage).
-4. Libellé : verbe nu, clé du catalogue `en` **et** `fr` ; raccourci par
+1. Choose its section in the canonical order; if none fits, the
+   grammar is to be discussed, not worked around.
+2. Paint in the surface's **shared paint** (a single write
+   for the bar and the right-click), behind `MenuSections::section`.
+3. Decide *absent* or *disabled* (`.disabled` tooltip for a disabled entry).
+4. Label: bare verb, key in the `en` **and** `fr` catalog; shortcut through
    `SHORTCUT_*`.
-5. Tester dans le module de la surface : l'entrée, son ordre, son absence
-   sur une cible qui n'en veut pas.
+5. Test in the surface's module: the entry, its order, its absence
+   on a target that does not want it.

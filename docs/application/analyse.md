@@ -1,178 +1,177 @@
-# Application : analyse
+# Application: analysis
 
-Suite du sommaire [`README.md`](README.md). Contenu : fenêtre d'analyse, menu Analysis, volet Results.
+Continuation of the table of contents [`README.md`](README.md). Contents: analysis window, Analysis menu, Results panel.
 
-### Analyse : fenêtre, menu, volet Results (#181)
+### Analysis: window, menu, Results panel (#181)
 
-L'interface du traitement mathématique est répartie ainsi :
+The mathematical processing interface is split as follows:
 
-- `stokesforge-app-state/src/analysis.rs` — **le modèle de formulaire** `AnalysisForm` (sans egui) :
-  famille, réglages de chaque famille (tous conservés quand on change de
-  famille), séries, auxiliaire (référence, réponse), `issues()` (ce qui bloque
-  Apply : `Operation::readiness()` de `stokesforge-analysis` pour les points, la
-  zone et le modèle, traduit par `issue_of` ; le `Tree` pour le reste, #260),
-  `operation_for(for_preview)`, `preview(tree)`, `draft(tree)` (noms
-  longs des colonnes de sortie, M6 : la règle est `stokesforge_core::OutputName`,
-  traduite ici par `output_name_text_in`, #256), `from_calculation` (édition), les gestes
-  de l'aperçu (`add_point`, `add_zone`, `remove_near`). Testé sans fenêtre
+- `stokesforge-app-state/src/analysis.rs` — **the form model** `AnalysisForm` (no egui):
+  family, settings of each family (all kept when the family
+  changes), series, auxiliary (reference, response), `issues()` (what blocks
+  Apply: `Operation::readiness()` of `stokesforge-analysis` for the points, the
+  zone and the model, translated by `issue_of`; the `Tree` for the rest, #260),
+  `operation_for(for_preview)`, `preview(tree)`, `draft(tree)` (long
+  names of the output columns, M6: the rule is `stokesforge_core::OutputName`,
+  translated here by `output_name_text_in`, #256), `from_calculation` (editing), the preview
+  gestures (`add_point`, `add_zone`, `remove_near`). Tested without a window
   (`stokesforge-app-state/tests/analysis.rs`).
-- `stokesforge-app-state/src/state/analysis.rs` — l'état et les `Action` (`OpenAnalysis`,
+- `stokesforge-app-state/src/state/analysis.rs` — the state and the `Action`s (`OpenAnalysis`,
   `EditCalculation`, `ApplyAnalysis`, `RecalculateCalculations`,
-  `DetachCalculation`, `RequestDeleteCalculation`/`ConfirmDeleteCalculation`) ;
-  Apply passe par `AddCalculation`/`UpdateCalculation` et garde la fenêtre
-  ouverte sur erreur.
-- Les surfaces de `src/app/` : `analysis_menu`, `analysis_dialog`,
-  `analysis_forms`, `analysis_preview`, `results_pane` (table des modules plus haut).
-- Poignées sur le graphe (#199) : `AnalysisForm::handles` / `move_handle` (modèle,
-  sans egui) listent et déplacent points d'ancrage, bornes de zones/plages et
-  positions de pics ; `app/analysis_handles.rs` les peint par-dessus la figure
-  (jamais dans `stokesforge-render`, donc jamais à l'export) pour le calcul
-  dont une courbe est sélectionnée ou dont la ligne du volet Results est
-  choisie. Pendant le glisser, la ligne de base est recalculée à la volée ;
-  au lâcher, `Action::MoveCalculationHandle` rouvre le calcul comme la fenêtre
-  et pousse un `UpdateCalculation` : **un pas d'historique par geste**, aucun
-  si la poignée n'a pas bougé. Le nœud de l'Object Manager n'existe pas (un
-  calcul n'est pas un nœud).
-- L'aperçu est peint à la main (pas de graphe du projet) mais **sa géométrie ne
-  lui appartient pas** (#261) : pixel ↔ données, zoom, déplacement, cadre
-  initial (marge de 5 %, bornes mémorisées, inversion), aimantation
-  sur la courbe (le rond orange couvre la zone moyennée : rayon = plus grand
-  demi-côté de la zone en X converti en pixels par la transformation d'écran,
-  6 px au minimum, la diagonale du tracé au plus ; le texte « Moyenne sur N
-  points » dit le nombre réel de points, #334) et graduations viennent de `stokesforge-render`
+  `DetachCalculation`, `RequestDeleteCalculation`/`ConfirmDeleteCalculation`);
+  Apply goes through `AddCalculation`/`UpdateCalculation` and keeps the window
+  open on error.
+- The surfaces of `src/app/`: `analysis_menu`, `analysis_dialog`,
+  `analysis_forms`, `analysis_preview`, `results_pane` (module table above).
+- Handles on the graph (#199): `AnalysisForm::handles` / `move_handle` (model,
+  no egui) list and move anchor points, bounds of zones/ranges and
+  peak positions; `app/analysis_handles.rs` paints them over the figure
+  (never in `stokesforge-render`, so never at export) for the calculation
+  of which a curve is selected or whose row in the Results panel is
+  chosen. During the drag, the baseline is recalculated on the fly;
+  on release, `Action::MoveCalculationHandle` reopens the calculation like the window
+  and pushes an `UpdateCalculation`: **one history step per gesture**, none
+  if the handle did not move. The Object Manager node does not exist (a
+  calculation is not a node).
+- The preview is painted by hand (no project graph) but **its geometry does not
+  belong to it** (#261): pixel ↔ data, zoom, pan, initial
+  frame (5% margin, remembered bounds, inversion), snapping
+  to the curve (the orange circle covers the averaged zone: radius = largest
+  half-side of the X zone converted to pixels by the screen transform,
+  6 px at minimum, the plot diagonal at most; the text « Moyenne sur N
+  points » gives the real number of points, #334) and ticks come from `stokesforge-render`
   (`PanelTransform::new`, `zoom`, `pan`, `axis_frame`, `snap_to_curve_zone`,
-  `scale::axis_ticks`) ;
-  l'application construit une transformation par image (une seconde pour la
-  bande des résidus) et convertit en `Pos2`. Les graduations ont donc le pas et
-  le format de celles du graphe (point décimal, sans virgule), et suivent
-  l'échelle logarithmique et l'inversion de l'axe du graphe source. Un zoom ou
-  un déplacement sans image (borne logarithmique ≤ 0) garde le cadre. La
-  **navigation est celle du graphe** (#270, D3 de #299) : Ctrl + molette zoome
-  (au-dessus d'un axe, cette échelle seule), Ctrl + glisser déplace la vue,
-  double-clic recadre, la molette seule ne fait rien ; il n'y a plus d'outil Zoom.
-  Le **geste** (point ou zone) est celui de l'analyse (`natural_tool`) ; seule la
-  détection de pics offre le choix (`tool_choices`), en deux textes entourés à
-  bascule (`form::toggle_texts`). Matrice : `docs/gestes.md`. Il est
-  **calculé sur un fil
-  de travail** (#201, `analysis_preview.rs`, `PreviewJobs`) : un seul fil à la
-  fois, la demande la plus récente remplace celle qui attend, l'image attend
-  40 ms au plus puis montre l'ancien résultat marqué « Calculating… » ; le fil
-  réveille le viewport une fois à sa fin, jamais de réveil périodique. Un
-  calcul déjà lancé n'est pas interrompu : son résultat périmé est ignoré.
-- Colonnes périmées : grisées dans la grille, lettre teintée (`theme::stale_color`)
-  et info-bulle ; le volet Results (replié par défaut) liste les calculs
-  conservés (portée Feuille / Classeur) avec Edit / Recalculate / Delete. Bandeau
-  de 22 px centré, fond un cran plus clair (`theme::results_pane_fill`) ; la liste
-  (≤ 45 % de la largeur) et le détail sont deux rectangles bornés, le texte du
-  détail revient à la ligne ; une ligne de liste est « Opération · Feuille/Colonne »
-  (`row_title`), sans catégorie.
-- Une catégorie du sous-menu `Analysis ▸` du clic droit rouvre **la dernière
-  méthode lancée dans cette catégorie** (tirée des analyses récentes, donc des trois
-  dernières seulement), sinon `Category::default_preset`. `publish_last_presets`
-  la publie chaque image dans le `Context`, `category_preset` la lit : les menus
-  du graphe n'ont pas l'état sous la main. Seule la méthode est reprise, pas ses
-  réglages.
-- Séries pas à jour sur le graphe (#198) : le cœur résout le drapeau
-  (`ResolvedSeries.stale` : une des colonnes X, Y ou d'erreur sort d'un calcul
-  pas à jour) et le rendu l'applique sans rien savoir du modèle — trait grisé
-  (`#9a9a9a`) et triangle d'avertissement juste au-dessus de son dernier point ; la ligne de
-  série de l'Object Manager porte l'icône `Icon::Stale`. Le réglage vit dans le
-  graphe (`PlotSpec::stale_warning`, case « Warn about out-of-date data » de la
-  page Graph des propriétés, défaut actif, fichier ancien = actif). Exporter ou
-  copier la figure d'un graphe qui montre un tel calcul demande d'abord
-  (`app/stale_export.rs`, `AppState::pending_stale_export`) : Export Anyway,
-  Export Without Warning (même figure, sans gris ni marqueur), Recalculate and
-  Export, Cancel. Ni commande ni historique pour la confirmation elle-même ; le
-  recalcul passe par les commandes habituelles.
-- Les erreurs viennent de `errors::analysis::error_message` (match exhaustif).
-- Fenêtre d'ajustement (#204) : trois exponentielles distinctes (`Exponential`,
-  `Exponential with Plateau`, `Two Exponentials`, mêmes noms que `pyst` :
-  `exponential`, `exponential_offset`, `exponential2`) ; la formule du modèle
-  est composée par Typst (`model_formula_source` →
-  `stokesforge_render_egui::formula_label`, cache et polices gardés dans la
-  mémoire d'egui) ; `Auto` remplit les valeurs de départ par
-  `CompiledModel::guess` (pour le modèle libre, un balayage par paramètre qui
-  suit l'échelle des données) ; une aire s'affiche avec le produit des unités de
-  X et de Y quand les deux existent (`value_unit`) ; la fenêtre des pics borne
-  les centres (`center_window`, aussi `pyst.analysis.peaks`).
-- Finitions (#200) : « Add to graph » (case de la sortie, visible quand un
-  graphique montre la courbe ; `AppState::graphs_plotting`) crée le calcul **et**
-  trace ses colonnes (hors résidus, `PanelSpec::push_series_batch` via
-  `AddSeriesToGraph`) dans une seule macro `MacroKind::AnalysisToGraph` ;
-  Show / Keep in Results se souvient du dernier choix d'une session à l'autre
-  (`preferences.json`, `analysis_keep_results`) ; l'en-tête d'une colonne pas à
-  jour porte l'icône `Icon::Stale` (Phosphor `warning`, rôle neutre) à gauche de
-  sa lettre teintée.
-- Analyse depuis une courbe (#210) : le clic droit de la figure et de
-  l’Object Manager partagent l’entrée « Analysis… ». Le menu Analysis du haut
-  utilise aussi la courbe ou le groupe sélectionné quand le graphique est actif.
-  Le formulaire conserve les références X/Y de chaque série, son style et son
-  cadrage ; il n’apparie pas de nouveau les colonnes selon leur position dans la
-  feuille. Un groupe ouvre un lot, les données d’un classeur caché restent
-  analysables. « Add to graph » est coché au départ et les colonnes produites
-  rejoignent le calque et le groupe de leur courbe source.
-  L’aperçu conserve aussi l’échelle logarithmique et l’inversion des axes,
-  avec les gestes en coordonnées des données. Pour des barres ou un
-  histogramme, il relie les Y bruts à analyser avec le style de la source ;
-  il ne calcule pas d’histogramme des résultats.
-- Ligne de base constante (#211) : « Constant… » est la première méthode du
-  menu Baseline. Le fond plat se fixe par un point unique (libre, ou aimanté avec
-  Maj et moyenne locale) éditable en X/Y, ou par la moyenne d’une zone inclusive
-  de X. Une nouvelle zone remplace la précédente ; seuls les couples X/Y finis
-  entrent dans sa moyenne. Subtract et Divide réutilisent les mêmes opérations
-  que les autres lignes de base.
-- Lissage (#324) : trois méthodes dans la catégorie Data Manipulation —
-  moyenne adjacente, Savitzky-Golay (ordre 2 à 5) et médiane glissante —,
-  `stokesforge-analysis/src/smooth.rs` (l'en-tête `//!` dit pourquoi : voisins
-  **par rang** après tri par X, bords réfléchis, fenêtre impaire). La fenêtre se
-  règle en points (impaire : le champ avance de 2, `SmoothSetup::set_points`
-  relève une saisie paire) ou en unités de X (convertie par le pas **médian**) ;
-  plafonds `MAX_WINDOW`, `MIN_ORDER`/`MAX_ORDER` lus par `quantities` et par
-  `Operation::validate`. La sortie est la colonne `smoothed` (`OutputName::Smoothed`),
-  de la longueur de la source, et peut **remplacer** les Y comme une correction
-  (`replacement_key` dans `core::calc`). Un pas de X irrégulier à plus de 1 %
-  n'avertit (`SignalStepNotUniform`) que pour Savitzky-Golay, dont les
-  coefficients supposent un pas régulier. Pas de filtre FFT (écarté : une FFT à
-  écrire sans dépendance, et le traitement des bords et des pas irréguliers).
-- Remplacement des données originales (#212) : la sortie d’une ligne de base,
-  d’une correction par référence ou d’un lissage peut écraser ses colonnes Y ordinaires.
-  La colonne conserve sa longueur et ses cellules non exploitables ; les
-  courbes qui la tracent suivent les nouvelles valeurs. Les colonnes à formule
-  ou calculées restent protégées. Plusieurs courbes qui partagent une source
-  déclenchent une confirmation. La commande `ReplaceAnalysisData` écrit les
-  données et une trace immuable `CorrectionRecord` dans une même entrée
-  annulable, sans lien de calcul ni colonne produite ; les réglages ne se
-  rouvrent pas. Résultats conserve les corrections successives, y compris
-  après une saisie manuelle, et le fichier `.stf` les enregistre. Le petit
-  crayon neutre dans l’en-tête renvoie à ces réglages par son info-bulle ;
-  Annuler retire les valeurs corrigées et la trace du geste ensemble.
-- Le choix du type d'analyse se fait dans la fenêtre (liste « Analysis type »,
-  `family_chooser`) tant qu'elle crée un calcul ; un calcul rouvert garde sa
-  famille (#202).
-- Lignes écartées et comptées (`skipped`) : X ou Y non fini, et, en ajustement
-  pondéré, σ vide, nul ou négatif (#205) — jamais un échec de tout l'ajustement.
-  Un paramètre que les données ne déterminent pas (colonne du jacobien nulle ou
-  combinaison des précédentes) n'a pas d'incertitude et lève
-  `Warning::Undetermined(n)` ; si aucun paramètre libre n'est déterminé,
-  l'ajustement est refusé (`SingularSystem`, #203).
-- Avertissements et erreurs de calcul (#313) : `Warning::NotConverged` couvre
-  aussi un solveur qui n'accepte aucun pas alors que la pente du résidu reste
-  au-dessus de 1e-6 (le point de départ est rendu avec son R², jamais en
-  silence) ; un paramètre collé à sa borne reste convergé. Une pente non
-  finie (ex. `sqrt(a)` en a = 0) est l'erreur `ModelNotEvaluable`. En
-  déconvolution, `Warning::IrfTruncated` signale une réponse coupée au-dessus
-  de 1 % de son pic au décalage retenu (le noyau reste renormalisé). En
-  correction par référence, une cellule vide ou non finie au milieu de la
-  référence est enjambée par interpolation et les points de données qui y
-  tombent sont comptés (`Warning::BridgedReferenceGap(n)`) ; une ligne de
-  référence sans X, ou un `NaN` en fin de référence, ne compte pas.
-  `Warning::DivisionByZero(n)` compte les divisions par zéro (correction par
-  référence, ligne de base en Divide) rendues `NaN` ; un débordement à
-  diviseur non nul n'est pas compté. Les durées moyennes de la reconvolution
-  sont `NaN` (jamais ±∞) quand la somme des amplitudes est nulle.
-- Longueur d'une série (#313) : un calcul lit **la longueur de la colonne X**
-  si elle est donnée, sinon celle de Y ; Y et σ sont tronqués ou complétés de
-  vides à cette longueur. Les lignes de Y au-delà de X n'ont pas d'abscisse :
-  la sortie s'arrête à X et un remplacement des données originales leur garde
-  leur valeur.
-
+  `scale::axis_ticks`);
+  the application builds one transform per frame (a second one for the
+  residuals band) and converts to `Pos2`. The ticks therefore have the step and
+  the format of those of the graph (decimal point, no comma), and follow
+  the logarithmic scale and the axis inversion of the source graph. A zoom or
+  a pan with no image (logarithmic bound ≤ 0) keeps the frame. The
+  **navigation is that of the graph** (#270, D3 of #299): Ctrl + wheel zooms
+  (above an axis, that scale only), Ctrl + drag pans the view,
+  double-click reframes, the wheel alone does nothing; there is no Zoom tool anymore.
+  The **gesture** (point or zone) is that of the analysis (`natural_tool`); only
+  peak detection offers the choice (`tool_choices`), in two boxed texts with a
+  toggle (`form::toggle_texts`). Matrix: `docs/gestes.md`. It is
+  **computed on a worker
+  thread** (#201, `analysis_preview.rs`, `PreviewJobs`): only one thread at a
+  time, the most recent request replaces the one that waits, the frame waits
+  40 ms at most then shows the old result marked "Calculating…"; the thread
+  wakes the viewport once at its end, never a periodic wake-up. A
+  calculation already started is not interrupted: its stale result is ignored.
+- Stale columns: greyed out in the grid, tinted letter (`theme::stale_color`)
+  and tooltip; the Results panel (collapsed by default) lists the kept
+  calculations (Sheet / Workbook scope) with Edit / Recalculate / Delete. A
+  22 px centered banner, background one step lighter (`theme::results_pane_fill`); the list
+  (≤ 45% of the width) and the detail are two bounded rectangles, the
+  detail text wraps; a list row is "Operation · Sheet/Column"
+  (`row_title`), with no category.
+- A category of the `Analysis ▸` submenu of the right-click reopens **the last
+  method run in that category** (taken from the recent analyses, so from the last
+  three only), otherwise `Category::default_preset`. `publish_last_presets`
+  publishes it every frame in the `Context`, `category_preset` reads it: the graph
+  menus do not have the state at hand. Only the method is taken back, not its
+  settings.
+- Series not up to date on the graph (#198): the core resolves the flag
+  (`ResolvedSeries.stale`: one of the X, Y or error columns comes from a calculation
+  not up to date) and the rendering applies it knowing nothing of the model — greyed line
+  (`#9a9a9a`) and warning triangle just above its last point; the
+  series row of the Object Manager carries the `Icon::Stale` icon. The setting lives in the
+  graph (`PlotSpec::stale_warning`, "Warn about out-of-date data" checkbox of the
+  Graph page of the properties, default on, old file = on). Exporting or
+  copying the figure of a graph that shows such a calculation asks first
+  (`app/stale_export.rs`, `AppState::pending_stale_export`): Export Anyway,
+  Export Without Warning (same figure, without grey or marker), Recalculate and
+  Export, Cancel. Neither command nor history for the confirmation itself; the
+  recalculation goes through the usual commands.
+- Errors come from `errors::analysis::error_message` (exhaustive match).
+- Fit window (#204): three distinct exponentials (`Exponential`,
+  `Exponential with Plateau`, `Two Exponentials`, same names as `pyst`:
+  `exponential`, `exponential_offset`, `exponential2`); the model formula
+  is composed by Typst (`model_formula_source` →
+  `stokesforge_render_egui::formula_label`, cache and fonts kept in
+  egui's memory); `Auto` fills the starting values with
+  `CompiledModel::guess` (for the free model, a sweep per parameter that
+  follows the scale of the data); an area is displayed with the product of the units of
+  X and Y when both exist (`value_unit`); the peaks window bounds
+  the centers (`center_window`, also `pyst.analysis.peaks`).
+- Finishing touches (#200): "Add to graph" (checkbox of the output, visible when a
+  graph shows the curve; `AppState::graphs_plotting`) creates the calculation **and**
+  plots its columns (except residuals, `PanelSpec::push_series_batch` via
+  `AddSeriesToGraph`) in a single macro `MacroKind::AnalysisToGraph`;
+  Show / Keep in Results remembers the last choice from one session to the next
+  (`preferences.json`, `analysis_keep_results`); the header of a column not up to
+  date carries the `Icon::Stale` icon (Phosphor `warning`, neutral role) to the left of
+  its tinted letter.
+- Analysis from a curve (#210): the right-click of the figure and of the
+  Object Manager share the "Analysis…" entry. The top Analysis menu
+  also uses the selected curve or group when the graph is active.
+  The form keeps the X/Y references of each series, its style and its
+  framing; it does not pair the columns again according to their position in the
+  sheet. A group opens a batch, the data of a hidden workbook stay
+  analyzable. "Add to graph" is checked at the start and the produced columns
+  join the layer and the group of their source curve.
+  The preview also keeps the logarithmic scale and the inversion of the axes,
+  with gestures in data coordinates. For bars or a
+  histogram, it links the raw Y to analyze with the source style;
+  it does not compute a histogram of the results.
+- Constant baseline (#211): "Constant…" is the first method of the
+  Baseline menu. The flat background is set by a single point (free, or snapped with
+  Shift and local average) editable in X/Y, or by the average of an inclusive zone
+  of X. A new zone replaces the previous one; only finite X/Y pairs
+  enter its average. Subtract and Divide reuse the same operations
+  as the other baselines.
+- Smoothing (#324): three methods in the Data Manipulation category —
+  adjacent average, Savitzky-Golay (order 2 to 5) and moving median —,
+  `stokesforge-analysis/src/smooth.rs` (the `//!` header says why: neighbors
+  **by rank** after sorting by X, reflected edges, odd window). The window is
+  set in points (odd: the field steps by 2, `SmoothSetup::set_points`
+  raises an even input) or in X units (converted by the **median** step); 
+  caps `MAX_WINDOW`, `MIN_ORDER`/`MAX_ORDER` read by `quantities` and by
+  `Operation::validate`. The output is the `smoothed` column (`OutputName::Smoothed`),
+  of the length of the source, and can **replace** the Y like a correction
+  (`replacement_key` in `core::calc`). An X step that is irregular by more than 1%
+  warns (`SignalStepNotUniform`) only for Savitzky-Golay, whose
+  coefficients assume a regular step. No FFT filter (rejected: an FFT to
+  write without a dependency, and the handling of edges and irregular steps).
+- Replacing the original data (#212): the output of a baseline,
+  of a correction by reference or of a smoothing can overwrite its ordinary Y columns.
+  The column keeps its length and its unusable cells; the
+  curves that plot it follow the new values. Columns with a formula
+  or computed columns stay protected. Several curves that share a source
+  trigger a confirmation. The `ReplaceAnalysisData` command writes the
+  data and an immutable `CorrectionRecord` trace in one undoable
+  entry, with no calculation link nor produced column; the settings do not
+  reopen. Results keeps the successive corrections, including
+  after a manual input, and the `.stf` file saves them. The small
+  neutral pencil in the header points to these settings through its tooltip;
+  Undo removes the corrected values and the trace of the gesture together.
+- The choice of the analysis type is made in the window ("Analysis type" list,
+  `family_chooser`) as long as it creates a calculation; a reopened calculation keeps its
+  family (#202).
+- Rows skipped and counted (`skipped`): non-finite X or Y, and, in weighted
+  fit, empty, zero or negative σ (#205) — never a failure of the whole fit.
+  A parameter that the data do not determine (zero Jacobian column or
+  combination of the previous ones) has no uncertainty and raises
+  `Warning::Undetermined(n)`; if no free parameter is determined,
+  the fit is refused (`SingularSystem`, #203).
+- Calculation warnings and errors (#313): `Warning::NotConverged` also covers
+  a solver that accepts no step while the residual slope stays
+  above 1e-6 (the starting point is returned with its R², never
+  silently); a parameter stuck to its bound stays converged. A non-finite
+  slope (e.g. `sqrt(a)` at a = 0) is the `ModelNotEvaluable` error. In
+  deconvolution, `Warning::IrfTruncated` signals a response cut above
+  1% of its peak at the chosen shift (the kernel stays renormalized). In
+  correction by reference, an empty or non-finite cell in the middle of the
+  reference is bridged by interpolation and the data points that fall
+  there are counted (`Warning::BridgedReferenceGap(n)`); a reference row
+  without X, or a `NaN` at the end of the reference, does not count.
+  `Warning::DivisionByZero(n)` counts the divisions by zero (correction by
+  reference, baseline in Divide) returned as `NaN`; an overflow with a
+  non-zero divisor is not counted. The mean durations of the reconvolution
+  are `NaN` (never ±∞) when the sum of the amplitudes is zero.
+- Length of a series (#313): a calculation reads **the length of the X column**
+  if given, otherwise that of Y; Y and σ are truncated or padded with
+  empties to this length. The Y rows beyond X have no abscissa:
+  the output stops at X and a replacement of the original data keeps
+  their value.

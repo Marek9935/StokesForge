@@ -1,172 +1,172 @@
-# Application : menus, barres d'outils, barre d'état
+# Application: menus, toolbars, status bar
 
-Suite du sommaire [`README.md`](README.md). Contenu : menus thématiques, barres d'outils, barre d'état. La grammaire des menus est dans [`../menus.md`](../menus.md).
+Continuation of the table of contents [`README.md`](README.md). Contents: themed menus, toolbars, status bar. The menu grammar is in [`../menus.md`](../menus.md).
 
-### Menus thématiques (#114)
+### Themed menus (#114)
 
-Les menus du haut et les clics droits rangent les actions partagées sous
-les mêmes noms. Les raccourcis et les barres d'outils gardent leurs actions.
-Les cases restent réservées aux bascules d'affichage ; elles laissent la
-chaîne de menus ouverte. Une action ou un choix exclusif (langue, type,
-rôle, résolution) ferme toute la chaîne. `MenuBar` utilise
-`CloseOnClickOutside` ; le fond de l'Object Manager et ses sous-menus de réglages
-utilisent le même comportement. Les actions ferment explicitement
-par `Ui::close`, dont egui propage la demande aux menus parents.
+The top menus and the right-clicks file the shared actions under
+the same names. Shortcuts and toolbars keep their actions.
+Checkboxes stay reserved for display toggles; they leave the
+menu chain open. An action or an exclusive choice (language, type,
+role, resolution) closes the whole chain. `MenuBar` uses
+`CloseOnClickOutside`; the Object Manager background and its settings submenus
+use the same behavior. Actions close explicitly
+through `Ui::close`, whose request egui propagates to the parent menus.
 
-| Menu | Organisation |
+| Menu | Organization |
 |---|---|
-| File | New → New Project, Add Workbook, Add Graph, Add Folder (#326, à la racine) ; Import → Import…, Refresh from Source, Reopen Last Import… ; Open…, Save, Save As… ; Language ; Quit |
-| Edit | Undo, Redo ; Selection → Copy, Paste, Rename, Duplicate, Delete des objets du Project Manager |
-| Workbook (classeur actif) | Sheet → Add Worksheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row, Show x' Row (ce classeur seul) |
-| Graph (graphique actif) | Show Data ; Add Text ; Selection → le menu de l'objet sélectionné (grisé sans sélection) ; Reset Text Positions ; Top / Right Mirror Axis (cases, calque actif ordinaire, #176) ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
-| View | Object Manager → les réglages du fond (Show Axes, Show Objects, Expand by Default, Reset Settings) ; plus de Panels ni de Toolbars (#214) |
+| File | New → New Project, Add Workbook, Add Graph, Add Folder (#326, at the root) ; Import → Import…, Refresh from Source, Reopen Last Import… ; Open…, Save, Save As… ; Language ; Quit |
+| Edit | Undo, Redo ; Selection → Copy, Paste, Rename, Duplicate, Delete of the Project Manager objects |
+| Workbook (active workbook) | Sheet → Add Worksheet, Rename, Duplicate, Delete ; Columns → Add Column, Type, Role ; Plot → Line, Scatter, Line + Symbol, Bar ; Show Metadata Row, Show x' Row (this workbook only) |
+| Graph (active graph) | Show Data ; Add Text ; Selection → the menu of the selected object (disabled without selection) ; Reset Text Positions ; Top / Right Mirror Axis (checkboxes, ordinary active layer, #176) ; Reset Zoom ; Export → Export Graph…, Copy Graph, SVG Text, PNG Resolution ; Properties → Graph Properties…, Plot Area…, Axes…, Series…, Legend…, Theme… |
+| View | Object Manager → the background settings (Show Axes, Show Objects, Expand by Default, Reset Settings) ; no more Panels or Toolbars (#214) |
 | Window | Maximize Window / Restore ; Detach / Reattach Project Manager |
 
-La grammaire des sections, des séparateurs et des sous-menus est dans
-[`docs/menus.md`](../menus.md) (#152) ; chaque menu range ses entrées par
-`MenuSections::section` (`app/menu_sections.rs`), qui ne pose un trait
-qu'entre deux sections présentes. Les peintures partagées peignent le
-**contenu** ; le menu du haut l'enveloppe dans un sous-menu qui nomme la
-cible, le clic droit l'affiche à plat.
+The grammar of sections, separators and submenus is in
+[`docs/menus.md`](../menus.md) (#152); each menu files its entries through
+`MenuSections::section` (`app/menu_sections.rs`), which draws a line
+only between two present sections. The shared paintings paint the
+**content**; the top menu wraps it in a submenu that names the
+target, the right-click displays it flat.
 
-Clics droits : le Project Manager réutilise `object_menu` à plat (une fenêtre :
-Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete ; un dossier : Add Folder ─
-Paste ─ Rename ─ Delete, le renommage s'éditant sur place ; Add Folder crée dans
-ce dossier, le déplie et ouvre le nom du dossier neuf en édition, #326). Un onglet de feuille
-propose Add Worksheet ─ Rename · Duplicate ─ Delete, la bande vide Add
-Worksheet. Les lettres de colonnes : Plot ▸ · Add Column ─ presse-papiers ─
-Type ▸ · Role ▸ ─ Clear · Delete (les colonnes elles-mêmes, `AppState::delete_columns`), au premier niveau (`column_properties_menu`),
-la grille vide Add Column ; les cellules, lignes et champs d'en-tête un seul
-groupe presse-papiers puis Clear · Delete, sans Undo/Redo.
+Right-clicks: the Project Manager reuses `object_menu` flat (a window:
+Open · Close ─ Copy · Paste ─ Rename · Duplicate ─ Delete; a folder: Add Folder ─
+Paste ─ Rename ─ Delete, the renaming being edited in place; Add Folder creates in
+this folder, expands it and opens the name of the new folder for editing, #326). A sheet tab
+offers Add Worksheet ─ Rename · Duplicate ─ Delete, the empty strip Add
+Worksheet. The column letters: Plot ▸ · Add Column ─ clipboard ─
+Type ▸ · Role ▸ ─ Clear · Delete (the columns themselves, `AppState::delete_columns`), at the first level (`column_properties_menu`),
+the empty grid Add Column; the cells, rows and header fields a single
+clipboard group then Clear · Delete, without Undo/Redo.
 
-Le fond de l'Object Manager affiche à plat les réglages de
-`object_manager_settings_contents` (aussi sous View → Object Manager) ; ses
-nœuds et la figure partagent `object_node_menu`, **le** menu d'un objet
-(courbe : Show Data ─ Rename, Move Up/Down, Hide ─ Delete ─ Properties… ;
-texte, axe, objet : voir `docs/menus.md`). Le clic droit de la figure ouvre ce
-menu pour l'objet visé — une courbe est sélectionnée par le clic droit — et,
-sur le fond ou la zone de tracé, Add Text, Insert Object ▸ (la forme est posée
-au point cliqué, `GraphView::insert_shape_at`), Export ▸ et Properties… ; Reset
-Zoom n'y figure plus. Les contenus et cibles sont identiques en fenêtres
-flottantes et détachées.
+The Object Manager background displays flat the settings of
+`object_manager_settings_contents` (also under View → Object Manager); its
+nodes and the figure share `object_node_menu`, **the** menu of an object
+(curve: Show Data ─ Rename, Move Up/Down, Hide ─ Delete ─ Properties…;
+text, axis, object: see `docs/menus.md`). The right-click on the figure opens this
+menu for the targeted object — a curve is selected by the right-click — and,
+on the background or the plot area, Add Text, Insert Object ▸ (the shape is placed
+at the clicked point, `GraphView::insert_shape_at`), Export ▸ and Properties…; Reset
+Zoom no longer appears there. The contents and targets are identical in floating
+and detached windows.
 
-Les filtres de l'arbre ne changent pas la visibilité des objets du graphique.
-Les cases directement dans l'arbre restent des contrôles de visibilité du
-modèle, indépendants de ces filtres. L'inventaire des réglages globaux et les
-questions de persistance pour la future fenêtre Preferences sont suivis dans
-l'issue #148 ; cette refonte n'ajoute pas cette fenêtre.
-
-
-### Barres d'outils (#59, #60)
-
-`src/toolbar.rs`. Des barres de boutons-icônes, **fixes** (#108) : leur
-contenu et leur place sont figés dans le logiciel, dans le panneau
-`stokesforge_toolbars` sous la barre de menu. Ni poignée, ni glisser-déposer,
-ni barre flottante ou verticale, ni logique de fenêtre étroite. Disposition en
-dur (`ToolbarId::row`) : rangée 0 = Fichier (nouveau projet, classeur, graphique, dossier, ouvrir…), Édition (Undo/Redo, #238 : libellé d'historique et raccourci en info-bulle, grisé = « Nothing to undo/redo »), Outils ; rangée 1 = Texte, large,
-seule sur sa rangée. La barre Object Manager est supprimée (#109) : le panneau
-se commande par View et son en-tête. Chaque barre se
-masque par le menu View ; seule cette **visibilité** est une préférence
-(`preferences.json`), jamais une donnée du `.stf`. Un ancien champ `placement`
-est ignoré à la lecture. Le `//!` du module dit pourquoi le panneau est un
-`egui::Panel::top` (ni `Window` brute, ni `show_window_in_layer`).
-
-- `ToolbarLayout` (pur, testé) : visibilité par barre et rangées visibles.
-  `ToolbarState` n'est que la glu egui.
-- Un bouton est un `ToolbarButton` : icône du composant commun, info-bulle
-  (libellé + raccourci + `.hint`), grisage. Il pousse la même `Action` que le
-  menu — jamais une seconde écriture. Le contenu de chaque barre est
-  `toolbar::bar_contents` ; un geste qui n'est pas une `Action` (sélecteur de
-  fichier, assistant d'import, export) remonte en `ToolbarRequest`, exécuté par
-  `StokesForgeApp::run_toolbar_request` (`app/format.rs`) avec les méthodes
-  mêmes des menus. Barre
-  Fichier (#61, #73) : nouveau projet, classeur, graphique vide, import,
-  ouvrir, enregistrer, enregistrer sous,
-  exporter (grisé sans graphe au premier plan).
-- Barre contextuelle `Tools` (#62), **toujours affichée** (#93) : son contenu
-  suit la fenêtre au premier plan (`ToolsContext`, calculé par
-  `StokesForgeApp::tools_context`, `app/format.rs`). Graphe : les outils Pointeur / Zoom / Texte
-  (`GraphTool` de la vue, bouton enfoncé pour l'outil actif), réinitialiser le
-  zoom, propriétés. Classeur : ajouter feuille, ajouter colonne, tracer la
-  sélection (courbe, nuage, barres ; grisé sans colonne sélectionnée). Matrice,
-  note, aucune fenêtre : les outils du graphe restent là, **grisés**, avec
-  l'info-bulle `toolbar-tools.disabled` (la barre ne change pas de forme).
-  Après un séparateur, elle porte le **format de l'objet** sélectionné (#64,
-  fusionné avec elle par #93 ; `object_format_contents`), grisé sans objet
-  sélectionné. Elle se masque encore par le menu View.
-- Barre `Text` (format du texte, #63), **toujours affichée** (#108) sur sa
-  propre rangée : sans graphe au premier plan ses boutons sont grisés, avec
-  l'info-bulle `toolbar-tools.disabled` (comme `Tools`, #93). Police, corps, couleur, gras,
-  italique, indice, exposant, formule. Les textes du graphe étant déjà du
-  markup Typst, gras, italique, indice, exposant, formule, couleur et corps
-  d'un passage **écrivent des balises dans le texte** (`text_format::apply`,
-  pur). La **police** n'est plus une balise (#78) : c'est un champ de la zone
-  entière (`TextFont`, `AnnotationSpec::font`), posé par `StokesForgeApp::format_zone`
-  (`app/format.rs`) — brouillon de l'éditeur pour un texte libre en édition
-  (`pending_zone_font_id`), `Action::SetTextFont` pour un titre ou la légende,
-  `Action::SetAnnotation` pour un texte libre sélectionné. Un titre, un titre
-  d'axe ou la légende **sélectionné** (`FormatTarget::Zone`, #77) ne prend que
-  la police, le corps et la **couleur de la zone entière** (`Action::SetTextColor`, #90 ;
-  les autres boutons sont grisés). Cible (`FormatTarget`, `StokesForgeApp::format_target`) : un champ en
-  édition sur place (texte libre, titre, titre d'axe, légende) → la demande
-  attend dans la mémoire d'egui (`pending_format_id`) et le champ la pose à
-  son prochain tracé sur le surlignage qu'egui a gardé, ou insère les balises
-  au curseur (`apply_pending_format`) ; sinon un texte libre sélectionné →
-  tout le texte, en **une** `Action::SetAnnotation` (couleur et corps sont les
-  champs du modèle) ; sinon les boutons sont grisés. Gras, italique, indice,
-  exposant et formule se défont en les reposant. Un clic sur la barre ne ferme
-  pas l'éditeur (`toolbar::over_format_bar`). Gras et italique agissent aussi
-  sur tout un titre, titre d'axe ou titre de calque **sélectionné** hors édition
-  (#243, `format_zone` : une `Action::SetTextContent`, bascule comme
-  `text_format::apply`) ; la légende, sans texte propre, n'en prend pas.
-  Largeur d'un texte libre (#244) : sans largeur, le texte tient sur une ligne ;
-  les deux poignées du texte sélectionné (milieux des bords gauche et droit,
-  `GraphView::width_handles`) fixent `AnnotationSpec::width`, en fraction de la
-  figure, et l'éditeur règle l'alignement (`TextAlign`). Un titre, titre de
-  calque ou titre d'axe sélectionné a les mêmes poignées (`TextFont::width`,
-  `GraphEvent::TextResized` → `Action::SetTextFont`) ; la légende n'en a pas. Les
-  trois boutons d'alignement de la barre de format (`TextFormat::Align`, un champ de la boîte
-  ou de la zone, jamais une balise) agissent sur le texte libre (brouillon en
-  édition, sinon `SetAnnotation`) et sur la zone d'un titre.
-  Les listes affichent la police et le corps de la zone sélectionnée (#97),
-  ou ceux du brouillon pendant l'édition, y compris en fenêtre détachée.
-  Un corps hérité affiche sa taille effective issue du pipeline partagé ;
-  l'entrée « Auto » est alors cochée. La choisir retire le corps explicite
-  d'un titre ou de la légende, et rétablit le corps par défaut d'un texte libre.
-  L'entrée « Graph font » est cochée pour une police héritée, tandis que le
-  champ affiche le nom de la police du graphe. « Auto » réutilise la clé
-  commune `common-auto` des deux langues.
-  Un réglage local de police ou de corps dans le markup affiche le libellé
-  neutre « Font » ou « Size » : la barre résume la zone sans interpréter les
-  expressions Typst calculées. Le parseur distingue ces réglages du texte
-  brut, des commentaires et des blocs de code brut.
-  Le sélecteur affiche aussi la couleur de cette zone (#99), jamais le dernier
-  choix fait sur une autre zone. Un passage portant une couleur locale donne
-  un échantillon neutre. En édition, le brouillon du sélecteur dure seulement
-  jusqu'à la validation du geste, qui pose une seule balise sur le passage.
-- Visibilité : plus de menu pour masquer une barre (View ne porte que les réglages des panneaux, #214) ; l'état reste dans `preferences.json`. Emplacement et visibilité
-  sont dans `preferences.json` (champ `toolbars`), pas dans le `.stf` ; la
-  lecture ignore ce qu'elle ne comprend pas. `StokesForgeApp::new` ne lit pas le
-  fichier (les tests), `main` appelle `load_toolbar_layout`.
-- Les barres ne sont peintes que dans la fenêtre principale, pas dans les
-  fenêtres OS détachées.
+The tree filters do not change the visibility of the graph objects.
+The checkboxes directly in the tree remain model visibility controls,
+independent of these filters. The inventory of global settings and the
+persistence questions for the future Preferences window are tracked in
+issue #148; this rework does not add that window.
 
 
-## Barre d'état (#230)
+### Toolbars (#59, #60)
 
-`AppState::notice` (information), `warn` (avertissement) et `fail` (erreur,
-sauf dans un dialogue modal : S-M7) posent un `StatusMessage` à niveau
-(`StatusLevel`) et l'ajoutent à un historique de `STATUS_HISTORY_LEN` = 50
-messages. Une information s'efface après `INFO_LIFETIME` (8 s) :
-`AppState::expire_status`, appelée à chaque image par
-`sync_window_title_and_status` (`app.rs`), efface l'échue et rend le délai
-restant — seul cet instant programme un redessin, aucun réveil au repos.
-Avertissement et erreur restent jusqu'au message suivant. Un clic sur la
-barre (`Action::OpenStatusHistory`) ouvre `status_history_window`. Une
-exception de script est une erreur (« Script failed. See the console »). La
-barre n'affiche plus « Revision N » ni « Reopen Last Import… ».
+`src/toolbar.rs`. Bars of icon buttons, **fixed** (#108): their
+content and place are frozen in the software, in the
+`stokesforge_toolbars` panel under the menu bar. No handle, no drag-and-drop,
+no floating or vertical bar, no narrow-window logic. Hard-coded
+layout (`ToolbarId::row`): row 0 = File (new project, workbook, graph, folder, open…), Edit (Undo/Redo, #238: history label and shortcut in the tooltip, disabled = "Nothing to undo/redo"), Tools; row 1 = Text, wide,
+alone on its row. The Object Manager bar is removed (#109): the panel
+is controlled by View and its header. Each bar is
+hidden through the View menu; only this **visibility** is a preference
+(`preferences.json`), never data of the `.stf`. An old `placement` field
+is ignored on reading. The `//!` of the module says why the panel is an
+`egui::Panel::top` (neither a raw `Window` nor `show_window_in_layer`).
 
-Le titre de la fenêtre est `AppState::window_title` (nom du fichier, « • »
-tant qu'il y a du travail non enregistré), renvoyé par
-`ViewportCommand::Title` quand il change. L'historique est horodaté en UTC
-(pas de fuseau local sans dépendance de calendrier).
+- `ToolbarLayout` (pure, tested): visibility per bar and visible rows.
+  `ToolbarState` is only the egui glue.
+- A button is a `ToolbarButton`: icon of the common component, tooltip
+  (label + shortcut + `.hint`), disabling. It pushes the same `Action` as the
+  menu — never a second write. The content of each bar is
+  `toolbar::bar_contents`; a gesture that is not an `Action` (file
+  picker, import wizard, export) goes up as a `ToolbarRequest`, executed by
+  `StokesForgeApp::run_toolbar_request` (`app/format.rs`) with the very
+  methods of the menus. File
+  bar (#61, #73): new project, workbook, empty graph, import,
+  open, save, save as,
+  export (disabled without a foreground graph).
+- `Tools` contextual bar (#62), **always displayed** (#93): its content
+  follows the foreground window (`ToolsContext`, computed by
+  `StokesForgeApp::tools_context`, `app/format.rs`). Graph: the Pointer / Zoom / Text tools
+  (`GraphTool` of the view, button pressed for the active tool), reset the
+  zoom, properties. Workbook: add sheet, add column, plot the
+  selection (curve, scatter, bars; disabled without a selected column). Matrix,
+  note, no window: the graph tools stay there, **disabled**, with
+  the tooltip `toolbar-tools.disabled` (the bar does not change shape).
+  After a separator, it carries the **format of the selected object** (#64,
+  merged into it by #93; `object_format_contents`), disabled without a selected
+  object. It is still hidden through the View menu.
+- `Text` bar (text format, #63), **always displayed** (#108) on its
+  own row: without a foreground graph its buttons are disabled, with
+  the tooltip `toolbar-tools.disabled` (like `Tools`, #93). Font, size, color, bold,
+  italic, subscript, superscript, formula. Since the graph texts are already
+  Typst markup, bold, italic, subscript, superscript, formula, color and size
+  of a passage **write tags into the text** (`text_format::apply`,
+  pure). The **font** is no longer a tag (#78): it is a field of the
+  whole zone (`TextFont`, `AnnotationSpec::font`), set by `StokesForgeApp::format_zone`
+  (`app/format.rs`) — editor draft for a free text being edited
+  (`pending_zone_font_id`), `Action::SetTextFont` for a title or the legend,
+  `Action::SetAnnotation` for a selected free text. A **selected** title, axis
+  title or legend (`FormatTarget::Zone`, #77) takes only the
+  font, the size and the **color of the whole zone** (`Action::SetTextColor`, #90;
+  the other buttons are disabled). Target (`FormatTarget`, `StokesForgeApp::format_target`): a field being
+  edited in place (free text, title, axis title, legend) → the request
+  waits in the egui memory (`pending_format_id`) and the field applies it at
+  its next paint on the highlight that egui kept, or inserts the tags
+  at the cursor (`apply_pending_format`); otherwise a selected free text →
+  the whole text, in **one** `Action::SetAnnotation` (color and size are
+  fields of the model); otherwise the buttons are disabled. Bold, italic, subscript,
+  superscript and formula are undone by applying them again. A click on the bar does not close
+  the editor (`toolbar::over_format_bar`). Bold and italic also act
+  on a whole **selected** title, axis title or layer title outside editing
+  (#243, `format_zone`: one `Action::SetTextContent`, toggle like
+  `text_format::apply`); the legend, having no text of its own, takes none.
+  Width of a free text (#244): without a width, the text fits on one line;
+  the two handles of the selected text (middles of the left and right edges,
+  `GraphView::width_handles`) set `AnnotationSpec::width`, as a fraction of the
+  figure, and the editor sets the alignment (`TextAlign`). A selected title, layer
+  title or axis title has the same handles (`TextFont::width`,
+  `GraphEvent::TextResized` → `Action::SetTextFont`); the legend has none. The
+  three alignment buttons of the format bar (`TextFormat::Align`, a field of the box
+  or of the zone, never a tag) act on the free text (draft while
+  editing, otherwise `SetAnnotation`) and on the zone of a title.
+  The lists display the font and size of the selected zone (#97),
+  or those of the draft during editing, including in a detached window.
+  An inherited size displays its effective size from the shared pipeline;
+  the "Auto" entry is then checked. Choosing it removes the explicit size
+  of a title or the legend, and restores the default size of a free text.
+  The "Graph font" entry is checked for an inherited font, while the
+  field displays the name of the graph font. "Auto" reuses the common
+  key `common-auto` of both languages.
+  A local font or size setting in the markup displays the neutral label
+  "Font" or "Size": the bar summarizes the zone without interpreting the
+  computed Typst expressions. The parser distinguishes these settings from plain
+  text, comments and raw code blocks.
+  The selector also displays the color of this zone (#99), never the last
+  choice made on another zone. A passage carrying a local color gives
+  a neutral swatch. While editing, the selector draft lasts only
+  until the gesture is confirmed, which sets a single tag on the passage.
+- Visibility: no more menu to hide a bar (View carries only the panel settings, #214); the state stays in `preferences.json`. Placement and visibility
+  are in `preferences.json` (field `toolbars`), not in the `.stf`; reading
+  ignores what it does not understand. `StokesForgeApp::new` does not read the
+  file (the tests), `main` calls `load_toolbar_layout`.
+- The bars are painted only in the main window, not in the detached
+  OS windows.
+
+
+## Status bar (#230)
+
+`AppState::notice` (information), `warn` (warning) and `fail` (error,
+except in a modal dialog: S-M7) set a leveled `StatusMessage`
+(`StatusLevel`) and add it to a history of `STATUS_HISTORY_LEN` = 50
+messages. An information message clears after `INFO_LIFETIME` (8 s):
+`AppState::expire_status`, called on every frame by
+`sync_window_title_and_status` (`app.rs`), clears the expired one and returns the remaining
+delay — only this instant schedules a repaint, no wake-up when idle.
+Warning and error stay until the next message. A click on the
+bar (`Action::OpenStatusHistory`) opens `status_history_window`. A
+script exception is an error ("Script failed. See the console"). The
+bar no longer displays "Revision N" or "Reopen Last Import…".
+
+The window title is `AppState::window_title` (file name, "•" as
+long as there is unsaved work), sent through
+`ViewportCommand::Title` when it changes. The history is timestamped in UTC
+(no local time zone without a calendar dependency).

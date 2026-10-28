@@ -4,19 +4,19 @@ Read when placing a field, message, dialog, confirmation, greying, keyboard or m
 
 ## Where the rule lives
 
-- Rule index: `docs/standard-interface.md` § Index des règles.
-- Numeric fields, bounds, steps, wheel: `docs/standard-interface.md` § Champs numériques.
-- Refused or clamped input: `docs/standard-interface.md` § Saisie refusée ou ramenée.
-- Decimal comma: `docs/standard-interface.md` § Virgule décimale.
-- Displayed numbers: `docs/standard-interface.md` § Affichage des nombres.
-- Text, in-place editing, Typst: `docs/standard-interface.md` § Champs texte et édition sur place.
-- Field help, dimmed text: `docs/standard-interface.md` § Messages et aide.
-- Greyed and its reason: `docs/standard-interface.md` § Grisé.
-- Keyboard, mouse, cursors: `docs/standard-interface.md` § Clavier et souris ; `docs/gestes.md` § Le modèle.
-- Long task, empty panel: `docs/standard-interface.md` § Travaux longs et états vides.
-- Building blocks in place / to come: `docs/standard-interface.md` § Briques et gardes.
-- A rule that looks wrong: `docs/standard-interface.md` § Une règle qui paraît fausse.
-- Overview: `docs/principes-ui.md` § 4. Rien n'est grisé ou refusé en silence.
+- Rule index: `docs/standard-interface.md` § Rule index.
+- Numeric fields, bounds, steps, wheel: `docs/standard-interface.md` § Numeric fields.
+- Refused or clamped input: `docs/standard-interface.md` § Input refused or brought back.
+- Decimal comma: `docs/standard-interface.md` § Decimal comma.
+- Displayed numbers: `docs/standard-interface.md` § Number display.
+- Text, in-place editing, Typst: `docs/standard-interface.md` § Text fields and in-place editing.
+- Field help, dimmed text: `docs/standard-interface.md` § Messages and help.
+- Greyed and its reason: `docs/standard-interface.md` § Disabled.
+- Keyboard, mouse, cursors: `docs/standard-interface.md` § Keyboard and mouse ; `docs/gestes.md` § The model.
+- Long task, empty panel: `docs/standard-interface.md` § Long tasks and empty states.
+- Building blocks in place / to come: `docs/standard-interface.md` § Building blocks and guards.
+- A rule that looks wrong: `docs/standard-interface.md` § A rule that looks wrong.
+- Overview: `docs/principes-ui.md` § 4. Nothing is greyed out or refused silently.
 
 ## Check
 

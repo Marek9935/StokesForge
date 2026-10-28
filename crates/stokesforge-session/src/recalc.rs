@@ -53,7 +53,7 @@
 //! colonne, son unité, une autre feuille, une fonction `row()` — sans
 //! l'ajouter ici serait « propre » à tort : la valeur affichée resterait
 //! fausse sans erreur. Ce qu'il faut tester alors : `docs/tests.md`,
-//! « Recalcul ciblé ».
+//! « Targeted recalculation ».
 //!
 //! ## L'oracle
 //!
