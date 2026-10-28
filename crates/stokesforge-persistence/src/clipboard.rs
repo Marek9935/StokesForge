@@ -1,7 +1,7 @@
-//! Transport textuel entre instances, sans version de format (#105).
-//! MessagePack réutilise les conversions du `.stf` ; l'hexadécimal permet de
-//! traverser le presse-papiers texte d'egui, y compris le récepteur Wayland.
-//! Chaque objet est validé comme un arbre indépendant avant d'être capturé.
+//! Text transport between instances, without a format version (#105).
+//! MessagePack reuses the conversions of the `.stf`; hexadecimal lets the
+//! text clipboard of egui carry it, the Wayland receiver included.
+//! Each object is validated as an independent tree before being captured.
 
 use std::fmt::Write;
 use std::path::Path;
@@ -12,10 +12,10 @@ use stokesforge_core::{NodeCopy, NodeId};
 use crate::schema::{FileBody, KindRecord, NodeRecord};
 use crate::{build_project, convert, PersistenceError, PersistenceResult, MAX_NODE_ID};
 
-/// Taille maximale du texte publié : 64 Mio, hexadécimal compris.
+/// Maximum size of the published text: 64 MiB, hexadecimal included.
 pub const MAX_OBJECT_CLIPBOARD_BYTES: usize = 64 * 1024 * 1024;
 
-/// Le sérialiseur s’arrête au plafond avant de construire un énorme texte.
+/// The serializer stops at the cap before building a huge text.
 struct ClipboardBuffer {
     bytes: Vec<u8>,
     limit: usize,
@@ -44,12 +44,12 @@ struct ClipboardRecord {
     graph_data: Vec<Vec<(u64, Vec<NodeRecord>)>>,
 }
 
-/// Reconnaît un transport d'objets avant qu'un tableur ne le traite en texte.
+/// Recognizes an object transport before a spreadsheet treats it as text.
 pub fn is_object_clipboard(text: &str) -> bool {
     text.starts_with(PREFIX)
 }
 
-/// Encode uniquement les objets capturés, sans fichier temporaire.
+/// Encodes only the captured objects, without a temporary file.
 pub fn encode_objects(origin: &str, copies: &[NodeCopy]) -> PersistenceResult<String> {
     let record = ClipboardRecord {
         origin: origin.into(),
@@ -80,8 +80,8 @@ pub fn encode_objects(origin: &str, copies: &[NodeCopy]) -> PersistenceResult<St
     Ok(text)
 }
 
-/// Décode et valide le transport ; l'origine sert uniquement à reconnaître
-/// les références internes au projet courant, jamais à comparer ses IDs.
+/// Decodes and validates the transport; the origin only serves to recognize
+/// the internal references to the current project, never to compare its IDs.
 pub fn decode_objects(text: &str) -> PersistenceResult<(String, Vec<NodeCopy>)> {
     if text.len() > MAX_OBJECT_CLIPBOARD_BYTES {
         return Err(corrupt("object clipboard exceeds 64 MiB".into()));
@@ -206,7 +206,7 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn le_plafond_arrete_le_serialiseur_avant_allocation() {
+    fn the_cap_stops_the_serializer_before_allocation() {
         let mut buffer = ClipboardBuffer {
             bytes: Vec::new(),
             limit: 4,

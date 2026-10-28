@@ -1,5 +1,5 @@
-//! Les plafonds des réglages et les prérequis d'une opération (#260) : ce que
-//! l'interface, `pyst` et le fichier lisent d'une seule source.
+//! The setting caps and the prerequisites of an operation (#260): what the
+//! interface, `pyst` and the file read from a single source.
 
 use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp, Interpolation};
 use stokesforge_analysis::deconv::{DirectMethod, ReconvSpec};
@@ -72,13 +72,13 @@ fn reconvolution(components: usize) -> Operation {
     }
 }
 
-// ── Plafonds ───────────────────────────────────────────────────────────
+// ── Caps ─────────────────────────────────────────────────────────────
 
-/// Un degré lu tel quel des préférences atteint `compile` avant `validate` :
-/// sans plafond, `degree + 1` paramètres nommés seraient fabriqués (des
-/// milliards). Le refus doit venir avant toute allocation.
+/// A degree read as is from the preferences reaches `compile` before
+/// `validate`: without a cap, `degree + 1` named parameters would be built
+/// (billions). The refusal must come before any allocation.
 #[test]
-fn compile_refuse_un_degre_hors_plafond_sans_allouer() {
+fn compile_refuses_a_degree_beyond_the_cap_without_allocating() {
     for degree in [MAX_DEGREE + 1, u32::MAX] {
         let result = Model::Polynomial { degree }.compile();
         assert_eq!(
@@ -86,27 +86,27 @@ fn compile_refuse_un_degre_hors_plafond_sans_allouer() {
             Some(AnalysisError::InvalidParameter {
                 name: "degree".into()
             }),
-            "degré {degree}"
+            "degree {degree}"
         );
     }
-    // Le plafond lui-même reste compilable.
+    // The cap itself stays compilable.
     let compiled = Model::Polynomial { degree: MAX_DEGREE }
         .compile()
-        .expect("le plafond est permis");
+        .expect("the cap is allowed");
     assert_eq!(compiled.param_count(), MAX_DEGREE as usize + 1);
 }
 
 #[test]
-fn les_plafonds_sont_ceux_de_la_table_des_grandeurs() {
+fn the_caps_are_those_of_the_quantities_table() {
     assert_eq!(MAX_DEGREE, 9);
     assert_eq!(MAX_ITERATIONS, 5000);
-    // Décision du 2026-10-15 : 100 pics partout (le champ en tenait 50).
+    // Decision of 2026-10-15: 100 peaks everywhere (the field held 50).
     assert_eq!(MAX_PEAKS, 100);
     assert_eq!(MAX_COMPONENTS, 4);
 }
 
 #[test]
-fn validate_accepte_le_plafond_et_refuse_au_dela() {
+fn validate_accepts_the_cap_and_refuses_beyond() {
     assert_eq!(peaks(MAX_PEAKS).validate(), Ok(()));
     assert_eq!(peaks(MAX_PEAKS + 1).validate(), invalid("max_peaks"));
     assert_eq!(reconvolution(MAX_COMPONENTS).validate(), Ok(()));
@@ -131,7 +131,7 @@ fn validate_accepte_le_plafond_et_refuse_au_dela() {
 }
 
 #[test]
-fn validate_refuse_une_borne_de_zone_non_finie() {
+fn validate_refuses_a_non_finite_zone_bound() {
     let zones = |zones| baseline(BaselineMethod::Zones { zones, degree: 1 });
     assert_eq!(zones(vec![(0.0, 1.0)]).validate(), Ok(()));
     assert_eq!(zones(vec![(f64::NAN, 1.0)]).validate(), invalid("zones"));
@@ -142,7 +142,7 @@ fn validate_refuse_une_borne_de_zone_non_finie() {
 }
 
 #[test]
-fn validate_ignore_une_ancre_non_finie() {
+fn validate_ignores_a_non_finite_anchor() {
     let anchors = |points| {
         baseline(BaselineMethod::Anchors {
             points,
@@ -150,7 +150,7 @@ fn validate_ignore_une_ancre_non_finie() {
         })
     };
     assert_eq!(anchors(vec![(0.0, 1.0), (2.0, 3.0)]).validate(), Ok(()));
-    // #298 : une ancre non posée est ignorée, jamais une erreur de validation.
+    // #298: an unplaced anchor is ignored, never a validation error.
     assert_eq!(
         anchors(vec![(0.0, 1.0), (f64::NAN, 3.0)]).validate(),
         Ok(())
@@ -162,7 +162,7 @@ fn validate_ignore_une_ancre_non_finie() {
 }
 
 #[test]
-fn validate_refuse_un_point_de_droite_non_fini() {
+fn validate_refuses_a_non_finite_line_point() {
     let line = |p1, p2| baseline(BaselineMethod::Line { p1, p2 });
     assert_eq!(line((0.0, 1.0), (4.0, 3.0)).validate(), Ok(()));
     assert_eq!(
@@ -176,7 +176,7 @@ fn validate_refuse_un_point_de_droite_non_fini() {
 }
 
 #[test]
-fn validate_refuse_un_decalage_initial_non_fini() {
+fn validate_refuses_a_non_finite_initial_shift() {
     let shifted = |shift_initial| Operation::Reconvolution {
         spec: ReconvSpec {
             components: 1,
@@ -194,7 +194,7 @@ fn validate_refuse_un_decalage_initial_non_fini() {
 }
 
 #[test]
-fn validate_refuse_une_plage_non_finie() {
+fn validate_refuses_a_non_finite_range() {
     let fit_in = |range| match fit(Model::Linear, Vec::new()) {
         Operation::Fit {
             spec, residuals, ..
@@ -229,7 +229,7 @@ fn validate_refuse_une_plage_non_finie() {
 }
 
 #[test]
-fn validate_refuse_une_graine_ou_une_proeminence_non_finie() {
+fn validate_refuses_a_non_finite_seed_or_prominence() {
     let seeded = |center, height, fwhm| match peaks(3) {
         Operation::Peaks {
             mut spec,
@@ -258,7 +258,7 @@ fn validate_refuse_une_graine_ou_une_proeminence_non_finie() {
         assert_eq!(seeded(1.0, Some(bad), None).validate(), invalid("seeds"));
         assert_eq!(seeded(1.0, None, Some(bad)).validate(), invalid("seeds"));
     }
-    // Une largeur imposée nulle ou négative est refusée (#285).
+    // An imposed width that is zero or negative is refused (#285).
     for bad in [0.0, -1.0] {
         assert_eq!(seeded(1.0, None, Some(bad)).validate(), invalid("seeds"));
     }
@@ -281,7 +281,7 @@ fn validate_refuse_une_graine_ou_une_proeminence_non_finie() {
 }
 
 #[test]
-fn validate_refuse_un_decalage_ou_une_fenetre_non_finis() {
+fn validate_refuses_a_non_finite_shift_or_window() {
     let direct = |shift| Operation::DirectDeconvolution {
         method: DirectMethod::RichardsonLucy { iterations: 5 },
         shift,
@@ -305,15 +305,15 @@ fn validate_refuse_un_decalage_ou_une_fenetre_non_finis() {
     );
 }
 
-/// Chaque champ numérique de position ou de réglage (#278) : `(nom du champ,
-/// erreur attendue, opération qui place la valeur dans ce champ)`. Les paires
-/// (plages, fenêtre) sont posées à leurs deux bouts.
-type Champ = (&'static str, &'static str, Box<dyn Fn(f64) -> Operation>);
+/// Each numeric position or setting field (#278): `(field name, expected
+/// error, operation that puts the value in this field)`. The pairs (ranges,
+/// window) are set at both ends.
+type Field = (&'static str, &'static str, Box<dyn Fn(f64) -> Operation>);
 
-/// Retouche d'une opération de pics : spec, détection automatique, plage.
-type Retouche = Box<dyn Fn(&mut PeaksSpec, &mut Option<AutoDetect>, &mut Option<(f64, f64)>)>;
+/// Tweak of a peaks operation: spec, automatic detection, range.
+type Tweak = Box<dyn Fn(&mut PeaksSpec, &mut Option<AutoDetect>, &mut Option<(f64, f64)>)>;
 
-fn champs_numeriques() -> Vec<Champ> {
+fn numeric_fields() -> Vec<Field> {
     let fit_range = |range| match fit(Model::Linear, Vec::new()) {
         Operation::Fit {
             spec, residuals, ..
@@ -324,7 +324,7 @@ fn champs_numeriques() -> Vec<Champ> {
         },
         _ => unreachable!(),
     };
-    let peaks_with = |f: Retouche| {
+    let peaks_with = |f: Tweak| {
         move |_: ()| match peaks(3) {
             Operation::Peaks {
                 mut spec,
@@ -358,7 +358,7 @@ fn champs_numeriques() -> Vec<Champ> {
         },
         residuals: false,
     };
-    let mut v: Vec<Champ> = Vec::new();
+    let mut v: Vec<Field> = Vec::new();
     v.push((
         "Fit.range.0",
         "range",
@@ -369,13 +369,13 @@ fn champs_numeriques() -> Vec<Champ> {
         "range",
         Box::new(move |x| fit_range(Some((0.0, x)))),
     ));
-    for (nom, premier) in [("Peaks.range.0", true), ("Peaks.range.1", false)] {
+    for (name, first) in [("Peaks.range.0", true), ("Peaks.range.1", false)] {
         v.push((
-            nom,
+            name,
             "range",
             Box::new(move |x| {
                 peaks_with(Box::new(move |_, _, r| {
-                    *r = Some(if premier { (x, 1.0) } else { (0.0, x) });
+                    *r = Some(if first { (x, 1.0) } else { (0.0, x) });
                 }))(())
             }),
         ));
@@ -406,7 +406,7 @@ fn champs_numeriques() -> Vec<Champ> {
         }),
     ));
     v.push((
-        "seed.center (deuxième graine)",
+        "seed.center (second seed)",
         "seeds",
         Box::new(move |x| {
             peaks_with(Box::new(move |s, _, _| {
@@ -452,30 +452,31 @@ fn champs_numeriques() -> Vec<Champ> {
     v
 }
 
-/// Champ par champ : NaN, +inf et -inf sont refusés sous le nom du champ ; une
-/// valeur finie (y compris aux extrêmes positifs de `f64` : une largeur imposée est > 0, #285) passe, et l'opération fait
-/// alors l'aller-retour exact de l'arbre — c'est la promesse que `validate`
-/// tient pour le `.stf` (#278).
+/// Field by field: NaN, +inf and -inf are refused under the field name; a
+/// finite value (including the positive extremes of `f64`: an imposed width
+/// must be positive, #285) passes, and the operation then round-trips exactly
+/// through the tree — this is the promise that `validate` keeps for the
+/// `.stf` (#278).
 #[test]
-fn validate_refuse_chaque_champ_non_fini_et_accepte_le_fini_qui_fait_l_aller_retour() {
-    for (champ, nom, op) in champs_numeriques() {
+fn validate_refuses_each_non_finite_field_and_accepts_the_finite_one_that_round_trips() {
+    for (field, name, op) in numeric_fields() {
         for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            assert_eq!(op(bad).validate(), invalid(nom), "{champ} = {bad}");
+            assert_eq!(op(bad).validate(), invalid(name), "{field} = {bad}");
         }
         for ok in [0.5, f64::MAX, f64::MIN_POSITIVE] {
             let operation = op(ok);
-            assert_eq!(operation.validate(), Ok(()), "{champ} = {ok}");
+            assert_eq!(operation.validate(), Ok(()), "{field} = {ok}");
             assert_eq!(
                 Operation::from_tree(&operation.to_tree()),
                 Ok(operation),
-                "{champ} = {ok}"
+                "{field} = {ok}"
             );
         }
     }
 }
 
 #[test]
-fn validate_ignore_toute_ancre_non_finie_et_l_accepte_finie() {
+fn validate_ignores_any_non_finite_anchor_and_accepts_a_finite_one() {
     for interpolation in [Interpolation::Segments, Interpolation::Spline] {
         let anchors = |points| {
             baseline(BaselineMethod::Anchors {
@@ -498,7 +499,7 @@ fn validate_ignore_toute_ancre_non_finie_et_l_accepte_finie() {
 }
 
 #[test]
-fn run_des_ancres_ignore_le_non_fini_et_compte_les_ancres_posees() {
+fn run_of_anchors_ignores_the_non_finite_and_counts_the_placed_anchors() {
     let input = SeriesInput {
         x: vec![0.0, 1.0, 2.0, 3.0, 4.0],
         y: vec![1.0, 2.0, 3.0, 4.0, 5.0],
@@ -518,7 +519,7 @@ fn run_des_ancres_ignore_le_non_fini_et_compte_les_ancres_posees() {
         .find(|v| v.key == "baseline.points")
         .unwrap();
     assert_eq!(points.value, 3.0);
-    // Ligne de base y = x : la série corrigée vaut 1 partout.
+    // Baseline y = x: the corrected series is 1 everywhere.
     let corrected = &out[0]
         .columns
         .iter()
@@ -528,7 +529,7 @@ fn run_des_ancres_ignore_le_non_fini_et_compte_les_ancres_posees() {
     for c in corrected {
         assert!((c - 1.0).abs() < 1e-12);
     }
-    // Un NaN : ignoré par `run`, comme par `readiness` (#298) ; compté pour rien.
+    // A NaN: ignored by `run`, as by `readiness` (#298); counted as nothing.
     let bad = anchors(vec![(0.0, 0.0), (2.0, 2.0), (f64::NAN, 1.0)]);
     assert_eq!(bad.readiness(), Readiness::Ready);
     let out = run(&bad, std::slice::from_ref(&input), None).unwrap();
@@ -541,13 +542,13 @@ fn run_des_ancres_ignore_le_non_fini_et_compte_les_ancres_posees() {
 }
 
 #[test]
-fn validate_refuse_un_ajustement_sans_parametre_libre() {
-    // Aucun paramètre : l'expression n'en contient pas.
+fn validate_refuses_a_fit_without_a_free_parameter() {
+    // No parameter: the expression contains none.
     assert_eq!(
         fit(custom("2 + 3"), Vec::new()).validate(),
         Err(AnalysisError::NoFreeParameter)
     );
-    // Tous fixés : le solveur refuserait de la même façon, plus tard.
+    // All fixed: the solver would refuse the same way, later.
     let fixed = ParamSetting {
         fixed: true,
         ..ParamSetting::default()
@@ -556,14 +557,14 @@ fn validate_refuse_un_ajustement_sans_parametre_libre() {
         fit(Model::Linear, vec![fixed.clone(), fixed.clone()]).validate(),
         Err(AnalysisError::NoFreeParameter)
     );
-    // Un seul paramètre libre suffit ; les réglages manquants sont libres.
+    // A single free parameter is enough; missing settings are free.
     assert_eq!(
         fit(Model::Linear, vec![fixed.clone(), ParamSetting::default()]).validate(),
         Ok(())
     );
     assert_eq!(fit(Model::Linear, vec![fixed]).validate(), Ok(()));
     assert_eq!(fit(custom("a*x + b"), Vec::new()).validate(), Ok(()));
-    // Le refus vient avant tout calcul.
+    // The refusal comes before any computation.
     let input = SeriesInput {
         x: vec![0.0, 1.0, 2.0],
         y: vec![0.0, 1.0, 2.0],
@@ -575,12 +576,12 @@ fn validate_refuse_un_ajustement_sans_parametre_libre() {
     );
 }
 
-// ── Prérequis ──────────────────────────────────────────────────────────
+// ── Prerequisites ──────────────────────────────────────────────────────────
 
 #[test]
-fn readiness_dit_ce_qui_manque_a_une_ligne_de_base() {
+fn readiness_says_what_a_baseline_lacks() {
     let nan = (f64::NAN, f64::NAN);
-    // Point constant pas encore posé.
+    // Constant point not placed yet.
     assert_eq!(
         baseline(BaselineMethod::Constant { point: nan }).readiness(),
         Readiness::NeedsPoints { needed: 1, have: 0 }
@@ -589,7 +590,7 @@ fn readiness_dit_ce_qui_manque_a_une_ligne_de_base() {
         baseline(BaselineMethod::Constant { point: (1.0, 2.0) }).readiness(),
         Readiness::Ready
     );
-    // Zone constante pas encore posée.
+    // Constant zone not placed yet.
     assert_eq!(
         baseline(BaselineMethod::ConstantZone { zone: nan }).readiness(),
         Readiness::NeedsZone
@@ -598,7 +599,7 @@ fn readiness_dit_ce_qui_manque_a_une_ligne_de_base() {
         baseline(BaselineMethod::ConstantZone { zone: (0.0, 1.0) }).readiness(),
         Readiness::Ready
     );
-    // Droite : le nombre de points posés est dit.
+    // Line: the number of placed points is reported.
     let line = |p1, p2| baseline(BaselineMethod::Line { p1, p2 }).readiness();
     assert_eq!(
         line(nan, nan),
@@ -609,12 +610,12 @@ fn readiness_dit_ce_qui_manque_a_une_ligne_de_base() {
         Readiness::NeedsPoints { needed: 2, have: 1 }
     );
     assert_eq!(line((0.0, 1.0), (2.0, 3.0)), Readiness::Ready);
-    // Zones de fond.
+    // Background zones.
     let zones = |zones| baseline(BaselineMethod::Zones { zones, degree: 1 }).readiness();
     assert_eq!(zones(Vec::new()), Readiness::NeedsZone);
     assert_eq!(zones(vec![(0.0, 1.0)]), Readiness::Ready);
     assert_eq!(zones(vec![(0.0, 1.0), (nan.0, 2.0)]), Readiness::NeedsZone);
-    // Points d'ancrage.
+    // Anchor points.
     let anchors = |points: Vec<(f64, f64)>| {
         baseline(BaselineMethod::Anchors {
             points,
@@ -631,13 +632,13 @@ fn readiness_dit_ce_qui_manque_a_une_ligne_de_base() {
         Readiness::NeedsPoints { needed: 2, have: 1 }
     );
     assert_eq!(anchors(vec![(0.0, 1.0), (2.0, 3.0)]), Readiness::Ready);
-    // Une ancre non posée ne compte pas.
+    // An unplaced anchor does not count.
     assert_eq!(
         anchors(vec![(0.0, 1.0), nan]),
         Readiness::NeedsPoints { needed: 2, have: 1 }
     );
     assert_eq!(anchors(vec![(0.0, 1.0), (2.0, 3.0), nan]), Readiness::Ready);
-    // Position de l'ancre non posée, coordonnée en défaut, infinis.
+    // Position of the unplaced anchor, coordinate at fault, infinities.
     let inf = (f64::INFINITY, 1.0);
     assert_eq!(
         anchors(vec![nan, (0.0, 1.0)]),
@@ -655,7 +656,7 @@ fn readiness_dit_ce_qui_manque_a_une_ligne_de_base() {
 }
 
 #[test]
-fn readiness_dit_ce_qui_manque_a_un_ajustement() {
+fn readiness_says_what_a_fit_lacks() {
     assert_eq!(fit(Model::Linear, Vec::new()).readiness(), Readiness::Ready);
     assert!(matches!(
         fit(custom("a*"), Vec::new()).readiness(),
@@ -665,8 +666,8 @@ fn readiness_dit_ce_qui_manque_a_un_ajustement() {
         fit(custom("2 + 3"), Vec::new()).readiness(),
         Readiness::NoParameter
     );
-    // Un degré hors plafond (lu d'un fichier) est un réglage refusé, sans
-    // allocation : jamais l'abandon de l'application.
+    // A degree beyond the cap (read from a file) is a refused setting,
+    // without allocation: never the application giving up.
     assert_eq!(
         fit(Model::Polynomial { degree: u32::MAX }, Vec::new()).readiness(),
         Readiness::Invalid(AnalysisError::InvalidParameter {
@@ -676,7 +677,7 @@ fn readiness_dit_ce_qui_manque_a_un_ajustement() {
 }
 
 #[test]
-fn les_autres_operations_sont_toujours_pretes() {
+fn the_other_operations_are_always_ready() {
     let integrate = Operation::Integrate {
         spec: IntegrateSpec {
             ranges: Vec::new(),
@@ -698,7 +699,7 @@ fn les_autres_operations_sont_toujours_pretes() {
     }
 }
 
-// ── Oublier les positions ──────────────────────────────────────────────
+// ── Forgetting positions ──────────────────────────────────────────────
 
 fn set() -> ParamSetting {
     ParamSetting {
@@ -711,7 +712,7 @@ fn set() -> ParamSetting {
 }
 
 #[test]
-fn forget_positions_efface_les_plages_et_les_reglages_par_parametre() {
+fn forget_positions_clears_the_ranges_and_the_per_parameter_settings() {
     let mut op = Operation::Fit {
         spec: FitSpec {
             model: Model::Linear,
@@ -721,8 +722,8 @@ fn forget_positions_efface_les_plages_et_les_reglages_par_parametre() {
         residuals: true,
     };
     op.forget_positions();
-    // `initial`, `fixed`, `min`, `max` et `shared` : tout revient au défaut,
-    // la longueur et le reste (résidus) sont gardés.
+    // `initial`, `fixed`, `min`, `max` and `shared`: everything goes back to
+    // the default, the length and the rest (residuals) are kept.
     assert_eq!(
         op,
         Operation::Fit {
@@ -776,7 +777,7 @@ fn forget_positions_efface_les_plages_et_les_reglages_par_parametre() {
     };
     assert!(spec.seeds.is_empty());
     assert_eq!(*range, None);
-    // Les réglages de méthode restent.
+    // The method settings stay.
     assert_eq!(spec.center_window, Some(0.5));
     assert!(spec.link_widths);
     assert_eq!(auto.map(|a| a.max_peaks), Some(6));
@@ -808,7 +809,7 @@ fn forget_positions_efface_les_plages_et_les_reglages_par_parametre() {
 }
 
 #[test]
-fn forget_positions_garde_la_definition_d_une_ligne_de_base() {
+fn forget_positions_keeps_the_definition_of_a_baseline() {
     let method = BaselineMethod::Anchors {
         points: vec![(0.0, 1.0), (2.0, 3.0)],
         interpolation: Interpolation::Spline,
@@ -816,7 +817,7 @@ fn forget_positions_garde_la_definition_d_une_ligne_de_base() {
     let mut op = baseline(method.clone());
     op.forget_positions();
     assert_eq!(op, baseline(method));
-    // Ni un degré énorme n'est compilé : rien n'est alloué.
+    // Not even a huge degree is compiled: nothing is allocated.
     let mut op = fit(Model::Polynomial { degree: u32::MAX }, vec![set()]);
     op.forget_positions();
     assert_eq!(
@@ -828,23 +829,23 @@ fn forget_positions_garde_la_definition_d_une_ligne_de_base() {
     );
 }
 
-// ── Estimation automatique ─────────────────────────────────────────────
+// ── Automatic estimation ─────────────────────────────────────────────
 
-fn droite() -> Series {
+fn line_series() -> Series {
     let x: Vec<f64> = (0..50).map(f64::from).collect();
     let y = x.iter().map(|x| 300.0 * x + 40.0).collect();
     Series::new(x, y)
 }
 
 #[test]
-fn auto_initial_suit_le_modele_sur_les_points_de_la_plage() {
-    let series = droite();
+fn auto_initial_follows_the_model_on_the_points_of_the_range() {
+    let series = line_series();
     let mut spec = FitSpec {
         model: Model::Linear,
         params: Vec::new(),
     };
-    // Sans plage : la droite entière ; les réglages sont ramenés à la longueur
-    // du modèle.
+    // Without a range: the whole line; the settings are brought to the length
+    // of the model.
     spec.auto_initial(&series, None);
     let expected = spec.model.compile().unwrap().guess(&series);
     let initial: Vec<Option<f64>> = spec.params.iter().map(|p| p.initial).collect();
@@ -854,9 +855,9 @@ fn auto_initial_suit_le_modele_sur_les_points_de_la_plage() {
     );
     assert!((expected[0] - 40.0).abs() < 1e-6 && (expected[1] - 300.0).abs() < 1e-6);
 
-    // Une plage ne garde que ses points, bornes incluses, dans n'importe quel
-    // ordre : sur ce modèle exact le départ ne change pas, donc on la teste
-    // avec des Y qui cassent la droite hors de la plage.
+    // A range keeps only its points, bounds included, in any order: on this
+    // exact model the start does not change, so it is tested with Y values
+    // that break the line outside the range.
     let mut broken = series.clone();
     for (x, y) in broken.x.iter().zip(broken.y.iter_mut()) {
         if *x < 10.0 || *x > 20.0 {
@@ -871,7 +872,7 @@ fn auto_initial_suit_le_modele_sur_les_points_de_la_plage() {
     let initial: Vec<f64> = spec.params.iter().map(|p| p.initial.unwrap()).collect();
     assert!((initial[0] - 40.0).abs() < 1e-6, "{initial:?}");
     assert!((initial[1] - 300.0).abs() < 1e-6, "{initial:?}");
-    // Sans plage, les points cassés tirent l'estimation ailleurs (témoin).
+    // Without a range, the broken points pull the estimate elsewhere (witness).
     let mut spec = FitSpec {
         model: Model::Linear,
         params: Vec::new(),
@@ -881,8 +882,8 @@ fn auto_initial_suit_le_modele_sur_les_points_de_la_plage() {
 }
 
 #[test]
-fn auto_initial_ignore_les_parametres_fixes_et_les_modeles_illisibles() {
-    let series = droite();
+fn auto_initial_ignores_fixed_parameters_and_unreadable_models() {
+    let series = line_series();
     let mut spec = FitSpec {
         model: Model::Linear,
         params: vec![
@@ -898,7 +899,7 @@ fn auto_initial_ignore_les_parametres_fixes_et_les_modeles_illisibles() {
     assert_eq!(spec.params[0].initial, Some(7.0));
     assert!((spec.params[1].initial.unwrap() - 300.0).abs() < 1e-6);
 
-    // Un modèle qui ne se compile pas : rien ne bouge.
+    // A model that does not compile: nothing moves.
     let mut bad = FitSpec {
         model: custom("a*"),
         params: vec![ParamSetting::default()],
@@ -908,12 +909,12 @@ fn auto_initial_ignore_les_parametres_fixes_et_les_modeles_illisibles() {
 }
 
 #[test]
-fn validate_refuse_toute_borne_de_zone_non_finie_lo_et_hi() {
+fn validate_refuses_any_non_finite_zone_bound_lo_and_hi() {
     let zones = |zones| baseline(BaselineMethod::Zones { zones, degree: 1 });
     for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         for z in [(bad, 1.0), (0.0, bad), (bad, bad)] {
             assert_eq!(zones(vec![z]).validate(), invalid("zones"), "{z:?}");
-            // Zone valide à côté : avant ou après, le refus tient.
+            // Valid zone next to it: before or after, the refusal holds.
             assert_eq!(zones(vec![(0.0, 1.0), z]).validate(), invalid("zones"));
             assert_eq!(zones(vec![z, (0.0, 1.0)]).validate(), invalid("zones"));
             assert_eq!(zones(vec![z]).readiness(), Readiness::NeedsZone);
@@ -924,7 +925,7 @@ fn validate_refuse_toute_borne_de_zone_non_finie_lo_et_hi() {
 }
 
 #[test]
-fn validate_accepte_zone_degeneree_inversee_et_degres_extremes() {
+fn validate_accepts_degenerate_reversed_zone_and_extreme_degrees() {
     let with = |zones: Vec<(f64, f64)>, degree| {
         baseline(BaselineMethod::Zones { zones, degree }).validate()
     };
@@ -932,22 +933,22 @@ fn validate_accepte_zone_degeneree_inversee_et_degres_extremes() {
     assert_eq!(with(vec![(3.0, 1.0)], 1), Ok(()));
     assert_eq!(with(vec![(0.0, 1.0)], MAX_DEGREE), Ok(()));
     assert_eq!(with(vec![(0.0, 1.0)], MAX_DEGREE + 1), invalid("degree"));
-    // Degré 0 : la constante, permis (#298).
+    // Degree 0: the constant, allowed (#298).
     assert_eq!(with(vec![(0.0, 1.0)], 0), Ok(()));
-    // Une zone non finie l'emporte sur le degré (erreur de zone d'abord).
+    // A non-finite zone wins over the degree (zone error first).
     assert_eq!(with(vec![(f64::NAN, 1.0)], 0), invalid("zones"));
     assert_eq!(
         with(vec![(f64::NAN, 1.0)], MAX_DEGREE + 1),
         invalid("zones")
     );
-    // Les zones valides et inversées sont prêtes.
+    // Valid and reversed zones are ready.
     let ready = |zones| baseline(BaselineMethod::Zones { zones, degree: 1 }).readiness();
     assert_eq!(ready(vec![(2.0, 2.0)]), Readiness::Ready);
     assert_eq!(ready(vec![(3.0, 1.0)]), Readiness::Ready);
 }
 
 #[test]
-fn run_refuse_une_borne_de_zone_non_finie_et_calcule_sinon() {
+fn run_refuses_a_non_finite_zone_bound_and_computes_otherwise() {
     let input = SeriesInput {
         x: (0..6).map(f64::from).collect(),
         y: vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0],
@@ -969,8 +970,8 @@ fn run_refuse_une_borne_de_zone_non_finie_et_calcule_sinon() {
             );
         }
     }
-    // Chemin sans NaN : y = 2x + 1 est sa propre ligne de base, corrigé = 0
-    // (zone inversée comprise).
+    // Path without NaN: y = 2x + 1 is its own baseline, corrected = 0
+    // (reversed zone included).
     for z in [(0.0, 2.0), (2.0, 0.0), (2.0, 2.0)] {
         let zs = if z.0 == z.1 {
             vec![(0.0, 1.0), z]
@@ -982,15 +983,15 @@ fn run_refuse_une_borne_de_zone_non_finie_et_calcule_sinon() {
             .columns
             .iter()
             .find(|c| c.key == "corrected")
-            .expect("colonne corrigée");
+            .expect("corrected column");
         assert_eq!(corrected.data.len(), 6);
         assert!(corrected.data.iter().all(|v| v.abs() < 1e-9), "{z:?}");
     }
 }
 
-// ── Largeur de graine imposée (#285) : validate, decompose et run d'accord ─
+// ── Forced seed width (#285): validate, decompose and run agree ─
 
-fn pic_gaussien() -> SeriesInput {
+fn gaussian_peak() -> SeriesInput {
     let x: Vec<f64> = (0..300).map(|i| f64::from(i) * 0.1).collect();
     let y = x
         .iter()
@@ -999,7 +1000,7 @@ fn pic_gaussien() -> SeriesInput {
     SeriesInput { x, y, sigma: None }
 }
 
-fn pics_graine(fwhm: Option<f64>) -> Operation {
+fn seeded_peaks(fwhm: Option<f64>) -> Operation {
     Operation::Peaks {
         spec: PeaksSpec {
             shape: PeakShape::Gaussian,
@@ -1019,18 +1020,18 @@ fn pics_graine(fwhm: Option<f64>) -> Operation {
 }
 
 #[test]
-fn largeur_de_graine_validate_decompose_et_run_donnent_la_meme_variante() {
+fn seed_width_validate_decompose_and_run_give_the_same_variant() {
     use stokesforge_analysis::peaks::decompose;
-    let input = pic_gaussien();
-    let serie = Series::new(input.x.clone(), input.y.clone());
+    let input = gaussian_peak();
+    let series = Series::new(input.x.clone(), input.y.clone());
     for fwhm in [0.0, -0.0, -1.0, f64::NEG_INFINITY] {
-        let op = pics_graine(Some(fwhm));
+        let op = seeded_peaks(Some(fwhm));
         let Operation::Peaks { spec, .. } = &op else {
             unreachable!()
         };
         assert_eq!(op.validate(), invalid("seeds"), "validate {fwhm:e}");
         assert_eq!(
-            decompose(&serie, spec),
+            decompose(&series, spec),
             Err(AnalysisError::InvalidParameter {
                 name: "seeds".into()
             }),
@@ -1044,10 +1045,10 @@ fn largeur_de_graine_validate_decompose_et_run_donnent_la_meme_variante() {
             "run {fwhm:e}"
         );
     }
-    // NaN et inf : refusés par `validate` (donc par `run`) avec la même
-    // variante, avant que `decompose` n'ait à s'en soucier.
+    // NaN and inf: refused by `validate` (hence by `run`) with the same
+    // variant, before `decompose` has to care.
     for fwhm in [f64::NAN, f64::INFINITY] {
-        let op = pics_graine(Some(fwhm));
+        let op = seeded_peaks(Some(fwhm));
         assert_eq!(op.validate(), invalid("seeds"));
         assert_eq!(
             run(&op, std::slice::from_ref(&input), None).unwrap_err(),
@@ -1056,21 +1057,21 @@ fn largeur_de_graine_validate_decompose_et_run_donnent_la_meme_variante() {
             }
         );
     }
-    // Une largeur valide, ou absente, passe les trois.
+    // A valid or absent width passes all three.
     for fwhm in [None, Some(2.0), Some(f64::MIN_POSITIVE)] {
-        assert_eq!(pics_graine(fwhm).validate(), Ok(()));
+        assert_eq!(seeded_peaks(fwhm).validate(), Ok(()));
     }
-    let ok = run(&pics_graine(None), std::slice::from_ref(&input), None).unwrap();
+    let ok = run(&seeded_peaks(None), std::slice::from_ref(&input), None).unwrap();
     assert_eq!(ok.len(), 1);
 }
 
 #[test]
-fn hauteur_de_graine_minuscule_est_acceptee_par_run_avec_l_avertissement_non_converge() {
+fn a_tiny_seed_height_is_accepted_by_run_with_the_not_converged_warning() {
     use stokesforge_analysis::ops::Warning;
-    let mut op = pics_graine(None);
+    let mut op = seeded_peaks(None);
     if let Operation::Peaks { spec, .. } = &mut op {
         spec.seeds[0].height = Some(1e-9);
     }
-    let out = run(&op, &[pic_gaussien()], None).unwrap();
+    let out = run(&op, &[gaussian_peak()], None).unwrap();
     assert!(out[0].warnings.contains(&Warning::NotConverged));
 }

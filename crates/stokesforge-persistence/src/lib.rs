@@ -1,92 +1,92 @@
-//! Persistance de StokesForge : `save`/`load` d'un [`stokesforge_core::Project`] complet.
+//! Persistence for StokesForge: `save`/`load` of a complete [`stokesforge_core::Project`].
 //!
-//! # Frontière figée
+//! # Frozen boundary
 //!
-//! Deux fonctions, un sens chacune, un `Project` complet en entrée/sortie et
-//! rien d'autre :
+//! Two functions, one direction each, a complete `Project` in/out and
+//! nothing else:
 //!
 //! ```text
 //! save(project: &Project, path: &Path) -> Result<(), PersistenceError>;
 //! load(path: &Path) -> Result<Project, PersistenceError>;
 //! ```
 //!
-//! Aucun appelant ne connaît le format sur disque ; s'il devait être
-//! remplacé un jour (Zarr avait été envisagé), rien au-dessus n'aurait à
-//! changer. Depuis la V1 le format lui-même est figé (invariant 12). Le
-//! chargement est **intégral** : tout le projet tient en mémoire, il n'y a
-//! pas de chargement partiel ou différé.
+//! No caller knows the on-disk format; if it ever had to be
+//! replaced (Zarr was considered), nothing above would have to
+//! change. Since V1 the format itself is frozen (invariant 12). Loading
+//! is **complete**: the whole project fits in memory, there is
+//! no partial or deferred loading.
 //!
-//! # Le format ne s'écrit pas dans le modèle
+//! # The format is not written into the model
 //!
-//! `stokesforge-core` ne dérive aucun `Serialize`/`Deserialize` : ce crate définit
-//! ses **propres structures de transport** (`schema.rs`, privées) et écrit à
-//! la main les conversions vers/depuis le modèle en mémoire (`convert.rs`).
-//! Le schéma sur disque est un objet explicite, versionné indépendamment des
-//! types du cœur — les faire diverger un jour (renommer un champ du modèle
-//! sans casser les fichiers déjà écrits, par exemple) ne coûtera qu'une
-//! fonction de conversion à ajuster.
+//! `stokesforge-core` derives no `Serialize`/`Deserialize`: this crate defines
+//! its **own transport structures** (`schema.rs`, private) and writes by
+//! hand the conversions to/from the in-memory model (`convert.rs`).
+//! The on-disk schema is an explicit object, versioned independently of the
+//! core types — making them diverge one day (renaming a field of the model
+//! without breaking the files already written, for example) will only cost one
+//! conversion function to adjust.
 //!
-//! # Cinq propriétés tenues dès la version 1
+//! # Five properties held from version 1
 //!
-//! Les rajouter après coup coûterait une migration ; elles sont donc dans le
-//! format depuis la version 1, figée (règle de version : `docs/persistance.md`) :
+//! Adding them afterwards would cost a migration; they are therefore in the
+//! format since version 1, frozen (version rule: `docs/persistance.md`):
 //!
-//! 1. **Écriture atomique.** `save` écrit dans un fichier temporaire du même
-//!    répertoire que la destination, puis le renomme sur la cible
-//!    (`tempfile::NamedTempFile::persist`). Un lecteur ne voit jamais un
-//!    fichier à moitié écrit ; une écriture qui échoue ne laisse aucune trace
-//!    sur la destination.
-//! 2. **Numéro de version en premier.** Les 4 octets qui suivent la
-//!    signature sont le numéro de version, lus et vérifiés **avant** de
-//!    toucher au corps du fichier. Un fichier plus récent que ce lecteur est
-//!    refusé proprement (`UnsupportedVersion`), sans tenter de décoder un
-//!    corps qu'il ne comprendrait pas forcément. Un fichier qui n'est pas un
-//!    StokesForge (mauvaise signature, ou trop court pour en porter une) est
-//!    refusé tout aussi proprement (`NotAStokesForgeFile`).
-//! 3. **Valeur manquante vs chaîne vide.** Les colonnes texte distinguent
-//!    `None` (manquant) de `Some(String::new())` (chaîne vide présente) —
-//!    c'est déjà la convention du cœur, ce format ne fait que la préserver.
-//!    Les valeurs manquantes numériques sont `NaN`, écrites et relues
-//!    **bit à bit** (`f64::to_le_bytes`/`from_le_bytes` conservent le motif
-//!    binaire exact).
-//! 4. **Compteur de `NodeId` persisté.** `next_id_hint` — le **prochain**
-//!    identifiant à attribuer, pas le plus grand déjà attribué — est écrit
-//!    dans le fichier ; au chargement, [`Project::from_tree`] fait repartir
-//!    le compteur à `max(valeur persistée, plus grand id lu + 1)`. Un
-//!    fichier dont la valeur persistée serait en retard sur les identifiants
-//!    qu'il contient (fichier écrit par une version boguée) ne fait donc
-//!    jamais reculer le compteur.
-//! 5. **Champs inconnus ignorés à la lecture.** C'est ce qui permettra
-//!    d'ajouter des données plus tard (une spécification de graphe, par
-//!    exemple) sans casser les fichiers déjà écrits : un lecteur plus ancien
-//!    ignore simplement ce qu'il ne connaît pas. **Conséquence directe** :
-//!    le conteneur doit être auto-descriptif, c'est-à-dire nommer ses champs
-//!    plutôt que les positionner. `bincode` encode les structures en
-//!    tuples positionnels — ajouter un champ y décale tout ce qui suit, et
-//!    en retirer un est tout aussi cassant. **MessagePack** (`rmp-serde`) le
-//!    permet : `rmp_serde::to_vec_named` sérialise chaque structure comme une
-//!    map nommée, et son lecteur ignore nativement une clé qu'une structure
-//!    ne déclare pas. Tout champ ajouté après la version 1 portera
-//!    `#[serde(default)]`, pour qu'un fichier plus ancien qui ne le porte pas
-//!    reste lisible.
+//! 1. **Atomic write.** `save` writes to a temporary file in the same
+//!    directory as the destination, then renames it onto the target
+//!    (`tempfile::NamedTempFile::persist`). A reader never sees a
+//!    half-written file; a write that fails leaves no trace
+//!    on the destination.
+//! 2. **Version number first.** The 4 bytes that follow the
+//!    signature are the version number, read and checked **before**
+//!    touching the body of the file. A file newer than this reader is
+//!    cleanly refused (`UnsupportedVersion`), without trying to decode a
+//!    body it would not necessarily understand. A file that is not a
+//!    StokesForge file (wrong signature, or too short to carry one) is
+//!    refused just as cleanly (`NotAStokesForgeFile`).
+//! 3. **Missing value vs empty string.** Text columns distinguish
+//!    `None` (missing) from `Some(String::new())` (empty string present) —
+//!    this is already the convention of the core, this format only preserves it.
+//!    Numeric missing values are `NaN`, written and read back
+//!    **bit for bit** (`f64::to_le_bytes`/`from_le_bytes` keep the exact
+//!    bit pattern).
+//! 4. **Persisted `NodeId` counter.** `next_id_hint` — the **next**
+//!    identifier to assign, not the largest already assigned — is written
+//!    in the file; at load, [`Project::from_tree`] restarts
+//!    the counter at `max(persisted value, largest id read + 1)`. A
+//!    file whose persisted value lags behind the identifiers
+//!    it contains (file written by a buggy version) therefore never
+//!    makes the counter go backwards.
+//! 5. **Unknown fields ignored at read.** This is what will make it possible
+//!    to add data later (a graph specification, for
+//!    example) without breaking the files already written: an older reader
+//!    simply ignores what it does not know. **Direct consequence**:
+//!    the container must be self-describing, that is, name its fields
+//!    rather than position them. `bincode` encodes structures as
+//!    positional tuples — adding a field there shifts everything after it, and
+//!    removing one is just as breaking. **MessagePack** (`rmp-serde`) allows
+//!    it: `rmp_serde::to_vec_named` serializes each structure as a
+//!    named map, and its reader natively ignores a key that a structure
+//!    does not declare. Any field added after version 1 will carry
+//!    `#[serde(default)]`, so that an older file that does not carry it
+//!    stays readable.
 //!
-//! Les buffers de colonnes numériques échappent à l'encodage MessagePack
-//! générique : ils sont écrits comme des octets bruts little-endian via
-//! `serde_bytes` (8 octets par `f64`), pas comme un tableau MessagePack
-//! d'éléments — un million de points pèse 8 Mo sur disque, pas un multiple de
-//! ce chiffre gonflé par l'encodage par élément.
+//! The numeric column buffers escape the generic MessagePack encoding:
+//! they are written as raw little-endian bytes via
+//! `serde_bytes` (8 bytes per `f64`), not as a MessagePack array
+//! of elements — a million points weigh 8 MB on disk, not a multiple of
+//! that figure inflated by per-element encoding.
 //!
-//! # Disposition du fichier
+//! # File layout
 //!
 //! ```text
-//! octets 0..4   signature "STKF"
-//! octets 4..8   FORMAT_VERSION, u32 little-endian
-//! octets 8..    corps MessagePack (FileBody), rmp_serde::to_vec_named
+//! bytes 0..4   signature "STKF"
+//! bytes 4..8   FORMAT_VERSION, u32 little-endian
+//! bytes 8..    MessagePack body (FileBody), rmp_serde::to_vec_named
 //! ```
 //!
-//! Le corps liste les nœuds de l'arbre en **parcours préfixe depuis la
-//! racine** (`Tree::walk_all`) : deux sauvegardes successives du même projet
-//! produisent donc des fichiers identiques octet à octet.
+//! The body lists the nodes of the tree in **pre-order from the
+//! root** (`Tree::walk_all`): two successive saves of the same project
+//! therefore produce files that are identical byte for byte.
 
 #![cfg_attr(
     not(test),
@@ -115,22 +115,22 @@ use schema::{FileBody, NodeRecord, FORMAT_VERSION, MAGIC};
 
 pub use error::{PersistenceError, PersistenceResult};
 
-/// Taille maximale d'un `.stf` à l'ouverture quand l'appelant n'en fixe pas
-/// (A2, #316) : 512 Mo. Le fichier n'étant pas compressé, c'est aussi la
-/// taille décompressée. L'application la rend réglable (préférences).
+/// Maximum size of a `.stf` at open when the caller sets none
+/// (A2, #316): 512 MB. The file not being compressed, this is also the
+/// decompressed size. The application makes it adjustable (preferences).
 pub const DEFAULT_MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
-/// Budget global de cellules à l'ouverture quand l'appelant n'en fixe pas
-/// (B1, #316) : un milliard. C'est la somme des longueurs de toutes les
-/// colonnes déclarées par le fichier ; l'application le rend réglable.
+/// Global cell budget at open when the caller sets none
+/// (B1, #316): one billion. It is the sum of the lengths of all the
+/// columns declared by the file; the application makes it adjustable.
 pub const DEFAULT_MAX_CELLS: u64 = 1_000_000_000;
 
-/// Les plafonds appliqués à l'ouverture d'un `.stf`.
+/// The caps applied when opening a `.stf`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoadLimits {
-    /// Taille maximale du fichier, en octets (A2).
+    /// Maximum size of the file, in bytes (A2).
     pub max_bytes: u64,
-    /// Nombre maximal de cellules déclarées, toutes colonnes confondues (B1).
+    /// Maximum number of declared cells, all columns together (B1).
     pub max_cells: u64,
 }
 
@@ -143,194 +143,194 @@ impl Default for LoadLimits {
     }
 }
 
-/// Un calcul que la lecture n'a pas pu garder : son enregistrement est
-/// illisible (opération inconnue ou invalide, identifiant hors borne). Donnée
-/// neutre : la mise en phrase est l'affaire de l'application.
+/// A calculation that reading could not keep: its record is
+/// unreadable (unknown or invalid operation, identifier out of bounds). Neutral
+/// data: putting it into a sentence is the application's business.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiscardedCalculation {
-    /// Identifiant du calcul dans le fichier.
+    /// Identifier of the calculation in the file.
     pub id: u64,
-    /// Famille d'opération (`"baseline"`…) quand l'enregistrement la porte
-    /// encore ; `None` si même cela est illisible.
+    /// Operation family (`"baseline"`…) when the record still carries it;
+    /// `None` if even that is unreadable.
     pub kind: Option<String>,
 }
 
-/// Ce que la lecture d'un `.stf` a dégradé sans échouer (invariant 10) :
-/// l'appelant le montre à l'utilisateur au lieu de perdre en silence. Les
-/// éléments écartés ne sont **pas conservés** — un enregistrement illisible ne
-/// peut pas être reconstruit — et disparaissent donc à la prochaine
-/// sauvegarde.
+/// What the reading of a `.stf` degraded without failing (invariant 10):
+/// the caller shows it to the user instead of losing it silently. The
+/// dropped items are **not kept** — an unreadable record cannot be
+/// rebuilt — and therefore disappear at the next
+/// save.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LoadReport {
-    /// Calculs d'analyse écartés (#278).
+    /// Analysis calculations dropped (#278).
     pub discarded_calculations: Vec<DiscardedCalculation>,
-    /// Traces de correction écartées (#309) : illisibles, hors borne, de forme
-    /// invalide ou d'une autre opération qu'une correction. Comptées ici, mais
-    /// sans texte d'avertissement dédié pour l'instant.
+    /// Correction traces dropped (#309): unreadable, out of bounds, of invalid shape
+    /// or of an operation other than a correction. Counted here, but
+    /// without a dedicated warning text for now.
     pub discarded_corrections: Vec<DiscardedCalculation>,
 }
 
 impl LoadReport {
-    /// Rien n'a été écarté.
+    /// Nothing was dropped.
     pub fn is_clean(&self) -> bool {
         self.discarded_calculations.is_empty() && self.discarded_corrections.is_empty()
     }
 }
 
-/// Position et taille d'une fenêtre de l'UI (classeur, graphe, matrice,
-/// note), en points logiques — même unité que le reste d'egui.
+/// Position and size of a UI window (workbook, graph, matrix,
+/// note), in logical points — same unit as the rest of egui.
 ///
-/// # Pourquoi ce type vit ici et pas dans `stokesforge-session`
+/// # Why this type lives here and not in `stokesforge-session`
 ///
-/// La géométrie des fenêtres vit hors de l'arbre du modèle, côté acteur de
-/// `stokesforge-session` (voir la doc de tête de ce crate) : ce n'est ni un champ
-/// de `WindowMeta`, ni quoi que ce soit de persistant dans `stokesforge-core`. Par
-/// défaut ce type aurait donc dû être défini dans `stokesforge-session`. La
-/// raison structurelle qui l'en écarte : ce crate (`stokesforge-persistence`) est
-/// **en dessous** de `stokesforge-session` dans le graphe de dépendances
-/// (`stokesforge-session` dépend de `stokesforge-persistence`, jamais l'inverse), et
-/// [`save_with_geometries`]/[`load_with_geometries`] ont besoin de nommer ce
-/// type dans leur signature publique. Le définir ici, où `stokesforge-session`
-/// vient simplement le réutiliser (`pub use stokesforge_persistence::WindowGeometry`),
-/// évite un type dupliqué des deux côtés d'une conversion qui n'aurait rien
-/// à faire. Contrairement au reste du schéma (`schema.rs`), il n'existe pas
-/// de type "modèle" séparé dont il faudrait rester indépendant (la doctrine
-/// "le format ne s'écrit pas dans le modèle" concerne `stokesforge-core`, qui ne
-/// porte justement pas ce champ) : ce type public sert donc directement de
-/// représentation sur le disque, sans `Record` privé qui le mirorerait.
+/// The geometry of the windows lives outside the model tree, on the actor side of
+/// `stokesforge-session` (see the head doc of that crate): it is neither a field
+/// of `WindowMeta`, nor anything persistent in `stokesforge-core`. By
+/// default this type should therefore have been defined in `stokesforge-session`. The
+/// structural reason that rules it out: this crate (`stokesforge-persistence`) is
+/// **below** `stokesforge-session` in the dependency graph
+/// (`stokesforge-session` depends on `stokesforge-persistence`, never the reverse), and
+/// [`save_with_geometries`]/[`load_with_geometries`] need to name this
+/// type in their public signature. Defining it here, where `stokesforge-session`
+/// simply reuses it (`pub use stokesforge_persistence::WindowGeometry`),
+/// avoids a type duplicated on both sides of a conversion that would have nothing
+/// to do. Unlike the rest of the schema (`schema.rs`), there is no
+/// separate "model" type from which it would have to stay independent (the doctrine
+/// "the format is not written into the model" concerns `stokesforge-core`, which
+/// precisely does not carry this field): this public type therefore serves directly as the
+/// on-disk representation, without a private `Record` that would mirror it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowGeometry {
-    /// Abscisse du coin supérieur gauche.
+    /// Abscissa of the top-left corner.
     pub x: f64,
-    /// Ordonnée du coin supérieur gauche.
+    /// Ordinate of the top-left corner.
     pub y: f64,
-    /// Largeur.
+    /// Width.
     pub width: f64,
-    /// Hauteur.
+    /// Height.
     pub height: f64,
-    /// État de la fenêtre (ouverte, maximisée, fermée, repliée, rang
-    /// d'empilement). `None` : jamais enregistré (fichier antérieur, ou
-    /// fenêtre jamais vue) — l'application applique alors sa disposition
-    /// initiale par défaut. Ne change jamais `x`/`y`/`width`/`height`, qui
-    /// restent la géométrie **flottante** quoi qu'il arrive à la fenêtre
+    /// State of the window (open, maximized, closed, collapsed, stacking
+    /// rank). `None`: never saved (earlier file, or window
+    /// never seen) — the application then applies its default initial
+    /// layout. Never changes `x`/`y`/`width`/`height`, which
+    /// stay the **floating** geometry whatever happens to the window
     /// (issue #16).
     pub view: Option<WindowView>,
 }
 
-/// État d'affichage d'une fenêtre de contenu, retenu avec sa
-/// [`WindowGeometry`] flottante. Une fenêtre détachée est enregistrée
-/// `Open` : le détachement ne se mémorise pas.
+/// Display state of a content window, kept with its floating
+/// [`WindowGeometry`]. A detached window is saved
+/// `Open`: detaching is not remembered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowView {
-    /// Ouverte, maximisée ou fermée.
+    /// Open, maximized or closed.
     pub mode: WindowMode,
-    /// Fenêtre repliée sur sa barre de titre.
+    /// Window collapsed onto its title bar.
     pub collapsed: bool,
-    /// Rang d'empilement parmi les fenêtres ouvertes : 0 = tout en dessous,
-    /// le plus grand rang est au premier plan. Un rang relatif, pas une
-    /// valeur de calque egui.
+    /// Stacking rank among the open windows: 0 = at the very bottom,
+    /// the largest rank is in the foreground. A relative rank, not an
+    /// egui layer value.
     pub stack: u32,
 }
 
-/// Mode d'une fenêtre de contenu. Une valeur inconnue (fichier d'une version
-/// plus récente) se lit `Closed` : dégradation gracieuse, jamais un échec de
-/// chargement (invariant 10).
+/// Mode of a content window. An unknown value (file of a newer
+/// version) reads as `Closed`: graceful degradation, never a load
+/// failure (invariant 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowMode {
-    /// Fenêtre flottante ouverte.
+    /// Floating window, open.
     Open,
-    /// Fenêtre maximisée dans l'espace de travail.
+    /// Window maximized in the workspace.
     Maximized,
-    /// Fenêtre fermée (sa géométrie flottante est conservée).
+    /// Window closed (its floating geometry is kept).
     Closed,
 }
 
-/// Les tables de **vue** qu'un `.stf` porte à côté de l'arbre annulable, par
-/// identifiant de nœud : jamais dans `Project`, jamais par une commande
-/// (invariant 1 ne les concerne pas, ce ne sont pas des données du modèle).
-/// Une struct plutôt qu'un n-uplet : une table de plus (#325) ne casse plus
-/// chaque appelant.
+/// The **view** tables that a `.stf` carries next to the undoable tree, by
+/// node identifier: never in `Project`, never through a command
+/// (invariant 1 does not concern them, they are not model data).
+/// A struct rather than a tuple: one more table (#325) no longer breaks
+/// every caller.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ViewTables {
-    /// Position, taille et état des fenêtres de contenu.
+    /// Position, size and state of the content windows.
     pub window_geometries: HashMap<NodeId, WindowGeometry>,
-    /// Largeur des colonnes de feuille (#325), en points logiques. Chaque
-    /// valeur est un réel fini strictement positif : la lecture écarte le
-    /// reste, l'écriture aussi.
+    /// Width of the sheet columns (#325), in logical points. Each
+    /// value is a strictly positive finite real: reading drops the
+    /// rest, writing too.
     pub column_widths: HashMap<NodeId, f32>,
 }
 
-/// Une largeur de colonne que le fichier peut porter : un réel fini
-/// strictement positif (invariant 10 : NaN, ∞ ou ≤ 0 écartés, jamais un échec).
+/// A column width that the file can carry: a strictly positive
+/// finite real (invariant 10: NaN, ∞ or ≤ 0 dropped, never a failure).
 pub fn is_valid_column_width(width: f32) -> bool {
     width.is_finite() && width > 0.0
 }
 
-/// Borne haute d'un identifiant de nœud ou de `next_id_hint` lu d'un fichier
-/// (B1, `guide-de-correction-robustesse.md` §F3) : largement au-dessus de
-/// tout projet réel, largement en dessous de `u64::MAX` — l'endroit où
-/// `checked_add` de `IdAllocator::next` (mécanique, déjà en place côté
-/// `stokesforge-core`) refuse de toute façon, mais trop tard pour qu'un projet
-/// chargé reste utilisable.
+/// Upper bound of a node identifier or of `next_id_hint` read from a file
+/// (B1, `guide-de-correction-robustesse.md` §F3): far above
+/// any real project, far below `u64::MAX` — the place where
+/// `checked_add` of `IdAllocator::next` (mechanical, already in place on the
+/// `stokesforge-core` side) refuses anyway, but too late for a loaded project
+/// to stay usable.
 const MAX_NODE_ID: u64 = 1_000_000_000_000;
 
-/// Sauvegarde `project` vers `path`, atomiquement : un fichier temporaire est
-/// écrit dans le même répertoire que `path` puis renommé sur la cible ; en
-/// cas d'échec à n'importe quelle étape, `path` n'est pas touché et le
-/// temporaire est supprimé (comportement de `NamedTempFile` à l'abandon).
+/// Saves `project` to `path`, atomically: a temporary file is
+/// written in the same directory as `path` then renamed onto the target; in
+/// case of failure at any step, `path` is untouched and the
+/// temporary is deleted (behavior of `NamedTempFile` on abandonment).
 ///
-/// Deux appels successifs sur le même `project` produisent des fichiers
-/// identiques octet à octet (ordre déterministe des nœuds : parcours
-/// préfixe depuis la racine).
+/// Two successive calls on the same `project` produce files that are
+/// identical byte for byte (deterministic order of the nodes: pre-order
+/// from the root).
 ///
-/// # Détection d'un écrivain concurrent (B8)
+/// # Detecting a concurrent writer (B8)
 ///
-/// Avant d'écrire, `save` compare le compteur de sauvegarde actuellement sur
-/// le disque (s'il existe déjà un fichier à `path`) à celui que **cette
-/// instance de `project`, dans ce processus**, a vu la dernière fois qu'elle
-/// a été chargée ou sauvegardée vers ce même chemin. S'ils diffèrent, un
-/// autre écrivain a modifié le fichier entre-temps : `save` refuse
-/// (`PersistenceError::ConcurrentModification`) plutôt que d'écraser son
-/// travail en silence. Ce suivi est un registre en mémoire, propre au
-/// processus (voir [`tracked_counter`]) — rien de tout cela ne traverse le
-/// disque à part le compteur lui-même (`FileBody::save_counter`), conforme à
-/// la doctrine des estampilles (§F2 du guide) : seule la valeur qui permet la
-/// comparaison est persistée, jamais l'identité de qui l'a vue.
+/// Before writing, `save` compares the save counter currently on
+/// disk (if a file already exists at `path`) with the one that **this
+/// instance of `project`, in this process,** saw the last time it
+/// was loaded or saved to this same path. If they differ, another
+/// writer modified the file in the meantime: `save` refuses
+/// (`PersistenceError::ConcurrentModification`) rather than overwrite its
+/// work silently. This tracking is an in-memory registry, specific to the
+/// process (see [`tracked_counter`]) — none of it goes through the
+/// disk except the counter itself (`FileBody::save_counter`), in line with
+/// the doctrine of stamps (§F2 of the guide): only the value that makes
+/// the comparison possible is persisted, never the identity of who saw it.
 ///
-/// Un `project` que ce processus n'a **jamais** chargé ni sauvegardé vers ce
-/// chemin (un projet neuf, ou une sauvegarde vers une nouvelle destination)
-/// n'a pas de baseline à comparer : `save` procède sans contrôle, comme
-/// avant B8 — il ne peut détecter qu'un changement depuis qu'IL a vu le
-/// fichier, pas depuis l'origine des temps.
+/// A `project` that this process has **never** loaded or saved to this
+/// path (a new project, or a save to a new destination)
+/// has no baseline to compare: `save` proceeds without a check, as
+/// before B8 — it can only detect a change since IT saw the
+/// file, not since the beginning of time.
 ///
-/// Équivalent à [`save_with_geometries`] avec des tables de vue vides :
-/// n'écrit aucun bloc de géométrie de fenêtre ni de largeur de colonne. C'est la fonction qu'utilisent
-/// les appelants qui ne connaissent pas cette notion (`stokesforge-app`) ;
-/// `stokesforge-session`, qui possède la table `NodeId -> WindowGeometry` à côté
-/// du `Project`, appelle `save_with_geometries` pour que le fichier retrouve
-/// la disposition des fenêtres et la largeur des colonnes à la réouverture.
+/// Equivalent to [`save_with_geometries`] with empty view tables:
+/// writes no window geometry block nor column width block. It is the function used by
+/// callers that do not know this notion (`stokesforge-app`);
+/// `stokesforge-session`, which owns the `NodeId -> WindowGeometry` table next to
+/// the `Project`, calls `save_with_geometries` so that the file gets back
+/// the window layout and the column width at reopening.
 pub fn save(project: &Project, path: &Path) -> PersistenceResult<()> {
     save_with_geometries(project, &ViewTables::default(), path)
 }
 
-/// Comme [`save`], mais écrit en plus `view` dans des blocs **séparés de
-/// l'arbre annulable** (`FileBody::window_geometries`, `FileBody::column_widths`)
-/// — jamais mêlés aux `NodeRecord` de `nodes`, jamais passés par `convert.rs`
-/// (qui ne convertit que des `Node`). C'est la fonction qu'appelle
-/// `stokesforge-session::actor` pour que la position des fenêtres et la largeur
-/// des colonnes survivent à un rechargement du projet. Les largeurs dont la
-/// clé n'est plus un nœud de l'arbre, ou qui ne sont pas des réels finis
-/// strictement positifs, ne sont **pas écrites** : l'acteur ne purge pas sa
-/// table à la mutation (la largeur d'une colonne supprimée doit revenir par
-/// Ctrl+Z, invariant 7), c'est donc ici que les clés mortes tombent.
+/// Like [`save`], but also writes `view` into blocks **separate from
+/// the undoable tree** (`FileBody::window_geometries`, `FileBody::column_widths`)
+/// — never mixed with the `NodeRecord`s of `nodes`, never passed through `convert.rs`
+/// (which only converts `Node`s). It is the function called by
+/// `stokesforge-session::actor` so that the position of the windows and the width
+/// of the columns survive a reload of the project. The widths whose
+/// key is no longer a node of the tree, or which are not strictly
+/// positive finite reals, are **not written**: the actor does not purge its
+/// table on mutation (the width of a deleted column must come back with
+/// Ctrl+Z, invariant 7), so this is where dead keys fall away.
 pub fn save_with_geometries(
     project: &Project,
     view: &ViewTables,
     path: &Path,
 ) -> PersistenceResult<()> {
-    // Un fichier que ce processus n'a jamais chargé ni écrit vers ce chemin :
-    // rien ne prouve qu'il se relit, on le vérifie en entier avant de le
-    // remplacer. Un fichier déjà suivi (compteur égal) est le nôtre.
+    // A file that this process never loaded or wrote to this path:
+    // nothing proves that it reads back, so it is checked in full before
+    // being replaced. A file already tracked (equal counter) is ours.
     let tracked = tracked_counter(path, project);
     let disk_counter = peek_save_counter(path, tracked.is_none())?;
     if let Some(found) = disk_counter {
@@ -382,10 +382,10 @@ pub fn save_with_geometries(
         column_widths,
     };
 
-    // Encoder ne devrait jamais échouer pour nos propres types de transport
-    // (pas de clé non-chaîne, aucune E/S impliquée) ; on retient tout de
-    // même l'erreur plutôt que de paniquer, au cas où une future extension du
-    // schéma introduirait un cas qui échoue à l'encodage.
+    // Encoding should never fail for our own transport types
+    // (no non-string key, no I/O involved); we still keep the
+    // error rather than panic, in case a future extension of the
+    // schema introduced a case that fails to encode.
     let payload = rmp_serde::to_vec_named(&body).map_err(|source| PersistenceError::Io {
         path: path.to_path_buf(),
         source: std::io::Error::other(source),
@@ -408,47 +408,47 @@ pub fn save_with_geometries(
     Ok(())
 }
 
-/// Charge un [`Project`] complet depuis `path`. La version est lue et
-/// vérifiée avant tout décodage du corps : un fichier plus récent que ce
-/// lecteur est refusé sans que son corps soit touché. Une version `0` — un
-/// numéro qui n'a jamais existé, la première version réelle étant 1 — est
-/// refusée elle aussi, explicitement, plutôt que d'être lue comme si
-/// c'était la version 1.
+/// Loads a complete [`Project`] from `path`. The version is read and
+/// checked before any decoding of the body: a file newer than this
+/// reader is refused without its body being touched. A version `0` — a
+/// number that never existed, the first real version being 1 — is
+/// refused too, explicitly, rather than read as if
+/// it were version 1.
 ///
-/// Équivalent à [`load_with_geometries`] dont le bloc de géométries de
-/// fenêtre est jeté : c'est la fonction qu'utilisent les appelants qui ne
-/// connaissent pas cette notion (`stokesforge-app`, aujourd'hui).
+/// Equivalent to [`load_with_geometries`] with its window geometry block
+/// thrown away: it is the function used by callers that do not
+/// know this notion (`stokesforge-app`, today).
 pub fn load(path: &Path) -> PersistenceResult<Project> {
     load_with_geometries(path).map(|(project, _geometries)| project)
 }
 
-/// Comme [`load`], mais rend aussi le bloc de géométries de fenêtre lu dans
-/// le fichier (`FileBody::window_geometries`), clé par `NodeId`. Une entrée
-/// dont la clé ne correspond à aucun nœud du projet reconstruit (fichier
-/// corrompu, ou géométrie orpheline laissée par un outil tiers) est
-/// silencieusement écartée plutôt que de faire échouer le chargement —
-/// invariant 10 : un défaut de donnée dégrade, il ne plante pas. C'est la
-/// fonction qu'appelle `stokesforge-session::actor` pour retrouver la disposition
-/// des fenêtres à la réouverture d'un projet.
+/// Like [`load`], but also returns the window geometry block read from
+/// the file (`FileBody::window_geometries`), keyed by `NodeId`. An entry
+/// whose key matches no node of the rebuilt project (corrupted
+/// file, or orphan geometry left by a third-party tool) is
+/// silently dropped rather than making the load fail —
+/// invariant 10: a data defect degrades, it does not crash. It is the
+/// function called by `stokesforge-session::actor` to get back the layout
+/// of the windows when a project is reopened.
 pub fn load_with_geometries(
     path: &Path,
 ) -> PersistenceResult<(Project, HashMap<NodeId, WindowGeometry>)> {
     load_with_report(path).map(|(project, view, _report)| (project, view.window_geometries))
 }
 
-/// Comme [`load_with_geometries`], mais rend aussi le [`LoadReport`] de ce que
-/// la lecture a écarté (calculs illisibles, #278). C'est la fonction qu'appelle
-/// la session, pour que l'application le signale.
+/// Like [`load_with_geometries`], but also returns the [`LoadReport`] of what
+/// the reading dropped (unreadable calculations, #278). It is the function called by
+/// the session, so that the application reports it.
 pub fn load_with_report(path: &Path) -> PersistenceResult<(Project, ViewTables, LoadReport)> {
     load_with_limit(path, DEFAULT_MAX_FILE_BYTES)
 }
 
-/// Comme [`load_with_report`], avec un plafond de taille de fichier explicite
-/// (A2, #316) : un fichier de plus de `max_bytes` octets est refusé par
-/// [`PersistenceError::TooLarge`] avant tout décodage. Exactement `max_bytes`
-/// octets passe. Le `.stf` n'étant pas compressé, la taille décompressée est la
-/// taille du fichier. La lecture est bornée (`take(limite + 1)`) : un fichier
-/// qui grossit entre la mesure et la lecture ne contourne pas le plafond.
+/// Like [`load_with_report`], with an explicit file size cap
+/// (A2, #316): a file of more than `max_bytes` bytes is refused with
+/// [`PersistenceError::TooLarge`] before any decoding. Exactly `max_bytes`
+/// bytes passes. The `.stf` not being compressed, the decompressed size is the
+/// size of the file. Reading is bounded (`take(max_bytes + 1)`): a file
+/// that grows between the measurement and the reading does not get around the cap.
 pub fn load_with_limit(
     path: &Path,
     max_bytes: u64,
@@ -462,10 +462,10 @@ pub fn load_with_limit(
     )
 }
 
-/// Comme [`load_with_limit`], avec aussi le budget global de cellules (B1,
-/// #316) : si les colonnes déclarent au total plus de `max_cells` cellules,
-/// la lecture est refusée par [`PersistenceError::TooManyCells`] **avant**
-/// toute allocation de colonne.
+/// Like [`load_with_limit`], also with the global cell budget (B1,
+/// #316): if the columns declare more than `max_cells` cells in total,
+/// reading is refused with [`PersistenceError::TooManyCells`] **before**
+/// any column allocation.
 pub fn load_with_limits(
     path: &Path,
     limits: LoadLimits,
@@ -537,13 +537,13 @@ pub fn load_with_limits(
     let (project, report) = build_project_reported(body, path)?;
     track_counter(path, &project, save_counter);
 
-    // Une clé sans nœud correspondant (fichier corrompu, ou géométrie
-    // orpheline laissée par un outil tiers qui n'aurait pas purgé la sienne)
-    // est écartée en silence plutôt que de faire échouer le chargement —
-    // invariant 10. `stokesforge-session::actor` purge lui-même, à chaque
-    // mutation, les entrées orphelines créées pendant la vie du processus ;
-    // ce filtre couvre le cas où le fichier en portait déjà avant même
-    // d'être ouvert.
+    // A key without a matching node (corrupted file, or orphan geometry
+    // left by a third-party tool that did not purge its own)
+    // is dropped silently rather than making the load fail —
+    // invariant 10. `stokesforge-session::actor` itself purges, at each
+    // mutation, the orphan entries created during the life of the process;
+    // this filter covers the case where the file already carried some even before
+    // being opened.
     let tree = project.tree();
     let geometries = raw_geometries
         .into_iter()
@@ -552,8 +552,8 @@ pub fn load_with_limits(
             tree.node(node).is_some().then_some((node, geometry.into()))
         })
         .collect();
-    // Même filtre pour les largeurs de colonne (#325), plus la valeur : un
-    // réel non fini ou ≤ 0 ferait peindre une grille absurde.
+    // Same filter for the column widths (#325), plus the value: a
+    // non-finite real or ≤ 0 would make a nonsensical grid be painted.
     let column_widths = raw_widths
         .into_iter()
         .filter_map(|(id, width)| {
@@ -569,15 +569,15 @@ pub fn load_with_limits(
     Ok((project, view, report))
 }
 
-/// Classe une erreur de décodage du corps : une **variante d'énumération**
-/// inconnue (C5, niveau 1) n'est pas la même chose qu'un fichier vraiment
-/// corrompu — `rmp_serde`/`serde` nomment ce cas dans le message d'erreur
-/// (« unknown variant … »), ce qui suffit à le distinguer sans avoir besoin
-/// d'inspecter les octets nous-mêmes.
+/// Classifies a body decoding error: an unknown **enum variant**
+/// (C5, level 1) is not the same thing as a truly corrupted
+/// file — `rmp_serde`/`serde` name this case in the error message
+/// ("unknown variant …"), which is enough to tell it apart without having to
+/// inspect the bytes ourselves.
 fn classify_body_error(source: version::BodyError, path: &Path) -> PersistenceError {
     let source = match source {
         version::BodyError::Decode(source) => source,
-        // `read_header` a déjà refusé une version sans décodeur.
+        // `read_header` already refused a version without a decoder.
         version::BodyError::UnknownVersion(found) => {
             return PersistenceError::UnsupportedVersion {
                 path: path.to_path_buf(),
@@ -600,15 +600,15 @@ fn classify_body_error(source: version::BodyError, path: &Path) -> PersistenceEr
     }
 }
 
-/// Reconstruit un `Project` depuis un corps déjà décodé. Séparé de `load`
-/// pour que les tests internes puissent fabriquer un `FileBody` à la main
-/// (cas ceinture du compteur d'identifiants, champs inconnus, modèle
-/// invalide) sans repasser par l'encodage MessagePack.
+/// Rebuilds a `Project` from an already decoded body. Separate from `load`
+/// so that the internal tests can craft a `FileBody` by hand
+/// (belt case of the identifier counter, unknown fields, invalid
+/// model) without going back through the MessagePack encoding.
 fn build_project(body: FileBody, path: &Path) -> PersistenceResult<Project> {
     build_project_reported(body, path).map(|(project, _report)| project)
 }
 
-/// [`build_project`], avec le rapport de ce que la reconstruction a écarté.
+/// [`build_project`], with the report of what the rebuild dropped.
 fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Project, LoadReport)> {
     check_node_id(body.root, path)?;
     check_node_id(body.next_id_hint, path)?;
@@ -624,9 +624,9 @@ fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Pro
         if let Some(parent_id) = parent {
             check_node_id(parent_id, path)?;
         }
-        // Les colonnes qu'une formule lit sont des identifiants comme les
-        // autres : bornés à la lecture (invariant 7), sans quoi un fichier
-        // fabriqué ferait démarrer l'allocateur au bord de `u64`.
+        // The columns that a formula reads are identifiers like the
+        // others: bounded at read (invariant 7), otherwise a crafted file
+        // would make the allocator start at the edge of `u64`.
         if let schema::KindRecord::Column {
             formula_parts: Some(parts),
             ..
@@ -663,8 +663,8 @@ fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Pro
         })?
         .with_saved_colors(convert::record_to_saved_colors(body.saved_colors))
         .with_correction_traces(traces);
-    // A1 (#316) : les entrées d'un calcul ont-elles changé depuis
-    // l'enregistrement ? Comparé sur les valeurs du fichier, sans recalcul.
+    // A1 (#316): have the inputs of a calculation changed since
+    // the save? Compared on the values of the file, without recalculation.
     calculations::mark_changed_inputs(&mut kept, &digests, &tree);
     let linked = transposes::records_to_transposes(body.transposes, &tree, MAX_NODE_ID);
     let tree = tree.with_calculations(kept).with_transposes(linked);
@@ -677,14 +677,14 @@ fn build_project_reported(body: FileBody, path: &Path) -> PersistenceResult<(Pro
     ))
 }
 
-/// Refuse un identifiant de nœud (ou `next_id_hint`) au-delà de
-/// [`MAX_NODE_ID`] (B1) : bien au-dessus de tout projet réel, bien en
-/// dessous de `u64::MAX` où `IdAllocator::next` refuserait de toute façon —
-/// mais un projet dont un nœud porte déjà un identifiant proche de cette
-/// frontière resterait inutilisable dès la première création suivante.
-/// Borner à la lecture ferme ce chemin d'entrée plutôt que de compter sur le
-/// `checked_add` mécanique de `stokesforge-core`, qui protège l'allocateur mais
-/// pas le fichier qui l'a fait démarrer si près du bord.
+/// Refuses a node identifier (or `next_id_hint`) beyond
+/// [`MAX_NODE_ID`] (B1): well above any real project, well
+/// below `u64::MAX` where `IdAllocator::next` would refuse anyway —
+/// but a project in which a node already carries an identifier close to this
+/// boundary would stay unusable from the first following creation.
+/// Bounding at read closes this entry path rather than counting on the
+/// mechanical `checked_add` of `stokesforge-core`, which protects the allocator but
+/// not the file that made it start so close to the edge.
 fn check_node_id(id: u64, path: &Path) -> PersistenceResult<()> {
     if id > MAX_NODE_ID {
         Err(PersistenceError::Corrupt {
@@ -699,9 +699,9 @@ fn check_node_id(id: u64, path: &Path) -> PersistenceResult<()> {
     }
 }
 
-/// Refuse un fichier dont les colonnes déclarent au total plus de
-/// `max_cells` cellules (B1, #316). Ne lit que les longueurs des enregistrements
-/// déjà décodés : rien n'est alloué pour les colonnes du modèle.
+/// Refuses a file whose columns declare more than
+/// `max_cells` cells in total (B1, #316). Only reads the lengths of the already
+/// decoded records: nothing is allocated for the model columns.
 fn check_cell_budget(body: &FileBody, max_cells: u64, path: &Path) -> PersistenceResult<()> {
     let mut cells: u64 = 0;
     for record in &body.nodes {
@@ -723,9 +723,9 @@ fn check_cell_budget(body: &FileBody, max_cells: u64, path: &Path) -> Persistenc
     Ok(())
 }
 
-/// Traduit une erreur de conversion bas niveau (`convert.rs`) en erreur
-/// publique : dans les deux cas, le fichier est incohérent d'une façon
-/// qu'un fichier écrit par ce crate ne produit jamais.
+/// Translates a low-level conversion error (`convert.rs`) into a public
+/// error: in both cases, the file is inconsistent in a way
+/// that a file written by this crate never produces.
 fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
     match err {
         ConvertError::BadFloatLength(len) => PersistenceError::Corrupt {
@@ -781,37 +781,37 @@ fn convert_error(err: ConvertError, path: &Path) -> PersistenceError {
     }
 }
 
-// -- B8 : détection d'un écrivain concurrent -------------------------------
+// -- B8: detection of a concurrent writer -----------------------------------
 //
-// Registre en mémoire, propre à ce processus, associant (chemin canonique,
-// identité d'un `Project`) au dernier compteur de sauvegarde observé pour ce
-// couple. Ne persiste jamais sur disque — seul le compteur qu'il décrit
-// traverse le disque (`FileBody::save_counter`), conforme à la doctrine des
-// estampilles (§F2 du guide de correction).
+// In-memory registry, specific to this process, associating (canonical path,
+// identity of a `Project`) with the last save counter observed for that
+// pair. Never persists to disk — only the counter it describes
+// goes through the disk (`FileBody::save_counter`), in line with the
+// doctrine of stamps (§F2 of the correction guide).
 //
-// La clé n'est pas le chemin seul : deux `Project` distincts chargés depuis
-// le même fichier (deux fenêtres, un script et l'interface, …) ne doivent
-// pas se confondre entre eux — c'est précisément le cas que B8 doit
-// détecter. On retient une référence **faible** sur `Project::identity()` —
-// PAS sur l'arbre courant (`project.tree()`) : une première version de ce
-// registre clefait sur l'identité de l'arbre, en s'appuyant sur le fait que
-// `Arc::make_mut` réutilise la même allocation tant que personne d'autre ne
-// l'a clonée. C'est faux dès qu'un `undo`/`redo` entre en jeu :
-// `Project::replace_tree` réaffecte à l'instance un `Arc<Tree>` DÉJÀ VU à un
-// instant antérieur de CETTE MÊME instance (restauré depuis la pile
-// d'historique) — la même adresse redevient donc « courante » alors que le
-// compteur de sauvegarde a avancé entre-temps, et le registre y voyait à
-// tort un compteur périmé, refusant une sauvegarde parfaitement légitime
-// (trouvé par `b14_laller_retour_disque_tient_a_chaque_pas`, un balayage
-// aléatoire d'opérations incluant `Annuler`/`Rétablir`). `Project::identity
-// ()` est stable sur toute la vie d'une instance, quel que soit l'arbre
-// qu'elle affiche à un instant donné, et c'est exactement l'identité qu'il
-// faut ici — voir sa documentation dans `stokesforge-core`. `Weak::upgrade`
-// échoue proprement pour un `Project` abandonné depuis longtemps plutôt que
-// de risquer une collision avec une adresse mémoire réutilisée par une
-// valeur sans rapport (tant qu'une `Weak` existe, l'allocation qu'elle vise
-// reste en vie — deux entrées encore « upgradables » en même temps ne
-// peuvent donc jamais partager une adresse).
+// The key is not the path alone: two distinct `Project`s loaded from
+// the same file (two windows, a script and the interface, …) must
+// not be confused with each other — this is precisely the case B8 has to
+// detect. A **weak** reference is kept on `Project::identity()` —
+// NOT on the current tree (`project.tree()`): a first version of this
+// registry keyed on the identity of the tree, relying on the fact that
+// `Arc::make_mut` reuses the same allocation as long as nobody else
+// has cloned it. This is false as soon as an `undo`/`redo` comes into play:
+// `Project::replace_tree` reassigns to the instance an `Arc<Tree>` ALREADY SEEN at an
+// earlier moment of THAT SAME instance (restored from the history
+// stack) — the same address becomes "current" again while the
+// save counter has advanced in the meantime, and the registry wrongly saw a
+// stale counter there, refusing a perfectly legitimate save
+// (found by `b14_laller_retour_disque_tient_a_chaque_pas`, a random sweep
+// of operations including `Undo`/`Redo`). `Project::identity
+// ()` is stable over the whole life of an instance, whatever tree
+// it shows at a given moment, and it is exactly the identity that
+// is needed here — see its documentation in `stokesforge-core`. `Weak::upgrade`
+// fails cleanly for a `Project` abandoned long ago rather than
+// risking a collision with a memory address reused by an unrelated
+// value (as long as a `Weak` exists, the allocation it points to
+// stays alive — two entries still "upgradable" at the same time can
+// therefore never share an address).
 
 struct TrackedSave {
     path: PathBuf,
@@ -824,8 +824,8 @@ fn registry() -> &'static Mutex<Vec<TrackedSave>> {
     REGISTRY.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-/// Chemin canonique si le fichier existe déjà ; sinon le chemin tel quel —
-/// une destination qui n'existe pas encore n'a pas de forme canonique.
+/// Canonical path if the file already exists; otherwise the path as is —
+/// a destination that does not exist yet has no canonical form.
 fn canonical_or_given(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
@@ -836,14 +836,14 @@ fn matches(entry: &TrackedSave, canon: &Path, project: &Project) -> bool {
         && Weak::ptr_eq(&entry.identity, &project.identity())
 }
 
-/// Compteur que CETTE instance de `project` (au sens de l'identité de son
-/// arbre) a vu la dernière fois qu'elle a été chargée ou sauvegardée vers
-/// `path`, dans ce processus. `None` si ce couple (chemin, instance) est
-/// inconnu du registre : soit ce `Project` n'est jamais passé par
-/// `load`/`save` pour ce chemin, soit son arbre a depuis été remplacé
-/// (`replace_tree`, restauration d'annulation) — dans les deux cas, il n'y a
-/// rien à comparer, et `save` procède sans contrôle plutôt que de refuser à
-/// tort.
+/// Counter that THIS instance of `project` (in the sense of the identity of its
+/// tree) saw the last time it was loaded or saved to
+/// `path`, in this process. `None` if this pair (path, instance) is
+/// unknown to the registry: either this `Project` never went through
+/// `load`/`save` for this path, or its tree has since been replaced
+/// (`replace_tree`, undo restoration) — in both cases, there is
+/// nothing to compare, and `save` proceeds without a check rather than refusing
+/// wrongly.
 fn tracked_counter(path: &Path, project: &Project) -> Option<u64> {
     let canon = canonical_or_given(path);
     let mut guard = match registry().lock() {
@@ -857,8 +857,8 @@ fn tracked_counter(path: &Path, project: &Project) -> Option<u64> {
         .map(|entry| entry.counter)
 }
 
-/// Enregistre (ou met à jour) le dernier compteur connu pour ce couple
-/// (chemin, instance) — appelé après chaque `load`/`save` réussi.
+/// Records (or updates) the last known counter for this pair
+/// (path, instance) — called after each successful `load`/`save`.
 fn track_counter(path: &Path, project: &Project, counter: u64) {
     let canon = canonical_or_given(path);
     let mut guard = match registry().lock() {
@@ -880,23 +880,23 @@ fn track_counter(path: &Path, project: &Project, counter: u64) {
     }
 }
 
-/// Lit uniquement le compteur de sauvegarde d'un fichier déjà écrit par ce
-/// format, sans construire de `Project` : c'est le contrôle bon marché que
-/// `save` fait avant d'écraser une cible existante.
+/// Reads only the save counter of a file already written by this
+/// format, without building a `Project`: it is the cheap check that
+/// `save` makes before overwriting an existing target.
 ///
-/// `Ok(None)` si le fichier n'existe pas encore (rien à comparer : la
-/// sauvegarde est la première) ou s'il ne porte pas la signature de ce format
-/// (comportement historique conservé pour une cible qui n'est pas un `.stf` —
-/// B8 ne couvre que la collision entre deux écritures de ce format-ci, pas le
-/// remplacement d'un fichier étranger). Un fichier **qui porte la signature**
-/// mais qu'on ne sait pas lire — en-tête tronqué, version 0, corps
-/// indécodable — est refusé (`UnreadableTarget`), comme celui d'une version
-/// plus récente (`UnsupportedVersion`) : mieux vaut ne pas écraser à l'aveugle
-/// un fichier qu'on ne sait pas lire.
-/// `validate` : en plus du décodage, reconstruit le projet comme `load` le
-/// ferait, pour refuser (`UnreadableTarget`) un corps qui se décode mais que le
-/// chargement rejetterait. `save` ne le demande que pour une cible que ce
-/// processus n'a jamais chargée ni écrite (sinon le fichier est le nôtre).
+/// `Ok(None)` if the file does not exist yet (nothing to compare: the
+/// save is the first) or if it does not carry the signature of this format
+/// (historical behavior kept for a target that is not a `.stf` —
+/// B8 only covers the collision between two writes of this format, not the
+/// replacement of a foreign file). A file **that carries the signature**
+/// but cannot be read — truncated header, version 0, undecodable
+/// body — is refused (`UnreadableTarget`), like that of a newer
+/// version (`UnsupportedVersion`): better not to overwrite blindly
+/// a file that cannot be read.
+/// `validate`: in addition to the decoding, rebuilds the project as `load` would
+/// do, to refuse (`UnreadableTarget`) a body that decodes but that
+/// loading would reject. `save` only asks for it for a target that this
+/// process never loaded or wrote (otherwise the file is ours).
 fn peek_save_counter(path: &Path, validate: bool) -> PersistenceResult<Option<u64>> {
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
@@ -908,8 +908,8 @@ fn peek_save_counter(path: &Path, validate: bool) -> PersistenceResult<Option<u6
             })
         }
     };
-    // À partir d'ici la cible se dit StokesForge : si elle ne se lit pas, on
-    // refuse de l'écraser (mêmes diagnostics que `load`, dans le même ordre).
+    // From here on the target says it is StokesForge: if it cannot be read, we
+    // refuse to overwrite it (same diagnostics as `load`, in the same order).
     let version = match version::read_header(&bytes) {
         version::Header::NotStokesForge => return Ok(None),
         version::Header::Truncated => {
@@ -937,10 +937,10 @@ fn peek_save_counter(path: &Path, validate: bool) -> PersistenceResult<Option<u6
         Ok(mut body) => {
             let save_counter = body.save_counter;
             if validate {
-                // Le corps se décode, mais `load` le refuserait-il (modèle
-                // incohérent, identifiant hors borne) ? Alors le remplacer
-                // détruirait un fichier que seul un outil plus tolérant sait
-                // encore lire.
+                // The body decodes, but would `load` refuse it (inconsistent
+                // model, identifier out of bounds)? Then replacing it
+                // would destroy a file that only a more tolerant tool can
+                // still read.
                 let unreadable = |source: PersistenceError| PersistenceError::UnreadableTarget {
                     path: path.to_path_buf(),
                     detail: source.to_string(),
@@ -954,9 +954,9 @@ fn peek_save_counter(path: &Path, validate: bool) -> PersistenceResult<Option<u6
             }
             Ok(Some(save_counter))
         }
-        // Le corps ne se décode pas : `save` ne diagnostique pas (c'est le
-        // rôle de `load`), mais il ne détruit pas non plus un fichier qu'il
-        // ne sait pas lire — un `.stf` tronqué serait irrécupérable.
+        // The body does not decode: `save` does not diagnose (that is the
+        // role of `load`), but it does not destroy either a file it
+        // cannot read — a truncated `.stf` would be unrecoverable.
         Err(source) => Err(PersistenceError::UnreadableTarget {
             path: path.to_path_buf(),
             detail: source.to_string(),
@@ -980,16 +980,16 @@ mod tests {
         }
     }
 
-    /// Critère 2 (cas ceinture) : un fichier dont `next_id_hint` est
-    /// inférieur au plus grand id qu'il contient doit tout de même faire
-    /// repartir le compteur au-dessus du plus grand id lu.
+    /// Criterion 2 (belt case): a file whose `next_id_hint` is
+    /// lower than the largest id it contains must still make the
+    /// counter restart above the largest id read.
     #[test]
     fn resume_uses_the_highest_id_seen_even_if_the_hint_is_stale() {
-        let root = folder_record(1, "Racine", vec![5]);
+        let root = folder_record(1, "Root", vec![5]);
         let child = folder_record(5, "Enfant", vec![]);
         let body = FileBody {
             root: 1,
-            next_id_hint: 2, // en retard : le plus grand id présent est 5
+            next_id_hint: 2, // behind: the largest id present is 5
             nodes: vec![root, child],
             save_counter: 0,
             saved_colors: Default::default(),
@@ -999,17 +999,17 @@ mod tests {
             window_geometries: Default::default(),
             column_widths: Default::default(),
         };
-        let project = build_project(body, Path::new("test.plyx")).expect("modèle valide");
+        let project = build_project(body, Path::new("test.plyx")).expect("valid model");
         assert_eq!(project.next_id_hint(), 6);
     }
 
-    /// Un corps qui se décode mais que `load` refuserait (nœud orphelin) n'est
-    /// pas écrasé par `save` : la cible est illisible pour nous. Un fichier que
-    /// ce processus vient de charger se réenregistre, lui, sans cette
-    /// vérification coûteuse.
+    /// A body that decodes but that `load` would refuse (orphan node) is not
+    /// overwritten by `save`: the target is unreadable for us. A file that
+    /// this process has just loaded is re-saved, itself, without this
+    /// costly check.
     #[test]
     fn save_refuses_a_target_that_decodes_but_does_not_load() {
-        let root = folder_record(1, "Racine", vec![]);
+        let root = folder_record(1, "Root", vec![]);
         let orphan = NodeRecord {
             id: 2,
             name: "Perdu".to_string(),
@@ -1030,32 +1030,32 @@ mod tests {
         };
         let mut bytes = MAGIC.to_vec();
         bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
-        bytes.extend_from_slice(&rmp_serde::to_vec_named(&body).expect("encodage"));
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        bytes.extend_from_slice(&rmp_serde::to_vec_named(&body).expect("encoding"));
+        let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("incoherent.stf");
-        std::fs::write(&path, &bytes).expect("écriture du fichier de test");
+        std::fs::write(&path, &bytes).expect("write the test file");
 
-        let project = Project::new("Neuf").expect("projet");
+        let project = Project::new("New").expect("project");
         let err = save(&project, &path).unwrap_err();
         assert!(
             matches!(err, PersistenceError::UnreadableTarget { .. }),
             "{err:?}"
         );
-        assert_eq!(std::fs::read(&path).unwrap(), bytes, "fichier intact");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "file intact");
 
-        // Un fichier sain, chargé puis réenregistré : aucun blocage.
-        let good = dir.path().join("sain.stf");
-        save(&project, &good).expect("première écriture");
-        let loaded = load(&good).expect("relecture");
-        save(&loaded, &good).expect("réenregistrement du fichier chargé");
+        // A sound file, loaded then re-saved: no blocking.
+        let good = dir.path().join("sound.stf");
+        save(&project, &good).expect("first write");
+        let loaded = load(&good).expect("reload");
+        save(&loaded, &good).expect("re-save of the loaded file");
     }
 
-    /// Critère 8 : un corps bien formé mais structurellement incohérent doit
-    /// produire `InvalidModel`, pas paniquer ni être silencieusement accepté.
+    /// Criterion 8: a well-formed but structurally inconsistent body must
+    /// produce `InvalidModel`, not panic nor be silently accepted.
     #[test]
     fn incoherent_body_yields_invalid_model() {
-        // Nœud dont le parent est absent de la liste.
-        let root = folder_record(1, "Racine", vec![]);
+        // Node whose parent is absent from the list.
+        let root = folder_record(1, "Root", vec![]);
         let orphan = NodeRecord {
             id: 2,
             name: "Perdu".to_string(),
@@ -1080,7 +1080,7 @@ mod tests {
             "{err:?}"
         );
 
-        // Deux nœuds partageant le même id.
+        // Two nodes sharing the same id.
         let a = folder_record(1, "A", vec![]);
         let b = folder_record(1, "B", vec![]);
         let body = FileBody {
@@ -1101,10 +1101,10 @@ mod tests {
             "{err:?}"
         );
 
-        // La racine n'est pas un dossier.
+        // The root is not a folder.
         let root = NodeRecord {
             id: 1,
-            name: "Racine".to_string(),
+            name: "Root".to_string(),
             parent: None,
             kind: KindRecord::Note {
                 hidden: false,
@@ -1132,13 +1132,13 @@ mod tests {
         );
     }
 
-    /// Une colonne dont le buffer flottant n'est pas de longueur multiple de
-    /// 8 doit être signalée `Corrupt`, distinctement d'un modèle invalide.
+    /// A column whose float buffer length is not a multiple of
+    /// 8 must be reported `Corrupt`, distinctly from an invalid model.
     #[test]
     fn bad_float_buffer_length_yields_corrupt_not_invalid_model() {
         let root = NodeRecord {
             id: 1,
-            name: "Racine".to_string(),
+            name: "Root".to_string(),
             parent: None,
             kind: KindRecord::Folder { children: vec![2] },
         };
@@ -1153,7 +1153,7 @@ mod tests {
                 long_name: String::new(),
                 comment: String::new(),
                 display_format: String::new(),
-                values: schema::ValuesRecord::Float(vec![0, 1, 2]), // 3 octets, pas multiple de 8
+                values: schema::ValuesRecord::Float(vec![0, 1, 2]), // 3 bytes, not a multiple of 8
                 version: 0,
                 formula_parts: None,
                 file_metadata: Vec::new(),
@@ -1177,11 +1177,11 @@ mod tests {
         assert!(matches!(err, PersistenceError::Corrupt { .. }), "{err:?}");
     }
 
-    /// Copies locales étendues du schéma v1, avec un champ supplémentaire à
-    /// chaque niveau — simule un fichier écrit par une version future qui
-    /// aurait ajouté des données. Les noms de champs/variantes doivent
-    /// coïncider avec `schema.rs` ; seule la présence d'un champ en plus
-    /// change.
+    /// Local extended copies of the v1 schema, with an additional field at
+    /// each level — simulates a file written by a future version that
+    /// would have added data. The names of fields/variants must
+    /// coincide with `schema.rs`; only the presence of an extra field
+    /// changes.
     #[derive(Serialize)]
     struct ExtendedFileBody {
         root: u64,
@@ -1224,10 +1224,10 @@ mod tests {
         },
     }
 
-    /// Critère 6 : des champs inconnus (ajoutés par une version future) sont
-    /// ignorés à la lecture plutôt que de faire échouer le chargement.
-    /// Chaîne minimale conforme aux règles de contenance du cœur : dossier
-    /// racine → classeur → feuille → colonne.
+    /// Criterion 6: unknown fields (added by a future version) are
+    /// ignored at read rather than making the load fail.
+    /// Minimal chain conforming to the containment rules of the core: root
+    /// folder → workbook → sheet → column.
     #[test]
     fn unknown_fields_are_ignored_on_load() {
         let extended = ExtendedFileBody {
@@ -1236,10 +1236,10 @@ mod tests {
             nodes: vec![
                 ExtendedNodeRecord {
                     id: 1,
-                    name: "Racine".to_string(),
+                    name: "Root".to_string(),
                     parent: None,
                     kind: ExtendedKindRecord::Folder { children: vec![2] },
-                    extra: "ignoré".to_string(),
+                    extra: "ignored".to_string(),
                 },
                 ExtendedNodeRecord {
                     id: 2,
@@ -1250,14 +1250,14 @@ mod tests {
                         label: String::new(),
                         comment: String::new(),
                     },
-                    extra: "ignoré".to_string(),
+                    extra: "ignored".to_string(),
                 },
                 ExtendedNodeRecord {
                     id: 3,
                     name: "Sheet1".to_string(),
                     parent: Some(2),
                     kind: ExtendedKindRecord::Worksheet { columns: vec![4] },
-                    extra: "ignoré".to_string(),
+                    extra: "ignored".to_string(),
                 },
                 ExtendedNodeRecord {
                     id: 4,
@@ -1273,42 +1273,42 @@ mod tests {
                         values: schema::ValuesRecord::Float(1.5f64.to_le_bytes().to_vec()),
                         plot_hint: 42,
                     },
-                    extra: "ignoré aussi".to_string(),
+                    extra: "ignored too".to_string(),
                 },
             ],
-            extra: "version future".to_string(),
+            extra: "future version".to_string(),
         };
 
-        let payload = rmp_serde::to_vec_named(&extended).expect("encodage valide");
+        let payload = rmp_serde::to_vec_named(&extended).expect("valid encoding");
         let mut bytes = MAGIC.to_vec();
         bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
         bytes.extend_from_slice(&payload);
 
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("extended.plyx");
-        std::fs::write(&path, &bytes).expect("écriture du fichier de test");
+        std::fs::write(&path, &bytes).expect("write the test file");
 
-        let project = load(&path).expect("le chargement doit ignorer les champs inconnus");
-        // `next_id_hint` persisté (5) n'est pas contredit par le plus grand
-        // id lu (4) : le compteur repart directement à 5.
+        let project = load(&path).expect("the load must ignore the unknown fields");
+        // The persisted `next_id_hint` (5) is not contradicted by the largest
+        // id read (4): the counter restarts directly at 5.
         assert_eq!(project.next_id_hint(), 5);
         let node = project
             .tree()
             .node(NodeId::from_raw(4))
-            .expect("colonne présente");
-        let column = node.as_column().expect("nœud colonne");
+            .expect("column present");
+        let column = node.as_column().expect("column node");
         assert_eq!(column.column_type(), ColumnType::Numeric);
         assert_eq!(column.meta().role, stokesforge_core::ColumnRole::X);
         assert_eq!(column.meta().unit, "ms");
         assert_eq!(column.len(), 1);
     }
 
-    /// Copie locale de la forme du schéma *avant* la phase R3 : un `Graph`
-    /// sans champ `spec` — exactement ce qu'un fichier écrit par une version
-    /// antérieure du logiciel contient. Sert à prouver le critère de sortie
-    /// de la tâche 3.2 sans dépendre d'un fichier `.plyx` archivé : `spec`
-    /// est `#[serde(default)]`, donc un champ absent ne doit pas faire
-    /// échouer le chargement, et le graphe reconstruit doit porter
+    /// Local copy of the shape of the schema *before* phase R3: a `Graph`
+    /// without a `spec` field — exactly what a file written by an earlier
+    /// version of the software contains. Used to prove the exit criterion
+    /// of task 3.2 without depending on an archived `.plyx` file: `spec`
+    /// is `#[serde(default)]`, so a missing field must not make the load
+    /// fail, and the rebuilt graph must carry
     /// `PlotSpec::default()`.
     #[derive(Serialize)]
     struct PreR3FileBody {
@@ -1331,10 +1331,10 @@ mod tests {
         Graph { label: String, comment: String },
     }
 
-    /// Critère de sortie de la tâche 3.2 : un fichier écrit avant la phase R3
-    /// (donc sans le champ `spec`) se relit, et le graphe qu'il contient
-    /// porte un `PlotSpec` par défaut plutôt que de faire échouer le
-    /// chargement.
+    /// Exit criterion of task 3.2: a file written before phase R3
+    /// (hence without the `spec` field) reads back, and the graph it contains
+    /// carries a default `PlotSpec` rather than making the
+    /// load fail.
     #[test]
     fn a_graph_written_before_r3_loads_with_a_default_spec() {
         let pre_r3 = PreR3FileBody {
@@ -1343,7 +1343,7 @@ mod tests {
             nodes: vec![
                 PreR3NodeRecord {
                     id: 1,
-                    name: "Racine".to_string(),
+                    name: "Root".to_string(),
                     parent: None,
                     kind: PreR3KindRecord::Folder { children: vec![2] },
                 },
@@ -1359,45 +1359,45 @@ mod tests {
             ],
         };
 
-        let payload = rmp_serde::to_vec_named(&pre_r3).expect("encodage valide");
+        let payload = rmp_serde::to_vec_named(&pre_r3).expect("valid encoding");
         let mut bytes = MAGIC.to_vec();
         bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
         bytes.extend_from_slice(&payload);
 
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("pre_r3.plyx");
-        std::fs::write(&path, &bytes).expect("écriture du fichier de test");
+        std::fs::write(&path, &bytes).expect("write the test file");
 
-        let project = load(&path).expect("un fichier sans champ spec doit encore se relire");
+        let project = load(&path).expect("a file without a spec field must still read back");
         let node = project
             .tree()
             .node(NodeId::from_raw(2))
-            .expect("graphe présent");
+            .expect("graph present");
         match node.kind() {
             NodeKind::Graph { spec, .. } => {
                 assert_eq!(*spec, stokesforge_plot::PlotSpec::default());
             }
-            other => panic!("attendu Graph, obtenu {other:?}"),
+            other => panic!("expected Graph, got {other:?}"),
         }
     }
 
-    /// `record_to_kind`/`kind_to_record` restent cohérents pour une colonne
-    /// vide (longueur 0, ni corrompue ni invalide).
+    /// `record_to_kind`/`kind_to_record` stay consistent for an empty
+    /// column (length 0, neither corrupted nor invalid).
     #[test]
     fn empty_column_round_trips_through_records() {
         let column = Column::new(ColumnType::Numeric);
         let record = convert::kind_to_record(&NodeKind::Column(column.clone()));
-        let rebuilt = convert::record_to_kind(record).expect("colonne valide");
+        let rebuilt = convert::record_to_kind(record).expect("valid column");
         match rebuilt {
             NodeKind::Column(rebuilt_column) => assert_eq!(rebuilt_column, column),
-            other => panic!("attendu Column, obtenu {other:?}"),
+            other => panic!("expected Column, got {other:?}"),
         }
     }
 
-    /// Sanity-check indépendant de `CoreError` : `Column::from_block` ne
-    /// devrait jamais être atteint avec un couple (type, bloc) incohérent
-    /// depuis `record_to_kind`, mais on vérifie que l'erreur, si elle
-    /// survenait, resterait bien un `CoreError` transmis tel quel.
+    /// Sanity check independent of `CoreError`: `Column::from_block` should
+    /// never be reached with an inconsistent (type, block) pair
+    /// from `record_to_kind`, but we check that the error, if it
+    /// occurred, would stay a `CoreError` passed on as is.
     #[test]
     fn core_error_variant_exists_for_completeness() {
         let err = ConvertError::Core(CoreError::TypeMismatch("test".to_string()));
@@ -1407,16 +1407,16 @@ mod tests {
         ));
     }
 
-    /// Géométrie des fenêtres (tâche « géométrie des fenêtres ») : une entrée
-    /// posée via `save_with_geometries` se relit identique via
-    /// `load_with_geometries`, associée au bon `NodeId`.
+    /// Window geometry (task "window geometry"): an entry
+    /// set via `save_with_geometries` reads back identical via
+    /// `load_with_geometries`, associated with the right `NodeId`.
     #[test]
     fn geometries_round_trip_through_save_and_load() {
-        let mut project = stokesforge_core::Project::new("Demo").expect("projet valide");
+        let mut project = stokesforge_core::Project::new("Demo").expect("valid project");
         let root = project.root();
         let book = project
             .add_empty_workbook(root, Some("Book1"))
-            .expect("classeur créé");
+            .expect("workbook created");
 
         let mut geometries = HashMap::new();
         geometries.insert(
@@ -1434,25 +1434,25 @@ mod tests {
             },
         );
 
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("geometries.plyx");
         let view = ViewTables {
             window_geometries: geometries.clone(),
             column_widths: HashMap::new(),
         };
-        save_with_geometries(&project, &view, &path).expect("sauvegarde réussie");
+        save_with_geometries(&project, &view, &path).expect("save succeeded");
 
-        let (loaded, loaded_geometries) = load_with_geometries(&path).expect("chargement réussi");
+        let (loaded, loaded_geometries) = load_with_geometries(&path).expect("load succeeded");
         assert_eq!(loaded.tree().len(), project.tree().len());
         assert_eq!(loaded_geometries, geometries);
     }
 
-    /// Rétrocompatibilité : un fichier écrit avant l'ajout du bloc de
-    /// géométries (`FileBody` sans `window_geometries`) se recharge sans
-    /// erreur, avec une table de géométries vide — même patron que
+    /// Backward compatibility: a file written before the addition of the
+    /// geometry block (`FileBody` without `window_geometries`) reloads without
+    /// error, with an empty geometry table — same pattern as
     /// `unknown_fields_are_ignored_on_load`/`a_graph_written_before_r3_loads_with_a_default_spec`
-    /// ci-dessus, qui simulent déjà un fichier plus ancien pour d'autres
-    /// champs `#[serde(default)]`.
+    /// above, which already simulate an older file for other
+    /// `#[serde(default)]` fields.
     #[derive(Serialize)]
     struct PreGeometryFileBody {
         root: u64,
@@ -1463,7 +1463,7 @@ mod tests {
 
     #[test]
     fn a_file_without_the_geometry_block_loads_with_an_empty_geometry_table() {
-        let root = folder_record(1, "Racine", vec![]);
+        let root = folder_record(1, "Root", vec![]);
         let pre_geometry = PreGeometryFileBody {
             root: 1,
             next_id_hint: 2,
@@ -1471,38 +1471,38 @@ mod tests {
             save_counter: 3,
         };
 
-        let payload = rmp_serde::to_vec_named(&pre_geometry).expect("encodage valide");
+        let payload = rmp_serde::to_vec_named(&pre_geometry).expect("valid encoding");
         let mut bytes = MAGIC.to_vec();
         bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
         bytes.extend_from_slice(&payload);
 
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
+        let dir = tempfile::tempdir().expect("temporary directory");
         let path = dir.path().join("pre_geometry.plyx");
-        std::fs::write(&path, &bytes).expect("écriture du fichier de test");
+        std::fs::write(&path, &bytes).expect("write the test file");
 
         let (project, geometries) =
-            load_with_geometries(&path).expect("un fichier sans bloc de géométries doit se relire");
+            load_with_geometries(&path).expect("a file without a geometry block must read back");
         assert!(geometries.is_empty());
         assert_eq!(project.next_id_hint(), 2);
     }
-    /// Écrit un corps à la main (schéma privé) vers un fichier de test.
+    /// Writes a body by hand (private schema) to a test file.
     fn write_body(dir: &tempfile::TempDir, name: &str, body: &FileBody) -> std::path::PathBuf {
         let mut bytes = MAGIC.to_vec();
         bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
-        bytes.extend_from_slice(&rmp_serde::to_vec_named(body).expect("encodage"));
+        bytes.extend_from_slice(&rmp_serde::to_vec_named(body).expect("encoding"));
         let path = dir.path().join(name);
-        std::fs::write(&path, &bytes).expect("écriture du fichier de test");
+        std::fs::write(&path, &bytes).expect("write the test file");
         path
     }
 
-    /// Un corps minimal (racine 1, feuille 2) portant ces largeurs brutes.
+    /// A minimal body (root 1, sheet 2) carrying these raw widths.
     fn body_with_widths(widths: Vec<(u64, f32)>) -> FileBody {
         FileBody {
             root: 1,
             next_id_hint: 3,
             nodes: vec![
-                folder_record(1, "Racine", vec![2]),
-                folder_record(2, "Dossier", vec![]),
+                folder_record(1, "Root", vec![2]),
+                folder_record(2, "Folder", vec![]),
             ],
             save_counter: 0,
             saved_colors: Default::default(),
@@ -1514,35 +1514,35 @@ mod tests {
         }
     }
 
-    /// #325 : les largeurs posées dans `ViewTables` se relisent identiques,
-    /// associées au bon nœud. Témoin : ne pas écrire le champ.
+    /// #325: the widths set in `ViewTables` read back identical,
+    /// associated with the right node. Witness: do not write the field.
     #[test]
     fn column_widths_round_trip_through_save_and_load() {
-        let mut project = stokesforge_core::Project::new("Demo").expect("projet valide");
+        let mut project = stokesforge_core::Project::new("Demo").expect("valid project");
         let root = project.root();
         let book = project
             .add_empty_workbook(root, Some("Book1"))
-            .expect("classeur créé");
+            .expect("workbook created");
         let view = ViewTables {
             window_geometries: HashMap::new(),
             column_widths: HashMap::from([(book, 77.5), (root, 12.0)]),
         };
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
-        let path = dir.path().join("largeurs.stf");
-        save_with_geometries(&project, &view, &path).expect("sauvegarde réussie");
-        let (_, loaded, _) = load_with_report(&path).expect("chargement réussi");
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("widths.stf");
+        save_with_geometries(&project, &view, &path).expect("save succeeded");
+        let (_, loaded, _) = load_with_report(&path).expect("load succeeded");
         assert_eq!(loaded.column_widths, view.column_widths);
-        // `load_with_geometries` garde sa signature et ne montre que les géométries.
-        let (_, geometries) = load_with_geometries(&path).expect("chargement réussi");
+        // `load_with_geometries` keeps its signature and only shows the geometries.
+        let (_, geometries) = load_with_geometries(&path).expect("load succeeded");
         assert!(geometries.is_empty());
     }
 
-    /// #325 : une clé qui n'est plus un nœud n'est pas écrite (l'acteur ne
-    /// purge pas sa table à la mutation, c'est la sauvegarde qui filtre), ni
-    /// une valeur non finie ou nulle. Témoin : retirer le filtre.
+    /// #325: a key that is no longer a node is not written (the actor does not
+    /// purge its table on mutation, it is the save that filters), nor
+    /// a non-finite or zero value. Witness: remove the filter.
     #[test]
     fn save_drops_dead_keys_and_invalid_widths() {
-        let project = stokesforge_core::Project::new("Demo").expect("projet valide");
+        let project = stokesforge_core::Project::new("Demo").expect("valid project");
         let root = project.root();
         let dead = NodeId::from_raw(999);
         let view = ViewTables {
@@ -1553,19 +1553,19 @@ mod tests {
                 (NodeId::from_raw(1000), f32::NAN),
             ]),
         };
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
-        let path = dir.path().join("filtre.stf");
-        save_with_geometries(&project, &view, &path).expect("sauvegarde réussie");
-        let (_, loaded, _) = load_with_report(&path).expect("chargement réussi");
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("filter.stf");
+        save_with_geometries(&project, &view, &path).expect("save succeeded");
+        let (_, loaded, _) = load_with_report(&path).expect("load succeeded");
         assert_eq!(loaded.column_widths, HashMap::from([(root, 40.0)]));
-        // Le fichier lui-même ne porte pas la clé morte : lecture du corps brut.
+        // The file itself does not carry the dead key: reading of the raw body.
         let bytes = std::fs::read(&path).unwrap();
         let body: FileBody = rmp_serde::from_slice(&bytes[MAGIC.len() + 4..]).unwrap();
         assert_eq!(body.column_widths.len(), 1);
         assert!(!body.column_widths.contains_key(&dead.raw()));
     }
 
-    /// #325 : un fichier écrit avant le bloc se relit, table vide.
+    /// #325: a file written before the block reads back, empty table.
     #[test]
     fn a_file_without_the_widths_block_loads_with_an_empty_table() {
         #[derive(Serialize)]
@@ -1578,30 +1578,30 @@ mod tests {
         let pre = PreWidthsFileBody {
             root: 1,
             next_id_hint: 2,
-            nodes: vec![folder_record(1, "Racine", vec![])],
+            nodes: vec![folder_record(1, "Root", vec![])],
             save_counter: 0,
         };
         let mut bytes = MAGIC.to_vec();
         bytes.extend_from_slice(&FORMAT_VERSION.to_le_bytes());
-        bytes.extend_from_slice(&rmp_serde::to_vec_named(&pre).expect("encodage"));
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
-        let path = dir.path().join("sans_largeurs.stf");
+        bytes.extend_from_slice(&rmp_serde::to_vec_named(&pre).expect("encoding"));
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = dir.path().join("without_widths.stf");
         std::fs::write(&path, &bytes).unwrap();
-        let (_, view, _) = load_with_report(&path).expect("un fichier sans bloc se relit");
+        let (_, view, _) = load_with_report(&path).expect("a file without the block reads back");
         assert!(view.column_widths.is_empty());
     }
 
-    /// #325, invariant 10 : une clé orpheline, NaN, ∞, 0 ou négative sont
-    /// écartées une à une, sans échec ; la valeur saine voisine reste.
+    /// #325, invariant 10: an orphan key, NaN, ∞, 0 or negative are
+    /// dropped one by one, without failure; the sound neighbouring value stays.
     #[test]
     fn hostile_column_widths_are_discarded_one_by_one() {
         let body = body_with_widths(vec![
             (2, 61.0),
             (77, 30.0), // orpheline
         ]);
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
-        let path = write_body(&dir, "orpheline.stf", &body);
-        let (_, view, _) = load_with_report(&path).expect("chargement réussi");
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = write_body(&dir, "orphan.stf", &body);
+        let (_, view, _) = load_with_report(&path).expect("load succeeded");
         assert_eq!(
             view.column_widths,
             HashMap::from([(NodeId::from_raw(2), 61.0)])
@@ -1609,22 +1609,22 @@ mod tests {
         for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, 0.0, -3.0] {
             let body = body_with_widths(vec![(2, bad), (1, 20.0)]);
             let path = write_body(&dir, "hostile.stf", &body);
-            let (_, view, _) = load_with_report(&path).expect("jamais un échec");
+            let (_, view, _) = load_with_report(&path).expect("never a failure");
             assert_eq!(
                 view.column_widths,
                 HashMap::from([(NodeId::from_raw(1), 20.0)]),
-                "largeur {bad:?} gardée"
+                "width {bad:?} kept"
             );
         }
     }
 
-    /// #325 : un identifiant au-delà de `MAX_NODE_ID` dans le bloc des
-    /// largeurs est refusé, comme pour les géométries.
+    /// #325: an identifier beyond `MAX_NODE_ID` in the block of the
+    /// widths is refused, as for the geometries.
     #[test]
     fn a_column_width_key_above_the_id_ceiling_is_refused() {
         let body = body_with_widths(vec![(MAX_NODE_ID + 1, 50.0)]);
-        let dir = tempfile::tempdir().expect("répertoire temporaire");
-        let path = write_body(&dir, "id_trop_grand.stf", &body);
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let path = write_body(&dir, "id_too_large.stf", &body);
         assert!(load_with_report(&path).is_err());
     }
 }

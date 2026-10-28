@@ -1,103 +1,103 @@
-//! Type d'erreur unique du crate.
+//! The crate's single error type.
 
 use crate::id::NodeId;
 
-/// Erreur du modèle de données. Une variante par cause, jamais de fourre-tout.
+/// Data model error. One variant per cause, never a catch-all.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CoreError {
-    /// Nom d'objet syntaxiquement invalide (vide, mal détouré, caractère réservé).
+    /// Object name syntactically invalid (empty, badly trimmed, reserved character).
     #[error("invalid name: {0}")]
     InvalidName(String),
-    /// Nom déjà pris dans le conteneur cible.
+    /// Name already taken in the target container.
     #[error("name already taken: {0}")]
     DuplicateName(String),
-    /// Chemin `[Book]Sheet!Col` mal formé ou non résolu.
+    /// Malformed or unresolved `[Book]Sheet!Col` path.
     #[error("invalid path: {0}")]
     Path(String),
-    /// Opération de structure impossible (mauvais type de parent, cycle, ...).
+    /// Structure operation impossible (wrong parent type, cycle, ...).
     #[error("invalid structure: {0}")]
     Structure(String),
-    /// Identifiant absent de l'arbre courant.
+    /// Identifier absent from the current tree.
     #[error("unknown node: {0}")]
     UnknownNode(NodeId),
-    /// Index de ligne ou de colonne hors bornes.
+    /// Row or column index out of bounds.
     #[error("index out of bounds: {0}")]
     IndexOutOfBounds(String),
-    /// Valeurs d'un type incompatible avec la colonne.
+    /// Values of a type incompatible with the column.
     #[error("incompatible type: {0}")]
     TypeMismatch(String),
-    /// `IdAllocator` a épuisé `u64` : plus aucun identifiant à attribuer.
-    /// B1 (`guide-de-correction-robustesse.md` §F2/F3/F4) — remplace le
-    /// débordement silencieux (`self.next += 1` sur `u64::MAX`, qui faisait
-    /// reculer le compteur et réattribuer un identifiant déjà vivant).
+    /// `IdAllocator` has exhausted `u64`: no identifier left to assign.
+    /// B1 (`guide-de-correction-robustesse.md` §F2/F3/F4) — replaces the
+    /// silent overflow (`self.next += 1` on `u64::MAX`, which made the
+    /// counter go backwards and reassign an identifier already alive).
     #[error("identifiers exhausted: no more nodes can be created")]
     IdentifiersExhausted,
     /// A2 (`guide-de-correction-robustesse.md` §F6) — `Command::SetCells`
-    /// portait un `expected_version` qui ne coïncide plus avec
-    /// `Column::version` au moment d'appliquer la commande : un autre
-    /// client a modifié la colonne entre l'instantané lu par l'appelant et
-    /// l'application de sa commande. Ni le modèle ni l'historique n'ont été
-    /// touchés — variante dédiée pour que l'appelant distingue ce refus
-    /// précis (à retenter après relecture) de toute autre erreur (mauvais
-    /// type, colonne absente...).
+    /// carried an `expected_version` that no longer matches
+    /// `Column::version` when the command is applied: another
+    /// client changed the column between the snapshot the caller read and
+    /// the application of its command. Neither the model nor the history was
+    /// touched — a dedicated variant so the caller can tell this
+    /// precise refusal (to retry after a re-read) from any other error (wrong
+    /// type, missing column...).
     #[error(
         "concurrent modification: column {column} expected version {expected}, found version \
          {found}"
     )]
     ConcurrentModification {
-        /// Colonne visée par l'écriture refusée.
+        /// Column targeted by the refused write.
         column: NodeId,
-        /// Version que l'appelant croyait encore valable.
+        /// Version the caller still believed valid.
         expected: u64,
-        /// Version réelle de la colonne au moment du refus.
+        /// Actual version of the column at the time of the refusal.
         found: u64,
     },
-    /// Colonnes calculées (v1) — `Command::SetCells` refusé parce que
-    /// `column` porte une formule (`ColumnMeta::formula.is_some()`) : ses
-    /// valeurs sont recalculées automatiquement par `stokesforge-session::actor`,
-    /// une écriture directe de cellule n'y a pas de sens. Le refus arrive
-    /// **avant** toute mutation (vérifié sur l'arbre courant, comme A2 pour
-    /// `ConcurrentModification`) : ni le modèle ni l'historique ne sont
-    /// touchés. Éditer le texte de la formule reste possible
-    /// (`Command::SetColumnMeta`), lui aussi annulable.
+    /// Computed columns (v1) — `Command::SetCells` refused because
+    /// `column` carries a formula (`ColumnMeta::formula.is_some()`): its
+    /// values are recalculated automatically by `stokesforge-session::actor`,
+    /// a direct cell write makes no sense there. The refusal comes
+    /// **before** any mutation (checked on the current tree, like A2 for
+    /// `ConcurrentModification`): neither the model nor the history is
+    /// touched. Editing the formula text stays possible
+    /// (`Command::SetColumnMeta`), also undoable.
     #[error("read-only column: {column} is computed by a formula")]
     FormulaColumnReadOnly {
-        /// Colonne-formule visée par l'écriture refusée.
+        /// Formula column targeted by the refused write.
         column: NodeId,
     },
-    /// Colonne produite par un calcul d'analyse (#181) : `Command::SetCells`
-    /// refusé, comme pour une colonne-formule — ses valeurs sont réécrites par
-    /// le recalcul, une saisie à la main serait écrasée (M9 d A). Se détache
-    /// du calcul par `Command::RemoveCalculation { with_columns: false }`
+    /// Column produced by an analysis calculation (#181): `Command::SetCells`
+    /// refused, as for a formula column — its values are rewritten by the
+    /// recalculation, a hand entry would be overwritten (M9 d A). Detach it
+    /// from the calculation with `Command::RemoveCalculation { with_columns: false }`
     /// (« Detach from Calculation »).
     #[error("read-only column: {column} is produced by calculation {calculation}")]
     CalculatedColumnReadOnly {
-        /// Colonne de sortie visée par l'écriture refusée.
+        /// Output column targeted by the refused write.
         column: NodeId,
-        /// Calcul qui la produit.
+        /// Calculation that produces it.
         calculation: NodeId,
     },
-    /// Transposition refusée (#253) : la colonne n'est pas numérique (elle
-    /// contient du texte). `letter` est sa lettre de position, ce que la grille
-    /// affiche ; `name` son nom de nœud.
+    /// Transpose refused (#253): the column is not numeric (it
+    /// contains text). `letter` is its position letter, what the grid
+    /// shows; `name` is its node name.
     #[error("cannot transpose: column {letter} ({name}) is not numeric")]
     TransposeNotNumeric {
-        /// Lettre de position de la colonne (A, B, …).
+        /// Position letter of the column (A, B, …).
         letter: String,
-        /// Nom de la colonne.
+        /// Name of the column.
         name: String,
     },
-    /// Transposition refusée (#253) : la colonne n'a pas de x'.
+    /// Transpose refused (#253): the column has no x'.
     #[error("cannot transpose: column {letter} ({name}) has no x' value")]
     TransposeNoXPrime {
-        /// Lettre de position de la colonne (A, B, …).
+        /// Position letter of the column (A, B, …).
         letter: String,
-        /// Nom de la colonne.
+        /// Name of the column.
         name: String,
     },
 }
 
-/// Alias de résultat du crate.
+/// Result alias of the crate.
 pub type CoreResult<T> = Result<T, CoreError>;
 
 #[cfg(test)]

@@ -1,10 +1,10 @@
-//! Nœuds de l'arbre de projet : nature (`NodeKind`), identité, nom, parent.
+//! Nodes of the project tree: kind (`NodeKind`), identity, name, parent.
 //!
-//! Un `Node` est immuable vu de l'extérieur du crate : il vit derrière un
-//! `Arc` dans `Tree`, et seul `Project` le mute, en passant par `Tree` et
-//! `Arc::make_mut`. Les listes d'enfants vivent *dans* la nature du nœud, ce
-//! qui garantit à la compilation qu'une colonne, un graphe, une matrice ou
-//! une note n'en a pas.
+//! A `Node` is immutable seen from outside the crate: it lives behind an
+//! `Arc` in `Tree`, and only `Project` mutates it, going through `Tree` and
+//! `Arc::make_mut`. The child lists live *inside* the node's kind, which
+//! guarantees at compile time that a column, a graph, a matrix or
+//! a note has none.
 
 use stokesforge_plot::{PlotSpec, RawVariant};
 
@@ -13,89 +13,89 @@ use crate::error::CoreResult;
 use crate::id::NodeId;
 use crate::name::check_name;
 
-/// Métadonnées communes aux fenêtres (classeur, graphe, matrice, note).
+/// Metadata common to windows (workbook, graph, matrix, note).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct WindowMeta {
-    /// Étiquette affichée dans le bandeau de la fenêtre (vide = afficher le nom).
+    /// Label shown in the window banner (empty = show the name).
     pub label: String,
-    /// Commentaire libre.
+    /// Free comment.
     pub comment: String,
-    /// Fenêtre absente du gestionnaire ; utilisé pour les classeurs embarqués.
+    /// Window absent from the manager; used for embedded workbooks.
     pub hidden: bool,
 }
 
-/// Nature d'un nœud et son contenu propre. Les listes d'enfants sont ordonnées :
-/// c'est cet ordre qui est affiché et persisté.
+/// Kind of a node and its own content. Child lists are ordered:
+/// that order is what is displayed and persisted.
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeKind {
-    /// Dossier de rangement : contient dossiers et fenêtres.
+    /// Storage folder: contains folders and windows.
     Folder {
-        /// Enfants ordonnés (dossiers, classeurs, graphes, matrices, notes).
+        /// Ordered children (folders, workbooks, graphs, matrices, notes).
         children: Vec<NodeId>,
     },
-    /// Classeur : une pile de feuilles ordonnées.
+    /// Workbook: a stack of ordered sheets.
     Workbook {
-        /// Feuilles du classeur, dans l'ordre des onglets.
+        /// Sheets of the workbook, in tab order.
         sheets: Vec<NodeId>,
-        /// Métadonnées de fenêtre.
+        /// Window metadata.
         meta: WindowMeta,
     },
-    /// Feuille de calcul : une suite ordonnée de colonnes.
+    /// Worksheet: an ordered sequence of columns.
     Worksheet {
-        /// Colonnes de la feuille, de gauche à droite.
+        /// Columns of the sheet, from left to right.
         columns: Vec<NodeId>,
     },
-    /// Colonne de données (le nom vit dans le nœud, pas dans la `Column`).
+    /// Data column (the name lives in the node, not in the `Column`).
     Column(Column),
-    /// Graphe : porte son contenu de tracé (phase R3, `docs/archive/newarchitecture/roadmap-rendu.md`).
+    /// Graph: carries its plot content (phase R3, `docs/archive/newarchitecture/roadmap-rendu.md`).
     Graph {
-        /// Métadonnées de fenêtre.
+        /// Window metadata.
         meta: WindowMeta,
-        /// Description du graphe, indépendante de tout moteur de rendu. Les
-        /// séries y référencent leurs colonnes par [`NodeId`] (`stokesforge-plot`
-        /// §11.1 d'`architecture-choisie.md`) : renommer ou déplacer une
-        /// colonne laisse le graphe intact, la supprimer produit une
-        /// référence brisée détectable à la résolution
-        /// (`crate::resolve::resolve_spec`), jamais une série
-        /// silencieusement vide. Remplaçable **en bloc** après création par
-        /// [`Project::set_plot_spec`] — jamais par sous-champ (pas plus
-        /// qu'une écriture de cellule ne modifie une seule valeur d'un bloc,
-        /// voir la doctrine de `Project::set_values`) : la mutation fine
-        /// (série, axe, légende) reste hors périmètre.
+        /// Description of the graph, independent of any renderer. The
+        /// series reference their columns by [`NodeId`] (`stokesforge-plot`
+        /// §11.1 of `architecture-choisie.md`): renaming or moving a
+        /// column leaves the graph intact, deleting it produces a
+        /// broken reference detectable at resolution
+        /// (`crate::resolve::resolve_spec`), never a silently
+        /// empty series. Replaceable **as a whole** after creation by
+        /// [`Project::set_plot_spec`] — never by sub-field (no more
+        /// than a cell write changes a single value of a block,
+        /// see the doctrine of `Project::set_values`): fine-grained mutation
+        /// (series, axis, legend) stays out of scope.
         spec: PlotSpec,
     },
-    /// Matrice (contenu ajouté dans une tranche ultérieure).
+    /// Matrix (content added in a later slice).
     Matrix {
-        /// Métadonnées de fenêtre.
+        /// Window metadata.
         meta: WindowMeta,
     },
-    /// Note : une fenêtre de texte libre.
+    /// Note: a free-text window.
     Note {
-        /// Métadonnées de fenêtre.
+        /// Window metadata.
         meta: WindowMeta,
-        /// Texte de la note.
+        /// Text of the note.
         text: String,
     },
-    /// Nature de nœud d'une version plus récente de StokesForge, inconnue de ce
-    /// lecteur (C5, niveau 2, `guide-de-correction-robustesse.md` §F3) : ce
-    /// nœud ne s'affiche pas comme un dossier, un classeur ou l'une des
-    /// autres natures connues, mais son contenu original (nom de la
-    /// variante et octets bruts) est conservé pour que la prochaine
-    /// sauvegarde réécrive le fichier à l'identique, plutôt que de perdre le
-    /// nœud — et le reste du fichier avec lui, avant ce correctif.
+    /// Node kind from a more recent version of StokesForge, unknown to this
+    /// reader (C5, level 2, `guide-de-correction-robustesse.md` §F3): this
+    /// node is not shown as a folder, a workbook or one of the
+    /// other known kinds, but its original content (variant name
+    /// and raw bytes) is kept so that the next
+    /// save rewrites the file identically, rather than losing the
+    /// node — and the rest of the file with it, before this fix.
     Unknown(RawVariant),
 }
 
 impl NodeKind {
-    /// Vrai pour `Workbook`, `Graph`, `Matrix`, `Note` — les nœuds adressables
-    /// par `[Nom]`, dont le nom est unique dans leur dossier parent (#105).
+    /// True for `Workbook`, `Graph`, `Matrix`, `Note` — the nodes addressable
+    /// by `[Name]`, whose name is unique in their parent folder (#105).
     ///
-    /// Vrai aussi pour `Unknown` : dans le schéma sur disque (`schema.rs`),
-    /// une nature de nœud est un enfant plat de `Folder` au même titre que
-    /// `Workbook`/`Graph`/`Matrix`/`Note` — jamais de `Worksheet`/`Column` —
-    /// donc une nature future se comporte forcément comme une fenêtre, pas
-    /// comme un dossier ou une feuille, du point de vue du confinement
-    /// (`accepts_child`) et de l'adressage (`Project::path_of`).
+    /// Also true for `Unknown`: in the on-disk schema (`schema.rs`),
+    /// a node kind is a flat child of `Folder` just like
+    /// `Workbook`/`Graph`/`Matrix`/`Note` — never `Worksheet`/`Column` —
+    /// so a future kind necessarily behaves like a window, not
+    /// like a folder or a sheet, from the point of view of containment
+    /// (`accepts_child`) and addressing (`Project::path_of`).
     pub fn is_window(&self) -> bool {
         matches!(
             self,
@@ -107,22 +107,22 @@ impl NodeKind {
         )
     }
 
-    /// Vrai pour un dossier.
+    /// True for a folder.
     pub fn is_folder(&self) -> bool {
         matches!(self, NodeKind::Folder { .. })
     }
 
-    /// Vrai pour une feuille de calcul.
+    /// True for a worksheet.
     pub fn is_worksheet(&self) -> bool {
         matches!(self, NodeKind::Worksheet { .. })
     }
 
-    /// Vrai pour une colonne.
+    /// True for a column.
     pub fn is_column(&self) -> bool {
         matches!(self, NodeKind::Column(_))
     }
 
-    /// Enfants ordonnés. Vide pour les feuilles de l'arbre : `Column`, `Graph`,
+    /// Ordered children. Empty for the leaves of the tree: `Column`, `Graph`,
     /// `Matrix`, `Note`.
     pub fn children(&self) -> &[NodeId] {
         match self {
@@ -137,7 +137,7 @@ impl NodeKind {
         }
     }
 
-    /// Nom lisible du type, en français, pour les messages d'erreur.
+    /// Readable name of the kind, for error messages.
     pub fn type_name(&self) -> &'static str {
         match self {
             NodeKind::Folder { .. } => "folder",
@@ -147,34 +147,34 @@ impl NodeKind {
             NodeKind::Graph { .. } => "graph",
             NodeKind::Matrix { .. } => "matrix",
             NodeKind::Note { .. } => "note",
-            // Affichage dégradé plutôt qu'un panique ou un rendu absent
-            // (C5, niveau 2) : l'utilisateur voit « nature non reconnue »
-            // au lieu d'un texte de type inventé pour un contenu que ce
-            // lecteur ne comprend pas.
+            // Degraded display rather than a panic or a missing rendering
+            // (C5, level 2): the user sees "unrecognized kind"
+            // instead of a type text invented for content this
+            // reader does not understand.
             NodeKind::Unknown(_) => "unrecognized kind",
         }
     }
 
-    /// Vrai si un nœud de cette nature peut contenir `child` :
-    /// `Folder ⊃ {Folder, Workbook, Graph, Matrix, Note}` ; `Workbook ⊃ {Worksheet}` ;
-    /// `Worksheet ⊃ {Column}` ; rien d'autre.
+    /// True if a node of this kind can contain `child`:
+    /// `Folder ⊃ {Folder, Workbook, Graph, Matrix, Note}`; `Workbook ⊃ {Worksheet}`;
+    /// `Worksheet ⊃ {Column}`; nothing else.
     ///
-    /// **Plus [`NodeKind::Unknown`], que les trois conteneurs acceptent.**
-    /// Une nature non reconnue vient toujours d'un fichier écrit par une
-    /// version plus récente (C5, niveau 2) ; la refuser ici ne la répare pas,
-    /// elle fait échouer la validation d'arbre de `stokesforge_persistence::load`,
-    /// donc perd **tout le fichier** au lieu de ce seul nœud — exactement ce
-    /// que la capture en `RawVariant` existe pour éviter (invariant 10).
-    /// `Folder` l'acceptait déjà, indirectement (`is_window` compte
-    /// `Unknown`) ; `Workbook` et `Worksheet` ne l'acceptaient pas, et c'est
-    /// par là qu'un type de colonne inconnu — une colonne mixte lue par un
-    /// lecteur d'avant, par exemple — emportait le fichier entier
+    /// **Plus [`NodeKind::Unknown`], which the three containers accept.**
+    /// An unrecognized kind always comes from a file written by a
+    /// more recent version (C5, level 2); refusing it here does not repair it,
+    /// it makes the tree validation of `stokesforge_persistence::load` fail,
+    /// so it loses **the whole file** instead of just that node — exactly what
+    /// the `RawVariant` capture exists to avoid (invariant 10).
+    /// `Folder` already accepted it, indirectly (`is_window` counts
+    /// `Unknown`); `Workbook` and `Worksheet` did not, and that is
+    /// how an unknown column type — a mixed column read by an
+    /// earlier reader, for example — took the whole file down
     /// (`stokesforge-robustesse`, `b19_un_type_de_colonne_inconnu_ne_perd_que_cette_colonne`).
     ///
-    /// Un nœud inconnu ainsi rangé n'est jamais confondu avec une colonne :
-    /// tout ce qui lit une feuille passe par `Node::as_column`, qui rend
-    /// `None` pour lui (`Project::row_targets`, `resolve`, la grille de
-    /// `stokesforge-app`). Il occupe une place dans la feuille, et c'est tout.
+    /// An unknown node stored this way is never mistaken for a column:
+    /// everything that reads a sheet goes through `Node::as_column`, which returns
+    /// `None` for it (`Project::row_targets`, `resolve`, the grid of
+    /// `stokesforge-app`). It takes up a place in the sheet, and that is all.
     pub fn accepts_child(&self, child: &NodeKind) -> bool {
         if child.is_unknown() {
             return self.allowed_children().is_some();
@@ -191,14 +191,14 @@ impl NodeKind {
         }
     }
 
-    /// Vrai pour une nature qu'aucune variante de ce lecteur ne nomme, lue
-    /// d'un fichier écrit par une version plus récente (C5, niveau 2).
+    /// True for a kind that no variant of this reader names, read
+    /// from a file written by a more recent version (C5, level 2).
     pub fn is_unknown(&self) -> bool {
         matches!(self, NodeKind::Unknown(_))
     }
 
-    /// Nom du type précédé de son article indéfini, pour les messages :
-    /// « une colonne », « un classeur »…
+    /// Name of the type preceded by its indefinite article, for messages:
+    /// "a column", "a workbook"…
     pub fn with_article(&self) -> &'static str {
         match self {
             NodeKind::Folder { .. } => "a folder",
@@ -212,8 +212,8 @@ impl NodeKind {
         }
     }
 
-    /// Description en français de ce que cette nature accepte, ou `None` si
-    /// elle n'accepte aucun enfant.
+    /// Description of what this kind accepts, or `None` if
+    /// it accepts no child.
     pub(crate) fn allowed_children(&self) -> Option<&'static str> {
         match self {
             NodeKind::Folder { .. } => Some("folders, workbooks, graphs, matrices and notes"),
@@ -227,7 +227,7 @@ impl NodeKind {
         }
     }
 
-    /// Liste d'enfants mutable, ou `None` pour une feuille de l'arbre.
+    /// Mutable child list, or `None` for a leaf of the tree.
     pub(crate) fn children_mut(&mut self) -> Option<&mut Vec<NodeId>> {
         match self {
             NodeKind::Folder { children } => Some(children),
@@ -241,12 +241,12 @@ impl NodeKind {
         }
     }
 
-    /// Métadonnées de fenêtre mutables, ou `None` si ce n'est pas une fenêtre.
+    /// Mutable window metadata, or `None` if this is not a window.
     ///
-    /// `Unknown` rend `None` bien qu'`is_window()` le compte comme une
-    /// fenêtre : son contenu est opaque, il n'y a pas de `WindowMeta` à en
-    /// extraire pour le muter — `Project::set_window_meta` échoue donc
-    /// proprement (`Structure`) sur un nœud d'une nature inconnue.
+    /// `Unknown` returns `None` although `is_window()` counts it as a
+    /// window: its content is opaque, there is no `WindowMeta` to extract
+    /// to mutate — `Project::set_window_meta` therefore fails
+    /// cleanly (`Structure`) on a node of an unknown kind.
     pub(crate) fn window_meta_mut(&mut self) -> Option<&mut WindowMeta> {
         match self {
             NodeKind::Workbook { meta, .. }
@@ -260,8 +260,8 @@ impl NodeKind {
         }
     }
 
-    /// Spec de tracé mutable, ou `None` si ce n'est pas un graphe. Utilisé
-    /// par [`Project::set_plot_spec`] pour remplacer le `PlotSpec` en bloc.
+    /// Mutable plot spec, or `None` if this is not a graph. Used
+    /// by [`Project::set_plot_spec`] to replace the `PlotSpec` as a whole.
     pub(crate) fn plot_spec_mut(&mut self) -> Option<&mut PlotSpec> {
         match self {
             NodeKind::Graph { spec, .. } => Some(spec),
@@ -276,7 +276,7 @@ impl NodeKind {
     }
 }
 
-/// Message d'erreur expliquant pourquoi `parent` ne peut pas contenir `child`.
+/// Error message explaining why `parent` cannot contain `child`.
 pub(crate) fn containment_message(parent: &NodeKind, child: &NodeKind) -> String {
     match parent.allowed_children() {
         Some(allowed) => format!(
@@ -293,8 +293,8 @@ pub(crate) fn containment_message(parent: &NodeKind, child: &NodeKind) -> String
     }
 }
 
-/// Un nœud de l'arbre. Immuable de l'extérieur : il vit derrière un `Arc` dans
-/// `Tree`, et seul `Project` le mute.
+/// A node of the tree. Immutable from outside: it lives behind an `Arc` in
+/// `Tree`, and only `Project` mutates it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Node {
     id: NodeId,
@@ -304,14 +304,14 @@ pub struct Node {
 }
 
 impl Node {
-    /// Construit un nœud détaché (`parent = None`). `Err(InvalidName)` si le nom
-    /// est invalide. Constructeur public : c'est aussi ce que la persistance
-    /// utilise pour reconstruire un arbre avec des identifiants imposés.
+    /// Builds a detached node (`parent = None`). `Err(InvalidName)` if the name
+    /// is invalid. Public constructor: it is also what persistence
+    /// uses to rebuild a tree with imposed identifiers.
     pub fn new(id: NodeId, name: &str, kind: NodeKind) -> CoreResult<Self> {
         Self::with_parent(id, name, None, kind)
     }
 
-    /// Comme `new`, mais avec un parent déjà connu (reconstruction depuis un fichier).
+    /// Like `new`, but with an already known parent (rebuilding from a file).
     pub fn with_parent(
         id: NodeId,
         name: &str,
@@ -327,9 +327,9 @@ impl Node {
         })
     }
 
-    /// Construit un nœud sans valider le nom. Réservé aux noms littéraux du
-    /// crate (racine par défaut), pour offrir un chemin de construction
-    /// infaillible sans `unwrap`.
+    /// Builds a node without validating the name. Reserved for the crate's
+    /// literal names (default root), to offer an infallible construction
+    /// path with no `unwrap`.
     pub(crate) fn new_unchecked(id: NodeId, name: &str, kind: NodeKind) -> Self {
         Self {
             id,
@@ -339,27 +339,27 @@ impl Node {
         }
     }
 
-    /// Identifiant du nœud, stable sur toute sa vie.
+    /// Identifier of the node, stable over its whole life.
     pub fn id(&self) -> NodeId {
         self.id
     }
 
-    /// Nom court du nœud (celui qui apparaît dans les chemins).
+    /// Short name of the node (the one that appears in paths).
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Parent du nœud, `None` pour la racine (ou un nœud encore détaché).
+    /// Parent of the node, `None` for the root (or a still detached node).
     pub fn parent(&self) -> Option<NodeId> {
         self.parent
     }
 
-    /// Nature du nœud et son contenu propre.
+    /// Kind of the node and its own content.
     pub fn kind(&self) -> &NodeKind {
         &self.kind
     }
 
-    /// Raccourci : `Some(&Column)` si le nœud est une colonne.
+    /// Shortcut: `Some(&Column)` if the node is a column.
     pub fn as_column(&self) -> Option<&Column> {
         match &self.kind {
             NodeKind::Column(column) => Some(column),
@@ -367,32 +367,32 @@ impl Node {
         }
     }
 
-    /// Enfants ordonnés (vide pour les feuilles de l'arbre).
+    /// Ordered children (empty for the leaves of the tree).
     pub fn children(&self) -> &[NodeId] {
         self.kind.children()
     }
 
-    /// Remplace le nom. Rend le précédent. La validation est faite par `Tree`.
+    /// Replaces the name. Returns the previous one. Validation is done by `Tree`.
     pub(crate) fn set_name(&mut self, name: String) -> String {
         std::mem::replace(&mut self.name, name)
     }
 
-    /// Remplace le parent. Rend le précédent.
+    /// Replaces the parent. Returns the previous one.
     pub(crate) fn set_parent(&mut self, parent: Option<NodeId>) -> Option<NodeId> {
         std::mem::replace(&mut self.parent, parent)
     }
 
-    /// Nature mutable.
+    /// Mutable kind.
     pub(crate) fn kind_mut(&mut self) -> &mut NodeKind {
         &mut self.kind
     }
 
-    /// Liste d'enfants mutable, ou `None` pour une feuille de l'arbre.
+    /// Mutable child list, or `None` for a leaf of the tree.
     pub(crate) fn children_mut(&mut self) -> Option<&mut Vec<NodeId>> {
         self.kind.children_mut()
     }
 
-    /// Colonne mutable, ou `None` si le nœud n'est pas une colonne.
+    /// Mutable column, or `None` if the node is not a column.
     pub(crate) fn column_mut(&mut self) -> Option<&mut Column> {
         match &mut self.kind {
             NodeKind::Column(column) => Some(column),
@@ -400,7 +400,7 @@ impl Node {
         }
     }
 
-    /// Texte de note mutable, ou `None` si le nœud n'est pas une note.
+    /// Mutable note text, or `None` if the node is not a note.
     pub(crate) fn note_text_mut(&mut self) -> Option<&mut String> {
         match &mut self.kind {
             NodeKind::Note { text, .. } => Some(text),
@@ -483,7 +483,7 @@ mod tests {
         for kind in [column(), graph(), matrix(), note()] {
             assert!(
                 kind.children().is_empty(),
-                "{} sans enfants",
+                "{} without children",
                 kind.type_name()
             );
         }
@@ -539,23 +539,23 @@ mod tests {
         }
     }
 
-    /// Une nature non reconnue (C5, niveau 2) est acceptée par les **trois**
-    /// conteneurs, et par eux seuls : la refuser ferait perdre tout le
-    /// fichier au lieu de ce seul nœud (voir la doc d'`accepts_child`).
+    /// An unrecognized kind (C5, level 2) is accepted by the **three**
+    /// containers, and by them alone: refusing it would lose the whole
+    /// file instead of just that node (see the doc of `accepts_child`).
     #[test]
     fn every_container_accepts_an_unknown_nature() {
-        let inconnu = NodeKind::Unknown(stokesforge_plot::RawVariant {
+        let unknown = NodeKind::Unknown(stokesforge_plot::RawVariant {
             name: "Image".to_string(),
             payload: Vec::new(),
         });
-        assert!(folder().accepts_child(&inconnu));
-        assert!(workbook().accepts_child(&inconnu));
-        assert!(worksheet().accepts_child(&inconnu));
+        assert!(folder().accepts_child(&unknown));
+        assert!(workbook().accepts_child(&unknown));
+        assert!(worksheet().accepts_child(&unknown));
 
-        for leaf in [column(), graph(), matrix(), note(), inconnu.clone()] {
+        for leaf in [column(), graph(), matrix(), note(), unknown.clone()] {
             assert!(
-                !leaf.accepts_child(&inconnu),
-                "une feuille de l'arbre n'accepte aucun enfant, inconnu compris"
+                !leaf.accepts_child(&unknown),
+                "a leaf of the tree accepts no child, unknown included"
             );
         }
     }

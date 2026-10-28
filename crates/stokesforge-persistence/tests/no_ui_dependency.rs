@@ -1,38 +1,37 @@
-//! Garde-fou : `stokesforge-persistence` ne doit jamais gagner de dépendance UI.
-//! Plutôt que de deviner ce qu'est « une dépendance UI », ce test liste les
-//! seules dépendances autorisées — toute addition dans `Cargo.toml` doit être
-//! ajoutée ici explicitement, ce qui force une décision consciente plutôt
-//! qu'un import qui se glisse.
+//! Guard: `stokesforge-persistence` must never gain a UI dependency.
+//! Rather than guessing what "a UI dependency" is, this test lists the
+//! only allowed dependencies: any addition to `Cargo.toml` must be added
+//! here explicitly, which forces a conscious decision rather than an import
+//! that slips in.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
-    "stokesforge-analysis", // `Operation` d'un calcul : sa forme arborescente traverse le fichier (#181)
+    "stokesforge-analysis", // `Operation` of a calculation: its tree shape goes through the file (#181)
     "stokesforge-core",
-    // la recette d'import d'une colonne importée traverse le fichier : son
-    // miroir (recipe_record.rs) convertit depuis `ImportRecipe` (S2, #323)
+    // the import recipe of an imported column goes through the file: its
+    // mirror (recipe_record.rs) converts from `ImportRecipe` (S2, #323)
     "stokesforge-import",
-    // le PlotSpec porté par NodeKind::Graph (phase R3) : la conversion vers
-    // son propre schéma (schema.rs) a besoin du type complet, pas seulement
-    // de ce que stokesforge-core en réexporte
+    // the PlotSpec carried by NodeKind::Graph (phase R3): the conversion to
+    // its own schema (schema.rs) needs the full type, not only what
+    // stokesforge-core re-exports of it
     "stokesforge-plot",
     "thiserror",
     "serde",
     "rmp-serde",
     "serde_bytes",
     "tempfile",
-    // Capture générique d'une variante d'énumération inconnue (C5, niveau 2,
-    // `guide-de-correction-robustesse.md` §F3) : `rmpv::Value` modélise
-    // n'importe quelle valeur MessagePack, ce qui permet de tenter le
-    // décodage strict d'une variante connue puis, à l'échec, de conserver le
-    // contenu tel quel plutôt que de faire échouer tout le fichier. Ce
-    // n'est toujours pas une dépendance UI : c'est le même format que
-    // `rmp-serde` sait déjà lire/écrire, vu de façon non typée.
+    // Generic capture of an unknown enum variant (C5, level 2,
+    // `guide-de-correction-robustesse.md` §F3): `rmpv::Value` models any
+    // MessagePack value, which makes it possible to try the strict decoding
+    // of a known variant and, on failure, to keep the content as is rather
+    // than fail the whole file. It is still not a UI dependency: it is the
+    // same format that `rmp-serde` can already read/write, seen untyped.
     "rmpv",
 ];
 
 #[test]
 fn only_allowed_dependencies_are_declared() {
-    // Lecture commune (`stokesforge-arch-guard`) : dépendances normales, de build,
-    // conditionnelles (`target`) et renommées (`package`) — issue #24.
+    // Shared reading (`stokesforge-arch-guard`): normal, build,
+    // conditional (`target`) and renamed (`package`) dependencies — issue #24.
     stokesforge_arch_guard::assert_only_allowed_dependencies(
         env!("CARGO_MANIFEST_DIR"),
         ALLOWED_DEPENDENCIES,

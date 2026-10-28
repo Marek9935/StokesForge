@@ -1,124 +1,124 @@
-//! Les quatre axes d'un panneau : échelle, limites, grille.
+//! The four axes of a panel: scale, limits, grid.
 
 use crate::text_anchor::TextAnchor;
 
-/// Échelle d'un axe.
+/// Scale of an axis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AxisScale {
-    /// Échelle linéaire (défaut).
+    /// Linear scale (default).
     #[default]
     Linear,
-    /// Échelle logarithmique.
+    /// Logarithmic scale.
     Log,
 }
 
-/// Côté du panneau où vit un axe. Les quatre existent ; une série, elle, ne
-/// se rattache qu'à deux d'entre eux — voir [`crate::SeriesAxis`].
+/// Side of the panel where an axis lives. All four exist; a series, though,
+/// attaches to only two of them — see [`crate::SeriesAxis`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AxisSide {
-    /// Abscisse, en bas.
+    /// Abscissa, at the bottom.
     Bottom,
-    /// Ordonnée principale, à gauche.
+    /// Main ordinate, on the left.
     Left,
-    /// Ordonnée secondaire, à droite.
+    /// Secondary ordinate, on the right.
     Right,
-    /// Abscisse secondaire, en haut.
+    /// Secondary abscissa, at the top.
     Top,
 }
 
-/// Sens des tirets d'un axe (#344) : hors de la zone de tracé (défaut, comme
-/// Plotters), vers l'intérieur, ou des deux côtés de la ligne.
+/// Direction of the tick marks of an axis (#344): outside the plot area (default, like
+/// Plotters), inward, or on both sides of the line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TickDirection {
-    /// Vers l'extérieur du cadre (défaut).
+    /// Toward the outside of the frame (default).
     #[default]
     Out,
-    /// Vers l'intérieur de la zone de tracé.
+    /// Toward the inside of the plot area.
     In,
-    /// De part et d'autre de la ligne.
+    /// On both sides of the line.
     Both,
 }
 
-/// Un axe : titre, unité, échelle, limites.
+/// An axis: title, unit, scale, limits.
 ///
-/// [`AxisSpec::auto_range`] prime sur `range_min`/`range_max` : les bornes
-/// restent mémorisées quand on repasse en automatique, pour qu'un aller-retour
-/// dans le panneau de propriétés ne les perde pas. C'est pour ça que les
-/// bornes ne sont pas fondues dans un unique `Option<(f64, f64)>` — la
-/// représentation serait plus serrée mais perdrait ce que l'utilisateur avait
-/// saisi.
+/// [`AxisSpec::auto_range`] takes precedence over `range_min`/`range_max`: the bounds
+/// stay remembered when switching back to automatic, so that a round trip
+/// through the properties panel does not lose them. This is why the
+/// bounds are not merged into a single `Option<(f64, f64)>` — the
+/// representation would be tighter but would lose what the user had
+/// entered.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AxisSpec {
-    /// Titre de l'axe, sans l'unité.
+    /// Title of the axis, without the unit.
     pub label: String,
-    /// Visibilité du titre, indépendante de son contenu (#85).
+    /// Visibility of the title, independent of its content (#85).
     pub title_visible: bool,
-    /// Unité affichée entre parenthèses après le titre.
+    /// Unit shown in parentheses after the title.
     pub unit: String,
-    /// Échelle.
+    /// Scale.
     pub scale: AxisScale,
-    /// Cadrage automatique sur les données.
+    /// Automatic framing on the data.
     pub auto_range: bool,
-    /// Borne basse mémorisée.
+    /// Remembered lower bound.
     pub range_min: Option<f64>,
-    /// Borne haute mémorisée.
+    /// Remembered upper bound.
     pub range_max: Option<f64>,
-    /// Grille sur cet axe.
+    /// Grid on this axis.
     pub grid: bool,
-    /// Axe affiché.
+    /// Axis is displayed.
     pub visible: bool,
-    /// Axe inversé (valeurs décroissantes).
+    /// Inverted axis (decreasing values).
     pub inverted: bool,
-    /// Couleur du titre de l'axe (`#RRGGBB`). Vide = automatique, voir
+    /// Color of the axis title (`#RRGGBB`). Empty = automatic, see
     /// [`crate::PlotSpec::title_color`].
     pub title_color: String,
-    /// Position du titre de l'axe s'il a été déplacé (issue #53).
+    /// Position of the axis title if it was moved (issue #53).
     pub title_anchor: Option<TextAnchor>,
-    /// Police et corps du titre de l'axe (issue #78).
+    /// Font and size of the axis title (issue #78).
     pub title_font: crate::TextFont,
-    /// Couleur de l'échelle — ligne d'axe, graduations et leurs libellés, et
-    /// la grille, atténuée (`#RRGGBB`). Vide = automatique.
+    /// Color of the scale — axis line, ticks and their labels, and
+    /// the grid, dimmed (`#RRGGBB`). Empty = automatic.
     pub tick_color: String,
-    /// Axe miroir (#176) : sur un calque ordinaire, l'axe du haut ou de droite
-    /// reprend l'échelle, les bornes et les graduations de celui du bas ou de
-    /// gauche, sans titre. Sans effet sur les autres axes, ni sur l'axe de
-    /// droite quand une série y est rattachée (c'est alors un vrai axe).
+    /// Mirror axis (#176): on an ordinary layer, the top or right axis
+    /// takes the scale, bounds and ticks of the bottom or left one,
+    /// without a title. No effect on the other axes, nor on the right
+    /// axis when a series is attached to it (it is then a real axis).
     pub mirror: bool,
-    /// Libellés des graduations affichés ; faux = la ligne et les tirets
-    /// seulement (#176).
+    /// Tick labels are displayed; false = the line and the tick marks
+    /// only (#176).
     pub tick_labels: bool,
-    /// Tirets des graduations tracés ; faux = la ligne et les nombres
-    /// seulement, l'écart des nombres est conservé (#344).
+    /// Tick marks are drawn; false = the line and the numbers
+    /// only, the spacing of the numbers is kept (#344).
     pub ticks: bool,
-    /// Sens des tirets (#344).
+    /// Direction of the tick marks (#344).
     pub tick_direction: TickDirection,
-    /// Sous-graduations tracées entre les graduations principales (#344),
-    /// avec ou sans les tirets principaux. Vrai pour un axe neuf ; un ancien
-    /// fichier, qui n'en avait pas, se relit faux.
+    /// Minor ticks drawn between the major ticks (#344),
+    /// with or without the major tick marks. True for a new axis; an old
+    /// file, which had none, reads back false.
     pub minor_ticks: bool,
-    /// Sous-graduations entre deux graduations principales (#344) ; `None` =
-    /// automatique (4 ou 5 subdivisions selon le pas). Sans effet en échelle
-    /// logarithmique, où ce sont les multiples 2 à 9.
+    /// Minor ticks between two major ticks (#344); `None` =
+    /// automatic (4 or 5 subdivisions depending on the step). No effect on a
+    /// logarithmic scale, where they are the multiples 2 to 9.
     pub minor_tick_count: Option<u8>,
-    /// Un nombre sur `label_every` est écrit, le premier toujours (#344) ; 1 =
-    /// tous. 0 se lit comme 1.
+    /// One number out of `label_every` is written, the first always (#344); 1 =
+    /// all. 0 reads as 1.
     pub label_every: u8,
-    /// Longueur des grands tirets en pixels de figure (#344, section
-    /// « Avancé ») ; `None` = automatique. La valeur brute est gardée telle
-    /// quelle : le rendu la borne.
+    /// Length of the major tick marks in figure pixels (#344, section
+    /// « Avancé »); `None` = automatic. The raw value is kept as
+    /// is: rendering clamps it.
     pub tick_length: Option<f64>,
-    /// Longueur des petits tirets en pixels de figure ; `None` = la moitié du
-    /// grand tiret effectif.
+    /// Length of the minor tick marks in figure pixels; `None` = half of the
+    /// effective major tick mark.
     pub minor_tick_length: Option<f64>,
-    /// Épaisseur des tirets en points ; `None` = automatique (1).
+    /// Thickness of the tick marks in points; `None` = automatic (1).
     pub tick_width: Option<f64>,
-    /// Couleur des tirets (`#RRGGBB`), distincte de [`AxisSpec::tick_color`]
-    /// (ligne et nombres). Vide = la couleur de l'échelle.
+    /// Color of the tick marks (`#RRGGBB`), distinct from [`AxisSpec::tick_color`]
+    /// (line and numbers). Empty = the color of the scale.
     pub tick_mark_color: String,
 }
 
 impl AxisSpec {
-    /// Axe masqué — la valeur par défaut de l'axe du haut d'un panneau.
+    /// Hidden axis — the default value of the top axis of a panel.
     pub fn hidden() -> Self {
         Self {
             visible: false,
@@ -126,7 +126,7 @@ impl AxisSpec {
         }
     }
 
-    /// Titre affiché : `label (unité)`, sans parenthèses vides.
+    /// Displayed title: `label (unit)`, without empty parentheses.
     pub fn display_label(&self) -> String {
         match (self.label.is_empty(), self.unit.is_empty()) {
             (false, false) => format!("{} ({})", self.label, self.unit),
@@ -136,19 +136,19 @@ impl AxisSpec {
         }
     }
 
-    /// L'axe dans sa forme canonique : le sens se lit sur l'ordre des bornes
-    /// (De > À = axe inversé), le champ [`AxisSpec::inverted`] n'est que sa
-    /// trace dans le fichier.
+    /// The axis in its canonical form: the direction is read from the order of the bounds
+    /// (« De » > « À » = inverted axis), the field [`AxisSpec::inverted`] is only its
+    /// trace in the file.
     ///
-    /// `inverted` devient vrai quand les bornes sont **utilisées** et que
-    /// `range_min > range_max` ; un axe inversé remet ses bornes mémorisées
-    /// dans l'ordre décroissant, que `auto_range` soit vrai ou non (en
-    /// automatique, les bornes mémorisées sont inertes, mais elles reprennent
-    /// le sens de l'axe). Des bornes mémorisées décroissantes sous
-    /// `auto_range` n'inversent donc rien : l'axe d'origine ne les lisait
-    /// pas. Une borne manquante ou non finie ne bouge pas. **Le rendu est
-    /// identique** à celui de l'axe d'origine (`axis_range` lit « l'un ou
-    /// l'autre »).
+    /// `inverted` becomes true when the bounds are **used** and
+    /// `range_min > range_max`; an inverted axis puts its remembered bounds
+    /// back in decreasing order, whether `auto_range` is true or not (in
+    /// automatic mode, the remembered bounds are inert, but they take back
+    /// the direction of the axis). Decreasing remembered bounds under
+    /// `auto_range` therefore invert nothing: the original axis did not read them.
+    /// A missing or non-finite bound does not move. **The rendering is
+    /// identical** to that of the original axis (`axis_range` reads "one or
+    /// the other").
     #[must_use]
     pub fn orient(&self) -> Self {
         let mut axis = self.clone();
@@ -166,8 +166,8 @@ impl AxisSpec {
         axis
     }
 
-    /// Vrai quand le cadrage manuel est à la fois demandé et complet : les
-    /// deux bornes sont là et l'automatique est coupé.
+    /// True when manual framing is both requested and complete: both
+    /// bounds are there and automatic is off.
     pub fn has_explicit_range(&self) -> bool {
         !self.auto_range && self.range_min.is_some() && self.range_max.is_some()
     }
@@ -219,12 +219,12 @@ mod tests {
         }
     }
 
-    /// Table : (auto, inversé, bornes) -> (inversé, bornes) après `orient`.
+    /// Table: (auto, inverted, bounds) -> (inverted, bounds) after `orient`.
     #[test]
-    fn orient_lit_le_sens_sur_l_ordre_des_bornes() {
+    fn orient_reads_the_direction_from_the_order_of_the_bounds() {
         let b = |a, z| (Some(a), Some(z));
         let table = [
-            // explicite ou automatique : mêmes règles sur les bornes mémorisées.
+            // explicit or automatic: same rules on the remembered bounds.
             (false, false, b(1.0, 5.0), false, b(1.0, 5.0)),
             (false, false, b(5.0, 1.0), true, b(5.0, 1.0)),
             (false, true, b(1.0, 5.0), true, b(5.0, 1.0)),
@@ -233,7 +233,7 @@ mod tests {
             (true, false, b(5.0, 1.0), false, b(5.0, 1.0)),
             (true, true, b(1.0, 5.0), true, b(5.0, 1.0)),
             (true, true, b(5.0, 1.0), true, b(5.0, 1.0)),
-            // bornes égales, absentes ou partielles : le sens ne change pas.
+            // equal, absent or partial bounds: the direction does not change.
             (false, true, b(3.0, 3.0), true, b(3.0, 3.0)),
             (true, true, (None, None), true, (None, None)),
             (true, false, (None, None), false, (None, None)),
@@ -251,10 +251,10 @@ mod tests {
             assert_eq!(
                 (got.inverted, (got.range_min, got.range_max)),
                 (want_inverted, want_bounds),
-                "auto={auto} inversé={inverted} bornes={bounds:?}"
+                "auto={auto} inverted={inverted} bounds={bounds:?}"
             );
-            assert_eq!(got.auto_range, auto, "orient ne touche pas auto_range");
-            assert_eq!(got.orient(), got, "idempotente");
+            assert_eq!(got.auto_range, auto, "orient does not touch auto_range");
+            assert_eq!(got.orient(), got, "idempotent");
         }
     }
 

@@ -1,20 +1,20 @@
-//! Traitement mathématique des données de StokesForge (chantier #181).
+//! Mathematical processing of StokesForge data (work package #181).
 //!
-//! Crate de **calcul pur** : lignes de base, correction par une référence,
-//! intégrales, ajustements, décomposition en pics, déconvolution, lissage. Il ne dépend
-//! d'aucun crate du workspace (comme `stokesforge-import`), ni d'une interface,
-//! ni de Python : tout ce que les menus proposent fonctionne sans interpréteur
-//! (décision du 2026-10-08). Le vocabulaire est celui des données brutes : des
-//! `f64` où `NaN` dit « vide », « texte » ou « invalide ».
+//! **Pure calculation** crate: baselines, correction by a reference,
+//! integrals, fits, decomposition into peaks, deconvolution, smoothing. It depends on
+//! no crate of the workspace (like `stokesforge-import`), nor on an interface,
+//! nor on Python: everything the menus offer works without an interpreter
+//! (decision of 2026-10-08). The vocabulary is that of raw data: plain
+//! `f64` where `NaN` means "empty", "text" or "invalid".
 //!
-//! Aucun nom d'interface ici : les résultats portent des **clés stables**
-//! (`area`, `tau`, `r_squared`…) que `stokesforge-app` met en libellés.
+//! No interface name here: results carry **stable keys**
+//! (`area`, `tau`, `r_squared`…) that `stokesforge-app` turns into labels.
 
-// Deux lints du calcul numérique, écartés ici avec leur raison :
-// - `!(x > 0.0)` est voulu : il est vrai aussi pour `NaN`, ce que `x <= 0.0` ne
-//   serait pas ; réécrire en `partial_cmp` alourdirait chaque garde ;
-// - les boucles d'algèbre indexent plusieurs tableaux par les mêmes indices
-//   (`a[i][j]`, `x[j]`) : un itérateur y est moins lisible que l'indice.
+// Two numerical-calculation lints, dismissed here with their reason:
+// - `!(x > 0.0)` is intended: it is also true for `NaN`, which `x <= 0.0` would
+//   not be; rewriting it with `partial_cmp` would weigh down every guard;
+// - the algebra loops index several arrays by the same indices
+//   (`a[i][j]`, `x[j]`): an iterator is less readable there than the index.
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::needless_range_loop)]
 
 pub mod baseline;

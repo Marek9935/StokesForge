@@ -1,13 +1,13 @@
-//! Garde-fou : `stokesforge-analysis` est du calcul pur (décision #181,
-//! 2026-10-08) — indépendant de tout autre crate du workspace, de l'interface
-//! et de Python. Ce test liste les seules dépendances autorisées : toute
-//! addition dans `Cargo.toml` doit être ajoutée ici explicitement, ce qui
-//! force une décision consciente (et, pour une crate d'algèbre, un passage
-//! par `cargo deny check licenses`).
+//! Guard: `stokesforge-analysis` is pure computation (decision #181,
+//! 2026-10-08) — independent of any other crate of the workspace, of the
+//! interface and of Python. This test lists the only allowed dependencies:
+//! any addition in `Cargo.toml` must be added here explicitly, which forces
+//! a conscious decision (and, for an algebra crate, a pass through
+//! `cargo deny check licenses`).
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
-    "thiserror", // erreurs typées, sans surface UI
-    "libm",      // fonctions transcendantes en Rust pur : mêmes bits partout (#332)
+    "thiserror", // typed errors, no UI surface
+    "libm",      // transcendental functions in pure Rust: same bits everywhere (#332)
 ];
 
 #[test]

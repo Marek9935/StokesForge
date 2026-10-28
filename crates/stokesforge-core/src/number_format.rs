@@ -1,48 +1,48 @@
-//! **Le** formateur de nombres affichés (#222, `docs/standard-interface.md`,
-//! § Number display) : grille, champs, volet Results et graduations
-//! passent tous par ici, jamais par un `format!` local.
+//! **The** formatter of displayed numbers (#222, `docs/standard-interface.md`,
+//! § Number display): grid, fields, Results pane and ticks
+//! all go through here, never through a local `format!`.
 //!
-//! Trois niveaux, une seule règle de forme :
+//! Three levels, one single shape rule:
 //!
-//! - [`format_results`] : 3 chiffres significatifs (résultats, graduations) ;
-//! - [`format_grid`] : 6 chiffres significatifs (grille, champs) ;
-//! - [`format_exact`] : la valeur entière, point décimal — pour l'édition, le
-//!   copier et la bulle des résultats. C'est la forme du modèle
-//!   ([`crate::column::format_f64_for_display`]) : elle reparse à l'identique.
+//! - [`format_results`]: 3 significant digits (results, ticks);
+//! - [`format_grid`]: 6 significant digits (grid, fields);
+//! - [`format_exact`]: the whole value, decimal point — for editing,
+//!   copying and the results tooltip. It is the model's form
+//!   ([`crate::column::format_f64_for_display`]): it parses back identically.
 //!
-//! La notation `e` (`1.23e-5`) prend le relais hors de [1e−4, 1e6), mesuré sur
-//! la valeur **arrondie** : `999999.9` à 3 chiffres s'écrit `1e6`, pas
-//! `1000000`. Les zéros de fin ne s'écrivent jamais, `-0` non plus. L'exposant
-//! typographique (1×10⁻⁵) est l'affaire de la figure (Typst), pas d'ici.
+//! The `e` notation (`1.23e-5`) takes over outside [1e−4, 1e6), measured on
+//! the **rounded** value: `999999.9` at 3 digits is written `1e6`, not
+//! `1000000`. Trailing zeros are never written, nor is `-0`. The typographic
+//! exponent (1×10⁻⁵) is the figure's business (Typst), not this module's.
 //!
-//! La **lecture** d'un nombre saisi est [`parse_input`] (#223) : la virgule y
-//! vaut point décimal ; l'interface réécrit toujours avec le point.
+//! **Reading** a typed number is [`parse_input`] (#223): the comma there
+//! counts as a decimal point; the interface always writes back with the point.
 //!
-//! Pur : aucune dépendance d'interface, aucune locale — le séparateur est
-//! toujours le point.
+//! Pure: no interface dependency, no locale — the separator is
+//! always the point.
 
 use crate::column::format_f64_for_display;
 
-/// Chiffres significatifs des résultats et des graduations.
+/// Significant digits of results and ticks.
 pub const RESULT_DIGITS: usize = 3;
-/// Chiffres significatifs de la grille et des champs.
+/// Significant digits of the grid and fields.
 pub const GRID_DIGITS: usize = 6;
-/// Chiffres significatifs d'une incertitude.
+/// Significant digits of an uncertainty.
 pub const UNCERTAINTY_DIGITS: usize = 2;
 
-/// Exposant décimal minimal de la forme positionnelle (inclus : 1e−4).
+/// Minimum decimal exponent of the positional form (inclusive: 1e−4).
 const POSITIONAL_MIN_EXP: i32 = -4;
-/// Exposant décimal maximal de la forme positionnelle (inclus : 9,99e5).
+/// Maximum decimal exponent of the positional form (inclusive: 9.99e5).
 const POSITIONAL_MAX_EXP: i32 = 5;
 
-/// Lit **un seul nombre fini** saisi à la main (#223, S-N4/S-N5 → S-R6) : « , » et
-/// « . » sont deux écritures du séparateur décimal. Le texte est rogné ; la
-/// virgule est lue comme un point quand elle est **seule** et sans point
-/// (`1,5` → 1.5, mais `1,000` → 1 : effet assumé ; `1,000.5` ou `1,2,3` sont
-/// refusés). `None` si le texte n'est pas un nombre fini.
+/// Reads **a single finite number** typed by hand (#223, S-N4/S-N5 → S-R6): "," and
+/// "." are two spellings of the decimal separator. The text is trimmed; the
+/// comma is read as a point when it is **alone** and there is no point
+/// (`1,5` → 1.5, but `1,000` → 1: accepted effect; `1,000.5` or `1,2,3` are
+/// refused). `None` if the text is not a finite number.
 ///
-/// Réservé aux champs d'un nombre et aux cellules : les formules et les listes
-/// de valeurs gardent le point, la virgule y sépare.
+/// Reserved for number fields and cells: formulas and value lists
+/// keep the point, the comma separates there.
 pub fn parse_input(text: &str) -> Option<f64> {
     let trimmed = text.trim();
     let value = if trimmed.matches(',').count() == 1 && !trimmed.contains('.') {
@@ -53,10 +53,10 @@ pub fn parse_input(text: &str) -> Option<f64> {
     value.is_finite().then_some(value)
 }
 
-/// Vrai si `text` (rogné) a exactement la forme `\d{1,3},\d{3}` : une saisie
-/// que [`parse_input`] lit comme une décimale (`1,234` → 1.234) alors qu'un
-/// lecteur anglophone y verrait un millier (#311, S-R6). Sert à l'avis discret
-/// de la barre d'état après la saisie d'une cellule ; ne change pas la lecture.
+/// True if `text` (trimmed) has exactly the form `\d{1,3},\d{3}`: an input
+/// that [`parse_input`] reads as a decimal (`1,234` → 1.234) while an
+/// English reader would see a thousand (#311, S-R6). Used for the discreet notice
+/// of the status bar after a cell is entered; does not change the reading.
 pub fn looks_like_thousands_separator(text: &str) -> bool {
     let Some((head, tail)) = text.trim().split_once(',') else {
         return false;
@@ -67,32 +67,32 @@ pub fn looks_like_thousands_separator(text: &str) -> bool {
         && tail.bytes().all(|b| b.is_ascii_digit())
 }
 
-/// Résultats et graduations : 3 chiffres significatifs.
+/// Results and ticks: 3 significant digits.
 pub fn format_results(value: f64) -> String {
     format_significant(value, RESULT_DIGITS)
 }
 
-/// Grille et champs : 6 chiffres significatifs.
+/// Grid and fields: 6 significant digits.
 pub fn format_grid(value: f64) -> String {
     format_significant(value, GRID_DIGITS)
 }
 
-/// La valeur exacte, avec un point : ce qu'on édite et ce qu'on copie.
+/// The exact value, with a point: what is edited and what is copied.
 pub fn format_exact(value: f64) -> String {
     format_f64_for_display(value)
 }
 
-/// Une graduation d'axe linéaire : toutes celles d'un axe partagent le même
-/// nombre de décimales (`0.0, 0.2, 0.4`, jamais `0, 0.2, 0.4`), sauf hors de
-/// [1e−4, 1e6) où chacune passe en notation `e` à 3 chiffres ([`format_results`]).
-/// Un zéro n'a pas de signe. Non fini : texte vide, rien à graduer.
+/// A linear axis tick: all those of an axis share the same
+/// number of decimals (`0.0, 0.2, 0.4`, never `0, 0.2, 0.4`), except outside
+/// [1e−4, 1e6) where each one switches to `e` notation at 3 digits ([`format_results`]).
+/// A zero has no sign. Not finite: empty text, nothing to tick.
 pub fn format_tick(value: f64, decimals: usize) -> String {
     if !value.is_finite() {
         return String::new();
     }
     let text = format!("{value:.decimals$}");
-    // Ce qui s'arrondit à zéro à la précision de l'axe EST le zéro (les
-    // graduations s'accumulent avec du bruit : 5.5e-17 à la place de 0).
+    // What rounds to zero at the axis precision IS zero (ticks
+    // accumulate noise: 5.5e-17 in place of 0).
     if text
         .trim_start_matches('-')
         .chars()
@@ -107,10 +107,10 @@ pub fn format_tick(value: f64, decimals: usize) -> String {
     }
 }
 
-/// `value` arrondie à `digits` chiffres significatifs (au moins 1), sans zéro
-/// inutile ; notation `e` hors de [1e−4, 1e6). Les chiffres **avant** la
-/// virgule ne sont jamais arrondis en forme positionnelle (`1234.5` → `1234`,
-/// pas `1230`) : seule la partie décimale est tronquée. `NaN` et ±∞ s'écrivent comme
+/// `value` rounded to `digits` significant digits (at least 1), with no useless
+/// zero; `e` notation outside [1e−4, 1e6). The digits **before** the
+/// point are never rounded in positional form (`1234.5` → `1234`,
+/// not `1230`): only the decimal part is truncated. `NaN` and ±∞ are written like
 /// `f64::to_string`.
 pub fn format_significant(value: f64, digits: usize) -> String {
     if !value.is_finite() {
@@ -129,13 +129,13 @@ pub fn format_significant(value: f64, digits: usize) -> String {
     }
 }
 
-/// Une valeur et son incertitude : l'incertitude à 2 chiffres significatifs,
-/// la valeur arrondie à la même décimale (`12.346 ± 0.052`). Hors de
-/// [1e−4, 1e6), les deux partagent l'exposant du plus grand des deux :
+/// A value and its uncertainty: the uncertainty at 2 significant digits,
+/// the value rounded to the same decimal (`12.346 ± 0.052`). Outside
+/// [1e−4, 1e6), both share the exponent of the larger of the two:
 /// `(1.2346 ± 0.0052)e-5`.
 ///
-/// Sans incertitude exploitable (absente, nulle, non finie) ou pour une valeur
-/// non finie : [`format_results`].
+/// With no usable uncertainty (absent, zero, not finite) or for a value
+/// not finite: [`format_results`].
 pub fn format_with_uncertainty(value: f64, uncertainty: Option<f64>) -> String {
     let Some(error) = uncertainty
         .map(f64::abs)
@@ -147,10 +147,10 @@ pub fn format_with_uncertainty(value: f64, uncertainty: Option<f64>) -> String {
         return format_results(value);
     }
     let (_, error_exp) = split_scientific(error, UNCERTAINTY_DIGITS - 1);
-    // Décimale du dernier chiffre significatif de l'incertitude.
+    // Decimal of the last significant digit of the uncertainty.
     let last_decimal = UNCERTAINTY_DIGITS as i32 - 1 - error_exp;
-    // L'exposant commun est celui du plus grand des deux : une valeur minuscule
-    // devant une grande incertitude s'écrit en positionnel (`0.00 ± 0.50`).
+    // The common exponent is that of the larger of the two: a tiny value
+    // next to a large uncertainty is written positionally (`0.00 ± 0.50`).
     let value_exp = if value == 0.0 {
         error_exp
     } else {
@@ -168,17 +168,17 @@ pub fn format_with_uncertainty(value: f64, uncertainty: Option<f64>) -> String {
     format!("({v} ± {e})e{value_exp}")
 }
 
-/// `(mantisse, exposant)` de `value` arrondie à `fraction_digits` décimales de
-/// mantisse (`1.23e-5` → `("1.23", -5)`) — l'arrondi de Rust, qui renormalise
-/// (`9.996` à 3 chiffres → `1.00e1`).
+/// `(mantissa, exponent)` of `value` rounded to `fraction_digits` decimals of
+/// mantissa (`1.23e-5` → `("1.23", -5)`) — Rust's rounding, which renormalizes
+/// (`9.996` at 3 digits → `1.00e1`).
 fn split_scientific(value: f64, fraction_digits: usize) -> (String, i32) {
     let text = format!("{value:.fraction_digits$e}");
     let (mantissa, exponent) = text.split_once('e').unwrap_or((&text, "0"));
     (mantissa.to_owned(), exponent.parse().unwrap_or(0))
 }
 
-/// `value` à `decimals` décimales ; une décimale négative arrondit aux
-/// dizaines, centaines… (`12345` à −2 → `12300`). Jamais « -0 ».
+/// `value` to `decimals` decimals; a negative decimal rounds to
+/// tens, hundreds… (`12345` at −2 → `12300`). Never "-0".
 fn fixed(value: f64, decimals: i32) -> String {
     let text = if decimals >= 0 {
         format!("{value:.*}", decimals as usize)
@@ -192,7 +192,7 @@ fn fixed(value: f64, decimals: i32) -> String {
     }
 }
 
-/// Retire les zéros de fin d'une partie décimale, et le point qui resterait.
+/// Removes the trailing zeros of a decimal part, and the point that would remain.
 fn trim_zeros(mut text: String) -> String {
     if text.contains('.') {
         let kept = text.trim_end_matches('0').trim_end_matches('.').len();
@@ -209,7 +209,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trois_chiffres_significatifs() {
+    fn three_significant_digits() {
         assert_eq!(format_results(12.3456), "12.3");
         assert_eq!(format_results(1234.5), "1234");
         assert_eq!(format_results(0.123456), "0.123");
@@ -219,7 +219,7 @@ mod tests {
     }
 
     #[test]
-    fn six_chiffres_significatifs() {
+    fn six_significant_digits() {
         assert_eq!(format_grid(12.3456789), "12.3457");
         assert_eq!(format_grid(0.1 + 0.2), "0.3");
         assert_eq!(format_grid(42.5), "42.5");
@@ -227,8 +227,8 @@ mod tests {
     }
 
     #[test]
-    fn la_notation_e_commence_a_1e6_et_finit_a_1e_moins_4() {
-        // Bornes : 1e-4 est positionnel, juste en dessous non ; 1e6 est en `e`.
+    fn e_notation_starts_at_1e6_and_ends_at_1e_minus_4() {
+        // Bounds: 1e-4 is positional, just below it is not; 1e6 is in `e`.
         assert_eq!(format_results(1e-4), "0.0001");
         assert_eq!(format_results(9.99e-5), "9.99e-5");
         assert_eq!(format_results(999_000.0), "999000");
@@ -240,14 +240,14 @@ mod tests {
     }
 
     #[test]
-    fn la_bascule_se_mesure_sur_la_valeur_arrondie() {
+    fn the_switch_is_measured_on_the_rounded_value() {
         assert_eq!(format_results(999_999.9), "1e6");
         assert_eq!(format_results(0.000_099_96), "0.0001");
         assert_eq!(format_results(9.996), "10");
     }
 
     #[test]
-    fn zero_n_a_ni_signe_ni_exposant() {
+    fn zero_has_neither_sign_nor_exponent() {
         assert_eq!(format_results(0.0), "0");
         assert_eq!(format_results(-0.0), "0");
         assert_eq!(format_grid(-0.0), "0");
@@ -255,7 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn le_non_fini_s_ecrit_comme_rust() {
+    fn non_finite_is_written_like_rust() {
         assert_eq!(format_results(f64::NAN), "NaN");
         assert_eq!(format_results(f64::INFINITY), "inf");
         assert_eq!(format_grid(f64::NEG_INFINITY), "-inf");
@@ -263,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn les_graduations_partagent_leurs_decimales_sauf_hors_plage() {
+    fn ticks_share_their_decimals_except_out_of_range() {
         assert_eq!(format_tick(0.0, 1), "0.0");
         assert_eq!(format_tick(-0.0, 1), "0.0");
         assert_eq!(format_tick(-1e-12, 1), "0.0");
@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn la_valeur_exacte_reparse_a_l_identique() {
+    fn the_exact_value_parses_back_identically() {
         for v in [
             0.1 + 0.2,
             1.0 / 3.0,
@@ -299,7 +299,7 @@ mod tests {
     }
 
     #[test]
-    fn l_incertitude_a_deux_chiffres_et_la_valeur_la_meme_decimale() {
+    fn the_uncertainty_has_two_digits_and_the_value_the_same_decimal() {
         assert_eq!(
             format_with_uncertainty(12.3456, Some(0.0523)),
             "12.346 ± 0.052"
@@ -313,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn une_grande_incertitude_arrondit_aux_dizaines() {
+    fn a_large_uncertainty_rounds_to_tens() {
         assert_eq!(
             format_with_uncertainty(12_345.0, Some(123.0)),
             "12350 ± 120"
@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn hors_de_la_plage_les_deux_partagent_l_exposant() {
+    fn out_of_range_both_share_the_exponent() {
         assert_eq!(
             format_with_uncertainty(1.234_56e-5, Some(5.2e-8)),
             "(1.2346 ± 0.0052)e-5"
@@ -337,7 +337,7 @@ mod tests {
     }
 
     #[test]
-    fn sans_incertitude_exploitable_trois_chiffres() {
+    fn without_a_usable_uncertainty_three_digits() {
         for none in [
             None,
             Some(0.0),
@@ -350,13 +350,13 @@ mod tests {
     }
 
     #[test]
-    fn une_valeur_nulle_garde_la_decimale_de_l_incertitude() {
+    fn a_zero_value_keeps_the_decimal_of_the_uncertainty() {
         assert_eq!(format_with_uncertainty(0.0, Some(0.034)), "0.000 ± 0.034");
         assert_eq!(format_with_uncertainty(-1e-9, Some(0.5)), "0.00 ± 0.50");
     }
 
     #[test]
-    fn la_virgule_seule_vaut_le_point_decimal() {
+    fn a_lone_comma_counts_as_the_decimal_point() {
         assert_eq!(parse_input("1,5"), Some(1.5));
         assert_eq!(parse_input(" -0,25 "), Some(-0.25));
         assert_eq!(parse_input("1e-3"), Some(0.001));
@@ -364,26 +364,26 @@ mod tests {
     }
 
     #[test]
-    fn le_point_reste_lu_comme_avant_et_mille_vaut_un() {
+    fn the_point_is_read_as_before_and_1_000_is_read_as_one() {
         assert_eq!(parse_input("1.5"), Some(1.5));
-        // Effet assumé (S-R6) : « 1,000 » est lu 1.
+        // Accepted effect (S-R6): "1,000" is read as 1.
         assert_eq!(parse_input("1,000"), Some(1.0));
     }
 
     #[test]
-    fn la_forme_milliers_est_reconnue_exactement() {
-        for oui in ["1,234", "12,345", "999,000", " 1,234 "] {
-            assert!(looks_like_thousands_separator(oui), "{oui:?}");
+    fn the_thousands_form_is_recognized_exactly() {
+        for yes in ["1,234", "12,345", "999,000", " 1,234 "] {
+            assert!(looks_like_thousands_separator(yes), "{yes:?}");
         }
-        for non in [
+        for no in [
             "1,5", "1234,567", "12,3456", "1.234", "1,234.5", "", ",", "a,123", "1,23a", "-1,234",
         ] {
-            assert!(!looks_like_thousands_separator(non), "{non:?}");
+            assert!(!looks_like_thousands_separator(no), "{no:?}");
         }
     }
 
     #[test]
-    fn l_ambigu_et_le_non_fini_sont_refuses() {
+    fn the_ambiguous_and_the_non_finite_are_refused() {
         for refused in [
             "1,000.5", "1.000,5", "1,2,3", "", ",", "a,5", "1e400", "nan", "inf",
         ] {
@@ -392,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn une_cellule_mixte_lit_la_virgule_comme_un_nombre() {
+    fn a_mixed_cell_reads_the_comma_as_a_number() {
         use crate::column::MixedCell;
         assert_eq!(
             MixedCell::from_text(Some("1,5".into())),

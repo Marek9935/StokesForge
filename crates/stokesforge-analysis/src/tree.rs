@@ -1,15 +1,15 @@
-//! Représentation **arborescente** d'une [`Operation`] : la forme sous laquelle
-//! la trace d'un calcul traverse le modèle et le fichier `.stf`.
+//! **Tree** representation of an [`Operation`]: the form in which
+//! the trace of a calculation crosses the model and the `.stf` file.
 //!
-//! Pourquoi un arbre générique plutôt que des types de transport ou `serde` :
-//! ce crate reste sans dépendance (donc sans `serde`), et la persistance, qui
-//! a déjà `serde_json`, convertit un [`Tree`] en JSON en une trentaine de
-//! lignes. Une opération nouvelle (ou un réglage nouveau) ne change donc **pas**
-//! le schéma du fichier : un champ **facultatif** absent (booléens, listes,
-//! plages) reprend sa valeur par défaut à la lecture, un champ inconnu est
-//! ignoré ; un champ **essentiel** (`op`, `under`, `shift_initial`,
-//! `center`…) est obligatoire et son absence écarte le calcul (invariant 10 :
-//! un défaut de donnée dégrade, il ne plante pas).
+//! Why a generic tree rather than transport types or `serde`:
+//! this crate stays dependency-free (so without `serde`), and persistence, which
+//! already has `serde_json`, converts a [`Tree`] to JSON in about thirty
+//! lines. A new operation (or a new setting) therefore does **not** change
+//! the file schema: an absent **optional** field (booleans, lists,
+//! ranges) takes its default value on read, an unknown field is
+//! ignored; an **essential** field (`op`, `under`, `shift_initial`,
+//! `center`…) is mandatory and its absence drops the calculation (invariant 10:
+//! a data defect degrades, it does not crash).
 
 use crate::baseline::{BaselineMethod, BaselineOp, Interpolation};
 use crate::correct::CorrectOp;
@@ -32,7 +32,7 @@ pub enum Tree {
     Map(Vec<(String, Tree)>),
 }
 
-// ── Écriture ───────────────────────────────────────────────────────────
+// ── Writing ────────────────────────────────────────────────────────────
 
 #[derive(Default)]
 struct W(Vec<(String, Tree)>);
@@ -64,7 +64,7 @@ impl W {
     }
 }
 
-/// Un nombre non fini n'est pas représentable en JSON : il devient « absent ».
+/// A non-finite number cannot be represented in JSON: it becomes "absent".
 fn num(v: f64) -> Tree {
     if v.is_finite() {
         Tree::Num(v)
@@ -113,8 +113,8 @@ fn settings_tree(p: &[ParamSetting]) -> Tree {
 }
 
 impl Operation {
-    /// L'opération sous forme d'arbre ; [`Operation::from_tree`] est son
-    /// inverse exact (aux nombres non finis près, écrits « absents »).
+    /// The operation as a tree; [`Operation::from_tree`] is its exact
+    /// inverse (up to non-finite numbers, written "absent").
     pub fn to_tree(&self) -> Tree {
         match self {
             Operation::Baseline {
@@ -296,7 +296,7 @@ impl Operation {
     }
 }
 
-// ── Lecture ────────────────────────────────────────────────────────────
+// ── Reading ────────────────────────────────────────────────────────────
 
 fn bad(name: &str) -> AnalysisError {
     AnalysisError::InvalidParameter { name: name.into() }
@@ -341,7 +341,7 @@ impl<'a> R<'a> {
             Err(bad(k))
         }
     }
-    /// Un booléen absent vaut `default`.
+    /// An absent boolean is `default`.
     fn bool(&self, k: &str, default: bool) -> Result<bool, AnalysisError> {
         match self.get(k) {
             None | Some(Tree::Null) => Ok(default),
@@ -767,8 +767,8 @@ mod tests {
     }
 
     #[test]
-    fn le_texte_d_un_modele_libre_avec_logarithmes_est_conserve_tel_quel() {
-        for formule in [
+    fn the_text_of_a_free_model_with_logarithms_is_kept_as_is() {
+        for formula in [
             "a*log(x)+b",
             "a * ln( x ) + b",
             "logx(x, 3) - log10(x)/log2(x)",
@@ -777,7 +777,7 @@ mod tests {
             let op = Operation::Fit {
                 spec: FitSpec {
                     model: Model::Custom {
-                        formula: formule.into(),
+                        formula: formula.into(),
                     },
                     params: vec![],
                 },
@@ -785,22 +785,22 @@ mod tests {
                 residuals: true,
             };
             let tree = op.to_tree();
-            let relu = Operation::from_tree(&tree).unwrap();
-            assert_eq!(relu, op, "{formule}");
-            let Operation::Fit { spec, .. } = relu else {
-                panic!("Fit attendu");
+            let reread = Operation::from_tree(&tree).unwrap();
+            assert_eq!(reread, op, "{formula}");
+            let Operation::Fit { spec, .. } = reread else {
+                panic!("expected Fit");
             };
             assert_eq!(
                 spec.model,
                 Model::Custom {
-                    formula: formule.into()
+                    formula: formula.into()
                 }
             );
         }
     }
 
     #[test]
-    fn chaque_operation_fait_l_aller_retour() {
+    fn every_operation_round_trips() {
         for op in all_operations() {
             let tree = op.to_tree();
             assert_eq!(Operation::from_tree(&tree).unwrap(), op, "{tree:?}");
@@ -808,11 +808,11 @@ mod tests {
     }
 
     #[test]
-    fn les_champs_absents_prennent_leur_valeur_par_defaut_et_les_inconnus_sont_ignores() {
+    fn absent_fields_take_their_default_and_unknown_ones_are_ignored() {
         let tree = Tree::Map(vec![
             ("kind".into(), Tree::Text("integrate".into())),
             ("under".into(), Tree::Text("zero".into())),
-            ("champ_futur".into(), Tree::Num(1.0)),
+            ("future_field".into(), Tree::Num(1.0)),
         ]);
         let op = Operation::from_tree(&tree).unwrap();
         assert_eq!(
@@ -829,11 +829,11 @@ mod tests {
     }
 
     #[test]
-    fn un_arbre_invalide_est_une_erreur_nommee_pas_une_panique() {
+    fn an_invalid_tree_is_a_named_error_not_a_panic() {
         let cases = [
             Tree::Null,
             Tree::Map(vec![]),
-            Tree::Map(vec![("kind".into(), Tree::Text("inconnue".into()))]),
+            Tree::Map(vec![("kind".into(), Tree::Text("unknown".into()))]),
             Tree::Map(vec![
                 ("kind".into(), Tree::Text("correct".into())),
                 ("op".into(), Tree::Text("modulo".into())),
@@ -855,7 +855,7 @@ mod tests {
     }
 
     #[test]
-    fn un_nombre_non_fini_s_ecrit_absent() {
+    fn a_non_finite_number_is_written_absent() {
         let op = Operation::Fit {
             spec: FitSpec {
                 model: Model::Linear,

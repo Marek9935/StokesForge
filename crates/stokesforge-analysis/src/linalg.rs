@@ -1,15 +1,15 @@
-//! Algèbre dense minimale : résolution, inverse, moindres carrés linéaires.
+//! Minimal dense algebra: solving, inverse, linear least squares.
 //!
-//! Écrite ici plutôt qu'empruntée à une crate d'algèbre : les systèmes sont
-//! petits (quelques paramètres), et rester sans dépendance garde le crate hors
-//! de `cargo deny` et de la liste des notices. La stabilité numérique d'un
-//! polynôme de degré élevé passe par la décomposition QR de Householder, pas
-//! par les équations normales. Le QR seul ne répare pas un X loin de 0 (les
-//! colonnes 1, x, x², … deviennent presque colinéaires) : l'ajustement
-//! polynomial centre X avant le QR et ré-exprime les coefficients dans l'axe
-//! d'origine (#283, `CompiledModel::x_shift`).
+//! Written here rather than borrowed from an algebra crate: the systems are
+//! small (a few parameters), and staying dependency-free keeps the crate out
+//! of `cargo deny` and of the notice list. Numerical stability for a
+//! high-degree polynomial comes from the Householder QR decomposition, not
+//! from the normal equations. QR alone does not repair an X far from 0 (the
+//! columns 1, x, x², … become almost collinear): the polynomial fit
+//! centers X before the QR and re-expresses the coefficients in the original
+//! axis (#283, `CompiledModel::x_shift`).
 
-/// Matrice dense stockée par lignes.
+/// Dense matrix stored by rows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Matrix {
     rows: usize,
@@ -122,8 +122,8 @@ impl Matrix {
     }
 }
 
-/// Résout `a · x = b` par élimination de Gauss à pivot partiel. `None` si la
-/// matrice est singulière (pivot nul ou non fini).
+/// Solves `a · x = b` by Gaussian elimination with partial pivoting. `None` if
+/// the matrix is singular (zero or non-finite pivot).
 pub fn solve(a: &Matrix, b: &[f64]) -> Option<Vec<f64>> {
     let n = a.rows;
     if a.cols != n || b.len() != n {
@@ -175,7 +175,7 @@ pub fn solve(a: &Matrix, b: &[f64]) -> Option<Vec<f64>> {
     Some(x)
 }
 
-/// Inverse d'une matrice carrée (Gauss-Jordan à pivot partiel).
+/// Inverse of a square matrix (Gauss-Jordan with partial pivoting).
 pub fn invert(a: &Matrix) -> Option<Matrix> {
     let n = a.rows;
     if a.cols != n {
@@ -227,16 +227,16 @@ pub fn invert(a: &Matrix) -> Option<Matrix> {
     Some(inv)
 }
 
-/// Résultat d'un moindres carrés linéaire.
+/// Result of a linear least-squares fit.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LeastSquares {
     pub coefficients: Vec<f64>,
-    /// `(AᵀA)⁻¹`, sans mise à l'échelle par la variance résiduelle.
+    /// `(AᵀA)⁻¹`, without scaling by the residual variance.
     pub unscaled_covariance: Matrix,
 }
 
-/// Moindres carrés `min ‖A·c − y‖²` par QR de Householder. `a` a plus de lignes
-/// que de colonnes ; `None` si le rang est insuffisant.
+/// Least squares `min ‖A·c − y‖²` by Householder QR. `a` has more rows
+/// than columns; `None` if the rank is insufficient.
 pub fn least_squares(a: &Matrix, y: &[f64]) -> Option<LeastSquares> {
     let (m, n) = (a.rows, a.cols);
     if m < n || n == 0 || y.len() != m {
@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn solve_resout_un_systeme_3x3() {
+    fn solve_solves_a_3x3_system() {
         let mut a = Matrix::zeros(3, 3);
         let vals = [2.0, 1.0, -1.0, -3.0, -1.0, 2.0, -2.0, 1.0, 2.0];
         for (i, v) in vals.iter().enumerate() {
@@ -341,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn solve_refuse_une_matrice_singuliere() {
+    fn solve_refuses_a_singular_matrix() {
         let mut a = Matrix::zeros(2, 2);
         a.set(0, 0, 1.0);
         a.set(0, 1, 2.0);
@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn invert_donne_l_identite() {
+    fn invert_gives_the_identity() {
         let mut a = Matrix::zeros(2, 2);
         a.set(0, 0, 4.0);
         a.set(0, 1, 7.0);
@@ -366,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn moindres_carres_retrouvent_une_droite_exacte() {
+    fn least_squares_recover_an_exact_line() {
         let xs = [0.0, 1.0, 2.0, 3.0, 4.0];
         let mut a = Matrix::zeros(5, 2);
         let mut y = Vec::new();
@@ -385,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn moindres_carres_refusent_un_rang_insuffisant() {
+    fn least_squares_refuse_an_insufficient_rank() {
         let mut a = Matrix::zeros(4, 2);
         for i in 0..4 {
             a.set(i, 0, 1.0);
@@ -395,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn gram_et_transpose_mul_sont_coherents() {
+    fn gram_and_transpose_mul_are_consistent() {
         let mut a = Matrix::zeros(3, 2);
         let vals = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         for (i, v) in vals.iter().enumerate() {
@@ -411,8 +411,8 @@ mod tests {
     }
 
     #[test]
-    fn mul_vec_mul_et_transpose_sur_des_matrices_rectangulaires() {
-        // A (2x3) · B (3x2) : produit connu, formes non carrées.
+    fn mul_vec_mul_and_transpose_on_rectangular_matrices() {
+        // A (2x3) · B (3x2): known product, non-square shapes.
         let mut a = Matrix::zeros(2, 3);
         for (i, v) in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0].iter().enumerate() {
             a.set(i / 3, i % 3, *v);
@@ -438,7 +438,7 @@ mod tests {
         assert_eq!(t.transpose(), a);
         // (A·B)ᵀ = Bᵀ·Aᵀ.
         assert_eq!(p.transpose(), b.transpose().mul(&a.transpose()));
-        // L'identité est neutre.
+        // The identity is neutral.
         assert_eq!(a.mul(&Matrix::identity(3)), a);
     }
 }

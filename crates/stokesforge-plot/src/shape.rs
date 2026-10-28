@@ -1,81 +1,81 @@
-//! Les objets graphiques d'un panneau — rectangle, ellipse, ligne, flèche
-//! (issue #76), à côté des textes libres ([`crate::AnnotationSpec`]).
+//! The graphic objects of a panel — rectangle, ellipse, line, arrow
+//! (issue #76), alongside the free texts ([`crate::AnnotationSpec`]).
 //!
-//! # Décisions du 2026-10-02
+//! # Decisions of 2026-10-02
 //!
-//! - **Ancrage aux données**, comme un texte libre : les deux points définissant
-//!   l'objet sont en coordonnées de données du panneau (axe gauche ou droit),
-//!   donc l'objet suit le zoom et le déplacement de la vue ;
-//! - **une seule liste ordonnée** ([`crate::PanelSpec::shapes`]) : l'ordre
-//!   d'empilement est l'ordre de création (le dernier est dessus), modifiable
-//!   par [`ShapeRef::bring_to_front`] / [`ShapeRef::send_to_back`]. Les textes
-//!   libres sont toujours tracés au-dessus des formes ;
-//! - deux points `(x1, y1)` / `(x2, y2)` pour les quatre types : les coins
-//!   opposés d'un rectangle ou de la boîte d'une ellipse, les extrémités d'une
-//!   ligne, la queue et la pointe d'une flèche. Le sens du glisser est donc
-//!   conservé (une flèche tracée de droite à gauche pointe à gauche).
+//! - **Anchored to the data**, like a free text: the two points defining
+//!   the object are in data coordinates of the panel (left or right axis),
+//!   so the object follows the zoom and pan of the view;
+//! - **a single ordered list** ([`crate::PanelSpec::shapes`]): the stacking
+//!   order is the creation order (the last is on top), changeable
+//!   with [`ShapeRef::bring_to_front`] / [`ShapeRef::send_to_back`]. Free texts
+//!   are always plotted above the shapes;
+//! - two points `(x1, y1)` / `(x2, y2)` for the four types: the opposite
+//!   corners of a rectangle or of the box of an ellipse, the ends of a
+//!   line, the tail and the tip of an arrow. The drag direction is therefore
+//!   kept (an arrow drawn from right to left points left).
 //!
-//! Les couleurs suivent la convention du dépôt : `#RRGGBB` ou `#RRGGBBAA` (donc
-//! l'opacité du remplissage est l'alpha de [`ShapeSpec::fill_color`]) ; vide =
-//! automatique pour le trait (contraste avec le fond), **aucun remplissage**
-//! pour le remplissage.
+//! Colors follow the repository convention: `#RRGGBB` or `#RRGGBBAA` (so
+//! the fill opacity is the alpha of [`ShapeSpec::fill_color`]); empty =
+//! automatic for the line (contrast with the background), **no fill**
+//! for the fill.
 
 use crate::series::SeriesAxis;
 use crate::spec::PlotSpec;
 
-/// La nature d'un objet graphique.
+/// The kind of a graphic object.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShapeKind {
-    /// Rectangle aligné aux axes de la figure, défini par deux coins opposés.
+    /// Rectangle aligned with the figure axes, defined by two opposite corners.
     Rectangle,
-    /// Ellipse alignée aux axes de la figure, inscrite dans ce rectangle.
+    /// Ellipse aligned with the figure axes, inscribed in that rectangle.
     Ellipse,
-    /// Segment de droite.
+    /// Line segment.
     Line,
-    /// Segment de droite terminé par une pointe en `(x2, y2)`.
+    /// Line segment ending in a tip at `(x2, y2)`.
     Arrow,
 }
 
 impl ShapeKind {
-    /// Vrai si le type a une surface, donc un remplissage.
+    /// True if the kind has an area, hence a fill.
     pub fn is_closed(self) -> bool {
         matches!(self, Self::Rectangle | Self::Ellipse)
     }
 }
 
-/// Un objet graphique posé sur un panneau, ancré aux données.
+/// A graphic object placed on a panel, anchored to the data.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapeSpec {
-    /// Sa nature.
+    /// Its kind.
     pub kind: ShapeKind,
-    /// Visible au rendu ; masquer conserve le contenu et son adresse (#81).
+    /// Visible at rendering; hiding keeps the content and its address (#81).
     pub visible: bool,
-    /// Abscisse du premier point (coin, queue), en données.
+    /// Abscissa of the first point (corner, tail), in data.
     pub x1: f64,
-    /// Ordonnée du premier point, en données de l'axe [`Self::axis`].
+    /// Ordinate of the first point, in data of the axis [`Self::axis`].
     pub y1: f64,
-    /// Abscisse du second point (coin opposé, pointe), en données.
+    /// Abscissa of the second point (opposite corner, tip), in data.
     pub x2: f64,
-    /// Ordonnée du second point, en données de l'axe [`Self::axis`].
+    /// Ordinate of the second point, in data of the axis [`Self::axis`].
     pub y2: f64,
-    /// Ordonnée de rattachement : gauche ou droite, comme une série.
+    /// Ordinate it is attached to: left or right, like a series.
     pub axis: SeriesAxis,
-    /// Couleur du trait ; vide = automatique.
+    /// Line color; empty = automatic.
     pub line_color: String,
-    /// Épaisseur du trait, comme [`crate::LineSpec::width`].
+    /// Line thickness, like [`crate::LineSpec::width`].
     pub line_width: f64,
-    /// Couleur de remplissage (rectangle et ellipse) ; vide = aucun.
+    /// Fill color (rectangle and ellipse); empty = none.
     pub fill_color: String,
 }
 
 impl ShapeSpec {
-    /// Épaisseur de trait par défaut.
+    /// Default line thickness.
     pub const DEFAULT_WIDTH: f64 = 1.5;
-    /// Épaisseur acceptée au rendu ; au-delà, ramenée dans ces bornes.
+    /// Thickness accepted at rendering; beyond it, clamped to these bounds.
     pub const WIDTH_RANGE: (f64, f64) = (0.5, 20.0);
 
-    /// Un objet de `kind` entre `(x1, y1)` et `(x2, y2)`, de l'ordonnée de
-    /// gauche, trait automatique, sans remplissage.
+    /// An object of `kind` between `(x1, y1)` and `(x2, y2)`, on the left
+    /// ordinate, automatic line, no fill.
     pub fn new(kind: ShapeKind, x1: f64, y1: f64, x2: f64, y2: f64) -> Self {
         Self {
             kind,
@@ -91,8 +91,8 @@ impl ShapeSpec {
         }
     }
 
-    /// L'épaisseur effectivement tracée : [`Self::line_width`] ramenée dans
-    /// [`Self::WIDTH_RANGE`], et le défaut pour une valeur non finie.
+    /// The thickness actually plotted: [`Self::line_width`] clamped to
+    /// [`Self::WIDTH_RANGE`], and the default for a non-finite value.
     pub fn effective_width(&self) -> f64 {
         if self.line_width.is_finite() {
             self.line_width
@@ -102,21 +102,21 @@ impl ShapeSpec {
         }
     }
 
-    /// Vrai si les quatre coordonnées sont finies ; sinon l'objet est ignoré
-    /// au rendu (fichier abîmé) plutôt que de projeter un `NaN`.
+    /// True if the four coordinates are finite; otherwise the object is ignored
+    /// at rendering (damaged file) rather than projecting a `NaN`.
     pub fn is_finite(&self) -> bool {
         self.x1.is_finite() && self.y1.is_finite() && self.x2.is_finite() && self.y2.is_finite()
     }
 }
 
-/// L'adresse d'un objet graphique dans un [`PlotSpec`] : son calque, par son
-/// indice dans [`PlotSpec::panels`], et son rang dans [`crate::PanelSpec::shapes`]
-/// (l'ordre d'empilement).
+/// The address of a graphic object in a [`PlotSpec`]: its layer, by its
+/// index in [`PlotSpec::panels`], and its rank in [`crate::PanelSpec::shapes`]
+/// (the stacking order).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ShapeRef {
-    /// Indice du calque dans [`PlotSpec::panels`].
+    /// Index of the layer in [`PlotSpec::panels`].
     pub panel: usize,
-    /// Rang de l'objet dans son panneau.
+    /// Rank of the object in its panel.
     pub index: usize,
 }
 
@@ -125,7 +125,7 @@ impl ShapeRef {
         (self.panel < spec.panels.len()).then_some(self.panel)
     }
 
-    /// L'objet désigné, s'il existe.
+    /// The designated object, if it exists.
     pub fn get<'a>(&self, spec: &'a PlotSpec) -> Option<&'a ShapeSpec> {
         spec.panels
             .get(self.panel_index(spec)?)?
@@ -133,9 +133,9 @@ impl ShapeRef {
             .get(self.index)
     }
 
-    /// Pose `shape` à cette adresse : remplace l'objet existant, ou l'ajoute
-    /// si `index` est le rang qui suit le dernier. Rend `false` sans rien
-    /// changer si le panneau n'existe pas ou si `index` est plus loin.
+    /// Places `shape` at this address: replaces the existing object, or adds it
+    /// if `index` is the rank after the last. Returns `false` without changing
+    /// anything if the panel does not exist or if `index` is further.
     pub fn set(&self, spec: &mut PlotSpec, shape: ShapeSpec) -> bool {
         let Some(panel) = self
             .panel_index(spec)
@@ -151,7 +151,7 @@ impl ShapeRef {
         true
     }
 
-    /// Retire l'objet désigné ; rend `false` s'il n'existe pas.
+    /// Removes the designated object; returns `false` if it does not exist.
     pub fn remove(&self, spec: &mut PlotSpec) -> bool {
         let Some(panel) = self
             .panel_index(spec)
@@ -166,8 +166,8 @@ impl ShapeRef {
         true
     }
 
-    /// Met l'objet au-dessus de tous les autres de son panneau. Rend sa
-    /// nouvelle adresse, ou `None` s'il n'existe pas.
+    /// Puts the object above all the others of its panel. Returns its
+    /// new address, or `None` if it does not exist.
     pub fn bring_to_front(&self, spec: &mut PlotSpec) -> Option<Self> {
         let panel = spec.panels.get_mut(self.panel_index(spec)?)?;
         if self.index >= panel.shapes.len() {
@@ -181,8 +181,8 @@ impl ShapeRef {
         })
     }
 
-    /// Met l'objet sous tous les autres de son panneau. Rend sa nouvelle
-    /// adresse, ou `None` s'il n'existe pas.
+    /// Puts the object below all the others of its panel. Returns its new
+    /// address, or `None` if it does not exist.
     pub fn send_to_back(&self, spec: &mut PlotSpec) -> Option<Self> {
         let panel = spec.panels.get_mut(self.panel_index(spec)?)?;
         if self.index >= panel.shapes.len() {
@@ -193,8 +193,8 @@ impl ShapeRef {
         Some(Self { index: 0, ..*self })
     }
 
-    /// L'adresse du prochain objet ajouté au calque `panel`, ou `None` si ce
-    /// calque n'existe pas.
+    /// The address of the next object added to the layer `panel`, or `None` if that
+    /// layer does not exist.
     pub fn next_in(spec: &PlotSpec, panel: usize) -> Option<Self> {
         let source = spec.panels.get(panel)?;
         Some(Self {
@@ -213,13 +213,13 @@ mod tests {
     }
 
     #[test]
-    fn une_adresse_ajoute_remplace_et_retire() {
+    fn an_address_adds_replaces_and_removes() {
         let mut spec = PlotSpec::empty("A");
-        let new = ShapeRef::next_in(&spec, 0).expect("panneau 0,0");
+        let new = ShapeRef::next_in(&spec, 0).expect("panel 0,0");
         assert_eq!(new.index, 0);
         assert!(new.set(&mut spec, rect(0.0)));
         assert!(new.set(&mut spec, rect(5.0)));
-        assert_eq!(spec.panels[0].shapes.len(), 1, "remplacé, pas ajouté");
+        assert_eq!(spec.panels[0].shapes.len(), 1, "replaced, not added");
         assert_eq!(new.get(&spec).map(|s| s.x1), Some(5.0));
         assert!(!ShapeRef { index: 5, ..new }.set(&mut spec, rect(0.0)));
         assert!(ShapeRef::next_in(&spec, 3).is_none());
@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn premier_et_arriere_plan_reordonnent_et_rendent_la_nouvelle_adresse() {
+    fn front_and_back_reorder_and_return_the_new_address() {
         let mut spec = PlotSpec::empty("A");
         for x in [0.0, 1.0, 2.0] {
             let at = ShapeRef::next_in(&spec, 0).unwrap();
@@ -249,7 +249,7 @@ mod tests {
     }
 
     #[test]
-    fn l_epaisseur_est_ramenee_dans_ses_bornes() {
+    fn the_thickness_is_clamped_to_its_bounds() {
         let mut shape = rect(0.0);
         shape.line_width = 1e9;
         assert_eq!(shape.effective_width(), ShapeSpec::WIDTH_RANGE.1);

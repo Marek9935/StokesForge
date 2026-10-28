@@ -1,41 +1,41 @@
-//! Les **calculs d'analyse** du projet (chantier #181) : le lien entre des
-//! colonnes calculées, les colonnes dont elles sortent et l'opération qui les a
-//! produites.
+//! The **analysis calculations** of the project (work package #181): the link between
+//! computed columns, the columns they come from and the operation that
+//! produced them.
 //!
-//! # Où ça vit, et pourquoi
+//! # Where it lives, and why
 //!
-//! Un [`Calculation`] n'est pas un nœud de l'arbre — il n'a ni nom, ni parent,
-//! ni fenêtre — mais un enregistrement porté par [`Tree`] à côté des couleurs
-//! enregistrées (`Tree::saved_colors`) : il voyage donc avec l'instantané de
-//! session, le retour arrière et le fichier `.stf` sans chemin à part. Son
-//! identité est un [`NodeId`] du même allocateur que les nœuds (jamais
-//! réutilisé, invariant 7), mais ne désigne aucun nœud de la carte.
+//! A [`Calculation`] is not a node of the tree — it has no name, no parent,
+//! no window — but a record carried by [`Tree`] next to the saved
+//! colors (`Tree::saved_colors`): so it travels with the session
+//! snapshot, the rollback and the `.stf` file with no separate path. Its
+//! identity is a [`NodeId`] from the same allocator as the nodes (never
+//! reused, invariant 7), but it names no node of the map.
 //!
-//! La trace de l'opération d'une colonne calculée (« cette colonne vient de tel
-//! calcul ») n'est **pas** stockée sur la colonne : elle se lit dans
-//! `Calculation::outputs` ([`Tree::calculation_of_column`]). Une source de
-//! vérité unique évite qu'une copie de colonne ou un déplacement laisse
-//! deux traces en désaccord.
+//! The trace of the operation of a computed column ("this column comes from such
+//! calculation") is **not** stored on the column: it is read from
+//! `Calculation::outputs` ([`Tree::calculation_of_column`]). A single source of
+//! truth prevents a column copy or a move from leaving
+//! two traces in disagreement.
 //!
-//! # Liens pendants
+//! # Dangling links
 //!
-//! Supprimer une colonne n'édite pas les calculs qui la citent : la référence
-//! devient pendante, et c'est la lecture qui la traite. Une **entrée**
-//! supprimée rend le calcul périmé ([`Staleness::InputMissing`]) ; une
-//! **sortie** supprimée reste dans `outputs` avec `column` pointant un nœud
-//! absent, et se relit « sortie supprimée » (M8 C). Une seule exception, pour
-//! que rien ne traîne : `Project::remove` retire le calcul dont **toutes** les
-//! colonnes Y d'entrée ont disparu (annuler la suppression le ramène avec
-//! l'arbre).
+//! Deleting a column does not edit the calculations that cite it: the reference
+//! becomes dangling, and it is the read that handles it. A deleted **input**
+//! makes the calculation stale ([`Staleness::InputMissing`]); a deleted
+//! **output** stays in `outputs` with `column` pointing to a missing node,
+//! and reads back as "output deleted" (M8 C). A single exception, so
+//! that nothing lingers: `Project::remove` removes the calculation whose **all**
+//! input Y columns have disappeared (undoing the deletion brings it back with
+//! the tree).
 //!
-//! # Ce qui est écrit hors historique
+//! # What is written outside history
 //!
-//! Le recalcul (`stokesforge-session::recalc`) réécrit les colonnes de sortie,
-//! les résultats et l'état périmé par [`Project::refresh_calculation`] et
-//! [`Project::set_calculation_stale`], comme il réécrit les colonnes-formule :
-//! jamais une entrée d'historique. La création, la modification des
-//! paramètres et la suppression d'un calcul sont, elles, des commandes
-//! annulables (`Command::AddCalculation`, `UpdateCalculation`,
+//! The recalculation (`stokesforge-session::recalc`) rewrites the output columns,
+//! the results and the stale state through [`Project::refresh_calculation`] and
+//! [`Project::set_calculation_stale`], as it rewrites formula columns:
+//! never a history entry. Creating, changing the
+//! parameters of and deleting a calculation are, for their part, undoable commands
+//! (`Command::AddCalculation`, `UpdateCalculation`,
 //! `RemoveCalculation`).
 
 use std::sync::Arc;
@@ -51,8 +51,8 @@ use crate::id::NodeId;
 use crate::project::Project;
 use crate::tree::Tree;
 
-/// Les colonnes d'une courbe traitée : son Y, son X apparié et, pour un
-/// ajustement pondéré, sa colonne d'écart-type.
+/// The columns of a processed curve: its Y, its paired X and, for a
+/// weighted fit, its standard-deviation column.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeriesRef {
     pub x: Option<NodeId>,
@@ -60,30 +60,30 @@ pub struct SeriesRef {
     pub sigma: Option<NodeId>,
 }
 
-/// La colonne annexe d'un calcul : la référence d'une correction, l'IRF d'une
-/// déconvolution.
+/// The auxiliary column of a calculation: the reference of a correction, the IRF of a
+/// deconvolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuxRef {
     pub x: Option<NodeId>,
     pub y: NodeId,
 }
 
-/// Une colonne de sortie : de quelle série elle vient, quelle sortie de
-/// l'opération elle porte (`OutColumn::key` + `index`), et où elle est.
+/// An output column: which series it comes from, which output of the
+/// operation it carries (`OutColumn::key` + `index`), and where it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputRef {
     pub series: usize,
     pub key: String,
     pub index: Option<usize>,
-    /// La colonne écrite. Un nœud qui n'existe plus : sortie supprimée.
+    /// The column written. A node that no longer exists: output deleted.
     pub column: Option<NodeId>,
 }
 
-/// Une valeur calculée gardée dans le projet.
+/// A computed value kept in the project.
 ///
-/// Même contenu que [`stokesforge_analysis::ops::Value`], mais l'égalité traite
-/// deux `NaN` comme égaux : un arbre restauré par annulation doit être
-/// **identique** à celui d'avant, même quand un résultat vaut `NaN`.
+/// Same content as [`stokesforge_analysis::ops::Value`], but equality treats
+/// two `NaN` as equal: a tree restored by undo must be
+/// **identical** to the one before, even when a result is `NaN`.
 #[derive(Debug, Clone)]
 pub struct ResultValue {
     pub key: String,
@@ -120,48 +120,48 @@ impl From<&Value> for ResultValue {
     }
 }
 
-/// Les valeurs d'une série traitée.
+/// The values of a processed series.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SeriesResult {
     pub values: Vec<ResultValue>,
-    /// Lignes écartées (X ou Y non fini).
+    /// Rows discarded (X or Y not finite).
     pub skipped: usize,
     pub warnings: Vec<Warning>,
 }
 
-/// Pourquoi les données d'un calcul ne sont pas à jour (M9 a).
+/// Why the data of a calculation is not up to date (M9 a).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Staleness {
-    /// Recalcul manuel : une source a changé et personne n'a relancé.
+    /// Manual recalculation: a source changed and nobody reran it.
     Manual,
-    /// Une colonne d'entrée n'existe plus.
+    /// An input column no longer exists.
     InputMissing,
-    /// Le recalcul a échoué ; les dernières valeurs valides sont gardées.
+    /// The recalculation failed; the last valid values are kept.
     Failed(AnalysisError),
 }
 
-/// Un calcul d'analyse enregistré dans le projet.
+/// An analysis calculation recorded in the project.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Calculation {
     pub operation: Operation,
     pub series: Vec<SeriesRef>,
     pub aux: Option<AuxRef>,
     pub outputs: Vec<OutputRef>,
-    /// Une entrée par série, ou vide quand on ne garde pas les résultats.
+    /// One entry per series, or empty when results are not kept.
     pub results: Vec<SeriesResult>,
-    /// « Keep in Results » (M5) : les valeurs sont gardées et montrées dans le
-    /// volet Results. Sinon la trace ne sert qu'aux colonnes.
+    /// "Keep in Results" (M5): the values are kept and shown in the
+    /// Results pane. Otherwise the trace only serves the columns.
     pub keep_results: bool,
-    /// Relancé automatiquement quand une source change (M9 b).
+    /// Rerun automatically when a source changes (M9 b).
     pub auto_recalc: bool,
-    /// Ouvre une boîte de dialogue quand R² d'un ajustement est très faible
-    /// (#288) ; propre au calcul, annulable et sauvegardé. Actif par défaut.
+    /// Opens a dialog box when the R² of a fit is very low
+    /// (#288); specific to the calculation, undoable and saved. On by default.
     pub low_r2_dialog: bool,
     pub stale: Option<Staleness>,
 }
 
 impl Calculation {
-    /// Les colonnes qu'il lit : séries et annexe.
+    /// The columns it reads: series and auxiliary.
     pub fn input_columns(&self) -> Vec<NodeId> {
         let mut out = Vec::new();
         for s in &self.series {
@@ -176,16 +176,16 @@ impl Calculation {
         out
     }
 
-    /// Empreinte **stable du contenu** des colonnes d'entrée (A1, #316) : type
-    /// et valeurs de chacune, dans l'ordre de [`Calculation::input_columns`].
-    /// `None` si une colonne manque ou n'est pas une colonne.
+    /// **Stable fingerprint of the content** of the input columns (A1, #316): type
+    /// and values of each, in the order of [`Calculation::input_columns`].
+    /// `None` if a column is missing or is not a column.
     ///
-    /// Écrite dans le fichier à l'enregistrement et comparée à la lecture,
-    /// sans recalcul, pour marquer périmé un calcul dont l'entrée a changé
-    /// hors de StokesForge. Elle ne contient **jamais** de version de colonne
-    /// (non persistante) ni d'identifiant : le même contenu sous deux
-    /// `NodeId` donne la même valeur. FNV-1a écrit à la main, parce que
-    /// `DefaultHasher` ne garantit aucune stabilité d'une version à l'autre.
+    /// Written into the file on save and compared on read,
+    /// without recalculation, to mark stale a calculation whose input changed
+    /// outside StokesForge. It **never** contains a column version
+    /// (not persisted) nor an identifier: the same content under two
+    /// `NodeId`s gives the same value. FNV-1a written by hand, because
+    /// `DefaultHasher` guarantees no stability from one version to the next.
     pub fn inputs_digest(&self, tree: &Tree) -> Option<u64> {
         let mut hash = Fnv1a::new();
         let inputs = self.input_columns();
@@ -228,7 +228,7 @@ impl Calculation {
         Some(hash.finish())
     }
 
-    /// Les colonnes de sortie qui existent encore dans `tree`.
+    /// The output columns that still exist in `tree`.
     pub fn live_outputs<'a>(
         &'a self,
         tree: &'a crate::tree::Tree,
@@ -239,8 +239,8 @@ impl Calculation {
     }
 }
 
-/// FNV-1a 64 bits : l'empreinte de [`Calculation::inputs_digest`] est écrite
-/// dans un fichier, son algorithme ne doit donc jamais changer sous nos pieds.
+/// FNV-1a 64 bits: the fingerprint of [`Calculation::inputs_digest`] is written
+/// into a file, so its algorithm must never change under our feet.
 struct Fnv1a(u64);
 
 impl Fnv1a {
@@ -260,19 +260,19 @@ impl Fnv1a {
     }
 }
 
-/// Une colonne à créer ou à réécrire pour un calcul.
+/// A column to create or rewrite for a calculation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutputDraft {
     pub series: usize,
     pub key: String,
     pub index: Option<usize>,
-    /// Métadonnées de la colonne (nom long, commentaire, unité).
+    /// Metadata of the column (long name, comment, unit).
     pub meta: ColumnMeta,
     pub data: Vec<f64>,
 }
 
-/// Tout ce qu'il faut pour enregistrer un calcul : l'enregistrement et les
-/// colonnes de sortie avec leurs valeurs.
+/// Everything needed to record a calculation: the record and the
+/// output columns with their values.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CalculationDraft {
     pub operation: Operation,
@@ -282,33 +282,33 @@ pub struct CalculationDraft {
     pub results: Vec<SeriesResult>,
     pub keep_results: bool,
     pub auto_recalc: bool,
-    /// Voir [`Calculation::low_r2_dialog`].
+    /// See [`Calculation::low_r2_dialog`].
     pub low_r2_dialog: bool,
 }
 
-/// Trace immuable d'une correction qui a remplacé ses données sources (#212).
-/// Elle ne crée aucun lien de calcul : les colonnes restent ordinaires.
+/// Immutable trace of a correction that replaced its source data (#212).
+/// It creates no calculation link: the columns stay ordinary.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CorrectionRecord {
     pub operation: Operation,
     pub series: Vec<SeriesRef>,
-    /// La référence figée d'une correction par une colonne (#248) : une copie
-    /// du classeur caché, jamais la colonne d'origine.
+    /// The frozen reference of a correction by a column (#248): a copy
+    /// of the hidden workbook, never the original column.
     pub aux: Option<AuxRef>,
     pub results: Vec<SeriesResult>,
-    /// `(colonne remplacée, copie de son original)` : de quoi la restaurer
-    /// (« Restore original data », #248). Les copies vivent dans le classeur
-    /// caché des analyses.
+    /// `(replaced column, copy of its original)`: what is needed to restore it
+    /// ("Restore original data", #248). The copies live in the hidden
+    /// analysis workbook.
     pub originals: Vec<(NodeId, NodeId)>,
 }
 
-/// Plafond de séries d'un même calcul (un lot de spectres).
+/// Cap on the series of a single calculation (a batch of spectra).
 pub const MAX_CALCULATION_SERIES: usize = 10_000;
 
-/// Forme d'un calcul : seule source des règles structurelles, appelée à
-/// l'écriture (`CalculationDraft`) comme à la lecture d'un `.stf` (#309).
-/// `output_series` : le rang de série de chaque sortie ; `results` : le
-/// nombre de résultats gardés.
+/// Shape of a calculation: sole source of the structural rules, called
+/// at write time (`CalculationDraft`) as at read time of a `.stf` (#309).
+/// `output_series`: the series rank of each output; `results`: the
+/// number of results kept.
 pub fn validate_calculation_shape(
     series: usize,
     output_series: impl IntoIterator<Item = usize>,
@@ -333,7 +333,7 @@ pub fn validate_calculation_shape(
 }
 
 impl Calculation {
-    /// Vérifie la forme (voir [`validate_calculation_shape`]).
+    /// Checks the shape (see [`validate_calculation_shape`]).
     pub fn validate_shape(&self) -> CoreResult<()> {
         validate_calculation_shape(
             self.series.len(),
@@ -344,11 +344,11 @@ impl Calculation {
 }
 
 impl CalculationDraft {
-    /// Prépare le remplacement des données originales (C4, #313) : une sortie
-    /// a la longueur de X, plus courte que Y quand X l'est. Elle est complétée
-    /// de `NaN` jusqu'à la longueur de la colonne Y source ; ces lignes n'ont
-    /// pas d'abscisse et gardent leur cellule originale à l'écriture. À appeler
-    /// avant `ReplaceAnalysisData`, dont la garde de longueur reste entière.
+    /// Prepares the replacement of the original data (C4, #313): an output
+    /// has the length of X, shorter than Y when X is. It is padded
+    /// with `NaN` up to the length of the source Y column; these rows have
+    /// no abscissa and keep their original cell at write time. To call
+    /// before `ReplaceAnalysisData`, whose length guard stays strict.
     pub fn complete_for_replacement(&mut self, tree: &Tree) {
         for output in &mut self.outputs {
             let Some(source) = self.series.get(output.series) else {
@@ -370,8 +370,8 @@ impl CalculationDraft {
             self.outputs.iter().map(|o| o.series),
             self.results.len(),
         )?;
-        // Une opération invalide (non-fini, plafond) ne s'enregistre pas : elle
-        // serait écrite puis perdue à la relecture du `.stf` (#278).
+        // An invalid operation (non-finite, cap) is not recorded: it
+        // would be written then lost when the `.stf` is reread (#278).
         self.operation
             .validate()
             .map_err(|e| CoreError::Structure(e.to_string()))?;
@@ -379,8 +379,8 @@ impl CalculationDraft {
     }
 }
 
-/// La clé de la sortie qui remplace les Y d'une source : la courbe corrigée
-/// d'une correction ou d'une ligne de base, la courbe lissée d'un lissage.
+/// The key of the output that replaces the Ys of a source: the corrected curve
+/// of a correction or a baseline, the smoothed curve of a smoothing.
 fn replacement_key(operation: &Operation) -> &'static str {
     match operation {
         Operation::Smooth { .. } => "smoothed",
@@ -389,9 +389,9 @@ fn replacement_key(operation: &Operation) -> &'static str {
 }
 
 impl Project {
-    /// Remplace les Y par leur correction et garde la trace du geste, atomiquement.
-    /// Le client fournit les versions de toutes les entrées lues : un résultat
-    /// préparé sur un instantané dépassé ne doit jamais écraser des données neuves.
+    /// Replaces the Ys with their correction and keeps the trace of the gesture, atomically.
+    /// The client supplies the versions of all inputs read: a result
+    /// prepared on a stale snapshot must never overwrite fresh data.
     pub fn replace_analysis_data(
         &mut self,
         draft: CalculationDraft,
@@ -462,9 +462,9 @@ impl Project {
                     "a correction must preserve the source length".into(),
                 ));
             }
-            // Les lignes non exploitables gardent leur cellule originale. Un
-            // résultat NaN sur une ligne valide (division par zéro, référence
-            // hors plage) reste NaN : ce n'est pas une valeur manquante d'entrée.
+            // Rows that cannot be used keep their original cell. A
+            // NaN result on a valid row (division by zero, out-of-range
+            // reference) stays NaN: it is not a missing input value.
             let cells: Vec<MixedCell> = (0..column.len())
                 .map(|row| {
                     let x_ok = source.x.is_none_or(|x| {
@@ -512,9 +512,9 @@ impl Project {
             let aux = self.frozen_aux(&draft.operation, draft.aux.as_ref())?;
             let mut originals = Vec::with_capacity(writes.len());
             for &id in writes.keys() {
-                // Une colonne déjà corrigée garde sa donnée brute d'origine
-                // (#308) : la copie du premier remplacement est réutilisée, on
-                // ne photographie pas l'état déjà corrigé.
+                // A column already corrected keeps its original raw data
+                // (#308): the copy of the first replacement is reused, the
+                // already corrected state is not photographed.
                 let copy = match self.first_original_of(id) {
                     Some(copy) => copy,
                     None => self.keep_original(id)?,
@@ -546,9 +546,9 @@ impl Project {
         result
     }
 
-    /// La copie de la donnée brute de `column`, si une correction antérieure
-    /// l'a déjà gardée : celle de la trace au plus petit identifiant, donc la
-    /// plus ancienne. `None` pour une colonne jamais corrigée.
+    /// The copy of the raw data of `column`, if an earlier correction
+    /// already kept it: that of the trace with the smallest identifier, hence the
+    /// oldest. `None` for a column never corrected.
     fn first_original_of(&self, column: NodeId) -> Option<NodeId> {
         self.tree().correction_traces().values().find_map(|trace| {
             trace
@@ -566,14 +566,14 @@ impl Project {
         })
     }
 
-    /// « Restore original data » (#248) : rend à chaque colonne remplacée par
-    /// la correction `trace` son type et ses valeurs **brutes** (celles d'avant
-    /// la toute première correction, #308), **écrase** ce qui y a été saisi
-    /// depuis, retire la trace et les copies qui ne servent plus. Une colonne
-    /// restaurée sort aussi de toutes les autres traces qui la citaient (une
-    /// trace qui n'a plus aucune colonne disparaît) : restaurer B après A rend
-    /// la donnée brute, il n'y a plus de correction « A » à restaurer.
-    /// Une colonne supprimée depuis est laissée de côté. Atomique.
+    /// "Restore original data" (#248): gives back to each column replaced by
+    /// the correction `trace` its **raw** type and values (those from before
+    /// the very first correction, #308), **overwrites** what was typed in
+    /// since, removes the trace and the copies that are no longer needed. A restored
+    /// column also leaves all the other traces that cited it (a
+    /// trace left with no column disappears): restoring B after A gives back
+    /// the raw data, there is no "A" correction left to restore.
+    /// A column deleted since is left aside. Atomic.
     pub fn restore_original_data(&mut self, trace: NodeId) -> CoreResult<()> {
         let record = self
             .tree()
@@ -627,9 +627,9 @@ impl Project {
         result
     }
 
-    /// La référence que le calcul lira : figée dans le classeur caché pour une
-    /// correction par une colonne (#248), telle quelle pour les autres
-    /// opérations.
+    /// The reference the calculation will read: frozen in the hidden workbook for a
+    /// correction by a column (#248), as is for the other
+    /// operations.
     fn frozen_aux(
         &mut self,
         operation: &Operation,
@@ -641,9 +641,9 @@ impl Project {
         }
     }
 
-    /// Enregistre un calcul : crée ses colonnes de sortie **juste après la
-    /// colonne Y de chaque série** (dans l'ordre des sorties), puis
-    /// l'enregistrement. Atomique : un échec rend l'arbre intact.
+    /// Records a calculation: creates its output columns **right after the
+    /// Y column of each series** (in the order of the outputs), then
+    /// the record. Atomic: a failure leaves the tree intact.
     pub fn add_calculation(&mut self, draft: CalculationDraft) -> CoreResult<NodeId> {
         draft.validate()?;
         let before = self.tree().clone();
@@ -690,7 +690,7 @@ impl Project {
         Ok(id)
     }
 
-    /// Crée la colonne de `out`, juste après `last_after[out.series]`.
+    /// Creates the column of `out`, right after `last_after[out.series]`.
     fn insert_output_column(
         &mut self,
         last_after: &mut [NodeId],
@@ -714,10 +714,10 @@ impl Project {
         Ok(id)
     }
 
-    /// Remplace les paramètres, les colonnes et les résultats d'un calcul
-    /// existant. Une sortie déjà présente (même série, même clé, même rang) est
-    /// **réécrite en place** ; une nouvelle est créée ; une sortie qui n'existe
-    /// plus dans `draft` voit sa colonne supprimée.
+    /// Replaces the parameters, columns and results of an existing
+    /// calculation. An output already present (same series, same key, same rank) is
+    /// **rewritten in place**; a new one is created; an output that no longer exists
+    /// in `draft` has its column deleted.
     pub fn update_calculation(&mut self, id: NodeId, draft: CalculationDraft) -> CoreResult<()> {
         draft.validate()?;
         let current = self
@@ -800,9 +800,9 @@ impl Project {
         Ok(())
     }
 
-    /// Retire un calcul. `with_columns` supprime aussi ses colonnes de sortie ;
-    /// sinon elles deviennent des colonnes ordinaires (« Detach from
-    /// Calculation »).
+    /// Removes a calculation. `with_columns` also deletes its output columns;
+    /// otherwise they become ordinary columns ("Detach from
+    /// Calculation").
     pub fn remove_calculation(&mut self, id: NodeId, with_columns: bool) -> CoreResult<()> {
         let calc = self
             .tree()
@@ -832,9 +832,9 @@ impl Project {
         result
     }
 
-    /// Réécrit les valeurs d'une colonne si elles diffèrent (version neuve du
-    /// projet à chaque écriture réelle ; rien si le contenu est identique, pour
-    /// ne pas relancer en cascade les calculs qui la lisent).
+    /// Rewrites the values of a column if they differ (fresh project version
+    /// on each real write; nothing if the content is identical, so as
+    /// not to rerun in cascade the calculations that read it).
     fn write_column_data(&mut self, column: NodeId, data: &[f64]) -> CoreResult<bool> {
         let same = self
             .tree()
@@ -852,13 +852,13 @@ impl Project {
         Ok(true)
     }
 
-    /// **Hors historique** — appelée par le recalcul de la session. Réécrit les
-    /// colonnes de sortie (`data` : une entrée par sortie de `Calculation::
-    /// outputs`, dans leur ordre ; `None` laisse la colonne telle quelle),
-    /// remplace les résultats si le calcul les garde, et lève l'état périmé.
-    /// Rend `true` si quelque chose a réellement changé (une colonne, les
-    /// résultats ou l'état) : c'est ce qui dit au recalcul de la session de
-    /// repasser sur les formules et les calculs qui lisent ces colonnes.
+    /// **Outside history** — called by the session's recalculation. Rewrites the
+    /// output columns (`data`: one entry per output of `Calculation::
+    /// outputs`, in their order; `None` leaves the column as is),
+    /// replaces the results if the calculation keeps them, and lifts the stale state.
+    /// Returns `true` if something really changed (a column, the
+    /// results or the state): this is what tells the session's recalculation to
+    /// go over the formulas and calculations that read these columns again.
     pub fn refresh_calculation(
         &mut self,
         id: NodeId,
@@ -896,11 +896,11 @@ impl Project {
         Ok(changed)
     }
 
-    /// **Hors historique** — comme [`Project::refresh_calculation`], à partir
-    /// du résultat de [`compute`]. Chaque colonne calculée retrouve sa sortie
-    /// par (série, clé, rang) ; une sortie que le calcul ne produit plus (moins
-    /// de pics détectés) est vidée en `NaN` — le recalcul ne crée ni ne
-    /// supprime de colonne, cela reste le fait de `UpdateCalculation`.
+    /// **Outside history** — like [`Project::refresh_calculation`], from
+    /// the result of [`compute`]. Each computed column finds its output
+    /// by (series, key, rank); an output the calculation no longer produces (fewer
+    /// peaks detected) is emptied to `NaN` — the recalculation neither creates nor
+    /// deletes a column, that remains the job of `UpdateCalculation`.
     pub fn refresh_calculation_from(&mut self, id: NodeId, computed: Computed) -> CoreResult<bool> {
         let calc = self
             .tree()
@@ -930,7 +930,7 @@ impl Project {
         self.refresh_calculation(id, &data, computed.results)
     }
 
-    /// **Hors historique** — marque un calcul périmé (ou à jour avec `None`).
+    /// **Outside history** — marks a calculation stale (or up to date with `None`).
     pub fn set_calculation_stale(
         &mut self,
         id: NodeId,
@@ -952,8 +952,8 @@ impl Project {
         Ok(())
     }
 
-    /// Remplace un enregistrement entier (la persistance et les tests). Rend
-    /// l'ancien.
+    /// Replaces a whole record (persistence and tests). Returns
+    /// the old one.
     pub fn restore_calculation(
         &mut self,
         id: NodeId,
@@ -967,20 +967,20 @@ impl Project {
     }
 }
 
-// ── Calculer ────────────────────────────────────────────────────────────
+// ── Compute ─────────────────────────────────────────────────────────────
 
-/// Pourquoi un calcul n'a pas pu être exécuté.
+/// Why a calculation could not be run.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ComputeError {
-    /// Une colonne d'entrée n'existe plus (ou n'est plus une colonne).
+    /// An input column no longer exists (or is no longer a column).
     #[error("input column {0} no longer exists")]
     MissingInput(NodeId),
-    /// L'opération elle-même a échoué.
+    /// The operation itself failed.
     #[error(transparent)]
     Analysis(#[from] AnalysisError),
 }
 
-/// Une colonne calculée, avant d'être posée dans le classeur.
+/// A computed column, before being placed in the workbook.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedColumn {
     pub series: usize,
@@ -989,17 +989,17 @@ pub struct ComputedColumn {
     pub data: Vec<f64>,
 }
 
-/// Le résultat d'une opération sur les colonnes du projet : de quoi bâtir un
-/// [`CalculationDraft`] (création) ou rafraîchir un calcul (recalcul).
+/// The result of an operation on the project's columns: what is needed to build a
+/// [`CalculationDraft`] (creation) or refresh a calculation (recalculation).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Computed {
     pub columns: Vec<ComputedColumn>,
-    /// Une entrée par série.
+    /// One entry per series.
     pub results: Vec<SeriesResult>,
 }
 
-/// Les nombres d'une colonne, `NaN` pour une cellule vide ou textuelle, prolongés
-/// de `NaN` jusqu'à `len`.
+/// The numbers of a column, `NaN` for an empty or text cell, padded
+/// with `NaN` up to `len`.
 fn numbers(tree: &Tree, column: NodeId, len: usize) -> Result<Vec<f64>, ComputeError> {
     let col = tree
         .node(column)
@@ -1016,15 +1016,15 @@ fn column_len(tree: &Tree, column: NodeId) -> Result<usize, ComputeError> {
         .ok_or(ComputeError::MissingInput(column))
 }
 
-/// X, Y et, au besoin, une colonne d'incertitude, lus ligne à ligne.
+/// X, Y and, if needed, an uncertainty column, read row by row.
 type ReadColumns = (Vec<f64>, Vec<f64>, Option<Vec<f64>>);
 
-/// Une paire (X, Y) lue dans `tree`. Sans colonne X, l'abscisse est le numéro
-/// de ligne (à partir de 1). **La longueur est celle de X** s'il est donné,
-/// sinon celle de Y (C4, #313) : Y et l'incertitude sont ramenés à cette
-/// longueur, prolongés de `NaN` s'ils sont plus courts (ligne incomplète,
-/// écartée par l'opération), tronqués s'ils sont plus longs (les lignes au-delà
-/// de X n'ont pas d'abscisse).
+/// An (X, Y) pair read from `tree`. Without an X column, the abscissa is the row
+/// number (starting at 1). **The length is that of X** if given,
+/// otherwise that of Y (C4, #313): Y and the uncertainty are brought to that
+/// length, padded with `NaN` if shorter (incomplete row,
+/// discarded by the operation), truncated if longer (rows beyond
+/// X have no abscissa).
 fn read_pair(
     tree: &Tree,
     x: Option<NodeId>,
@@ -1044,9 +1044,9 @@ fn read_pair(
     Ok((xs, ys, es))
 }
 
-/// Exécute `op` sur les colonnes citées de `tree`. C'est la lecture du modèle
-/// que partagent la création (application, `pyst`) et le recalcul de la
-/// session ; l'opération elle-même est `stokesforge_analysis::ops::run`.
+/// Runs `op` on the columns cited of `tree`. This is the model read
+/// shared by creation (application, `pyst`) and the session's
+/// recalculation; the operation itself is `stokesforge_analysis::ops::run`.
 pub fn compute(
     tree: &Tree,
     op: &Operation,
@@ -1085,21 +1085,21 @@ pub fn compute(
     Ok(computed)
 }
 
-/// Le nom d'une colonne de sortie d'analyse, **comme donnée** : les crates du
-/// dessous ne mettent rien en phrase. Une seule règle, partagée par l'interface
-/// et `pyst` (#256) : [`OutputName::of`] choisit la variante depuis la famille,
-/// la clé de sortie et la source ; [`OutputName::english`] en donne la forme
-/// anglaise brute (scripts, journaux) ; l'application la traduit par un `match`
-/// exhaustif vers les clés `analysis-output-*` du catalogue `en`
-/// (`tests/output_names.rs` garde l'accord des deux).
+/// The name of an analysis output column, **as data**: the crates
+/// below put nothing into sentences. A single rule, shared by the interface
+/// and `pyst` (#256): [`OutputName::of`] chooses the variant from the family,
+/// the output key and the source; [`OutputName::english`] gives the raw
+/// English form (scripts, logs); the application translates it through an
+/// exhaustive `match` to the `analysis-output-*` keys of the `en` catalog
+/// (`tests/output_names.rs` guards the agreement of the two).
 ///
-/// `name` est le nom long de la source, à défaut son nom court ; `column` est
-/// toujours son nom court (« B »).
+/// `name` is the long name of the source, failing that its short name; `column` is
+/// always its short name ("B").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OutputName {
-    /// Le Y corrigé d'une ligne de base : `Intensity (B-corr)`.
+    /// The corrected Y of a baseline: `Intensity (B-corr)`.
     BaselineCorrected { name: String, column: String },
-    /// Le Y corrigé d'une correction : `Intensity (corrected)`.
+    /// The corrected Y of a correction: `Intensity (corrected)`.
     Corrected { name: String },
     /// `Baseline of B`.
     Baseline { column: String },
@@ -1111,7 +1111,7 @@ pub enum OutputName {
     Fit { name: String },
     /// `Intensity (resid.)`.
     Residuals { name: String },
-    /// `Peak 2 of B` (rang à partir de 1).
+    /// `Peak 2 of B` (rank starting at 1).
     Peak { index: usize, column: String },
     /// `Background of B`.
     Background { column: String },
@@ -1119,20 +1119,20 @@ pub enum OutputName {
     PeaksSum { column: String },
     /// `Intensity (deconvolved)`.
     Deconvolved { name: String },
-    /// Le Y lissé : `Intensity (smoothed)`.
+    /// The smoothed Y: `Intensity (smoothed)`.
     Smoothed { name: String },
-    /// Repli d'une clé que cette version ne connaît pas : le nom de la source.
+    /// Fallback of a key this version does not know: the name of the source.
     Source { name: String },
 }
 
-/// Le nom court d'une colonne (« B »), à défaut le vide.
+/// The short name of a column ("B"), failing that empty.
 fn short_name(tree: &Tree, column: NodeId) -> String {
     tree.node(column)
         .map(|n| n.name().to_string())
         .unwrap_or_default()
 }
 
-/// Le nom long d'une colonne, ou à défaut son nom court.
+/// The long name of a column, or failing that its short name.
 fn long_name(tree: &Tree, column: NodeId) -> String {
     tree.node(column)
         .and_then(|n| n.as_column())
@@ -1142,7 +1142,7 @@ fn long_name(tree: &Tree, column: NodeId) -> String {
 }
 
 impl OutputName {
-    /// Le nom de la sortie `key` (et `index`, pour un pic) de `kind` sur `series`.
+    /// The name of output `key` (and `index`, for a peak) of `kind` on `series`.
     pub fn of(
         tree: &Tree,
         kind: OperationKind,
@@ -1172,7 +1172,7 @@ impl OutputName {
         }
     }
 
-    /// La forme anglaise brute, identique au catalogue `en` de l'application.
+    /// The raw English form, identical to the application's `en` catalog.
     pub fn english(&self) -> String {
         match self {
             Self::BaselineCorrected { name, column } => format!("{name} ({column}-corr)"),
@@ -1192,8 +1192,8 @@ impl OutputName {
     }
 }
 
-/// L'unité d'une colonne de sortie : **toujours celle de la source** pour les
-/// onze clés connues, vide pour une clé inconnue.
+/// The unit of an output column: **always that of the source** for the
+/// eleven known keys, empty for an unknown key.
 pub fn output_unit(tree: &Tree, series: &SeriesRef, key: &str) -> String {
     match key {
         "corrected" | "baseline" | "cumulative" | "normalized" | "fit" | "residuals" | "peak"
@@ -1206,9 +1206,9 @@ pub fn output_unit(tree: &Tree, series: &SeriesRef, key: &str) -> String {
     }
 }
 
-/// Le nom anglais brut d'une famille d'opération : le commentaire des colonnes
-/// de sortie écrites par `pyst` et le `Display` des libellés d'historique. Le
-/// catalogue `analysis-kind-*` de l'application en est la traduction.
+/// The raw English name of an operation family: the comment of the output
+/// columns written by `pyst` and the `Display` of history labels. The
+/// application's `analysis-kind-*` catalog is its translation.
 pub fn family_english(kind: OperationKind) -> &'static str {
     match kind {
         OperationKind::Baseline => "Correction",
@@ -1222,20 +1222,20 @@ pub fn family_english(kind: OperationKind) -> &'static str {
     }
 }
 
-/// Les deux réglages de sortie d'une décomposition en pics qui ne sont pas dans
-/// l'[`Operation`] (ni dans le fichier) : les colonnes « un pic + fond » et la
-/// colonne « somme des pics ». Les cases de la fenêtre et les options de
-/// `pyst.peaks` les portent.
+/// The two output settings of a peak decomposition that are not in the
+/// [`Operation`] (nor in the file): the "one peak + background" columns and the
+/// "sum of peaks" column. The window's checkboxes and the options of
+/// `pyst.peaks` carry them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PeakOutputs {
-    /// Une colonne par pic et la colonne de fond.
+    /// One column per peak and the background column.
     pub peak_columns: bool,
-    /// La colonne de la somme des pics.
+    /// The column of the sum of peaks.
     pub sum_column: bool,
 }
 
 impl Default for PeakOutputs {
-    /// Les valeurs par défaut de la fenêtre : tout est écrit.
+    /// The default values of the window: everything is written.
     fn default() -> Self {
         Self {
             peak_columns: true,
@@ -1244,10 +1244,10 @@ impl Default for PeakOutputs {
     }
 }
 
-/// La sortie `key` de `op` est-elle à écrire ? Une seule liste pour la fenêtre
-/// d'analyse et `pyst` : les colonnes d'aide (ligne de base, intégrales,
-/// résidus) suivent l'option de l'opération ; celles d'une décomposition en pics
-/// suivent `peaks`. Toute autre sortie est écrite.
+/// Is output `key` of `op` to be written? A single list for the analysis
+/// window and `pyst`: the helper columns (baseline, integrals,
+/// residuals) follow the operation's option; those of a peak decomposition
+/// follow `peaks`. Every other output is written.
 pub fn wants_output(op: &Operation, key: &str, peaks: PeakOutputs) -> bool {
     match (op, key) {
         (Operation::Baseline { keep_baseline, .. }, "baseline") => *keep_baseline,
@@ -1269,8 +1269,8 @@ mod output_name_tests {
     use stokesforge_analysis::integrate::{IntegrateSpec, Under};
     use stokesforge_analysis::peaks::{PeakBackground, PeakShape, PeaksSpec};
 
-    /// Une feuille avec la colonne « B » (nom long « Intensity », unité
-    /// « counts ») et la colonne « C » (aucun nom long ni unité).
+    /// A sheet with column "B" (long name "Intensity", unit
+    /// "counts") and column "C" (no long name or unit).
     fn fixture() -> (Project, SeriesRef, SeriesRef) {
         let mut project = Project::new("P").unwrap();
         let book = project.add_workbook(project.root(), Some("Book")).unwrap();
@@ -1315,7 +1315,7 @@ mod output_name_tests {
             }
         );
         assert_eq!(n.english(), "Intensity (B-corr)");
-        // Hors famille Baseline : le corrigé d'une correction.
+        // Outside the Baseline family: the corrected of a correction.
         let n = name(project.tree(), OperationKind::Correct, &b, "corrected");
         assert_eq!(n.english(), "Intensity (corrected)");
     }
@@ -1399,7 +1399,7 @@ mod output_name_tests {
             "smoothed",
         ] {
             assert_eq!(output_unit(tree, &b, key), "counts", "{key}");
-            assert_eq!(output_unit(tree, &c, key), "", "{key} sans unité");
+            assert_eq!(output_unit(tree, &c, key), "", "{key} without unit");
         }
         assert_eq!(output_unit(tree, &b, "something_new"), "");
     }
@@ -1449,7 +1449,7 @@ mod output_name_tests {
                 assert_eq!(wants_output(&op, "peak", options), peak_columns);
                 assert_eq!(wants_output(&op, "background", options), peak_columns);
                 assert_eq!(wants_output(&op, "peaks_sum", options), sum_column);
-                // Ce que les options ne règlent pas reste écrit ou suit l'opération.
+                // What the options do not set stays written or follows the operation.
                 assert!(wants_output(&op, "fit", options));
                 assert!(!wants_output(&op, "residuals", options));
             }
@@ -1537,9 +1537,9 @@ mod inputs_digest_tests {
         calc_on(ids[0]).inputs_digest(project.tree())
     }
 
-    /// L'empreinte fait partie du format `.stf` (S3, #323) : ces valeurs sont
-    /// écrites dans les fichiers, elles ne changent jamais. Un changement ici
-    /// périmerait à la relecture tous les calculs des fichiers déjà écrits.
+    /// The fingerprint is part of the `.stf` format (S3, #323): these values are
+    /// written into files, they never change. A change here would make stale on
+    /// reread all the calculations of files already written.
     #[test]
     fn the_digest_is_frozen_on_known_inputs() {
         let numeric = Column::from_f64(&[1.5, f64::NAN, -0.0, 0.0]);
@@ -1555,7 +1555,7 @@ mod inputs_digest_tests {
     #[test]
     fn the_same_content_under_two_ids_gives_the_same_digest() {
         let c = Column::from_f64(&[1.0, 2.0, f64::NAN]);
-        // Deux feuilles, donc deux jeux d'identifiants : seul le contenu compte.
+        // Two sheets, hence two sets of identifiers: only the content counts.
         let (mut project, ids) = sheet_with(std::slice::from_ref(&c));
         let extra = project.tree().children(project.root()).unwrap()[0];
         let sheet = project.tree().children(extra).unwrap()[0];
@@ -1585,7 +1585,7 @@ mod inputs_digest_tests {
             MixedCell::Text("3".into()),
         ]);
         assert_ne!(digest(&[mixed]), digest(&[text]));
-        // Le motif binaire compte : -0.0 n'est pas 0.0.
+        // The binary pattern counts: -0.0 is not 0.0.
         assert_ne!(
             digest(&[Column::from_f64(&[0.0])]),
             digest(&[Column::from_f64(&[-0.0])])

@@ -1,4 +1,4 @@
-//! Les calculs d'analyse (#181) traversent le fichier `.stf`.
+//! The analysis calculations (#181) go through the `.stf` file.
 
 use stokesforge_analysis::correct::CorrectOp;
 use stokesforge_analysis::ops::{Operation, Warning};
@@ -78,7 +78,7 @@ fn project_with_calculation() -> Project {
 }
 
 #[test]
-fn un_calcul_survit_a_un_aller_retour() {
+fn a_calculation_survives_a_round_trip() {
     let project = project_with_calculation();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("p.stf");
@@ -89,8 +89,8 @@ fn un_calcul_survit_a_un_aller_retour() {
 }
 
 #[test]
-fn le_reglage_de_boite_r2_faible_d_un_calcul_survit_au_fichier() {
-    // La fixture l'éteint (#288) : le défaut `true` ne doit pas le rallumer.
+fn the_weak_r2_dialog_setting_of_a_calculation_survives_the_file() {
+    // The fixture turns it off (#288): the default `true` must not turn it back on.
     let project = project_with_calculation();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("r2.stf");
@@ -101,7 +101,7 @@ fn le_reglage_de_boite_r2_faible_d_un_calcul_survit_au_fichier() {
 }
 
 #[test]
-fn la_peremption_manuelle_et_l_entree_perdue_sont_gardees_l_echec_devient_manuel() {
+fn manual_staleness_and_the_lost_input_are_kept_the_failure_becomes_manual() {
     for (stale, expected) in [
         (Staleness::Manual, Staleness::Manual),
         (Staleness::InputMissing, Staleness::InputMissing),
@@ -122,7 +122,7 @@ fn la_peremption_manuelle_et_l_entree_perdue_sont_gardees_l_echec_devient_manuel
 }
 
 #[test]
-fn les_identifiants_continuent_apres_un_rechargement() {
+fn identifiers_continue_after_a_reload() {
     let project = project_with_calculation();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("p.stf");
@@ -130,13 +130,13 @@ fn les_identifiants_continuent_apres_un_rechargement() {
     let mut back = load(&path).unwrap();
     let id = *back.tree().calculations().keys().next().unwrap();
     let book = back.tree().children(back.root()).unwrap()[0];
-    let fresh = back.add_workbook(back.root(), Some("Autre")).unwrap();
+    let fresh = back.add_workbook(back.root(), Some("Other")).unwrap();
     assert_ne!(fresh, id);
     assert_ne!(fresh, book);
 }
 
 #[test]
-fn le_reglage_d_avertissement_d_un_graphe_survit_a_un_aller_retour() {
+fn the_warning_setting_of_a_graph_survives_a_round_trip() {
     for wanted in [true, false] {
         let mut project = project_with_calculation();
         let spec = stokesforge_plot::PlotSpec {
@@ -151,14 +151,14 @@ fn le_reglage_d_avertissement_d_un_graphe_survit_a_un_aller_retour() {
         let stokesforge_core::NodeKind::Graph { spec, .. } =
             back.tree().node(graph).unwrap().kind()
         else {
-            panic!("un graphe attendu");
+            panic!("a graph expected");
         };
         assert_eq!(spec.stale_warning, wanted);
     }
 }
 
 #[test]
-fn le_separateur_decimal_d_un_graphe_survit_a_un_aller_retour_et_vaut_point_par_defaut() {
+fn the_decimal_separator_of_a_graph_survives_a_round_trip_and_defaults_to_point() {
     for wanted in [true, false] {
         let mut project = project_with_calculation();
         let spec = stokesforge_plot::PlotSpec {
@@ -173,7 +173,7 @@ fn le_separateur_decimal_d_un_graphe_survit_a_un_aller_retour_et_vaut_point_par_
         let stokesforge_core::NodeKind::Graph { spec, .. } =
             back.tree().node(graph).unwrap().kind()
         else {
-            panic!("un graphe attendu");
+            panic!("a graph expected");
         };
         assert_eq!(spec.decimal_comma, wanted);
     }
@@ -181,7 +181,7 @@ fn le_separateur_decimal_d_un_graphe_survit_a_un_aller_retour_et_vaut_point_par_
 }
 
 #[test]
-fn les_deux_lignes_de_base_constantes_traversent_le_fichier_stf() {
+fn the_two_constant_baselines_go_through_the_stf_file() {
     use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
     for method in [
         BaselineMethod::Constant { point: (2.5, 7.0) },
@@ -226,7 +226,7 @@ fn les_deux_lignes_de_base_constantes_traversent_le_fichier_stf() {
 }
 
 #[test]
-fn les_corrections_definitives_survivent_au_fichier_sans_lien_de_calcul() {
+fn final_corrections_survive_the_file_without_a_calculation_link() {
     let mut project = project_with_calculation();
     let (id, calc) = project
         .tree()
@@ -285,8 +285,8 @@ fn les_corrections_definitives_survivent_au_fichier_sans_lien_de_calcul() {
     let back = load(&path).unwrap();
     assert_eq!(back.tree(), project.tree());
     assert_eq!(back.tree().correction_traces().len(), 2);
-    // #308 : les deux corrections de Y partagent la même donnée brute, avant
-    // comme après le fichier.
+    // #308: the two corrections of Y share the same raw data, before
+    // as well as after the file.
     let copies: Vec<_> = back
         .tree()
         .correction_traces()
@@ -297,7 +297,7 @@ fn les_corrections_definitives_survivent_au_fichier_sans_lien_de_calcul() {
     assert!(back.tree().calculations().is_empty());
     assert!(back.tree().calculation_of_column(y).is_none());
     let mut back = back;
-    let next = back.add_note(back.root(), None, "suivant").unwrap();
+    let next = back.add_note(back.root(), None, "next").unwrap();
     assert!(back
         .tree()
         .correction_traces()
@@ -305,11 +305,11 @@ fn les_corrections_definitives_survivent_au_fichier_sans_lien_de_calcul() {
         .all(|id| id.raw() < next.raw()));
 }
 
-/// Une correction par une référence figée, remplaçant les données (#248) : le
-/// classeur caché, la copie de l'original et la référence survivent au fichier,
-/// et « Restore original data » marche après rechargement.
+/// A correction by a frozen reference, replacing the data (#248): the
+/// hidden workbook, the copy of the original and the reference survive the file,
+/// and "Restore original data" works after a reload.
 #[test]
-fn les_copies_figees_et_les_originaux_survivent_au_fichier() {
+fn frozen_copies_and_originals_survive_the_file() {
     use stokesforge_core::AuxRef;
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
@@ -372,7 +372,7 @@ fn les_copies_figees_et_les_originaux_survivent_au_fichier() {
     assert_eq!(back.tree(), project.tree());
     assert!(
         back.analysis_store_sheet().is_some(),
-        "le classeur caché revient marqué"
+        "the hidden workbook comes back marked"
     );
     let trace = *back.tree().correction_traces().keys().next().unwrap();
     assert_eq!(back.tree().correction_traces()[&trace].originals.len(), 1);
@@ -390,24 +390,24 @@ fn les_copies_figees_et_les_originaux_survivent_au_fichier() {
     assert!(back.analysis_store_sheet().is_none());
 }
 
-/// Un calcul dont l'opération est illisible n'est pas perdu en silence (#278) :
-/// le rapport de chargement le nomme, et le reste du projet se charge.
+/// A calculation whose operation is unreadable is not lost in silence (#278):
+/// the load report names it, and the rest of the project loads.
 #[test]
-fn un_calcul_illisible_est_nomme_par_le_rapport_et_le_reste_se_charge() {
+fn an_unreadable_calculation_is_named_by_the_report_and_the_rest_loads() {
     let project = project_with_calculation();
     let id = project.tree().calculations().keys().next().unwrap().raw();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("p.stf");
     save(&project, &path).unwrap();
 
-    // Même longueur : on abîme l'opération (« subtract » n'existe plus) sans
-    // décaler le moindre octet du fichier.
+    // Same length: the operation is damaged ("subtract" no longer exists) without
+    // shifting a single byte of the file.
     let mut bytes = std::fs::read(&path).unwrap();
     let needle = b"subtract";
     let at = bytes
         .windows(needle.len())
         .position(|w| w == needle)
-        .expect("l'opération est écrite dans le fichier");
+        .expect("the operation is written in the file");
     bytes[at..at + needle.len()].copy_from_slice(b"subtraXX");
     std::fs::write(&path, &bytes).unwrap();
 
@@ -420,14 +420,14 @@ fn un_calcul_illisible_est_nomme_par_le_rapport_et_le_reste_se_charge() {
             kind: Some("correct".into())
         }]
     );
-    // Le reste du projet est là.
+    // The rest of the project is there.
     assert_eq!(
         loaded.tree().root(),
         project.tree().root(),
-        "la racine est celle du fichier"
+        "the root is that of the file"
     );
     assert_eq!(loaded.tree().len(), project.tree().len());
-    // Un fichier sain ne rapporte rien.
+    // A sound file reports nothing.
     save(&project, &path).unwrap();
     assert!(stokesforge_persistence::load_with_report(&path)
         .unwrap()
@@ -435,11 +435,11 @@ fn un_calcul_illisible_est_nomme_par_le_rapport_et_le_reste_se_charge() {
         .is_clean());
 }
 
-// ── Calculs écartés au chargement (#278) ───────────────────────────────────
+// ── Calculations discarded at load (#278) ──────────────────────────────────
 
-/// Un projet à trois calculs de correction sur trois colonnes Y distinctes :
-/// `(projet, [(identifiant du calcul, mot d'opération écrit dans le fichier)])`
-/// dans l'ordre croissant des identifiants.
+/// A project with three correction calculations on three distinct Y columns:
+/// `(project, [(identifier of the calculation, operation word written in the file)])`
+/// in increasing order of identifiers.
 fn project_with_three_calculations() -> (Project, Vec<(u64, &'static str)>) {
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
@@ -480,20 +480,20 @@ fn project_with_three_calculations() -> (Project, Vec<(u64, &'static str)>) {
     (project, made)
 }
 
-/// Remplace, dans les octets du fichier, `from` par `to` (même longueur).
+/// Replaces, in the bytes of the file, `from` by `to` (same length).
 fn patch(path: &std::path::Path, from: &[u8], to: &[u8]) {
     assert_eq!(from.len(), to.len());
     let mut bytes = std::fs::read(path).unwrap();
     let at = bytes
         .windows(from.len())
         .position(|w| w == from)
-        .expect("le motif est dans le fichier");
+        .expect("the pattern is in the file");
     bytes[at..at + to.len()].copy_from_slice(to);
     std::fs::write(path, bytes).unwrap();
 }
 
 #[test]
-fn plusieurs_calculs_ecartes_sont_tous_listes_dans_l_ordre_et_les_sains_se_chargent() {
+fn several_discarded_calculations_are_all_listed_in_order_and_the_sound_ones_load() {
     let (project, made) = project_with_three_calculations();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("p.stf");
@@ -511,7 +511,7 @@ fn plusieurs_calculs_ecartes_sont_tous_listes_dans_l_ordre_et_les_sains_se_charg
             kind: Some("correct".into()),
         },
     ];
-    // Même rapport à chaque lecture : l'ordre ne dépend de rien d'aléatoire.
+    // Same report at each read: the order depends on nothing random.
     for _ in 0..3 {
         let (loaded, _, report) = stokesforge_persistence::load_with_report(&path).unwrap();
         assert_eq!(report.discarded_calculations, expected);
@@ -522,21 +522,21 @@ fn plusieurs_calculs_ecartes_sont_tous_listes_dans_l_ordre_et_les_sains_se_charg
             .keys()
             .map(|k| k.raw())
             .collect();
-        assert_eq!(kept, vec![made[1].0], "seul le sain est gardé");
+        assert_eq!(kept, vec![made[1].0], "only the sound one is kept");
     }
-    // `load` et `load_with_geometries` gardent leur comportement : ils
-    // chargent le même projet, sans rapport et sans échec.
+    // `load` and `load_with_geometries` keep their behavior: they
+    // load the same project, with no report and no failure.
     let by_load = load(&path).unwrap();
     let (by_geometries, _) = stokesforge_persistence::load_with_geometries(&path).unwrap();
     let (by_report, _, _) = stokesforge_persistence::load_with_report(&path).unwrap();
     assert_eq!(by_load.tree(), by_report.tree());
     assert_eq!(by_geometries.tree(), by_report.tree());
-    // Les colonnes de sortie d'un calcul écarté restent des colonnes ordinaires.
+    // The output columns of a discarded calculation stay ordinary columns.
     assert_eq!(by_report.tree().len(), project.tree().len());
 }
 
 #[test]
-fn un_fichier_sans_calcul_ecarte_rend_un_rapport_vide() {
+fn a_file_without_a_discarded_calculation_gives_an_empty_report() {
     let (project, made) = project_with_three_calculations();
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("p.stf");
@@ -545,8 +545,8 @@ fn un_fichier_sans_calcul_ecarte_rend_un_rapport_vide() {
     assert!(report.is_clean());
     assert_eq!(report, stokesforge_persistence::LoadReport::default());
     assert_eq!(loaded.tree().calculations().len(), made.len());
-    // Un projet sans aucun calcul aussi.
-    let empty = Project::new("Vide").unwrap();
+    // A project without any calculation too.
+    let empty = Project::new("Empty").unwrap();
     save(&empty, &path).unwrap();
     assert!(stokesforge_persistence::load_with_report(&path)
         .unwrap()
@@ -554,11 +554,11 @@ fn un_fichier_sans_calcul_ecarte_rend_un_rapport_vide() {
         .is_clean());
 }
 
-/// Un NaN écrit à la main dans un point de ligne de base ne doit pas entrer
-/// dans le modèle (il serait perdu à la resauvegarde) : le calcul est écarté
-/// **et** signalé, comme n'importe quel enregistrement illisible.
+/// A NaN written by hand in a baseline point must not enter
+/// the model (it would be lost on re-save): the calculation is discarded
+/// **and** reported, like any unreadable record.
 #[test]
-fn un_nan_edite_a_la_main_dans_le_fichier_ecarte_et_signale_le_calcul() {
+fn a_nan_edited_by_hand_in_the_file_discards_and_reports_the_calculation() {
     use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp};
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
@@ -607,7 +607,7 @@ fn un_nan_edite_a_la_main_dans_le_fichier_ecarte_et_signale_le_calcul() {
     let (loaded, _, report) = stokesforge_persistence::load_with_report(&path).unwrap();
     assert!(
         loaded.tree().calculations().is_empty(),
-        "un NaN ne doit pas entrer dans le modèle"
+        "a NaN must not enter the model"
     );
     assert_eq!(
         report.discarded_calculations,
@@ -618,10 +618,10 @@ fn un_nan_edite_a_la_main_dans_le_fichier_ecarte_et_signale_le_calcul() {
     );
 }
 
-/// #309 : une trace de correction illisible n'est pas perdue sans bruit : le
-/// rapport la compte (`discarded_corrections`), le reste se charge.
+/// #309: an unreadable correction trace is not lost silently: the
+/// report counts it (`discarded_corrections`), the rest loads.
 #[test]
-fn une_trace_de_correction_illisible_est_comptee_par_le_rapport() {
+fn an_unreadable_correction_trace_is_counted_by_the_report() {
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
     let sheet = project.tree().children(book).unwrap()[0];
@@ -684,10 +684,10 @@ fn une_trace_de_correction_illisible_est_comptee_par_le_rapport() {
     assert!(!report.is_clean());
 }
 
-/// A1 (#316) : l'empreinte du contenu des entrées, écrite à l'enregistrement,
-/// est comparée à la lecture sans rien recalculer.
+/// A1 (#316): the fingerprint of the content of the inputs, written at save,
+/// is compared at read without recomputing anything.
 #[test]
-fn des_entrees_modifiees_dans_le_fichier_perimment_le_calcul_sans_le_recalculer() {
+fn inputs_modified_in_the_file_make_the_calculation_stale_without_recalculating_it() {
     let (project, id) = {
         let project = project_with_calculation();
         let id = *project.tree().calculations().keys().next().unwrap();
@@ -697,25 +697,28 @@ fn des_entrees_modifiees_dans_le_fichier_perimment_le_calcul_sans_le_recalculer(
     let path = dir.path().join("p.stf");
     save(&project, &path).unwrap();
 
-    // Intact : rien de périmé.
+    // Intact: nothing stale.
     let loaded = load(&path).unwrap();
     assert_eq!(loaded.tree().calculation(id).unwrap().stale, None);
 
-    // Y devient [10, 20, 31] hors StokesForge (même longueur, aucun décalage).
-    let octets = |v: &[f64]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
-    let (avant, apres) = (octets(&[10.0, 20.0, 30.0]), octets(&[10.0, 20.0, 31.0]));
+    // Y becomes [10, 20, 31] outside StokesForge (same length, no shift).
+    let float_bytes = |v: &[f64]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
+    let (before, after) = (
+        float_bytes(&[10.0, 20.0, 30.0]),
+        float_bytes(&[10.0, 20.0, 31.0]),
+    );
     let mut bytes = std::fs::read(&path).unwrap();
     let at = bytes
-        .windows(avant.len())
-        .position(|w| w == avant.as_slice())
-        .expect("Y est dans le fichier");
-    bytes[at..at + avant.len()].copy_from_slice(&apres);
+        .windows(before.len())
+        .position(|w| w == before.as_slice())
+        .expect("Y is in the file");
+    bytes[at..at + before.len()].copy_from_slice(&after);
     std::fs::write(&path, &bytes).unwrap();
 
     let loaded = load(&path).unwrap();
     let calc = loaded.tree().calculation(id).unwrap();
     assert_eq!(calc.stale, Some(Staleness::Manual));
-    // Les valeurs de sortie sont celles du fichier : rien n'a été recalculé.
+    // The output values are those of the file: nothing was recomputed.
     let out = calc.outputs[0].column.unwrap();
     let values = loaded
         .tree()

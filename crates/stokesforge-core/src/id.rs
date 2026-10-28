@@ -1,51 +1,50 @@
-//! Identité des nœuds de l'arbre de projet.
+//! Identity of the project tree nodes.
 //!
-//! `NodeId` lui-même vit dans `stokesforge-id`, un crate minimal sans dépendance :
-//! voir sa documentation de tête pour la raison (un cycle Cargo à casser en
-//! phase R3, entre ce crate et `stokesforge-plot`). Ce module ne fait que le
-//! réexporter — `stokesforge_core::NodeId` désigne exactement le même type
-//! qu'avant, aucun appelant n'a rien à changer — et porte l'allocateur, qui
-//! lui reste ici : il n'a besoin que de construire des `NodeId`, jamais de
-//! `stokesforge-plot`.
+//! `NodeId` itself lives in `stokesforge-id`, a minimal crate with no dependency:
+//! see its top-level documentation for the reason (a Cargo cycle to break in
+//! phase R3, between this crate and `stokesforge-plot`). This module only
+//! re-exports it — `stokesforge_core::NodeId` names exactly the same type
+//! as before, no caller has to change — and holds the allocator, which
+//! stays here: it only needs to build `NodeId`s, never `stokesforge-plot`.
 pub use stokesforge_id::NodeId;
 
 use crate::error::{CoreError, CoreResult};
 
-/// Allocateur d'identifiants : `next()` rend des valeurs strictement croissantes.
-/// N'est jamais remis en arrière — c'est le `Project` (tranche suivante) qui le
-/// possède, hors de l'arbre, pour qu'une annulation ne le fasse pas reculer.
+/// Identifier allocator: `next()` returns strictly increasing values.
+/// It is never moved back — the `Project` (next slice) owns it,
+/// outside the tree, so that an undo does not move it back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdAllocator {
     next: u64,
 }
 
 impl IdAllocator {
-    /// Premier identifiant rendu : `NodeId::from_raw(1)`. Zéro n'est jamais attribué.
+    /// First identifier returned: `NodeId::from_raw(1)`. Zero is never assigned.
     pub fn new() -> Self {
         Self { next: 1 }
     }
 
-    /// Reprend après un chargement. `hint` est le **prochain identifiant à attribuer**, tel que
-    /// [`IdAllocator::peek`] le rend et que la persistance l'écrit ; `highest_seen` est le plus grand
-    /// identifiant effectivement lu dans le fichier. Le compteur repart à
-    /// `max(hint, highest_seen + 1)` — la seconde moitié est une ceinture gratuite contre un fichier
-    /// dont le compteur persisté serait incohérent avec son contenu.
+    /// Resumes after a load. `hint` is the **next identifier to assign**, as
+    /// [`IdAllocator::peek`] returns it and as persistence writes it; `highest_seen` is the
+    /// largest identifier actually read from the file. The counter restarts at
+    /// `max(hint, highest_seen + 1)` — the second half is a free safeguard against a file
+    /// whose persisted counter is inconsistent with its content.
     pub fn resume(hint: u64, highest_seen: u64) -> Self {
         Self {
             next: hint.max(highest_seen.saturating_add(1)),
         }
     }
 
-    /// Attribue l'identifiant suivant. `Err(IdentifiersExhausted)` si `u64`
-    /// est épuisé, plutôt que de déborder silencieusement (B1,
-    /// `guide-de-correction-robustesse.md` §F2/F3/F4) : avant ce correctif,
-    /// `self.next += 1` sur `u64::MAX` débordait — panique en debug,
-    /// compteur qui **recule** en release, ouvrant la porte à deux nœuds
-    /// sous le même identifiant. `self.next` n'est incrémenté qu'après
-    /// vérification, donc un appel qui échoue laisse l'allocateur inchangé
-    /// (et tout appel suivant échoue pareillement, jamais de régression).
-    // `IdAllocator` n'est pas un itérateur (il n'y a pas de fin, pas d'`Iterator::next`
-    // à honorer) ; le nom `next` reste le plus clair pour cette API.
+    /// Assigns the next identifier. `Err(IdentifiersExhausted)` if `u64`
+    /// is exhausted, rather than overflowing silently (B1,
+    /// `guide-de-correction-robustesse.md` §F2/F3/F4): before this fix,
+    /// `self.next += 1` on `u64::MAX` overflowed — a panic in debug, a
+    /// counter that **goes backwards** in release, opening the door to two nodes
+    /// under the same identifier. `self.next` is incremented only after
+    /// the check, so a failing call leaves the allocator unchanged
+    /// (and every later call fails the same way, never a regression).
+    // `IdAllocator` is not an iterator (there is no end, no `Iterator::next`
+    // to honor); the name `next` stays the clearest for this API.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> CoreResult<NodeId> {
         let id = NodeId::from_raw(self.next);
@@ -56,7 +55,7 @@ impl IdAllocator {
         Ok(id)
     }
 
-    /// Valeur du prochain identifiant qui serait rendu (à persister).
+    /// Value of the next identifier that would be returned (to persist).
     pub fn peek(&self) -> u64 {
         self.next
     }
@@ -88,34 +87,34 @@ mod tests {
 
     #[test]
     fn resume_uses_the_hint_when_nothing_contradicts_it() {
-        // Le fichier dit « le prochain est 10 » ; son plus grand identifiant
-        // lu est 3, ce qui ne contredit rien : le compteur repart bien à 10.
+        // The file says "the next one is 10"; its largest identifier
+        // read is 3, which contradicts nothing: the counter does restart at 10.
         let mut alloc = IdAllocator::resume(10, 3);
         assert_eq!(alloc.next().unwrap().raw(), 10);
     }
 
     #[test]
     fn resume_falls_back_to_the_belt_when_the_hint_is_stale() {
-        // Le compteur persisté (3) est incohérent avec le contenu du
-        // fichier (plus grand identifiant lu : 10) : il rendrait un
-        // identifiant déjà attribué. La ceinture le rattrape au-dessus.
+        // The persisted counter (3) is inconsistent with the content of the
+        // file (largest identifier read: 10): it would return an
+        // identifier already assigned. The safeguard catches it above.
         let mut alloc = IdAllocator::resume(3, 10);
         assert_eq!(alloc.next().unwrap().raw(), 11);
     }
 
     #[test]
     fn resume_of_an_empty_project_starts_at_one() {
-        // Projet vide : aucun identifiant lu, donc `highest_seen == 0`
-        // (zéro n'est jamais attribué).
+        // Empty project: no identifier read, so `highest_seen == 0`
+        // (zero is never assigned).
         let mut alloc = IdAllocator::resume(1, 0);
         assert_eq!(alloc.next().unwrap().raw(), 1);
     }
 
     #[test]
     fn resume_does_not_panic_at_the_u64_boundary() {
-        // `highest_seen.saturating_add(1)` doit saturer plutôt que déborder ;
-        // un `highest_seen` de `u64::MAX` est inatteignable en pratique, mais
-        // le crate s'interdit toute panique.
+        // `highest_seen.saturating_add(1)` must saturate rather than overflow;
+        // a `highest_seen` of `u64::MAX` is unreachable in practice, but
+        // the crate forbids itself any panic.
         let alloc = IdAllocator::resume(u64::MAX, u64::MAX);
         assert_eq!(alloc.peek(), u64::MAX);
     }
@@ -127,8 +126,8 @@ mod tests {
         assert_eq!(alloc.peek(), 1);
     }
 
-    // `display_formats_as_expected` et `from_raw_and_raw_are_inverse` ont
-    // déménagé dans `stokesforge-id` avec le type qu'elles testent (phase R3).
+    // `display_formats_as_expected` and `from_raw_and_raw_are_inverse` moved
+    // to `stokesforge-id` with the type they test (phase R3).
 
     #[test]
     fn default_matches_new() {

@@ -1,29 +1,29 @@
-//! Composition d'un graphe à partir des colonnes d'un classeur (#257) : les
-//! règles qui lisent le [`Tree`] et fabriquent des [`SeriesSpec`] ou lisent un
-//! [`PlotSpec`], sans interface ni phrase.
+//! Composition of a graph from the columns of a workbook (#257): the
+//! rules that read the [`Tree`] and build [`SeriesSpec`]s or read a
+//! [`PlotSpec`], with no interface and no sentence.
 //!
-//! Elles vivaient dans `stokesforge-app/src/state.rs`, d'où `pyst` et le CLI
-//! n'y voyaient rien et en refaisaient une partie à la main (la palette, la
-//! recherche de l'abscisse). Elles sont ici pour que **l'interface, `pyst` et
-//! les analyses appliquent la même règle** :
+//! They used to live in `stokesforge-app/src/state.rs`, where `pyst` and the CLI
+//! could not see them and redid part of them by hand (the palette, the
+//! search for the abscissa). They are here so that **the interface, `pyst` and
+//! the analyses apply the same rule**:
 //!
-//! - **appariement**, façon OriginLab : chaque colonne Y est appariée à la
-//!   colonne X la plus proche à sa **gauche** dans la feuille (rôle
-//!   [`ColumnRole::X`]), en incluant les colonnes X non sélectionnées ; un Yn
-//!   (Y2, Y3, Y4) suit la même règle avec les colonnes Xn ([`x_for`],
-//!   [`series_from_columns`]). Sans X à gauche, l'abscisse reste implicite
-//!   (numéro de ligne) ;
-//! - **palette** : la couleur d'une série est celle de son rang
-//!   ([`SeriesSpec::from_palette`]), jamais une écriture à la main ;
-//! - **calques** : le calque ordinaire que recouvre un calque superposé
-//!   ([`overlay_base`]) et le calque de rôle Xn/Yn d'un calque de base
-//!   ([`role_layer_of`]) ;
-//! - **lecture du spec** : [`current_plot_spec`], [`panel_plot_type`],
+//! - **pairing**, OriginLab style: each Y column is paired with the
+//!   nearest X column to its **left** in the sheet (role
+//!   [`ColumnRole::X`]), including unselected X columns; a Yn
+//!   (Y2, Y3, Y4) follows the same rule with the Xn columns ([`x_for`],
+//!   [`series_from_columns`]). With no X to the left, the abscissa stays implicit
+//!   (row number);
+//! - **palette**: the color of a series is that of its rank
+//!   ([`SeriesSpec::from_palette`]), never written by hand;
+//! - **layers**: the ordinary layer that an overlay layer covers
+//!   ([`overlay_base`]) and the Xn/Yn role layer of a base layer
+//!   ([`role_layer_of`]);
+//! - **reading the spec**: [`current_plot_spec`], [`panel_plot_type`],
 //!   [`spec_has_x`].
 //!
-//! Ce module ne mute rien : il construit des valeurs que l'appelant envoie par
-//! une commande annulable (invariant 1). Il ne produit aucun texte :
-//! l'interface passe le nom traduit des séries « ligne » en paramètre
+//! This module mutates nothing: it builds values that the caller sends through
+//! an undoable command (invariant 1). It produces no text:
+//! the interface passes the translated name of the "row" series as a parameter
 //! ([`row_series`]).
 
 use stokesforge_id::NodeId;
@@ -33,36 +33,36 @@ use crate::column::ColumnRole;
 use crate::node::{Node, NodeKind};
 use crate::tree::Tree;
 
-/// Les séries à tracer pour une sélection de colonnes, réparties par calque
-/// (#167, #168) : le calque principal et les calques superposés des rôles
-/// X2/Y2, X3/Y3 et X4/Y4.
+/// The series to plot for a selection of columns, split by layer
+/// (#167, #168): the main layer and the overlay layers of the roles
+/// X2/Y2, X3/Y3 and X4/Y4.
 #[derive(Debug, Default)]
 pub struct PlannedSeries {
-    /// Séries de rôle Y, sur les axes principaux.
+    /// Y-role series, on the main axes.
     pub primary: Vec<SeriesSpec>,
-    /// Séries de rôle Y2, Y3 et Y4 (dans cet ordre) : chacune sur le calque
-    /// superposé de son numéro (axe X en haut, axe Y à droite).
+    /// Y2, Y3 and Y4 role series (in that order): each on the overlay
+    /// layer of its number (X axis on top, Y axis on the right).
     pub overlays: [Vec<SeriesSpec>; OVERLAY_ROLES],
 }
 
-/// Nombre de calques superposés qu'alimentent les rôles Xn/Yn (X2…X4).
+/// Number of overlay layers fed by the Xn/Yn roles (X2…X4).
 pub const OVERLAY_ROLES: usize =
     (OverlaySpec::LAST_ROLE_LAYER - OverlaySpec::FIRST_ROLE_LAYER + 1) as usize;
 
 impl PlannedSeries {
-    /// Aucune série, ni principale ni superposée.
+    /// No series, neither main nor overlay.
     pub fn is_empty(&self) -> bool {
         self.primary.is_empty() && self.overlays.iter().all(Vec::is_empty)
     }
 
-    /// Les séries de tous les calques superposés, du calque 2 au calque 4.
+    /// The series of all overlay layers, from layer 2 to layer 4.
     pub fn overlay_series(&self) -> impl Iterator<Item = &SeriesSpec> {
         self.overlays.iter().flatten()
     }
 }
 
-/// Les colonnes de `sheet`, dans l'ordre de la feuille (vide si `sheet` n'est
-/// pas un nœud de l'arbre).
+/// The columns of `sheet`, in sheet order (empty if `sheet` is
+/// not a node of the tree).
 fn sheet_columns(tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
     tree.node(sheet)
         .map(Node::children)
@@ -82,8 +82,8 @@ fn role_of(tree: &Tree, id: NodeId) -> Option<ColumnRole> {
         .map(|column| column.meta().role)
 }
 
-/// La colonne de rôle `x_role` la plus proche **à gauche** de la colonne de
-/// rang `position` dans `columns`.
+/// The column of role `x_role` nearest **to the left** of the column at
+/// rank `position` in `columns`.
 fn nearest_left(
     tree: &Tree,
     columns: &[NodeId],
@@ -97,11 +97,11 @@ fn nearest_left(
         .find(|id| role_of(tree, *id) == Some(x_role))
 }
 
-/// La colonne X appariée à la colonne `y` : le X (Xn si `y` est de rôle Yn) le
-/// plus proche à sa gauche dans sa feuille, `None` sans X à gauche ou si `y`
-/// n'est pas une colonne d'une feuille. C'est la règle de
-/// [`series_from_columns`], pour qui ne veut que l'abscisse (annexe d'une
-/// analyse, `pyst.plot(y)` sans `x=`).
+/// The X column paired with column `y`: the X (Xn if `y` has role Yn) nearest
+/// to its left in its sheet, `None` with no X to the left or if `y`
+/// is not a column of a sheet. It is the rule of
+/// [`series_from_columns`], for whoever wants only the abscissa (attachment of an
+/// analysis, `pyst.plot(y)` without `x=`).
 pub fn x_for(tree: &Tree, y: NodeId) -> Option<NodeId> {
     let sheet = tree.node(y).and_then(Node::parent)?;
     let columns = sheet_columns(tree, sheet);
@@ -110,17 +110,17 @@ pub fn x_for(tree: &Tree, y: NodeId) -> Option<NodeId> {
     nearest_left(tree, &columns, position, x_role)
 }
 
-/// Construit les séries de la sélection `columns` de `sheet` : les colonnes de
-/// rôle Y (ou Y2, Y3, Y4) présentes dans `columns`, dans l'ordre où elles apparaissent
-/// dans la feuille, chacune appariée à son X ([`x_for`]) — y compris un X non
-/// sélectionné. Les Yn vont dans [`PlannedSeries::overlays`].
+/// Builds the series of the selection `columns` of `sheet`: the columns of
+/// role Y (or Y2, Y3, Y4) present in `columns`, in the order they appear
+/// in the sheet, each paired with its X ([`x_for`]) — including an unselected
+/// X. The Yn go into [`PlannedSeries::overlays`].
 ///
-/// Chaque série prend la couleur de palette de son rang, `start_index` inclus
-/// (`overlay_starts` pour les calques superposés) : décalage utile à l'ajout
-/// de séries à un graphe, qui prolonge la palette après les séries déjà
-/// présentes plutôt que de la reprendre à zéro. Rend des listes vides si
-/// `columns` ne contient aucun Y ni Y2 — c'est ce que les appelants lisent
-/// pour refuser un graphe ou un ajout vide.
+/// Each series takes the palette color of its rank, `start_index` included
+/// (`overlay_starts` for the overlay layers): an offset useful when adding
+/// series to a graph, which continues the palette after the series already
+/// present instead of restarting from zero. Returns empty lists if
+/// `columns` holds no Y or Y2 — this is what callers read
+/// to refuse an empty graph or an empty addition.
 pub fn series_from_columns(
     tree: &Tree,
     sheet: NodeId,
@@ -157,10 +157,10 @@ pub fn series_from_columns(
     planned
 }
 
-/// Les séries « ligne » (#166) de `rows`, ancrées sur `anchor`, avec les
-/// couleurs de palette à partir du rang `start`. `name` donne le nom de la
-/// série d'une ligne (0 = la première) : une phrase d'interface, que ce crate
-/// ne sait pas écrire.
+/// The "row" series (#166) of `rows`, anchored on `anchor`, with the
+/// palette colors from rank `start`. `name` gives the name of the
+/// series of a row (0 = the first): an interface sentence, which this crate
+/// cannot write.
 pub fn row_series(
     anchor: NodeId,
     rows: &[usize],
@@ -180,8 +180,8 @@ pub fn row_series(
         .collect()
 }
 
-/// Les colonnes de `sheet` qui portent une valeur x' finie, dans l'ordre de la
-/// feuille (#164, #166).
+/// The columns of `sheet` that carry a finite x' value, in sheet
+/// order (#164, #166).
 pub fn x_prime_columns(tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
     sheet_columns(tree, sheet)
         .into_iter()
@@ -193,9 +193,9 @@ pub fn x_prime_columns(tree: &Tree, sheet: NodeId) -> Vec<NodeId> {
         .collect()
 }
 
-/// Le graphe a-t-il déjà un X : une série dont l'abscisse vient d'une colonne
-/// de rôle X, ou une série « ligne » (abscisse = x') ? Décide si le dépôt de
-/// lignes pose la question de l'axe (#166).
+/// Does the graph already have an X: a series whose abscissa comes from a column
+/// of role X, or a "row" series (abscissa = x')? Decides whether dropping
+/// rows raises the axis question (#166).
 pub fn spec_has_x(spec: &PlotSpec) -> bool {
     spec.panels
         .iter()
@@ -203,8 +203,8 @@ pub fn spec_has_x(spec: &PlotSpec) -> bool {
         .any(|series| series.x.is_some() || series.row.is_some())
 }
 
-/// Le calque ordinaire que `panel` recouvre (lui-même s'il est ordinaire) :
-/// le dernier calque ordinaire qui le précède dans sa case.
+/// The ordinary layer that `panel` covers (itself if it is ordinary):
+/// the last ordinary layer that precedes it in its cell.
 pub fn overlay_base(spec: &PlotSpec, panel: usize) -> usize {
     let Some(target) = spec.panels.get(panel) else {
         return panel;
@@ -223,9 +223,9 @@ pub fn overlay_base(spec: &PlotSpec, panel: usize) -> usize {
         .unwrap_or(panel)
 }
 
-/// L'indice du calque de rôle de numéro `layer` (2 à 4 : axe X en haut, axe Y
-/// à droite, [`OverlaySpec::role_layer`]) posé sur le calque ordinaire `base`,
-/// s'il existe.
+/// The index of the role layer numbered `layer` (2 to 4: X axis on top, Y axis
+/// on the right, [`OverlaySpec::role_layer`]) placed on the ordinary layer `base`,
+/// if it exists.
 pub fn role_layer_of(spec: &PlotSpec, base: usize, layer: u8) -> Option<usize> {
     let cell = spec
         .panels
@@ -239,11 +239,11 @@ pub fn role_layer_of(spec: &PlotSpec, base: usize, layer: u8) -> Option<usize> {
     })
 }
 
-/// Nombre maximal de calques superposés d'une case que « New Layer » laisse
-/// poser : autant que de rôles Xn/Yn (#168), les calques « ligne » compris.
+/// Maximum number of overlay layers of a cell that "New Layer" allows
+/// adding: as many as there are Xn/Yn roles (#168), "row" layers included.
 pub const MAX_OVERLAYS: usize = OVERLAY_ROLES;
 
-/// Les calques superposés de la case du calque `panel`.
+/// The overlay layers of the cell of layer `panel`.
 fn overlays_in_cell(spec: &PlotSpec, panel: usize) -> impl Iterator<Item = &PanelSpec> {
     let cell = spec
         .panels
@@ -254,15 +254,15 @@ fn overlays_in_cell(spec: &PlotSpec, panel: usize) -> impl Iterator<Item = &Pane
     })
 }
 
-/// La case du calque `panel` porte-t-elle déjà [`MAX_OVERLAYS`] calques
-/// superposés ? Alors « New Layer » est grisé.
+/// Does the cell of layer `panel` already hold [`MAX_OVERLAYS`] overlay
+/// layers? Then "New Layer" is greyed out.
 pub fn overlays_full(spec: &PlotSpec, panel: usize) -> bool {
     overlays_in_cell(spec, panel).count() >= MAX_OVERLAYS
 }
 
-/// Le plus petit numéro de calque de rôle (2 à 4) qu'aucun calque de la case
-/// du calque `panel` ne porte : celui d'un nouveau calque à deux axes (#168).
-/// `None` si les trois sont pris.
+/// The smallest role layer number (2 to 4) that no layer of the cell
+/// of layer `panel` holds: that of a new two-axis layer (#168).
+/// `None` if all three are taken.
 pub fn free_role_layer(spec: &PlotSpec, panel: usize) -> Option<u8> {
     (OverlaySpec::FIRST_ROLE_LAYER..=OverlaySpec::LAST_ROLE_LAYER).find(|layer| {
         !overlays_in_cell(spec, panel).any(|candidate| {
@@ -273,8 +273,8 @@ pub fn free_role_layer(spec: &PlotSpec, panel: usize) -> Option<u8> {
     })
 }
 
-/// Le [`PlotSpec`] courant de `graph`, ou `None` si ce n'est pas un graphe de
-/// ce projet.
+/// The current [`PlotSpec`] of `graph`, or `None` if it is not a graph of
+/// this project.
 pub fn current_plot_spec(tree: &Tree, graph: NodeId) -> Option<PlotSpec> {
     match tree.node(graph)?.kind() {
         NodeKind::Graph { spec, .. } => Some(spec.clone()),
@@ -282,9 +282,9 @@ pub fn current_plot_spec(tree: &Tree, graph: NodeId) -> Option<PlotSpec> {
     }
 }
 
-/// Type de tracé des séries ajoutées à `panel` quand le geste n'en désigne
-/// pas : celui de sa **dernière** série (un calque qui en mélange plusieurs
-/// donne le dernier), [`PlotType::Line`] pour un calque vide.
+/// Plot type of the series added to `panel` when the gesture names
+/// none: that of its **last** series (a layer that mixes several
+/// gives the last), [`PlotType::Line`] for an empty layer.
 pub fn panel_plot_type(panel: &PanelSpec) -> PlotType {
     panel
         .series
@@ -298,8 +298,8 @@ mod tests {
     use crate::{Column, ColumnMeta, Project};
     use stokesforge_plot::{palette_color, Panels, DEFAULT_PALETTE};
 
-    /// Un classeur dont les colonnes, dans l'ordre, portent les rôles donnés
-    /// (nommées `c0`, `c1`…).
+    /// A workbook whose columns, in order, carry the given roles
+    /// (named `c0`, `c1`…).
     fn sheet_with(roles: &[ColumnRole]) -> (Project, NodeId, Vec<NodeId>) {
         let mut project = Project::new("P").unwrap();
         let book = project.add_workbook(project.root(), Some("Book")).unwrap();
@@ -334,11 +334,11 @@ mod tests {
     use ColumnRole::{None as NoRole, X, X2, X3, X4, Y, Y2, Y3, Y4};
 
     #[test]
-    fn chaque_y_prend_le_x_le_plus_proche_a_sa_gauche_meme_non_selectionne() {
-        // X0 Y1 X2 Y3 Y4 : Y1 -> X0, Y3 et Y4 -> X2 (le plus proche à gauche).
+    fn each_y_takes_the_nearest_x_to_its_left_even_if_unselected() {
+        // X0 Y1 X2 Y3 Y4: Y1 -> X0, Y3 and Y4 -> X2 (the nearest to the left).
         let (project, sheet, c) = sheet_with(&[X, Y, X, Y, Y]);
         let tree = project.tree();
-        // Seuls les Y sont sélectionnés : les X ne le sont pas, ils servent quand même.
+        // Only the Y are selected: the X are not, yet they still serve.
         let planned = series_from_columns(
             tree,
             sheet,
@@ -354,13 +354,13 @@ mod tests {
             [(Some(c[0]), c[1]), (Some(c[2]), c[3]), (Some(c[2]), c[4])]
         );
         assert!(planned.overlays.iter().all(Vec::is_empty));
-        // Le témoin : un appariement « à droite » donnerait un autre X.
+        // The witness: a pairing "to the right" would give another X.
         assert_ne!(planned.primary[0].x, Some(c[2]));
     }
 
     #[test]
-    fn un_y2_s_apparie_a_x2_et_va_au_second_calque() {
-        // X0 Y1 X2_2 Y2_3 : Y2 ignore X0 et prend X2.
+    fn a_y2_pairs_with_x2_and_goes_to_the_second_layer() {
+        // X0 Y1 X2_2 Y2_3: Y2 ignores X0 and takes X2.
         let (project, sheet, c) = sheet_with(&[X, Y, X2, Y2]);
         let planned = series_from_columns(
             project.tree(),
@@ -382,10 +382,10 @@ mod tests {
             .all(|s| s.plot_type == PlotType::Scatter));
     }
 
-    /// #168 : Y3 et Y4 s'apparient à X3 et X4 (jamais à X ni à X2) et vont à
-    /// leur propre calque ; un Y3 sans Y2 ne remplit pas le calque 2.
+    /// #168: Y3 and Y4 pair with X3 and X4 (never with X or X2) and go to
+    /// their own layer; a Y3 without Y2 does not fill layer 2.
     #[test]
-    fn y3_et_y4_s_apparient_a_leur_x_et_vont_a_leur_calque() {
+    fn y3_and_y4_pair_with_their_x_and_go_to_their_layer() {
         let (project, sheet, c) = sheet_with(&[X, Y, X2, Y2, X3, Y3, X4, Y4]);
         let planned = series_from_columns(
             project.tree(),
@@ -395,12 +395,12 @@ mod tests {
             0,
             [0; OVERLAY_ROLES],
         );
-        let paires = |i: usize| -> Vec<(Option<NodeId>, NodeId)> {
+        let pairs = |i: usize| -> Vec<(Option<NodeId>, NodeId)> {
             planned.overlays[i].iter().map(|s| (s.x, s.y)).collect()
         };
-        assert_eq!(paires(0), [(Some(c[2]), c[3])]);
-        assert_eq!(paires(1), [(Some(c[4]), c[5])]);
-        assert_eq!(paires(2), [(Some(c[6]), c[7])]);
+        assert_eq!(pairs(0), [(Some(c[2]), c[3])]);
+        assert_eq!(pairs(1), [(Some(c[4]), c[5])]);
+        assert_eq!(pairs(2), [(Some(c[6]), c[7])]);
         assert_eq!(x_for(project.tree(), c[7]), Some(c[6]));
 
         let (project, sheet, c) = sheet_with(&[X, Y, X3, Y3]);
@@ -412,20 +412,20 @@ mod tests {
             0,
             [0; OVERLAY_ROLES],
         );
-        assert!(planned.overlays[0].is_empty(), "pas de Y2 : calque 2 vide");
+        assert!(planned.overlays[0].is_empty(), "no Y2: layer 2 empty");
         assert_eq!(planned.overlays[1].len(), 1);
         assert_eq!(planned.overlay_series().count(), 1);
     }
 
     #[test]
-    fn sans_x_a_gauche_l_abscisse_reste_implicite_et_sans_y_rien_n_est_planifie() {
-        // Y0 X1 Y2 : Y0 n'a pas de X à sa gauche, Y2 a X1.
+    fn without_x_to_the_left_the_abscissa_stays_implicit_and_without_y_nothing_is_planned() {
+        // Y0 X1 Y2: Y0 has no X to its left, Y2 has X1.
         let (project, sheet, c) = sheet_with(&[Y, X, Y]);
         let tree = project.tree();
         let planned = series_from_columns(tree, sheet, &c, &PlotType::Line, 0, [0; OVERLAY_ROLES]);
         assert_eq!(planned.primary[0].x, None);
         assert_eq!(planned.primary[1].x, Some(c[1]));
-        // Un Y2 sans X2 à gauche reste implicite aussi, même avec un X.
+        // A Y2 without X2 to the left stays implicit too, even with an X.
         let (project, sheet, c) = sheet_with(&[X, Y2]);
         let planned = series_from_columns(
             project.tree(),
@@ -436,7 +436,7 @@ mod tests {
             [0; OVERLAY_ROLES],
         );
         assert_eq!(planned.overlays[0][0].x, None);
-        // Aucune colonne Y ni Y2 sélectionnée : vide.
+        // No Y or Y2 column selected: empty.
         let (project, sheet, c) = sheet_with(&[X, NoRole]);
         let planned = series_from_columns(
             project.tree(),
@@ -450,19 +450,19 @@ mod tests {
     }
 
     #[test]
-    fn x_for_suit_la_meme_regle_que_series_from_columns() {
+    fn x_for_follows_the_same_rule_as_series_from_columns() {
         let (project, _sheet, c) = sheet_with(&[Y, X, Y, X2, Y2, Y]);
         let tree = project.tree();
-        assert_eq!(x_for(tree, c[0]), None, "pas de X à gauche");
+        assert_eq!(x_for(tree, c[0]), None, "no X to the left");
         assert_eq!(x_for(tree, c[2]), Some(c[1]));
-        assert_eq!(x_for(tree, c[4]), Some(c[3]), "un Y2 prend X2");
-        assert_eq!(x_for(tree, c[5]), Some(c[1]), "un Y ignore X2");
-        // Pas une colonne : rien.
+        assert_eq!(x_for(tree, c[4]), Some(c[3]), "a Y2 takes X2");
+        assert_eq!(x_for(tree, c[5]), Some(c[1]), "a Y ignores X2");
+        // Not a column: nothing.
         assert_eq!(x_for(tree, tree.root()), None);
     }
 
     #[test]
-    fn la_palette_suit_le_rang_avec_le_decalage_de_chaque_calque() {
+    fn the_palette_follows_the_rank_with_the_offset_of_each_layer() {
         let (project, sheet, c) = sheet_with(&[X, Y, Y, X2, Y2]);
         let planned = series_from_columns(
             project.tree(),
@@ -479,13 +479,13 @@ mod tests {
             .collect();
         assert_eq!(colors, [palette_color(3), palette_color(4)]);
         assert_eq!(planned.overlays[0][0].line.color, palette_color(7));
-        // Trait et marqueurs ensemble.
+        // Line and markers together.
         assert!(planned
             .primary
             .iter()
             .chain(&planned.overlays[0])
             .all(|s| s.symbol.color == s.line.color));
-        // Le rang boucle sur la palette.
+        // The rank wraps around the palette.
         let (project, sheet, c) = sheet_with(&[Y]);
         let planned = series_from_columns(
             project.tree(),
@@ -499,16 +499,16 @@ mod tests {
     }
 
     #[test]
-    fn les_series_ligne_prennent_la_palette_du_rang_et_le_nom_donne() {
+    fn row_series_take_the_palette_of_the_rank_and_the_given_name() {
         let (_project, _sheet, c) = sheet_with(&[Y]);
         let series = row_series(c[0], &[4, 9], 2, &PlotType::Scatter, |row| {
-            format!("ligne {}", row + 1)
+            format!("row {}", row + 1)
         });
         assert_eq!(series.len(), 2);
         assert_eq!((series[0].row, series[1].row), (Some(4), Some(9)));
         assert_eq!(
             (series[0].name.as_str(), series[1].name.as_str()),
-            ("ligne 5", "ligne 10")
+            ("row 5", "row 10")
         );
         assert_eq!(series[0].line.color, palette_color(2));
         assert_eq!(series[1].line.color, palette_color(3));
@@ -518,7 +518,7 @@ mod tests {
     }
 
     #[test]
-    fn les_colonnes_x_prime_sont_celles_dont_la_valeur_est_finie() {
+    fn x_prime_columns_are_those_whose_value_is_finite() {
         let (mut project, sheet, c) = sheet_with(&[Y, Y, Y, Y]);
         for (id, x_prime) in [
             (c[0], None),
@@ -539,46 +539,46 @@ mod tests {
         assert_eq!(x_prime_columns(project.tree(), sheet), [c[1], c[3]]);
     }
 
-    /// Un spec à trois calques : ordinaire, X2/Y2 superposé, ordinaire en case (0, 1).
-    fn spec_a_calques() -> PlotSpec {
+    /// A spec with three layers: ordinary, overlaid X2/Y2, ordinary in cell (0, 1).
+    fn spec_with_layers() -> PlotSpec {
         let base = PanelSpec::default();
         let second = PanelSpec::overlay_on(&base, OverlaySpec::SECOND_AXES);
         let rows = PanelSpec::overlay_on(&base, OverlaySpec::TOP_X);
-        let ailleurs = PanelSpec::at(0, 1);
+        let elsewhere = PanelSpec::at(0, 1);
         PlotSpec {
-            panels: Panels::new(vec![base, rows, second, ailleurs]),
+            panels: Panels::new(vec![base, rows, second, elsewhere]),
             ..PlotSpec::default()
         }
     }
 
     #[test]
-    fn un_calque_superpose_recouvre_le_dernier_calque_ordinaire_de_sa_case() {
-        let spec = spec_a_calques();
-        assert_eq!(overlay_base(&spec, 0), 0, "ordinaire : lui-même");
+    fn an_overlay_layer_covers_the_last_ordinary_layer_of_its_cell() {
+        let spec = spec_with_layers();
+        assert_eq!(overlay_base(&spec, 0), 0, "ordinary: itself");
         assert_eq!(overlay_base(&spec, 1), 0);
         assert_eq!(overlay_base(&spec, 2), 0);
         assert_eq!(overlay_base(&spec, 3), 3);
-        assert_eq!(overlay_base(&spec, 9), 9, "inexistant : inchangé");
+        assert_eq!(overlay_base(&spec, 9), 9, "nonexistent: unchanged");
     }
 
     #[test]
-    fn le_second_calque_est_celui_des_deux_axes_pas_celui_des_lignes() {
-        let spec = spec_a_calques();
-        // Le calque 1 (X en haut seul) n'est pas le second calque : c'est le 2.
+    fn the_second_layer_is_the_two_axes_one_not_the_rows_one() {
+        let spec = spec_with_layers();
+        // Layer 1 (X on top only) is not the second layer: layer 2 is.
         assert_eq!(role_layer_of(&spec, 0, 2), Some(2));
-        assert_eq!(role_layer_of(&spec, 0, 3), None, "pas de calque 3");
-        assert_eq!(role_layer_of(&spec, 3, 2), None, "autre case");
+        assert_eq!(role_layer_of(&spec, 0, 3), None, "no layer 3");
+        assert_eq!(role_layer_of(&spec, 3, 2), None, "other cell");
         assert_eq!(role_layer_of(&spec, 9, 2), None);
     }
 
-    /// #168 : un calque de rôle se retrouve par son **numéro**, pas par sa
-    /// position : le calque 3 est celui du Y3 même sans calque 2 avant lui.
+    /// #168: a role layer is found by its **number**, not by its
+    /// position: layer 3 is that of Y3 even without a layer 2 before it.
     #[test]
-    fn un_calque_de_role_se_retrouve_par_son_numero() {
+    fn a_role_layer_is_found_by_its_number() {
         let base = PanelSpec::default();
-        let troisieme = PanelSpec::overlay_on(&base, OverlaySpec::role_layer(3));
+        let third = PanelSpec::overlay_on(&base, OverlaySpec::role_layer(3));
         let spec = PlotSpec {
-            panels: Panels::new(vec![base, troisieme]),
+            panels: Panels::new(vec![base, third]),
             ..PlotSpec::default()
         };
         assert_eq!(role_layer_of(&spec, 0, 3), Some(1));
@@ -586,7 +586,7 @@ mod tests {
     }
 
     #[test]
-    fn le_graphe_a_un_x_par_une_colonne_x_ou_une_serie_ligne() {
+    fn the_graph_has_an_x_through_an_x_column_or_a_row_series() {
         let (_project, _sheet, c) = sheet_with(&[X, Y]);
         let mut spec = PlotSpec::default();
         assert!(!spec_has_x(&spec));
@@ -595,7 +595,7 @@ mod tests {
             .unwrap()
             .series
             .push(SeriesSpec::new(c[1]));
-        assert!(!spec_has_x(&spec), "abscisse implicite : pas de X");
+        assert!(!spec_has_x(&spec), "implicit abscissa: no X");
         spec.panels
             .get_mut(0)
             .unwrap()
@@ -610,10 +610,10 @@ mod tests {
     }
 
     #[test]
-    fn le_type_de_tracage_d_un_calque_est_celui_de_sa_derniere_serie() {
+    fn the_plot_type_of_a_layer_is_that_of_its_last_series() {
         let (_project, _sheet, c) = sheet_with(&[Y]);
         let mut panel = PanelSpec::default();
-        assert_eq!(panel_plot_type(&panel), PlotType::Line, "calque vide");
+        assert_eq!(panel_plot_type(&panel), PlotType::Line, "empty layer");
         let mut a = SeriesSpec::new(c[0]);
         a.plot_type = PlotType::Scatter;
         let b = SeriesSpec::new(c[0]);
@@ -624,15 +624,15 @@ mod tests {
     }
 
     #[test]
-    fn le_spec_courant_est_celui_du_graphe_et_rien_d_autre() {
+    fn the_current_spec_is_the_graphs_and_nothing_else() {
         let (mut project, sheet, _c) = sheet_with(&[Y]);
-        let spec = spec_a_calques();
+        let spec = spec_with_layers();
         let graph = project
             .add_graph(project.root(), Some("G"), spec.clone())
             .unwrap();
         let tree = project.tree();
         assert_eq!(current_plot_spec(tree, graph), Some(spec));
-        assert_eq!(current_plot_spec(tree, sheet), None, "une feuille");
+        assert_eq!(current_plot_spec(tree, sheet), None, "a sheet");
         assert_eq!(current_plot_spec(tree, NodeId::from_raw(987_654)), None);
     }
 }

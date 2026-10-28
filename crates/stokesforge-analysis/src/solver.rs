@@ -1,29 +1,29 @@
-//! Moteur de moindres carrés non linéaires (Levenberg-Marquardt) à **cases de
-//! paramètres** (« slots »), commun à l'ajustement, à l'ajustement global, à la
-//! décomposition en pics et à la reconvolution (#188, #189, #190).
+//! Non-linear least-squares engine (Levenberg-Marquardt) with **parameter
+//! slots**, shared by the fit, the global fit, the
+//! peak decomposition and the reconvolution (#188, #189, #190).
 //!
-//! Un problème est une liste de **termes** (une courbe mesurée et une fonction
-//! qui la modélise) qui lisent un même vecteur de cases. Une case partagée par
-//! plusieurs termes, c'est un paramètre global (M13 b) ; une case lue par deux
-//! pics, c'est une largeur liée (#189). Le moteur ne connaît ni modèle ni pic.
+//! A problem is a list of **terms** (a measured curve and a function
+//! that models it) that read the same vector of slots. A slot shared by
+//! several terms is a global parameter (M13 b); a slot read by two
+//! peaks is a linked width (#189). The engine knows neither model nor peak.
 //!
-//! Dérivées par différences centrées (pas relatif au paramètre, **raffiné** tant
-//! que les dérivées à `h` et `h/4` divergent au-delà de l'arrondi, #294) : les
-//! modèles libres n'ont pas de dérivée analytique, et un seul chemin de calcul
-//! vaut mieux que deux (modèle intégré, modèle libre). Les bornes sont tenues
-//! par projection du pas.
+//! Derivatives by central differences (step relative to the parameter, **refined** as long
+//! as the derivatives at `h` and `h/4` diverge beyond rounding, #294): free
+//! models have no analytic derivative, and a single calculation path
+//! is better than two (built-in model, free model). Bounds are enforced
+//! by projecting the step.
 //!
-//! X décalé (#282, #293, #294) : trois garde-fous tiennent un X de grande
-//! valeur absolue. Le pas de Levenberg-Marquardt passe par les moindres carrés
-//! augmentés ; un pas minuscule ne conclut à la convergence qu'après un pas
-//! presque non amorti (l'amortissement de Marquardt bride la direction faible
-//! des colonnes quasi colinéaires) ; une colonne n'est indéterminée que sous
-//! `DETERMINED_MIN_SHARE` de sa norme.
+//! Shifted X (#282, #293, #294): three guards hold an X of large
+//! absolute value. The Levenberg-Marquardt step goes through augmented
+//! least squares; a tiny step concludes convergence only after an
+//! almost undamped step (Marquardt damping restrains the weak direction
+//! of nearly collinear columns); a column is undetermined only below
+//! `DETERMINED_MIN_SHARE` of its norm.
 
 use crate::error::AnalysisError;
 use crate::linalg::{invert, least_squares, Matrix};
 
-/// Une case de paramètre.
+/// A parameter slot.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Slot {
     pub name: String,
@@ -45,25 +45,25 @@ impl Slot {
     }
 }
 
-/// Fonction qui remplit un tampon avec le modèle évalué aux X d'un terme.
+/// Function that fills a buffer with the model evaluated at the X of a term.
 pub type TermEval<'a> = Box<dyn Fn(&[f64], &mut [f64]) + 'a>;
 
-/// Une courbe mesurée et le modèle qui la reproduit.
+/// A measured curve and the model that reproduces it.
 pub struct Term<'a> {
     pub x: &'a [f64],
     pub y: &'a [f64],
-    /// Écarts-types des Y (pondération `1/σ`). `None` : poids égaux.
+    /// Standard deviations of Y (weighting `1/σ`). `None`: equal weights.
     pub sigma: Option<&'a [f64]>,
-    /// Remplit `out` (longueur de `x`) avec le modèle évalué aux X, d'après les
-    /// valeurs de toutes les cases.
+    /// Fills `out` (length of `x`) with the model evaluated at the X, from the
+    /// values of all the slots.
     pub eval: TermEval<'a>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Options {
     pub max_iterations: usize,
-    /// Mise à l'échelle des erreurs par le χ² réduit (comme `absolute_sigma =
-    /// False` de scipy). Sans pondération, c'est toujours le cas.
+    /// Scaling of the errors by the reduced χ² (like `absolute_sigma =
+    /// False` of scipy). Without weighting, this is always the case.
     pub scale_errors: bool,
 }
 
@@ -76,73 +76,73 @@ impl Default for Options {
     }
 }
 
-/// Qualité de l'ajustement d'un terme.
+/// Quality of the fit of a term.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TermStats {
     pub points: usize,
-    /// Somme des carrés des résidus, non pondérée.
+    /// Sum of the squares of the residuals, unweighted.
     pub ss_res: f64,
-    /// `1 − SSres/SStot` (non pondéré) ; `NaN` si Y est constant.
+    /// `1 − SSres/SStot` (unweighted); `NaN` if Y is constant.
     pub r_squared: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Solution {
     pub values: Vec<f64>,
-    /// Incertitude-type de chaque case ; `None` pour une case fixée ou si la
-    /// covariance n'est pas calculable.
+    /// Standard uncertainty of each slot; `None` for a fixed slot or if the
+    /// covariance cannot be computed.
     pub errors: Vec<Option<f64>>,
-    /// Case libre que les données ne déterminent pas (colonne du jacobien nulle
-    /// ou combinaison des précédentes, #203) : son incertitude est `None`.
+    /// Free slot that the data do not determine (zero Jacobian column
+    /// or combination of the previous ones, #203): its uncertainty is `None`.
     pub undetermined: Vec<bool>,
-    /// Somme pondérée des carrés des résidus.
+    /// Weighted sum of the squares of the residuals.
     pub chi2: f64,
     pub dof: usize,
     pub reduced_chi2: f64,
     pub iterations: usize,
     pub terms: Vec<TermStats>,
-    /// Le solveur s'est arrêté sur un **plateau**, pas sur un minimum (#281) :
-    /// des cases libres sans effet sur le modèle (gradient nul) alors que le
-    /// résidu reste grand, ex. un pic parti hors des données. La solution est
-    /// rendue (jamais d'erreur dure : elle ferait perdre le résultat) mais ne
-    /// doit pas être lue comme un ajustement convergé.
+    /// The solver stopped on a **plateau**, not on a minimum (#281):
+    /// free slots with no effect on the model (zero gradient) while the
+    /// residual stays large, e.g. a peak that started outside the data. The solution is
+    /// returned (never a hard error: it would lose the result) but must
+    /// not be read as a converged fit.
     pub plateau: bool,
-    /// Le solveur n'a pu accepter **aucun** pas alors que la pente restait
-    /// au-dessus de `STALL_COSINE` (C1, #313) : le point de départ est rendu
-    /// tel quel, avec son R², sans être un minimum. Rendu et signalé comme le
-    /// plateau, jamais en erreur dure ni en silence.
+    /// The solver could accept **no** step while the slope stayed
+    /// above `STALL_COSINE` (C1, #313): the starting point is returned
+    /// as is, with its R², without being a minimum. Returned and reported like the
+    /// plateau, never as a hard error nor silently.
     pub stalled: bool,
 }
 
-/// Seuil relâché de la pente (cosinus résidu/colonne) sous lequel un arrêt
-/// sans pas accepté reste un minimum atteint : plus lâche que le `1e-9` de
-/// l'arrêt par gradient, car les derniers pas d'un vrai minimum butent sur
-/// l'arrondi avant d'atteindre ce seuil.
+/// Relaxed slope threshold (residual/column cosine) below which a stop
+/// without an accepted step remains a reached minimum: looser than the `1e-9` of
+/// the gradient stop, because the last steps of a true minimum hit
+/// rounding before reaching this threshold.
 const STALL_COSINE: f64 = 1e-6;
 
-/// Part de l'énergie des Y (pondérée comme le résidu) sous laquelle le χ² est
-/// du bruit d'arrondi : un ajustement exact (données sans bruit) n'a plus de
-/// pente à lire, son cosinus vaut ~0,05 sans rien vouloir dire.
+/// Share of the energy of Y (weighted like the residual) below which χ² is
+/// rounding noise: an exact fit (noise-free data) has no slope left
+/// to read, its cosine is ~0.05 without meaning anything.
 const EXACT_FIT_FRACTION: f64 = 1e-20;
 
-/// Part de l'énergie des Y sous laquelle le χ² ne peut plus baisser que par
-/// l'arrondi : un résidu de l'ordre de l'epsilon de `f64` (~1e-16 de Y, soit
-/// ~1e-32 en carré) sur des données sans bruit. Au-delà de ce plancher
-/// (1e-28, quelques epsilons) chaque pas « améliore » le χ² de quelques ulp sans
-/// que les critères relatifs (`drop`, `moved`) ne se déclenchent, et la
-/// convergence dépendait du dernier ulp de `exp`/`ln` de la plateforme (#332).
-/// Le solveur est alors arrivé : ce n'est pas un plateau, le résidu est nul.
+/// Share of the energy of Y below which χ² can only decrease by
+/// rounding: a residual of the order of the `f64` epsilon (~1e-16 of Y, i.e.
+/// ~1e-32 squared) on noise-free data. Beyond this floor
+/// (1e-28, a few epsilons) each step "improves" χ² by a few ulp without
+/// the relative criteria (`drop`, `moved`) firing, and
+/// convergence depended on the last ulp of the platform's `exp`/`ln` (#332).
+/// The solver has then arrived: this is not a plateau, the residual is zero.
 const ROUNDING_FLOOR_FRACTION: f64 = 1e-28;
 
-/// λ du pas de vérification (#293) : l'amortissement de Marquardt suit la
-/// diagonale de `JᵀJ`, qui vaut 1e15 et plus pour un X décalé de 1e7 ; sous ce
-/// plancher il bride encore la direction faible, donc on le coupe presque.
+/// λ of the verification step (#293): Marquardt damping follows the
+/// diagonal of `JᵀJ`, which is 1e15 and more for an X shifted by 1e7; below this
+/// floor it still restrains the weak direction, so it is almost removed.
 const UNDAMPED_LAMBDA: f64 = 1e-30;
 
-/// Part de la variance de Y (`SStot`) que le résidu (`SSres`) doit dépasser,
-/// sur une courbe au moins, pour qu'un arrêt avec des cases sans effet soit un
-/// plateau et non un modèle surparamétré qui s'ajuste bien (R² < 0,5). Seuil
-/// conservateur : un minimum local de données bruitées reste loin de lui.
+/// Share of the variance of Y (`SStot`) that the residual (`SSres`) must exceed,
+/// on at least one curve, for a stop with no-effect slots to be a
+/// plateau and not an over-parameterized model that fits well (R² < 0.5). Conservative
+/// threshold: a local minimum of noisy data stays far from it.
 const PLATEAU_RESIDUAL_FRACTION: f64 = 0.5;
 
 fn residuals(terms: &[Term<'_>], values: &[f64], buf: &mut Vec<f64>, out: &mut Vec<f64>) {
@@ -166,7 +166,7 @@ fn clamp_slot(v: f64, s: &Slot) -> f64 {
     v.max(s.min).min(s.max)
 }
 
-/// Ajuste les cases libres de `slots` aux `terms`.
+/// Fits the free slots of `slots` to the `terms`.
 pub fn solve_problem(
     slots: &[Slot],
     terms: &[Term<'_>],
@@ -200,8 +200,8 @@ pub fn solve_problem(
         return Err(AnalysisError::NonFiniteModel);
     }
 
-    // Énergie des Y, pondérée comme le résidu : l'échelle des deux seuils
-    // d'ajustement exact (`ROUNDING_FLOOR_FRACTION`, `EXACT_FIT_FRACTION`).
+    // Energy of Y, weighted like the residual: the scale of the two exact-fit
+    // thresholds (`ROUNDING_FLOOR_FRACTION`, `EXACT_FIT_FRACTION`).
     let energy: f64 = terms
         .iter()
         .map(|t| {
@@ -219,9 +219,9 @@ pub fn solve_problem(
     let mut iterations = 0;
     let mut converged = false;
     let mut stalled = false;
-    // Un pas minuscule n'est une preuve de convergence que s'il n'est pas
-    // minuscule à cause de l'amortissement (#293) : on le vérifie par un pas
-    // presque non amorti avant de conclure.
+    // A tiny step is proof of convergence only if it is not tiny
+    // because of the damping (#293): we check it with an almost
+    // undamped step before concluding.
     let mut undamped_tried = false;
     let mut jac = Matrix::zeros(m, free.len());
     while iterations < opts.max_iterations {
@@ -229,16 +229,16 @@ pub fn solve_problem(
         jacobian(terms, &values, slots, &free, &mut jac, &mut buf);
         let a = jac.gram();
         let g = jac.transpose_mul(&r);
-        // Un non-fini dans le gradient ou le Gram échapperait au pli `max`
-        // ci-dessous (qui ignore NaN) : le solveur conclurait « convergé »
-        // sur un jacobien NaN (C6, #313). À tester avant le pli.
+        // A non-finite value in the gradient or the Gram matrix would escape the `max` fold
+        // below (which ignores NaN): the solver would conclude "converged"
+        // on a NaN Jacobian (C6, #313). Test before the fold.
         if g.iter().any(|v| !v.is_finite()) || !(0..free.len()).all(|k| a.get(k, k).is_finite()) {
             return Err(AnalysisError::ModelNotEvaluable);
         }
-        // Critère de gradient **indépendant de l'échelle** des données (le
-        // `gtol` de MINPACK) : cosinus de l'angle entre le résidu et chaque
-        // colonne du jacobien. Un seuil absolu arrêtait l'ajustement dès le
-        // premier pas quand les Y valent 1e-12 (ampères, sections efficaces).
+        // Gradient criterion **independent of the scale** of the data (the
+        // `gtol` of MINPACK): cosine of the angle between the residual and each
+        // Jacobian column. An absolute threshold stopped the fit at the
+        // first step when Y is 1e-12 (amperes, cross sections).
         let residual_norm = chi2.sqrt();
         let cosine = (0..free.len()).fold(0.0_f64, |acc, k| {
             let norm = a.get(k, k).sqrt();
@@ -255,14 +255,14 @@ pub fn solve_problem(
 
         let mut improved = false;
         for _ in 0..40 {
-            // Pas de Levenberg-Marquardt par moindres carrés **augmentés**
-            // (QR de [J; √(λD)] contre [−r; 0]) et non par les équations
-            // normales : JᵀJ élève le conditionnement au carré, et deux
-            // colonnes quasi colinéaires (X décalé de 1e6, #282) y perdaient
-            // toute précision. Marquardt : l'amortissement suit la diagonale
-            // de chaque paramètre, sans plancher absolu (les colonnes du
-            // jacobien peuvent différer de vingt ordres de grandeur) ; une
-            // colonne nulle prend 1.
+            // Levenberg-Marquardt step by **augmented** least squares
+            // (QR of [J; √(λD)] against [−r; 0]) and not by the normal
+            // equations: JᵀJ squares the condition number, and two
+            // nearly collinear columns (X shifted by 1e6, #282) lost all
+            // precision there. Marquardt: the damping follows the diagonal
+            // of each parameter, with no absolute floor (the Jacobian
+            // columns can differ by twenty orders of magnitude); a zero
+            // column takes 1.
             let n = free.len();
             let mut aug = Matrix::zeros(m + n, n);
             let mut rhs = vec![0.0; m + n];
@@ -294,8 +294,8 @@ pub fn solve_problem(
                 values = trial;
                 r = rt;
                 chi2 = chi2_trial;
-                // Plancher très bas : à 1e-12, l'amortissement bridait le fond
-                // d'une vallée étroite (colonnes quasi colinéaires, #282).
+                // Very low floor: at 1e-12, the damping restrained the bottom
+                // of a narrow valley (nearly collinear columns, #282).
                 lambda = (lambda / 3.0).max(1e-20);
                 improved = true;
                 if drop <= 1e-14 * chi2.max(1e-300) || moved < 1e-11 {
@@ -316,16 +316,16 @@ pub fn solve_problem(
             }
         }
         if !improved {
-            // Plus aucun pas ne fait baisser le χ² : minimum local atteint si la
-            // pente est (presque) nulle ; sinon le solveur est bloqué (C1) et la
-            // solution est rendue marquée, jamais présentée comme convergée.
+            // No step lowers χ² any more: local minimum reached if the
+            // slope is (almost) zero; otherwise the solver is stalled (C1) and the
+            // solution is returned flagged, never presented as converged.
             converged = true;
-            // Aucun pas n'ayant été accepté, `a`, `g` et `residual_norm` sont
-            // ceux de ce point. Un paramètre collé à sa borne ne relève pas d'ici :
-            // son pas projeté ne bouge plus, `chi2_trial <= chi2` l'accepte et
-            // l'arrêt `moved < 1e-11` le déclare convergé, sans avertissement.
-            // Un résidu au niveau de l'arrondi (ajustement exact) n'a pas de
-            // pente lisible : son cosinus n'est que du bruit, jamais un blocage.
+            // As no step was accepted, `a`, `g` and `residual_norm` are
+            // those of this point. A parameter stuck on its bound does not belong here:
+            // its projected step no longer moves, `chi2_trial <= chi2` accepts it
+            // and the `moved < 1e-11` stop declares it converged, without a warning.
+            // A residual at the rounding level (exact fit) has no readable
+            // slope: its cosine is only noise, never a stall.
             let exact = chi2 <= EXACT_FIT_FRACTION * energy;
             stalled = !exact
                 && (0..free.len()).any(|k| {
@@ -344,7 +344,7 @@ pub fn solve_problem(
         return Err(AnalysisError::NotConverged { iterations });
     }
 
-    // Covariance au point trouvé.
+    // Covariance at the point found.
     jacobian(terms, &values, slots, &free, &mut jac, &mut buf);
     let dof = m.saturating_sub(free.len());
     let reduced_chi2 = if dof > 0 { chi2 / dof as f64 } else { f64::NAN };
@@ -357,8 +357,8 @@ pub fn solve_problem(
     for (k, &i) in free.iter().enumerate() {
         undetermined[i] = !determined[k];
     }
-    // Covariance des seules cases déterminées : une case sans effet ne rend
-    // pas muettes les incertitudes des autres.
+    // Covariance of the determined slots only: a no-effect slot does not make
+    // the uncertainties of the others mute.
     let kept: Vec<usize> = (0..free.len()).filter(|&k| determined[k]).collect();
     let mut sub = Matrix::zeros(m, kept.len());
     for row in 0..m {
@@ -366,8 +366,8 @@ pub fn solve_problem(
             sub.set(row, c, jac.get(row, k));
         }
     }
-    // À 0 degré de liberté (ajustement exact), la mise à l'échelle par le χ²
-    // réduit n'a pas de base : pas d'incertitude, comme le chemin linéaire.
+    // At 0 degrees of freedom (exact fit), scaling by the reduced
+    // χ² has no basis: no uncertainty, like the linear path.
     let no_basis = opts.scale_errors && dof == 0;
     if let Some(cov) = invert(&sub.gram()).filter(|_| !no_basis) {
         let scale = if opts.scale_errors && dof > 0 {
@@ -383,7 +383,7 @@ pub fn solve_problem(
         }
     }
 
-    // Statistiques par terme.
+    // Statistics per term.
     let mut stats = Vec::with_capacity(terms.len());
     for t in terms {
         buf.clear();
@@ -403,10 +403,10 @@ pub fn solve_problem(
             },
         });
     }
-    // Plateau (#281) : une case libre sans effet (colonne du jacobien nulle)
-    // ET un résidu qui reste grand. Des cases sans effet sur un bon ajustement
-    // restent un simple `undetermined` ; un résidu grand sans case sans effet
-    // est un vrai minimum local, pas un plateau.
+    // Plateau (#281): a free slot with no effect (zero Jacobian column)
+    // AND a residual that stays large. No-effect slots on a good fit
+    // remain a simple `undetermined`; a large residual with no no-effect slot
+    // is a true local minimum, not a plateau.
     let plateau = undetermined.iter().any(|u| *u)
         && stats.iter().zip(terms).any(|(st, t)| {
             let mean = t.y.iter().sum::<f64>() / t.y.len().max(1) as f64;
@@ -427,18 +427,18 @@ pub fn solve_problem(
     })
 }
 
-/// Part de la norme d'une colonne du jacobien qu'elle doit avoir de neuf (hors
-/// des colonnes précédentes) pour être déterminée. Le bruit d'une différence
-/// centrée au pas relatif de 1e-6 est de l'ordre de `ε / 1e-6 ≈ 2e-10` : un
-/// plancher à 1e-8 garde 50 fois de marge sur une vraie dépendance, et laisse
-/// passer une droite sur un X décalé de 1e6 (part neuve ≈ 4,5e-7, #293), que
-/// l'ancien millionième déclarait indéterminée à tort.
+/// Share of the norm of a Jacobian column that it must have anew (outside
+/// the previous columns) to be determined. The noise of a central difference
+/// at relative step 1e-6 is of the order of `ε / 1e-6 ≈ 2e-10`: a
+/// floor at 1e-8 keeps a 50-fold margin over a true dependency, and lets
+/// through a line on an X shifted by 1e6 (new share ≈ 4.5e-7, #293), which
+/// the former millionth wrongly declared undetermined.
 const DETERMINED_MIN_SHARE: f64 = 1e-8;
 
-/// Pour chaque colonne du jacobien, `true` si les données la déterminent : sa
-/// part non portée par les colonnes précédentes (Gram-Schmidt modifié) dépasse
-/// `DETERMINED_MIN_SHARE` de sa norme. Une colonne nulle (paramètre sans effet)
-/// ou combinaison des précédentes (X tous égaux pour une droite) est écartée.
+/// For each Jacobian column, `true` if the data determine it: its
+/// share not carried by the previous columns (modified Gram-Schmidt) exceeds
+/// `DETERMINED_MIN_SHARE` of its norm. A zero column (parameter with no effect)
+/// or combination of the previous ones (all X equal for a line) is dropped.
 fn determined_columns(jac: &Matrix) -> Vec<bool> {
     let (m, n) = (jac.rows(), jac.cols());
     let mut basis: Vec<Vec<f64>> = Vec::new();
@@ -467,14 +467,14 @@ fn determined_columns(jac: &Matrix) -> Vec<bool> {
     out
 }
 
-/// `J[i][k] = ∂résidu_i/∂case_libre_k`, en différences centrées.
+/// `J[i][k] = ∂residual_i/∂free_slot_k`, by central differences.
 ///
-/// Le pas relatif à la valeur du paramètre (1e-6) est faux pour un paramètre
-/// de position à grande valeur : 1 pour un centre de pic à 1e6, plus que la
-/// largeur du pic, donc une dérivée fausse rendue comme convergée (#294). Le
-/// pas est donc **raffiné** : tant que la dérivée à `h` et celle à `h/4`
-/// divergent, on garde le pas plus fin. Un modèle lisse à l'échelle du pas
-/// garde son pas d'origine, à l'identique.
+/// The step relative to the parameter value (1e-6) is wrong for a position
+/// parameter of large value: 1 for a peak center at 1e6, more than the
+/// peak width, hence a wrong derivative returned as converged (#294). The
+/// step is therefore **refined**: as long as the derivative at `h` and the one at `h/4`
+/// diverge, the finer step is kept. A model that is smooth at the scale of the step
+/// keeps its original step, identically.
 fn jacobian(
     terms: &[Term<'_>],
     values: &[f64],
@@ -487,8 +487,8 @@ fn jacobian(
     let (mut plus, mut minus) = (Vec::new(), Vec::new());
     let mut work = values.to_vec();
     for (k, &i) in free.iter().enumerate() {
-        // Pas relatif à l'échelle des paramètres ; le repli absolu ne sert que si
-        // tous sont nuls (jamais un plancher qui écraserait des valeurs en 1e-12).
+        // Step relative to the scale of the parameters; the absolute fallback is only used if
+        // all are zero (never a floor that would crush values at 1e-12).
         let mut h = 1e-6
             * values[i]
                 .abs()
@@ -496,7 +496,7 @@ fn jacobian(
                 .max(if pmax > 0.0 { 0.0 } else { 1e-9 });
         let mut coarse = column(terms, &mut work, slots, i, h, buf, &mut plus, &mut minus);
         for _ in 0..MAX_STEP_REFINEMENTS {
-            // Affiner un pas ne rend pas une dérivée non finie fine.
+            // Refining a step does not make a non-finite derivative fine.
             if !h.is_finite() || coarse.values.iter().any(|v| !v.is_finite()) {
                 break;
             }
@@ -504,8 +504,8 @@ fn jacobian(
             let fine = column(
                 terms, &mut work, slots, i, fine_h, buf, &mut plus, &mut minus,
             );
-            // Un écart que l'arrondi explique n'est pas un désaccord : sans
-            // cela, un départ à zéro (pas de 1e-15) descendrait dans le bruit.
+            // A difference explained by rounding is not a disagreement: without
+            // this, a start at zero (step of 1e-15) would go down into the noise.
             let gap = (coarse.values.iter().zip(&coarse.noise))
                 .zip(fine.values.iter().zip(&fine.noise))
                 .map(|((c, nc), (f, nf))| ((c - f).abs() - nc - nf).max(0.0).powi(2))
@@ -524,20 +524,20 @@ fn jacobian(
     }
 }
 
-/// Nombre maximal de divisions du pas de différence (`4^8` au plus).
+/// Maximum number of divisions of the difference step (`4^8` at most).
 const MAX_STEP_REFINEMENTS: usize = 8;
-/// Rapport entre deux pas successifs de la comparaison des dérivées.
+/// Ratio between two successive steps of the derivative comparison.
 const STEP_REFINEMENT_RATIO: f64 = 4.0;
-/// Écart relatif (norme de la colonne) toléré entre les dérivées à `h` et `h/4`.
+/// Relative gap (norm of the column) tolerated between the derivatives at `h` and `h/4`.
 const STEP_AGREEMENT: f64 = 1e-3;
 
-/// Une colonne du jacobien et l'incertitude d'arrondi de chacune de ses lignes.
+/// A Jacobian column and the rounding uncertainty of each of its rows.
 struct Column {
     values: Vec<f64>,
     noise: Vec<f64>,
 }
 
-/// Colonne du jacobien de la case `i`, en différences centrées de pas `h`.
+/// Jacobian column of slot `i`, by central differences of step `h`.
 #[allow(clippy::too_many_arguments)]
 fn column(
     terms: &[Term<'_>],
@@ -550,7 +550,7 @@ fn column(
     minus: &mut Vec<f64>,
 ) -> Column {
     let value = work[i];
-    // Le pas ne sort pas des bornes : à une borne, différence décentrée.
+    // The step does not leave the bounds: at a bound, off-center difference.
     let hi = (value + h).min(slots[i].max);
     let lo = (value - h).max(slots[i].min);
     work[i] = hi;
@@ -565,10 +565,10 @@ fn column(
     };
     for (p, mn) in plus.iter().zip(minus.iter()) {
         let d = if den > 0.0 { (p - mn) / den } else { 0.0 };
-        // Une dérivée non finie reste telle quelle (C6, #313) : la mettre à 0
-        // faisait passer un modèle non évaluable pour une case sans effet.
+        // A non-finite derivative stays as is (C6, #313): setting it to 0
+        // made a non-evaluable model pass for a no-effect slot.
         column.values.push(d);
-        // Un pas qui ne déplace plus la valeur n'apprend rien : bruit infini.
+        // A step that no longer moves the value learns nothing: infinite noise.
         column.noise.push(if den > 0.0 {
             ROUNDOFF_FACTOR * f64::EPSILON * p.abs().max(mn.abs()) / den
         } else {
@@ -578,7 +578,7 @@ fn column(
     column
 }
 
-/// Marge sur l'erreur d'arrondi d'une différence de deux résidus.
+/// Margin on the rounding error of a difference of two residuals.
 const ROUNDOFF_FACTOR: f64 = 8.0;
 
 #[cfg(test)]
@@ -591,13 +591,13 @@ mod tests {
             .collect()
     }
 
-    /// Bruit déterministe (suite de Weyl) d'amplitude ±1.
+    /// Deterministic noise (Weyl sequence) of amplitude ±1.
     fn noise(i: usize) -> f64 {
         ((i as f64 * 0.618_033_988_749_895).fract() - 0.5) * 2.0
     }
 
     #[test]
-    fn retrouve_une_exponentielle_avec_decalage() {
+    fn recovers_an_exponential_with_offset() {
         let x = xs(200, 0.0, 10.0);
         let y: Vec<f64> = x.iter().map(|v| 1.0 + 4.0 * libm::exp(-v / 2.5)).collect();
         let term = Term {
@@ -622,7 +622,7 @@ mod tests {
         assert!(sol.terms[0].r_squared > 1.0 - 1e-12);
     }
 
-    /// Gaussienne + décalage : le départ de l'issue #281.
+    /// Gaussian + offset: the start of issue #281.
     fn gaussian_problem<'a>(x: &'a [f64], y: &'a [f64]) -> Term<'a> {
         Term {
             x,
@@ -660,8 +660,8 @@ mod tests {
     }
 
     #[test]
-    fn un_depart_hors_des_donnees_s_arrete_sur_un_plateau() {
-        // #281 : xc = 1000, loin du pic -> jacobien nul sauf y0.
+    fn a_start_outside_the_data_stops_on_a_plateau() {
+        // #281: xc = 1000, far from the peak -> zero Jacobian except y0.
         let (x, y) = gaussian_data(0.0);
         let sol = solve_problem(
             &gaussian_slots(1000.0, 1.0),
@@ -674,7 +674,7 @@ mod tests {
     }
 
     #[test]
-    fn un_ajustement_sain_ou_bruite_n_est_pas_un_plateau() {
+    fn a_sound_or_noisy_fit_is_not_a_plateau() {
         for amp in [0.0, 0.3] {
             let (x, y) = gaussian_data(amp);
             let sol = solve_problem(
@@ -683,18 +683,18 @@ mod tests {
                 Options::default(),
             )
             .unwrap();
-            assert!(sol.terms[0].r_squared > 0.9 && !sol.plateau, "bruit {amp}");
+            assert!(sol.terms[0].r_squared > 0.9 && !sol.plateau, "noise {amp}");
         }
     }
 
-    /// Huit points X = 0..7 et un vecteur orthogonal à `1` et à `x` : un
-    /// ajustement affine laisse exactement `k · ORTHO` de résidu.
+    /// Eight points X = 0..7 and a vector orthogonal to `1` and to `x`: an
+    /// affine fit leaves exactly `k · ORTHO` of residual.
     const ORTHO: [f64; 8] = [1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0, 1.0];
-    /// `Σ (x − x̄)²` pour X = 0..7.
+    /// `Σ (x − x̄)²` for X = 0..7.
     const SS_X: f64 = 42.0;
 
-    /// Les données `y = x + k·ORTHO` dont SSres/SStot vaut `fraction` après un
-    /// ajustement affine : SSres = 8k², SStot = 42 + 8k².
+    /// The data `y = x + k·ORTHO` whose SSres/SStot is `fraction` after an
+    /// affine fit: SSres = 8k², SStot = 42 + 8k².
     fn affine_with_residual(fraction: f64) -> (Vec<f64>, Vec<f64>) {
         let k = (SS_X * fraction / (8.0 * (1.0 - fraction))).sqrt();
         let x: Vec<f64> = (0..8).map(f64::from).collect();
@@ -702,7 +702,7 @@ mod tests {
         (x, y)
     }
 
-    /// `p0 + p1·x`, plus (si `dead`) une case libre `p2` sans aucun effet.
+    /// `p0 + p1·x`, plus (if `dead`) a free slot `p2` with no effect at all.
     fn affine_term<'a>(x: &'a [f64], y: &'a [f64]) -> Term<'a> {
         Term {
             x,
@@ -726,7 +726,7 @@ mod tests {
 
     fn solve_affine(fraction: f64, dead: bool) -> Solution {
         let (x, y) = affine_with_residual(fraction);
-        #[allow(clippy::let_and_return)] // `x` et `y` doivent survivre à l'appel.
+        #[allow(clippy::let_and_return)] // `x` and `y` must outlive the call.
         let sol = solve_problem(
             &affine_slots(dead),
             &[affine_term(&x, &y)],
@@ -737,7 +737,7 @@ mod tests {
     }
 
     #[test]
-    fn le_jeu_de_donnees_construit_donne_le_residu_voulu() {
+    fn the_constructed_data_set_gives_the_wanted_residual() {
         for f in [0.2, 0.49, 0.51, 0.9] {
             let sol = solve_affine(f, true);
             let (x, y) = affine_with_residual(f);
@@ -749,19 +749,19 @@ mod tests {
     }
 
     #[test]
-    fn le_seuil_du_plateau_sur_la_part_de_residu_est_a_une_demie() {
-        // Case sans effet dans les deux cas : seule la part de résidu change.
-        let sous = solve_affine(0.49, true);
-        let dessus = solve_affine(0.51, true);
-        assert_eq!(sous.undetermined, vec![false, false, true]);
-        assert_eq!(dessus.undetermined, vec![false, false, true]);
-        assert!(!sous.plateau, "0,49 : sous le seuil");
-        assert!(dessus.plateau, "0,51 : au-dessus du seuil");
+    fn the_plateau_threshold_on_the_residual_share_is_one_half() {
+        // No-effect slot in both cases: only the residual share changes.
+        let below = solve_affine(0.49, true);
+        let above = solve_affine(0.51, true);
+        assert_eq!(below.undetermined, vec![false, false, true]);
+        assert_eq!(above.undetermined, vec![false, false, true]);
+        assert!(!below.plateau, "0.49: below the threshold");
+        assert!(above.plateau, "0.51: above the threshold");
         const { assert!(PLATEAU_RESIDUAL_FRACTION > 0.49 && PLATEAU_RESIDUAL_FRACTION < 0.51) };
     }
 
     #[test]
-    fn un_gros_residu_sans_case_sans_effet_est_un_minimum_pas_un_plateau() {
+    fn a_large_residual_without_a_no_effect_slot_is_a_minimum_not_a_plateau() {
         for f in [0.51, 0.9, 0.99] {
             let sol = solve_affine(f, false);
             assert!(sol.undetermined.iter().all(|u| !u), "{f}");
@@ -770,7 +770,7 @@ mod tests {
     }
 
     #[test]
-    fn un_modele_surparametre_qui_s_ajuste_bien_est_indetermine_sans_plateau() {
+    fn an_over_parameterized_model_that_fits_well_is_undetermined_without_a_plateau() {
         for f in [0.0, 1e-6, 0.1] {
             let sol = solve_affine(f, true);
             assert_eq!(sol.undetermined, vec![false, false, true], "{f}");
@@ -779,9 +779,9 @@ mod tests {
     }
 
     #[test]
-    fn une_courbe_constante_n_est_jamais_un_plateau() {
-        // SStot = 0 : la part de résidu n'a pas de sens (SSres/0 = +inf si le
-        // modèle ne peut pas l'atteindre : `a` fixé à 0, y = 3).
+    fn a_constant_curve_is_never_a_plateau() {
+        // SStot = 0: the residual share is meaningless (SSres/0 = +inf if the
+        // model cannot reach it: `a` fixed at 0, y = 3).
         let x: Vec<f64> = (0..8).map(f64::from).collect();
         let y = vec![3.0; 8];
         let mut slots = affine_slots(true);
@@ -794,20 +794,20 @@ mod tests {
     }
 
     #[test]
-    fn un_ajustement_global_est_sur_un_plateau_si_une_seule_courbe_l_est() {
+    fn a_global_fit_is_on_a_plateau_if_a_single_curve_is() {
         let (xa, ya) = affine_with_residual(0.01);
         let (xb, yb) = affine_with_residual(0.9);
         let slots = affine_slots(true);
-        for ordre in [[0, 1], [1, 0]] {
-            let courbes = [(&xa, &ya), (&xb, &yb)];
-            let terms: Vec<Term> = ordre
+        for order in [[0, 1], [1, 0]] {
+            let curves = [(&xa, &ya), (&xb, &yb)];
+            let terms: Vec<Term> = order
                 .iter()
-                .map(|&i| affine_term(courbes[i].0, courbes[i].1))
+                .map(|&i| affine_term(curves[i].0, curves[i].1))
                 .collect();
             let sol = solve_problem(&slots, &terms, Options::default()).unwrap();
-            assert!(sol.plateau, "ordre {ordre:?}");
+            assert!(sol.plateau, "order {order:?}");
         }
-        // Deux courbes bien ajustées : pas de plateau.
+        // Two well-fitted curves: no plateau.
         let sol = solve_problem(
             &slots,
             &[affine_term(&xa, &ya), affine_term(&xa, &ya)],
@@ -818,7 +818,7 @@ mod tests {
     }
 
     #[test]
-    fn l_exemple_de_l_issue_281_est_un_plateau_et_garde_ses_valeurs() {
+    fn the_example_of_issue_281_is_a_plateau_and_keeps_its_values() {
         let (x, y) = gaussian_data(0.0);
         let sol = solve_problem(
             &gaussian_slots(1000.0, 1.0),
@@ -827,14 +827,14 @@ mod tests {
         )
         .unwrap();
         assert!(sol.plateau);
-        // La solution est rendue (pas d'erreur dure) : xc et fwhm n'ont pas bougé.
+        // The solution is returned (no hard error): xc and fwhm did not move.
         assert!((sol.values[1] - 1000.0).abs() < 1e-6, "{:?}", sol.values);
         assert!((sol.values[3] - 1.0).abs() < 1e-6, "{:?}", sol.values);
         assert_eq!(sol.undetermined, vec![false, true, true, true]);
     }
 
     #[test]
-    fn les_incertitudes_suivent_le_bruit() {
+    fn the_uncertainties_follow_the_noise() {
         let x = xs(400, 0.0, 10.0);
         let y: Vec<f64> = x
             .iter()
@@ -855,13 +855,13 @@ mod tests {
         let sol = solve_problem(&slots, &[term], Options::default()).unwrap();
         assert!((sol.values[1] - 3.0).abs() < 0.01);
         let e = sol.errors[1].unwrap();
-        // σ_pente ≈ σ_bruit / (√n · σ_x) = 0.2·0.577/(20·2.89) ≈ 0.002.
-        assert!(e > 0.0005 && e < 0.01, "erreur sur la pente {e}");
+        // σ_slope ≈ σ_noise / (√n · σ_x) = 0.2·0.577/(20·2.89) ≈ 0.002.
+        assert!(e > 0.0005 && e < 0.01, "error on the slope {e}");
         assert!(sol.reduced_chi2 > 0.0 && sol.dof == 398);
     }
 
     #[test]
-    fn une_case_fixee_ne_bouge_pas_et_n_a_pas_d_erreur() {
+    fn a_fixed_slot_does_not_move_and_has_no_error() {
         let x = xs(50, 0.0, 5.0);
         let y: Vec<f64> = x.iter().map(|v| 2.0 * v + 1.0).collect();
         let term = Term {
@@ -883,7 +883,7 @@ mod tests {
     }
 
     #[test]
-    fn les_bornes_sont_respectees() {
+    fn the_bounds_are_respected() {
         let x = xs(50, 0.0, 5.0);
         let y: Vec<f64> = x.iter().map(|v| 5.0 * v).collect();
         let term = Term {
@@ -902,8 +902,8 @@ mod tests {
         assert!((sol.values[0] - 3.0).abs() < 1e-9);
     }
 
-    /// Droite `a + b·x` sur `x`, deux paramètres libres.
-    fn droite_sur<'a>(x: &'a [f64], y: &'a [f64]) -> Term<'a> {
+    /// Line `a + b·x` on `x`, two free parameters.
+    fn line_on<'a>(x: &'a [f64], y: &'a [f64]) -> Term<'a> {
         Term {
             x,
             y,
@@ -916,9 +916,9 @@ mod tests {
         }
     }
 
-    /// Droite `y = 2 + 3t` sur `x = off + t` (60 points, `t ∈ [0, 1]`), départ
-    /// `(a, b) = (-off, 1)` : le X décalé rend les colonnes quasi colinéaires.
-    fn droite_decalee(off: f64) -> Solution {
+    /// Line `y = 2 + 3t` on `x = off + t` (60 points, `t ∈ [0, 1]`), start
+    /// `(a, b) = (-off, 1)`: the shifted X makes the columns nearly collinear.
+    fn shifted_line(off: f64) -> Solution {
         let t: Vec<f64> = (0..60).map(|i| f64::from(i) / 59.0).collect();
         let x: Vec<f64> = t.iter().map(|t| off + t).collect();
         let y: Vec<f64> = t
@@ -927,17 +927,17 @@ mod tests {
             .map(|(i, t)| 2.0 + 3.0 * t + 0.01 * libm::sin(i as f64 * 1.7))
             .collect();
         let slots = vec![Slot::new("a", -off), Slot::new("b", 1.0)];
-        let sol = solve_problem(&slots, &[droite_sur(&x, &y)], Options::default());
+        let sol = solve_problem(&slots, &[line_on(&x, &y)], Options::default());
         sol.unwrap()
     }
 
     #[test]
-    fn un_pas_amorti_minuscule_n_est_pas_une_convergence() {
-        // #293 : l'amortissement de Marquardt suit `JᵀJ` (≈ off²) et bride la
-        // direction faible ; le pas devenait minuscule, pris pour la
-        // convergence, alors que le χ² valait 7000 fois le minimum.
+    fn a_tiny_damped_step_is_not_a_convergence() {
+        // #293: Marquardt damping follows `JᵀJ` (≈ off²) and restrains the
+        // weak direction; the step became tiny, taken for
+        // convergence, while χ² was 7000 times the minimum.
         for off in [1e7, 1e8, 1e9] {
-            let sol = droite_decalee(off);
+            let sol = shifted_line(off);
             let (a, b) = (sol.values[0], sol.values[1]);
             assert!((b - 3.0).abs() < 1e-2, "off = {off:e} : {:?}", sol.values);
             assert!(sol.chi2 < 1e-2, "off = {off:e} : χ² = {:e}", sol.chi2);
@@ -946,10 +946,10 @@ mod tests {
     }
 
     #[test]
-    fn zero_ddl_avec_echelle_pas_d_incertitude() {
+    fn zero_dof_with_scaling_no_uncertainty() {
         let (x, y) = (vec![0.0, 1.0], vec![1.0, 3.0]);
         let slots = vec![Slot::new("a", 0.0), Slot::new("b", 0.0)];
-        let sol = solve_problem(&slots, &[droite_sur(&x, &y)], Options::default()).unwrap();
+        let sol = solve_problem(&slots, &[line_on(&x, &y)], Options::default()).unwrap();
         assert_eq!(sol.dof, 0);
         assert!(sol.errors.iter().all(Option::is_none));
         assert!(sol.reduced_chi2.is_nan());
@@ -957,17 +957,17 @@ mod tests {
     }
 
     #[test]
-    fn zero_ddl_sans_echelle_garde_les_incertitudes() {
-        // Choix documenté de #280 : `scale_errors == false` (σ absolus) n'a pas
-        // besoin du χ² réduit ; la covariance brute reste valable à 0 ddl.
-        // Pour x = {0, 1}, σ = 1 : var(a) = 1, var(b) = 2.
+    fn zero_dof_without_scaling_keeps_the_uncertainties() {
+        // Documented choice of #280: `scale_errors == false` (absolute σ) does not
+        // need the reduced χ²; the raw covariance stays valid at 0 dof.
+        // For x = {0, 1}, σ = 1: var(a) = 1, var(b) = 2.
         let (x, y) = (vec![0.0, 1.0], vec![1.0, 3.0]);
         let slots = vec![Slot::new("a", 0.0), Slot::new("b", 0.0)];
         let opts = Options {
             scale_errors: false,
             ..Options::default()
         };
-        let sol = solve_problem(&slots, &[droite_sur(&x, &y)], opts).unwrap();
+        let sol = solve_problem(&slots, &[line_on(&x, &y)], opts).unwrap();
         assert_eq!(sol.dof, 0);
         assert!(sol.reduced_chi2.is_nan());
         let (ea, eb) = (sol.errors[0].unwrap(), sol.errors[1].unwrap());
@@ -976,35 +976,35 @@ mod tests {
     }
 
     #[test]
-    fn un_ddl_avec_echelle_incertitudes_mises_a_l_echelle() {
-        // 3 points, 2 libres : dof 1, erreurs = covariance brute × χ² réduit.
+    fn one_dof_with_scaling_scaled_uncertainties() {
+        // 3 points, 2 free: dof 1, errors = raw covariance × reduced χ².
         let (x, y) = (vec![0.0, 1.0, 2.0], vec![1.0, 3.5, 4.0]);
         let slots = vec![Slot::new("a", 0.0), Slot::new("b", 0.0)];
-        let mis = solve_problem(&slots, &[droite_sur(&x, &y)], Options::default()).unwrap();
+        let scaled = solve_problem(&slots, &[line_on(&x, &y)], Options::default()).unwrap();
         let opts = Options {
             scale_errors: false,
             ..Options::default()
         };
-        let brut = solve_problem(&slots, &[droite_sur(&x, &y)], opts).unwrap();
-        assert_eq!(mis.dof, 1);
-        assert!(mis.reduced_chi2.is_finite() && mis.reduced_chi2 > 0.0);
+        let raw = solve_problem(&slots, &[line_on(&x, &y)], opts).unwrap();
+        assert_eq!(scaled.dof, 1);
+        assert!(scaled.reduced_chi2.is_finite() && scaled.reduced_chi2 > 0.0);
         for k in 0..2 {
-            let (m, b) = (mis.errors[k].unwrap(), brut.errors[k].unwrap());
-            let attendu = b * mis.reduced_chi2.sqrt();
-            assert!((m - attendu).abs() < 1e-6 * attendu, "{m} vs {attendu}");
+            let (m, b) = (scaled.errors[k].unwrap(), raw.errors[k].unwrap());
+            let expected = b * scaled.reduced_chi2.sqrt();
+            assert!((m - expected).abs() < 1e-6 * expected, "{m} vs {expected}");
         }
     }
 
     #[test]
-    fn moins_de_points_que_de_libres_refuse_avant_le_solveur() {
-        // m < libres : jamais de dof négatif, refus net avec les deux effectifs.
+    fn fewer_points_than_free_slots_refused_before_the_solver() {
+        // m < free: never a negative dof, clean refusal with both counts.
         let (x, y) = (vec![0.0, 1.0], vec![1.0, 3.0]);
         let slots = vec![
             Slot::new("a", 0.0),
             Slot::new("b", 0.0),
             Slot::new("c", 0.0),
         ];
-        let e = solve_problem(&slots, &[droite_sur(&x, &y)], Options::default()).unwrap_err();
+        let e = solve_problem(&slots, &[line_on(&x, &y)], Options::default()).unwrap_err();
         assert_eq!(
             e,
             AnalysisError::NotEnoughPoints {
@@ -1012,17 +1012,17 @@ mod tests {
                 needed: 3
             }
         );
-        // Une case fixée ramène le besoin à 2 : accepté, dof 0.
+        // A fixed slot brings the need down to 2: accepted, dof 0.
         let mut fixed = Slot::new("c", 0.0);
         fixed.fixed = true;
         let slots = vec![Slot::new("a", 0.0), Slot::new("b", 0.0), fixed];
-        let sol = solve_problem(&slots, &[droite_sur(&x, &y)], Options::default()).unwrap();
+        let sol = solve_problem(&slots, &[line_on(&x, &y)], Options::default()).unwrap();
         assert_eq!(sol.dof, 0);
     }
 
     #[test]
-    fn deux_termes_partagent_une_case_globale() {
-        // y1 = k·x, y2 = k·x + 10 : k partagé, décalage propre à la 2e courbe.
+    fn two_terms_share_a_global_slot() {
+        // y1 = k·x, y2 = k·x + 10: k shared, own offset for the 2nd curve.
         let x = xs(30, 0.0, 3.0);
         let y1: Vec<f64> = x.iter().map(|v| 4.0 * v).collect();
         let y2: Vec<f64> = x.iter().map(|v| 4.0 * v + 10.0).collect();
@@ -1053,8 +1053,8 @@ mod tests {
     }
 
     #[test]
-    fn la_ponderation_donne_plus_de_poids_aux_points_precis() {
-        // Deux points aberrants à grand σ n'attirent pas la droite.
+    fn weighting_gives_more_weight_to_precise_points() {
+        // Two outliers with large σ do not pull the line.
         let x = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
         let y = vec![0.0, 1.0, 2.0, 3.0, 40.0, 5.0];
         let sigma = vec![0.1, 0.1, 0.1, 0.1, 1000.0, 0.1];
@@ -1074,7 +1074,7 @@ mod tests {
     }
 
     #[test]
-    fn erreurs_de_probleme() {
+    fn problem_errors() {
         let x = vec![0.0, 1.0];
         let y = vec![0.0, 1.0];
         let mk = || Term {
@@ -1125,8 +1125,8 @@ mod tests {
         );
     }
 
-    /// Terme à `eval` sur mesure : `y` constant, modèle `f` d'une case.
-    fn one_case<'a>(x: &'a [f64], y: &'a [f64], f: impl Fn(f64) -> f64 + 'a) -> Term<'a> {
+    /// Term with a custom `eval`: constant `y`, model `f` of one slot.
+    fn one_slot<'a>(x: &'a [f64], y: &'a [f64], f: impl Fn(f64) -> f64 + 'a) -> Term<'a> {
         Term {
             x,
             y,
@@ -1139,14 +1139,14 @@ mod tests {
         }
     }
 
-    /// C1 (#313) : un coin sans descente. `f = 1 + |d| + 0,5·d` (d = a − 3) a un
-    /// minimum en pointe : la pente centrée vaut 0,5, aucun pas ne baisse le
-    /// χ². Le départ est rendu, marqué `stalled`, jamais « convergé » en silence.
+    /// C1 (#313): a corner with no descent. `f = 1 + |d| + 0.5·d` (d = a − 3) has a
+    /// kinked minimum: the centerd slope is 0.5, no step lowers
+    /// χ². The start is returned, flagged `stalled`, never silently "converged".
     #[test]
-    fn un_solveur_sans_pas_accepte_et_a_pente_forte_est_marque_bloque() {
+    fn a_solver_with_no_accepted_step_and_a_steep_slope_is_flagged_stalled() {
         let x = xs(5, 0.0, 4.0);
         let y = vec![0.0; 5];
-        let term = one_case(&x, &y, |a| {
+        let term = one_slot(&x, &y, |a| {
             let d = a - 3.0;
             1.0 + d.abs() + 0.5 * d
         });
@@ -1155,36 +1155,37 @@ mod tests {
         assert_eq!(sol.values[0], 3.0);
     }
 
-    /// Un vrai minimum lisse (pente nulle) ne bascule pas ; un paramètre collé
-    /// à sa borne non plus.
+    /// A true smooth minimum (zero slope) does not flip; neither does a parameter stuck
+    /// on its bound.
     #[test]
-    fn un_minimum_lisse_ou_une_borne_atteinte_ne_sont_pas_bloques() {
+    fn a_smooth_minimum_or_a_reached_bound_are_not_stalled() {
         let x = xs(5, 0.0, 4.0);
         let y = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let lisse = one_case(&x, &y, |a| a);
-        let sol = solve_problem(&[Slot::new("a", 5.0)], &[lisse], Options::default()).unwrap();
+        let smooth_term = one_slot(&x, &y, |a| a);
+        let sol =
+            solve_problem(&[Slot::new("a", 5.0)], &[smooth_term], Options::default()).unwrap();
         assert!(
             !sol.stalled && (sol.values[0] - 3.0).abs() < 1e-4,
             "{sol:?}"
         );
 
-        // f = 1 + a, a ≥ 0 : le minimum sous contrainte est la borne.
+        // f = 1 + a, a ≥ 0: the minimum under constraint is the bound.
         let mut slot = Slot::new("a", 2.0);
         slot.min = 0.0;
         let zero = vec![0.0; 5];
-        let borne = one_case(&x, &zero, |a| 1.0 + a);
-        let sol = solve_problem(&[slot], &[borne], Options::default()).unwrap();
+        let bound = one_slot(&x, &zero, |a| 1.0 + a);
+        let sol = solve_problem(&[slot], &[bound], Options::default()).unwrap();
         assert!(!sol.stalled && sol.values[0] == 0.0, "{sol:?}");
     }
 
-    /// C6 (#313) : un jacobien NaN échappait au pli `max` (qui ignore NaN) et
-    /// le solveur concluait « convergé ». `sqrt(a)` en a = 0 : la différence
-    /// centrée lit `sqrt(−h)`.
+    /// C6 (#313): a NaN Jacobian escaped the `max` fold (which ignores NaN) and
+    /// the solver concluded "converged". `sqrt(a)` at a = 0: the centerd
+    /// difference reads `sqrt(−h)`.
     #[test]
-    fn une_pente_non_finie_est_une_erreur_modele_non_evaluable() {
+    fn a_non_finite_slope_is_a_non_evaluable_model_error() {
         let x = xs(5, 0.0, 4.0);
         let y = vec![1.0; 5];
-        let term = one_case(&x, &y, f64::sqrt);
+        let term = one_slot(&x, &y, f64::sqrt);
         assert_eq!(
             solve_problem(&[Slot::new("a", 0.0)], &[term], Options::default()).unwrap_err(),
             AnalysisError::ModelNotEvaluable

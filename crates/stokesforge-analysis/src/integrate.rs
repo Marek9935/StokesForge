@@ -1,26 +1,25 @@
-//! Intégration par la méthode des trapèzes (#187), dans les **unités de X
-//! telles qu'elles sont** : une courbe en longueur d'onde s'intègre en longueur
-//! d'onde, une courbe en énergie en énergie. Aucune conversion (décision
-//! 2026-10-08).
+//! Integration by the trapezoid method (#187), in the **X units as they
+//! are**: a wavelength curve is integrated in wavelength, an energy curve in
+//! energy. No conversion (decision 2026-10-08).
 //!
-//! L'aire est celle de la série **triée par X croissant** : elle est positive
-//! pour un Y positif quel que soit le sens d'enregistrement du spectre.
+//! The area is that of the series **sorted by increasing X**: it is positive
+//! for a positive Y whatever the recording direction of the spectrum.
 
 use crate::error::AnalysisError;
 use crate::series::{interpolate, Series};
 
-/// Ce qu'on retranche sous la courbe d'une plage (M12 b).
+/// What is subtracted under the curve of a range (M12 b).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Under {
-    /// Aire jusqu'à Y = 0.
+    /// Area down to Y = 0.
     Zero,
-    /// Aire au-dessus de la droite qui joint les deux extrémités de la plage.
+    /// Area above the line joining the two ends of the range.
     Line,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntegrateSpec {
-    /// Plages `(de, à)`. Vide : la série entière.
+    /// Ranges `(from, to)`. Empty: the whole series.
     pub ranges: Vec<(f64, f64)>,
     pub under: Under,
     pub cumulative: bool,
@@ -29,11 +28,11 @@ pub struct IntegrateSpec {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RangeArea {
-    /// Bornes effectives, rognées au domaine des données.
+    /// Effective bounds, clipped to the data domain.
     pub from: f64,
     pub to: f64,
     pub area: f64,
-    /// Points de la série dans la plage.
+    /// Points of the series in the range.
     pub points: usize,
 }
 
@@ -41,14 +40,14 @@ pub struct RangeArea {
 pub struct Integrated {
     pub areas: Vec<RangeArea>,
     pub total: f64,
-    /// Intégrale cumulée depuis le plus petit X, un point par point de la série
-    /// d'entrée (dans son ordre).
+    /// Cumulative integral from the smallest X, one point per point of the
+    /// input series (in its order).
     pub cumulative: Option<Vec<f64>>,
-    /// `y / total`, un point par point de la série d'entrée.
+    /// `y / total`, one point per point of the input series.
     pub normalized: Option<Vec<f64>>,
 }
 
-/// Aire par trapèzes de la série triée sur `[lo, hi]` (bornes interpolées).
+/// Trapezoid area of the sorted series on `[lo, hi]` (interpolated bounds).
 fn trapezoid(sorted: &Series, lo: f64, hi: f64, under: Under) -> Option<(f64, usize)> {
     let (x0, x1) = (*sorted.x.first()?, *sorted.x.last()?);
     let (lo, hi) = (lo.max(x0), hi.min(x1));
@@ -85,8 +84,8 @@ pub fn integrate(series: &Series, spec: &IntegrateSpec) -> Result<Integrated, An
             needed: 2,
         });
     }
-    // Une borne non finie (plage pas encore posée, NaN) ferait `min/max`
-    // renvoyer l'autre argument : (NaN, NaN) intégrerait toute la courbe (#276).
+    // A non-finite bound (range not yet placed, NaN) would make `min/max`
+    // return the other argument: (NaN, NaN) would integrate the whole curve (#276).
     if spec
         .ranges
         .iter()
@@ -117,14 +116,14 @@ pub fn integrate(series: &Series, spec: &IntegrateSpec) -> Result<Integrated, An
             points,
         });
     }
-    // Un débordement (aire infinie) n'est pas une aire : NaN, comme les autres
-    // valeurs non finies du module (#275), pour que la normalisation ne donne
-    // pas un 0 trompeur (`y / inf`).
+    // An overflow (infinite area) is not an area: NaN, like the other
+    // non-finite values of the module (#275), so that normalization does not
+    // give a misleading 0 (`y / inf`).
     let total: f64 = areas.iter().map(|a| a.area).sum();
     let total = if total.is_finite() { total } else { f64::NAN };
 
     let cumulative = spec.cumulative.then(|| {
-        // Cumul sur la série triée, puis remis dans l'ordre d'entrée.
+        // Cumulative sum on the sorted series, then put back in input order.
         let mut order: Vec<usize> = (0..series.len()).collect();
         order.sort_by(|&a, &b| series.x[a].total_cmp(&series.x[b]));
         let mut out = vec![0.0; series.len()];
@@ -180,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn aire_totale_d_une_parabole() {
+    fn total_area_of_a_parabola() {
         let r = integrate(&parabola(), &spec()).unwrap();
         assert!((r.total - 1.0 / 3.0).abs() < 1e-6, "{}", r.total);
         assert_eq!(r.areas.len(), 1);
@@ -188,9 +187,9 @@ mod tests {
     }
 
     #[test]
-    fn la_plage_est_interpolee_aux_bornes() {
-        // Bornes entre deux échantillons : Y est affine par morceaux, l'aire de
-        // [0.25, 0.75] de y = x sur grille grossière est exacte.
+    fn the_range_is_interpolated_at_the_bounds() {
+        // Bounds between two samples: Y is piecewise affine, the area of
+        // [0.25, 0.75] of y = x on a coarse grid is exact.
         let s = Series::new(vec![0.0, 0.5, 1.0], vec![0.0, 0.5, 1.0]);
         let mut sp = spec();
         sp.ranges = vec![(0.25, 0.75)];
@@ -199,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn plusieurs_plages_donnent_une_aire_chacune() {
+    fn several_ranges_give_one_area_each() {
         let mut sp = spec();
         sp.ranges = vec![(0.0, 0.5), (0.5, 1.0)];
         let r = integrate(&parabola(), &sp).unwrap();
@@ -209,8 +208,8 @@ mod tests {
     }
 
     #[test]
-    fn sous_la_droite_entre_les_bornes() {
-        // Pic triangulaire sur un fond plat à 2 : aire au-dessus de la droite = 1.
+    fn below_the_line_between_the_bounds() {
+        // Triangular peak on a flat background at 2: area above the line = 1.
         let s = Series::new(vec![0.0, 1.0, 2.0, 3.0, 4.0], vec![2.0, 2.0, 3.0, 2.0, 2.0]);
         let mut sp = spec();
         sp.under = Under::Line;
@@ -221,13 +220,13 @@ mod tests {
     }
 
     #[test]
-    fn un_spectre_decroissant_en_x_donne_une_aire_positive() {
+    fn a_spectrum_decreasing_in_x_gives_a_positive_area() {
         let s = Series::new(vec![4.0, 3.0, 2.0, 1.0], vec![1.0, 1.0, 1.0, 1.0]);
         assert!((integrate(&s, &spec()).unwrap().total - 3.0).abs() < 1e-12);
     }
 
     #[test]
-    fn cumul_et_normalisation() {
+    fn cumulative_and_normalization() {
         let s = Series::new(vec![0.0, 1.0, 2.0], vec![2.0, 2.0, 2.0]);
         let mut sp = spec();
         sp.cumulative = true;
@@ -238,17 +237,17 @@ mod tests {
     }
 
     #[test]
-    fn cumul_dans_l_ordre_d_entree_pour_un_x_decroissant() {
+    fn cumulative_in_input_order_for_a_decreasing_x() {
         let s = Series::new(vec![2.0, 1.0, 0.0], vec![2.0, 2.0, 2.0]);
         let mut sp = spec();
         sp.cumulative = true;
         let c = integrate(&s, &sp).unwrap().cumulative.unwrap();
-        // Depuis le plus petit X : x=0 → 0, x=1 → 2, x=2 → 4.
+        // From the smallest X: x=0 → 0, x=1 → 2, x=2 → 4.
         assert_eq!(c, vec![4.0, 2.0, 0.0]);
     }
 
     #[test]
-    fn normalisation_par_une_aire_nulle_donne_des_cellules_vides() {
+    fn normalization_by_a_zero_area_gives_empty_cells() {
         let s = Series::new(vec![0.0, 1.0], vec![0.0, 0.0]);
         let mut sp = spec();
         sp.normalize = true;
@@ -257,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn debordement_de_l_aire_donne_nan_et_non_zero() {
+    fn area_overflow_gives_nan_not_zero() {
         let s = Series::new(vec![0.0, 10.0], vec![1e308, 1e308]);
         let mut sp = spec();
         sp.cumulative = true;
@@ -271,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn plage_hors_des_donnees_et_serie_trop_courte() {
+    fn range_outside_the_data_and_series_too_short() {
         let mut sp = spec();
         sp.ranges = vec![(5.0, 6.0)];
         assert_eq!(
@@ -285,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn plage_partiellement_hors_donnees_est_rognee() {
+    fn range_partly_outside_the_data_is_clipped() {
         let mut sp = spec();
         sp.ranges = vec![(-3.0, 0.5)];
         let r = integrate(&parabola(), &sp).unwrap();
@@ -293,27 +292,27 @@ mod tests {
         assert!((r.total - 1.0 / 24.0).abs() < 1e-6);
     }
 
-    fn rampe() -> Series {
+    fn ramp() -> Series {
         let x: Vec<f64> = (0..=10).map(f64::from).collect();
         Series::new(x.clone(), x)
     }
 
-    fn avec_plages(ranges: Vec<(f64, f64)>) -> IntegrateSpec {
+    fn with_ranges(ranges: Vec<(f64, f64)>) -> IntegrateSpec {
         let mut sp = spec();
         sp.ranges = ranges;
         sp
     }
 
-    fn plages_invalides() -> Result<Integrated, AnalysisError> {
+    fn invalid_ranges() -> Result<Integrated, AnalysisError> {
         Err(AnalysisError::InvalidParameter {
             name: "ranges".into(),
         })
     }
 
     #[test]
-    fn toute_borne_non_finie_est_refusee_quelle_que_soit_la_position() {
+    fn any_non_finite_bound_is_refused_whatever_the_position() {
         let (nan, inf) = (f64::NAN, f64::INFINITY);
-        let fautives = [
+        let faulty = [
             (nan, nan),
             (nan, 5.0),
             (5.0, nan),
@@ -323,12 +322,12 @@ mod tests {
             (2.0, -inf),
             (-inf, inf),
         ];
-        for f in fautives {
-            // Seule, ou après / avant une plage valide : l'ordre ne compte pas.
+        for f in faulty {
+            // Alone, or after / before a valid range: the order does not matter.
             for ranges in [vec![f], vec![(1.0, 2.0), f], vec![f, (1.0, 2.0)]] {
                 assert_eq!(
-                    integrate(&rampe(), &avec_plages(ranges.clone())),
-                    plages_invalides(),
+                    integrate(&ramp(), &with_ranges(ranges.clone())),
+                    invalid_ranges(),
                     "{ranges:?}"
                 );
             }
@@ -336,18 +335,18 @@ mod tests {
     }
 
     #[test]
-    fn la_garde_de_plage_passe_avant_le_calcul_du_cumul_et_de_la_normalisation() {
-        let mut sp = avec_plages(vec![(f64::NAN, f64::NAN)]);
+    fn the_range_guard_runs_before_the_cumulative_and_normalization_calculation() {
+        let mut sp = with_ranges(vec![(f64::NAN, f64::NAN)]);
         sp.cumulative = true;
         sp.normalize = true;
-        assert_eq!(integrate(&rampe(), &sp), plages_invalides());
+        assert_eq!(integrate(&ramp(), &sp), invalid_ranges());
     }
 
     #[test]
-    fn une_serie_trop_courte_est_signalee_avant_une_plage_non_finie() {
+    fn a_series_too_short_is_reported_before_a_non_finite_range() {
         let s = Series::new(vec![1.0], vec![1.0]);
         assert_eq!(
-            integrate(&s, &avec_plages(vec![(f64::NAN, f64::NAN)])),
+            integrate(&s, &with_ranges(vec![(f64::NAN, f64::NAN)])),
             Err(AnalysisError::NotEnoughPoints {
                 found: 1,
                 needed: 2
@@ -356,9 +355,9 @@ mod tests {
     }
 
     #[test]
-    fn plage_inversee_acceptee_et_normalisee() {
-        let r = integrate(&rampe(), &avec_plages(vec![(8.0, 2.0)])).unwrap();
-        // Aire de y = x sur [2, 8] : (64 - 4) / 2 = 30.
+    fn reversed_range_accepted_and_normalized() {
+        let r = integrate(&ramp(), &with_ranges(vec![(8.0, 2.0)])).unwrap();
+        // Area of y = x on [2, 8]: (64 - 4) / 2 = 30.
         assert_eq!(r.areas[0].from, 2.0);
         assert_eq!(r.areas[0].to, 8.0);
         assert_eq!(r.areas[0].area, 30.0);
@@ -366,34 +365,34 @@ mod tests {
     }
 
     #[test]
-    fn plage_degeneree_est_une_plage_vide() {
+    fn degenerate_range_is_an_empty_range() {
         assert_eq!(
-            integrate(&rampe(), &avec_plages(vec![(5.0, 5.0)])),
+            integrate(&ramp(), &with_ranges(vec![(5.0, 5.0)])),
             Err(AnalysisError::EmptyRange)
         );
-        // Une plage vide après une valide fait échouer le tout.
+        // An empty range after a valid one makes the whole fail.
         assert_eq!(
-            integrate(&rampe(), &avec_plages(vec![(1.0, 2.0), (5.0, 5.0)])),
-            Err(AnalysisError::EmptyRange)
-        );
-    }
-
-    #[test]
-    fn plage_hors_donnees_de_l_autre_cote_est_vide() {
-        assert_eq!(
-            integrate(&rampe(), &avec_plages(vec![(-6.0, -5.0)])),
-            Err(AnalysisError::EmptyRange)
-        );
-        // Plage qui ne touche les données qu'en un point : dégénérée.
-        assert_eq!(
-            integrate(&rampe(), &avec_plages(vec![(10.0, 12.0)])),
+            integrate(&ramp(), &with_ranges(vec![(1.0, 2.0), (5.0, 5.0)])),
             Err(AnalysisError::EmptyRange)
         );
     }
 
     #[test]
-    fn liste_de_plages_vide_integre_toute_la_courbe() {
-        let r = integrate(&rampe(), &spec()).unwrap();
+    fn range_outside_the_data_on_the_other_side_is_empty() {
+        assert_eq!(
+            integrate(&ramp(), &with_ranges(vec![(-6.0, -5.0)])),
+            Err(AnalysisError::EmptyRange)
+        );
+        // Range that touches the data at only one point: degenerate.
+        assert_eq!(
+            integrate(&ramp(), &with_ranges(vec![(10.0, 12.0)])),
+            Err(AnalysisError::EmptyRange)
+        );
+    }
+
+    #[test]
+    fn empty_range_list_integrates_the_whole_curve() {
+        let r = integrate(&ramp(), &spec()).unwrap();
         assert_eq!(r.total, 50.0);
         assert_eq!(r.areas.len(), 1);
         assert_eq!((r.areas[0].from, r.areas[0].to), (0.0, 10.0));
@@ -401,16 +400,16 @@ mod tests {
     }
 
     #[test]
-    fn plages_chevauchantes_comptees_chacune_et_additionnees() {
-        // Comportement actuel : le recouvrement [4, 6] est compté deux fois.
-        let r = integrate(&rampe(), &avec_plages(vec![(2.0, 6.0), (4.0, 8.0)])).unwrap();
+    fn overlapping_ranges_counted_each_and_summed() {
+        // Current behavior: the overlap [4, 6] is counted twice.
+        let r = integrate(&ramp(), &with_ranges(vec![(2.0, 6.0), (4.0, 8.0)])).unwrap();
         assert_eq!(r.areas[0].area, 16.0);
         assert_eq!(r.areas[1].area, 24.0);
         assert_eq!(r.total, 40.0);
     }
 
     #[test]
-    fn cumul_et_normalisation_ordinaires_sur_une_rampe() {
+    fn ordinary_cumulative_and_normalization_on_a_ramp() {
         let mut sp = spec();
         sp.cumulative = true;
         sp.normalize = true;
@@ -425,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn debordement_total_infini_negatif_donne_aussi_nan() {
+    fn negative_infinite_total_overflow_also_gives_nan() {
         let s = Series::new(vec![0.0, 10.0], vec![-1e308, -1e308]);
         let mut sp = spec();
         sp.normalize = true;
@@ -435,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn juste_sous_le_debordement_le_resultat_reste_fini_et_exact() {
+    fn just_below_the_overflow_the_result_stays_finite_and_exact() {
         let s = Series::new(vec![0.0, 10.0], vec![1e307, 1e307]);
         let mut sp = spec();
         sp.cumulative = true;
@@ -452,17 +451,17 @@ mod tests {
     }
 
     #[test]
-    fn debordement_d_une_plage_parmi_deux_rend_le_total_nan_mais_garde_l_autre_aire() {
+    fn overflow_of_one_range_out_of_two_makes_the_total_nan_but_keeps_the_other_area() {
         let s = Series::new(vec![0.0, 1.0, 2.0, 12.0], vec![1.0, 1.0, 1e308, 1e308]);
-        let r = integrate(&s, &avec_plages(vec![(0.0, 1.0), (2.0, 12.0)])).unwrap();
+        let r = integrate(&s, &with_ranges(vec![(0.0, 1.0), (2.0, 12.0)])).unwrap();
         assert_eq!(r.areas[0].area, 1.0);
         assert!(r.areas[1].area.is_infinite());
         assert!(r.total.is_nan());
     }
 
     #[test]
-    fn normalisation_par_une_aire_nulle_avec_y_non_nul_donne_nan_et_non_infini() {
-        // Aire nulle (+1 puis -1) mais Y non nul : `y / 0` = ±inf → NaN.
+    fn normalization_by_a_zero_area_with_non_zero_y_gives_nan_not_infinity() {
+        // Zero area (+1 then -1) but non-zero Y: `y / 0` = ±inf → NaN.
         let s = Series::new(vec![0.0, 1.0, 2.0], vec![1.0, 0.0, -1.0]);
         let mut sp = spec();
         sp.normalize = true;

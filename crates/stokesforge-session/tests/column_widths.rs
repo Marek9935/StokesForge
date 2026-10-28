@@ -1,34 +1,35 @@
-//! Largeur des colonnes (#325) : table `NodeId -> f32` de l'acteur, à côté des
-//! géométries de fenêtre — hors du modèle, hors de l'historique, partageant
-//! `geometry_revision`, enregistrée dans le `.stf`, jamais purgée à la mutation.
+//! Column width (#325): the actor's `NodeId -> f32` table, beside the window
+//! geometries — outside the model, outside the history, sharing
+//! `geometry_revision`, saved in the `.stf`, never purged on mutation.
 
 use stokesforge_commands::Command;
 use stokesforge_core::{Column, NodeId, Project};
 use stokesforge_session::Session;
 
-/// `Book1` → `Sheet1` → colonnes `A`, `B`. Rend `(project, a, b)`.
+/// `Book1` → `Sheet1` → columns `A`, `B`. Returns `(project, a, b)`.
 fn fixture() -> (Project, NodeId, NodeId) {
-    let mut project = Project::new("Demo").expect("projet valide");
+    let mut project = Project::new("Demo").expect("valid project");
     let root = project.root();
     project
         .add_workbook(root, Some("Book1"))
-        .expect("classeur créé");
+        .expect("workbook created");
     let sheet = project
         .resolve_path("[Book1]Sheet1")
-        .expect("feuille résolue");
+        .expect("sheet resolved");
     let a = project
         .add_column(sheet, None, Some("A"), Column::from_f64(&[1.0, 2.0]))
-        .expect("colonne A");
+        .expect("column A");
     let b = project
         .add_column(sheet, None, Some("B"), Column::from_f64(&[3.0, 4.0]))
-        .expect("colonne B");
+        .expect("column B");
     (project, a, b)
 }
 
-/// Poser une largeur ne touche ni `revision` ni l'historique : `geometry_revision`
-/// avance seule. Témoin : faire passer la pose par `revision`.
+/// Setting a width touches neither `revision` nor the history:
+/// `geometry_revision` alone advances. Witness: make the setting go through
+/// `revision`.
 #[test]
-fn poser_une_largeur_n_avance_que_geometry_revision() {
+fn setting_a_width_only_advances_geometry_revision() {
     let (project, _a, b) = fixture();
     let session = Session::spawn(project, None).unwrap();
     let handle = session.handle();
@@ -39,11 +40,11 @@ fn poser_une_largeur_n_avance_que_geometry_revision() {
     assert_eq!(rev, before.geometry_revision + 1);
 
     let after = handle.snapshot().unwrap();
-    assert_eq!(after.revision, before.revision, "revision intacte");
-    assert!(!after.history.can_undo, "aucune entrée d'historique");
+    assert_eq!(after.revision, before.revision, "revision intact");
+    assert!(!after.history.can_undo, "no history entry");
     assert_eq!(after.geometry_revision, before.geometry_revision + 1);
     assert_eq!(after.column_widths.get(&b), Some(&80.0));
-    // La même largeur reposée, ou une largeur invalide, ne réveille personne.
+    // The same width set again, or an invalid width, wakes nobody.
     handle.set_column_width(b, 80.0).unwrap();
     handle.set_column_width(b, f32::NAN).unwrap();
     handle.set_column_width(b, -4.0).unwrap();
@@ -55,11 +56,11 @@ fn poser_une_largeur_n_avance_que_geometry_revision() {
     session.shutdown().unwrap();
 }
 
-/// Supprimer la colonne puis Ctrl+Z : sa largeur revient (invariant 7 : le
-/// `NodeId` est le même, et la table n'est pas purgée à la mutation).
-/// Témoin : ajouter les largeurs à `purge_orphaned_geometries`.
+/// Delete the column then Ctrl+Z: its width comes back (invariant 7: the
+/// `NodeId` is the same, and the table is not purged on mutation).
+/// Witness: add the widths to `purge_orphaned_geometries`.
 #[test]
-fn la_largeur_revient_avec_la_colonne_apres_annulation() {
+fn the_width_comes_back_with_the_column_after_undo() {
     let (project, a, b) = fixture();
     let session = Session::spawn(project, None).unwrap();
     let handle = session.handle();
@@ -79,20 +80,20 @@ fn la_largeur_revient_avec_la_colonne_apres_annulation() {
     session.shutdown().unwrap();
 }
 
-/// Aller-retour `save`/`load` : la table se retrouve identique.
-/// Témoin : ne pas écrire le champ.
+/// `save`/`load` round trip: the table comes back identical.
+/// Witness: do not write the field.
 #[test]
-fn les_largeurs_font_l_aller_retour_du_fichier() {
+fn the_widths_make_the_file_round_trip() {
     let (project, a, b) = fixture();
     let session = Session::spawn(project, None).unwrap();
     let handle = session.handle();
     handle.set_column_width(a, 61.0).unwrap();
     handle.set_column_width(b, 99.5).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("largeurs.stf");
+    let path = dir.path().join("widths.stf");
     handle.save(&path).unwrap();
 
-    let other = Session::spawn(Project::new("Vide").unwrap(), None).unwrap();
+    let other = Session::spawn(Project::new("Empty").unwrap(), None).unwrap();
     let other_handle = other.handle();
     other_handle.load(&path).unwrap();
     let loaded = other_handle.snapshot().unwrap();
@@ -101,52 +102,52 @@ fn les_largeurs_font_l_aller_retour_du_fichier() {
         *handle.snapshot().unwrap().column_widths
     );
     assert_eq!(loaded.column_widths.len(), 2);
-    // Un projet neuf vide la table.
+    // A new project empties the table.
     other_handle.new_project().unwrap();
     assert!(other_handle.snapshot().unwrap().column_widths.is_empty());
     session.shutdown().unwrap();
     other.shutdown().unwrap();
 }
 
-/// Sauvegarde après suppression : la clé de la colonne disparue n'est pas
-/// écrite, alors que la table de l'acteur la garde (pour Ctrl+Z).
-/// Témoin : retirer le filtre de `save_with_geometries`.
+/// Save after deletion: the key of the vanished column is not written, while
+/// the actor's table keeps it (for Ctrl+Z).
+/// Witness: remove the filter of `save_with_geometries`.
 #[test]
-fn la_sauvegarde_n_ecrit_pas_la_largeur_d_une_colonne_supprimee() {
+fn saving_does_not_write_the_width_of_a_deleted_column() {
     let (project, a, b) = fixture();
     let session = Session::spawn(project, None).unwrap();
     let handle = session.handle();
     handle.set_column_width(a, 61.0).unwrap();
     handle.set_column_width(b, 99.0).unwrap();
     handle.execute(Command::DeleteColumn { column: b }).unwrap();
-    // L'acteur garde la clé morte...
+    // The actor keeps the dead key...
     assert!(handle.snapshot().unwrap().column_widths.contains_key(&b));
 
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("supprime.stf");
+    let path = dir.path().join("deleted.stf");
     handle.save(&path).unwrap();
-    // ... mais le fichier ne la porte pas.
+    // ... but the file does not carry it.
     let (_, view, _) = stokesforge_persistence::load_with_report(&path).unwrap();
     assert_eq!(view.column_widths.get(&a), Some(&61.0));
     assert!(!view.column_widths.contains_key(&b));
-    // Et le fichier brut non plus (le filtre de lecture ne masque pas l'écriture).
+    // Nor does the raw file (the read filter does not hide the write).
     let raw = std::fs::read(&path).unwrap();
     let needle = b"column_widths";
     let at = raw
         .windows(needle.len())
         .position(|w| w == needle)
-        .expect("le champ est écrit");
-    // Une map à une entrée : fixmap 0x81 juste après la clé (str de 13 : 0xad + nom).
-    assert_eq!(raw[at + needle.len()], 0x81, "une seule largeur écrite");
+        .expect("the field is written");
+    // A one-entry map: fixmap 0x81 right after the key (13-byte str: 0xad + name).
+    assert_eq!(raw[at + needle.len()], 0x81, "only one width written");
     session.shutdown().unwrap();
 }
 
-/// Remettre une largeur posée au défaut (#330) : la clé disparaît,
-/// `geometry_revision` avance de 1, ni `revision` ni l'historique ne bougent.
-/// Une colonne sans largeur : rien ne change. Témoin éprouvé : `+= 1`
-/// inconditionnel (rouge).
+/// Resetting a set width to the default (#330): the key disappears,
+/// `geometry_revision` advances by 1, neither `revision` nor the history
+/// moves. A column without a width: nothing changes. Witness tried: an
+/// unconditional `+= 1` (red).
 #[test]
-fn remettre_au_defaut_retire_la_cle_et_n_avance_que_si_elle_existait() {
+fn resetting_to_default_removes_the_key_and_advances_only_if_it_existed() {
     let (project, a, b) = fixture();
     let session = Session::spawn(project, None).unwrap();
     let handle = session.handle();
@@ -157,22 +158,18 @@ fn remettre_au_defaut_retire_la_cle_et_n_avance_que_si_elle_existait() {
     handle.reset_column_widths(&[b]).unwrap();
     let after = handle.snapshot().unwrap();
     assert!(!after.column_widths.contains_key(&b));
-    assert_eq!(
-        after.column_widths.get(&a),
-        Some(&61.0),
-        "A garde la sienne"
-    );
+    assert_eq!(after.column_widths.get(&a), Some(&61.0), "A keeps its own");
     assert_eq!(after.geometry_revision, before.geometry_revision + 1);
-    assert_eq!(after.revision, before.revision, "revision intacte");
-    assert!(!after.history.can_undo, "aucune entrée d'historique");
+    assert_eq!(after.revision, before.revision, "revision intact");
+    assert!(!after.history.can_undo, "no history entry");
 
-    // Déjà au défaut : inchangé.
+    // Already at the default: unchanged.
     handle.reset_column_widths(&[b]).unwrap();
     handle.reset_column_widths(&[]).unwrap();
     let still = handle.snapshot().unwrap();
     assert_eq!(still.geometry_revision, after.geometry_revision);
 
-    // Plusieurs colonnes d'un coup : une seule avance.
+    // Several columns at once: a single advance.
     handle.reset_column_widths(&[a, b]).unwrap();
     let all = handle.snapshot().unwrap();
     assert!(all.column_widths.is_empty());
@@ -180,11 +177,11 @@ fn remettre_au_defaut_retire_la_cle_et_n_avance_que_si_elle_existait() {
     session.shutdown().unwrap();
 }
 
-/// Remise puis enregistrement : le fichier ne porte plus la clé (la session
-/// n'écrit pas 54). Témoin éprouvé : poser 54 au lieu de retirer, ou ne rien
-/// retirer (rouge).
+/// Reset then save: the file no longer carries the key (the session does not
+/// write 54). Witness tried: set 54 instead of removing, or remove nothing
+/// (red).
 #[test]
-fn une_colonne_remise_au_defaut_n_est_plus_dans_le_fichier() {
+fn a_column_reset_to_default_is_no_longer_in_the_file() {
     let (project, a, b) = fixture();
     let session = Session::spawn(project, None).unwrap();
     let handle = session.handle();
@@ -192,7 +189,7 @@ fn une_colonne_remise_au_defaut_n_est_plus_dans_le_fichier() {
     handle.set_column_width(b, 99.0).unwrap();
     handle.reset_column_widths(&[b]).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("remise.stf");
+    let path = dir.path().join("reset.stf");
     handle.save(&path).unwrap();
     let (_, view, _) = stokesforge_persistence::load_with_report(&path).unwrap();
     assert_eq!(view.column_widths.get(&a), Some(&61.0));

@@ -1,4 +1,4 @@
-//! Instantané immuable rendu aux clients de la session.
+//! Immutable snapshot returned to the session's clients.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,78 +8,74 @@ use stokesforge_core::{NodeId, Tree};
 
 use crate::WindowGeometry;
 
-/// Compteur monotone d'état : incrémenté à chaque changement effectif du
-/// modèle ou de l'historique (voir la doc de crate pour la liste exacte des
-/// événements qui l'incrémentent). Sert aux clients à détecter qu'un
-/// instantané est périmé, sans jamais comparer les arbres entre eux.
+/// Monotonic state counter: incremented on every effective change of the
+/// model or of the history (see the crate docs for the exact list of events
+/// that increment it). Clients use it to detect that a snapshot is stale,
+/// without ever comparing trees with each other.
 pub type Revision = u64;
 
-/// État de l'historique tel que l'UI en a besoin pour ses actions (menus
-/// grisés, libellé d'annuler/rétablir), sans exposer la pile elle-même.
+/// History state as the UI needs it for its actions (disabled menus,
+/// undo/redo label), without exposing the stack itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HistoryState {
-    /// Vrai s'il y a quelque chose à annuler.
+    /// True if there is something to undo.
     pub can_undo: bool,
-    /// Vrai s'il y a quelque chose à rétablir.
+    /// True if there is something to redo.
     pub can_redo: bool,
-    /// Libellé de la prochaine annulation, s'il y en a une.
+    /// Label of the next undo, if there is one.
     pub undo_label: Option<HistoryLabel>,
-    /// Libellé du prochain rétablissement, s'il y en a un.
+    /// Label of the next redo, if there is one.
     pub redo_label: Option<HistoryLabel>,
-    /// Vrai si une macro est actuellement ouverte. Une macro est globale à
-    /// la session : ce drapeau ne dit rien de qui l'a ouverte (voir la
-    /// limite documentée en tête de crate).
+    /// True if a macro is currently open. A macro is global to the
+    /// session: this flag says nothing about who opened it (see the limit
+    /// documented at the top of the crate).
     pub in_macro: bool,
 }
 
-/// Instantané immuable rendu aux clients. Cloner un `Snapshot` est bon marché
-/// (deux `Arc`/compteurs et une poignée de champs) : l'arbre n'est jamais
-/// recopié, seulement partagé.
+/// Immutable snapshot returned to clients. Cloning a `Snapshot` is cheap
+/// (two `Arc`s/counters and a handful of fields): the tree is never copied,
+/// only shared.
 #[derive(Debug, Clone)]
 pub struct Snapshot {
-    /// Arbre du projet au moment de l'instantané.
+    /// Project tree at the time of the snapshot.
     pub tree: Arc<Tree>,
-    /// Révision à laquelle cet instantané correspond.
+    /// Revision this snapshot corresponds to.
     pub revision: Revision,
-    /// État de l'historique à cette révision.
+    /// History state at this revision.
     pub history: HistoryState,
-    /// A3 (`guide-de-correction-robustesse.md` §F2/F6) — époque du projet
-    /// courant : un compteur local à l'acteur, **jamais persisté**,
-    /// incrémenté quand un `Load` ou `NewProject` réussit (jamais sur
-    /// `Execute`/`Undo`/`Redo`/macro, qui avancent déjà `revision`). Deux
-    /// instantanés de la même identité de projet partagent la même époque ;
-    /// un remplacement, même vers un fichier de forme identique, en change — à la
-    /// différence de `revision`, qui recommencerait à une petite valeur et
-    /// pourrait sembler « antérieure » sans jamais prouver qu'il s'agit
-    /// encore du même projet. Sert à `stokesforge-script` à détecter qu'une
-    /// poignée (`Handle`) désigne un `NodeId` d'un projet qui n'est plus
-    /// celui qui l'a produite, avant même de chercher ce `NodeId` dans
-    /// l'arbre courant — où il pourrait, par coïncidence, désigner un autre
-    /// objet.
+    /// A3 (`guide-de-correction-robustesse.md` §F2/F6) — epoch of the current
+    /// project: a counter local to the actor, **never persisted**,
+    /// incremented when a `Load` or `NewProject` succeeds (never on
+    /// `Execute`/`Undo`/`Redo`/macro, which already advance `revision`). Two
+    /// snapshots of the same project identity share the same epoch; a
+    /// replacement, even by a file of identical shape, changes it — unlike
+    /// `revision`, which would restart at a small value and could look
+    /// "earlier" without ever proving that it is still the same project.
+    /// `stokesforge-script` uses it to detect that a handle (`Handle`) names
+    /// a `NodeId` of a project that is no longer the one that produced it,
+    /// before even looking that `NodeId` up in the current tree — where it
+    /// could, by coincidence, name another object.
     pub epoch: u64,
-    /// Géométrie des fenêtres (position/taille), par `NodeId` — table tenue
-    /// par l'acteur **à côté** du `Project`, jamais dans l'arbre (voir la
-    /// doc de tête de crate). Cloner un `Snapshot` reste bon marché : cette
-    /// table est recopiée dans un `Arc` neuf à chaque instantané côté acteur
-    /// (`build_snapshot`), mais son coût est borné par le nombre de fenêtres
-    /// ouvertes, pas par la taille du modèle — sans commune mesure avec
-    /// `tree`, qui n'est jamais recopié.
+    /// Window geometry (position/size), by `NodeId` — a table kept by the
+    /// actor **beside** the `Project`, never in the tree (see the crate-level
+    /// docs). Cloning a `Snapshot` stays cheap: this table is copied into a
+    /// fresh `Arc` at each snapshot on the actor side (`build_snapshot`), but
+    /// its cost is bounded by the number of open windows, not by the size of
+    /// the model — out of all proportion with `tree`, which is never copied.
     pub window_geometries: Arc<HashMap<NodeId, WindowGeometry>>,
-    /// Largeur des colonnes de feuille (#325), en points logiques, par `NodeId`
-    /// de colonne — même statut que `window_geometries` : table de l'acteur
-    /// hors du `Project`, jamais dans l'historique. **Non purgée** à la
-    /// mutation : elle peut contenir la clé d'une colonne supprimée, dont la
-    /// largeur revient avec Ctrl+Z (invariant 7) ; seule la sauvegarde filtre.
-    /// Partage `geometry_revision`.
+    /// Sheet column widths (#325), in logical points, by column `NodeId` —
+    /// same status as `window_geometries`: an actor table outside the
+    /// `Project`, never in the history. **Not purged** on mutation: it can
+    /// hold the key of a deleted column, whose width comes back with Ctrl+Z
+    /// (invariant 7); only saving filters. Shares `geometry_revision`.
     pub column_widths: Arc<HashMap<NodeId, f32>>,
-    /// Compteur monotone **distinct** de `revision` : incrémenté à chaque
-    /// changement de `window_geometries` ou de `column_widths` (une pose de
-    /// géométrie ou de largeur, une purge d'entrée orpheline de géométrie, ou
-    /// un `Load` qui remplace toute la table), jamais
-    /// par `Execute`/`Undo`/`Redo`/une macro. Voir la doc de tête de crate
-    /// pour la décision : dissocier ce compteur de `revision` est ce qui
-    /// permet à un client de rendu de savoir qu'une fenêtre a bougé sans que
-    /// ça ressemble à une mutation du modèle (et donc sans invalider un
-    /// cache qui n'a aucune raison de l'être).
+    /// Monotonic counter **distinct** from `revision`: incremented on every
+    /// change of `window_geometries` or `column_widths` (setting a geometry
+    /// or a width, purging an orphan geometry entry, or a `Load` that
+    /// replaces the whole table), never by `Execute`/`Undo`/`Redo`/a macro.
+    /// See the crate-level docs for the decision: keeping this counter apart
+    /// from `revision` is what lets a rendering client know that a window
+    /// moved without it looking like a model mutation (and so without
+    /// invalidating a cache that has no reason to be).
     pub geometry_revision: u64,
 }

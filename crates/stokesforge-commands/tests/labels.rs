@@ -1,6 +1,6 @@
-//! Libellés d'historique structurés (issue #46) : chaque variante de
-//! `Command` produit son `HistoryLabel`, et le `Display` anglais dit la même
-//! chose que le catalogue de l'application.
+//! Structured history labels (issue #46): each variant of
+//! `Command` produces its `HistoryLabel`, and the English `Display` says the
+//! same thing as the application catalog.
 
 use std::collections::BTreeSet;
 
@@ -21,20 +21,20 @@ struct World {
     third: NodeId,
 }
 
-/// `Book1` / `Sheet1` avec trois colonnes nommées `Temps`, `Signal`, `Bruit` :
-/// des noms qui ne sont **pas** les lettres de la grille, pour que le test
-/// distingue la position du nom de nœud.
+/// `Book1` / `Sheet1` with three columns named `Time`, `Signal`, `Noise`:
+/// names that are **not** the grid letters, so that the test
+/// tells the position from the node name.
 fn world() -> World {
-    let mut project = Project::new("Demo").expect("projet");
+    let mut project = Project::new("Demo").expect("project");
     let root = project.root();
-    let book = project.add_workbook(root, Some("Book1")).expect("classeur");
-    let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+    let book = project.add_workbook(root, Some("Book1")).expect("workbook");
+    let sheet = project.resolve_path("[Book1]Sheet1").expect("sheet");
     let mut columns = Vec::new();
-    for name in ["Temps", "Signal", "Bruit"] {
+    for name in ["Time", "Signal", "Noise"] {
         columns.push(
             project
                 .add_column(sheet, None, Some(name), Column::from_f64(&[1.0, 2.0]))
-                .expect("colonne"),
+                .expect("column"),
         );
     }
     World {
@@ -46,9 +46,9 @@ fn world() -> World {
     }
 }
 
-/// Le rang de chaque variante : le `match` est **exhaustif** (aucune branche
-/// par défaut), donc une variante ajoutée à `Command` ne compile pas ici tant
-/// qu'elle n'a pas son rang — et le test de couverture exige alors un exemple.
+/// The rank of each variant: the `match` is **exhaustive** (no default
+/// branch), so a variant added to `Command` does not compile here until
+/// it has its rank — and the coverage test then demands an example.
 fn rank(command: &Command) -> usize {
     match command {
         Command::SetCells { .. } => 0,
@@ -93,7 +93,7 @@ fn named(name: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-/// Une commande de chaque variante, avec le libellé attendu.
+/// One command of each variant, with the expected label.
 fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
     let root = w.project.root();
     vec![
@@ -152,11 +152,11 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
         (
             Command::Rename {
                 id: w.book,
-                name: "Mesures".to_string(),
+                name: "Measures".to_string(),
             },
             HistoryLabel::Rename {
                 from: named("Book1"),
-                to: "Mesures".to_string(),
+                to: "Measures".to_string(),
             },
         ),
         (
@@ -166,7 +166,7 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
                 index: 1,
             },
             HistoryLabel::Move {
-                name: named("Temps"),
+                name: named("Time"),
             },
         ),
         (
@@ -205,10 +205,10 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
         (
             Command::AddFolder {
                 parent: root,
-                name: "Manips".to_string(),
+                name: "Experiments".to_string(),
             },
             HistoryLabel::AddFolder {
-                name: "Manips".to_string(),
+                name: "Experiments".to_string(),
             },
         ),
         (
@@ -330,14 +330,14 @@ fn samples(w: &World) -> Vec<(Command, HistoryLabel)> {
             HistoryLabel::AddCalculation(OperationKind::Correct),
         ),
         (
-            // Trace inconnue de l'arbre : pas de famille à nommer.
+            // Trace unknown to the tree: no family to name.
             Command::RestoreOriginalData {
                 trace: NodeId::from_raw(9_999),
             },
             HistoryLabel::RestoreOriginalData(None),
         ),
         (
-            // Calcul inconnu de l'arbre : la famille se lit dans le brouillon.
+            // Calculation unknown to the tree: the family is read from the draft.
             Command::UpdateCalculation {
                 id: NodeId::from_raw(9_999),
                 draft: calc_draft(w),
@@ -376,7 +376,7 @@ fn calc_draft(w: &World) -> CalculationDraft {
     }
 }
 
-/// Le `Display` anglais des libellés de calcul (journaux, CLI).
+/// The English `Display` of the calculation labels (logs, CLI).
 #[test]
 fn calculation_labels_display_in_english() {
     assert_eq!(
@@ -410,9 +410,9 @@ fn calculation_labels_display_in_english() {
     }
 }
 
-/// Chaque variante de `Command` produit son libellé — et les exemples couvrent
-/// **toutes** les variantes (le témoin : sans lui, un exemple oublié passerait
-/// pour un test exhaustif).
+/// Each `Command` variant produces its label — and the examples cover
+/// **all** the variants (the witness: without it, a forgotten example would
+/// pass for an exhaustive test).
 #[test]
 fn every_command_variant_produces_its_label() {
     let w = world();
@@ -431,35 +431,35 @@ fn every_command_variant_produces_its_label() {
     assert_eq!(
         covered,
         (0..VARIANTS).collect::<BTreeSet<_>>(),
-        "une variante de Command n'a pas d'exemple"
+        "a Command variant has no example"
     );
     for (command, expected) in samples {
         assert_eq!(
             command.label(w.project.tree()),
             expected,
-            "libellé de {command:?}"
+            "label of {command:?}"
         );
     }
 }
 
-/// Une colonne se désigne par sa position, jamais par son nom de nœud : le
-/// libellé de `Temps` (première colonne) porte `ColumnRef(0)`, dont la lettre
-/// est celle de l'en-tête de la grille.
+/// A column is designated by its position, never by its node name: the
+/// label of `Time` (first column) carries `ColumnRef(0)`, whose letter
+/// is that of the grid header.
 #[test]
 fn a_column_is_designated_by_its_position_not_its_node_name() {
     let w = world();
     let label = Command::DeleteColumn { column: w.third }.label(w.project.tree());
     assert_eq!(label.to_string(), "Delete Column C");
-    assert!(!label.to_string().contains("Bruit"));
+    assert!(!label.to_string().contains("Noise"));
 }
 
-/// Un nœud absent de l'arbre donne la forme générique, sans échec : c'est
-/// l'application de la commande qui échouera, avec la bonne erreur.
+/// A node absent from the tree gives the generic form, without failing: it is
+/// applying the command that will fail, with the right error.
 #[test]
 fn a_missing_node_gives_the_generic_label() {
     let mut w = world();
     let ghost = w.first;
-    w.project.remove(ghost).expect("suppression");
+    w.project.remove(ghost).expect("deletion");
     let tree = w.project.tree();
     let cases = [
         (
@@ -493,8 +493,8 @@ fn a_missing_node_gives_the_generic_label() {
     }
 }
 
-/// Le pluriel anglais du `Display` : seul 1 est au singulier. Le même cas est
-/// tenu côté interface par le catalogue (`stokesforge-app-state/tests/history_text.rs`).
+/// The English plural of the `Display`: only 1 is singular. The same case is
+/// held on the interface side by the catalog (`stokesforge-app-state/tests/history_text.rs`).
 #[test]
 fn the_english_display_pluralizes_rows() {
     let text = |count| HistoryLabel::InsertRows { count }.to_string();
@@ -507,8 +507,8 @@ fn the_english_display_pluralizes_rows() {
     );
 }
 
-/// Un libellé se compare : l'application n'a plus à lire un texte pour savoir
-/// si l'entrée du dessus est un import.
+/// A label is comparable: the application no longer has to read a text to know
+/// whether the entry on top is an import.
 #[test]
 fn macro_labels_compare_by_kind() {
     assert_eq!(

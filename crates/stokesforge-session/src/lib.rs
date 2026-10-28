@@ -1,149 +1,146 @@
-//! Acteur qui possède le `Project` de StokesForge et le sert à ses clients (l'UI,
-//! le thread de script Python de `stokesforge-script`) par un canal de requêtes.
+//! Actor that owns the StokesForge `Project` and serves it to its clients (the
+//! UI, the Python script thread of `stokesforge-script`) through a request
+//! channel.
 //!
-//! # Rôle
+//! # Role
 //!
-//! Ce crate rend concrète une décision d'architecture du socle
-//! (`docs/archive/rustrewrite/roadmap.md` §6) : **le `Project` vit sur son propre
-//! thread**. L'UI et le thread de script sont deux clients
-//! symétriques : ils envoient des requêtes et reçoivent des instantanés
-//! immuables ([`Snapshot`]). L'acteur détient le **seul** `&mut Project` du
-//! processus, ce qui transforme la règle « aucune mutation hors d'une
-//! commande » en propriété de propriété — vérifiable par le compilateur —
-//! plutôt qu'en convention à surveiller.
+//! This crate makes concrete an architecture decision of the foundation
+//! (`docs/archive/rustrewrite/roadmap.md` §6): **the `Project` lives on its own
+//! thread**. The UI and the script thread are two symmetric clients: they
+//! send requests and receive immutable snapshots ([`Snapshot`]). The actor
+//! holds the **only** `&mut Project` of the process, which turns the rule "no
+//! mutation outside a command" into a property of ownership — checkable by
+//! the compiler — rather than a convention to watch.
 //!
-//! # Protocole
+//! # Protocol
 //!
-//! Un canal de requêtes **FIFO** (`std::sync::mpsc`, ordre déterministe) ;
-//! chaque requête reçoit **une** réponse, sur un canal à usage unique créé
-//! par le client pour cette requête. L'UI garde le dernier [`Snapshot`] reçu
-//! et peint depuis lui sans verrou ; un client sait si son instantané est
-//! périmé en comparant la `revision` (compteur monotone), jamais en
-//! comparant les arbres entre eux.
+//! A **FIFO** request channel (`std::sync::mpsc`, deterministic order); each
+//! request gets **one** reply, on a single-use channel created by the client
+//! for that request. The UI keeps the last [`Snapshot`] received and paints
+//! from it without a lock; a client knows whether its snapshot is stale by
+//! comparing the `revision` (monotonic counter), never by comparing trees with
+//! each other.
 //!
-//! Deux requêtes passent par `stokesforge-persistence` (frontière figée, format
-//! provisoire — voir la doc de ce crate) : [`SessionHandle::save`] écrit le
-//! projet courant sans toucher à la révision ni à l'historique, et
-//! [`SessionHandle::load`] **remplace** le projet courant par un projet
-//! neuf chargé depuis le disque et **réinitialise l'historique**
-//! (`undo`/`redo` redeviennent vides) — un ancien instantané n'a alors plus
-//! aucun rapport avec l'arbre courant, y compris ses identifiants de nœud,
-//! qui repartent de la valeur persistée dans le fichier. `load` est refusé
-//! (`Err(SessionError::Command(CommandError::MacroOpen(_)))`) si une macro
-//! est ouverte ; dans ce cas, comme pour tout échec de `save`/`load`, ni le
-//! projet ni l'historique ne sont modifiés.
+//! Two requests go through `stokesforge-persistence` (frozen boundary,
+//! provisional format — see the docs of that crate): [`SessionHandle::save`]
+//! writes the current project without touching the revision or the history,
+//! and [`SessionHandle::load`] **replaces** the current project with a new
+//! project loaded from disk and **resets the history** (`undo`/`redo` become
+//! empty again) — an old snapshot then has no relation left to the current
+//! tree, including its node identifiers, which restart from the value
+//! persisted in the file. `load` is refused
+//! (`Err(SessionError::Command(CommandError::MacroOpen(_)))`) if a macro is
+//! open; in that case, as for any `save`/`load` failure, neither the project
+//! nor the history is modified.
 //!
-//! # Deux invariants tenus par construction
+//! # Two invariants held by construction
 //!
-//! 1. **L'acteur ne touche jamais à Python.** Ce crate ne dépend d'aucun
-//!    crate Python, alors même que `stokesforge-script` existe et l'appelle : le
-//!    type d'un objet Python n'est pas nommable ici, ce qui rend le blocage
-//!    mutuel GIL ↔ acteur structurellement impossible. Une liste blanche de
-//!    dépendances (`tests/no_ui_dependency.rs`) force une décision consciente
-//!    à toute nouvelle dépendance, plutôt que de compter sur une relecture.
-//! 2. **Aucun objet non-`Send` ne traverse le canal.** Requêtes et réponses
-//!    sont du Rust pur, `Send + 'static` — vérifié par un test de
-//!    compilation statique (`assert_send`, dans ce module et dans
-//!    `actor`).
+//! 1. **The actor never touches Python.** This crate depends on no Python
+//!    crate, even though `stokesforge-script` exists and calls it: the type
+//!    of a Python object cannot be named here, which makes a GIL ↔ actor
+//!    deadlock structurally impossible. A whitelist of dependencies
+//!    (`tests/no_ui_dependency.rs`) forces a conscious decision for every new
+//!    dependency, rather than relying on a review.
+//! 2. **No non-`Send` object crosses the channel.** Requests and replies are
+//!    pure Rust, `Send + 'static` — checked by a static compile-time test
+//!    (`assert_send`, in this module and in `actor`).
 //!
-//! # Ce qu'une macro ouverte fait des huit requêtes, et ce que change l'identité de l'émetteur
+//! # What an open macro does to the eight requests, and what the sender's identity changes
 //!
-//! F6 (`guide-de-correction-robustesse.md` §2, §6) : tout ce qu'un client
-//! sait du projet est une copie potentiellement périmée, donc toute
-//! hypothèse doit voyager dans la requête et être vérifiée par l'acteur au
-//! moment de l'appliquer — jamais avant. Cette table referme la question que
-//! le palliatif d'A11 (vague 1 de la campagne) avait seulement mise en
-//! évidence sans y répondre : *lesquelles des huit requêtes une macro
-//! ouverte doit-elle suspendre, et pour qui ?*
+//! F6 (`guide-de-correction-robustesse.md` §2, §6): everything a client knows
+//! about the project is a potentially stale copy, so every assumption must
+//! travel in the request and be checked by the actor at the moment of
+//! applying it — never before. This table closes the question that the A11
+//! stopgap (wave 1 of the campaign) had only brought to light without
+//! answering it: *which of the eight requests must an open macro suspend, and
+//! for whom?*
 //!
-//! Chaque [`SessionHandle`] porte désormais une identité stable (`ClientId`,
-//! privé au crate — voir sa doc) : deux `.clone()` d'une même poignée restent le même
-//! émetteur (un script qui clone sa poignée pour un thread reste « lui-même »)
-//! ; deux poignées issues de deux appels **indépendants** à [`Session::handle`]
-//! sont deux émetteurs distincts, même dans le même processus.
+//! Each [`SessionHandle`] now carries a stable identity (`ClientId`, private
+//! to the crate — see its docs): two `.clone()`s of the same handle remain the
+//! same sender (a script that clones its handle for a thread stays "itself");
+//! two handles obtained from two **independent** calls to [`Session::handle`]
+//! are two distinct senders, even in the same process.
 //!
-//! | Requête | Pendant une macro ouverte, aujourd'hui | Ce que l'identité de l'émetteur y change |
+//! | Request | During an open macro, today | What the sender's identity changes |
 //! |---|---|---|
-//! | `Execute` | absorbée dans la macro courante, quel que soit l'émetteur (A4 : c'était le bug — le travail d'un client s'infiltrait dans la macro d'un autre) | **refusée** (`CommandError::ForeignMacro("execute")`) si l'émetteur n'est pas le propriétaire de la macro ; absorbée normalement sinon |
-//! | `Undo` | refusée pour **quiconque** (`CommandError::MacroOpen("undo")`) : annuler pendant une macro, la sienne ou celle d'un autre, laisserait un état incohérent | inchangé — ce refus ne dépend jamais de qui a ouvert la macro |
-//! | `Redo` | refusée pour quiconque (`CommandError::MacroOpen("redo")`), même raison qu'`Undo` | inchangé |
-//! | `BeginMacro` | ouvre un niveau d'imbrication supplémentaire, quel que soit l'émetteur, jusqu'à [`stokesforge_commands::MAX_MACRO_DEPTH`] | **refusée** (`ForeignMacro("begin_macro")`) si une macro est déjà ouverte par un *autre* émetteur ; un même émetteur peut toujours imbriquer la sienne |
-//! | `EndMacro` | ferme le niveau courant en une entrée d'historique, quel que soit l'émetteur | **refusée** (`ForeignMacro("end_macro")`) si l'émetteur n'est pas le propriétaire — `CommandError::NotInMacro` reste réservé au cas où **aucune** macro n'est ouverte |
-//! | `AbortMacro` | annule le niveau courant et tout son contenu, quel que soit l'émetteur — **y compris le travail déjà validé d'un autre client, silencieusement** : c'était exactement A4 | **refusée** (`ForeignMacro("abort_macro")`) si l'émetteur n'est pas le propriétaire : un `abort_macro` ne peut plus défaire le travail de quelqu'un d'autre |
-//! | `Save` | refusée pour quiconque pendant une macro ouverte (A11, **palliatif déclaré** en vague 1 : la garde de `load_project` recopiée sans plus de nuance) | inchangé — le refus ne dépend pas de qui a ouvert la macro ; écrire sur le disque l'état intermédiaire d'une macro que *quelqu'un* pourrait encore avorter reste interdit à tous |
-//! | `Load` | refusée pour quiconque pendant une macro ouverte, avant même de toucher au disque | inchangé, même raison que `Save` |
-//! | `NewProject` | mêmes gardes que `Load` ; remplace l'identité, l'historique et les géométries | refusée pour quiconque pendant une macro |
+//! | `Execute` | absorbed into the current macro, whatever the sender (A4: that was the bug — one client's work leaked into another's macro) | **refused** (`CommandError::ForeignMacro("execute")`) if the sender does not own the macro; absorbed normally otherwise |
+//! | `Undo` | refused for **anyone** (`CommandError::MacroOpen("undo")`): undoing during a macro, one's own or another's, would leave an inconsistent state | unchanged — this refusal never depends on who opened the macro |
+//! | `Redo` | refused for anyone (`CommandError::MacroOpen("redo")`), same reason as `Undo` | unchanged |
+//! | `BeginMacro` | opens one more nesting level, whatever the sender, up to [`stokesforge_commands::MAX_MACRO_DEPTH`] | **refused** (`ForeignMacro("begin_macro")`) if a macro is already open by *another* sender; the same sender can always nest its own |
+//! | `EndMacro` | closes the current level into one history entry, whatever the sender | **refused** (`ForeignMacro("end_macro")`) if the sender is not the owner — `CommandError::NotInMacro` stays reserved for the case where **no** macro is open |
+//! | `AbortMacro` | undoes the current level and all its content, whatever the sender — **including another client's already validated work, silently**: that was exactly A4 | **refused** (`ForeignMacro("abort_macro")`) if the sender is not the owner: an `abort_macro` can no longer undo somebody else's work |
+//! | `Save` | refused for anyone during an open macro (A11, **declared stopgap** in wave 1: the guard of `load_project` copied without more nuance) | unchanged — the refusal does not depend on who opened the macro; writing to disk the intermediate state of a macro that *somebody* could still abort stays forbidden to all |
+//! | `Load` | refused for anyone during an open macro, before even touching the disk | unchanged, same reason as `Save` |
+//! | `NewProject` | same guards as `Load`; replaces the identity, the history and the geometries | refused for anyone during a macro |
 //!
-//! `Snapshot` et `Shutdown` ne mutent rien : `Snapshot` est une lecture pure,
-//! toujours servie ; `Shutdown` ne passe pas par ce tableau mais par le
-//! constat qui suit.
+//! `Snapshot` and `Shutdown` mutate nothing: `Snapshot` is a pure read,
+//! always served; `Shutdown` does not go through this table but through the
+//! finding that follows.
 //!
-//! # Géométrie des fenêtres
+//! # Window geometry
 //!
-//! Position et taille des fenêtres de l'UI (un classeur, un graphe, une
-//! matrice, une note — tout nœud qui porte une `WindowMeta`) ne sont **pas**
-//! un champ du modèle : ni un ajout à `WindowMeta`
-//! (`crates/stokesforge-core/src/node.rs`), ni quoi que ce soit de persistant
-//! dans `stokesforge-core`. Raison : déplacer ou redimensionner une fenêtre ne
-//! doit **jamais** pousser d'entrée sur `History` — Ctrl+Z reste réservé aux
-//! vraies mutations de données (invariant 1).
+//! Position and size of the UI windows (a workbook, a graph, a matrix, a note
+//! — any node that carries a `WindowMeta`) are **not** a field of the model:
+//! neither an addition to `WindowMeta`
+//! (`crates/stokesforge-core/src/node.rs`), nor anything persistent in
+//! `stokesforge-core`. Reason: moving or resizing a window must **never**
+//! push an entry onto `History` — Ctrl+Z stays reserved for real data
+//! mutations (invariant 1).
 //!
-//! L'acteur garde donc une table `NodeId -> `[`WindowGeometry`]` **à côté**
-//! du `Project` (voir `actor::run`), mutée par
-//! [`SessionHandle::set_window_geometry`] : une requête légère qui ne passe
-//! ni par `History` ni par la `revision` qui accompagne undo/redo. Elle fait
-//! en revanche avancer un compteur **dédié**, `Snapshot::geometry_revision`
-//! — la question posée était : un client de rendu qui ne connaît la
-//! position des fenêtres que par le `Snapshot` a quand même besoin de
-//! savoir qu'elle a changé pour repeindre, sans que ça ressemble à une
-//! mutation du modèle qui invaliderait un cache d'affichage (le
-//! `(revision, rect, pixels_per_point, view_generation)` de
-//! `stokesforge-render-egui`, voir `docs/rendu.md`) qui n'a aucune raison de
-//! l'être. Séparer les deux compteurs referme cette question : `revision`
-//! ne bouge jamais pour une géométrie, `geometry_revision` ne bouge jamais
-//! pour une mutation du modèle.
+//! The actor therefore keeps a `NodeId -> `[`WindowGeometry`]` table **beside**
+//! the `Project` (see `actor::run`), mutated by
+//! [`SessionHandle::set_window_geometry`]: a light request that goes neither
+//! through `History` nor through the `revision` that goes with undo/redo. It
+//! does, however, advance a **dedicated** counter,
+//! `Snapshot::geometry_revision` — the question asked was: a rendering client
+//! that knows the position of the windows only through the `Snapshot` still
+//! needs to know that it changed in order to repaint, without it looking like
+//! a model mutation that would invalidate a display cache (the
+//! `(revision, rect, pixels_per_point, view_generation)` of
+//! `stokesforge-render-egui`, see `docs/rendu.md`) that has no reason to be.
+//! Separating the two counters closes that question: `revision` never moves
+//! for a geometry, `geometry_revision` never moves for a model mutation.
 //!
-//! Suppression d'un nœud : son entrée de géométrie devient orpheline dès
-//! qu'une commande (actuelle ou future) le retire de l'arbre. L'acteur la
-//! purge automatiquement — `actor::purge_orphaned_geometries`, appelée après
-//! tout `Execute`/`Undo`/`Redo` qui a effectivement changé l'arbre — plutôt
-//! que de la laisser traîner : c'est un nettoyage sans risque d'une simple
-//! entrée de `HashMap` non référencée, et la garder n'aurait aucun usage
-//! (rouvrir ce même `NodeId` un jour n'a pas de sens, les identifiants ne
-//! sont jamais réutilisés — invariant 7).
+//! Deleting a node: its geometry entry becomes orphaned as soon as a command
+//! (current or future) removes it from the tree. The actor purges it
+//! automatically — `actor::purge_orphaned_geometries`, called after every
+//! `Execute`/`Undo`/`Redo` that actually changed the tree — rather than
+//! leaving it around: it is a risk-free cleanup of a plain unreferenced
+//! `HashMap` entry, and keeping it would serve no purpose (reopening that same
+//! `NodeId` one day makes no sense, identifiers are never reused —
+//! invariant 7).
 //!
-//! **Largeur des colonnes (#325).** Une seconde table `NodeId -> f32`, à côté
-//! de la première, avec le même statut (hors `Project`, jamais dans
-//! l'historique, mutée par [`SessionHandle::set_column_width`], partage
-//! `geometry_revision`). **Exception à la purge** : elle n'est jamais purgée à
-//! la mutation. L'identifiant d'une colonne n'est jamais réutilisé (invariant 7)
-//! et Ctrl+Z la ressuscite sous le même `NodeId` : elle doit y retrouver sa
-//! largeur. C'est la sauvegarde qui écarte les clés dont le nœud n'existe plus.
+//! **Column widths (#325).** A second `NodeId -> f32` table, beside the first,
+//! with the same status (outside the `Project`, never in the history, mutated
+//! by [`SessionHandle::set_column_width`], shares `geometry_revision`).
+//! **Exception to the purge**: it is never purged on mutation. A column's
+//! identifier is never reused (invariant 7) and Ctrl+Z resurrects it under the
+//! same `NodeId`: it must find its width again there. Saving is what drops the
+//! keys whose node no longer exists.
 //!
-//! Persistée malgré tout : [`SessionHandle::save`]/[`SessionHandle::load`]
-//! passent par `stokesforge_persistence::save_with_geometries`/
-//! `load_with_geometries`, qui écrivent/lisent ce bloc **séparé de l'arbre
-//! annulable** dans le fichier `.stf` (`FileBody::window_geometries` et
+//! Persisted all the same: [`SessionHandle::save`]/[`SessionHandle::load`] go
+//! through `stokesforge_persistence::save_with_geometries`/
+//! `load_with_geometries`, which write/read this block **separate from the
+//! undoable tree** in the `.stf` file (`FileBody::window_geometries` and
 //! `FileBody::column_widths`,
-//! `#[serde(default)]` — voir `docs/persistance.md`) — jamais mêlé aux
-//! `NodeRecord`, jamais par `convert.rs`.
+//! `#[serde(default)]` — see `docs/persistance.md`) — never mixed into the
+//! `NodeRecord`s, never through `convert.rs`.
 //!
-//! **`Session::shutdown` pendant une macro ouverte — constat non
-//! reproductible, corrigé.** Une macro ouverte à l'arrêt de l'acteur n'avait
-//! aucune garde : `Request::Shutdown` rendait directement le `Project`
-//! courant, macro comprise — ses mutations, déjà appliquées au modèle en
-//! mémoire (une macro n'empêche jamais `Project` d'être muté, elle ne fait
-//! que différer l'entrée d'historique), se retrouvaient **commises en
-//! silence**, sans jamais être devenues une entrée annulable et sans que
-//! `end_macro` ait été appelé. Même absence de garde qu'A11, mais à la
-//! sortie plutôt qu'à la sauvegarde — et sans reproduction possible (le banc
-//! ne peut pas observer un `Project` qui n'existe plus après l'arrêt de
-//! l'acteur, voir `guide-de-correction-robustesse.md` §7.3). La correction
-//! retenue, triviale une fois A4 en place : `actor::run` annule (plutôt que
-//! de commettre) toute macro encore ouverte à la réception de `Shutdown`,
-//! niveau par niveau (`History::abort_macro`, sans distinction de
-//! propriétaire — il n'y a plus de client à qui répondre) — une macro
-//! ouverte à l'arrêt est désormais **annulée, pas commise**.
+//! **`Session::shutdown` during an open macro — finding not reproducible,
+//! fixed.** A macro open when the actor stopped had no guard:
+//! `Request::Shutdown` directly returned the current `Project`, macro
+//! included — its mutations, already applied to the in-memory model (a macro
+//! never prevents `Project` from being mutated, it only defers the history
+//! entry), ended up **silently committed**, without ever having become an
+//! undoable entry and without `end_macro` having been called. Same missing
+//! guard as A11, but at exit rather than at save — and with no possible
+//! reproduction (the bench cannot observe a `Project` that no longer exists
+//! after the actor stops, see `guide-de-correction-robustesse.md` §7.3). The
+//! chosen fix, trivial once A4 is in place: `actor::run` undoes (rather than
+//! commits) every macro still open on receiving `Shutdown`, level by level
+//! (`History::abort_macro`, without distinguishing owners — there is no client
+//! left to answer) — a macro open at shutdown is now **aborted, not
+//! committed**.
 
 #![cfg_attr(
     not(test),
@@ -168,8 +165,8 @@ use stokesforge_core::{NodeId, Project};
 use actor::Request;
 use gauge::RecalcGauge;
 
-/// Nom d'un projet neuf : celui de Fichier > Nouveau, et celui du projet vide
-/// du démarrage (#333).
+/// Name of a new project: that of File > New, and that of the empty project
+/// at startup (#333).
 pub const NEW_PROJECT_NAME: &str = "Project1";
 
 pub use error::{SessionError, SessionResult};
@@ -177,66 +174,63 @@ pub use gauge::RecalcEnd;
 pub use recalc::FormulaRecalc;
 pub use snapshot::{HistoryState, Revision, Snapshot};
 
-/// Position et taille d'une fenêtre de l'UI — voir « Géométrie des fenêtres »
-/// ci-dessus pour ce qu'elle est et pourquoi elle vit ici plutôt que dans le
-/// modèle. Réutilise directement le type public de `stokesforge-persistence` : la
-/// doc de tête de ce type explique pourquoi ce n'est pas une duplication
-/// (persistance est **sous** ce crate dans le graphe de dépendances et ne
-/// peut donc pas nommer un type défini ici).
+/// Position and size of a UI window — see "Window geometry" above for what
+/// it is and why it lives here rather than in the model. Directly reuses the
+/// public type of `stokesforge-persistence`: the top-level doc of that type
+/// explains why this is not a duplication (persistence is **below** this crate
+/// in the dependency graph and so cannot name a type defined here).
 pub use stokesforge_persistence::{WindowGeometry, WindowMode, WindowView};
 
-/// Ce qu'un `Load` a écarté sans échouer (calculs illisibles, #278) : données
-/// neutres de `stokesforge-persistence`, mises en phrase par l'application.
+/// What a `Load` dropped without failing (unreadable calculations, #278):
+/// neutral data from `stokesforge-persistence`, put into sentences by the
+/// application.
 pub use stokesforge_persistence::{DiscardedCalculation, LoadReport};
 
-/// Identité stable et comparable d'un émetteur de requêtes (A4,
+/// Stable, comparable identity of a request sender (A4,
 /// `guide-de-correction-robustesse.md` §F6).
 ///
-/// Un compteur atomique global, incrémenté à chaque appel **indépendant** à
-/// [`Session::handle`] — jamais à `Clone` : deux `.clone()` d'une même
-/// poignée partagent la même identité (un script qui clone sa poignée pour
-/// la passer à un thread reste « le même émetteur » aux yeux de l'acteur),
-/// alors que deux poignées issues de deux appels distincts à `handle()` sont
-/// deux émetteurs différents, même s'ils vivent dans le même processus.
-/// C'est cette identité qui permet à l'acteur de refuser qu'une macro
-/// ouverte par l'un absorbe ou soit close par l'autre.
+/// A global atomic counter, incremented on every **independent** call to
+/// [`Session::handle`] — never on `Clone`: two `.clone()`s of the same handle
+/// share the same identity (a script that clones its handle to pass it to a
+/// thread stays "the same sender" in the actor's eyes), whereas two handles
+/// obtained from two distinct calls to `handle()` are two different senders,
+/// even if they live in the same process. This identity is what lets the
+/// actor refuse that a macro opened by one absorbs or is closed by the other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ClientId(u64);
 
 impl ClientId {
-    /// Attribue une identité neuve, jamais réutilisée sur la vie du
-    /// processus (`AtomicU64`, `Ordering::Relaxed` : seule l'unicité compte,
-    /// pas un ordre entre threads).
+    /// Allocates a new identity, never reused over the life of the process
+    /// (`AtomicU64`, `Ordering::Relaxed`: only uniqueness matters, not an
+    /// order between threads).
     fn fresh() -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(0);
         ClientId(NEXT.fetch_add(1, Ordering::Relaxed))
     }
 }
 
-/// Poignée cliente vers une [`Session`] : clonable, envoyable à d'autres
-/// threads. Chaque méthode envoie une requête sur le canal FIFO de l'acteur
-/// et **bloque** jusqu'à la réponse. Rend `Err(SessionError::Disconnected)`
-/// si l'acteur est terminé (arrêté via [`Session::shutdown`], ou en
-/// panique).
+/// Client handle to a [`Session`]: cloneable, sendable to other threads. Each
+/// method sends a request on the actor's FIFO channel and **blocks** until the
+/// reply. Returns `Err(SessionError::Disconnected)` if the actor has ended
+/// (stopped via [`Session::shutdown`], or panicked).
 #[derive(Debug, Clone)]
 pub struct SessionHandle {
     tx: mpsc::Sender<Request>,
-    /// Identité de cet émetteur (A4) : partagée par tous les `.clone()` de
-    /// cette poignée, distincte de celle de toute poignée issue d'un autre
-    /// appel à [`Session::handle`].
+    /// Identity of this sender (A4): shared by all `.clone()`s of this
+    /// handle, distinct from that of any handle obtained from another call to
+    /// [`Session::handle`].
     client: ClientId,
-    /// Jauge du recalcul interruptible (#239), commune à toutes les poignées.
+    /// Gauge of the interruptible recalculation (#239), common to all handles.
     gauge: Arc<RecalcGauge>,
 }
 
 impl SessionHandle {
-    /// Poignée vers la même session, mais avec une identité d'émetteur
-    /// **neuve** (A4) : contrairement à `.clone()`, elle n'est pas le même
-    /// client. C'est ce qu'il faut à tout composant qui écrit en parallèle
-    /// d'une macro ouverte par un autre — fenêtre détachée, script : l'acteur
-    /// refuse alors ses écritures (`ForeignMacro`) au lieu de les absorber
-    /// dans la macro de l'autre, où l'annulation de celle-ci les emporterait
-    /// (issue #21).
+    /// Handle to the same session, but with a **new** sender identity (A4):
+    /// unlike `.clone()`, it is not the same client. This is what any
+    /// component that writes alongside a macro opened by another needs —
+    /// detached window, script: the actor then refuses its writes
+    /// (`ForeignMacro`) instead of absorbing them into the other's macro,
+    /// where undoing that macro would take them away (issue #21).
     pub fn with_new_identity(&self) -> SessionHandle {
         SessionHandle {
             tx: self.tx.clone(),
@@ -245,9 +239,8 @@ impl SessionHandle {
         }
     }
 
-    /// Envoie une requête construite par `build` (qui reçoit l'émetteur du
-    /// canal de réponse à usage unique de cet appel) et bloque jusqu'à la
-    /// réponse.
+    /// Sends a request built by `build` (which receives the sender of this
+    /// call's single-use reply channel) and blocks until the reply.
     fn request<T>(&self, build: impl FnOnce(mpsc::Sender<T>) -> Request) -> SessionResult<T> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.tx
@@ -256,10 +249,10 @@ impl SessionHandle {
         reply_rx.recv().map_err(|_| SessionError::Disconnected)
     }
 
-    /// Exécute une commande. Rend la nouvelle révision, ou l'erreur du bus de
-    /// commandes — l'arbre et l'historique restent alors inchangés. Refusée
-    /// (`Command(ForeignMacro("execute"))`) si une macro est ouverte par un
-    /// autre émetteur (A4, voir la table en tête de crate).
+    /// Executes a command. Returns the new revision, or the command bus's
+    /// error — the tree and the history then stay unchanged. Refused
+    /// (`Command(ForeignMacro("execute"))`) if a macro is open by another
+    /// sender (A4, see the table at the top of the crate).
     pub fn execute(&self, command: Command) -> SessionResult<Revision> {
         let client = self.client;
         self.request(|reply| Request::Execute {
@@ -271,12 +264,12 @@ impl SessionHandle {
         .map_err(SessionError::from)
     }
 
-    /// Comme [`SessionHandle::execute`], mais rend la main dès la commande
-    /// appliquée (#239) : le recalcul des formules continue dans l'acteur et
-    /// peut être arrêté par [`SessionHandle::stop_recalc`]. Les requêtes
-    /// suivantes attendent, comme toujours, la fin du recalcul ; pour ne pas
-    /// bloquer, voir [`SessionHandle::recalc_running`]. La révision rendue
-    /// est celle d'avant recalcul ; la fin du recalcul en ajoute une.
+    /// Like [`SessionHandle::execute`], but returns as soon as the command is
+    /// applied (#239): the formula recalculation continues in the actor and
+    /// can be stopped by [`SessionHandle::stop_recalc`]. The following
+    /// requests wait, as always, for the end of the recalculation; to avoid
+    /// blocking, see [`SessionHandle::recalc_running`]. The revision returned
+    /// is the one before recalculation; the end of the recalculation adds one.
     pub fn execute_interruptible(&self, command: Command) -> SessionResult<Revision> {
         let client = self.client;
         self.request(|reply| Request::Execute {
@@ -288,56 +281,56 @@ impl SessionHandle {
         .map_err(SessionError::from)
     }
 
-    /// Le fil de l'acteur tourne-t-il encore ? Faux après un arrêt, et surtout
-    /// après un panic : le modèle est alors perdu et toute requête rendrait
-    /// `Disconnected`. Ne passe pas par l'acteur : ne bloque jamais.
+    /// Is the actor's thread still running? False after a stop, and above all
+    /// after a panic: the model is then lost and any request would return
+    /// `Disconnected`. Does not go through the actor: never blocks.
     pub fn actor_alive(&self) -> bool {
         self.gauge.actor_alive()
     }
 
-    /// Numéro du recalcul interruptible en cours, s'il y en a un. Ne passe
-    /// pas par l'acteur : ne bloque jamais.
+    /// Number of the interruptible recalculation in progress, if there is
+    /// one. Does not go through the actor: never blocks.
     pub fn recalc_running(&self) -> Option<u64> {
         self.gauge.running()
     }
 
-    /// Attend au plus `timeout` la fin du recalcul en cours ; vrai s'il n'y
-    /// en a (plus) aucun.
+    /// Waits at most `timeout` for the end of the recalculation in progress;
+    /// true if there is (no longer) any.
     pub fn wait_recalc(&self, timeout: std::time::Duration) -> bool {
         self.gauge.wait_idle(timeout)
     }
 
-    /// Demande l'arrêt du recalcul `id` (#239) : il s'interrompt entre deux
-    /// colonnes, la commande qui l'avait déclenché est annulée comme par
-    /// Ctrl+Z, puis ce qui avait changé est recalculé. Faux si ce recalcul
-    /// est déjà fini. Ne bloque jamais.
+    /// Requests the stop of recalculation `id` (#239): it stops between two
+    /// columns, the command that triggered it is undone as by Ctrl+Z, then
+    /// what had changed is recalculated. False if this recalculation is
+    /// already finished. Never blocks.
     pub fn stop_recalc(&self, id: u64) -> bool {
         self.gauge.request_stop(id)
     }
 
-    /// Relève la fin du dernier recalcul interruptible, une seule fois.
+    /// Collects the end of the last interruptible recalculation, only once.
     pub fn take_recalc_end(&self) -> Option<RecalcEnd> {
         self.gauge.take_finished()
     }
 
-    /// Annule l'entrée du sommet. `Ok(None)` si la pile est vide.
+    /// Undoes the top entry. `Ok(None)` if the stack is empty.
     pub fn undo(&self) -> SessionResult<Option<Revision>> {
         self.request(|reply| Request::Undo { reply })?
             .map_err(SessionError::from)
     }
 
-    /// Rétablit l'entrée annulée la plus récente. `Ok(None)` si rien à
-    /// rétablir.
+    /// Redoes the most recently undone entry. `Ok(None)` if there is nothing
+    /// to redo.
     pub fn redo(&self) -> SessionResult<Option<Revision>> {
         self.request(|reply| Request::Redo { reply })?
             .map_err(SessionError::from)
     }
 
-    /// Ouvre une macro de nature `kind` — voir la table en tête de crate.
-    /// Refusée (`Command(ForeignMacro("begin_macro"))`) si une macro est déjà
-    /// ouverte par un *autre* émetteur ; un même émetteur peut toujours
-    /// imbriquer la sienne, jusqu'à [`stokesforge_commands::MAX_MACRO_DEPTH`]
-    /// niveaux (`Err(MacroTooDeep)` au-delà).
+    /// Opens a macro of kind `kind` — see the table at the top of the crate.
+    /// Refused (`Command(ForeignMacro("begin_macro"))`) if a macro is already
+    /// open by *another* sender; the same sender can always nest its own, up
+    /// to [`stokesforge_commands::MAX_MACRO_DEPTH`] levels
+    /// (`Err(MacroTooDeep)` beyond).
     pub fn begin_macro(&self, kind: MacroKind) -> SessionResult<Revision> {
         let client = self.client;
         self.request(|reply| Request::BeginMacro {
@@ -348,32 +341,32 @@ impl SessionHandle {
         .map_err(SessionError::from)
     }
 
-    /// Ferme la macro courante en une seule entrée d'historique.
-    /// `Err(Command(NotInMacro))` si aucune macro n'est ouverte ;
-    /// `Err(Command(ForeignMacro("end_macro")))` si une macro est ouverte
-    /// mais par un autre émetteur (A4, voir la table en tête de crate).
+    /// Closes the current macro into a single history entry.
+    /// `Err(Command(NotInMacro))` if no macro is open;
+    /// `Err(Command(ForeignMacro("end_macro")))` if a macro is open but by
+    /// another sender (A4, see the table at the top of the crate).
     pub fn end_macro(&self) -> SessionResult<Revision> {
         let client = self.client;
         self.request(|reply| Request::EndMacro { client, reply })?
             .map_err(SessionError::from)
     }
 
-    /// Annule la macro courante et tout ce qu'elle avait appliqué.
-    /// `Err(Command(NotInMacro))` si aucune macro n'est ouverte ;
-    /// `Err(Command(ForeignMacro("abort_macro")))` si une macro est ouverte
-    /// mais par un autre émetteur — un `abort_macro` ne peut plus défaire le
-    /// travail de quelqu'un d'autre (A4, voir la table en tête de crate).
+    /// Aborts the current macro and everything it had applied.
+    /// `Err(Command(NotInMacro))` if no macro is open;
+    /// `Err(Command(ForeignMacro("abort_macro")))` if a macro is open but by
+    /// another sender — an `abort_macro` can no longer undo somebody else's
+    /// work (A4, see the table at the top of the crate).
     pub fn abort_macro(&self) -> SessionResult<Revision> {
         let client = self.client;
         self.request(|reply| Request::AbortMacro { client, reply })?
             .map_err(SessionError::from)
     }
 
-    /// Relance des calculs d'analyse (#181) : les `ids` donnés, ou — liste
-    /// vide — tous ceux qui sont périmés. Hors historique, comme le recalcul
-    /// automatique ; la révision avance. Un calcul dont une entrée a disparu
-    /// ou dont l'opération échoue garde ses dernières valeurs et se marque
-    /// périmé (`Staleness`).
+    /// Reruns analysis calculations (#181): the given `ids`, or — empty list
+    /// — all those that are stale. Outside the history, like automatic
+    /// recalculation; the revision advances. A calculation whose input has
+    /// disappeared or whose operation fails keeps its last values and marks
+    /// itself stale (`Staleness`).
     pub fn recalculate(&self, ids: &[NodeId]) -> SessionResult<Revision> {
         let client = self.client;
         let ids = ids.to_vec();
@@ -381,22 +374,21 @@ impl SessionHandle {
             .map_err(SessionError::from)
     }
 
-    /// Demande un instantané de l'état courant. Bon marché : ne clone pas
-    /// l'arbre.
+    /// Requests a snapshot of the current state. Cheap: does not clone the
+    /// tree.
     pub fn snapshot(&self) -> SessionResult<Snapshot> {
         self.request(|reply| Request::Snapshot { reply })
     }
 
-    /// Pose (ou remplace) la géométrie de la fenêtre de `node` — voir
-    /// « Géométrie des fenêtres » en tête de crate. Ne touche **ni**
-    /// `History` **ni** `revision` : ce n'est pas une mutation du modèle, il
-    /// n'y a rien à annuler. Rend la nouvelle valeur de
-    /// [`Snapshot::geometry_revision`], le compteur dédié qui permet à un
-    /// client de rendu de savoir que la géométrie a changé sans confondre ça
-    /// avec un changement du modèle. Toujours acceptée, y compris pendant
-    /// une macro ouverte par quelqu'un d'autre (ce n'est ni `Execute`, ni
-    /// `Undo`/`Redo`, ni `Save`/`Load` : rien dans la table de tête de crate
-    /// ne la concerne).
+    /// Sets (or replaces) the window geometry of `node` — see "Window
+    /// geometry" at the top of the crate. Touches **neither** `History` **nor**
+    /// `revision`: it is not a model mutation, there is nothing to undo.
+    /// Returns the new value of [`Snapshot::geometry_revision`], the dedicated
+    /// counter that lets a rendering client know that the geometry changed
+    /// without confusing it with a model change. Always accepted, including
+    /// during a macro opened by somebody else (it is neither `Execute`, nor
+    /// `Undo`/`Redo`, nor `Save`/`Load`: nothing in the table at the top of
+    /// the crate concerns it).
     pub fn set_window_geometry(
         &self,
         node: NodeId,
@@ -409,11 +401,12 @@ impl SessionHandle {
         })
     }
 
-    /// Pose (ou remplace) la largeur de la colonne `column`, en points logiques
-    /// (#325). Même statut que [`Self::set_window_geometry`] : ni `History` ni
-    /// `revision`, rien à annuler ; avance `geometry_revision` (rendu), sauf si
-    /// la largeur est inchangée ou invalide (pas un réel fini > 0), auquel cas
-    /// elle est ignorée. Rend la valeur courante de `geometry_revision`.
+    /// Sets (or replaces) the width of column `column`, in logical points
+    /// (#325). Same status as [`Self::set_window_geometry`]: neither `History`
+    /// nor `revision`, nothing to undo; advances `geometry_revision`
+    /// (rendering), unless the width is unchanged or invalid (not a finite
+    /// real > 0), in which case it is ignored. Returns the current value of
+    /// `geometry_revision`.
     pub fn set_column_width(&self, column: NodeId, width: f32) -> SessionResult<u64> {
         self.request(|reply| Request::SetColumnWidth {
             column,
@@ -422,10 +415,10 @@ impl SessionHandle {
         })
     }
 
-    /// Remet les colonnes `columns` à la largeur par défaut (#330) : retire
-    /// leur clé de la table. Même statut que [`Self::set_column_width`] ; avance
-    /// `geometry_revision` seulement si une clé a été retirée. Rend la valeur
-    /// courante de `geometry_revision`.
+    /// Resets columns `columns` to the default width (#330): removes their key
+    /// from the table. Same status as [`Self::set_column_width`]; advances
+    /// `geometry_revision` only if a key was removed. Returns the current value
+    /// of `geometry_revision`.
     pub fn reset_column_widths(&self, columns: &[NodeId]) -> SessionResult<u64> {
         self.request(|reply| Request::ResetColumnWidths {
             columns: columns.to_vec(),
@@ -433,8 +426,8 @@ impl SessionHandle {
         })
     }
 
-    /// Sauvegarde le projet courant vers `path`. Ne change pas la révision :
-    /// sauvegarder ne modifie pas le modèle.
+    /// Saves the current project to `path`. Does not change the revision:
+    /// saving does not modify the model.
     pub fn save(&self, path: &Path) -> SessionResult<()> {
         self.request(|reply| Request::Save {
             path: path.to_path_buf(),
@@ -442,25 +435,24 @@ impl SessionHandle {
         })?
     }
 
-    /// Charge un projet complet depuis `path` et le substitue au projet
-    /// courant : l'historique est vidé, la révision avance. `Err(Command(
-    /// MacroOpen))` si une macro est ouverte — dans ce cas, comme pour tout
-    /// échec, ni le projet ni l'historique ne sont touchés.
+    /// Loads a complete project from `path` and substitutes it for the current
+    /// project: the history is cleared, the revision advances. `Err(Command(
+    /// MacroOpen))` if a macro is open — in that case, as for any failure,
+    /// neither the project nor the history is touched.
     pub fn load(&self, path: &Path) -> SessionResult<Revision> {
         self.load_with_report(path)
             .map(|(revision, _report)| revision)
     }
 
-    /// Comme [`Self::load`], mais rend aussi le [`LoadReport`] de ce que la
-    /// lecture a écarté sans échouer (calculs illisibles, #278), pour que
-    /// l'appelant le signale.
+    /// Like [`Self::load`], but also returns the [`LoadReport`] of what the
+    /// read dropped without failing (unreadable calculations, #278), so that
+    /// the caller reports it.
     pub fn load_with_report(&self, path: &Path) -> SessionResult<(Revision, LoadReport)> {
         self.load_with_limit(path, stokesforge_persistence::DEFAULT_MAX_FILE_BYTES)
     }
 
-    /// Comme [`Self::load_with_report`], avec un plafond de taille de fichier
-    /// (octets, A2 #316) : au-delà, `Err(Persistence(TooLarge))` et rien n'est
-    /// touché.
+    /// Like [`Self::load_with_report`], with a file size cap (bytes, A2 #316):
+    /// beyond it, `Err(Persistence(TooLarge))` and nothing is touched.
     pub fn load_with_limit(
         &self,
         path: &Path,
@@ -475,8 +467,8 @@ impl SessionHandle {
         )
     }
 
-    /// Comme [`Self::load_with_limit`], avec aussi le budget global de cellules
-    /// (B1, #316) : au-delà, `Err(Persistence(TooManyCells))`, rien n'est touché.
+    /// Like [`Self::load_with_limit`], also with the global cell budget (B1,
+    /// #316): beyond it, `Err(Persistence(TooManyCells))`, nothing is touched.
     pub fn load_with_limits(
         &self,
         path: &Path,
@@ -489,15 +481,15 @@ impl SessionHandle {
         })?
     }
 
-    /// Crée un projet vide et remplace l'identité courante. Vide l'historique
-    /// et les géométries ; refuse une macro ouverte, comme [`Self::load`].
+    /// Creates an empty project and replaces the current identity. Clears the
+    /// history and the geometries; refuses an open macro, like [`Self::load`].
     pub fn new_project(&self) -> SessionResult<Revision> {
         self.request(|reply| Request::NewProject { reply })?
     }
 }
 
-/// La session : le thread de l'acteur et une poignée vers lui. Construire une
-/// `Session` démarre le thread immédiatement.
+/// The session: the actor's thread and a handle to it. Building a `Session`
+/// starts the thread immediately.
 #[derive(Debug)]
 pub struct Session {
     handle: SessionHandle,
@@ -505,17 +497,17 @@ pub struct Session {
 }
 
 impl Session {
-    /// Démarre l'acteur avec `project` et la limite d'historique donnée
-    /// (`None` → [`stokesforge_commands::DEFAULT_LIMIT`]). `Err` si le système
-    /// d'exploitation refuse de créer le thread.
+    /// Starts the actor with `project` and the given history limit
+    /// (`None` → [`stokesforge_commands::DEFAULT_LIMIT`]). `Err` if the
+    /// operating system refuses to create the thread.
     pub fn spawn(project: Project, history_limit: Option<usize>) -> std::io::Result<Self> {
         Self::spawn_with_recalc(project, history_limit, FormulaRecalc::Targeted)
     }
 
-    /// Comme [`Session::spawn`], en choisissant comment l'acteur recalcule les
-    /// colonnes-formule. [`FormulaRecalc::Full`] n'existe que comme oracle du
-    /// test différentiel (`stokesforge-robustesse`, batterie `b22`) : une
-    /// session de production prend [`Session::spawn`].
+    /// Like [`Session::spawn`], choosing how the actor recalculates formula
+    /// columns. [`FormulaRecalc::Full`] exists only as the oracle of the
+    /// differential test (`stokesforge-robustesse`, battery `b22`): a
+    /// production session takes [`Session::spawn`].
     pub fn spawn_with_recalc(
         project: Project,
         history_limit: Option<usize>,
@@ -537,10 +529,10 @@ impl Session {
         })
     }
 
-    /// Poignée cliente **neuve** vers cette session : un émetteur distinct de
-    /// tout autre appel à `handle()` (A4, voir la table en tête de crate).
-    /// `.clone()` sur la poignée rendue reste le même émetteur ; seul un
-    /// nouvel appel à `handle()` en crée un autre.
+    /// **New** client handle to this session: a sender distinct from any other
+    /// call to `handle()` (A4, see the table at the top of the crate).
+    /// `.clone()` on the returned handle stays the same sender; only a new call
+    /// to `handle()` creates another.
     pub fn handle(&self) -> SessionHandle {
         SessionHandle {
             tx: self.handle.tx.clone(),
@@ -549,18 +541,18 @@ impl Session {
         }
     }
 
-    /// Demande l'arrêt de l'acteur et attend la fin de son thread ; rend le
-    /// `Project` final. Les autres poignées reçoivent ensuite
-    /// `Err(Disconnected)` à leur prochain appel. `Err(Disconnected)` ici si
-    /// le thread de l'acteur a paniqué.
+    /// Requests the actor's stop and waits for its thread to end; returns the
+    /// final `Project`. The other handles then receive `Err(Disconnected)` on
+    /// their next call. `Err(Disconnected)` here if the actor's thread
+    /// panicked.
     ///
-    /// Lâcher une `Session` (et toutes les poignées qui en descendent) sans
-    /// appeler `shutdown` termine aussi le thread : la boucle de l'acteur
-    /// s'arrête dès que le dernier émetteur du canal de requêtes est
-    /// abandonné (`for request in rx`, `tests/session.rs`).
+    /// Dropping a `Session` (and all the handles derived from it) without
+    /// calling `shutdown` also ends the thread: the actor's loop stops as soon
+    /// as the last sender of the request channel is dropped
+    /// (`for request in rx`, `tests/session.rs`).
     pub fn shutdown(self) -> SessionResult<Project> {
-        // Échec d'envoi ignoré : l'acteur peut déjà être terminé si toutes
-        // les autres poignées ont aussi été lâchées entre-temps.
+        // Send failure ignored: the actor may already have ended if all the
+        // other handles were also dropped in the meantime.
         let _ = self.handle.tx.send(Request::Shutdown);
         self.thread.join().map_err(|_| SessionError::Disconnected)
     }
@@ -570,8 +562,8 @@ impl Session {
 mod tests {
     use super::*;
 
-    /// N'existe que pour que le compilateur vérifie l'invariant `Send` — ce
-    /// n'est pas un test comportemental.
+    /// Exists only so that the compiler checks the `Send` invariant — it is
+    /// not a behavioral test.
     fn assert_send<T: Send>() {}
 
     #[test]
@@ -581,12 +573,12 @@ mod tests {
         assert_send::<Command>();
     }
 
-    /// `A [1,2,3]` et une colonne `C` vide, pour y poser une formule.
-    fn feuille() -> (Session, NodeId, NodeId) {
-        let mut project = Project::new("Demo").expect("projet");
+    /// `A [1,2,3]` and an empty column `C`, to put a formula on.
+    fn sheet_with_empty_c() -> (Session, NodeId, NodeId) {
+        let mut project = Project::new("Demo").expect("project");
         let root = project.root();
-        project.add_workbook(root, Some("Book1")).expect("classeur");
-        let sheet = project.resolve_path("[Book1]Sheet1").expect("feuille");
+        project.add_workbook(root, Some("Book1")).expect("workbook");
+        let sheet = project.resolve_path("[Book1]Sheet1").expect("sheet");
         project
             .add_column(
                 sheet,
@@ -603,16 +595,16 @@ mod tests {
                 stokesforge_core::Column::new(stokesforge_core::ColumnType::Numeric),
             )
             .expect("C");
-        (Session::spawn(project, None).expect("acteur"), sheet, c)
+        (Session::spawn(project, None).expect("actor"), sheet, c)
     }
 
-    fn formule_c(handle: &SessionHandle, c: NodeId) -> Command {
+    fn formula_c(handle: &SessionHandle, c: NodeId) -> Command {
         let formula = handle
             .snapshot()
-            .expect("instantané")
+            .expect("snapshot")
             .tree
             .formula_from_letters(c, "A*2")
-            .expect("formule saisie");
+            .expect("formula entered");
         Command::SetColumnMeta {
             column: c,
             meta: stokesforge_core::ColumnMeta {
@@ -622,70 +614,70 @@ mod tests {
         }
     }
 
-    /// #239 : sans Stop, la commande est appliquée, le recalcul s'achève et la
-    /// fin est relevée une fois ; chaque étape ajoute une révision.
+    /// #239: without Stop, the command is applied, the recalculation completes
+    /// and the end is collected once; each step adds a revision.
     #[test]
-    fn un_recalcul_interruptible_non_arrete_s_acheve_normalement() {
-        let (session, _, c) = feuille();
+    fn an_interruptible_recalculation_not_stopped_completes_normally() {
+        let (session, _, c) = sheet_with_empty_c();
         let handle = session.handle();
-        let before = handle.snapshot().expect("instantané").revision;
+        let before = handle.snapshot().expect("snapshot").revision;
         handle
-            .execute_interruptible(formule_c(&handle, c))
-            .expect("commande");
+            .execute_interruptible(formula_c(&handle, c))
+            .expect("command");
         assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
         assert_eq!(handle.take_recalc_end(), Some(RecalcEnd::Done));
-        assert_eq!(handle.take_recalc_end(), None, "relevée une seule fois");
-        let snapshot = handle.snapshot().expect("instantané");
+        assert_eq!(handle.take_recalc_end(), None, "collected only once");
+        let snapshot = handle.snapshot().expect("snapshot");
         assert_eq!(
             snapshot.revision,
             before + 2,
-            "commande, puis fin de recalcul"
+            "command, then end of recalculation"
         );
         assert!(snapshot.history.can_undo);
         let column = snapshot.tree.node(c).and_then(|n| n.as_column()).unwrap();
         assert!(column.meta().formula.is_some());
     }
 
-    /// #239 : Stop annule la commande comme Ctrl+Z (historique intact : rien
-    /// à rétablir de plus que ce qu'un Undo aurait laissé), et la fin est
-    /// `Stopped`. L'arrêt est posé d'avance sur le prochain recalcul, ce qui
-    /// le rend déterministe : le premier point d'arrêt le voit.
+    /// #239: Stop undoes the command like Ctrl+Z (history intact: nothing more
+    /// to redo than what an Undo would have left), and the end is `Stopped`.
+    /// The stop is set in advance on the next recalculation, which makes it
+    /// deterministic: the first stop point sees it.
     #[test]
-    fn stop_annule_la_commande_qui_a_declenche_le_recalcul() {
-        let (session, _, c) = feuille();
+    fn stop_undoes_the_command_that_triggered_the_recalculation() {
+        let (session, _, c) = sheet_with_empty_c();
         let handle = session.handle();
-        let first = handle.snapshot().expect("instantané");
+        let first = handle.snapshot().expect("snapshot");
         handle.gauge.stop_next_for_test();
         handle
-            .execute_interruptible(formule_c(&handle, c))
-            .expect("commande");
+            .execute_interruptible(formula_c(&handle, c))
+            .expect("command");
         assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
         assert_eq!(handle.take_recalc_end(), Some(RecalcEnd::Stopped));
-        let snapshot = handle.snapshot().expect("instantané");
+        let snapshot = handle.snapshot().expect("snapshot");
         let column = snapshot.tree.node(c).and_then(|n| n.as_column()).unwrap();
-        assert!(column.meta().formula.is_none(), "la formule est défaite");
-        assert!(!snapshot.history.can_undo, "la commande a quitté la pile");
-        assert!(snapshot.history.can_redo, "comme après un Ctrl+Z");
+        assert!(column.meta().formula.is_none(), "the formula is undone");
+        assert!(!snapshot.history.can_undo, "the command left the stack");
+        assert!(snapshot.history.can_redo, "as after a Ctrl+Z");
         assert!(snapshot.revision > first.revision);
     }
 
-    /// Stop après une commande acceptée mais **sans effet** (B5 : aucune entrée
-    /// rangée) ne défait rien : sans cela, l'`undo` de l'acteur retirait la
-    /// formule posée juste avant, sans rapport avec le geste interrompu.
+    /// Stop after an accepted but **no-op** command (B5: no entry stored)
+    /// undoes nothing: without this, the actor's `undo` removed the formula
+    /// set just before, unrelated to the interrupted gesture.
     #[test]
-    fn stop_apres_une_commande_sans_effet_ne_defait_pas_l_action_precedente() {
-        for structurelle in [true, false] {
-            let (session, sheet, c) = feuille();
+    fn stop_after_a_no_op_command_does_not_undo_the_previous_action() {
+        for structural in [true, false] {
+            let (session, sheet, c) = sheet_with_empty_c();
             let handle = session.handle();
-            handle.execute(formule_c(&handle, c)).expect("formule");
-            let command = if structurelle {
-                // « Renommer M en M ».
+            handle.execute(formula_c(&handle, c)).expect("formula");
+            let command = if structural {
+                // "Rename M to M".
                 Command::Rename {
                     id: sheet,
                     name: "Sheet1".into(),
                 }
             } else {
-                // Insertion de zéro ligne : aucune colonne cible.
+                // Insertion of zero rows: no target column.
                 Command::InsertRows {
                     sheet,
                     at: 0,
@@ -693,79 +685,76 @@ mod tests {
                 }
             };
             handle.gauge.stop_next_for_test();
-            handle.execute_interruptible(command).expect("commande");
+            handle.execute_interruptible(command).expect("command");
             assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
             assert_eq!(handle.take_recalc_end(), Some(RecalcEnd::Done));
-            let snapshot = handle.snapshot().expect("instantané");
+            let snapshot = handle.snapshot().expect("snapshot");
             let column = snapshot.tree.node(c).and_then(|n| n.as_column()).unwrap();
-            assert!(column.meta().formula.is_some(), "la formule reste posée");
-            assert!(snapshot.history.can_undo, "l'entrée précédente reste");
-            assert!(!snapshot.history.can_redo, "rien n'a été défait");
+            assert!(column.meta().formula.is_some(), "the formula stays set");
+            assert!(snapshot.history.can_undo, "the previous entry stays");
+            assert!(!snapshot.history.can_redo, "nothing was undone");
         }
     }
 
-    /// Un panic de l'acteur est visible : `actor_alive` devient faux, et toute
-    /// requête rend `Disconnected` (le modèle est perdu).
+    /// An actor panic is visible: `actor_alive` becomes false, and any request
+    /// returns `Disconnected` (the model is lost).
     #[test]
-    fn un_panic_de_l_acteur_est_visible() {
-        let (session, _, _) = feuille();
+    fn an_actor_panic_is_visible() {
+        let (session, _, _) = sheet_with_empty_c();
         let handle = session.handle();
         assert!(handle.actor_alive());
-        handle.tx.send(actor::Request::PanicForTest).expect("envoi");
+        handle.tx.send(actor::Request::PanicForTest).expect("send");
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while handle.actor_alive() {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "acteur toujours vivant"
-            );
+            assert!(std::time::Instant::now() < deadline, "actor still alive");
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         assert!(matches!(handle.snapshot(), Err(SessionError::Disconnected)));
     }
 
-    /// Un panic **pendant un recalcul** ne laisse pas l'indicateur « en cours »
-    /// pour toujours : la jauge est libérée, `wait_recalc` rend vrai tout de
-    /// suite et `actor_alive` dit pourquoi.
+    /// A panic **during a recalculation** does not leave the "in progress"
+    /// indicator forever: the gauge is released, `wait_recalc` returns true
+    /// right away and `actor_alive` says why.
     #[test]
-    fn un_panic_en_plein_recalcul_libere_la_jauge() {
-        let (session, _, c) = feuille();
+    fn a_panic_in_the_middle_of_a_recalculation_releases_the_gauge() {
+        let (session, _, c) = sheet_with_empty_c();
         let handle = session.handle();
         handle.gauge.panic_in_next_recalc_for_test();
         handle
-            .execute_interruptible(formule_c(&handle, c))
-            .expect("la commande est appliquée avant le recalcul");
+            .execute_interruptible(formula_c(&handle, c))
+            .expect("the command is applied before the recalculation");
         assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
         assert_eq!(handle.recalc_running(), None);
         assert!(!handle.actor_alive());
     }
 
-    /// Un arrêt normal compte aussi comme « parti » : plus rien à attendre.
+    /// A normal stop also counts as "gone": nothing left to wait for.
     #[test]
-    fn apres_l_arret_l_acteur_n_est_plus_vivant() {
-        let (session, _, _) = feuille();
+    fn after_shutdown_the_actor_is_no_longer_alive() {
+        let (session, _, _) = sheet_with_empty_c();
         let handle = session.handle();
-        session.shutdown().expect("arrêt");
+        session.shutdown().expect("shutdown");
         assert!(!handle.actor_alive());
     }
 
-    /// Un Stop tardif (le recalcul visé est fini) ne fait rien — et surtout
-    /// n'arrête pas le suivant.
+    /// A late Stop (the targeted recalculation is finished) does nothing — and
+    /// above all does not stop the next one.
     #[test]
-    fn un_stop_tardif_n_arrete_pas_le_recalcul_suivant() {
-        let (session, _, c) = feuille();
+    fn a_late_stop_does_not_stop_the_next_recalculation() {
+        let (session, _, c) = sheet_with_empty_c();
         let handle = session.handle();
         handle
-            .execute_interruptible(formule_c(&handle, c))
-            .expect("commande");
+            .execute_interruptible(formula_c(&handle, c))
+            .expect("command");
         assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
-        let finished = 1; // numéro du premier recalcul
-        assert!(!handle.stop_recalc(finished), "déjà fini");
+        let finished = 1; // number of the first recalculation
+        assert!(!handle.stop_recalc(finished), "already finished");
         handle
             .execute_interruptible(Command::AddFolder {
-                parent: handle.snapshot().expect("instantané").tree.root(),
-                name: "Dossier".into(),
+                parent: handle.snapshot().expect("snapshot").tree.root(),
+                name: "Folder".into(),
             })
-            .expect("commande");
+            .expect("command");
         assert!(handle.wait_recalc(std::time::Duration::from_secs(5)));
         assert_eq!(handle.take_recalc_end(), Some(RecalcEnd::Done));
     }

@@ -1,40 +1,40 @@
-//! Déconvolution par une réponse instrumentale mesurée, l'IRF (#190) :
-//! **reconvolution** (ajuster un déclin multi-exponentiel convolué par l'IRF) et
-//! **déconvolution directe** (Richardson-Lucy par défaut, Wiener en option).
+//! Deconvolution by a measured instrument response, the IRF (#190):
+//! **reconvolution** (fitting a multi-exponential decay convolved with the IRF) and
+//! **direct deconvolution** (Richardson-Lucy by default, Wiener as an option).
 //!
-//! Convention de temps, commune aux deux : le signal et l'IRF partagent
-//! l'origine de l'axe X (même instrument, même échelle) ; le signal est la
-//! réponse d'un système excité à l'instant 0 par l'IRF *décalée de `shift`*.
-//! Concrètement `d(tₖ) = Σⱼ hⱼ·u(tₖ − tⱼ)`, où `h` est l'IRF **normalisée à une
-//! somme de 1** ré-échantillonnée sur la grille du signal (M15 a A) et `u` la
-//! réponse impulsionnelle cherchée. Un signal et une IRF dont les pas
-//! diffèrent de plus de 1 % déclenchent un avertissement, pas un refus.
+//! Time convention, common to both: the signal and the IRF share
+//! the origin of the X axis (same instrument, same scale); the signal is the
+//! response of a system excited at time 0 by the IRF *shifted by `shift`*.
+//! Concretely `d(tₖ) = Σⱼ hⱼ·u(tₖ − tⱼ)`, where `h` is the IRF **normalized to a
+//! sum of 1** resampled on the signal grid (M15 a A) and `u` the
+//! impulse response sought. A signal and an IRF whose steps
+//! differ by more than 1 % trigger a warning, not a refusal.
 
 use crate::error::AnalysisError;
 use crate::fit::ParamSetting;
 use crate::series::{interpolate, Series};
 use crate::solver::{solve_problem, Options, Slot, Term};
 
-/// Écart relatif de pas au-delà duquel on avertit (M15 a A).
+/// Relative step gap beyond which a warning is given (M15 a A).
 pub const STEP_TOLERANCE: f64 = 0.01;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct DeconvWarnings {
-    /// Le pas du signal n'est pas constant (écart > 1 %) : le pas moyen est
-    /// utilisé.
+    /// The signal step is not constant (gap > 1 %): the mean step is
+    /// used.
     pub non_uniform_signal: bool,
-    /// Le pas de l'IRF diffère de celui du signal de plus de 1 %.
+    /// The IRF step differs from that of the signal by more than 1 %.
     pub irf_step_mismatch: bool,
-    /// Points de Y négatifs ramenés à 0 (Richardson-Lucy suppose Y ≥ 0).
+    /// Negative Y points brought to 0 (Richardson-Lucy assumes Y ≥ 0).
     pub negative_clipped: usize,
-    /// L'IRF est coupée au-dessus de [`IRF_TRUNCATION_FRACTION`] de son pic au
-    /// décalage retenu (C2, #313) : la queue manquante vaut 0 puis le noyau est
-    /// renormalisé, ce qui déforme les durées de vie sans que rien le dise.
+    /// The IRF is cut above [`IRF_TRUNCATION_FRACTION`] of its peak at the
+    /// chosen shift (C2, #313): the missing tail is 0 then the kernel is
+    /// renormalized, which distorts the lifetimes without anything saying so.
     pub irf_truncated: bool,
 }
 
-/// Part du pic de l'IRF au-dessus de laquelle une coupure (fin de l'IRF, ou
-/// points hors de la fenêtre du signal) est signalée : 1 %.
+/// Share of the IRF peak above which a cut (end of the IRF, or
+/// points outside the signal window) is reported: 1 %.
 pub const IRF_TRUNCATION_FRACTION: f64 = 0.01;
 
 // ── FFT ────────────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ fn spectrum(a: &[f64], size: usize) -> (Vec<f64>, Vec<f64>) {
     (re, im)
 }
 
-/// `(h ⊛ u)ₖ = Σⱼ hⱼ·u(k−j)` pour `k < n`, causal.
+/// `(h ⊛ u)ₖ = Σⱼ hⱼ·u(k−j)` for `k < n`, causal.
 pub fn convolve(h: &[f64], u: &[f64]) -> Vec<f64> {
     let n = u.len();
     let size = padded_len(n.max(h.len()));
@@ -110,7 +110,7 @@ pub fn convolve(h: &[f64], u: &[f64]) -> Vec<f64> {
     ur
 }
 
-/// Adjoint : `(h ⋆ r)ₖ = Σⱼ hⱼ·r(k+j)`.
+/// Adjoint: `(h ⋆ r)ₖ = Σⱼ hⱼ·r(k+j)`.
 fn correlate(h: &[f64], r: &[f64]) -> Vec<f64> {
     let n = r.len();
     let size = padded_len(n.max(h.len()));
@@ -127,12 +127,12 @@ fn correlate(h: &[f64], r: &[f64]) -> Vec<f64> {
     rr
 }
 
-// ── IRF sur la grille du signal ────────────────────────────────────────
+// ── IRF on the signal grid ─────────────────────────────────────────────
 
-/// Grille uniforme du calcul. Un signal à pas régulier la porte telle quelle
-/// (`identity`) ; un signal troué (ligne écartée, pas variable) est ré-échantillonné
-/// par interpolation linéaire au pas médian : la convolution compte en indices,
-/// et un indice n'est un instant que sur une grille uniforme.
+/// Uniform grid of the calculation. A regularly stepped signal carries it as is
+/// (`identity`); a signal with holes (dropped row, variable step) is resampled
+/// by linear interpolation at the median step: convolution counts in indices,
+/// and an index is a time only on a uniform grid.
 #[derive(Clone, Copy)]
 struct Grid {
     start: f64,
@@ -141,7 +141,7 @@ struct Grid {
     identity: bool,
 }
 
-/// Plafond de la grille ré-échantillonnée (nœuds).
+/// Cap on the resampled grid (nodes).
 const MAX_GRID: usize = 1 << 22;
 
 fn grid_of(x: &[f64], w: &mut DeconvWarnings) -> Result<Grid, AnalysisError> {
@@ -170,9 +170,9 @@ fn grid_of(x: &[f64], w: &mut DeconvWarnings) -> Result<Grid, AnalysisError> {
     let mut steps: Vec<f64> = x.windows(2).map(|p| p[1] - p[0]).collect();
     steps.sort_by(f64::total_cmp);
     let step = steps[steps.len() / 2];
-    // La grille doit couvrir le dernier X : arrondi supérieur (à l'erreur de
-    // flottant près, pour qu'un dernier nœud qui tombe pile ne gagne pas un
-    // nœud de plus), sinon la relecture hors grille donnerait NaN.
+    // The grid must cover the last X: round up (up to the floating-point
+    // error, so that a last node that falls exactly does not gain one more
+    // node), otherwise reading back outside the grid would give NaN.
     let ratio = (x[n - 1] - x[0]) / step;
     let nodes = (ratio - 1e-9 * ratio.max(1.0)).ceil().max(0.0) as usize + 1;
     if nodes > MAX_GRID {
@@ -189,7 +189,7 @@ fn grid_of(x: &[f64], w: &mut DeconvWarnings) -> Result<Grid, AnalysisError> {
 }
 
 impl Grid {
-    /// Y du signal sur la grille.
+    /// Y of the signal on the grid.
     fn sample(&self, x: &[f64], y: &[f64]) -> Vec<f64> {
         if self.identity {
             return y.to_vec();
@@ -206,7 +206,7 @@ impl Grid {
             .collect()
     }
 
-    /// Valeurs de la grille relues aux X du signal.
+    /// Grid values read back at the X of the signal.
     fn read_back(&self, x: &[f64], on_grid: &[f64]) -> Vec<f64> {
         if self.identity {
             return on_grid.to_vec();
@@ -220,7 +220,7 @@ impl Grid {
     }
 }
 
-/// L'IRF normalisée (somme 1) aux instants `start + j·step − shift`.
+/// The normalized IRF (sum 1) at the times `start + j·step − shift`.
 fn kernel(irf: &Series, grid: &Grid, n: usize, shift: f64) -> Result<Vec<f64>, AnalysisError> {
     let mut h: Vec<f64> = (0..n)
         .map(|j| {
@@ -238,10 +238,10 @@ fn kernel(irf: &Series, grid: &Grid, n: usize, shift: f64) -> Result<Vec<f64>, A
     Ok(h)
 }
 
-/// L'IRF est-elle coupée au décalage `shift` ? Oui si un de ses points hors de
-/// la fenêtre `[start − shift, start + (n−1)·step − shift]` du noyau dépasse
-/// 1 % du pic, ou si un de ses bords (premier ou dernier point) le dépasse : au
-/// delà du bord, l'interpolation lit 0 (C2, #313). Le noyau renormalisé reste.
+/// Is the IRF cut at shift `shift`? Yes if one of its points outside
+/// the kernel window `[start − shift, start + (n−1)·step − shift]` exceeds
+/// 1 % of the peak, or if one of its edges (first or last point) does: beyond
+/// the edge, interpolation reads 0 (C2, #313). The renormalized kernel remains.
 fn irf_truncated(irf: &Series, grid: &Grid, shift: f64) -> bool {
     let peak = irf.y.iter().copied().fold(f64::NEG_INFINITY, f64::max);
     if !(peak > 0.0) || irf.is_empty() {
@@ -266,15 +266,15 @@ fn irf_step_mismatch(irf: &Series, grid: &Grid) -> bool {
     (step - grid.step).abs() > STEP_TOLERANCE * grid.step
 }
 
-// ── Déconvolution directe ──────────────────────────────────────────────
+// ── Direct deconvolution ───────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DirectMethod {
     RichardsonLucy {
         iterations: usize,
     },
-    /// `noise` : rapport bruit/signal `K` du filtre `H*/(|H|²+K)`. `None` :
-    /// estimé sur le spectre du signal.
+    /// `noise`: noise/signal ratio `K` of the filter `H*/(|H|²+K)`. `None`:
+    /// estimated from the spectrum of the signal.
     Wiener {
         noise: Option<f64>,
     },
@@ -282,10 +282,10 @@ pub enum DirectMethod {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Deconvolved {
-    /// Réponse impulsionnelle estimée, un point par point du signal.
+    /// Estimated impulse response, one point per point of the signal.
     pub values: Vec<f64>,
     pub warnings: DeconvWarnings,
-    /// Wiener : le `K` employé (donné ou estimé).
+    /// Wiener: the `K` used (given or estimated).
     pub noise_ratio: Option<f64>,
 }
 
@@ -369,8 +369,8 @@ pub fn deconvolve(
     }
 }
 
-/// `K = P_bruit / P_signal` : puissance moyenne du quart haut du spectre
-/// (supposé du bruit) sur celle du dixième bas, bruit retranché.
+/// `K = P_noise / P_signal`: mean power of the upper quarter of the spectrum
+/// (assumed to be noise) over that of the lower tenth, noise subtracted.
 fn estimate_noise_ratio(re: &[f64], im: &[f64]) -> f64 {
     let size = re.len();
     let half = size / 2;
@@ -387,16 +387,16 @@ fn estimate_noise_ratio(re: &[f64], im: &[f64]) -> f64 {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReconvSpec {
-    /// Nombre d'exponentielles (1 à 4).
+    /// Number of exponentials (1 to 4).
     pub components: usize,
-    /// Réglages dans l'ordre `bkg, A1, tau1, A2, tau2, …, shift`.
+    /// Settings in the order `bkg, A1, tau1, A2, tau2, …, shift`.
     pub params: Vec<ParamSetting>,
-    /// Valeur initiale du décalage de l'IRF.
+    /// Initial value of the IRF shift.
     pub shift_initial: f64,
-    /// Ajuster le décalage (sinon il reste fixé à `shift_initial`).
+    /// Fit the shift (otherwise it stays fixed at `shift_initial`).
     pub fit_shift: bool,
-    /// Plage de X sur laquelle on ajuste (le modèle est calculé sur toute la
-    /// courbe, car la convolution lit l'historique).
+    /// X range on which the fit is done (the model is computed on the whole
+    /// curve, because the convolution reads the history).
     pub window: Option<(f64, f64)>,
 }
 
@@ -405,28 +405,28 @@ pub struct Reconvolution {
     pub names: Vec<String>,
     pub values: Vec<f64>,
     pub errors: Vec<Option<f64>>,
-    /// Courbe ajustée (modèle ⊛ IRF), un point par point du signal trié.
+    /// Fitted curve (model ⊛ IRF), one point per point of the sorted signal.
     pub fitted: Vec<f64>,
-    /// Le signal trié par X croissant sur lequel `fitted` est aligné.
+    /// The signal sorted by increasing X on which `fitted` is aligned.
     pub x: Vec<f64>,
     pub points: usize,
     pub r_squared: f64,
     pub reduced_chi2: f64,
     pub dof: usize,
-    /// Nombre de paramètres libres que les données ne déterminent pas (#203).
+    /// Number of free parameters that the data do not determine (#203).
     pub undetermined: usize,
-    /// Arrêt sur un plateau (#281) ou solveur bloqué sans pas accepté (C1, #313) :
-    /// pas sur un minimum.
+    /// Stop on a plateau (#281) or solver stalled without an accepted step (C1, #313):
+    /// not on a minimum.
     pub plateau: bool,
-    /// Durée de vie moyenne pondérée par les amplitudes `ΣAτ/ΣA`.
+    /// Mean lifetime weighted by the amplitudes `ΣAτ/ΣA`.
     pub tau_amplitude_weighted: f64,
-    /// Durée de vie moyenne pondérée par l'intensité `ΣAτ²/ΣAτ`.
+    /// Mean lifetime weighted by the intensity `ΣAτ²/ΣAτ`.
     pub tau_intensity_weighted: f64,
     pub warnings: DeconvWarnings,
 }
 
-/// `num / den`, `NaN` si le dénominateur est nul (jamais ±∞, C5, #313) : des
-/// amplitudes de somme nulle ne définissent pas de durée de vie moyenne.
+/// `num / den`, `NaN` if the denominator is zero (never ±∞, C5, #313): amplitudes
+/// with a zero sum do not define a mean lifetime.
 fn ratio_or_nan(num: f64, den: f64) -> f64 {
     if den == 0.0 {
         f64::NAN
@@ -456,7 +456,7 @@ pub fn reconvolve(
     let n = sig.len();
     let nc = spec.components;
 
-    // Indices des points de la fenêtre d'ajustement.
+    // Indices of the points of the fit window.
     let (wlo, whi) = spec
         .window
         .map_or((f64::NEG_INFINITY, f64::INFINITY), |(a, b)| {
@@ -468,7 +468,7 @@ pub fn reconvolve(
     let wx: Vec<f64> = win.iter().map(|&i| sig.x[i]).collect();
     let wy: Vec<f64> = win.iter().map(|&i| sig.y[i]).collect();
 
-    // Valeurs initiales d'après la décroissance après le maximum.
+    // Initial values from the decay after the maximum.
     let (imax, ymax) =
         sig.y.iter().enumerate().fold(
             (0, f64::NEG_INFINITY),
@@ -587,7 +587,7 @@ mod tests {
         (0..n).map(|i| i as f64 * step).collect()
     }
 
-    /// IRF gaussienne centrée en `c`, largeur σ.
+    /// Gaussian IRF centerd at `c`, width σ.
     fn irf_series(n: usize, step: f64, c: f64, sigma: f64) -> Series {
         let x = grid(n, step);
         let y = x
@@ -597,7 +597,7 @@ mod tests {
         Series::new(x, y)
     }
 
-    /// Signal = (IRF normalisée) ⊛ Σ Aᵢ·exp(−t/τᵢ) + fond.
+    /// Signal = (normalized IRF) ⊛ Σ Aᵢ·exp(−t/τᵢ) + background.
     fn synth(irf: &Series, step: f64, a: &[(f64, f64)], bkg: f64) -> Series {
         let n = irf.len();
         let sum: f64 = irf.y.iter().sum();
@@ -614,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn fft_aller_retour_et_convolution_directe() {
+    fn fft_round_trip_and_direct_convolution() {
         let h = [0.5, 0.3, 0.2];
         let u = [1.0, 2.0, 3.0, 4.0, 5.0];
         let c = convolve(&h, &u);
@@ -627,7 +627,7 @@ mod tests {
         for (a, b) in c.iter().zip(&want) {
             assert!((a - b).abs() < 1e-12, "{a} vs {b}");
         }
-        // L'adjoint vérifie ⟨h⊛u, r⟩ = ⟨u, h⋆r⟩.
+        // The adjoint satisfies ⟨h⊛u, r⟩ = ⟨u, h⋆r⟩.
         let r = [0.3, -1.0, 2.0, 0.5, 1.5];
         let lhs: f64 = c.iter().zip(&r).map(|(a, b)| a * b).sum();
         let hr = correlate(&h, &r);
@@ -636,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn reconvolution_retrouve_un_declin_biexponentiel() {
+    fn reconvolution_recovers_a_biexponential_decay() {
         let step = 0.05;
         let irf = irf_series(800, step, 2.0, 0.15);
         let signal = synth(&irf, step, &[(100.0, 1.2), (50.0, 4.0)], 3.0);
@@ -657,15 +657,15 @@ mod tests {
         assert!(r.r_squared > 1.0 - 1e-9);
         assert!(!r.warnings.irf_step_mismatch && !r.warnings.non_uniform_signal);
         assert!(!r.warnings.irf_truncated);
-        // Moyenne pondérée par les amplitudes : (100·1.2 + 50·4)/150.
+        // Mean weighted by the amplitudes: (100·1.2 + 50·4)/150.
         assert!((r.tau_amplitude_weighted - 320.0 / 150.0).abs() < 1e-2);
     }
 
     #[test]
-    fn le_decalage_est_ajuste_quand_la_case_est_cochee() {
+    fn the_shift_is_fitted_when_the_checkbox_is_ticked() {
         let step = 0.05;
         let irf = irf_series(600, step, 2.0, 0.15);
-        // Signal fabriqué avec une IRF décalée de +0,3.
+        // Signal built with an IRF shifted by +0.3.
         let shifted = irf_series(600, step, 2.3, 0.15);
         let signal = synth(&shifted, step, &[(80.0, 2.0)], 1.0);
         let mk = |fit_shift: bool| ReconvSpec {
@@ -680,13 +680,13 @@ mod tests {
         let shift = |r: &Reconvolution| *r.values.last().unwrap();
         assert_eq!(shift(&fixed), 0.0);
         assert!((shift(&free) - 0.3).abs() < 5e-3, "shift {}", shift(&free));
-        // Témoin : décalage fixé à tort = moins bon ajustement.
+        // Witness: shift wrongly fixed = worse fit.
         assert!(free.r_squared > fixed.r_squared);
         assert!(fixed.errors.last().unwrap().is_none());
     }
 
     #[test]
-    fn la_fenetre_n_ecarte_pas_l_historique_de_la_convolution() {
+    fn the_window_does_not_drop_the_history_of_the_convolution() {
         let step = 0.05;
         let irf = irf_series(600, step, 2.0, 0.15);
         let signal = synth(&irf, step, &[(60.0, 2.5)], 0.0);
@@ -699,13 +699,13 @@ mod tests {
         };
         let r = reconvolve(&signal, &irf, &spec).unwrap();
         assert!((r.values[2] - 2.5).abs() < 1e-3, "tau {}", r.values[2]);
-        // Fenêtre [4, 25] au pas 0,05 : 421 points ajustés sur les 600.
+        // Window [4, 25] at step 0.05: 421 points fitted out of 600.
         assert!((420..=422).contains(&r.points), "{} points", r.points);
         assert_eq!(r.fitted.len(), signal.len());
     }
 
     #[test]
-    fn avertissement_quand_les_pas_different() {
+    fn warning_when_the_steps_differ() {
         let step = 0.05;
         let irf = irf_series(400, step * 1.5, 2.0, 0.2);
         let signal = synth(&irf_series(400, step, 2.0, 0.15), step, &[(10.0, 2.0)], 0.0);
@@ -721,7 +721,7 @@ mod tests {
     }
 
     #[test]
-    fn richardson_lucy_resserre_le_declin() {
+    fn richardson_lucy_tightens_the_decay() {
         let step = 0.05;
         let irf = irf_series(512, step, 1.0, 0.3);
         let signal = synth(&irf, step, &[(100.0, 2.0)], 0.0);
@@ -732,17 +732,17 @@ mod tests {
             DirectMethod::RichardsonLucy { iterations: 200 },
         )
         .unwrap();
-        // L'estimée suit exp(−t/2) : ratio à t=2 vs t=0 proche de e⁻¹.
+        // The estimate follows exp(−t/2): ratio at t=2 vs t=0 close to e⁻¹.
         let u = &r.values;
         let (i0, i1) = (0, (2.0 / step) as usize);
         let ratio = u[i1] / u[i0];
         assert!((ratio - libm::exp(-1.0_f64)).abs() < 0.08, "ratio {ratio}");
-        assert!(u.iter().all(|v| *v >= 0.0), "positivité de Richardson-Lucy");
+        assert!(u.iter().all(|v| *v >= 0.0), "Richardson-Lucy positivity");
         assert!(r.noise_ratio.is_none());
     }
 
     #[test]
-    fn plus_d_iterations_rapprochent_de_la_verite() {
+    fn more_iterations_get_closer_to_the_truth() {
         let step = 0.05;
         let irf = irf_series(512, step, 1.0, 0.3);
         let signal = synth(&irf, step, &[(100.0, 2.0)], 0.0);
@@ -762,7 +762,7 @@ mod tests {
     }
 
     #[test]
-    fn wiener_estime_son_niveau_de_bruit_et_accepte_celui_de_l_utilisateur() {
+    fn wiener_estimates_its_noise_level_and_accepts_the_users() {
         let step = 0.05;
         let irf = irf_series(512, step, 1.0, 0.3);
         let signal = synth(&irf, step, &[(100.0, 2.0)], 0.0);
@@ -777,8 +777,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(fixed.noise_ratio, Some(1e-4));
-        // Avec peu de bruit, Wiener décroît comme le vrai déclin (le front de
-        // montée en t = 0 est lissé : on compare deux points après lui).
+        // With little noise, Wiener decays like the true decay (the rising
+        // edge at t = 0 is smoothed: we compare two points after it).
         let u = &fixed.values;
         let (i0, i1) = ((1.0 / step) as usize, (3.0 / step) as usize);
         assert!(
@@ -789,7 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn irf_nulle_ou_signal_negatif() {
+    fn zero_irf_or_negative_signal() {
         let step = 0.05;
         let signal = Series::new(grid(100, step), vec![1.0; 100]);
         let zero = Series::new(grid(100, step), vec![0.0; 100]);
@@ -821,7 +821,7 @@ mod tests {
     }
 
     #[test]
-    fn composantes_hors_de_1_a_4() {
+    fn components_outside_1_to_4() {
         let irf = irf_series(100, 0.05, 1.0, 0.2);
         let s = synth(&irf, 0.05, &[(10.0, 1.0)], 0.0);
         let spec = ReconvSpec {
@@ -838,9 +838,9 @@ mod tests {
     }
 
     #[test]
-    fn grille_non_uniforme_couvre_le_dernier_x() {
-        // Dernier X (4,4) entre deux nœuds du pas médian : le dernier point
-        // ne doit être ni NaN (directe) ni NonFiniteModel (réconvolution).
+    fn non_uniform_grid_covers_the_last_x() {
+        // Last X (4.4) between two nodes of the median step: the last point
+        // must be neither NaN (direct) nor NonFiniteModel (reconvolution).
         let irf = irf_series(40, 0.1, 1.0, 0.3);
         let x = vec![0.0, 1.0, 2.0, 3.0, 4.4];
         let signal = Series::new(x.clone(), vec![1.0, 2.0, 3.0, 2.0, 1.0]);
@@ -872,71 +872,71 @@ mod tests {
         );
     }
 
-    // ── #284 : la grille non uniforme couvre le dernier X ──────────────
+    // ── #284: the non-uniform grid covers the last X ───────────────────
 
     fn warns() -> DeconvWarnings {
         DeconvWarnings::default()
     }
 
-    /// Nombre de nœuds de la grille d'un signal non uniforme `x`.
-    fn noeuds(x: &[f64]) -> usize {
+    /// Number of nodes of the grid of a non-uniform signal `x`.
+    fn node_count(x: &[f64]) -> usize {
         grid_of(x, &mut warns()).unwrap().n
     }
 
-    /// `[0, 1, 2, 3, 4 + f]` : pas médian 1, dernier pas `1 + f`.
+    /// `[0, 1, 2, 3, 4 + f]`: median step 1, last step `1 + f`.
     fn x_fraction(f: f64) -> Vec<f64> {
         vec![0.0, 1.0, 2.0, 3.0, 4.0 + f]
     }
 
-    /// Pas de 0,1 sur [0 ; `fin`] avec un trou (le point 5 est écarté) : pas médian 0,1.
-    fn pas_dixieme_avec_trou(fin: f64) -> Vec<f64> {
+    /// Step of 0.1 on [0, `end`] with a hole (point 5 is dropped): median step 0.1.
+    fn tenth_step_with_hole(end: f64) -> Vec<f64> {
         let mut x: Vec<f64> = (0..40)
             .filter(|&i| i != 5)
             .map(|i| i as f64 * 0.1)
             .collect();
-        x.push(fin);
+        x.push(end);
         x
     }
 
     #[test]
-    fn grille_etendue_pile_entiere_ne_gagne_pas_de_noeud() {
-        // 4,0 / 0,1 = 40 pas : 41 nœuds, pas 42, malgré l'erreur de flottant.
-        let x = pas_dixieme_avec_trou(4.0);
+    fn extended_grid_exactly_on_the_integer_does_not_gain_a_node() {
+        // 4.0 / 0.1 = 40 steps: 41 nodes, not 42, despite floating-point error.
+        let x = tenth_step_with_hole(4.0);
         let mut w = warns();
         let g = grid_of(&x, &mut w).unwrap();
         assert!(w.non_uniform_signal && !g.identity);
         assert!((g.step - 0.1).abs() < 1e-12, "{}", g.step);
         assert_eq!(g.n, 41);
-        // Pas de 1 et dernier X entier.
-        assert_eq!(noeuds(&[0.0, 1.0, 2.0, 4.0, 6.0, 7.0, 8.0]), 9);
+        // Step of 1 and integer last X.
+        assert_eq!(node_count(&[0.0, 1.0, 2.0, 4.0, 6.0, 7.0, 8.0]), 9);
     }
 
     #[test]
-    fn grille_tolerance_relative_autour_du_pile() {
-        // Juste au-dessus, sous la tolérance 1e-9 : toujours 41 nœuds.
-        assert_eq!(noeuds(&pas_dixieme_avec_trou(4.0 * (1.0 + 1e-12))), 41);
-        // Juste au-dessus, au-delà de la tolérance : le dernier X n'est plus couvert par 41.
-        assert_eq!(noeuds(&pas_dixieme_avec_trou(4.0 * (1.0 + 1e-6))), 42);
-        // Juste au-dessous : 41 (le dernier nœud 4,0 couvre 4,0·(1 − 1e-6)).
-        assert_eq!(noeuds(&pas_dixieme_avec_trou(4.0 * (1.0 - 1e-6))), 41);
-        assert_eq!(noeuds(&pas_dixieme_avec_trou(4.0 * (1.0 - 1e-12))), 41);
-        // Une tolérance trop large (1e-3) donnerait 41 ici : le pas du dessus tranche.
-        assert_eq!(noeuds(&pas_dixieme_avec_trou(4.0 * (1.0 + 1e-4))), 42);
+    fn grid_relative_tolerance_around_the_exact_value() {
+        // Just above, under the tolerance 1e-9: still 41 nodes.
+        assert_eq!(node_count(&tenth_step_with_hole(4.0 * (1.0 + 1e-12))), 41);
+        // Just above, beyond the tolerance: the last X is no longer covered by 41.
+        assert_eq!(node_count(&tenth_step_with_hole(4.0 * (1.0 + 1e-6))), 42);
+        // Just below: 41 (the last node 4.0 covers 4.0·(1 − 1e-6)).
+        assert_eq!(node_count(&tenth_step_with_hole(4.0 * (1.0 - 1e-6))), 41);
+        assert_eq!(node_count(&tenth_step_with_hole(4.0 * (1.0 - 1e-12))), 41);
+        // A tolerance that is too wide (1e-3) would give 41 here: the step above decides.
+        assert_eq!(node_count(&tenth_step_with_hole(4.0 * (1.0 + 1e-4))), 42);
     }
 
     #[test]
-    fn grille_fraction_sous_a_et_au_dessus_de_la_demie() {
-        // Le dernier nœud est toujours le premier ≥ dernier X : 6 nœuds (0…5).
+    fn grid_fraction_below_and_above_one_half() {
+        // The last node is always the first ≥ last X: 6 nodes (0…5).
         for f in [0.1, 0.4, 0.5, 0.6, 0.999] {
-            assert_eq!(noeuds(&x_fraction(f)), 6, "fraction {f}");
+            assert_eq!(node_count(&x_fraction(f)), 6, "fraction {f}");
         }
-        // Pile entier (dernier X = 5) : 6 nœuds, pas 7.
-        assert_eq!(noeuds(&x_fraction(1.0)), 6);
-        // Dernier pas plus court que le pas médian : arrondi aussi vers le haut.
+        // Exact integer (last X = 5): 6 nodes, not 7.
+        assert_eq!(node_count(&x_fraction(1.0)), 6);
+        // Last step shorter than the median step: also rounded up.
         for (last, n) in [(3.4, 5), (3.5, 5), (3.6, 5), (3.01, 5)] {
-            assert_eq!(noeuds(&[0.0, 1.0, 2.0, 3.0, last]), n, "dernier X {last}");
+            assert_eq!(node_count(&[0.0, 1.0, 2.0, 3.0, last]), n, "last X {last}");
         }
-        // Le dernier nœud ≥ dernier X et < dernier X + 1 pas, sur toute la plage.
+        // The last node ≥ last X and < last X + 1 step, over the whole range.
         for k in 1..=99 {
             let x = x_fraction(k as f64 / 100.0);
             let g = grid_of(&x, &mut warns()).unwrap();
@@ -947,12 +947,12 @@ mod tests {
     }
 
     #[test]
-    fn grille_de_trois_points_non_uniformes() {
-        // Pas 1 et 1,5 : le médian est le plus grand (indice 1 sur 2) ; 2,5 / 1,5 → 2 pas.
+    fn grid_of_three_non_uniform_points() {
+        // Steps 1 and 1.5: the median is the larger (index 1 of 2); 2.5 / 1.5 → 2 steps.
         let g = grid_of(&[0.0, 1.0, 2.5], &mut warns()).unwrap();
         assert!(!g.identity);
         assert_eq!((g.step, g.n), (1.5, 3));
-        // Deux points : refus.
+        // Two points: refusal.
         assert_eq!(
             grid_of(&[0.0, 1.0], &mut warns()).err().unwrap(),
             AnalysisError::NotEnoughPoints {
@@ -960,7 +960,7 @@ mod tests {
                 needed: 3
             }
         );
-        // Des signaux de trois points se déconvoluent sans NaN.
+        // Signals of three points deconvolve without NaN.
         let irf = irf_series(40, 0.1, 1.0, 0.3);
         let signal = Series::new(vec![0.0, 1.0, 2.5], vec![1.0, 3.0, 1.0]);
         for method in [
@@ -974,9 +974,9 @@ mod tests {
     }
 
     #[test]
-    fn grille_premier_et_dernier_x_relus_sans_nan() {
-        // read_back d'une fonction affine des nœuds rend exactement l'affine aux X,
-        // dernier X (4,4) compris ; le premier X est le nœud 0.
+    fn grid_first_and_last_x_read_back_without_nan() {
+        // read_back of an affine function of the nodes returns exactly the affine at the X,
+        // last X (4.4) included; the first X is node 0.
         let x = x_fraction(0.4);
         let g = grid_of(&x, &mut warns()).unwrap();
         let on_grid: Vec<f64> = (0..g.n)
@@ -991,18 +991,18 @@ mod tests {
     }
 
     #[test]
-    fn grille_sample_plafonne_au_dernier_x() {
-        // Nœuds 0…5, dernier X 4,4 : le nœud 5 est lu à 4,4 (pas d'extrapolation, pas de NaN).
+    fn grid_sample_caps_at_the_last_x() {
+        // Nodes 0…5, last X 4.4: node 5 is read at 4.4 (no extrapolation, no NaN).
         let x = x_fraction(0.4);
         let y: Vec<f64> = x.iter().map(|v| 3.0 * v + 2.0).collect();
         let g = grid_of(&x, &mut warns()).unwrap();
         let s = g.sample(&x, &y);
         assert_eq!(s.len(), 6);
         for (j, v) in s.iter().enumerate().take(5) {
-            assert!((v - (3.0 * j as f64 + 2.0)).abs() < 1e-12, "nœud {j}");
+            assert!((v - (3.0 * j as f64 + 2.0)).abs() < 1e-12, "node {j}");
         }
         assert!((s[5] - (3.0 * 4.4 + 2.0)).abs() < 1e-12, "{}", s[5]);
-        // Régulier (identity) : copie telle quelle.
+        // Regular (identity): copy as is.
         let xr = grid(6, 0.5);
         let yr = vec![1.0, 2.0, 4.0, 8.0, 16.0, 32.0];
         let gr = grid_of(&xr, &mut warns()).unwrap();
@@ -1012,40 +1012,40 @@ mod tests {
     }
 
     #[test]
-    fn deconvolution_au_dernier_x_egale_la_grille_reguliere_equivalente() {
-        // Signal non uniforme [0,1,2,3,4,4] → dernier X 4,4 ; son équivalent régulier
-        // porte le signal rééchantillonné sur les nœuds 0…5 (le nœud 5 plafonné
-        // à 4,4). Les valeurs relues doivent en être l'interpolation linéaire.
+    fn deconvolution_at_the_last_x_equals_the_equivalent_regular_grid() {
+        // Non-uniform signal [0,1,2,3,4,4] → last X 4.4; its regular equivalent
+        // carries the signal resampled on nodes 0…5 (node 5 capped
+        // at 4.4). The values read back must be its linear interpolation.
         let irf = irf_series(40, 0.1, 1.0, 0.3);
         let x = x_fraction(0.4);
         let y = vec![1.0, 2.0, 3.0, 2.0, 1.0];
         let signal = Series::new(x.clone(), y.clone());
         let interp = |t: f64| interpolate(&x, &y, t.min(4.4)).unwrap();
         let reg_y: Vec<f64> = (0..6).map(|j| interp(j as f64)).collect();
-        let regulier = Series::new((0..6).map(|j| j as f64).collect(), reg_y);
+        let regular = Series::new((0..6).map(|j| j as f64).collect(), reg_y);
         for method in [
             DirectMethod::RichardsonLucy { iterations: 30 },
             DirectMethod::Wiener { noise: Some(0.01) },
         ] {
             let d = deconvolve(&signal, &irf, 0.0, method).unwrap();
-            let r = deconvolve(&regulier, &irf, 0.0, method).unwrap();
+            let r = deconvolve(&regular, &irf, 0.0, method).unwrap();
             assert!(!r.warnings.non_uniform_signal);
             let u = &r.values;
-            let attendu = [u[0], u[1], u[2], u[3], u[4] + 0.4 * (u[5] - u[4])];
-            for (i, (a, e)) in d.values.iter().zip(&attendu).enumerate() {
+            let expected = [u[0], u[1], u[2], u[3], u[4] + 0.4 * (u[5] - u[4])];
+            for (i, (a, e)) in d.values.iter().zip(&expected).enumerate() {
                 assert!(a.is_finite(), "{method:?} point {i}");
                 assert!(
                     (a - e).abs() <= 1e-9 * e.abs().max(1.0),
-                    "{method:?} point {i} : {a} contre {e}"
+                    "{method:?} point {i}: {a} against {e}"
                 );
             }
         }
     }
 
     #[test]
-    fn reconvolution_non_uniforme_relit_le_dernier_x() {
-        // Signal exponentiel, dernier X entre deux nœuds : le modèle relu aux X du
-        // signal est fini partout, dernier point compris.
+    fn non_uniform_reconvolution_reads_back_the_last_x() {
+        // Exponential signal, last X between two nodes: the model read at the X of the
+        // signal is finite everywhere, last point included.
         let irf = irf_series(40, 0.1, 1.0, 0.3);
         let mut x: Vec<f64> = (0..=40)
             .filter(|i| i % 7 != 3)
@@ -1065,16 +1065,16 @@ mod tests {
         assert!(r.warnings.non_uniform_signal);
         assert_eq!(r.fitted.len(), x.len());
         assert!(r.fitted.iter().all(|v| v.is_finite()), "{:?}", r.fitted);
-        // Régulier : pas d'avertissement.
+        // Regular: no warning.
         let reg = synth(&irf_series(400, 0.05, 2.0, 0.15), 0.05, &[(10.0, 2.0)], 0.0);
         let r = reconvolve(&reg, &irf, &spec).unwrap();
         assert!(!r.warnings.non_uniform_signal);
     }
 
     #[test]
-    fn grille_reguliere_identity_est_inchangee() {
-        // Un pas régulier (à 1 % près) ne rééchantillonne rien : mêmes valeurs bit à
-        // bit qu'un signal exactement régulier de mêmes extrémités.
+    fn regular_grid_identity_is_unchanged() {
+        // A regular step (to within 1 %) resamples nothing: same values bit for
+        // bit as an exactly regular signal with the same ends.
         let irf = irf_series(40, 0.1, 1.0, 0.3);
         let n = 30;
         let exact: Vec<f64> = (0..n).map(|i| i as f64 * 0.1).collect();
@@ -1101,7 +1101,7 @@ mod tests {
     }
 
     #[test]
-    fn avertissement_pas_uniforme_seulement_en_non_uniforme() {
+    fn uniform_step_warning_only_when_non_uniform() {
         let irf = irf_series(40, 0.1, 1.0, 0.3);
         let m = DirectMethod::Wiener { noise: Some(0.01) };
         let y = vec![1.0, 2.0, 3.0, 2.0, 1.0];
@@ -1112,9 +1112,9 @@ mod tests {
     }
 
     #[test]
-    fn pas_de_l_irf_plus_grand_que_l_etendue_du_signal() {
-        // IRF à pas 10 sur 20 unités, signal sur 4,4 : refus propre ou valeurs finies,
-        // jamais NaN ; l'écart de pas est signalé.
+    fn irf_step_larger_than_the_signal_extent() {
+        // IRF at step 10 over 20 units, signal over 4.4: clean refusal or finite values,
+        // never NaN; the step gap is reported.
         let irf = Series::new(vec![0.0, 10.0, 20.0], vec![1.0, 0.5, 0.1]);
         let signal = Series::new(x_fraction(0.4), vec![1.0, 2.0, 3.0, 2.0, 1.0]);
         for method in [
@@ -1128,35 +1128,35 @@ mod tests {
     }
 
     #[test]
-    fn grilles_non_uniformes_aleatoires_toutes_finies() {
-        // Générateur congruentiel figé : mêmes grilles à chaque exécution.
-        let mut etat: u64 = 0x2545_F491_4F6C_DD1D;
-        let mut alea = move || {
-            etat = etat
+    fn random_non_uniform_grids_all_finite() {
+        // Frozen linear congruential generator: same grids on each run.
+        let mut state: u64 = 0x2545_F491_4F6C_DD1D;
+        let mut random = move || {
+            state = state
                 .wrapping_mul(6_364_136_223_846_793_005)
                 .wrapping_add(1_442_695_040_888_963_407);
-            (etat >> 11) as f64 / (1u64 << 53) as f64
+            (state >> 11) as f64 / (1u64 << 53) as f64
         };
         let irf = irf_series(40, 0.1, 1.0, 0.3);
-        let mut non_uniformes = 0;
-        for cas in 0..25 {
-            let n = 4 + (alea() * 30.0) as usize;
+        let mut non_uniform_count = 0;
+        for case in 0..25 {
+            let n = 4 + (random() * 30.0) as usize;
             let mut t = 0.0;
             let mut x = vec![t];
             for _ in 1..n {
-                t += 0.03 + 0.17 * alea();
+                t += 0.03 + 0.17 * random();
                 x.push(t);
             }
             let y: Vec<f64> = x
                 .iter()
-                .map(|t| 0.5 + libm::exp(-t / 1.5) + 0.1 * alea())
+                .map(|t| 0.5 + libm::exp(-t / 1.5) + 0.1 * random())
                 .collect();
             let signal = Series::new(x.clone(), y);
             let g = grid_of(&x, &mut warns()).unwrap();
-            let dernier = g.start + (g.n - 1) as f64 * g.step;
-            assert!(dernier >= x[n - 1] - 1e-9, "cas {cas}");
-            assert!(dernier < x[n - 1] + g.step, "cas {cas}");
-            non_uniformes += usize::from(!g.identity);
+            let last_node = g.start + (g.n - 1) as f64 * g.step;
+            assert!(last_node >= x[n - 1] - 1e-9, "case {case}");
+            assert!(last_node < x[n - 1] + g.step, "case {case}");
+            non_uniform_count += usize::from(!g.identity);
             for method in [
                 DirectMethod::RichardsonLucy { iterations: 10 },
                 DirectMethod::Wiener { noise: Some(0.01) },
@@ -1165,15 +1165,18 @@ mod tests {
                 assert_eq!(d.values.len(), n);
                 assert!(
                     d.values.iter().all(|v| v.is_finite()),
-                    "cas {cas} {method:?} : {:?}",
+                    "case {case} {method:?} : {:?}",
                     d.values
                 );
             }
         }
-        assert!(non_uniformes >= 20, "{non_uniformes} grilles non uniformes");
+        assert!(
+            non_uniform_count >= 20,
+            "{non_uniform_count} non-uniform grids"
+        );
     }
 
-    /// IRF de pic 1 en x = 3 (x = 0..=9), dont les deux bords valent `first` et
+    /// IRF with peak 1 at x = 3 (x = 0..=9), whose two edges are `first` and
     /// `last`.
     fn irf_with_edges(first: f64, last: f64) -> Series {
         let mut y = vec![0.0, 0.4, 0.8, 1.0, 0.8, 0.4, 0.2, 0.1, 0.05, 0.0];
@@ -1191,42 +1194,42 @@ mod tests {
         }
     }
 
-    /// C2 (#313) : le noyau est coupé si l'IRF s'arrête au-dessus de 1 % de son
-    /// pic. 5 % et 1,1 % avertissent, 0,9 % et 0,5 % non.
+    /// C2 (#313): the kernel is cut if the IRF stops above 1 % of its
+    /// peak. 5 % and 1.1 % warn, 0.9 % and 0.5 % do not.
     #[test]
-    fn une_irf_coupee_au_dessus_d_un_pour_cent_de_son_pic_est_signalee() {
+    fn an_irf_cut_above_one_percent_of_its_peak_is_reported() {
         let g = signal_grid();
         for (edge, want) in [(0.05, true), (0.011, true), (0.009, false), (0.005, false)] {
             assert_eq!(
                 irf_truncated(&irf_with_edges(0.0, edge), &g, 0.0),
                 want,
-                "bord de fin {edge}"
+                "end edge {edge}"
             );
             assert_eq!(
                 irf_truncated(&irf_with_edges(edge, 0.0), &g, 0.0),
                 want,
-                "bord de début {edge}"
+                "start edge {edge}"
             );
         }
     }
 
-    /// Un point de l'IRF hors de la fenêtre du noyau, au-dessus de 1 %, est
-    /// perdu ; sous 1 %, non. Le décalage déplace la fenêtre.
+    /// An IRF point outside the kernel window, above 1 %, is
+    /// lost; below 1 %, not. The shift moves the window.
     #[test]
-    fn un_point_d_irf_hors_de_la_fenetre_est_signale_selon_le_decalage() {
+    fn an_irf_point_outside_the_window_is_reported_depending_on_the_shift() {
         let g = signal_grid();
         let irf = irf_with_edges(0.0, 0.0);
         assert!(!irf_truncated(&irf, &g, 0.0));
-        // Décalage −2,5 : la fenêtre commence en 2,5 ; le point x = 2 (0,8) est hors.
+        // Shift −2.5: the window starts at 2.5; the point x = 2 (0.8) is outside.
         assert!(irf_truncated(&irf, &g, -2.5));
-        // Décalage −9 : seul x = 9 (0) reste ; x = 8 (0,05) est au-dessus de 1 %.
+        // Shift −9: only x = 9 (0) remains; x = 8 (0.05) is above 1 %.
         assert!(irf_truncated(&irf, &g, -9.0));
-        // Décalage positif : la fenêtre s'étend avant 0 et après 99 − shift.
+        // Positive shift: the window extends before 0 and after 99 − shift.
         assert!(irf_truncated(&irf, &g, 95.0));
     }
 
     #[test]
-    fn la_deconvolution_directe_dit_une_irf_coupee_et_garde_la_renormalisation() {
+    fn direct_deconvolution_reports_a_cut_irf_and_keeps_the_renormalization() {
         let step = 1.0;
         let irf = irf_with_edges(0.0, 0.05);
         let signal = Series::new(
@@ -1240,19 +1243,19 @@ mod tests {
         assert!(!ok.warnings.irf_truncated);
     }
 
-    /// C5 (#313) : des amplitudes de somme nulle ne définissent pas de durée
-    /// de vie moyenne : NaN, jamais ±∞.
+    /// C5 (#313): amplitudes with a zero sum do not define a mean
+    /// lifetime: NaN, never ±∞.
     #[test]
-    fn un_denominateur_nul_donne_nan_et_pas_l_infini() {
+    fn a_zero_denominator_gives_nan_and_not_infinity() {
         assert!(ratio_or_nan(3.0, 0.0).is_nan());
         assert!(ratio_or_nan(-3.0, 0.0).is_nan());
         assert_eq!(ratio_or_nan(6.0, 3.0), 2.0);
     }
 
-    /// C5 de bout en bout : deux amplitudes fixées à +5 et −5 (somme nulle) ne
-    /// donnent aucune durée de vie moyenne.
+    /// C5 end to end: two amplitudes fixed at +5 and −5 (zero sum) give
+    /// no mean lifetime.
     #[test]
-    fn des_amplitudes_de_somme_nulle_donnent_des_durees_moyennes_nan() {
+    fn amplitudes_with_a_zero_sum_give_nan_mean_lifetimes() {
         let step = 0.05;
         let irf = irf_series(400, step, 1.0, 0.1);
         let signal = synth(&irf, step, &[(10.0, 1.0)], 1.0);

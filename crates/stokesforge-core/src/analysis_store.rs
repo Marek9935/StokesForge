@@ -1,40 +1,40 @@
-//! Le classeur caché des copies d'analyse (#248).
+//! The hidden workbook of analysis copies (#248).
 //!
-//! Deux sortes de copies de colonnes y vivent, **un seul classeur caché par
-//! projet** :
+//! Two kinds of column copies live there, **a single hidden workbook per
+//! project**:
 //!
-//! - la **référence figée** d'une correction par une colonne de référence (avec
-//!   son X) : le calcul lit la copie, pas la colonne d'origine, si bien
-//!   que supprimer ou modifier celle-ci, ou son classeur, ne casse rien. Une
-//!   copie est partagée par tous les spectres d'un même calcul (une seule
-//!   référence par calcul) et par les calculs qui corrigent par la même colonne
-//!   dans le même état ;
-//! - l'**original** de chaque colonne qu'un remplacement de données a écrasée,
-//!   gardé dans le `.stf` pour que « Restore original data » puisse le rendre,
-//!   même après fermeture.
+//! - the **frozen reference** of a correction by a reference column (with
+//!   its X): the calculation reads the copy, not the original column, so
+//!   deleting or changing the latter, or its workbook, breaks nothing. A
+//!   copy is shared by all the spectra of the same calculation (a single
+//!   reference per calculation) and by the calculations that correct with the same column
+//!   in the same state;
+//! - the **original** of each column that a data replacement overwrote,
+//!   kept in the `.stf` so that "Restore original data" can give it back,
+//!   even after closing.
 //!
-//! # Identification et cycle de vie
+//! # Identification and life cycle
 //!
-//! Le classeur est un classeur ordinaire de l'arbre, `hidden` et marqué par
-//! [`ANALYSIS_STORE_MARK`] dans le commentaire de sa fenêtre : il voyage donc
-//! avec l'arbre (instantané de session, retour arrière, `.stf`) sans schéma à
-//! part, et reste hors de `books()`, du Project Manager et de l'Object Manager
-//! comme les classeurs cachés qui portent les données d'un graphe copié.
+//! The workbook is an ordinary workbook of the tree, `hidden` and marked by
+//! [`ANALYSIS_STORE_MARK`] in its window comment: it therefore travels
+//! with the tree (session snapshot, undo, `.stf`) with no separate schema,
+//! and stays out of `books()`, the Project Manager and the Object Manager,
+//! like the hidden workbooks that carry the data of a copied graph.
 //!
-//! Aucune copie n'a de durée de vie propre : une colonne du classeur est gardée
-//! tant qu'un calcul (`Calculation::aux`), une correction (`CorrectionRecord`
-//! : sa référence ou ses originaux) la cite, et retirée avec la dernière
-//! analyse qui l'utilise ([`Project::gc_analysis_store`]). Le classeur lui-même
-//! disparaît avec sa dernière copie. Toutes ces écritures font partie d'une
-//! commande **structurelle** : annuler ramène l'arbre entier, copies comprises.
+//! No copy has a life of its own: a column of the workbook is kept
+//! as long as a calculation (`Calculation::aux`) or a correction (`CorrectionRecord`
+//! : its reference or its originals) cites it, and removed with the last
+//! analysis that uses it ([`Project::gc_analysis_store`]). The workbook itself
+//! disappears with its last copy. All these writes are part of one
+//! **structural** command: undo brings back the whole tree, copies included.
 //!
-//! # Pourquoi pas une table à part dans l'arbre
+//! # Why not a separate table in the tree
 //!
-//! Une `BTreeMap<NodeId, Column>` de plus dans [`Tree`] aurait demandé un champ
-//! de schéma `.stf`, une copie dans les instantanés et son propre parcours pour
-//! la version de colonne (invariant 11 : toute donnée lue par un calcul entre
-//! dans l'empreinte). Une colonne ordinaire, elle, a déjà tout cela : version,
-//! persistance, recalcul ciblé.
+//! One more `BTreeMap<NodeId, Column>` in [`Tree`] would have needed a `.stf`
+//! schema field, a copy in the snapshots and its own walk for
+//! the column version (invariant 11: every piece of data read by a calculation enters
+//! the fingerprint). An ordinary column already has all of this: version,
+//! persistence, targeted recalculation.
 
 use std::collections::HashSet;
 
@@ -46,29 +46,29 @@ use crate::node::{NodeKind, WindowMeta};
 use crate::project::Project;
 use crate::tree::Tree;
 
-/// Mêmes type et mêmes cellules (comparaison binaire : `NaN` égale `NaN`).
+/// Same type and same cells (binary comparison: `NaN` equals `NaN`).
 fn same_content(a: &Column, b: &Column) -> bool {
     a.column_type() == b.column_type()
         && a.len() == b.len()
         && (0..a.len()).all(|row| a.get(row) == b.get(row))
 }
 
-/// Le commentaire de fenêtre qui désigne le classeur caché des copies.
+/// The window comment that designates the hidden workbook of copies.
 pub const ANALYSIS_STORE_MARK: &str = "stokesforge:analysis-store";
 
-/// Préfixe du commentaire de colonne qui dit d'où vient une copie
-/// (`copy-of:<id>`) : une même colonne, dans le même état, n'est copiée qu'une
-/// fois. Le **contenu** tranche l'« état », jamais un numéro de version : il
-/// dépend de l'historique des écritures de la session (le recalcul ciblé en
-/// tire moins que le complet), et deux arbres que l'oracle `b22` compare
-/// doivent rester égaux.
+/// Prefix of the column comment that says where a copy comes from
+/// (`copy-of:<id>`): the same column, in the same state, is copied only
+/// once. The **content** decides the "state", never a version number: it
+/// depends on the history of the session's writes (targeted recalculation
+/// draws fewer than the full one), and two trees that the `b22` oracle compares
+/// must stay equal.
 const SOURCE_MARK: &str = "copy-of:";
 
-/// Nom du classeur caché.
+/// Name of the hidden workbook.
 const STORE_NAME: &str = "Analysis Data";
 
 impl Tree {
-    /// La feuille du classeur caché des copies, s'il existe.
+    /// The sheet of the hidden workbook of copies, if it exists.
     pub fn analysis_store_sheet(&self) -> Option<NodeId> {
         self.children(self.root())
             .ok()?
@@ -83,7 +83,7 @@ impl Tree {
             })
     }
 
-    /// `column` est-elle une copie du classeur caché ?
+    /// Is `column` a copy in the hidden workbook?
     pub fn is_analysis_copy(&self, column: NodeId) -> bool {
         self.analysis_store_sheet()
             .is_some_and(|sheet| self.parent(column).ok().flatten() == Some(sheet))
@@ -91,24 +91,24 @@ impl Tree {
 }
 
 impl Project {
-    /// La feuille du classeur caché des copies, s'il existe.
+    /// The sheet of the hidden workbook of copies, if it exists.
     pub fn analysis_store_sheet(&self) -> Option<NodeId> {
         self.tree().analysis_store_sheet()
     }
 
-    /// `column` est-elle une copie du classeur caché ?
+    /// Is `column` a copy in the hidden workbook?
     pub fn is_analysis_copy(&self, column: NodeId) -> bool {
         self.tree().is_analysis_copy(column)
     }
 
-    /// La feuille des copies, créée au besoin (classeur caché, un par projet).
+    /// The sheet of copies, created if needed (hidden workbook, one per project).
     fn ensure_analysis_store(&mut self) -> CoreResult<NodeId> {
         if let Some(sheet) = self.analysis_store_sheet() {
             return Ok(sheet);
         }
         let root = self.root();
-        // Un classeur de l'utilisateur peut déjà porter ce nom : le nôtre se
-        // distingue par son marqueur, pas par son nom.
+        // A user workbook may already carry this name: ours is
+        // told apart by its marker, not by its name.
         let mut name = STORE_NAME.to_string();
         let mut n = 1;
         while self
@@ -132,9 +132,9 @@ impl Project {
         self.add_worksheet(book, Some("Copies"))
     }
 
-    /// Copie `source` dans le classeur caché. `share` : réutilise la copie déjà
-    /// faite de cette colonne dans ce même état (référence figée) ; sinon la
-    /// copie est neuve (original d'un remplacement).
+    /// Copies `source` into the hidden workbook. `share`: reuses the copy already
+    /// made of this column in this same state (frozen reference); otherwise the
+    /// copy is new (original of a replacement).
     fn copy_into_store(&mut self, source: NodeId, share: bool) -> CoreResult<NodeId> {
         let column = self
             .tree()
@@ -159,22 +159,22 @@ impl Project {
         let label = self.path_of(source).unwrap_or_default();
         let sheet = self.ensure_analysis_store()?;
         let mut meta = column.meta().clone();
-        // La copie est une photo : ni formule à recalculer, ni rôle de tracé.
+        // The copy is a photo: no formula to recalculate, no plot role.
         meta.formula = None;
         meta.long_name = label;
         meta.comment = mark;
         let mut copy = column;
         copy.set_meta(meta);
         let id = self.add_column(sheet, None, None, copy)?;
-        // Un numéro de version que ce projet n'a jamais attribué à un autre
-        // contenu (A7) : la copie n'hérite pas de celui de sa source.
+        // A version number that this project never assigned to other
+        // content (A7): the copy does not inherit its source's.
         let version = self.next_column_version();
         self.restamp_column_version(id, version)?;
         Ok(id)
     }
 
-    /// Fige la colonne de référence d'une correction (et son X) : le calcul lira
-    /// ces copies. Une référence déjà figée est rendue telle quelle.
+    /// Freezes the reference column of a correction (and its X): the calculation will read
+    /// these copies. A reference already frozen is returned as is.
     pub(crate) fn freeze_reference(&mut self, aux: &AuxRef) -> CoreResult<AuxRef> {
         if self.is_analysis_copy(aux.y) {
             return Ok(aux.clone());
@@ -188,12 +188,12 @@ impl Project {
         Ok(AuxRef { x, y })
     }
 
-    /// Garde l'original de `column` avant un remplacement de données.
+    /// Keeps the original of `column` before a data replacement.
     pub(crate) fn keep_original(&mut self, column: NodeId) -> CoreResult<NodeId> {
         self.copy_into_store(column, false)
     }
 
-    /// Rend à `column` le type et les valeurs gardés dans `copy`.
+    /// Gives `column` back the type and values kept in `copy`.
     pub(crate) fn restore_from_copy(&mut self, column: NodeId, copy: NodeId) -> CoreResult<()> {
         let source = self
             .tree()
@@ -205,8 +205,8 @@ impl Project {
         self.restore_column(column, column_type, values)
     }
 
-    /// Retire les copies que plus aucune analyse ne cite, puis le classeur
-    /// caché s'il est vide.
+    /// Removes the copies that no analysis cites any more, then the hidden
+    /// workbook if it is empty.
     pub(crate) fn gc_analysis_store(&mut self) {
         let Some(sheet) = self.analysis_store_sheet() else {
             return;
@@ -237,8 +237,8 @@ impl Project {
             })
             .unwrap_or_default();
         for column in dead {
-            // Une copie qui ne se retire pas reste : un ménage raté ne défait
-            // pas l'analyse qui l'a déclenché.
+            // A copy that cannot be removed stays: a failed cleanup does not undo
+            // the analysis that triggered it.
             let _ = self.remove_without_gc(column);
         }
         let empty = self

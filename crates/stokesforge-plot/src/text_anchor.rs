@@ -1,36 +1,36 @@
-//! Les textes déplaçables d'un graphe — titre, titres de panneau, titres
-//! d'axe, légende (issue #53).
+//! The movable texts of a graph — title, panel titles, axis titles,
+//! legend (issue #53).
 //!
-//! Un titre sans [`TextAnchor`] est **là où le rendu le met** : Plotters
-//! réserve sa place (bande du titre, aire de graduation, coin de la zone de
-//! tracé pour la légende). Avec une ancre, il est **ancré aux données** comme
-//! un texte libre ([`crate::AnnotationSpec`]) : son centre suit le zoom et le
-//! déplacement de la vue, et la position vaut à l'export (le rendu, donc les
-//! deux backends, la lit). Réinitialiser, c'est retirer l'ancre.
+//! A title without a [`TextAnchor`] is **where rendering puts it**: Plotters
+//! reserves its place (title band, tick area, corner of the plot
+//! area for the legend). With an anchor, it is **anchored to the data** like
+//! a free text ([`crate::AnnotationSpec`]): its center follows the zoom and
+//! pan of the view, and the position holds on export (rendering, hence both
+//! backends, reads it). Resetting means removing the anchor.
 //!
-//! L'ancre est exprimée dans le repère de données du **panneau** du texte —
-//! le premier panneau pour le titre du graphe, qui n'appartient à aucun
-//! panneau. Un titre vit en général **hors** de la zone de tracé : l'ancre
-//! n'est donc pas bornée au cadrage visible — pas plus qu'un texte libre
-//! (#163) : l'un comme l'autre restent tracés dans les marges.
+//! The anchor is expressed in the data frame of the text's **panel** —
+//! the first panel for the graph title, which belongs to no
+//! panel. A title generally lives **outside** the plot area: the anchor
+//! is therefore not bounded to the visible framing — no more than a free text
+//! (#163): both stay plotted in the margins.
 
 use crate::axis::AxisSide;
 use crate::series::SeriesAxis;
 use crate::spec::PlotSpec;
 
-/// Où un texte déplacé est posé : son **centre**, en données.
+/// Where a moved text is placed: its **center**, in data.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TextAnchor {
-    /// Abscisse du centre, en données.
+    /// Abscissa of the center, in data.
     pub x: f64,
-    /// Ordonnée du centre, en données de l'axe [`Self::axis`].
+    /// Ordinate of the center, in data of the axis [`Self::axis`].
     pub y: f64,
-    /// Ordonnée de rattachement : gauche ou droite, comme un texte libre.
+    /// Ordinate it is attached to: left or right, like a free text.
     pub axis: SeriesAxis,
 }
 
 impl TextAnchor {
-    /// Une ancre au point `(x, y)` de l'ordonnée de gauche.
+    /// An anchor at the point `(x, y)` of the left ordinate.
     pub const fn new(x: f64, y: f64) -> Self {
         Self {
             x,
@@ -39,41 +39,41 @@ impl TextAnchor {
         }
     }
 
-    /// Vrai si l'ancre est exploitable : coordonnées finies. Une ancre venue
-    /// d'un fichier abîmé est ignorée au rendu (le texte retrouve sa place
-    /// par défaut) plutôt que de projeter un `NaN`.
+    /// True if the anchor is usable: finite coordinates. An anchor coming
+    /// from a damaged file is ignored at rendering (the text gets its default
+    /// place back) rather than projecting a `NaN`.
     pub fn is_finite(&self) -> bool {
         self.x.is_finite() && self.y.is_finite()
     }
 }
 
-/// Un texte déplaçable, désigné dans un [`PlotSpec`]. Les calques sont
-/// adressés par leur indice, comme [`crate::AnnotationRef`].
+/// A movable text, designated in a [`PlotSpec`]. Layers are
+/// addressed by their index, like [`crate::AnnotationRef`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextTarget {
-    /// Le titre du graphe.
+    /// The graph title.
     Title,
-    /// Le titre d'un panneau.
+    /// The title of a panel.
     PanelTitle {
-        /// Indice du calque dans [`PlotSpec::panels`].
+        /// Index of the layer in [`PlotSpec::panels`].
         panel: usize,
     },
-    /// Le titre d'un axe d'un panneau.
+    /// The title of an axis of a panel.
     AxisTitle {
-        /// Indice du calque dans [`PlotSpec::panels`].
+        /// Index of the layer in [`PlotSpec::panels`].
         panel: usize,
-        /// Le côté de l'axe.
+        /// The side of the axis.
         side: AxisSide,
     },
-    /// La légende d'un panneau (le cadre entier).
+    /// The legend of a panel (the whole frame).
     Legend {
-        /// Indice du calque dans [`PlotSpec::panels`].
+        /// Index of the layer in [`PlotSpec::panels`].
         panel: usize,
     },
 }
 
 impl TextTarget {
-    /// L'indice du calque du texte ; `None` pour le titre du graphe.
+    /// The index of the text's layer; `None` for the graph title.
     pub fn panel_index_of(&self) -> Option<usize> {
         match *self {
             Self::Title => None,
@@ -88,7 +88,7 @@ impl TextTarget {
             .filter(|panel| *panel < spec.panels.len())
     }
 
-    /// Visibilité mémorisée du texte, sans effacer son contenu ni son ancre.
+    /// Remembered visibility of the text, without erasing its content or its anchor.
     pub fn visible(&self, spec: &PlotSpec) -> Option<bool> {
         Some(match *self {
             Self::Title => spec.title_visible,
@@ -103,7 +103,7 @@ impl TextTarget {
         })
     }
 
-    /// Change seulement la visibilité ; une cible absente reste sans effet.
+    /// Only changes the visibility; an absent target has no effect.
     pub fn set_visible(&self, spec: &mut PlotSpec, visible: bool) -> bool {
         if self.visible(spec).is_none_or(|value| value == visible) {
             return false;
@@ -127,7 +127,7 @@ impl TextTarget {
         true
     }
 
-    /// L'ancre du texte, s'il a été déplacé.
+    /// The anchor of the text, if it was moved.
     pub fn anchor(&self, spec: &PlotSpec) -> Option<TextAnchor> {
         match *self {
             Self::Title => spec.title_anchor,
@@ -142,8 +142,8 @@ impl TextTarget {
         }
     }
 
-    /// Pose (ou, avec `None`, retire) l'ancre du texte. Rend `false` sans
-    /// rien changer si le panneau n'existe pas.
+    /// Sets (or, with `None`, removes) the anchor of the text. Returns `false` without
+    /// changing anything if the panel does not exist.
     pub fn set_anchor(&self, spec: &mut PlotSpec, anchor: Option<TextAnchor>) -> bool {
         match *self {
             Self::Title => {
@@ -183,8 +183,8 @@ impl TextTarget {
         }
     }
 
-    /// La police et le corps du texte (issue #78), `None` si le panneau
-    /// n'existe pas.
+    /// The font and size of the text (issue #78), `None` if the panel
+    /// does not exist.
     pub fn font(&self, spec: &PlotSpec) -> Option<crate::TextFont> {
         Some(match *self {
             Self::Title => spec.title_font.clone(),
@@ -204,8 +204,8 @@ impl TextTarget {
         })
     }
 
-    /// Pose la police et le corps du texte. Rend `false` sans rien changer si
-    /// le panneau n'existe pas.
+    /// Sets the font and size of the text. Returns `false` without changing anything if
+    /// the panel does not exist.
     pub fn set_font(&self, spec: &mut PlotSpec, font: crate::TextFont) -> bool {
         if let Self::Title = self {
             spec.title_font = font;
@@ -226,8 +226,8 @@ impl TextTarget {
         true
     }
 
-    /// La couleur de toute la zone (issue #90), vide = automatique ; `None`
-    /// si le panneau n'existe pas.
+    /// The color of the whole area (issue #90), empty = automatic; `None`
+    /// if the panel does not exist.
     pub fn color(&self, spec: &PlotSpec) -> Option<String> {
         Some(match *self {
             Self::Title => spec.title_color.clone(),
@@ -251,8 +251,8 @@ impl TextTarget {
         })
     }
 
-    /// Pose la couleur de toute la zone. Rend `false` sans rien changer si le
-    /// panneau n'existe pas.
+    /// Sets the color of the whole area. Returns `false` without changing anything if the
+    /// panel does not exist.
     pub fn set_color(&self, spec: &mut PlotSpec, color: String) -> bool {
         if let Self::Title = self {
             spec.title_color = color;
@@ -273,9 +273,9 @@ impl TextTarget {
         true
     }
 
-    /// Le texte du titre tel qu'il s'affiche — `None` pour la légende (ses
-    /// textes sont les noms des séries) ou si le panneau n'existe pas. Pour un
-    /// titre d'axe, l'unité est incluse (`Signal (u.a.)`,
+    /// The title text as displayed — `None` for the legend (its
+    /// texts are the series names) or if the panel does not exist. For an
+    /// axis title, the unit is included (`Signal (a.u.)`,
     /// [`crate::AxisSpec::display_label`]).
     pub fn text(&self, spec: &PlotSpec) -> Option<String> {
         match *self {
@@ -293,11 +293,11 @@ impl TextTarget {
         }
     }
 
-    /// Remplace le texte du titre. Rend `false` sans rien changer pour la
-    /// légende ou un panneau absent. Pour un titre d'axe, `text` est le texte
-    /// **affiché** ([`Self::text`]) : s'il se termine encore par l'unité entre
-    /// parenthèses, elle reste l'unité de l'axe et le reste devient le titre ;
-    /// sinon l'unité est vidée (le texte saisi est tout ce qui s'affiche).
+    /// Replaces the title text. Returns `false` without changing anything for the
+    /// legend or an absent panel. For an axis title, `text` is the **displayed**
+    /// text ([`Self::text`]): if it still ends with the unit in
+    /// parentheses, that stays the unit of the axis and the rest becomes the title;
+    /// otherwise the unit is cleared (the typed text is all that is displayed).
     pub fn set_text(&self, spec: &mut PlotSpec, text: String) -> bool {
         match *self {
             Self::Title => {
@@ -341,8 +341,8 @@ impl TextTarget {
 }
 
 impl PlotSpec {
-    /// Retire toutes les ancres : chaque titre et chaque légende retrouve sa
-    /// place par défaut. Rend le nombre d'ancres retirées.
+    /// Removes all the anchors: each title and each legend gets its default
+    /// place back. Returns the number of anchors removed.
     pub fn reset_text_anchors(&mut self) -> usize {
         let mut removed = usize::from(self.title_anchor.take().is_some());
         for panel in self.panels.iter_mut() {
@@ -360,7 +360,7 @@ impl PlotSpec {
         removed
     }
 
-    /// Vrai si au moins un texte a été déplacé.
+    /// True if at least one text was moved.
     pub fn has_text_anchors(&self) -> bool {
         self.title_anchor.is_some()
             || self.panels.iter().any(|panel| {
@@ -383,9 +383,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn une_ancre_se_pose_se_lit_et_se_retire_pour_chaque_texte() {
-        let mut spec = PlotSpec::empty("Titre");
-        let cibles = [
+    fn an_anchor_is_set_read_and_removed_for_each_text() {
+        let mut spec = PlotSpec::empty("Title");
+        let targets = [
             TextTarget::Title,
             TextTarget::PanelTitle { panel: 0 },
             TextTarget::AxisTitle {
@@ -394,10 +394,10 @@ mod tests {
             },
             TextTarget::Legend { panel: 0 },
         ];
-        for cible in cibles {
-            assert_eq!(cible.anchor(&spec), None);
-            assert!(cible.set_anchor(&mut spec, Some(TextAnchor::new(1.0, 2.0))));
-            assert_eq!(cible.anchor(&spec), Some(TextAnchor::new(1.0, 2.0)));
+        for target in targets {
+            assert_eq!(target.anchor(&spec), None);
+            assert!(target.set_anchor(&mut spec, Some(TextAnchor::new(1.0, 2.0))));
+            assert_eq!(target.anchor(&spec), Some(TextAnchor::new(1.0, 2.0)));
         }
         assert!(spec.has_text_anchors());
         assert_eq!(spec.reset_text_anchors(), 4);
@@ -406,42 +406,42 @@ mod tests {
     }
 
     #[test]
-    fn un_panneau_absent_ne_change_rien() {
+    fn an_absent_panel_changes_nothing() {
         let mut spec = PlotSpec::empty("T");
-        let loin = TextTarget::Legend { panel: 3 };
-        assert!(!loin.set_anchor(&mut spec, Some(TextAnchor::new(0.0, 0.0))));
-        assert_eq!(loin.anchor(&spec), None);
+        let far = TextTarget::Legend { panel: 3 };
+        assert!(!far.set_anchor(&mut spec, Some(TextAnchor::new(0.0, 0.0))));
+        assert_eq!(far.anchor(&spec), None);
         assert!(!spec.has_text_anchors());
     }
 
     #[test]
-    fn le_texte_d_un_titre_se_lit_et_se_remplace() {
+    fn the_text_of_a_title_is_read_and_replaced() {
         let mut spec = PlotSpec::empty("A");
-        let axe = TextTarget::AxisTitle {
+        let axis = TextTarget::AxisTitle {
             panel: 0,
             side: AxisSide::Bottom,
         };
         assert_eq!(TextTarget::Title.text(&spec).as_deref(), Some("A"));
         assert!(TextTarget::Title.set_text(&mut spec, "B".into()));
-        assert!(axe.set_text(&mut spec, "t".into()));
+        assert!(axis.set_text(&mut spec, "t".into()));
         assert_eq!(spec.title, "B");
         assert_eq!(spec.panels[0].bottom.label, "t");
-        // L'unité s'affiche avec le titre : la garder ou l'effacer à l'édition.
-        spec.panels.get_mut(0).expect("panneau").bottom.unit = "s".into();
-        assert_eq!(axe.text(&spec).as_deref(), Some("t (s)"));
-        assert!(axe.set_text(&mut spec, "temps (s)".into()));
-        assert_eq!(spec.panels[0].bottom.label, "temps");
+        // The unit is displayed with the title: keep it or clear it on edit.
+        spec.panels.get_mut(0).expect("panel").bottom.unit = "s".into();
+        assert_eq!(axis.text(&spec).as_deref(), Some("t (s)"));
+        assert!(axis.set_text(&mut spec, "time (s)".into()));
+        assert_eq!(spec.panels[0].bottom.label, "time");
         assert_eq!(spec.panels[0].bottom.unit, "s");
-        assert!(axe.set_text(&mut spec, "durée".into()));
-        assert_eq!(spec.panels[0].bottom.label, "durée");
+        assert!(axis.set_text(&mut spec, "duration".into()));
+        assert_eq!(spec.panels[0].bottom.label, "duration");
         assert_eq!(spec.panels[0].bottom.unit, "");
-        let legende = TextTarget::Legend { panel: 0 };
-        assert_eq!(legende.text(&spec), None);
-        assert!(!legende.set_text(&mut spec, "x".into()));
+        let legend = TextTarget::Legend { panel: 0 };
+        assert_eq!(legend.text(&spec), None);
+        assert!(!legend.set_text(&mut spec, "x".into()));
     }
 
     #[test]
-    fn une_ancre_non_finie_n_est_pas_exploitable() {
+    fn a_non_finite_anchor_is_not_usable() {
         assert!(TextAnchor::new(1.0, 2.0).is_finite());
         assert!(!TextAnchor::new(f64::NAN, 2.0).is_finite());
     }

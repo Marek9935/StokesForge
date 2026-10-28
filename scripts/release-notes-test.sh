@@ -14,9 +14,9 @@ lock() { # lock <version of a> <version of b>
 }
 lock 1.2.3 1.2.3
 pers="$tmp/crates/stokesforge-persistence"
-mkdir -p "$pers/src" "$pers/tests/temoins/v1"
+mkdir -p "$pers/src" "$pers/tests/witnesses/v1"
 printf 'pub(crate) const FORMAT_VERSION: u32 = 1;\n' > "$pers/src/schema.rs"
-: > "$pers/tests/temoins/v1/projet.stf"
+: > "$pers/tests/witnesses/v1/project.stf"
 
 fail=0
 attend() { # attend <code> <description> <tag>
@@ -96,9 +96,9 @@ printf "$B_OK" > "$tmp/crates/b/Cargo.toml"
 printf 'pub const FORMAT_VERSION: u32 = 2;\n' > "$pers/src/schema.rs"
 aligne 1 "FORMAT_VERSION = 2 without v2 witness"
 grep -q "FORMAT_VERSION = 2" "$tmp/err" || { echo "FAILED: witness message missing" >&2; fail=1; }
-mkdir "$pers/tests/temoins/v2"
-aligne 1 "empty v2 folder, no projet.stf"
-: > "$pers/tests/temoins/v2/projet.stf"
+mkdir "$pers/tests/witnesses/v2"
+aligne 1 "empty v2 folder, no project.stf"
+: > "$pers/tests/witnesses/v2/project.stf"
 aligne 0 "FORMAT_VERSION = 2 with v2 witness"
 printf '// rien\n' > "$pers/src/schema.rs"
 aligne 1 "FORMAT_VERSION not found"

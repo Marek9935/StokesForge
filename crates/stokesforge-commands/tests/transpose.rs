@@ -1,6 +1,6 @@
-//! Les commandes de la feuille transposée liée (#253) : une entrée
-//! d'historique par geste, annulable et rétablissable, et le lien voyage avec
-//! l'arbre (le groupe « Analyser des lignes » défait feuille et calcul d'un bloc).
+//! The commands of the linked transposed sheet (#253): one history entry
+//! per gesture, undoable and redoable, and the link travels with the tree
+//! (the "Analyser des lignes" group undoes sheet and calculation as one block).
 
 use stokesforge_commands::{Command, History, MacroKind};
 use stokesforge_core::{Column, ColumnMeta, CoreError, NodeId, Project, ValueBlock};
@@ -66,7 +66,7 @@ fn transposing_is_one_undoable_entry_and_the_link_returns_with_redo() {
 fn a_refused_transposition_changes_nothing_and_leaves_no_entry() {
     let mut w = world();
     w.project
-        .add_column(w.sheet, None, Some("Sans"), Column::from_f64(&[1.0]))
+        .add_column(w.sheet, None, Some("Without"), Column::from_f64(&[1.0]))
         .unwrap();
     let before = w.project.tree().clone();
     let source = w.sheet;
@@ -146,6 +146,6 @@ fn the_analyze_rows_macro_undoes_sheet_and_link_in_one_step() {
     w.history.end_macro(&mut w.project).unwrap();
     assert!(w.history.undo(&mut w.project).unwrap());
     assert_eq!(w.project.tree().as_ref(), before.as_ref());
-    assert!(!w.history.undo(&mut w.project).unwrap(), "un seul groupe");
+    assert!(!w.history.undo(&mut w.project).unwrap(), "a single group");
     let _ = &w.cols;
 }

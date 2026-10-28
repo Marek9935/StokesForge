@@ -8,7 +8,7 @@ Read while walking the chain of `stokesforge-commande`. Each point is a conventi
 - **One creation command per node kind** (`AddFolder`, `AddWorkbook`, `AddWorksheet`, `AddGraph`, `AddMatrix`, `AddNote`); `RemoveNode` stays generic.
 - **Content edits replace their target as a block** (`SetWindowMeta`, `SetNoteText`, `SetColumnMeta`, `SetPlotSpec`, like `SetCells`). `EditPlotSpec` reuses the `SetPlotSpec` delta and adds only a closed `PlotEditKind` for graph gestures.
 - **`expected_version`** is the optimistic condition on cell writes: `None` checks nothing (the UI), `Some(v)` requires `Column::version == v` when applying.
-- **Every column data write draws a new version** through `Project` primitives (`next_column_version`, `insert_node` for any node addition), never the `Column` directly: targeted formula recalculation (invariant 11) compares versions. A command that can target a formula column gets a named case in `stokesforge-session/tests/recalc_cible.rs` (`docs/tests.md` § Targeted recalculation (#193) — and what to test when relying on it).
+- **Every column data write draws a new version** through `Project` primitives (`next_column_version`, `insert_node` for any node addition), never the `Column` directly: targeted formula recalculation (invariant 11) compares versions. A command that can target a formula column gets a named case in `stokesforge-session/tests/recalc_targeted.rs` (`docs/tests.md` § Targeted recalculation (#193) — and what to test when relying on it).
 - **A formula keeps its columns by id** (`ColumnFormula`, #321): inserting, deleting or moving columns never changes what a formula reads. `SetColumnMeta` receives a `ColumnFormula` already built by `Tree::formula_from_letters`, **above** the command.
 
 ## Structural or data — the cost question
@@ -29,7 +29,7 @@ A data command that **moves rows** rewrites, in the same delta, the row referenc
 
 ## Persistence
 
-`convert.rs` / `schema.rs` have their own transport types: `stokesforge-plot` does not depend on `serde` (invariant 3). An unknown enum variant is kept in a `RawVariant` — loss bounded to the node (invariant 10). Version rule: `docs/persistance.md` § Version rule: every V1 file can be read back up to V3 (additive `#[serde(default)]` field → regenerate `tests/temoins/v1/projet.stf` with an off-default value in `projet_temoin`; removal, rename or change of meaning → bump and migrate).
+`convert.rs` / `schema.rs` have their own transport types: `stokesforge-plot` does not depend on `serde` (invariant 3). An unknown enum variant is kept in a `RawVariant` — loss bounded to the node (invariant 10). Version rule: `docs/persistance.md` § Version rule: every V1 file can be read back up to V3 (additive `#[serde(default)]` field → regenerate `tests/witnesses/v1/project.stf` with an off-default value in `witness_project`; removal, rename or change of meaning → bump and migrate).
 
 ## Interface
 

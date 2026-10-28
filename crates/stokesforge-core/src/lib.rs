@@ -1,49 +1,49 @@
-//! Modèle de données de StokesForge : l'arbre de projet (`Folder → Workbook →
-//! Worksheet → Column`, `Graph`/`Matrix`/`Note` en feuilles) et rien d'autre
-//! — voir `docs/archive/rustrewrite/roadmap.md` phase 1.
+//! StokesForge data model: the project tree (`Folder → Workbook →
+//! Worksheet → Column`, with `Graph`/`Matrix`/`Note` as sheets) and nothing
+//! else — see `docs/archive/rustrewrite/roadmap.md` phase 1.
 //!
-//! Règle non négociable, vérifiée par `tests/no_ui_dependency.rs` : ce crate
-//! n'importe aucune dépendance UI.
+//! Non-negotiable rule, checked by `tests/no_ui_dependency.rs`: this crate
+//! imports no UI dependency.
 //!
-//! # Depuis la phase R3 : une dépendance à `stokesforge-plot`, et une seule raison
+//! # Since phase R3: one dependency on `stokesforge-plot`, for one reason
 //!
-//! `NodeKind::Graph` porte désormais un `stokesforge_plot::PlotSpec`
-//! (`docs/archive/newarchitecture/roadmap-rendu.md` phase R3) : un graphe du projet
-//! porte son contenu de tracé, comme une colonne porte les siennes. Ce n'est
-//! **pas** une porte ouverte au rendu — `stokesforge-plot` lui-même reste sans
-//! dépendance de dessin (`stokesforge-plot/tests/no_ui_dependency.rs`), et sa
-//! seule dépendance est désormais `stokesforge-id` (voir plus bas), pas ce crate.
-//! [`resolve`] est le seul module qui traduit un spec en données prêtes à
-//! tracer (`NodeId` → colonne) ; tout le reste du crate continue d'ignorer
-//! jusqu'à l'existence de `PlotSpec`.
+//! `NodeKind::Graph` now carries a `stokesforge_plot::PlotSpec`
+//! (`docs/archive/newarchitecture/roadmap-rendu.md` phase R3): a project graph
+//! carries its plot content, as a column carries its own values. This is
+//! **not** an open door to rendering — `stokesforge-plot` itself stays free of
+//! drawing dependencies (`stokesforge-plot/tests/no_ui_dependency.rs`), and its
+//! only dependency is now `stokesforge-id` (see below), not this crate.
+//! [`resolve`] is the only module that turns a spec into data ready to
+//! plot (`NodeId` → column); the rest of the crate still ignores
+//! the very existence of `PlotSpec`.
 //!
-//! **Pourquoi `stokesforge-id` et pas `stokesforge-core` dans `Cargo.toml` de
-//! `stokesforge-plot`.** Avant R3, `stokesforge-plot` dépendait de ce crate en entier
-//! pour son seul usage de `NodeId`. Une fois ce crate lui-même dépendant de
-//! `stokesforge-plot` (pour `PlotSpec`), garder les deux arêtes aurait formé un
-//! cycle Cargo direct — vérifié, pas supposé : `cargo check` le refuse avec
-//! *cyclic package dependency*, Cargo n'autorisant pas de dépendances
-//! normales circulaires (seules les dépendances de développement le
-//! peuvent, ce qui ne s'applique pas ici puisque `PlotSpec` est un champ de
-//! production, pas un besoin de test). `NodeId` a donc été descendu dans
-//! `stokesforge-id`, crate minimal sans dépendance, réexporté ici à l'identique
-//! (`pub use id::NodeId`, ci-dessous) : aucun appelant de
-//! `stokesforge_core::NodeId` n'a rien à changer. Détail complet dans
+//! **Why `stokesforge-id` and not `stokesforge-core` in the `Cargo.toml` of
+//! `stokesforge-plot`.** Before R3, `stokesforge-plot` depended on this whole
+//! crate for its sole use of `NodeId`. Once this crate itself depends on
+//! `stokesforge-plot` (for `PlotSpec`), keeping both edges would have formed a
+//! direct Cargo cycle — checked, not assumed: `cargo check` rejects it with
+//! *cyclic package dependency*, since Cargo does not allow circular normal
+//! dependencies (only development dependencies can be circular, which does
+//! not apply here because `PlotSpec` is a production field, not a test
+//! need). So `NodeId` moved down into
+//! `stokesforge-id`, a minimal crate with no dependency, re-exported here unchanged
+//! (`pub use id::NodeId`, below): no caller of
+//! `stokesforge_core::NodeId` has to change. Full details in
 //! `crates/stokesforge-id/src/lib.rs`.
 //!
-//! Le modèle est désormais construit. Il repose sur trois décisions :
+//! The model is now built. It rests on three decisions:
 //!
-//! - **identité** — `NodeId` est un compteur monotone, jamais réutilisé sur
-//!   toute la vie d'un projet (rechargement compris) ; l'allocateur vit dans
-//!   `Project`, hors de l'arbre, pour qu'une annulation ne le fasse pas
-//!   reculer ;
-//! - **arbre persistant** — `Arc<Tree>` sur une carte plate
-//!   `NodeId → Arc<Node>` : muter clone la carte et les seuls nœuds touchés,
-//!   si bien qu'un ancien `Arc<Tree>` reste un instantané figé dont les nœuds
-//!   intacts sont physiquement partagés avec l'arbre courant ;
-//! - **une seule façade de mutation** — toute mutation passe par `Project`,
-//!   dont l'unique `&mut` sera détenu par l'acteur de `stokesforge-session` ;
-//!   `Tree` n'expose publiquement que de la lecture.
+//! - **identity** — `NodeId` is a monotonic counter, never reused over
+//!   the whole life of a project (reloading included); the allocator lives in
+//!   `Project`, outside the tree, so that an undo does not move it
+//!   back;
+//! - **persistent tree** — `Arc<Tree>` over a flat map
+//!   `NodeId → Arc<Node>`: a mutation clones the map and only the touched nodes,
+//!   so an old `Arc<Tree>` stays a frozen snapshot whose untouched nodes
+//!   are physically shared with the current tree;
+//! - **a single mutation facade** — every mutation goes through `Project`,
+//!   whose only `&mut` will be held by the actor of `stokesforge-session`;
+//!   `Tree` publicly exposes read access only.
 
 #![cfg_attr(
     not(test),

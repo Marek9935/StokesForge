@@ -1,20 +1,20 @@
-//! Déterminisme des résultats d'analyse entre plateformes (#332).
+//! Determinism of analysis results across platforms (#332).
 //!
-//! Les fonctions transcendantes de `f64` délèguent à la libm de la plateforme
-//! (CRT MSVC sous Windows, glibc sous Linux), qui diffèrent au dernier ulp ;
-//! une décomposition en pics itérative convergeait sous Linux et pas sous
-//! Windows (#290). `stokesforge-analysis` passe donc par le crate `libm` (Rust
-//! pur), gardé par `clippy.toml`. Les bits figés ci-dessous valent pour toutes
-//! les plateformes ; la CI Linux les confirme.
+//! The transcendental functions of `f64` delegate to the platform libm
+//! (MSVC CRT on Windows, glibc on Linux), which differ in the last ulp; an
+//! iterative peak decomposition converged on Linux and not on Windows (#290).
+//! `stokesforge-analysis` therefore goes through the `libm` crate (pure Rust),
+//! guarded by `clippy.toml`. The bits frozen below hold on every platform;
+//! the Linux CI confirms them.
 
 use stokesforge_analysis::error::AnalysisError;
 use stokesforge_analysis::expr::Expr;
 use stokesforge_analysis::ops::{run, AutoDetect, Operation, SeriesInput};
 use stokesforge_analysis::peaks::{PeakBackground, PeakShape, PeaksSpec};
 
-/// La série en dents de scie de #290 : 40 points, x = 0..39, y = 0 aux lignes
-/// paires et 100 aux lignes impaires.
-fn dents_de_scie() -> SeriesInput {
+/// The sawtooth series of #290: 40 points, x = 0..39, y = 0 on even rows
+/// and 100 on odd rows.
+fn sawtooth() -> SeriesInput {
     SeriesInput {
         x: (0..40).map(f64::from).collect(),
         y: (0..40)
@@ -24,9 +24,9 @@ fn dents_de_scie() -> SeriesInput {
     }
 }
 
-/// Des paliers de cinq lignes à 0 puis à 100 (R² faible) : la décomposition
-/// en pics converge. C'est la série du test d'état #290 depuis #332.
-fn paliers() -> SeriesInput {
+/// Steps of five rows at 0 then at 100 (low R²): the peak decomposition
+/// converges. This is the series of the state test #290 since #332.
+fn steps() -> SeriesInput {
     SeriesInput {
         x: (0..40).map(f64::from).collect(),
         y: (0..40)
@@ -36,7 +36,7 @@ fn paliers() -> SeriesInput {
     }
 }
 
-fn decomposition_en_pics() -> Operation {
+fn peak_decomposition() -> Operation {
     Operation::Peaks {
         spec: PeaksSpec {
             shape: PeakShape::Gaussian,
@@ -54,14 +54,14 @@ fn decomposition_en_pics() -> Operation {
     }
 }
 
-fn evalue(src: &str, x: f64, p: &[f64]) -> f64 {
+fn evaluate(src: &str, x: f64, p: &[f64]) -> f64 {
     Expr::parse(src).unwrap().eval(x, p)
 }
 
-/// Relevé de la décomposition en pics des paliers : (clé, indice, valeur,
-/// incertitude), en bits `f64`.
+/// Record of the peak decomposition of the steps: (key, index, value,
+/// uncertainty), as `f64` bits.
 #[allow(clippy::type_complexity)]
-const PALIERS_ATTENDUS: [(&str, Option<usize>, u64, Option<u64>); 20] = [
+const EXPECTED_STEPS: [(&str, Option<usize>, u64, Option<u64>); 20] = [
     (
         "peak.height",
         Some(1),
@@ -135,9 +135,9 @@ const PALIERS_ATTENDUS: [(&str, Option<usize>, u64, Option<u64>); 20] = [
 ];
 
 #[test]
-fn la_decomposition_en_pics_des_paliers_donne_les_memes_bits_partout() {
-    let sorties = run(&decomposition_en_pics(), &[paliers()], None).unwrap();
-    let obtenu: Vec<(&str, Option<usize>, u64, Option<u64>)> = sorties[0]
+fn the_peak_decomposition_of_the_steps_gives_the_same_bits_everywhere() {
+    let outputs = run(&peak_decomposition(), &[steps()], None).unwrap();
+    let obtained: Vec<(&str, Option<usize>, u64, Option<u64>)> = outputs[0]
         .values
         .iter()
         .map(|v| {
@@ -149,59 +149,59 @@ fn la_decomposition_en_pics_des_paliers_donne_les_memes_bits_partout() {
             )
         })
         .collect();
-    assert_eq!(obtenu, PALIERS_ATTENDUS);
+    assert_eq!(obtained, EXPECTED_STEPS);
 }
 
-/// La dent de scie de #290 ne converge pas en 400 itérations avec `libm`, et
-/// c'est vrai sur toutes les plateformes : le test d'état #290 utilise donc les
-/// paliers, qui convergent.
+/// The sawtooth of #290 does not converge in 400 iterations with `libm`, and
+/// this holds on every platform: the state test #290 therefore uses the
+/// steps, which converge.
 #[test]
-fn la_dent_de_scie_ne_converge_sur_aucune_plateforme() {
-    let erreur = run(&decomposition_en_pics(), &[dents_de_scie()], None).unwrap_err();
+fn the_sawtooth_converges_on_no_platform() {
+    let error = run(&peak_decomposition(), &[sawtooth()], None).unwrap_err();
     assert!(
-        matches!(erreur, AnalysisError::NotConverged { iterations: 400 }),
-        "{erreur:?}"
+        matches!(error, AnalysisError::NotConverged { iterations: 400 }),
+        "{error:?}"
     );
 }
 
 #[test]
-fn les_fonctions_d_expression_donnent_les_memes_bits_partout() {
-    let attendus: [(&str, f64, &[f64], u64); 5] = [
+fn the_expression_functions_give_the_same_bits_everywhere() {
+    let expected_values: [(&str, f64, &[f64], u64); 5] = [
         ("exp(x)", 0.5, &[], 0x3ffa_6129_8e1e_069c),
         ("ln(x)", 3.0, &[], 0x3ff1_93ea_7aad_030a),
         ("sin(x)", 1e6, &[], 0xbfd6_664b_2568_d867),
         ("pow(x, a)", 2.5, &[1.7], 0x4012_fdcf_53f3_e6f3),
         ("atan2(x, a)", 1.0, &[-3.0], 0x4006_8f09_5fdf_593c),
     ];
-    for (source, x, p, bits) in attendus {
-        let obtenu = evalue(source, x, p);
-        assert_eq!(obtenu.to_bits(), bits, "{source} en {x} : {obtenu:?}");
+    for (source, x, p, bits) in expected_values {
+        let obtained = evaluate(source, x, p);
+        assert_eq!(obtained.to_bits(), bits, "{source} at {x}: {obtained:?}");
     }
 }
 
-/// Empreinte FNV-1a des bits d'une fonction balayée sur 256 abscisses : un
-/// seul point proche d'une arête d'arrondi suffit à la faire bouger, ce que
-/// cinq valeurs isolées ne garantissent pas.
-fn empreinte(source: &str, p: &[f64], abscisse: impl Fn(usize) -> f64) -> u64 {
+/// FNV-1a fingerprint of the bits of a function swept over 256 abscissas: a
+/// single point near a rounding edge is enough to move it, which five
+/// isolated values do not guarantee.
+fn fingerprint(source: &str, p: &[f64], abscissa: impl Fn(usize) -> f64) -> u64 {
     (0..256).fold(0xcbf2_9ce4_8422_2325_u64, |h, i| {
-        let bits = evalue(source, abscisse(i), p).to_bits();
+        let bits = evaluate(source, abscissa(i), p).to_bits();
         (h ^ bits).wrapping_mul(0x0100_0000_01b3)
     })
 }
 
 #[test]
-fn le_balayage_des_fonctions_d_expression_donne_les_memes_bits_partout() {
-    let pas = |i: usize| (i as f64 - 128.0) * 0.173 + 0.011;
-    let positif = |i: usize| 0.0137 * (i as f64 + 1.0);
-    let obtenu = [
-        ("exp(x)", empreinte("exp(x)", &[], pas)),
-        ("ln(x)", empreinte("ln(x)", &[], positif)),
-        ("sin(x)", empreinte("sin(x)", &[], |i| pas(i) * 997.0)),
-        ("pow(x, a)", empreinte("pow(x, a)", &[1.7], positif)),
-        ("atan2(x, a)", empreinte("atan2(x, a)", &[-3.0], pas)),
-        ("tanh(x)", empreinte("tanh(x)", &[], pas)),
+fn the_sweep_of_the_expression_functions_gives_the_same_bits_everywhere() {
+    let step = |i: usize| (i as f64 - 128.0) * 0.173 + 0.011;
+    let positive = |i: usize| 0.0137 * (i as f64 + 1.0);
+    let obtained = [
+        ("exp(x)", fingerprint("exp(x)", &[], step)),
+        ("ln(x)", fingerprint("ln(x)", &[], positive)),
+        ("sin(x)", fingerprint("sin(x)", &[], |i| step(i) * 997.0)),
+        ("pow(x, a)", fingerprint("pow(x, a)", &[1.7], positive)),
+        ("atan2(x, a)", fingerprint("atan2(x, a)", &[-3.0], step)),
+        ("tanh(x)", fingerprint("tanh(x)", &[], step)),
     ];
-    let attendu = [
+    let expected = [
         ("exp(x)", 0xb645_35ea_6664_ce0b),
         ("ln(x)", 0x065c_a518_45f6_7c01),
         ("sin(x)", 0x8924_bcd5_724e_304d),
@@ -209,5 +209,5 @@ fn le_balayage_des_fonctions_d_expression_donne_les_memes_bits_partout() {
         ("atan2(x, a)", 0xab38_4b41_92ae_7740),
         ("tanh(x)", 0x1b6c_37db_5200_3baa),
     ];
-    assert_eq!(obtenu, attendu);
+    assert_eq!(obtained, expected);
 }

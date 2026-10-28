@@ -1,4 +1,4 @@
-//! La description complète d'un graphe, et l'adressage de ses séries.
+//! The complete description of a graph, and the addressing of its series.
 
 use std::ops::Deref;
 
@@ -9,27 +9,27 @@ use crate::series::SeriesSpec;
 use crate::text_anchor::TextAnchor;
 use crate::text_font::TextFont;
 
-/// Les panneaux d'un graphe : **au moins un, toujours**.
+/// The panels of a graph: **at least one, always**.
 ///
-/// C'est le seul invariant du crate que le système de types ne donne pas
-/// gratuitement, alors il est tenu par construction plutôt que vérifié : le
-/// `Vec` est privé, et aucune opération publique ne peut le vider. Un graphe
-/// sans panneau ne serait pas rendable, et la version Python le rattrapait à
-/// chaque construction (`tuple(panels) or (PanelSpec(),)`) — ici il n'y a
-/// rien à rattraper parce qu'il n'y a pas d'état à rattraper.
+/// This is the only invariant of the crate that the type system does not give
+/// for free, so it is held by construction rather than checked: the
+/// `Vec` is private, and no public operation can empty it. A graph
+/// without a panel could not be rendered, and the Python version caught it at
+/// each construction (`tuple(panels) or (PanelSpec(),)`) — here there is
+/// nothing to catch because there is no state to catch.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Panels(Vec<PanelSpec>);
 
 impl Panels {
-    /// Un panneau unique.
+    /// A single panel.
     pub fn one(panel: PanelSpec) -> Self {
         Self(vec![panel])
     }
 
-    /// Les panneaux donnés, dans l'ordre. **Une suite vide donne un panneau
-    /// par défaut** plutôt qu'une erreur : c'est le comportement de la version
-    /// Python, et le seul qui ait un sens — refuser obligerait tout appelant à
-    /// traiter un cas qui n'a pas de réparation intéressante.
+    /// The given panels, in order. **An empty sequence gives a default
+    /// panel** rather than an error: this is the behavior of the Python
+    /// version, and the only one that makes sense — refusing would force every caller to
+    /// handle a case that has no interesting repair.
     pub fn new(panels: impl IntoIterator<Item = PanelSpec>) -> Self {
         let panels: Vec<PanelSpec> = panels.into_iter().collect();
         if panels.is_empty() {
@@ -39,23 +39,23 @@ impl Panels {
         }
     }
 
-    /// Ajoute un panneau à la fin.
+    /// Adds a panel at the end.
     pub fn push(&mut self, panel: PanelSpec) {
         self.0.push(panel);
     }
 
-    /// Accès modifiable au panneau `index`.
+    /// Mutable access to the panel `index`.
     pub fn get_mut(&mut self, index: usize) -> Option<&mut PanelSpec> {
         self.0.get_mut(index)
     }
 
-    /// Les panneaux, modifiables un à un (leur nombre ne change pas : la
-    /// liste reste non vide).
+    /// The panels, mutable one by one (their number does not change: the
+    /// list stays non-empty).
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, PanelSpec> {
         self.0.iter_mut()
     }
 
-    /// Les panneaux, en lecture.
+    /// The panels, read-only.
     pub fn as_slice(&self) -> &[PanelSpec] {
         &self.0
     }
@@ -87,41 +87,41 @@ impl From<Vec<PanelSpec>> for Panels {
     }
 }
 
-/// Adresse d'une série dans un [`PlotSpec`] : le panneau, puis le rang dans ce
-/// panneau.
+/// Address of a series in a [`PlotSpec`]: the panel, then the rank in that
+/// panel.
 ///
-/// C'est ce qui remplace l'identifiant opaque que la version Python attachait
-/// à chaque série. Une adresse n'est valable que pour la valeur de `PlotSpec`
-/// dont elle sort : le spec étant immuable et reconstruit à chaque
-/// modification, il n'y a pas d'adresse à faire survivre à une édition.
+/// This replaces the opaque identifier that the Python version attached
+/// to each series. An address is only valid for the `PlotSpec` value
+/// it came from: the spec being immutable and rebuilt at each
+/// change, there is no address to keep alive across an edit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SeriesRef {
-    /// Indice du panneau dans [`PlotSpec::panels`].
+    /// Index of the panel in [`PlotSpec::panels`].
     pub panel: usize,
-    /// Rang de la série dans ce panneau.
+    /// Rank of the series in that panel.
     pub index: usize,
 }
 
 impl SeriesRef {
-    /// Adresse de la série `index` du panneau `panel`.
+    /// Address of the series `index` of the panel `panel`.
     pub const fn new(panel: usize, index: usize) -> Self {
         Self { panel, index }
     }
 }
 
-/// Adresse d'un groupe de séries (#197) : le panneau, puis le numéro de groupe
-/// dans ce panneau. Comme [`SeriesRef`], elle ne vaut que pour la valeur de
-/// [`PlotSpec`] dont elle sort.
+/// Address of a series group (#197): the panel, then the group number
+/// in that panel. Like [`SeriesRef`], it is only valid for the [`PlotSpec`]
+/// value it came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SeriesGroupRef {
-    /// Indice du panneau dans [`PlotSpec::panels`].
+    /// Index of the panel in [`PlotSpec::panels`].
     pub panel: usize,
-    /// Numéro du groupe dans ce panneau.
+    /// Number of the group in that panel.
     pub group: u32,
 }
 
 impl SeriesGroupRef {
-    /// Adresse du groupe `group` du panneau `panel`.
+    /// Address of the group `group` of the panel `panel`.
     pub const fn new(panel: usize, group: u32) -> Self {
         Self { panel, group }
     }
@@ -129,48 +129,48 @@ impl SeriesGroupRef {
 
 impl std::fmt::Display for SeriesRef {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "série {} du panneau {}", self.index, self.panel)
+        write!(f, "series {} of panel {}", self.index, self.panel)
     }
 }
 
-/// Aucune couleur : blanc d'opacité nulle. Le fond par défaut d'un graphe.
+/// No color: white with zero opacity. The default background of a graph.
 pub const TRANSPARENT: &str = "#ffffff00";
 
-/// La description complète d'un graphe : le seul objet qu'un renderer lira.
+/// The complete description of a graph: the only object a renderer will read.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlotSpec {
-    /// Titre du graphe.
+    /// Title of the graph.
     pub title: String,
-    /// Visibilité du titre, indépendante de son contenu (#85).
+    /// Visibility of the title, independent of its content (#85).
     pub title_visible: bool,
-    /// Panneaux, au moins un.
+    /// Panels, at least one.
     pub panels: Panels,
-    /// Fond du graphe (`#RRGGBB` ou `#RRGGBBAA`). Par défaut **aucune
-    /// couleur** ([`TRANSPARENT`]) : la figure exportée n'a pas de fond et
-    /// s'intègre telle quelle à une autre présentation. Vide = fond blanc
-    /// (ce que portent les fichiers écrits avant ce choix).
+    /// Background of the graph (`#RRGGBB` or `#RRGGBBAA`). By default **no
+    /// color** ([`TRANSPARENT`]): the exported figure has no background and
+    /// fits as is into another presentation. Empty = white background
+    /// (what files written before this choice carry).
     pub background: String,
-    /// Couleur du titre du graphe (`#RRGGBB`). Vide = automatique : l'encre
-    /// qui contraste avec le fond (sombre sur fond clair, blanche sur fond
-    /// sombre), comme tout le texte et les axes laissés en automatique.
+    /// Color of the graph title (`#RRGGBB`). Empty = automatic: the ink
+    /// that contrasts with the background (dark on a light background, white on a dark
+    /// one), like all the text and axes left automatic.
     pub title_color: String,
-    /// Position du titre du graphe s'il a été déplacé (issue #53), dans le
-    /// repère de données du premier panneau ; `None` = sa place par défaut.
+    /// Position of the graph title if it was moved (issue #53), in the
+    /// data frame of the first panel; `None` = its default place.
     pub title_anchor: Option<TextAnchor>,
-    /// Police et corps du titre du graphe (issue #78).
+    /// Font and size of the graph title (issue #78).
     pub title_font: TextFont,
-    /// Signaler les séries dont une colonne vient d'un calcul pas à jour : trait
-    /// grisé et triangle « ! » (#198). Réglage du graphe, gardé avec lui ; la
-    /// confirmation à l'export en propose une copie sans avertissement.
+    /// Flag the series with a column coming from an out-of-date calculation: greyed
+    /// line and "!" triangle (#198). Setting of the graph, kept with it; the
+    /// confirmation on export offers a copy without the warning.
     pub stale_warning: bool,
-    /// Séparateur décimal des graduations : `false` = point, `true` = virgule
-    /// (#223, S-N4 → S-R9). Réglage **du graphe**, indépendant de la langue de
-    /// l'interface ; vaut pour l'écran et les exports.
+    /// Decimal separator of the ticks: `false` = point, `true` = comma
+    /// (#223, S-N4 → S-R9). Setting **of the graph**, independent of the
+    /// interface language; applies to the screen and to exports.
     pub decimal_comma: bool,
 }
 
 impl PlotSpec {
-    /// Un graphe vide mais valide : un panneau, aucune série.
+    /// An empty but valid graph: one panel, no series.
     pub fn empty(title: impl Into<String>) -> Self {
         Self {
             title: title.into(),
@@ -178,12 +178,12 @@ impl PlotSpec {
         }
     }
 
-    /// Nombre de lignes de la grille de panneaux.
+    /// Number of rows of the panel grid.
     ///
     /// B2 (`guide-de-correction-robustesse.md` §F3/F4/rendu) —
-    /// `saturating_add(1)` : une position de panneau venue d'un fichier peut
-    /// valoir `usize::MAX` (rien ne la borne à la lecture, voir C5/le
-    /// lecteur), et `+ 1` panique en debug, déborde sur 0 en release.
+    /// `saturating_add(1)`: a panel position coming from a file can
+    /// be `usize::MAX` (nothing bounds it on read, see C5/the
+    /// reader), and `+ 1` panics in debug, overflows to 0 in release.
     pub fn rows(&self) -> usize {
         self.panels
             .iter()
@@ -193,9 +193,9 @@ impl PlotSpec {
             .saturating_add(1)
     }
 
-    /// Nombre de colonnes de la grille de panneaux. À ne pas confondre avec
-    /// [`PlotSpec::referenced_columns`] : ici ce sont des colonnes de grille,
-    /// là des colonnes de données. Voir [`PlotSpec::rows`] pour le
+    /// Number of columns of the panel grid. Not to be confused with
+    /// [`PlotSpec::referenced_columns`]: here they are grid columns,
+    /// there data columns. See [`PlotSpec::rows`] for the
     /// `saturating_add`.
     pub fn columns(&self) -> usize {
         self.panels
@@ -206,9 +206,9 @@ impl PlotSpec {
             .saturating_add(1)
     }
 
-    /// Ramène chaque axe de chaque panneau à sa forme canonique
-    /// ([`AxisSpec::orient`]). À l'ouverture d'un fichier et après un script ;
-    /// le rendu d'un spec orienté est celui du spec d'origine.
+    /// Brings each axis of each panel to its canonical form
+    /// ([`crate::AxisSpec::orient`]). On opening a file and after a script;
+    /// the rendering of an oriented spec is that of the original spec.
     pub fn orient_axes(&mut self) {
         for panel in self.panels.iter_mut() {
             for axis in [
@@ -222,7 +222,7 @@ impl PlotSpec {
         }
     }
 
-    /// Toutes les séries du graphe, avec leur adresse, panneau par panneau.
+    /// All the series of the graph, with their address, panel by panel.
     pub fn iter_series(&self) -> impl Iterator<Item = (SeriesRef, &SeriesSpec)> {
         self.panels.iter().enumerate().flat_map(|(panel, spec)| {
             spec.series
@@ -232,27 +232,27 @@ impl PlotSpec {
         })
     }
 
-    /// La série à cette adresse, si elle existe.
+    /// The series at this address, if it exists.
     pub fn series_at(&self, at: SeriesRef) -> Option<&SeriesSpec> {
         self.panels.get(at.panel)?.series.get(at.index)
     }
 
-    /// La série à cette adresse, modifiable.
+    /// The series at this address, mutable.
     pub fn series_at_mut(&mut self, at: SeriesRef) -> Option<&mut SeriesSpec> {
         self.panels.get_mut(at.panel)?.series.get_mut(at.index)
     }
 
-    /// Nombre total de séries, tous panneaux confondus.
+    /// Total number of series, all panels together.
     pub fn series_count(&self) -> usize {
         self.panels.iter().map(|p| p.series.len()).sum()
     }
 
-    /// Colonnes référencées par l'ensemble des séries, sans doublon, dans
-    /// l'ordre de première apparition.
+    /// Columns referenced by all the series, without duplicates, in
+    /// order of first appearance.
     ///
-    /// C'est la liste que la résolution ira chercher dans l'arbre, et celle
-    /// qu'une suppression de colonne devra consulter pour savoir quels graphes
-    /// elle casse.
+    /// This is the list that resolution will look up in the tree, and the one
+    /// that a column deletion will have to consult to know which graphs
+    /// it breaks.
     pub fn referenced_columns(&self) -> Vec<NodeId> {
         let mut seen: Vec<NodeId> = Vec::new();
         for (_, series) in self.iter_series() {
@@ -265,12 +265,12 @@ impl PlotSpec {
         seen
     }
 
-    /// Vrai si une série du graphe référence cette colonne.
+    /// True if a series of the graph references this column.
     pub fn references(&self, column: NodeId) -> bool {
         self.panels.iter().any(|p| p.references(column))
     }
 
-    /// Le même graphe avec d'autres panneaux.
+    /// The same graph with other panels.
     pub fn with_panels(self, panels: impl Into<Panels>) -> Self {
         Self {
             panels: panels.into(),
@@ -299,12 +299,12 @@ impl Default for PlotSpec {
 mod tests {
     use super::*;
 
-    /// Un graphe neuf n'a pas de fond : « aucune couleur » est le défaut.
+    /// A new graph has no background: "no color" is the default.
     #[test]
-    fn le_fond_par_defaut_est_sans_couleur() {
+    fn the_default_background_has_no_color() {
         assert_eq!(PlotSpec::default().background, TRANSPARENT);
-        assert_eq!(PlotSpec::empty("Titre").background, TRANSPARENT);
-        assert!(TRANSPARENT.ends_with("00"), "opacité nulle");
+        assert_eq!(PlotSpec::empty("Title").background, TRANSPARENT);
+        assert!(TRANSPARENT.ends_with("00"), "zero opacity");
     }
 
     #[test]
@@ -321,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn a_series_ref_reads_as_french() {
-        assert_eq!(SeriesRef::new(1, 0).to_string(), "série 0 du panneau 1");
+    fn a_series_ref_reads_as_english() {
+        assert_eq!(SeriesRef::new(1, 0).to_string(), "series 0 of panel 1");
     }
 }

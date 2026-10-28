@@ -1,24 +1,24 @@
-//! Garde-fou de la phase 1 (`docs/archive/rustrewrite/roadmap.md`) : `stokesforge-core`
-//! ne doit jamais gagner de dépendance UI. Plutôt que de deviner ce qu'est
-//! "une dépendance UI", ce test liste les seules dépendances autorisées —
-//! toute addition dans `Cargo.toml` doit être ajoutée ici explicitement,
-//! ce qui force une décision consciente plutôt qu'un import qui se glisse.
+//! Phase 1 guard (`docs/archive/rustrewrite/roadmap.md`): `stokesforge-core`
+//! must never gain a UI dependency. Rather than guessing what
+//! "a UI dependency" is, this test lists the only allowed dependencies —
+//! any addition to `Cargo.toml` must be added here explicitly,
+//! which forces a conscious decision rather than an import that slips in.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
-    "thiserror",      // erreurs typées, sans surface UI
-    "stokesforge-id", // identité de nœud seule (NodeId), zéro dépendance transitive
-    // le PlotSpec que NodeKind::Graph porte (phase R3) — pas de dépendance de
-    // dessin : cargo tree -p stokesforge-plot ne montre toujours que stokesforge-id
+    "thiserror",      // typed errors, no UI surface
+    "stokesforge-id", // node identity only (NodeId), zero transitive dependencies
+    // the PlotSpec that NodeKind::Graph carries (phase R3) — no drawing
+    // dependency: cargo tree -p stokesforge-plot still shows only stokesforge-id
     "stokesforge-plot",
-    // les types d'une opération d'analyse que le modèle enregistre (#181) :
-    // calcul pur, sans autre dépendance que thiserror (voir son propre garde-fou)
+    // the types of an analysis operation that the model records (#181):
+    // pure computation, with no dependency other than thiserror (see its own guard)
     "stokesforge-analysis",
 ];
 
 #[test]
 fn only_allowed_dependencies_are_declared() {
-    // Lecture commune (`stokesforge-arch-guard`) : dépendances normales, de build,
-    // conditionnelles (`target`) et renommées (`package`) — issue #24.
+    // Shared reading (`stokesforge-arch-guard`): normal, build,
+    // conditional (`target`) and renamed (`package`) dependencies — issue #24.
     stokesforge_arch_guard::assert_only_allowed_dependencies(
         env!("CARGO_MANIFEST_DIR"),
         ALLOWED_DEPENDENCIES,

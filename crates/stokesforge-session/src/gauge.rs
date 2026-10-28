@@ -1,49 +1,52 @@
-//! Jauge du recalcul interruptible (#239) : le seul état partagé entre
-//! l'acteur et ses clients qui ne passe **pas** par le canal FIFO.
+//! Gauge of the interruptible recalculation (#239): the only state shared
+//! between the actor and its clients that does **not** go through the FIFO
+//! channel.
 //!
-//! Pourquoi hors du canal : pendant un recalcul lourd l'acteur ne lit plus ses
-//! requêtes, donc un « Stop » envoyé par le canal attendrait la fin du
-//! recalcul qu'il veut interrompre, et un instantané demandé pour peindre
-//! l'indicateur bloquerait l'interface. La jauge se lit et s'écrit sans
-//! l'acteur : un mutex pour l'état (avec une condition pour attendre la
-//! fin), un atomique pour le Stop, lu par le recalcul entre deux colonnes.
+//! Why outside the channel: during a heavy recalculation the actor no longer
+//! reads its requests, so a "Stop" sent through the channel would wait for the
+//! end of the recalculation it wants to interrupt, and a snapshot requested
+//! to paint the indicator would block the interface. The gauge is read and
+//! written without the actor: a mutex for the state (with a condition to wait
+//! for the end), an atomic for the Stop, read by the recalculation between
+//! two columns.
 //!
-//! Un recalcul porte un numéro : un Stop tardif — demandé juste après la fin
-//! du recalcul qu'il visait — ne peut pas arrêter le suivant.
+//! A recalculation carries a number: a late Stop — requested just after the
+//! end of the recalculation it targeted — cannot stop the next one.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-/// Comment s'est terminé un recalcul interruptible.
+/// How an interruptible recalculation ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecalcEnd {
-    /// Mené à son terme.
+    /// Ran to completion.
     Done,
-    /// Interrompu par Stop : la commande qui l'avait déclenché a été annulée
-    /// (comme par Ctrl+Z) et ce qui avait changé a été recalculé.
+    /// Interrupted by Stop: the command that triggered it was undone (as by
+    /// Ctrl+Z) and what had changed was recalculated.
     Stopped,
 }
 
 #[derive(Debug, Default)]
 struct State {
-    /// Numéro du prochain recalcul (0 est réservé : « aucun »).
+    /// Number of the last recalculation started (0 is reserved: "none"; the
+    /// first one is 1).
     last: u64,
-    /// Le recalcul en cours.
+    /// The recalculation in progress.
     running: Option<u64>,
-    /// La fin du dernier recalcul, tant que personne ne l'a relevée.
+    /// The end of the last recalculation, until somebody collects it.
     finished: Option<RecalcEnd>,
-    /// Le fil de l'acteur est sorti de sa boucle (arrêt normal **ou** panic).
+    /// The actor's thread left its loop (normal stop **or** panic).
     gone: bool,
 }
 
-/// Voir la doc du module.
+/// See the module docs.
 #[derive(Debug, Default)]
 pub(crate) struct RecalcGauge {
     state: Mutex<State>,
     idle: Condvar,
     stop: AtomicU64,
-    /// Test seulement : le prochain point d'arrêt du recalcul panique.
+    /// Tests only: the next stop point of the recalculation panics.
     #[cfg(test)]
     panic_in_recalc: std::sync::atomic::AtomicBool,
 }
@@ -53,7 +56,7 @@ impl RecalcGauge {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Ouvre un recalcul et rend son numéro.
+    /// Opens a recalculation and returns its number.
     pub(crate) fn begin(&self) -> u64 {
         let mut state = self.lock();
         state.last += 1;
@@ -62,7 +65,7 @@ impl RecalcGauge {
         state.last
     }
 
-    /// Clôt le recalcul `id` et réveille ceux qui attendent.
+    /// Closes recalculation `id` and wakes those who wait.
     pub(crate) fn finish(&self, id: u64, end: RecalcEnd) {
         let mut state = self.lock();
         if state.running == Some(id) {
@@ -76,9 +79,10 @@ impl RecalcGauge {
         self.lock().running
     }
 
-    /// L'acteur est parti : plus aucun recalcul ne peut finir, ni être attendu.
-    /// Remet `running` à `None` (sinon un panic en plein recalcul laisserait un
-    /// indicateur « en cours » pour toujours) et réveille ceux qui attendent.
+    /// The actor is gone: no recalculation can finish or be waited for any
+    /// more. Resets `running` to `None` (otherwise a panic in the middle of a
+    /// recalculation would leave an "in progress" indicator forever) and
+    /// wakes those who wait.
     pub(crate) fn abandon(&self) {
         let mut state = self.lock();
         state.gone = true;
@@ -86,12 +90,12 @@ impl RecalcGauge {
         self.idle.notify_all();
     }
 
-    /// Le fil de l'acteur est-il encore là ? Ne passe pas par l'acteur.
+    /// Is the actor's thread still there? Does not go through the actor.
     pub(crate) fn actor_alive(&self) -> bool {
         !self.lock().gone
     }
 
-    /// Demande l'arrêt du recalcul `id` ; faux s'il n'est plus en cours.
+    /// Requests the stop of recalculation `id`; false if it is no longer running.
     pub(crate) fn request_stop(&self, id: u64) -> bool {
         let state = self.lock();
         if state.running == Some(id) {
@@ -102,18 +106,18 @@ impl RecalcGauge {
         }
     }
 
-    /// Lu par le recalcul entre deux colonnes.
+    /// Read by the recalculation between two columns.
     pub(crate) fn stop_requested(&self, id: u64) -> bool {
         #[cfg(test)]
         assert!(
             !self.panic_in_recalc.load(Ordering::Acquire),
-            "panic de test pendant un recalcul"
+            "test panic during a recalculation"
         );
         self.stop.load(Ordering::Acquire) == id
     }
 
-    /// Attend la fin du recalcul en cours, au plus `timeout` ; vrai s'il n'y
-    /// en a (plus) aucun.
+    /// Waits for the end of the recalculation in progress, at most `timeout`;
+    /// true if there is (no longer) any.
     pub(crate) fn wait_idle(&self, timeout: Duration) -> bool {
         let state = self.lock();
         let (state, _) = self
@@ -123,7 +127,7 @@ impl RecalcGauge {
         state.running.is_none()
     }
 
-    /// Relève la fin du dernier recalcul (une seule fois).
+    /// Collects the end of the last recalculation (only once).
     pub(crate) fn take_finished(&self) -> Option<RecalcEnd> {
         self.lock().finished.take()
     }
@@ -131,9 +135,9 @@ impl RecalcGauge {
 
 #[cfg(test)]
 impl RecalcGauge {
-    /// Pose l'arrêt sur le prochain recalcul : son premier point d'arrêt le
-    /// voit, ce qui rend déterministe un test qui, sinon, devrait battre le
-    /// recalcul de vitesse.
+    /// Sets the stop on the next recalculation: its first stop point sees
+    /// it, which makes deterministic a test that would otherwise have to race
+    /// the recalculation.
     pub(crate) fn panic_in_next_recalc_for_test(&self) {
         self.panic_in_recalc.store(true, Ordering::Release);
     }

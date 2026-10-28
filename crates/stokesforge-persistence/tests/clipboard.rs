@@ -1,10 +1,10 @@
-//! Le transport d'objets préserve les valeurs et réutilise les règles du `.stf`.
+//! The transport of objects preserves values and reuses the rules of the `.stf`.
 
 use stokesforge_core::{Column, ColumnType, NodeCopy, NodeKind, Project, ValueBlock};
 use stokesforge_persistence::clipboard::{decode_objects, encode_objects};
 
 #[test]
-fn valeurs_manquantes_nan_et_metadonnees_survivent_au_transport() {
+fn missing_values_nan_and_metadata_survive_the_transport() {
     let mut project = Project::new("Test").unwrap();
     let root = project.root();
     let book = project.add_workbook(root, Some("Book1")).unwrap();
@@ -23,7 +23,7 @@ fn valeurs_manquantes_nan_et_metadonnees_survivent_au_transport() {
             ValueBlock::Mixed(vec![
                 stokesforge_core::MixedCell::Empty,
                 stokesforge_core::MixedCell::Text(String::new()),
-                stokesforge_core::MixedCell::Text("échantillon".into()),
+                stokesforge_core::MixedCell::Text("Café".into()),
             ]),
         )
         .unwrap();
@@ -62,7 +62,7 @@ fn valeurs_manquantes_nan_et_metadonnees_survivent_au_transport() {
 }
 
 #[test]
-fn une_note_et_une_matrice_sont_copiables_sans_commandes_par_nature() {
+fn a_note_and_a_matrix_are_copyable_without_commands_by_nature() {
     let mut project = Project::new("Test").unwrap();
     let root = project.root();
     let note = project.add_note(root, Some("Note1"), "λ = 500 nm").unwrap();
@@ -88,12 +88,12 @@ fn une_note_et_une_matrice_sont_copiables_sans_commandes_par_nature() {
 }
 
 #[test]
-fn graphe_externe_emporte_x_y_erreurs_sans_colonnes_inutiles_et_persiste() {
+fn external_graph_carries_x_y_errors_without_useless_columns_and_persists() {
     use stokesforge_plot::{PanelSpec, Panels, PlotSpec, SeriesSpec};
     let mut source = Project::new("Source").unwrap();
     let root = source.root();
     let mut columns = Vec::new();
-    // Deux feuilles homonymes, issues de classeurs différents.
+    // Two sheets with the same name, from different workbooks.
     for name in ["Book1", "Book2"] {
         let book = source.add_workbook(root, Some(name)).unwrap();
         let sheet = source.tree().children(book).unwrap()[0];
@@ -110,7 +110,7 @@ fn graphe_externe_emporte_x_y_erreurs_sans_colonnes_inutiles_et_persiste() {
     series.y_error = Some(columns[4]);
     let mut panel = PanelSpec::default();
     panel.series.push(series.clone());
-    // Une seconde série partage X et garde une référence déjà rompue.
+    // A second series shares X and keeps an already broken reference.
     let broken = stokesforge_core::NodeId::from_raw(999);
     panel.series.push(SeriesSpec::new_xy(columns[0], broken));
     let graph = source
@@ -124,7 +124,7 @@ fn graphe_externe_emporte_x_y_erreurs_sans_colonnes_inutiles_et_persiste() {
     let (_, copies) = decode_objects(&encode_objects("source", &[copy]).unwrap()).unwrap();
     let mut target = Project::new("Target").unwrap();
     let root = target.root();
-    // Forcer une collision avec la référence rompue source.
+    // Force a collision with the source broken reference.
     for _ in 0..1000 {
         target.add_note(root, None, "").unwrap();
     }
@@ -132,7 +132,7 @@ fn graphe_externe_emporte_x_y_erreurs_sans_colonnes_inutiles_et_persiste() {
         .insert_copy(root, &copies[0].clone().into_external(), "Graph1")
         .unwrap();
     let NodeKind::Graph { spec, .. } = target.tree().node(copied).unwrap().kind() else {
-        panic!("graphe");
+        panic!("graph");
     };
     let s = &spec.panels[0].series;
     assert_eq!(s[0].x, s[1].x);
@@ -175,7 +175,7 @@ fn graphe_externe_emporte_x_y_erreurs_sans_colonnes_inutiles_et_persiste() {
     assert!(
         matches!(target.tree().node(books[0]).unwrap().kind(), NodeKind::Workbook { meta, .. } if meta.hidden)
     );
-    assert_eq!(target.tree().walk(books[0]).unwrap().len(), 7); // classeur + deux feuilles + quatre colonnes
+    assert_eq!(target.tree().walk(books[0]).unwrap().len(), 7); // workbook + two sheets + four columns
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("graph.stf");
     stokesforge_persistence::save(&target, &path).unwrap();
@@ -183,7 +183,7 @@ fn graphe_externe_emporte_x_y_erreurs_sans_colonnes_inutiles_et_persiste() {
     assert_eq!(loaded.tree(), target.tree());
     let next = loaded.add_note(root, None, "").unwrap();
     assert_ne!(next, s[1].y);
-    // Une erreur après l'insertion des données restaure tout le modèle.
+    // An error after the insertion of the data restores the whole model.
     let before = target.tree().clone();
     assert!(target
         .insert_copy(root, &copies[0].clone().into_external(), "Graph1")
@@ -191,11 +191,11 @@ fn graphe_externe_emporte_x_y_erreurs_sans_colonnes_inutiles_et_persiste() {
     assert_eq!(target.tree(), &before);
 }
 
-/// #166 : une série « ligne » lit toutes les colonnes x' de sa feuille, pas
-/// seulement son ancre — la copie du graphe vers un autre projet les emporte
-/// toutes (et seulement elles), et la série se résout à l'identique.
+/// #166: a "line" series reads all the x' columns of its sheet, not only
+/// its anchor — copying the graph to another project carries all of them
+/// (and only them), and the series resolves identically.
 #[test]
-fn graphe_externe_a_serie_ligne_emporte_les_colonnes_x_prime_de_la_feuille() {
+fn external_graph_with_line_series_carries_the_x_prime_columns_of_the_sheet() {
     use stokesforge_plot::{PanelSpec, Panels, PlotSpec, SeriesSpec};
     let mut source = Project::new("Source").unwrap();
     let root = source.root();
@@ -241,7 +241,7 @@ fn graphe_externe_a_serie_ligne_emporte_les_colonnes_x_prime_de_la_feuille() {
         .insert_copy(root, &copies[0].clone().into_external(), "Graph1")
         .unwrap();
     let NodeKind::Graph { spec, .. } = target.tree().node(copied).unwrap().kind() else {
-        panic!("graphe");
+        panic!("graph");
     };
     let resolved = stokesforge_core::resolve_spec(target.tree(), spec);
     let series = &resolved.panels[0].series[0];

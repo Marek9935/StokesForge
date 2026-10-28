@@ -1,59 +1,59 @@
-//! Couleurs enregistrées par l'utilisateur, rangées par usage.
+//! Colors saved by the user, filed by usage.
 //!
-//! Une courbe, un texte et un fond n'ont pas besoin des mêmes couleurs : le
-//! sélecteur de couleur de l'application propose une palette par usage
-//! ([`ColorUsage`]), et une couleur enregistrée ne réapparaît que dans la
-//! palette de l'usage pour lequel elle a été enregistrée.
+//! A curve, a text and a background do not need the same colors: the
+//! application's color picker offers one palette per usage
+//! ([`ColorUsage`]), and a saved color only reappears in the
+//! palette of the usage it was saved for.
 //!
-//! Ce type décrit les couleurs enregistrées **dans un projet** (elles
-//! voyagent avec le fichier `.stf`) ; l'application tient à part, sur la
-//! machine, celles que l'utilisateur garde pour tous ses projets — même
-//! forme, autre stockage. Comme partout dans ce crate, une couleur est une
-//! chaîne `#RRGGBB` ou `#RRGGBBAA`, jamais un type structuré.
+//! This type describes the colors saved **in a project** (they
+//! travel with the `.stf` file); the application keeps separately, on the
+//! machine, those the user keeps for all their projects — same
+//! shape, other storage. As everywhere in this crate, a color is a
+//! `#RRGGBB` or `#RRGGBBAA` string, never a structured type.
 
-/// Ce que colore une couleur.
+/// What a color colors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColorUsage {
-    /// Trait et marqueur d'une courbe.
+    /// Line and marker of a curve.
     Curves,
-    /// Texte et échelles (titres, graduations).
+    /// Text and scales (titles, ticks).
     Text,
-    /// Fond du graphe.
+    /// Background of the graph.
     Background,
 }
 
-/// Nombre maximal de couleurs enregistrées par usage. Un plafond de
-/// lisibilité, pas de mémoire : au-delà, une palette ne se parcourt plus
-/// d'un coup d'œil. Enregistrer une couleur de plus retire la plus ancienne ;
-/// un fichier qui en porterait davantage est tronqué à la lecture.
+/// Maximum number of saved colors per usage. A readability cap, not a
+/// memory one: beyond it, a palette can no longer be scanned
+/// at a glance. Saving one more color removes the oldest;
+/// a file carrying more is truncated on read.
 pub const MAX_SAVED_COLORS: usize = 32;
 
-/// Un nuancier enregistré (#178) : un nom choisi par l'utilisateur et ses
-/// arrêts `#RRGGBB`, au moins deux.
+/// A saved color gradient (#178): a name chosen by the user and its
+/// `#RRGGBB` stops, at least two.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SavedGradient {
-    /// Nom, unique dans sa liste (casse indifférente).
+    /// Name, unique in its list (case-insensitive).
     pub name: String,
-    /// Arrêts, du premier au dernier.
+    /// Stops, from first to last.
     pub stops: Vec<String>,
 }
 
-/// Couleurs enregistrées, par usage, de la plus ancienne à la plus récente.
+/// Saved colors, by usage, from the oldest to the most recent.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SavedColors {
-    /// Couleurs de courbes.
+    /// Curve colors.
     pub curves: Vec<String>,
-    /// Couleurs de texte.
+    /// Text colors.
     pub text: Vec<String>,
-    /// Couleurs de fond.
+    /// Background colors.
     pub backgrounds: Vec<String>,
-    /// Nuanciers enregistrés (#178), du plus ancien au plus récent, bornés
-    /// comme les couleurs ([`MAX_SAVED_COLORS`]).
+    /// Saved color gradients (#178), from the oldest to the most recent, bounded
+    /// like the colors ([`MAX_SAVED_COLORS`]).
     pub gradients: Vec<SavedGradient>,
 }
 
 impl SavedColors {
-    /// Les couleurs enregistrées pour `usage`.
+    /// The colors saved for `usage`.
     pub fn get(&self, usage: ColorUsage) -> &[String] {
         match usage {
             ColorUsage::Curves => &self.curves,
@@ -70,9 +70,9 @@ impl SavedColors {
         }
     }
 
-    /// Une copie où `color` est enregistrée pour `usage` : à la fin de la
-    /// liste, sans doublon (casse indifférente), la plus ancienne retirée
-    /// au-delà de [`MAX_SAVED_COLORS`].
+    /// A copy where `color` is saved for `usage`: at the end of the
+    /// list, without duplicate (case-insensitive), the oldest removed
+    /// beyond [`MAX_SAVED_COLORS`].
     pub fn with_added(&self, usage: ColorUsage, color: &str) -> Self {
         let mut next = self.with_removed(usage, color);
         let list = next.get_mut(usage);
@@ -82,7 +82,7 @@ impl SavedColors {
         next
     }
 
-    /// Une copie où `color` n'est plus enregistrée pour `usage`.
+    /// A copy where `color` is no longer saved for `usage`.
     pub fn with_removed(&self, usage: ColorUsage, color: &str) -> Self {
         let mut next = self.clone();
         let target = color.trim();
@@ -91,10 +91,10 @@ impl SavedColors {
         next
     }
 
-    /// Une copie où le nuancier `name` est enregistré avec les arrêts `stops` :
-    /// il remplace un nuancier de même nom (casse indifférente, accents compris), sinon va à la
-    /// fin, la plus ancienne partant au-delà de [`MAX_SAVED_COLORS`]. Un nom
-    /// vide ou moins de deux arrêts ne changent rien.
+    /// A copy where the color gradient `name` is saved with the stops `stops`:
+    /// it replaces a color gradient of the same name (case-insensitive, accents included), otherwise goes to the
+    /// end, the oldest leaving beyond [`MAX_SAVED_COLORS`]. An empty name
+    /// or fewer than two stops change nothing.
     pub fn with_gradient_added(&self, name: &str, stops: &[String]) -> Self {
         let name = name.trim();
         if name.is_empty() || stops.len() < 2 {
@@ -113,7 +113,7 @@ impl SavedColors {
         next
     }
 
-    /// Une copie sans le nuancier `name` (casse indifférente).
+    /// A copy without the color gradient `name` (case-insensitive).
     pub fn with_gradient_removed(&self, name: &str) -> Self {
         let mut next = self.clone();
         let name = name.trim();
@@ -122,8 +122,8 @@ impl SavedColors {
         next
     }
 
-    /// Ramène chaque liste sous [`MAX_SAVED_COLORS`] en gardant les plus
-    /// récentes — pour une liste venue d'un fichier, que rien ne borne.
+    /// Brings each list under [`MAX_SAVED_COLORS`], keeping the most
+    /// recent — for a list coming from a file, which nothing bounds.
     pub fn bounded(mut self) -> Self {
         for usage in [ColorUsage::Curves, ColorUsage::Text, ColorUsage::Background] {
             let list = self.get_mut(usage);
@@ -135,7 +135,7 @@ impl SavedColors {
         self
     }
 
-    /// Vrai si aucune couleur n'est enregistrée.
+    /// True if no color is saved.
     pub fn is_empty(&self) -> bool {
         self.curves.is_empty()
             && self.text.is_empty()
@@ -149,7 +149,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn enregistrer_range_par_usage_sans_doublon() {
+    fn saving_groups_by_usage_without_duplicates() {
         let saved = SavedColors::default()
             .with_added(ColorUsage::Curves, "#FF0000")
             .with_added(ColorUsage::Text, "#202020")
@@ -163,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn au_dela_du_plafond_la_plus_ancienne_part() {
+    fn beyond_the_cap_the_oldest_leaves() {
         let mut saved = SavedColors::default();
         for index in 0..=MAX_SAVED_COLORS {
             saved = saved.with_added(ColorUsage::Background, &format!("#0000{index:02x}"));
@@ -179,19 +179,19 @@ mod tests {
     }
 
     #[test]
-    fn un_nuancier_se_remplace_par_son_nom_et_se_supprime() {
+    fn a_gradient_is_replaced_by_its_name_and_removed() {
         let stops = |a: &str, b: &str| vec![a.to_string(), b.to_string()];
         let saved = SavedColors::default()
-            .with_gradient_added("Mon dégradé", &stops("#0000FF", "#ff0000"))
-            .with_gradient_added("autre", &stops("#000000", "#ffffff"))
-            .with_gradient_added("MON DÉGRADÉ", &stops("#00ff00", "#ff0000"));
+            .with_gradient_added("Café gradient", &stops("#0000FF", "#ff0000"))
+            .with_gradient_added("other", &stops("#000000", "#ffffff"))
+            .with_gradient_added("CAFÉ GRADIENT", &stops("#00ff00", "#ff0000"));
         assert_eq!(saved.gradients.len(), 2);
-        assert_eq!(saved.gradients[1].name, "MON DÉGRADÉ");
+        assert_eq!(saved.gradients[1].name, "CAFÉ GRADIENT");
         assert_eq!(saved.gradients[1].stops, ["#00ff00", "#ff0000"]);
         assert!(!saved.is_empty());
-        let saved = saved.with_gradient_removed("autre");
+        let saved = saved.with_gradient_removed("other");
         assert_eq!(saved.gradients.len(), 1);
-        // Sans nom ou avec un seul arrêt : rien n'est enregistré.
+        // Without a name or with a single stop: nothing is saved.
         assert_eq!(
             saved.with_gradient_added("  ", &stops("#000000", "#ffffff")),
             saved

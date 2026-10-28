@@ -3,7 +3,7 @@ name = "stokesforge-analysis"
 version = "1.0.0"
 edition.workspace = true
 license.workspace = true
-description = "Traitement mathématique des données (lignes de base, correction, intégrales, ajustements, pics, déconvolution), en Rust pur."
+description = "Mathematical processing of data (baselines, correction, integrals, fits, peaks, deconvolution), in pure Rust."
 
 [lints]
 workspace = true

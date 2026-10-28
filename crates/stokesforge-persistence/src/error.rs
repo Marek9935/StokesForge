@@ -1,135 +1,135 @@
-//! Type d'erreur unique du crate.
+//! Single error type of the crate.
 
 use std::path::PathBuf;
 
 use stokesforge_core::CoreError;
 
-/// Erreur de sauvegarde ou de chargement d'un [`stokesforge_core::Project`].
+/// Error while saving or loading a [`stokesforge_core::Project`].
 ///
-/// Ne dérive pas `PartialEq` : `std::io::Error` ne l'implémente pas. Les
-/// tests comparent les variantes avec `matches!`.
+/// Does not derive `PartialEq`: `std::io::Error` does not implement it. The
+/// tests compare the variants with `matches!`.
 #[derive(Debug, thiserror::Error)]
 pub enum PersistenceError {
-    /// Échec d'entrée/sortie sur le fichier.
+    /// I/O failure on the file.
     #[error("I/O error on {path}: {source}")]
     Io {
-        /// Chemin visé par l'opération.
+        /// Path targeted by the operation.
         path: PathBuf,
-        /// Erreur système d'origine.
+        /// Original system error.
         #[source]
         source: std::io::Error,
     },
-    /// Le fichier dépasse la taille maximale acceptée à l'ouverture (A2,
-    /// #316). Le `.stf` n'est pas compressé : sa taille sur disque est sa
-    /// taille décompressée, donc ce plafond borne aussi la mémoire du
-    /// décodage. Rien n'a été lu au-delà de `limit` octets.
+    /// The file exceeds the maximum size accepted at open (A2,
+    /// #316). The `.stf` is not compressed: its size on disk is its
+    /// decompressed size, so this cap also bounds the memory of the
+    /// decoding. Nothing was read beyond `limit` bytes.
     #[error("{path} is too large to open ({size} bytes, limit {limit} bytes)")]
     TooLarge {
-        /// Chemin du fichier lu.
+        /// Path of the file read.
         path: PathBuf,
-        /// Taille du fichier, en octets.
+        /// Size of the file, in bytes.
         size: u64,
-        /// Plafond en vigueur, en octets.
+        /// Cap in force, in bytes.
         limit: u64,
     },
-    /// Les colonnes du fichier déclarent plus de cellules que le budget global
-    /// accepté à l'ouverture (B1, #316). Refusé avant toute allocation de
-    /// colonne ; `cells` est le cumul au moment du dépassement.
+    /// The columns of the file declare more cells than the global budget
+    /// accepted at open (B1, #316). Refused before any column
+    /// allocation; `cells` is the running total at the moment of the overrun.
     #[error("{path} declares too many cells ({cells} so far, limit {limit})")]
     TooManyCells {
-        /// Chemin du fichier lu.
+        /// Path of the file read.
         path: PathBuf,
-        /// Cellules cumulées quand le plafond a été franchi.
+        /// Cells accumulated when the cap was crossed.
         cells: u64,
-        /// Budget en vigueur.
+        /// Budget in force.
         limit: u64,
     },
-    /// Le fichier ne commence pas par la signature `STKF` : ce n'est pas un
-    /// fichier StokesForge (ou il est vide / tronqué avant la signature).
+    /// The file does not start with the `STKF` signature: it is not a
+    /// StokesForge file (or it is empty / truncated before the signature).
     #[error("{path} is not a StokesForge file")]
     NotAStokesForgeFile {
-        /// Chemin du fichier lu.
+        /// Path of the file read.
         path: PathBuf,
     },
-    /// Le fichier porte un numéro de version supérieur à celui que ce
-    /// lecteur sait comprendre. Le corps n'a **pas** été lu.
+    /// The file carries a version number higher than the one this
+    /// reader can understand. The body was **not** read.
     #[error("{path} was written by a newer version (format {found}, reader supports {supported})")]
     UnsupportedVersion {
-        /// Chemin du fichier lu.
+        /// Path of the file read.
         path: PathBuf,
-        /// Numéro de version trouvé dans le fichier.
+        /// Version number found in the file.
         found: u32,
-        /// Numéro de version le plus élevé que ce lecteur sait décoder.
+        /// Highest version number that this reader can decode.
         supported: u32,
     },
-    /// Le corps du fichier n'a pas pu être décodé (MessagePack invalide,
-    /// tronqué, ou buffer de colonne `Float` de longueur non multiple de 8).
+    /// The body of the file could not be decoded (invalid MessagePack,
+    /// truncated, or `Float` column buffer of a length not a multiple of 8).
     #[error("corrupt file {path}: {detail}")]
     Corrupt {
-        /// Chemin du fichier lu.
+        /// Path of the file read.
         path: PathBuf,
-        /// Description de l'anomalie.
+        /// Description of the anomaly.
         detail: String,
     },
-    /// Le contenu lu ne forme pas un modèle valide (`Tree::from_nodes` ou
-    /// `Node::with_parent` l'a refusé).
+    /// The content read does not form a valid model (`Tree::from_nodes` or
+    /// `Node::with_parent` refused it).
     #[error("invalid model in {path}: {source}")]
     InvalidModel {
-        /// Chemin du fichier lu.
+        /// Path of the file read.
         path: PathBuf,
-        /// Erreur du cœur qui a refusé la reconstruction.
+        /// Error of the core that refused the reconstruction.
         #[source]
         source: CoreError,
     },
-    /// Le corps ne s'est pas décodé à cause d'une **variante d'énumération**
-    /// que ce lecteur ne connaît pas (un type de trace, un type de colonne, …
-    /// ajouté par une version plus récente de StokesForge) — distinct de
-    /// [`Corrupt`](Self::Corrupt) : le fichier n'est pas endommagé, il est
-    /// simplement plus récent que ce lecteur. C5 (niveau 1,
-    /// `guide-de-correction-robustesse.md` §F3) : reconnaître ce cas plutôt
-    /// que de le confondre avec une vraie corruption ; la dégradation
-    /// gracieuse (garder ce qui se comprend, niveau 2) reste un chantier
-    /// séparé.
+    /// The body could not be decoded because of an **enum variant**
+    /// that this reader does not know (a trace type, a column type, …
+    /// added by a newer version of StokesForge) — distinct from
+    /// [`Corrupt`](Self::Corrupt): the file is not damaged, it is
+    /// simply newer than this reader. C5 (level 1,
+    /// `guide-de-correction-robustesse.md` §F3): recognize this case rather
+    /// than confuse it with real corruption; graceful degradation
+    /// (keeping what is understood, level 2) remains a separate work
+    /// package.
     #[error("{path} was written by a newer version of StokesForge (unknown variant): {detail}")]
     UnknownVariant {
-        /// Chemin du fichier lu.
+        /// Path of the file read.
         path: PathBuf,
-        /// Message d'origine de `rmp_serde`/`serde`, qui nomme la variante.
+        /// Original message of `rmp_serde`/`serde`, which names the variant.
         detail: String,
     },
-    /// `save` a détecté que le fichier visé a été modifié — par une autre
-    /// fenêtre, un script, ou tout autre écrivain — depuis la dernière fois
-    /// que CE processus l'a chargé ou sauvegardé. B8
-    /// (`guide-de-correction-robustesse.md` §F2) : sans ce contrôle,
-    /// l'écriture écraserait silencieusement le travail de l'autre écrivain.
+    /// `save` detected that the targeted file was modified — by another
+    /// window, a script, or any other writer — since the last time
+    /// THIS process loaded or saved it. B8
+    /// (`guide-de-correction-robustesse.md` §F2): without this check,
+    /// the write would silently overwrite the work of the other writer.
     #[error(
         "{path} changed since this process last loaded or saved it \
          (expected save counter {expected}, found {found}): reload before overwriting"
     )]
     ConcurrentModification {
-        /// Chemin du fichier visé par `save`.
+        /// Path of the file targeted by `save`.
         path: PathBuf,
-        /// Compteur de sauvegarde que ce processus attendait.
+        /// Save counter that this process expected.
         expected: u64,
-        /// Compteur de sauvegarde réellement présent sur le disque.
+        /// Save counter actually present on disk.
         found: u64,
     },
-    /// `save` a trouvé à l'emplacement visé un fichier qui porte la signature
-    /// StokesForge mais qu'on ne sait pas lire (en-tête tronqué, version 0,
-    /// corps indécodable — copie interrompue, fichier d'une version proche).
-    /// Écrire par-dessus le détruirait sans retour : on refuse, et c'est à
-    /// l'utilisateur de le déplacer ou de choisir un autre nom.
+    /// `save` found at the targeted location a file that carries the StokesForge
+    /// signature but cannot be read (truncated header, version 0,
+    /// undecodable body — interrupted copy, file of a nearby version).
+    /// Writing over it would destroy it with no way back: we refuse, and it is
+    /// up to the user to move it or choose another name.
     #[error(
         "{path} exists but cannot be read as a StokesForge file ({detail}): \
          refusing to overwrite it"
     )]
     UnreadableTarget {
-        /// Chemin du fichier visé par `save`.
+        /// Path of the file targeted by `save`.
         path: PathBuf,
-        /// Pourquoi il ne se lit pas (même texte que le refus au chargement).
+        /// Why it cannot be read (same text as the refusal at load).
         detail: String,
     },
 }
 
-/// Alias de résultat du crate.
+/// Result alias of the crate.
 pub type PersistenceResult<T> = Result<T, PersistenceError>;

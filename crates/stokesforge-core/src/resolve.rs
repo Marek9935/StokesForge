@@ -1,60 +1,60 @@
-//! Résolution d'un [`PlotSpec`] contre l'arbre courant : traduit des
-//! références (`NodeId`) en données prêtes à tracer.
+//! Resolution of a [`PlotSpec`] against the current tree: turns
+//! references (`NodeId`) into data ready to plot.
 //!
-//! Port de `legacy-python/src/stokesforge/plot/resolve.py`. C'est le seul module
-//! du crate à connaître `stokesforge-plot` — exactement comme `resolve.py` était
-//! le seul module de `stokesforge.plot` à connaître `stokesforge.core` côté Python. La
-//! frontière est la même, juste inversée : là-bas la couche neutre importait
-//! le modèle pour résoudre ; ici c'est le modèle qui importe la couche
-//! neutre pour porter le spec (`NodeKind::Graph`), et la résolution reste
-//! l'endroit qui les met en présence.
+//! Port of `legacy-python/src/stokesforge/plot/resolve.py`. This is the only module
+//! of the crate that knows `stokesforge-plot` — exactly as `resolve.py` was
+//! the only module of `stokesforge.plot` that knew `stokesforge.core` on the Python side. The
+//! boundary is the same, just inverted: there the neutral layer imported
+//! the model to resolve; here the model imports the neutral
+//! layer to carry the spec (`NodeKind::Graph`), and resolution remains
+//! the place that brings them together.
 //!
-//! # Références rompues : un état de première classe, pas une exception
+//! # Broken references: a first-class state, not an exception
 //!
-//! Citation de la documentation de tête de `resolve.py`, portée telle quelle
-//! (c'est directement la décision §11.1 d'`architecture-choisie.md`) :
+//! Quote from the top-level documentation of `resolve.py`, carried over as is
+//! (it is directly decision §11.1 of `architecture-choisie.md`):
 //!
-//! > Le parti pris de Python est d'en faire un **état de première classe**
-//! > plutôt qu'une exception : `ResolvedSeries` existe toujours, avec
-//! > `missing` non vide et `ok` faux.
+//! > The stance of Python is to make it a **first-class state**
+//! > rather than an exception: `ResolvedSeries` always exists, with
+//! > `missing` non-empty and `ok` false.
 //!
-//! Rien ne plante ; la série n'est pas retirée du spec ; elle reste visible,
-//! marquée comme référence rompue ([`ResolvedSeries::broken`]). Renommer ou
-//! déplacer la colonne référencée ne casse rien (la référence est un
-//! `NodeId`) ; la supprimer produit cet état, détectable, jamais une série
-//! silencieusement vide.
+//! Nothing crashes; the series is not removed from the spec; it stays visible,
+//! marked as a broken reference ([`ResolvedSeries::broken`]). Renaming or
+//! moving the referenced column breaks nothing (the reference is a
+//! `NodeId`); deleting it produces this detectable state, never a silently
+//! empty series.
 //!
-//! # Zéro copie
+//! # Zero copy
 //!
-//! Les colonnes du modèle sont déjà des `Arc<Vec<f64>>`
-//! ([`Column::float_values`]). La résolution clone l'`Arc` (un incrément de
-//! compteur de référence), jamais le buffer : [`ResolvedValues`] est une vue
-//! sur la même mémoire que la colonne, éventuellement tronquée au préfixe
-//! commun d'une série dont les colonnes ont des longueurs différentes.
+//! The columns of the model are already `Arc<Vec<f64>>`
+//! ([`Column::float_values`]). Resolution clones the `Arc` (a reference
+//! counter increment), never the buffer: [`ResolvedValues`] is a view
+//! on the same memory as the column, possibly truncated to the common prefix
+//! of a series whose columns have different lengths.
 //!
-//! **Une exception, et une seule** : une colonne à types mixtes
-//! ([`stokesforge_core::ColumnType::Mixed`](crate::ColumnType::Mixed)) n'a pas de
-//! buffer `f64` contigu — ses cellules sont un `Vec<MixedCell>` — et il n'y a
-//! donc rien à partager. [`Column::numeric_view`] en matérialise un, où les
-//! cellules texte et vides valent `NaN`, ce que le renderer écarte déjà :
-//! une colonne mixte trace exactement ses cellules numériques. Le coût est
-//! `O(n)` par résolution et **par colonne mixte référencée par une série**,
-//! jamais par colonne du projet, et il ne touche aucune colonne homogène.
+//! **One exception, and only one**: a mixed-type column
+//! ([`stokesforge_core::ColumnType::Mixed`](crate::ColumnType::Mixed)) has no
+//! contiguous `f64` buffer — its cells are a `Vec<MixedCell>` — and there is
+//! therefore nothing to share. [`Column::numeric_view`] materializes one, where
+//! text and empty cells are `NaN`, which the renderer already discards:
+//! a mixed column plots exactly its numeric cells. The cost is
+//! `O(n)` per resolution and **per mixed column referenced by a series**,
+//! never per column of the project, and it touches no homogeneous column.
 //!
-//! # Ce qui n'est pas porté, et pourquoi
+//! # What is not ported, and why
 //!
-//! `prepare()` et `ComputeCancelled` de `resolve.py` sont **spécifiques à
-//! l'asynchrone Python** : `prepare()` enveloppe `resolve_spec` d'une
-//! progression et d'une annulation coopérative pensées pour un calcul en fil
-//! de fond (`stokesforge.ui.plot_worker`, `QThread`). Ce mécanisme n'existe pas
-//! côté Rust — le recalcul automatique n'est ni construit ni planifié
-//! (`architecture-choisie.md` §11.4) — et le porter inventerait une
-//! infrastructure d'annulation dont rien ne dépend encore. [`resolve_spec`]
-//! couvre la partie qui reste : la résolution elle-même, qui ne parcourt
-//! jamais les données (coût indépendant du nombre de points, comme en
-//! Python). Le pré-calcul d'histogramme que `prepare()` intercalait est
-//! disponible séparément ([`histogram`]) : un futur renderer l'appelle
-//! lui-même sur les séries `Histogram` qu'il rencontre.
+//! `prepare()` and `ComputeCancelled` of `resolve.py` are **specific to
+//! Python's async**: `prepare()` wraps `resolve_spec` in a progress
+//! report and a cooperative cancellation designed for a background-thread
+//! computation (`stokesforge.ui.plot_worker`, `QThread`). This mechanism does not exist
+//! on the Rust side — automatic recalculation is neither built nor planned
+//! (`architecture-choisie.md` §11.4) — and porting it would invent a
+//! cancellation infrastructure that nothing depends on yet. [`resolve_spec`]
+//! covers the part that remains: resolution itself, which never walks
+//! the data (cost independent of the number of points, as in
+//! Python). The histogram precomputation that `prepare()` interleaved is
+//! available separately ([`histogram`]): a future renderer calls it
+//! itself on the `Histogram` series it meets.
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -66,32 +66,32 @@ use crate::id::NodeId;
 use crate::node::Node;
 use crate::tree::Tree;
 
-/// Rôle d'une référence de série qui n'a pas pu être résolue.
+/// Role of a series reference that could not be resolved.
 ///
-/// Remplace les chaînes `"x"`/`"y"`/`"xErr"`/`"yErr"` de `resolve.py` par un
-/// jeu fermé — même raisonnement que partout ailleurs dans le port Rust
-/// (`stokesforge-plot`) : une énumération nommée plutôt qu'un vocabulaire de
-/// chaînes.
+/// Replaces the strings `"x"`/`"y"`/`"xErr"`/`"yErr"` of `resolve.py` with a
+/// closed set — same reasoning as everywhere else in the Rust port
+/// (`stokesforge-plot`): a named enumeration rather than a vocabulary of
+/// strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MissingRole {
-    /// Colonne des abscisses.
+    /// X column.
     X,
-    /// Colonne des ordonnées.
+    /// Y column.
     Y,
-    /// Colonne des barres d'erreur en X.
+    /// X error bar column.
     XError,
-    /// Colonne des barres d'erreur en Y.
+    /// Y error bar column.
     YError,
 }
 
-/// Vue zéro-copie, éventuellement tronquée, sur les valeurs `f64` résolues
-/// d'une colonne.
+/// Zero-copy view, possibly truncated, on the resolved `f64` values
+/// of a column.
 ///
-/// Porte le même `Arc` que la [`Column`] d'origine : le cloner n'incrémente
-/// qu'un compteur de référence, jamais les octets. La longueur portée ici
-/// peut être inférieure à celle du buffer — c'est le préfixe commun d'une
-/// série dont les colonnes n'ont pas la même longueur (colonnes de longueur
-/// libre, décision du socle), au lieu d'un refus de tracer.
+/// Carries the same `Arc` as the original [`Column`]: cloning it only increments
+/// a reference counter, never the bytes. The length carried here
+/// may be smaller than that of the buffer — it is the common prefix of a
+/// series whose columns do not have the same length (columns of free
+/// length, a decision of the core), instead of a refusal to plot.
 #[derive(Debug, Clone)]
 pub struct ResolvedValues {
     data: Arc<Vec<f64>>,
@@ -102,100 +102,100 @@ impl ResolvedValues {
     fn new(data: Arc<Vec<f64>>, len: usize) -> Self {
         debug_assert!(
             len <= data.len(),
-            "une vue résolue ne peut pas dépasser son buffer"
+            "a resolved view cannot exceed its buffer"
         );
         Self { data, len }
     }
 
-    /// Les valeurs, jusqu'à la troncature éventuelle.
+    /// The values, up to the possible truncation.
     pub fn as_slice(&self) -> &[f64] {
         &self.data[..self.len]
     }
 
-    /// Nombre de valeurs visibles (après troncature éventuelle).
+    /// Number of visible values (after possible truncation).
     pub fn len(&self) -> usize {
         self.len
     }
 
-    /// Vrai si aucune valeur n'est visible.
+    /// True if no value is visible.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 }
 
-/// Une série résolue et ses tableaux, ou la description de ce qui manque.
+/// A resolved series and its arrays, or the description of what is missing.
 ///
-/// Emprunte `spec` à l'appelant plutôt que de le cloner : `SeriesSpec` ne
-/// porte pas de gros buffer (ce sont des identités et du style), mais rien
-/// n'oblige à en dupliquer même la partie légère quand un emprunt suffit —
-/// contrairement à `resolve.py`, où le dataclass Python est de toute façon
-/// un objet partagé par référence.
+/// Borrows `spec` from the caller rather than cloning it: `SeriesSpec` does not
+/// carry a large buffer (it is identities and style), but nothing
+/// forces duplicating even the light part when a borrow is enough —
+/// unlike `resolve.py`, where the Python dataclass is in any case
+/// an object shared by reference.
 #[derive(Debug)]
 pub struct ResolvedSeries<'s> {
-    /// La série d'origine.
+    /// The original series.
     pub spec: &'s SeriesSpec,
-    /// Nom affiché : celui du spec s'il est fixé, sinon celui de la colonne
-    /// Y, sinon `"(référence rompue)"`.
+    /// Displayed name: the spec's if set, otherwise that of the Y
+    /// column, otherwise `"(référence rompue)"`.
     pub label: String,
-    /// Abscisses. `None` si la série n'en a pas (histogramme) ou si la
-    /// référence est rompue.
+    /// X values. `None` if the series has none (histogram) or if the
+    /// reference is broken.
     pub x: Option<ResolvedValues>,
-    /// Ordonnées. `None` seulement si la référence est rompue.
+    /// Y values. `None` only if the reference is broken.
     pub y: Option<ResolvedValues>,
-    /// Barres d'erreur en X, si demandées et résolues.
+    /// X error bars, if requested and resolved.
     pub x_error: Option<ResolvedValues>,
-    /// Barres d'erreur en Y, si demandées et résolues.
+    /// Y error bars, if requested and resolved.
     pub y_error: Option<ResolvedValues>,
-    /// Rôles dont la colonne référencée est introuvable. Non vide ⇔ la
-    /// série est une référence brisée ([`ResolvedSeries::broken`]).
+    /// Roles whose referenced column cannot be found. Non-empty ⇔ the
+    /// series is a broken reference ([`ResolvedSeries::broken`]).
     pub missing: Vec<MissingRole>,
-    /// Vrai si les colonnes résolues n'avaient pas toutes la même longueur :
-    /// le tracé porte alors sur leur préfixe commun plutôt que d'être refusé.
+    /// True if the resolved columns did not all have the same length:
+    /// the plot then covers their common prefix instead of being refused.
     pub truncated: bool,
-    /// Vrai si une colonne tracée est écrite par un calcul d'analyse pas à jour
-    /// (#198). Le rendu n'en sait pas plus : il grise la série et pose son
-    /// marqueur ; d'où vient la péremption reste du modèle.
+    /// True if a plotted column is written by an out-of-date analysis calculation
+    /// (#198). The rendering knows no more: it greys the series out and places its
+    /// marker; where the staleness comes from remains the model's business.
     pub stale: bool,
 }
 
 impl<'s> ResolvedSeries<'s> {
-    /// Vrai si la série est traçable en l'état.
+    /// True if the series is plottable as it is.
     pub fn ok(&self) -> bool {
         self.missing.is_empty() && self.y.as_ref().is_some_and(|y| !y.is_empty())
     }
 
-    /// Vrai si au moins une colonne référencée est introuvable.
+    /// True if at least one referenced column cannot be found.
     pub fn broken(&self) -> bool {
         !self.missing.is_empty()
     }
 
-    /// Nombre de points de la série (0 si la référence est rompue).
+    /// Number of points of the series (0 if the reference is broken).
     pub fn point_count(&self) -> usize {
         self.y.as_ref().map_or(0, ResolvedValues::len)
     }
 }
 
-/// Un panneau résolu : le panneau d'origine, et ses séries résolues dans
-/// l'ordre de superposition.
+/// A resolved panel: the original panel, and its resolved series in
+/// stacking order.
 #[derive(Debug)]
 pub struct ResolvedPanel<'s> {
-    /// Le panneau d'origine.
+    /// The original panel.
     pub spec: &'s PanelSpec,
-    /// Ses séries, résolues, dans le même ordre.
+    /// Its series, resolved, in the same order.
     pub series: Vec<ResolvedSeries<'s>>,
 }
 
-/// Un graphe résolu : tous ses panneaux, résolus.
+/// A resolved graph: all its panels, resolved.
 #[derive(Debug)]
 pub struct ResolvedPlot<'s> {
-    /// Le spec d'origine.
+    /// The original spec.
     pub spec: &'s PlotSpec,
-    /// Ses panneaux, résolus, dans le même ordre.
+    /// Its panels, resolved, in the same order.
     pub panels: Vec<ResolvedPanel<'s>>,
 }
 
 impl<'s> ResolvedPlot<'s> {
-    /// Les séries dont la référence est rompue, tous panneaux confondus.
+    /// The series whose reference is broken, all panels together.
     pub fn broken_series(&self) -> impl Iterator<Item = &ResolvedSeries<'s>> {
         self.panels
             .iter()
@@ -203,7 +203,7 @@ impl<'s> ResolvedPlot<'s> {
             .filter(|series| series.broken())
     }
 
-    /// Nombre total de points tracés, tous panneaux et séries confondus.
+    /// Total number of plotted points, all panels and series together.
     pub fn point_count(&self) -> usize {
         self.panels
             .iter()
@@ -213,33 +213,33 @@ impl<'s> ResolvedPlot<'s> {
     }
 }
 
-/// Colonne inscrite sous `id`, ou `None` si la référence est rompue.
+/// Column registered under `id`, or `None` if the reference is broken.
 ///
-/// `None` couvre deux cas volontairement indistincts pour l'appelant : nœud
-/// absent de l'arbre courant (supprimé, en attente d'un `undo`), ou nœud
-/// présent mais qui n'est pas une colonne. Dans les deux, il n'y a rien à
-/// tracer — port de `resolve_column` (`resolve.py` ligne 68), qui traite ces
-/// deux cas de la même façon côté Python (`project.registry.get` rendant soit
-/// rien, soit un objet d'un autre type).
+/// `None` covers two cases deliberately indistinct for the caller: node
+/// absent from the current tree (deleted, awaiting an `undo`), or node
+/// present but not a column. In both there is nothing to
+/// plot — port of `resolve_column` (`resolve.py` line 68), which treats these
+/// two cases the same way on the Python side (`project.registry.get` returning either
+/// nothing, or an object of another type).
 pub fn resolve_column(tree: &Tree, id: NodeId) -> Option<&Column> {
     tree.node(id).and_then(Node::as_column)
 }
 
-/// Nom affiché d'une série : `SeriesSpec::name` s'il est renseigné, sinon le
-/// nom long de la colonne Y, sinon son nom de nœud, sinon « (référence
-/// rompue) » si la colonne n'existe plus.
+/// Displayed name of a series: `SeriesSpec::name` if set, otherwise the
+/// long name of the Y column, otherwise its node name, otherwise "(référence
+/// rompue)" if the column no longer exists.
 ///
-/// **Source unique** : la légende du graphe (via [`resolve_series`]) et la
-/// liste des séries de la fenêtre des propriétés (`stokesforge-app`) l'appellent
-/// toutes deux, pour qu'un renommage ou un changement de règle atteigne les
-/// deux (issue #25). Elle vit ici, dans `stokesforge-core`, parce que c'est
-/// l'endroit qui sait lire une colonne ; l'interface n'a pas à la réécrire.
+/// **Single source**: the graph legend (via [`resolve_series`]) and the
+/// series list of the properties window (`stokesforge-app`) both call it,
+/// so that a rename or a rule change reaches
+/// both (issue #25). It lives here, in `stokesforge-core`, because it is
+/// the place that knows how to read a column; the interface need not rewrite it.
 pub fn series_label(series: &SeriesSpec, tree: &Tree) -> String {
     if !series.name.is_empty() {
         return series.name.clone();
     }
     if let Some(row) = series.row {
-        // Série « ligne » (#166) : la ligne est son nom, comme dans la grille.
+        // "Row" series (#166): the row is its name, as in the grid.
         return format!("Row {}", row.saturating_add(1));
     }
     let Some(y_node) = tree.node(series.y).filter(|node| node.kind().is_column()) else {
@@ -256,22 +256,22 @@ pub fn series_label(series: &SeriesSpec, tree: &Tree) -> String {
     }
 }
 
-/// Vue `f64` d'une colonne référencée par `id`, ou `None` si la référence est
-/// rompue (port de `_numeric`, `resolve.py` ligne 77). Il n'y a plus de type
-/// de colonne non traçable : une colonne `Mixed` — y compris une colonne
-/// entièrement textuelle — trace ses cellules numériques et vaut `NaN`
-/// ailleurs (voir [`Column::numeric_view`]).
+/// `f64` view of a column referenced by `id`, or `None` if the reference is
+/// broken (port of `_numeric`, `resolve.py` line 77). There is no longer a
+/// non-plottable column type: a `Mixed` column — including a
+/// fully textual column — plots its numeric cells and is `NaN`
+/// elsewhere (see [`Column::numeric_view`]).
 ///
-/// Zéro copie pour une colonne numérique ou date-heure ; une copie pour une
-/// colonne **mixte**, qui n'a pas de buffer `f64` contigu à partager — voir
-/// [`Column::numeric_view`], qui porte le détail et le coût de cette seule
-/// exception à la propriété « zéro copie » de ce module.
+/// Zero copy for a numeric or date-time column; one copy for a
+/// **mixed** column, which has no contiguous `f64` buffer to share — see
+/// [`Column::numeric_view`], which carries the detail and the cost of this sole
+/// exception to the "zero copy" property of this module.
 fn resolve_numeric(tree: &Tree, id: NodeId) -> Option<Arc<Vec<f64>>> {
     resolve_column(tree, id).and_then(Column::numeric_view)
 }
 
-/// Résout une série. Ne lève jamais : une référence rompue est un état
-/// (port de `resolve_series`, `resolve.py` ligne 165).
+/// Resolves a series. Never raises: a broken reference is a state
+/// (port of `resolve_series`, `resolve.py` line 165).
 pub fn resolve_series<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries<'s> {
     let mut resolved = resolve_series_data(tree, series);
     resolved.stale = [Some(series.y), series.x, series.x_error, series.y_error]
@@ -281,7 +281,7 @@ pub fn resolve_series<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSeries
     resolved
 }
 
-/// Vrai si `column` est écrite par un calcul d'analyse pas à jour.
+/// True if `column` is written by an out-of-date analysis calculation.
 fn column_is_stale(tree: &Tree, column: NodeId) -> bool {
     tree.calculation_of_column(column)
         .and_then(|(id, _)| tree.calculation(id))
@@ -340,15 +340,15 @@ fn resolve_series_data<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSerie
         };
     }
 
-    // Colonnes de longueur libre (décision du socle) : le tracé porte sur le
-    // préfixe commun plutôt que d'être refusé.
+    // Columns of free length (a decision of the core): the plot covers the
+    // common prefix instead of being refused.
     //
-    // A10 (`guide-de-correction-robustesse.md` §F1) : `n` — le nombre de
-    // points de la série — ne vient que des colonnes de **données** (`x`,
-    // `y`), qui vont par paires et se tronquent ensemble. Les colonnes
-    // d'erreur sont des **annotations par point** : elles ne participent pas
-    // à ce calcul, sous peine qu'une colonne d'erreur trop courte (ou vide)
-    // tronque le signal lui-même — c'est exactement l'anomalie.
+    // A10 (`guide-de-correction-robustesse.md` §F1): `n` — the number of
+    // points of the series — comes only from the **data** columns (`x`,
+    // `y`), which go in pairs and are truncated together. The error
+    // columns are **per-point annotations**: they do not take part in
+    // this computation, otherwise a too-short (or empty) error column
+    // would truncate the signal itself — which is exactly the anomaly.
     let lengths: Vec<usize> = [&x, &y]
         .into_iter()
         .flatten()
@@ -364,8 +364,8 @@ fn resolve_series_data<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSerie
         lengths.iter().any(|&len| len != n) || error_lengths.iter().any(|&len| len != n);
 
     if x.is_none() && series.plot_type.needs_x() {
-        // Abscisse implicite : l'indice de ligne, façon Origin quand aucune
-        // colonne X n'est désignée. Construit à la volée, jamais stocké.
+        // Implicit x: the row index, Origin style when no X
+        // column is designated. Built on the fly, never stored.
         x = Some(Arc::new((0..n).map(|i| i as f64).collect()));
     }
 
@@ -382,12 +382,12 @@ fn resolve_series_data<'s>(tree: &Tree, series: &'s SeriesSpec) -> ResolvedSerie
     }
 }
 
-/// Résout une série « ligne » (#166) : une valeur par colonne de la feuille de
-/// `series.y` qui porte une valeur x' finie, dans l'ordre de la feuille —
-/// ordonnée = la cellule de la ligne `row` (`NaN` si la colonne est plus
-/// courte, ou si la cellule n'est pas un nombre), abscisse = le x' de la
-/// colonne. Une feuille sans aucune colonne x' donne une série vide, pas une
-/// référence rompue ; seule la perte de la colonne d'ancrage (`y`) en est une.
+/// Resolves a "row" series (#166): one value per column of the sheet of
+/// `series.y` that carries a finite x' value, in sheet order —
+/// y = the cell of row `row` (`NaN` if the column is shorter,
+/// or if the cell is not a number), x = the x' of the
+/// column. A sheet with no x' column gives an empty series, not a
+/// broken reference; only the loss of the anchor column (`y`) is one.
 fn resolve_row_series<'s>(
     tree: &Tree,
     series: &'s SeriesSpec,
@@ -440,17 +440,17 @@ fn resolve_row_series<'s>(
     }
 }
 
-/// Conforme une colonne d'erreur (barre d'erreur en X ou en Y) à la longueur
-/// `n` des données qu'elle annote (A10, `guide-de-correction-robustesse.md`
-/// §F1) : tronquée si elle est plus longue, **complétée par `NaN`** — la
-/// valeur manquante du modèle — si elle est plus courte, jamais l'inverse
-/// (raccourcir `x`/`y` pour s'aligner sur elle).
+/// Conforms an error column (error bar in X or in Y) to the length
+/// `n` of the data it annotates (A10, `guide-de-correction-robustesse.md`
+/// §F1): truncated if it is longer, **padded with `NaN`** — the model's
+/// missing value — if it is shorter, never the reverse
+/// (shortening `x`/`y` to align with it).
 ///
-/// Zéro copie dans le cas courant (assez de valeurs, ou trop) : ce n'est
-/// qu'une vue tronquée sur le même `Arc`, comme [`ResolvedValues::new`]
-/// partout ailleurs. Une colonne d'erreur trop courte est le cas rare ; elle
-/// seule paie une copie (le buffer d'origine, complété de `NaN`), plutôt que
-/// de faire payer `x`/`y` d'une troncature qui perdrait des mesures.
+/// Zero copy in the usual case (enough values, or too many): it is only
+/// a truncated view on the same `Arc`, like [`ResolvedValues::new`]
+/// everywhere else. A too-short error column is the rare case; it
+/// alone pays a copy (the original buffer, padded with `NaN`), rather than
+/// making `x`/`y` pay for a truncation that would lose measurements.
 fn conform_error_values(values: Arc<Vec<f64>>, n: usize) -> ResolvedValues {
     if values.len() >= n {
         return ResolvedValues::new(values, n);
@@ -460,7 +460,7 @@ fn conform_error_values(values: Arc<Vec<f64>>, n: usize) -> ResolvedValues {
     ResolvedValues::new(Arc::new(padded), n)
 }
 
-/// Résout toutes les séries d'un panneau, dans l'ordre.
+/// Resolves all the series of a panel, in order.
 pub fn resolve_panel<'s>(tree: &Tree, panel: &'s PanelSpec) -> ResolvedPanel<'s> {
     ResolvedPanel {
         spec: panel,
@@ -472,18 +472,18 @@ pub fn resolve_panel<'s>(tree: &Tree, panel: &'s PanelSpec) -> ResolvedPanel<'s>
     }
 }
 
-/// Résout toutes les séries d'un graphe. Ne lève jamais.
+/// Resolves all the series of a graph. Never raises.
 ///
-/// Coût indépendant du nombre de points : une résolution de `NodeId` et un
-/// clonage d'`Arc` par colonne référencée, jamais une copie des données
-/// (port de `resolve_spec`, `resolve.py` ligne 227).
+/// Cost independent of the number of points: one `NodeId` resolution and one
+/// `Arc` clone per referenced column, never a copy of the data
+/// (port of `resolve_spec`, `resolve.py` line 227).
 pub fn resolve_spec<'s>(tree: &Tree, spec: &'s PlotSpec) -> ResolvedPlot<'s> {
     let mut panels: Vec<ResolvedPanel<'s>> = spec
         .panels
         .iter()
         .map(|panel| resolve_panel(tree, panel))
         .collect();
-    // Le graphe peut renoncer à l'avertissement des séries pas à jour (#198).
+    // The graph may waive the warning for out-of-date series (#198).
     if !spec.stale_warning {
         for series in panels.iter_mut().flat_map(|panel| panel.series.iter_mut()) {
             series.stale = false;
@@ -492,22 +492,22 @@ pub fn resolve_spec<'s>(tree: &Tree, spec: &'s PlotSpec) -> ResolvedPlot<'s> {
     ResolvedPlot { spec, panels }
 }
 
-/// Largeur des barres : celle demandée si elle est positive, sinon 80 % du
-/// pas médian des abscisses.
+/// Width of the bars: the requested one if positive, otherwise 80% of the
+/// median step of the x values.
 ///
-/// Ici, dans le socle, et pas dans un renderer : la déduction ne doit pas
-/// donner deux largeurs différentes selon le moteur qui peint — c'est la
-/// même raison qui a fait naître `PlotSpec` (port de `bar_width`,
-/// `resolve.py` ligne 287).
+/// Here, in the core, and not in a renderer: the deduction must not
+/// give two different widths depending on the engine that paints — this is the
+/// same reason that gave birth to `PlotSpec` (port of `bar_width`,
+/// `resolve.py` line 287).
 ///
-/// `requested` est déjà un `Option<f64>` plutôt que le `float` Python
-/// sentinelle-à-zéro : c'est la décision de R2 (`SeriesSpec::bar_width`,
-/// `None` = déduite), donc pas de test `> 0` à faire ici pour le distinguer
-/// d'une valeur explicite de zéro.
+/// `requested` is already an `Option<f64>` rather than the Python `float`
+/// zero sentinel: this is the decision of R2 (`SeriesSpec::bar_width`,
+/// `None` = deduced), so no `> 0` test to do here to tell it apart
+/// from an explicit value of zero.
 pub fn bar_width(x: Option<&[f64]>, requested: Option<f64>) -> f64 {
-    // A6 — une largeur demandée absurde (négative, nulle, NaN ou infinie)
-    // n'est pas une largeur : on la traite comme absente et on retombe sur
-    // la déduction, plutôt que de la renvoyer telle quelle au renderer.
+    // A6 — an absurd requested width (negative, zero, NaN or infinite)
+    // is not a width: it is treated as absent and we fall back on
+    // the deduction, rather than returning it as is to the renderer.
     if let Some(requested) = requested.filter(|w| w.is_finite() && *w > 0.0) {
         return requested;
     }
@@ -531,8 +531,8 @@ pub fn bar_width(x: Option<&[f64]>, requested: Option<f64>) -> f64 {
     median_of_sorted(&steps) * 0.8
 }
 
-/// Médiane d'une tranche déjà triée (moyenne des deux valeurs centrales si
-/// la longueur est paire, comme `numpy.median`).
+/// Median of an already sorted slice (mean of the two central values if
+/// the length is even, like `numpy.median`).
 fn median_of_sorted(sorted: &[f64]) -> f64 {
     let n = sorted.len();
     if n % 2 == 1 {
@@ -542,16 +542,16 @@ fn median_of_sorted(sorted: &[f64]) -> f64 {
     }
 }
 
-/// Bornes et effectifs d'un histogramme, `NaN` exclus (« finite » du code
-/// Python).
+/// Bounds and counts of a histogram, `NaN` excluded ("finite" in the Python
+/// code).
 ///
-/// Dans le socle, sans dépendance de calcul lourde (pas de `numpy` — ni
-/// équivalent Rust type `ndarray` : `stokesforge-core` reste sans dépendance de
-/// calcul, cahier des charges de la phase R3), pour que le calcul soit
-/// testable seul et partagé par tout futur renderer (port de `histogram`,
-/// `resolve.py` ligne 304). `bins` est déjà un `NonZeroU32` côté
-/// `SeriesSpec::histogram_bins` — pas de `max(1, …)` à refaire ici, R2 l'a
-/// déjà rendu impossible d'exprimer zéro classe.
+/// In the core, with no heavy computation dependency (no `numpy` — nor a
+/// Rust equivalent like `ndarray`: `stokesforge-core` stays free of
+/// computation dependencies, brief of phase R3), so that the computation is
+/// testable alone and shared by any future renderer (port of `histogram`,
+/// `resolve.py` line 304). `bins` is already a `NonZeroU32` on the
+/// `SeriesSpec::histogram_bins` side — no `max(1, …)` to redo here, R2 has
+/// already made it impossible to express zero classes.
 pub fn histogram(values: &[f64], bins: NonZeroU32) -> (Vec<f64>, Vec<f64>) {
     let finite: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
     if finite.is_empty() {
@@ -565,30 +565,30 @@ pub fn histogram(values: &[f64], bins: NonZeroU32) -> (Vec<f64>, Vec<f64>) {
         min = min.min(v);
         max = max.max(v);
     }
-    // `numpy.histogram` élargit un intervalle dégénéré de 0,5 de chaque
-    // côté plutôt que de diviser par une largeur nulle.
+    // `numpy.histogram` widens a degenerate interval by 0.5 on each
+    // side rather than dividing by a zero width.
     let (first_edge, last_edge) = if min == max {
         (min - 0.5, max + 0.5)
     } else {
         (min, max)
     };
 
-    // A5 (`guide-de-correction-robustesse.md`, « Une échéance, pas une
-    // cause ») — `last_edge - first_edge` peut déborder `f64` (deux valeurs
-    // proches de `±f64::MAX`), ce qui rendait `width = +inf`, puis des
-    // bornes `NaN` (`inf * 0.0`) et un comptage qui rangeait tout en classe
-    // 0. On évite tout intermédiaire non fini :
+    // A5 (`guide-de-correction-robustesse.md`, "A deadline, not a
+    // cause") — `last_edge - first_edge` can overflow `f64` (two values
+    // close to `±f64::MAX`), which made `width = +inf`, then `NaN`
+    // bounds (`inf * 0.0`) and a count that put everything in bin
+    // 0. We avoid any non-finite intermediate:
     //
-    // - les bornes se calculent par combinaison convexe
-    //   `first*(1-t) + last*t`, qui reste toujours dans `[first, last]`
-    //   (donc finie) quels que soient `first`/`last`, sans jamais passer par
-    //   une différence qui pourrait déborder ;
-    // - la position d'une valeur dans l'histogramme se calcule via
-    //   `half_width = last/2 - first/2` — la moitié de la largeur, mais
-    //   calculée en divisant d'abord chaque borne par deux, sans jamais
-    //   déborder — puis `t = (v/2 - first/2) / half_width`, qui rend le
-    //   même résultat que `(v - first) / width` sans jamais matérialiser une
-    //   différence non finie.
+    // - the bounds are computed by convex combination
+    //   `first*(1-t) + last*t`, which always stays within `[first, last]`
+    //   (hence finite) whatever `first`/`last`, without ever going through
+    //   a difference that could overflow;
+    // - the position of a value in the histogram is computed via
+    //   `half_width = last/2 - first/2` — half the width, but
+    //   computed by dividing each bound by two first, never
+    //   overflowing — then `t = (v/2 - first/2) / half_width`, which gives the
+    //   same result as `(v - first) / width` without ever materializing a
+    //   non-finite difference.
     let half_width = last_edge / 2.0 - first_edge / 2.0;
 
     let edges: Vec<f64> = (0..=bins)
@@ -623,48 +623,48 @@ mod tests {
             ValueBlock::Float(values.to_vec()),
             ColumnMeta::default(),
         )
-        .expect("colonne numérique valide")
+        .expect("valid numeric column")
     }
 
-    /// Fixture : un projet avec une feuille contenant les colonnes `x`, `y`
-    /// (deux points) et `texte` (colonne mixte entièrement textuelle, sans
-    /// contenu numérique), plus un graphe.
+    /// Fixture: a project with a sheet containing the columns `x`, `y`
+    /// (two points) and `text` (an entirely textual mixed column, with no
+    /// numeric content), plus a graph.
     struct Fixture {
         project: Project,
         x: NodeId,
         y: NodeId,
-        texte: NodeId,
+        text: NodeId,
         graph: NodeId,
     }
 
     impl Fixture {
         fn new() -> Self {
-            let mut project = Project::new("Demo").expect("projet valide");
+            let mut project = Project::new("Demo").expect("valid project");
             let root = project.root();
-            let book = project.add_empty_workbook(root, None).expect("classeur");
-            let sheet = project.add_worksheet(book, None).expect("feuille");
+            let book = project.add_empty_workbook(root, None).expect("workbook");
+            let sheet = project.add_worksheet(book, None).expect("sheet");
             let x = project
                 .add_column(sheet, None, Some("X"), numeric_column(&[0.0, 1.0, 2.0]))
-                .expect("colonne X");
+                .expect("column X");
             let y = project
                 .add_column(sheet, None, Some("Y"), numeric_column(&[10.0, 20.0, 30.0]))
-                .expect("colonne Y");
-            let texte = project
+                .expect("column Y");
+            let text = project
                 .add_column(
                     sheet,
                     None,
                     Some("T"),
                     Column::from_text(&[Some("a".to_string()), Some("b".to_string())]),
                 )
-                .expect("colonne texte");
+                .expect("text column");
             let graph = project
                 .add_graph(root, None, PlotSpec::default())
-                .expect("graphe");
+                .expect("graph");
             Self {
                 project,
                 x,
                 y,
-                texte,
+                text,
                 graph,
             }
         }
@@ -684,9 +684,9 @@ mod tests {
         assert_eq!(resolved.y.unwrap().as_slice(), &[10.0, 20.0, 30.0]);
     }
 
-    /// Tâche 3.6, premier volet : renommer une colonne référencée par un
-    /// graphe laisse le graphe résoluble — la référence est un `NodeId`, le
-    /// renommage ne le touche pas (décision §11.1 d'`architecture-choisie.md`).
+    /// Task 3.6, first part: renaming a column referenced by a
+    /// graph leaves the graph resolvable — the reference is a `NodeId`, the
+    /// rename does not touch it (decision §11.1 of `architecture-choisie.md`).
     #[test]
     fn renaming_the_referenced_column_leaves_the_series_resolvable() {
         let f = Fixture::new();
@@ -696,30 +696,30 @@ mod tests {
         let before = resolve_series(project.tree(), &series);
         assert!(before.ok());
 
-        project.rename(f.y, "Tension").expect("renommage valide");
+        project.rename(f.y, "Voltage").expect("valid rename");
 
         let after = resolve_series(project.tree(), &series);
-        assert!(after.ok(), "le renommage ne doit pas casser la résolution");
+        assert!(after.ok(), "the rename must not break resolution");
         assert!(!after.broken());
         assert_eq!(after.y.unwrap().as_slice(), &[10.0, 20.0, 30.0]);
-        // Le nom affiché suit le renommage : la colonne s'appelle maintenant
-        // « Tension », et rien dans le spec ne fige l'ancien nom « Y ».
+        // The displayed name follows the rename: the column is now called
+        // "Voltage", and nothing in the spec freezes the old name "Y".
         assert_eq!(
             series_label(&series, project.tree()),
-            "Tension",
-            "le nom affiché doit suivre le renommage de la colonne"
+            "Voltage",
+            "the displayed name must follow the column rename"
         );
     }
 
-    /// Tâche 3.6, second volet : supprimer la colonne référencée produit une
-    /// référence brisée **explicite** dans le résultat de résolution — jamais
-    /// une série silencieusement vide. C'est `ResolvedSeries::ok() == false`
-    /// avec `missing` non vide, pas un panique ni une série retirée du spec.
+    /// Task 3.6, second part: deleting the referenced column produces an
+    /// **explicit** broken reference in the resolution result — never
+    /// a silently empty series. It is `ResolvedSeries::ok() == false`
+    /// with `missing` non-empty, not a panic nor a series removed from the spec.
     #[test]
     fn a_broken_reference_is_a_state_not_a_panic() {
         let f = Fixture::new();
         let mut project = f.project;
-        project.remove(f.y).expect("suppression de la colonne Y");
+        project.remove(f.y).expect("deletion of column Y");
         let series = SeriesSpec::new_xy(f.x, f.y);
 
         let resolved = resolve_series(project.tree(), &series);
@@ -730,40 +730,37 @@ mod tests {
         assert!(resolved.y.is_none());
         assert!(
             resolved.x.is_none(),
-            "toute la série est marquée, pas juste Y"
+            "the whole series is marked, not just Y"
         );
         assert_eq!(resolved.label, "(référence rompue)");
     }
 
-    /// Il n'y a plus de type de colonne non traçable (`Text` a disparu au
-    /// profit de `Mixed`) : une colonne entièrement textuelle résout sa
-    /// série normalement, simplement sans le moindre point numérique — ce
-    /// n'est pas une référence rompue.
+    /// There is no longer a non-plottable column type (`Text` disappeared in
+    /// favor of `Mixed`): an entirely textual column resolves its
+    /// series normally, simply without a single numeric point — this
+    /// is not a broken reference.
     #[test]
     fn a_fully_textual_column_resolves_with_no_numeric_points() {
         let f = Fixture::new();
-        let series = SeriesSpec::new(f.texte);
+        let series = SeriesSpec::new(f.text);
         let resolved = resolve_series(f.project.tree(), &series);
-        assert!(
-            resolved.ok(),
-            "une colonne mixte n'est jamais une référence rompue"
-        );
+        assert!(resolved.ok(), "a mixed column is never a broken reference");
         assert!(resolved.missing.is_empty());
-        let slice = resolved.y.expect("ordonnées résolues");
+        let slice = resolved.y.expect("resolved y values");
         assert!(slice.as_slice().iter().all(|value| value.is_nan()));
     }
 
-    /// Une colonne **mixte** est traçable, contrairement à une colonne texte :
-    /// la série se résout, et seules les cellules numériques portent une
-    /// valeur — les autres valent `NaN`, ce que le renderer écarte déjà.
+    /// A **mixed** column is plottable, unlike a text column:
+    /// the series resolves, and only the numeric cells carry a
+    /// value — the others are `NaN`, which the renderer already discards.
     #[test]
     fn a_mixed_column_resolves_and_only_its_numbers_carry_a_value() {
         use crate::column::MixedCell;
 
-        let mut project = Project::new("Demo").expect("projet valide");
+        let mut project = Project::new("Demo").expect("valid project");
         let root = project.root();
-        let book = project.add_empty_workbook(root, None).expect("classeur");
-        let sheet = project.add_worksheet(book, None).expect("feuille");
+        let book = project.add_empty_workbook(root, None).expect("workbook");
+        let sheet = project.add_worksheet(book, None).expect("sheet");
         let y = project
             .add_column(
                 sheet,
@@ -776,31 +773,28 @@ mod tests {
                     MixedCell::Number(1.5),
                 ]),
             )
-            .expect("colonne mixte");
+            .expect("mixed column");
 
         let series = SeriesSpec::new(y);
         let resolved = resolve_series(project.tree(), &series);
 
-        assert!(
-            resolved.ok(),
-            "une colonne mixte n'est pas une référence rompue"
-        );
+        assert!(resolved.ok(), "a mixed column is not a broken reference");
         assert!(!resolved.broken());
         assert_eq!(resolved.point_count(), 4);
-        let values = resolved.y.expect("ordonnées résolues");
+        let values = resolved.y.expect("resolved y values");
         let slice = values.as_slice();
         assert_eq!(slice[0], 1.2);
-        assert!(slice[1].is_nan(), "la cellule texte ne se trace pas");
-        assert!(slice[2].is_nan(), "la cellule vide ne se trace pas");
+        assert!(slice[1].is_nan(), "the text cell is not plotted");
+        assert!(slice[2].is_nan(), "the empty cell is not plotted");
         assert_eq!(slice[3], 1.5);
     }
 
-    /// Une feuille « cinétique » : A, B, C ont un x' (0, 10, 20), D n'en a pas.
+    /// A "kinetics" sheet: A, B, C have an x' (0, 10, 20), D does not.
     fn kinetics() -> (Project, NodeId, Vec<NodeId>) {
-        let mut project = Project::new("Cinétique").expect("projet valide");
+        let mut project = Project::new("Kinetics").expect("valid project");
         let root = project.root();
-        let book = project.add_empty_workbook(root, None).expect("classeur");
-        let sheet = project.add_worksheet(book, None).expect("feuille");
+        let book = project.add_empty_workbook(root, None).expect("workbook");
+        let sheet = project.add_worksheet(book, None).expect("sheet");
         let mut ids = Vec::new();
         for (name, values, x_prime) in [
             ("A", [1.0, 2.0, 3.0], Some(0.0)),
@@ -810,7 +804,7 @@ mod tests {
         ] {
             let id = project
                 .add_column(sheet, None, Some(name), Column::from_f64(&values))
-                .expect("colonne");
+                .expect("column");
             let mut meta = project
                 .tree()
                 .node(id)
@@ -826,8 +820,8 @@ mod tests {
         (project, sheet, ids)
     }
 
-    /// #166 : une série « ligne » trace, pour chaque colonne qui porte un x',
-    /// la cellule de sa ligne à l'abscisse x' ; la colonne sans x' n'y est pas.
+    /// #166: a "row" series plots, for each column that carries an x',
+    /// the cell of its row at the abscissa x'; the column without an x' is not in it.
     #[test]
     fn a_row_series_plots_the_row_against_the_x_prime_of_each_column() {
         let (project, _, ids) = kinetics();
@@ -843,8 +837,8 @@ mod tests {
         assert_eq!(resolved.y.as_ref().unwrap().as_slice(), &[2.0, 5.0, 8.0]);
     }
 
-    /// Une `row` lue d'un fichier peut valoir `usize::MAX` : le libellé ne
-    /// doit pas déborder (#316).
+    /// A `row` read from a file may be `usize::MAX`: the label must
+    /// not overflow (#316).
     #[test]
     fn a_row_series_label_does_not_overflow_on_the_largest_row() {
         let (project, _, ids) = kinetics();
@@ -858,8 +852,8 @@ mod tests {
         );
     }
 
-    /// Une ligne au-delà d'une colonne plus courte vaut `NaN` (le point ne se
-    /// trace pas), et l'abscisse de `x` explicite est ignorée.
+    /// A row beyond a shorter column is `NaN` (the point is not
+    /// plotted), and the abscissa of an explicit `x` is ignored.
     #[test]
     fn a_row_series_reads_nan_past_a_short_column_and_ignores_x() {
         let (project, _, ids) = kinetics();
@@ -880,8 +874,8 @@ mod tests {
             .all(|v| v.is_nan()));
     }
 
-    /// Sans colonne x' dans la feuille, la série est vide mais pas rompue ;
-    /// sans sa colonne d'ancrage, elle l'est.
+    /// Without an x' column in the sheet, the series is empty but not broken;
+    /// without its anchor column, it is.
     #[test]
     fn a_row_series_is_empty_without_x_prime_and_broken_without_its_anchor() {
         let (mut project, _, ids) = kinetics();
@@ -902,10 +896,10 @@ mod tests {
             ..SeriesSpec::new(ids[0])
         };
         let resolved = resolve_series(project.tree(), &series);
-        assert!(!resolved.broken(), "vide, pas rompue");
+        assert!(!resolved.broken(), "empty, not broken");
         assert_eq!(resolved.point_count(), 0);
 
-        project.remove(ids[0]).expect("suppression");
+        project.remove(ids[0]).expect("deletion");
         let resolved = resolve_series(project.tree(), &series);
         assert!(resolved.broken());
         assert_eq!(resolved.missing, vec![MissingRole::Y]);
@@ -934,10 +928,10 @@ mod tests {
 
     #[test]
     fn mismatched_lengths_truncate_to_the_common_prefix() {
-        let mut project = Project::new("Demo").expect("projet valide");
+        let mut project = Project::new("Demo").expect("valid project");
         let root = project.root();
-        let book = project.add_empty_workbook(root, None).expect("classeur");
-        let sheet = project.add_worksheet(book, None).expect("feuille");
+        let book = project.add_empty_workbook(root, None).expect("workbook");
+        let sheet = project.add_worksheet(book, None).expect("sheet");
         let x = project
             .add_column(
                 sheet,
@@ -945,10 +939,10 @@ mod tests {
                 Some("X"),
                 numeric_column(&[0.0, 1.0, 2.0, 3.0]),
             )
-            .expect("colonne X");
+            .expect("column X");
         let y = project
             .add_column(sheet, None, Some("Y"), numeric_column(&[10.0, 20.0]))
-            .expect("colonne Y, plus courte");
+            .expect("column Y, shorter");
 
         let series = SeriesSpec::new_xy(x, y);
         let resolved = resolve_series(project.tree(), &series);
@@ -963,10 +957,10 @@ mod tests {
     fn explicit_name_wins_over_the_column_name() {
         let f = Fixture::new();
         let series = SeriesSpec {
-            name: "Ma série".to_string(),
+            name: "My series".to_string(),
             ..SeriesSpec::new(f.y)
         };
-        assert_eq!(series_label(&series, f.project.tree()), "Ma série");
+        assert_eq!(series_label(&series, f.project.tree()), "My series");
     }
 
     #[test]
@@ -980,24 +974,22 @@ mod tests {
             .set_column_meta(
                 f.y,
                 ColumnMeta {
-                    long_name: "Tension".to_string(),
+                    long_name: "Voltage".to_string(),
                     ..ColumnMeta::default()
                 },
             )
-            .expect("métadonnées valides");
-        assert_eq!(series_label(&series, project.tree()), "Tension");
+            .expect("valid metadata");
+        assert_eq!(series_label(&series, project.tree()), "Voltage");
     }
 
     #[test]
     fn resolve_spec_walks_every_panel_and_series() {
         let f = Fixture::new();
         let mut project = f.project;
-        // Une référence rompue, pour la seconde série : supprimer la colonne
-        // qu'elle visait plutôt que passer par une colonne texte, qui résout
-        // désormais toujours (voir `a_fully_textual_column_resolves_with_no_numeric_points`).
-        project
-            .remove(f.texte)
-            .expect("suppression de la colonne texte");
+        // A broken reference, for the second series: delete the column
+        // it targeted rather than go through a text column, which now
+        // always resolves (see `a_fully_textual_column_resolves_with_no_numeric_points`).
+        project.remove(f.text).expect("deletion of the text column");
         let spec = PlotSpec {
             panels: vec![
                 PanelSpec {
@@ -1005,12 +997,12 @@ mod tests {
                     ..PanelSpec::at(0, 0)
                 },
                 PanelSpec {
-                    series: vec![SeriesSpec::new(f.texte)],
+                    series: vec![SeriesSpec::new(f.text)],
                     ..PanelSpec::at(1, 0)
                 },
             ]
             .into(),
-            ..PlotSpec::empty("Deux panneaux")
+            ..PlotSpec::empty("Two panels")
         };
 
         let resolved = resolve_spec(project.tree(), &spec);
@@ -1033,13 +1025,13 @@ mod tests {
 
     #[test]
     fn bar_width_deduces_eighty_percent_of_the_median_step() {
-        // Pas constant de 2 → largeur déduite 1.6.
+        // Constant step of 2 → deduced width 1.6.
         assert_eq!(bar_width(Some(&[0.0, 2.0, 4.0, 6.0]), None), 1.6);
     }
 
     #[test]
     fn bar_width_ignores_non_finite_and_non_positive_steps() {
-        // Un doublon produit un pas nul, exclu ; NaN aussi.
+        // A duplicate produces a zero step, excluded; NaN too.
         assert_eq!(bar_width(Some(&[0.0, 0.0, 1.0, f64::NAN]), None), 0.8);
     }
 
@@ -1058,26 +1050,26 @@ mod tests {
         assert_eq!(edges.first().copied(), Some(0.0));
         assert_eq!(edges.last().copied(), Some(3.0));
         let total: f64 = counts.iter().sum();
-        assert_eq!(total, 4.0, "les deux valeurs non finies sont exclues");
+        assert_eq!(total, 4.0, "the two non-finite values are excluded");
     }
 
     #[test]
     fn histogram_of_a_single_repeated_value_widens_the_degenerate_range() {
         let (edges, counts) = histogram(&[5.0, 5.0, 5.0], NonZeroU32::new(2).unwrap());
         assert_eq!(edges, vec![4.5, 5.0, 5.5]);
-        // Toutes les valeurs tombent dans le bin de droite avec cette
-        // implémentation (bord droit inclusif) : le compte total est
-        // préservé, ce qui est la propriété qui compte.
+        // All the values fall into the right bin with this
+        // implementation (inclusive right edge): the total count is
+        // preserved, which is the property that matters.
         let total: f64 = counts.iter().sum();
         assert_eq!(total, 3.0);
     }
 
     #[test]
     fn window_meta_default_is_used_for_fixture_windows() {
-        // Sanity check du fixture lui-même : le graphe existe et sa fenêtre
-        // est par défaut.
+        // Sanity check of the fixture itself: the graph exists and its window
+        // is the default.
         let f = Fixture::new();
-        let node = f.project.tree().get(f.graph).expect("graphe présent");
+        let node = f.project.tree().get(f.graph).expect("graph present");
         assert!(matches!(
             node.kind(),
             crate::node::NodeKind::Graph { meta, .. } if *meta == WindowMeta::default()

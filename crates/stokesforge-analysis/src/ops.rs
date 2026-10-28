@@ -1,14 +1,14 @@
-//! Les opérations du menu Analysis, de bout en bout : colonnes brutes en
-//! entrée, colonnes calculées et valeurs en sortie.
+//! The operations of the Analysis menu, end to end: raw columns as
+//! input, computed columns and values as output.
 //!
-//! C'est la **seule** porte d'entrée dont l'application, les scripts `pyst` et
-//! le recalcul se servent : ils fournissent les colonnes lues dans le modèle et
-//! écrivent ce qui revient. Les sorties sont **alignées sur les lignes de
-//! l'entrée** (`NaN` où une ligne est écartée ou hors plage), pour qu'une
-//! colonne calculée ait la longueur de sa source.
+//! This is the **only** entry point that the application, the `pyst` scripts and
+//! recalculation use: they supply the columns read from the model and
+//! write back what comes out. Outputs are **aligned on the rows of the
+//! input** (`NaN` where a row is dropped or out of range), so that a
+//! computed column has the length of its source.
 //!
-//! Les clés de sortie sont stables et sans phrase (voir [`Value::key`] et
-//! [`OutColumn::key`]) : l'application les met en libellés traduits.
+//! Output keys are stable and sentence-free (see [`Value::key`] and
+//! [`OutColumn::key`]): the application turns them into translated labels.
 
 use crate::baseline::{self, Baseline, BaselineMethod, BaselineOp};
 use crate::correct::{self, CorrectOp};
@@ -22,28 +22,28 @@ use crate::peaks::{self, PeakSeed, PeaksSpec};
 use crate::series::{clean, interpolate, Series};
 use crate::smooth::{self, SmoothMethod, SmoothSpec};
 
-/// Les colonnes d'une courbe à traiter, ligne à ligne. `NaN` : cellule vide,
-/// texte ou invalide.
+/// The columns of a curve to process, row by row. `NaN`: empty cell,
+/// text or invalid.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SeriesInput {
     pub x: Vec<f64>,
     pub y: Vec<f64>,
-    /// Écart-type de Y (colonne de rôle erreur), pour l'ajustement pondéré.
+    /// Standard deviation of Y (column with the error role), for the weighted fit.
     pub sigma: Option<Vec<f64>>,
 }
 
-/// Une colonne annexe (X, Y) : la référence d'une correction, l'IRF d'une
-/// déconvolution.
+/// An auxiliary (X, Y) column: the reference of a correction, the IRF of a
+/// deconvolution.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct AuxInput {
     pub x: Vec<f64>,
     pub y: Vec<f64>,
 }
 
-/// Détection automatique des pics de départ (M14 a C).
+/// Automatic detection of the starting peaks (M14 a C).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AutoDetect {
-    /// Proéminence minimale, en fraction de l'étendue de Y (0 à 1).
+    /// Minimum prominence, as a fraction of the Y range (0 to 1).
     pub min_prominence: f64,
     pub max_peaks: usize,
 }
@@ -53,10 +53,10 @@ pub enum Operation {
     Baseline {
         method: BaselineMethod,
         op: BaselineOp,
-        /// Écrire aussi la ligne de base dans une colonne.
+        /// Also write the baseline into a column.
         keep_baseline: bool,
     },
-    /// Référence : colonne annexe.
+    /// Reference: auxiliary column.
     Correct {
         op: CorrectOp,
     },
@@ -68,32 +68,32 @@ pub enum Operation {
         range: Option<(f64, f64)>,
         residuals: bool,
     },
-    /// Sans `seeds` dans `spec`, `auto` détecte les pics sur la courbe.
+    /// Without `seeds` in `spec`, `auto` detects the peaks on the curve.
     Peaks {
         spec: PeaksSpec,
         auto: Option<AutoDetect>,
         range: Option<(f64, f64)>,
         residuals: bool,
     },
-    /// IRF : colonne annexe.
+    /// IRF: auxiliary column.
     Reconvolution {
         spec: ReconvSpec,
         residuals: bool,
     },
-    /// IRF : colonne annexe.
+    /// IRF: auxiliary column.
     DirectDeconvolution {
         method: DirectMethod,
         shift: f64,
     },
-    /// Lissage d'une courbe (#324).
+    /// Smoothing of a curve (#324).
     Smooth {
         spec: SmoothSpec,
     },
 }
 
-/// La famille d'une opération, sans ses réglages : le libellé d'historique, la
-/// clé du glossaire et le réglage « recalcul automatique » par défaut en
-/// dépendent.
+/// The family of an operation, without its settings: the history label, the
+/// glossary key and the default "automatic recalculation" setting
+/// depend on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OperationKind {
     Baseline,
@@ -118,7 +118,7 @@ impl OperationKind {
         OperationKind::Smooth,
     ];
 
-    /// Clé stable (celle de `Tree` et des scripts).
+    /// Stable key (that of `Tree` and of the scripts).
     pub fn key(self) -> &'static str {
         match self {
             OperationKind::Baseline => "baseline",
@@ -137,8 +137,8 @@ impl OperationKind {
     }
 }
 
-/// Au-delà de ce nombre de séries, un lot n'est plus recalculé automatiquement
-/// par défaut (M9 b C).
+/// Beyond this number of series, a batch is no longer recalculated automatically
+/// by default (M9 b C).
 pub const HEAVY_BATCH: usize = 20;
 
 impl Operation {
@@ -155,9 +155,9 @@ impl Operation {
         }
     }
 
-    /// Réglage initial de « recalculer automatiquement » : coché, sauf pour la
-    /// reconvolution, la déconvolution directe et les lots de plus de
-    /// [`HEAVY_BATCH`] séries (M9 b C).
+    /// Initial setting of "recalculate automatically": checked, except for
+    /// reconvolution, direct deconvolution and batches of more than
+    /// [`HEAVY_BATCH`] series (M9 b C).
     pub fn auto_recalc_by_default(&self, series_count: usize) -> bool {
         !matches!(
             self.kind(),
@@ -165,7 +165,7 @@ impl Operation {
         ) && series_count <= HEAVY_BATCH
     }
 
-    /// Cette opération lit une colonne annexe.
+    /// This operation reads an auxiliary column.
     pub fn needs_aux(&self) -> bool {
         matches!(
             self,
@@ -176,25 +176,25 @@ impl Operation {
     }
 }
 
-/// Une colonne calculée, de la longueur de l'entrée.
+/// A computed column, of the length of the input.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutColumn {
-    /// Clé stable : `corrected`, `baseline`, `fit`, `residuals`, `cumulative`,
+    /// Stable key: `corrected`, `baseline`, `fit`, `residuals`, `cumulative`,
     /// `normalized`, `peak` (+ `index`), `peaks_sum`, `background`,
     /// `deconvolved`.
     pub key: &'static str,
-    /// Rang du pic pour `peak` (à partir de 1).
+    /// Rank of the peak for `peak` (from 1).
     pub index: Option<usize>,
     pub data: Vec<f64>,
 }
 
-/// Une valeur calculée, avec son incertitude éventuelle.
+/// A computed value, with its optional uncertainty.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Value {
-    /// Clé stable à points : `param.<nom>`, `stat.<nom>`, `area`, `area.total`,
-    /// `peak.<nom>`, `background.<nom>`, `baseline.<nom>`, `count.<nom>`.
+    /// Stable dotted key: `param.<name>`, `stat.<name>`, `area`, `area.total`,
+    /// `peak.<name>`, `background.<name>`, `baseline.<name>`, `count.<name>`.
     pub key: String,
-    /// Rang (plage, pic), à partir de 1.
+    /// Rank (range, peak), from 1.
     pub index: Option<usize>,
     pub value: f64,
     pub error: Option<f64>,
@@ -202,29 +202,29 @@ pub struct Value {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Warning {
-    /// Pas du signal non constant (> 1 %).
+    /// Step of the non-constant signal (> 1 %).
     SignalStepNotUniform,
-    /// Pas de l'IRF différent de celui du signal (> 1 %).
+    /// IRF step different from that of the signal (> 1 %).
     IrfStepMismatch,
-    /// Points négatifs ramenés à 0 (Richardson-Lucy).
+    /// Negative points brought to 0 (Richardson-Lucy).
     NegativeClipped(usize),
-    /// Paramètres libres que les données ne déterminent pas : leur incertitude
-    /// est omise (#203).
+    /// Free parameters that the data do not determine: their uncertainty
+    /// is omitted (#203).
     Undetermined(usize),
-    /// Le solveur s'est arrêté sur un plateau (#281) ou sans pouvoir accepter
-    /// de pas alors que la pente restait grande (C1, #313), non sur un
-    /// minimum : le résultat est rendu mais n'est pas un ajustement convergé.
+    /// The solver stopped on a plateau (#281) or without being able to accept
+    /// a step while the slope was still large (C1, #313), not on a
+    /// minimum: the result is returned but is not a converged fit.
     NotConverged,
-    /// L'IRF est coupée au-dessus de 1 % de son pic au décalage retenu : la
-    /// queue manquante vaut 0 et le noyau est renormalisé (C2, #313).
+    /// The IRF is cut above 1 % of its peak at the chosen shift: the missing
+    /// tail is 0 and the kernel is renormalized (C2, #313).
     IrfTruncated,
-    /// Points de données interpolés à travers un trou (cellule vide ou non
-    /// finie) de la colonne de référence (C3, #313).
+    /// Data points interpolated across a hole (empty or non-finite
+    /// cell) of the reference column (C3, #313).
     BridgedReferenceGap(usize),
-    /// Divisions par zéro, rendues vides (`NaN`) (C5, #313).
+    /// Divisions by zero, returned empty (`NaN`) (C5, #313).
     DivisionByZero(usize),
-    /// Polynôme contraint ajusté sur un X très décalé de 0, sans centrage : la
-    /// précision peut s'être dégradée (A2, #296).
+    /// Constrained polynomial fitted on an X very far from 0, without centering:
+    /// the precision may have degraded (A2, #296).
     ShiftedX,
 }
 
@@ -232,7 +232,7 @@ pub enum Warning {
 pub struct Outcome {
     pub columns: Vec<OutColumn>,
     pub values: Vec<Value>,
-    /// Lignes écartées : X ou Y non fini.
+    /// Rows dropped: X or Y non-finite.
     pub skipped: usize,
     pub warnings: Vec<Warning>,
 }
@@ -283,15 +283,15 @@ impl Outcome {
     }
 }
 
-/// Une entrée alignée : la série propre et le rang de chaque point dans les
-/// lignes d'origine.
+/// An aligned input: the clean series and the rank of each point in the
+/// original rows.
 struct Aligned {
     series: Series,
     rows: Vec<usize>,
-    /// Nombre de lignes de l'entrée.
+    /// Number of rows of the input.
     len: usize,
     skipped: usize,
-    /// X de chaque ligne (`NaN` si absent), pour évaluer une courbe en tout X.
+    /// X of each row (`NaN` if absent), to evaluate a curve at any X.
     x_all: Vec<f64>,
     sigma: Option<Vec<f64>>,
 }
@@ -304,8 +304,8 @@ fn align(input: &SeriesInput) -> Aligned {
     let mut skipped = 0;
     for i in 0..len {
         let s = input.sigma.as_ref().and_then(|s| s.get(i).copied());
-        // Une ligne pondérée dont σ est vide, nul ou négatif est écartée et
-        // comptée, comme une ligne dont X ou Y manque (#205).
+        // A weighted row whose σ is empty, zero or negative is dropped and
+        // counted, like a row whose X or Y is missing (#205).
         let sigma_ok = input.sigma.is_none() || s.is_some_and(|v| v.is_finite() && v > 0.0);
         let ok = x_all[i].is_finite() && input.y[i].is_finite() && sigma_ok;
         if ok {
@@ -329,7 +329,7 @@ fn align(input: &SeriesInput) -> Aligned {
 }
 
 impl Aligned {
-    /// Étale une valeur par point propre sur toutes les lignes.
+    /// Spreads a value per clean point over all the rows.
     fn expand(&self, per_point: &[f64]) -> Vec<f64> {
         let mut out = vec![f64::NAN; self.len];
         for (k, &row) in self.rows.iter().enumerate() {
@@ -338,7 +338,7 @@ impl Aligned {
         out
     }
 
-    /// Évalue `f` sur chaque ligne dont X est fini.
+    /// Evaluates `f` on each row whose X is finite.
     fn eval_all(&self, f: impl Fn(f64) -> f64) -> Vec<f64> {
         self.x_all
             .iter()
@@ -346,7 +346,7 @@ impl Aligned {
             .collect()
     }
 
-    /// Évalue `f` sur chaque ligne dont X est fini et dans `range`.
+    /// Evaluates `f` on each row whose X is finite and within `range`.
     fn eval_in(&self, range: Option<(f64, f64)>, f: impl Fn(f64) -> f64) -> Vec<f64> {
         let (lo, hi) = range.map_or((f64::NEG_INFINITY, f64::INFINITY), |(a, b)| {
             (a.min(b), a.max(b))
@@ -363,7 +363,7 @@ impl Aligned {
             .collect()
     }
 
-    /// Les `y` des lignes (valeur d'origine ou `NaN`).
+    /// The `y` of the rows (original value or `NaN`).
     fn y_rows(&self, input: &SeriesInput) -> Vec<f64> {
         (0..self.len)
             .map(|i| {
@@ -386,8 +386,8 @@ fn aux_series(aux: Option<&AuxInput>) -> Result<Series, AnalysisError> {
     Ok(c.series)
 }
 
-/// X des lignes de la référence dont Y n'est pas fini alors que X l'est : les
-/// trous que `correct` peut enjamber. Une ligne sans X n'a pas de position.
+/// X of the reference rows whose Y is not finite while X is: the
+/// holes that `correct` can bridge. A row without X has no position.
 fn aux_holes(aux: Option<&AuxInput>) -> Vec<f64> {
     aux.map_or_else(Vec::new, |a| {
         a.x.iter()
@@ -429,47 +429,47 @@ fn restrict(series: &Series, range: Option<(f64, f64)>) -> Result<Series, Analys
     }
 }
 
-/// Plafonds des réglages, communs à l'interface (la table des grandeurs de
-/// `stokesforge-app` les lit), à `pyst` et au fichier : un degré de 10⁹
-/// créerait un milliard de paramètres, des itérations sans borne bloqueraient
-/// l'acteur de session au recalcul. `Model::compile` applique aussi
-/// [`MAX_DEGREE`] : un degré lu tel quel d'un fichier ne doit rien allouer
-/// avant d'être refusé.
+/// Caps on the settings, shared by the interface (the quantities table of
+/// `stokesforge-app` reads them), by `pyst` and by the file: a degree of 10⁹
+/// would create a billion parameters, unbounded iterations would block
+/// the session actor on recalculation. `Model::compile` also applies
+/// [`MAX_DEGREE`]: a degree read as is from a file must not allocate anything
+/// before being refused.
 pub const MAX_DEGREE: u32 = 9;
 pub const MAX_ITERATIONS: usize = 5000;
-/// Nombre maximal de pics cherchés par la détection automatique.
+/// Maximum number of peaks sought by automatic detection.
 pub const MAX_PEAKS: usize = 100;
-/// Nombre maximal de composantes d'une reconvolution (le minimum est 1).
+/// Maximum number of components of a reconvolution (the minimum is 1).
 pub const MAX_COMPONENTS: usize = 4;
 
-/// Ce qui manque à une opération pour être lancée, **sans consulter les
-/// données** : une donnée, jamais une phrase (l'interface la met en phrase par
-/// un `match` exhaustif). Ce que seule la lecture du projet révèle — pas de
-/// série, colonne de référence absente, colonne disparue — n'est pas ici.
+/// What an operation lacks to be launched, **without consulting the
+/// data**: a piece of data, never a sentence (the interface turns it into a sentence
+/// by an exhaustive `match`). What only reading the project reveals — no
+/// series, reference column missing, column gone — is not here.
 ///
-/// Un point ou une zone « pas encore posé » se dit par un `NaN` dans
-/// l'opération, comme partout dans le crate (`NaN` : vide) : le brouillon d'un
-/// formulaire se décrit alors en [`Operation`] même incomplet.
+/// A point or a zone "not yet placed" is expressed by a `NaN` in the
+/// operation, as everywhere in the crate (`NaN`: empty): the draft of a
+/// form is then described as an [`Operation`] even if incomplete.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Readiness {
-    /// Rien ne manque.
+    /// Nothing is missing.
     Ready,
-    /// Pas assez de points posés pour la ligne de base.
+    /// Not enough points placed for the baseline.
     NeedsPoints { needed: usize, have: usize },
-    /// Une zone de fond au moins.
+    /// At least one background zone.
     NeedsZone,
-    /// L'expression du modèle libre est illisible.
+    /// The free model expression is unreadable.
     BadExpression(ExprError),
-    /// Le modèle n'a aucun paramètre.
+    /// The model has no parameter.
     NoParameter,
-    /// Un réglage est refusé par le calcul (par exemple un degré hors plafond).
+    /// A setting is refused by the calculation (for example a degree above the cap).
     Invalid(AnalysisError),
 }
 
 impl Operation {
-    /// Ce qui empêche de lancer l'opération, sans lire de donnée (voir
-    /// [`Readiness`]). Ne refait pas [`Operation::validate`] : celui-ci juge les
-    /// plafonds, celui-là ce qui reste à poser.
+    /// What prevents launching the operation, without reading any data (see
+    /// [`Readiness`]). Does not redo [`Operation::validate`]: that one judges the
+    /// caps, this one what remains to be placed.
     pub fn readiness(&self) -> Readiness {
         match self {
             Operation::Baseline { method, .. } => match method {
@@ -491,7 +491,7 @@ impl Operation {
                     Readiness::NeedsZone
                 }
                 BaselineMethod::Anchors { points, .. } => {
-                    // Une ancre non posée (non finie) ne compte pas.
+                    // An unplaced (non-finite) anchor does not count.
                     let have = points.iter().filter(|p| is_posed(**p)).count();
                     if have < 2 {
                         Readiness::NeedsPoints { needed: 2, have }
@@ -507,8 +507,8 @@ impl Operation {
                 Ok(compiled) if compiled.param_count() == 0 => Readiness::NoParameter,
                 Ok(_) => Readiness::Ready,
             },
-            // Une plage non posée (NaN) n'est pas « toute la courbe » : `run`
-            // la refuse (#276), elle reste donc à poser.
+            // An unplaced range (NaN) is not "the whole curve": `run`
+            // refuses it (#276), so it remains to be placed.
             Operation::Integrate { spec } if !spec.ranges.iter().all(|r| is_posed(*r)) => {
                 Readiness::NeedsZone
             }
@@ -521,13 +521,13 @@ impl Operation {
         }
     }
 
-    /// Retire de l'opération tout ce qui désigne des **données** : plages
-    /// d'intégration, d'ajustement et de pics, positions de départ des pics,
-    /// réglages par paramètre d'un ajustement ou d'une reconvolution (valeurs
-    /// initiales, bornes, paramètres fixés **et partagés**), fenêtre d'une
-    /// reconvolution. Il reste la méthode et ses réglages (modèle, degré,
-    /// fenêtre de recentrage des pics, cases de sortie) et la définition d'une
-    /// ligne de base. La longueur de `params` est gardée.
+    /// Removes from the operation everything that designates **data**: ranges
+    /// of integration, fit and peaks, starting positions of the peaks,
+    /// per-parameter settings of a fit or reconvolution (initial
+    /// values, bounds, fixed **and shared** parameters), window of a
+    /// reconvolution. What remains is the method and its settings (model, degree,
+    /// peak recentering window, output checkboxes) and the definition of a
+    /// baseline. The length of `params` is kept.
     pub fn forget_positions(&mut self) {
         match self {
             Operation::Integrate { spec } => spec.ranges.clear(),
@@ -550,7 +550,7 @@ impl Operation {
         }
     }
 
-    /// Refuse les réglages hors plafond avant tout calcul.
+    /// Refuses settings above the cap before any calculation.
     pub fn validate(&self) -> Result<(), AnalysisError> {
         let bad = |name: &str| {
             Err(AnalysisError::InvalidParameter {
@@ -587,10 +587,10 @@ impl Operation {
             {
                 bad("min_prominence")
             }
-            // Une graine posée n'a que des valeurs finies (centre toujours ;
-            // hauteur et largeur quand elles sont données). La largeur
-            // imposée est de plus strictement positive (#285) ; la hauteur,
-            // de signe libre, est jugée par l'ajustement.
+            // A placed seed has only finite values (center always;
+            // height and width when given). The imposed width
+            // is moreover strictly positive (#285); the height,
+            // of free sign, is judged by the fit.
             Operation::Peaks { spec, .. }
                 if !spec.seeds.iter().all(|s| {
                     s.center.is_finite()
@@ -630,23 +630,23 @@ impl Operation {
     }
 }
 
-/// Le modèle n'a aucun paramètre libre : aucun, ou tous fixés (le solveur
-/// refuse de toute façon avec la même erreur). Un modèle qui ne se compile pas
-/// n'est pas jugé ici : sa propre erreur sort à l'ajustement.
+/// The model has no free parameter: none, or all fixed (the solver
+/// refuses anyway with the same error). A model that does not compile
+/// is not judged here: its own error comes out at the fit.
 fn no_free_parameter(spec: &FitSpec) -> bool {
     spec.model.compile().is_ok_and(|compiled| {
         (0..compiled.param_count()).all(|j| spec.params.get(j).is_some_and(|p| p.fixed))
     })
 }
 
-/// Un point ou une zone posé n'a que des coordonnées finies.
+/// A placed point or zone has only finite coordinates.
 fn is_posed(pair: (f64, f64)) -> bool {
     pair.0.is_finite() && pair.1.is_finite()
 }
 
-/// Exécute `op` sur chaque entrée. Une erreur sur une entrée annule le lot
-/// (l'appelant décide de relancer les autres). Un ajustement global traite
-/// toutes les entrées ensemble.
+/// Runs `op` on each input. An error on one input cancels the batch
+/// (the caller decides whether to rerun the others). A global fit processes
+/// all the inputs together.
 pub fn run(
     op: &Operation,
     inputs: &[SeriesInput],
@@ -713,7 +713,7 @@ pub fn run(
                     o.column("normalized", None, a.expand(n));
                 }
             }
-            Operation::Fit { .. } => unreachable!("traité plus haut"),
+            Operation::Fit { .. } => unreachable!("handled above"),
             Operation::Peaks {
                 spec,
                 auto,
@@ -731,9 +731,9 @@ pub fn run(
                 o.stats(r.points, r.r_squared, r.reduced_chi2, r.dof);
                 o.warn_undetermined(r.undetermined);
                 o.warn_plateau(r.plateau);
-                // `fitted` est aligné sur le signal trié : on le relit à chaque X de
-                // l'entrée (interpolation linéaire, exacte aux nœuds), y compris
-                // aux lignes dont Y est vide.
+                // `fitted` is aligned on the sorted signal: it is read again at each X of
+                // the input (linear interpolation, exact at the nodes), including
+                // at the rows whose Y is empty.
                 let by_x = |x: f64| interpolate(&r.x, &r.fitted, x).unwrap_or(f64::NAN);
                 let fitted = a.eval_all(by_x);
                 if *residuals {
@@ -745,8 +745,8 @@ pub fn run(
                     );
                 }
                 o.column("fit", None, fitted);
-                // Étendre, pas écraser : `Undetermined` et `NotConverged` sont déjà posés
-                // plus haut ; `deconv_warnings` ne produit que les trois autres (#292).
+                // Extend, do not overwrite: `Undetermined` and `NotConverged` are already set
+                // above; `deconv_warnings` only produces the other three (#292).
                 o.warnings.extend(deconv_warnings(r.warnings));
             }
             Operation::Smooth { spec } => {
@@ -787,7 +787,7 @@ fn run_baseline(
     let corrected: Vec<f64> = (0..a.len)
         .map(|i| baseline::apply(op, input.y[i], base[i]))
         .collect();
-    // Division par une ligne de base exactement nulle : comptée (C5, #313).
+    // Division by an exactly zero baseline: counted (C5, #313).
     let by_zero = if op == BaselineOp::Divide {
         (0..a.len)
             .filter(|&i| input.y[i].is_finite() && base[i] == 0.0)
@@ -821,7 +821,7 @@ fn run_fit(
     let mut fit_inputs = Vec::new();
     for a in aligned {
         let s = restrict(&a.series, range)?;
-        // σ aligné sur les points retenus par la plage.
+        // σ aligned on the points kept by the range.
         let sigma = a.sigma.as_ref().map(|all| {
             let (lo, hi) = range.map_or((f64::NEG_INFINITY, f64::INFINITY), |(p, q)| {
                 (p.min(q), p.max(q))
@@ -937,7 +937,7 @@ fn run_peaks(
     Ok(())
 }
 
-/// `y − modèle` sur les lignes propres où le modèle est défini.
+/// `y − model` on the clean rows where the model is defined.
 fn fill_residuals(a: &Aligned, total: &[f64]) -> Vec<f64> {
     let mut out = vec![f64::NAN; a.len];
     for (k, &row) in a.rows.iter().enumerate() {

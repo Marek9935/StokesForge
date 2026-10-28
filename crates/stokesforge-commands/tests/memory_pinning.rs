@@ -1,78 +1,78 @@
-//! Mesure : combien de versions d'un buffer de colonne l'historique
-//! d'annulation hybride garde-t-il vivantes, et combien de mémoire ça pèse ?
+//! Measurement: how many versions of a column buffer does the hybrid undo
+//! history keep alive, and how much memory does that weigh?
 //!
-//! # Le doute à trancher
+//! # The doubt to settle
 //!
-//! `History` (`src/history.rs`) retient une modification de **structure**
-//! (renommer, déplacer, ajouter, supprimer un nœud) comme un couple
-//! d'instantanés `Arc<Tree>` — cloner l'arbre est bon marché (une table de
-//! paires `(NodeId, Arc<Node>)`, pas les nœuds). Une modification de
-//! **données** (cellules d'une colonne) est retenue comme un delta : les
-//! seules valeurs écrites, minuscules. La documentation du crate affirme que
-//! les charges utiles retenues sont « à l'identique » dans les deux schémas.
+//! `History` (`src/history.rs`) keeps a **structure** change
+//! (rename, move, add, delete a node) as a pair of
+//! `Arc<Tree>` snapshots — cloning the tree is cheap (a table of
+//! `(NodeId, Arc<Node>)` pairs, not the nodes). A **data** change
+//! (cells of a column) is kept as a delta: only the values written, tiny.
+//! The documentation of the crate claims that the retained payloads are
+//! "identical" in the two schemes.
 //!
-//! C'est vrai d'une colonne **supprimée** : les deux schémas la retiennent
-//! (scénario 6). Ce n'est peut-être **pas** vrai d'une colonne **modifiée**
-//! après coup : un `Arc<Tree>` capturé par une entrée structurelle retient
-//! tous ses `Arc<Node>`, donc toutes les colonnes, donc leurs buffers
-//! `Arc<Vec<f64>>`. Si cette colonne est ensuite écrite, la copie-à-l'écriture
-//! (`Arc::make_mut`, dans `Column::set_values`) alloue un nouveau buffer — et
-//! l'ancien reste vivant tant que l'entrée structurelle est sur la pile,
-//! *même si personne ne le lit plus jamais*. En alternant structure et
-//! écritures dans une grosse colonne, chaque entrée structurelle risque
-//! d'épingler une version complète du buffer.
+//! That is true of a **deleted** column: both schemes keep it
+//! (scenario 6). It may **not** be true of a column **modified**
+//! afterwards: an `Arc<Tree>` captured by a structural entry keeps
+//! all its `Arc<Node>`, so all the columns, so their
+//! `Arc<Vec<f64>>` buffers. If this column is then written, copy-on-write
+//! (`Arc::make_mut`, in `Column::set_values`) allocates a new buffer — and
+//! the old one stays alive as long as the structural entry is on the stack,
+//! *even if nobody ever reads it again*. By alternating structure and
+//! writes in a big column, each structural entry risks
+//! pinning a full version of the buffer.
 //!
-//! **Un chiffre élevé** (des dizaines de méga-octets de buffers épinglés pour
-//! quelques dizaines d'opérations) confirmerait que le choix hybride a un
-//! coût mémoire réel et grandissant avec l'usage — un argument pour revoir la
-//! limite d'historique, ou pour que les entrées structurelles ne capturent
-//! pas les colonnes elles-mêmes. **Un chiffre proche de zéro** (des versions
-//! qui ne dépassent jamais le nombre de colonnes vivantes) infirmerait
-//! l'hypothèse et confirmerait la documentation actuelle.
+//! **A high figure** (tens of megabytes of pinned buffers for
+//! a few dozen operations) would confirm that the hybrid choice has a
+//! real memory cost that grows with use — an argument to revisit the
+//! history limit, or for structural entries not to capture
+//! the columns themselves. **A figure close to zero** (versions
+//! that never exceed the number of live columns) would refute
+//! the hypothesis and confirm the current documentation.
 //!
-//! # Méthode : compter les buffers vivants, pas les octets alloués
+//! # Method: count live buffers, not allocated bytes
 //!
-//! La mémoire du processus (RSS) est illisible ici : bruit de l'allocateur,
-//! pages non rendues au système. On mesure à la place *exactement ce qui est
-//! en jeu*, de deux façons indépendantes :
+//! The memory of the process (RSS) is unreadable here: allocator noise,
+//! pages not returned to the system. We measure instead *exactly what is
+//! at stake*, in two independent ways:
 //!
-//! - **Mesure 1** — avant chaque écriture, on relève l'adresse du buffer
-//!   (`Arc::as_ptr`) et un `std::sync::Weak` obtenu par `Arc::downgrade`. À la
-//!   fin d'un scénario, on compte combien de ces `Weak` sont encore
-//!   promouvables (`upgrade().is_some()`) : c'est le nombre de versions
-//!   *encore retenues*. Un `Weak` ne retient rien — c'est le point capital de
-//!   la méthode : l'observation ne fausse jamais la mesure qu'elle sert à
-//!   faire.
-//! - **Mesure 2** — un `#[global_allocator]` de test enveloppe
-//!   `std::alloc::System` et compte les octets actuellement vivants
-//!   (incrémentés à `alloc`, décrémentés à `dealloc`, ajustés à `realloc`).
-//!   Relevé avant et après chaque scénario, c'est une seconde vue,
-//!   indépendante de la première ; si les deux concordent, le chiffre est
-//!   solide.
+//! - **Measure 1** — before each write, we record the address of the buffer
+//!   (`Arc::as_ptr`) and a `std::sync::Weak` obtained by `Arc::downgrade`. At the
+//!   end of a scenario, we count how many of these `Weak` can still be
+//!   upgraded (`upgrade().is_some()`): this is the number of versions
+//!   *still retained*. A `Weak` keeps nothing alive — this is the key point of
+//!   the method: the observation never distorts the measure it serves to
+//!   make.
+//! - **Measure 2** — a test `#[global_allocator]` wraps
+//!   `std::alloc::System` and counts the bytes currently alive
+//!   (incremented at `alloc`, decremented at `dealloc`, adjusted at `realloc`).
+//!   Read before and after each scenario, it is a second view,
+//!   independent of the first; if the two agree, the figure is
+//!   solid.
 //!
-//! # Ce que les scénarios n'affirment pas
+//! # What the scenarios do not assert
 //!
-//! Sauf au scénario 6 (où la survie du buffer d'une colonne supprimée tant
-//! que son entrée est sur la pile est structurellement garantie par le code
-//! — sans ça, pas d'annulation possible — et où sa libération après éviction
-//! l'est tout autant), ces tests **affichent** des chiffres sans imposer de
-//! seuil. La mesure sert à décider une architecture, pas à devenir un test
-//! fragile qui casse au premier réglage de constante.
+//! Except for scenario 6 (where the survival of the buffer of a deleted column as
+//! long as its entry is on the stack is structurally guaranteed by the code
+//! — without that, no undo is possible — and where its release after eviction
+//! is just as guaranteed), these tests **print** figures without imposing a
+//! threshold. The measurement serves to decide an architecture, not to become a
+//! fragile test that breaks at the first constant tuning.
 //!
-//! # Organisation
+//! # Organization
 //!
-//! Chaque scénario est une fonction ordinaire qui construit son état, mesure,
-//! imprime un compte rendu lisible, et rend une [`Row`]. Un `#[test]` dédié
-//! par scénario permet de le rejouer isolément ; [`summary_table_all_scenarios`]
-//! les rejoue tous dans l'ordre et imprime le tableau récapitulatif final —
-//! c'est lui la source de vérité pour le tableau de chiffres. Un
-//! `static MEASURE_LOCK` sérialise tous les tests de ce fichier : la mesure 2
-//! est un compteur **par processus**, donc par binaire de test ; sans
-//! sérialisation, deux scénarios `--ignored` tournant en parallèle sur les
-//! threads par défaut du harnais fausseraient l'un l'autre.
+//! Each scenario is an ordinary function that builds its state, measures,
+//! prints a readable report, and returns a [`Row`]. A dedicated `#[test]`
+//! per scenario allows replaying it in isolation; [`summary_table_all_scenarios`]
+//! replays them all in order and prints the final summary table —
+//! it is the source of truth for the table of figures. A
+//! `static MEASURE_LOCK` serializes all the tests of this file: measure 2
+//! is a **per-process** counter, so per test binary; without
+//! serialization, two `--ignored` scenarios running in parallel on the
+//! default threads of the harness would distort each other.
 //!
-//! Ignorés (`#[ignore]`) : ces tests allouent des centaines de méga-octets et
-//! ne doivent pas alourdir `cargo test`. Lancement explicite :
+//! Ignored (`#[ignore]`): these tests allocate hundreds of megabytes and
+//! must not weigh down `cargo test`. Explicit launch:
 //! `cargo test -p stokesforge-commands --release --test memory_pinning -- --ignored --nocapture`.
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -84,26 +84,26 @@ use stokesforge_commands::{Command, History};
 use stokesforge_core::{Column, MixedCell, Node, NodeId, Project, ValueBlock};
 
 // ===========================================================================
-// Allocateur compteur — mesure 2
+// Counting allocator — measure 2
 // ===========================================================================
 
-/// Octets actuellement vivants (incrémenté à `alloc`/`alloc_zeroed`,
-/// décrémenté à `dealloc`, ajusté à `realloc`).
+/// Bytes currently alive (incremented at `alloc`/`alloc_zeroed`,
+/// decremented at `dealloc`, adjusted at `realloc`).
 static LIVE_BYTES: AtomicUsize = AtomicUsize::new(0);
 
-/// Octets alloués depuis le départ du processus, jamais décrémenté : sert à
-/// distinguer un pic transitoire (alloué puis libéré aussitôt) d'un chiffre
-/// réellement épinglé — voir le commentaire du scénario 1.
+/// Bytes allocated since the start of the process, never decremented: serves
+/// to tell a transient peak (allocated then freed at once) from a figure
+/// really pinned — see the comment of scenario 1.
 static TOTAL_ALLOCATED: AtomicUsize = AtomicUsize::new(0);
 
-/// Enveloppe `System` : ne change aucun comportement d'allocation, ne fait
-/// qu'observer les tailles qui transitent.
+/// Wraps `System`: changes no allocation behavior, only
+/// observes the sizes passing through.
 struct CountingAllocator;
 
-// Sûr : chaque méthode ne fait que déléguer à `System` (dont les garanties de
-// sécurité sont celles du système standard) et incrémenter/décrémenter des
-// compteurs atomiques à partir des tailles réellement passées/rendues — aucun
-// pointeur n'est déréférencé ni construit ici.
+// SAFETY: each method only delegates to `System` (whose safety guarantees
+// are those of the standard system) and increments/decrements atomic
+// counters from the sizes actually passed/returned — no
+// pointer is dereferenced or built here.
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = unsafe { System.alloc(layout) };
@@ -155,11 +155,11 @@ fn total_allocated() -> usize {
     TOTAL_ALLOCATED.load(Ordering::SeqCst)
 }
 
-/// Sérialise tous les tests de ce fichier : la mesure 2 (compteurs
-/// atomiques du processus) n'a de sens que si un seul scénario s'exécute à
-/// la fois. Le poison est récupéré plutôt que propagé : un scénario qui
-/// paniquerait (assertion du scénario 6, par exemple) ne doit pas faire
-/// échouer en cascade tous les autres.
+/// Serializes all the tests of this file: measure 2 (process atomic
+/// counters) makes sense only if a single scenario runs at a
+/// time. Poison is recovered rather than propagated: a scenario that
+/// panicked (assertion of scenario 6, for example) must not cause all the
+/// others to fail in cascade.
 static MEASURE_LOCK: Mutex<()> = Mutex::new(());
 
 fn measure_lock() -> std::sync::MutexGuard<'static, ()> {
@@ -169,21 +169,21 @@ fn measure_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 // ===========================================================================
-// Empreinte d'une version de buffer — mesure 1
+// Footprint of a buffer version — measure 1
 // ===========================================================================
 
-/// Empreinte du buffer `f64` d'une colonne à un instant donné : son adresse
-/// (pour regrouper les empreintes qui désignent la même version) et un
-/// `Weak` qui dira, plus tard, si CETTE version précise est encore vivante.
-/// Un `Weak` ne retient rien : l'observer ne fausse jamais la mesure qu'il
-/// sert à faire.
+/// Footprint of the `f64` buffer of a column at a given instant: its address
+/// (to group the footprints that designate the same version) and a
+/// `Weak` that will tell, later, whether THIS precise version is still alive.
+/// A `Weak` keeps nothing: observing it never distorts the measure it
+/// serves to make.
 struct BufferFingerprint {
     ptr: usize,
     weak: Weak<Vec<f64>>,
     len: usize,
 }
 
-/// Empreinte du buffer de `column` dans l'état courant de `project`.
+/// Footprint of the buffer of `column` in the current state of `project`.
 fn fingerprint(project: &Project, column: NodeId) -> BufferFingerprint {
     let arc = project
         .tree()
@@ -191,7 +191,7 @@ fn fingerprint(project: &Project, column: NodeId) -> BufferFingerprint {
         .and_then(Node::as_column)
         .and_then(Column::float_values)
         .cloned()
-        .expect("colonne numérique existante");
+        .expect("existing numeric column");
     BufferFingerprint {
         ptr: Arc::as_ptr(&arc) as usize,
         weak: Arc::downgrade(&arc),
@@ -199,17 +199,17 @@ fn fingerprint(project: &Project, column: NodeId) -> BufferFingerprint {
     }
 }
 
-/// Parmi des empreintes prises à des instants divers (la même version peut
-/// avoir été observée plusieurs fois), combien de versions **distinctes**
-/// sont encore vivantes à l'instant de l'appel, et combien d'octets ça
-/// représente.
+/// Among footprints taken at various instants (the same version may
+/// have been observed several times), how many **distinct** versions
+/// are still alive at the moment of the call, and how many bytes that
+/// represents.
 fn live_versions(fingerprints: &[BufferFingerprint]) -> (usize, usize) {
     let mut seen = HashSet::new();
     let mut versions = 0usize;
     let mut bytes = 0usize;
     for fp in fingerprints {
         if !seen.insert(fp.ptr) {
-            continue; // même version déjà comptée
+            continue; // same version already counted
         }
         if fp.weak.upgrade().is_some() {
             versions += 1;
@@ -219,8 +219,8 @@ fn live_versions(fingerprints: &[BufferFingerprint]) -> (usize, usize) {
     (versions, bytes)
 }
 
-/// Somme de [`live_versions`] sur la colonne cible et sur les colonnes
-/// témoins.
+/// Sum of [`live_versions`] over the target column and over the
+/// witness columns.
 fn total_live(target: &[BufferFingerprint], others: &[Vec<BufferFingerprint>]) -> (usize, usize) {
     let (mut versions, mut bytes) = live_versions(target);
     for fingerprints in others {
@@ -231,24 +231,24 @@ fn total_live(target: &[BufferFingerprint], others: &[Vec<BufferFingerprint>]) -
     (versions, bytes)
 }
 
-/// Comme [`live_versions`], mais **exclut** la version dont l'adresse est
-/// `current_ptr` : c'est le pendant, mesuré indépendamment (par des `Weak`
-/// promouvables, jamais en interrogeant `History`), de ce que
-/// `History::retained_bytes` calcule par soustraction du footprint de
-/// l'arbre courant — un buffer que l'arbre courant utilise encore n'est pas
-/// un coût de l'historique, il serait là de toute façon. Sert au scénario 7
-/// à comparer les deux mesures sur la même base (« combien de versions
-/// *en trop* », pas « combien de versions en tout »).
+/// Like [`live_versions`], but **excludes** the version whose address is
+/// `current_ptr`: it is the counterpart, measured independently (through
+/// upgradable `Weak`s, never by querying `History`), of what
+/// `History::retained_bytes` computes by subtracting the footprint of the
+/// current tree — a buffer that the current tree still uses is not
+/// a cost of the history, it would be there anyway. Serves scenario 7
+/// to compare the two measures on the same basis ("how many *extra*
+/// versions", not "how many versions in all").
 fn historical_only_live(fingerprints: &[BufferFingerprint], current_ptr: usize) -> (usize, usize) {
     let mut seen = HashSet::new();
     let mut versions = 0usize;
     let mut bytes = 0usize;
     for fp in fingerprints {
         if fp.ptr == current_ptr {
-            continue; // la version courante n'est pas un coût de l'historique
+            continue; // the current version is not a cost of the history
         }
         if !seen.insert(fp.ptr) {
-            continue; // même version déjà comptée
+            continue; // same version already counted
         }
         if fp.weak.upgrade().is_some() {
             versions += 1;
@@ -258,9 +258,9 @@ fn historical_only_live(fingerprints: &[BufferFingerprint], current_ptr: usize) 
     (versions, bytes)
 }
 
-/// Octets « historique seul » (voir [`historical_only_live`]) pour la cible
-/// et l'ensemble des témoins d'un [`AlternatingRun`] — la mesure
-/// indépendante à comparer à `run.history.retained_bytes()`.
+/// "History only" bytes (see [`historical_only_live`]) for the target
+/// and the set of witnesses of an [`AlternatingRun`] — the independent
+/// measure to compare with `run.history.retained_bytes()`.
 fn independent_historical_bytes(run: &AlternatingRun) -> usize {
     let current_target = fingerprint(&run.project, run.target).ptr;
     let (_, mut bytes) = historical_only_live(&run.target_fingerprints, current_target);
@@ -273,33 +273,33 @@ fn independent_historical_bytes(run: &AlternatingRun) -> usize {
 }
 
 // ===========================================================================
-// Fixture : une feuille de 5 colonnes de 1 000 000 f64
+// Fixture: a sheet of 5 columns of 1,000,000 f64
 // ===========================================================================
 
-/// Colonne de référence : 1 000 000 `f64`, ~7,6 Mio (8 000 000 octets).
+/// Reference column: 1,000,000 `f64`, ~7.6 MiB (8,000,000 bytes).
 const ROWS: usize = 1_000_000;
 
-/// Nombre de couples [renommer, écrire] joués dans le scénario alterné.
+/// Number of [rename, write] pairs played in the alternating scenario.
 const WRITE_ITERATIONS: usize = 20;
 
-/// Limite d'historique du scénario 3 : assez petite pour voir si elle borne
-/// vraiment le nombre de versions vivantes.
+/// History limit of scenario 3: small enough to see whether it really
+/// bounds the number of live versions.
 const BOUNDED_HISTORY_LIMIT: usize = 5;
 
-/// Limite en octets du scénario 7 : 64 Mio, assez petite pour observer si
-/// `History::with_limits` borne réellement le total retenu à cette hauteur —
-/// et à quel ordre de grandeur (environ 8 versions de la colonne de
-/// référence, 64 / 7,6 ≈ 8,4, contre 21 sans elle au scénario 2).
+/// Byte limit of scenario 7: 64 MiB, small enough to observe whether
+/// `History::with_limits` really bounds the retained total at this height —
+/// and at what order of magnitude (about 8 versions of the reference
+/// column, 64 / 7.6 ≈ 8.4, against 21 without it in scenario 2).
 const BYTE_BOUNDED_LIMIT: usize = 64 * 1024 * 1024;
 
-/// Taille en octets d'une colonne de référence (`ROWS` flottants).
+/// Size in bytes of a reference column (`ROWS` floats).
 fn column_bytes() -> usize {
     ROWS * std::mem::size_of::<f64>()
 }
 
-/// `Book1/Sheet1` avec 5 colonnes de `ROWS` flottants : `target`, celle qu'on
-/// va renommer et écrire, et 4 colonnes témoins jamais touchées — pour voir
-/// si elles sont épinglées elles aussi, ou seulement celle qu'on écrit.
+/// `Book1/Sheet1` with 5 columns of `ROWS` floats: `target`, the one we
+/// will rename and write, and 4 witness columns never touched — to see
+/// whether they are pinned too, or only the one we write.
 struct Fixture {
     project: Project,
     sheet: NodeId,
@@ -308,25 +308,23 @@ struct Fixture {
 }
 
 fn build_fixture() -> Fixture {
-    let mut project = Project::new("MesureMemoire").expect("projet de mesure");
+    let mut project = Project::new("MemoryMeasure").expect("measurement project");
     let root = project.root();
     project
         .add_workbook(root, Some("Book1"))
-        .expect("classeur Book1");
-    let sheet = project
-        .resolve_path("[Book1]Sheet1")
-        .expect("feuille Sheet1");
+        .expect("workbook Book1");
+    let sheet = project.resolve_path("[Book1]Sheet1").expect("sheet Sheet1");
 
     let values: Vec<f64> = (0..ROWS).map(|row| row as f64).collect();
     let target = project
         .add_column(sheet, None, Some("Target"), Column::from_f64(&values))
-        .expect("colonne cible (1 000 000 f64)");
+        .expect("target column (1,000,000 f64)");
     let others: Vec<NodeId> = ["Witness1", "Witness2", "Witness3", "Witness4"]
         .into_iter()
         .map(|name| {
             project
                 .add_column(sheet, None, Some(name), Column::from_f64(&values))
-                .expect("colonne témoin")
+                .expect("witness column")
         })
         .collect();
 
@@ -339,15 +337,15 @@ fn build_fixture() -> Fixture {
 }
 
 // ===========================================================================
-// Pilote partagé : structure et écritures alternées sous `History`
+// Shared driver: structure and writes alternating under `History`
 // ===========================================================================
 
-/// État d'une exécution du scénario alterné : le projet et l'historique
-/// (pour que l'appelant puisse continuer à s'en servir — le scénario 4
-/// annule après coup), les empreintes collectées en cours de route, et les
-/// identifiants des colonnes cible/témoins (pour retrouver, après coup, la
-/// version *courante* de chacune — nécessaire à la mesure indépendante « à
-/// combien concorde `History::retained_bytes` » du scénario 7).
+/// State of an execution of the alternating scenario: the project and the history
+/// (so that the caller can keep using them — scenario 4
+/// undoes afterwards), the footprints collected along the way, and the
+/// identifiers of the target/witness columns (to find, afterwards, the
+/// *current* version of each — needed for the independent measure "to how
+/// much does `History::retained_bytes` agree" of scenario 7).
 struct AlternatingRun {
     project: Project,
     history: History,
@@ -357,27 +355,27 @@ struct AlternatingRun {
     other_fingerprints: Vec<Vec<BufferFingerprint>>,
 }
 
-/// `WRITE_ITERATIONS` fois [renommer la colonne cible, écrire une cellule
-/// dans la cible], sous `History` limité à `limit` entrées (`0` =
-/// illimité), à la limite en octets par défaut de `History` (512 Mio — sans
-/// effet à cette échelle, voir le scénario 7 pour une limite en octets
-/// serrée). Empreinte le buffer cible juste **avant** chaque écriture —
-/// c'est cette version-là qu'un renommage ultérieur risque d'épingler dans
-/// son instantané `before` — et les colonnes témoins à chaque itération,
-/// pour vérifier qu'elles ne gagnent jamais de version supplémentaire.
+/// `WRITE_ITERATIONS` times [rename the target column, write a cell
+/// into the target], under a `History` limited to `limit` entries (`0` =
+/// unlimited), at the default byte limit of `History` (512 MiB — with no
+/// effect at this scale, see scenario 7 for a tight byte
+/// limit). Footprints the target buffer just **before** each write —
+/// it is that version that a later rename risks pinning in
+/// its `before` snapshot — and the witness columns at each iteration,
+/// to check that they never gain an extra version.
 fn run_alternating(limit: usize) -> AlternatingRun {
     run_alternating_history(History::with_limit(limit))
 }
 
-/// Comme [`run_alternating`], mais avec les deux limites de `History`
-/// explicites — c'est ce que le scénario 7 utilise pour observer si la
-/// limite en octets borne réellement le total retenu.
+/// Like [`run_alternating`], but with both limits of `History`
+/// explicit — this is what scenario 7 uses to observe whether the
+/// byte limit really bounds the retained total.
 fn run_alternating_with_limits(limit: usize, byte_limit: usize) -> AlternatingRun {
     run_alternating_history(History::with_limits(limit, byte_limit))
 }
 
-/// Pilote commun à [`run_alternating`] et [`run_alternating_with_limits`] :
-/// même déroulé, `History` déjà construit avec les limites voulues.
+/// Common driver of [`run_alternating`] and [`run_alternating_with_limits`]:
+/// same course, `History` already built with the wanted limits.
 fn run_alternating_history(mut history: History) -> AlternatingRun {
     let Fixture {
         mut project,
@@ -399,7 +397,7 @@ fn run_alternating_history(mut history: History) -> AlternatingRun {
                     name: format!("Target{i}"),
                 },
             )
-            .expect("renommage accepté");
+            .expect("rename accepted");
         history
             .execute(
                 &mut project,
@@ -410,7 +408,7 @@ fn run_alternating_history(mut history: History) -> AlternatingRun {
                     expected_version: None,
                 },
             )
-            .expect("écriture acceptée");
+            .expect("write accepted");
         for (fingerprints, &column) in other_fingerprints.iter_mut().zip(others.iter()) {
             fingerprints.push(fingerprint(&project, column));
         }
@@ -431,18 +429,18 @@ fn run_alternating_history(mut history: History) -> AlternatingRun {
 }
 
 // ===========================================================================
-// Tableau récapitulatif
+// Summary table
 // ===========================================================================
 
-/// Une ligne du tableau récapitulatif final.
+/// A row of the final summary table.
 struct Row {
     name: &'static str,
-    /// Versions vivantes du buffer, mesure 1 (cible + témoins).
+    /// Live versions of the buffer, measure 1 (target + witnesses).
     live_versions: usize,
-    /// Octets épinglés, mesure 1 (cible + témoins).
+    /// Pinned bytes, measure 1 (target + witnesses).
     pinned_bytes: usize,
-    /// Delta d'octets vivants selon l'allocateur, mesure 2, du début à la fin
-    /// du scénario (projet et historique encore vivants au relevé final).
+    /// Delta of live bytes according to the allocator, measure 2, from the start to the end
+    /// of the scenario (project and history still alive at the final reading).
     allocator_bytes: usize,
 }
 
@@ -452,7 +450,7 @@ fn mb(bytes: usize) -> f64 {
 
 fn print_row(row: &Row) {
     println!(
-        "  => {} : {} version(s) vivante(s), {:.1} Mo épinglés (mesure 1), {:.1} Mo vivants Δ (mesure 2)",
+        "  => {} : {} live version(s), {:.1} MiB pinned (measure 1), {:.1} MiB live Δ (measure 2)",
         row.name,
         row.live_versions,
         mb(row.pinned_bytes),
@@ -468,21 +466,21 @@ fn print_summary_table(rows: &[Row]) {
 
     println!();
     println!(
-        "colonne de référence : {ROWS} f64 ({:.1} Mo) ; {WRITE_ITERATIONS} itérations par scénario alterné",
+        "reference column: {ROWS} f64 ({:.1} MiB); {WRITE_ITERATIONS} iterations per alternating scenario",
         mb(ROWS * std::mem::size_of::<f64>())
     );
     println!(
-        "================================ Tableau récapitulatif ================================"
+        "================================== Summary table ======================================"
     );
     println!(
         "{:<46} {:>9} {:>15} {:>15} {:>11}",
-        "Scénario", "Versions", "Mesure1 (Mo)", "Mesure2 (Mo)", "Rapport/S5"
+        "Scenario", "Versions", "Measure1 (MiB)", "Measure2 (MiB)", "Ratio/S5"
     );
     for row in rows {
-        // Le rapport au scénario 5 n'a de sens que pour les scénarios 1 à 5
-        // (même construction : cible + 4 témoins, mêmes 20 itérations). Le
-        // scénario 6 mesure autre chose (une colonne supprimée) et n'est pas
-        // comparable terme à terme.
+        // The ratio to scenario 5 makes sense only for scenarios 1 to 5
+        // (same construction: target + 4 witnesses, same 20 iterations).
+        // Scenario 6 measures something else (a deleted column) and is not
+        // comparable term by term.
         let comparable = row
             .name
             .chars()
@@ -509,13 +507,13 @@ fn print_summary_table(rows: &[Row]) {
 }
 
 // ===========================================================================
-// Scénario 1 — écritures seules, sans opération de structure
+// Scenario 1 — writes only, without any structure operation
 // ===========================================================================
 
-/// 20 écritures d'une seule cellule dans la colonne cible, sans la moindre
-/// opération de structure. Hypothèse : une entrée `Data` ne retient jamais de
-/// buffer entier (seulement les valeurs écrites, minuscules) — aucune
-/// ancienne version du buffer ne devrait donc rester épinglée à la fin.
+/// 20 writes of a single cell in the target column, without any
+/// structure operation. Hypothesis: a `Data` entry never keeps a
+/// whole buffer (only the values written, tiny) — no
+/// old version of the buffer should therefore stay pinned at the end.
 fn scenario_1_writes_only() -> Row {
     let before = live_bytes();
     let total_before = total_allocated();
@@ -542,7 +540,7 @@ fn scenario_1_writes_only() -> Row {
                     expected_version: None,
                 },
             )
-            .expect("écriture acceptée");
+            .expect("write accepted");
     }
     target_fingerprints.push(fingerprint(&project, target));
     for (fingerprints, &column) in other_fingerprints.iter_mut().zip(others.iter()) {
@@ -554,30 +552,30 @@ fn scenario_1_writes_only() -> Row {
     let after = live_bytes();
     let total_after = total_allocated();
 
-    println!("\n== Scénario 1 — écritures seules (pas de structure) ==");
+    println!("\n== Scenario 1 — writes only (no structure) ==");
     println!(
-        "  versions vivantes du buffer cible : {target_versions} (rien ne devrait rester épinglé au-delà de la version courante)"
+        "  live versions of the target buffer: {target_versions} (nothing should stay pinned beyond the current version)"
     );
     println!(
-        "  total (cible + 4 témoins) : {total_versions} versions, {:.1} Mo épinglés (mesure 1)",
+        "  total (target + 4 witnesses): {total_versions} versions, {:.1} MiB pinned (measure 1)",
         mb(pinned_bytes)
     );
     println!(
-        "  allocateur : {:.1} -> {:.1} Mo vivants (Δ {:.1} Mo, mesure 2) ; {:.1} Mo alloués au total durant le scénario",
+        "  allocator: {:.1} -> {:.1} MiB live (Δ {:.1} MiB, measure 2); {:.1} MiB allocated in total during the scenario",
         mb(before),
         mb(after),
         mb(after.saturating_sub(before)),
         mb(total_after.saturating_sub(total_before))
     );
     println!(
-        "  note : même sans aucune entrée structurelle, `History::execute` clone l'`Arc<Tree>` \
-         courant avant d'appliquer la commande (garantie de restauration en cas d'échec) ; ce clone \
-         transitoire force une copie-à-l'écriture du buffer à CHAQUE écriture (visible dans le total \
-         alloué), même si rien n'en reste épinglé à la fin."
+        "  note: even without any structural entry, `History::execute` clones the current \
+         `Arc<Tree>` before applying the command (guarantee of restoration on failure); this \
+         transient clone forces a copy-on-write of the buffer at EVERY write (visible in the total \
+         allocated), even if nothing stays pinned at the end."
     );
 
     Row {
-        name: "1. Écritures seules",
+        name: "1. Writes only",
         live_versions: target_versions,
         pinned_bytes,
         allocator_bytes: after.saturating_sub(before),
@@ -585,14 +583,14 @@ fn scenario_1_writes_only() -> Row {
 }
 
 // ===========================================================================
-// Scénario 2 — structure et écritures alternées (le scénario suspecté)
+// Scenario 2 — alternating structure and writes (the suspected scenario)
 // ===========================================================================
 
-/// `WRITE_ITERATIONS` fois [renommer la cible, écrire une cellule dans la
-/// cible], historique illimité. Hypothèse : chaque renommage capture, dans
-/// son instantané `before`, la version du buffer que l'écriture précédente
-/// venait de créer — elle reste épinglée tant que cette entrée structurelle
-/// est sur la pile.
+/// `WRITE_ITERATIONS` times [rename the target, write a cell into the
+/// target], unlimited history. Hypothesis: each rename captures, in
+/// its `before` snapshot, the version of the buffer that the previous write
+/// had just created — it stays pinned as long as this structural entry
+/// is on the stack.
 fn scenario_2_alternating() -> Row {
     let before = live_bytes();
     let run = run_alternating(0);
@@ -606,27 +604,27 @@ fn scenario_2_alternating() -> Row {
         .collect();
     let after = live_bytes();
 
-    println!("\n== Scénario 2 — structure et écritures alternées (historique illimité) ==");
+    println!("\n== Scenario 2 — alternating structure and writes (unlimited history) ==");
     println!(
-        "  versions vivantes du buffer cible : {target_versions} ({:.1} Mo, mesure 1)",
+        "  live versions of the target buffer: {target_versions} ({:.1} MiB, measure 1)",
         mb(target_bytes)
     );
     println!(
-        "  colonnes témoins (jamais écrites) : {witness_versions:?} version(s) vivante(s) chacune (attendu : 1 partout)"
+        "  witness columns (never written): {witness_versions:?} live version(s) each (expected: 1 everywhere)"
     );
     println!(
-        "  total (cible + témoins) : {total_versions} versions, {:.1} Mo épinglés (mesure 1)",
+        "  total (target + witnesses): {total_versions} versions, {:.1} MiB pinned (measure 1)",
         mb(pinned_bytes)
     );
     println!(
-        "  allocateur : {:.1} -> {:.1} Mo vivants (Δ {:.1} Mo, mesure 2)",
+        "  allocator: {:.1} -> {:.1} MiB live (Δ {:.1} MiB, measure 2)",
         mb(before),
         mb(after),
         mb(after.saturating_sub(before))
     );
 
     Row {
-        name: "2. Structure + écritures alternées",
+        name: "2. Alternating structure + writes",
         live_versions: target_versions,
         pinned_bytes,
         allocator_bytes: after.saturating_sub(before),
@@ -634,11 +632,11 @@ fn scenario_2_alternating() -> Row {
 }
 
 // ===========================================================================
-// Scénario 3 — même scénario, historique borné
+// Scenario 3 — same scenario, bounded history
 // ===========================================================================
 
-/// Même alternance que le scénario 2, mais `History::with_limit(BOUNDED_HISTORY_LIMIT)` :
-/// la limite d'historique protège-t-elle réellement, et à quelle hauteur ?
+/// Same alternation as scenario 2, but `History::with_limit(BOUNDED_HISTORY_LIMIT)`:
+/// does the history limit really protect, and at what height?
 fn scenario_3_bounded_history() -> Row {
     let before = live_bytes();
     let run = run_alternating(BOUNDED_HISTORY_LIMIT);
@@ -648,25 +646,25 @@ fn scenario_3_bounded_history() -> Row {
     let after = live_bytes();
 
     println!(
-        "\n== Scénario 3 — même scénario, historique borné à {BOUNDED_HISTORY_LIMIT} entrées =="
+        "\n== Scenario 3 — same scenario, history bounded to {BOUNDED_HISTORY_LIMIT} entries =="
     );
     println!(
-        "  versions vivantes du buffer cible : {target_versions} ({:.1} Mo, mesure 1)",
+        "  live versions of the target buffer: {target_versions} ({:.1} MiB, measure 1)",
         mb(target_bytes)
     );
     println!(
-        "  total (cible + témoins) : {total_versions} versions, {:.1} Mo épinglés (mesure 1)",
+        "  total (target + witnesses): {total_versions} versions, {:.1} MiB pinned (measure 1)",
         mb(pinned_bytes)
     );
     println!(
-        "  allocateur : {:.1} -> {:.1} Mo vivants (Δ {:.1} Mo, mesure 2)",
+        "  allocator: {:.1} -> {:.1} MiB live (Δ {:.1} MiB, measure 2)",
         mb(before),
         mb(after),
         mb(after.saturating_sub(before))
     );
 
     Row {
-        name: "3. Même scénario, historique à 5",
+        name: "3. Same scenario, history at 5",
         live_versions: target_versions,
         pinned_bytes,
         allocator_bytes: after.saturating_sub(before),
@@ -674,28 +672,28 @@ fn scenario_3_bounded_history() -> Row {
 }
 
 // ===========================================================================
-// Scénario 4 — effet de l'annulation
+// Scenario 4 — effect of undoing
 // ===========================================================================
 
-/// Rejoue le scénario 2, puis annule tout l'historique (`undo` jusqu'à
-/// `Ok(false)`), et recompte les **mêmes** empreintes prises pendant la
+/// Replays scenario 2, then undoes the whole history (`undo` until
+/// `Ok(false)`), and recounts the **same** footprints taken during
 /// construction.
 ///
-/// Deux affirmations, pas une seule — distinction qu'une première version de
-/// ce test manquait, et que la mesure elle-même a mise au jour (voir le
-/// rapport de tâche) :
+/// Two assertions, not just one — a distinction that a first version of
+/// this test missed, and that the measurement itself brought to light (see the
+/// task report):
 ///
-/// - les `WRITE_ITERATIONS` empreintes prises **avant chaque écriture**
-///   désignent chacune une version qu'un renommage *suivant* capture dans son
-///   instantané `before`. Leur survie après annulation est structurellement
-///   garantie : `History::undo` retire l'entrée de `undo` et la pousse sur
-///   `redo` (`Vec::pop` puis `Vec::push`), il ne la détruit jamais ;
-/// - la toute **dernière** empreinte, prise après la boucle, désigne l'état
-///   courant au moment de la mesure — mais aucun renommage ne suit pour la
-///   capturer dans une entrée. Rien ne la retient : annuler l'opération qui
-///   l'a produite l'abandonne, et elle doit disparaître. Ce n'est pas une
-///   fuite du mécanisme de rétablissement, c'est l'absence de mécanisme pour
-///   cette version précise.
+/// - the `WRITE_ITERATIONS` footprints taken **before each write**
+///   each designate a version that a *following* rename captures in its
+///   `before` snapshot. Their survival after undo is structurally
+///   guaranteed: `History::undo` removes the entry from `undo` and pushes it onto
+///   `redo` (`Vec::pop` then `Vec::push`), it never destroys it;
+/// - the very **last** footprint, taken after the loop, designates the
+///   current state at the time of the measurement — but no rename follows to
+///   capture it in an entry. Nothing keeps it: undoing the operation that
+///   produced it abandons it, and it must disappear. This is not a
+///   leak of the redo mechanism, it is the absence of a mechanism for
+///   this precise version.
 fn scenario_4_after_undo() -> Row {
     let before = live_bytes();
     let mut run = run_alternating(0);
@@ -708,11 +706,7 @@ fn scenario_4_after_undo() -> Row {
         total_live(&run.target_fingerprints, &run.other_fingerprints);
 
     let mut steps = 0usize;
-    while run
-        .history
-        .undo(&mut run.project)
-        .expect("annulation acceptée")
-    {
+    while run.history.undo(&mut run.project).expect("undo accepted") {
         steps += 1;
     }
 
@@ -722,42 +716,42 @@ fn scenario_4_after_undo() -> Row {
         total_live(&run.target_fingerprints, &run.other_fingerprints);
     let after = live_bytes();
 
-    println!("\n== Scénario 4 — après annulation complète du scénario 2 ==");
-    println!("  {steps} annulation(s) effectuée(s) jusqu'à Ok(false)");
+    println!("\n== Scenario 4 — after a complete undo of scenario 2 ==");
+    println!("  {steps} undo(s) performed until Ok(false)");
     println!(
-        "  total (cible + témoins), mesure 1 : {versions_before_undo} versions avant -> {versions_after_undo} après \
-         ({:.1} Mo -> {:.1} Mo)",
+        "  total (target + witnesses), measure 1: {versions_before_undo} versions before -> {versions_after_undo} after \
+         ({:.1} MiB -> {:.1} MiB)",
         mb(bytes_before_undo),
         mb(bytes_after_undo)
     );
     println!(
-        "  versions capturées par une entrée structurelle (les {WRITE_ITERATIONS} premières écritures) : \
-         {captured_versions_before} avant -> {captured_versions_after} après"
+        "  versions captured by a structural entry (the first {WRITE_ITERATIONS} writes): \
+         {captured_versions_before} before -> {captured_versions_after} after"
     );
     assert_eq!(
         captured_versions_after, captured_versions_before,
-        "une version retenue par une entrée structurelle ne doit pas disparaître à l'annulation : \
-         `History::undo` déplace l'entrée vers `redo`, il ne la détruit jamais"
+        "a version retained by a structural entry must not disappear on undo: \
+         `History::undo` moves the entry to `redo`, it never destroys it"
     );
     println!(
-        "  version « courante », retenue par aucune entrée : vivante avant = {tail_alive_before}, \
-         après = {tail_alive_after} (attendu : redevient fausse — personne ne la retenait, l'annulation \
-         abandonne l'état qui la portait)"
+        "  \"current\" version, retained by no entry: alive before = {tail_alive_before}, \
+         after = {tail_alive_after} (expected: becomes false again — nobody kept it, undoing \
+         abandons the state that carried it)"
     );
     println!(
-        "  -> confirmé : tout ce qu'une entrée structurelle retient reste épinglé pour le \
-         rétablissement (redo) ; seule la version courante, jamais capturée par aucune entrée, \
-         disparaît."
+        "  -> confirmed: everything a structural entry retains stays pinned for \
+         redo; only the current version, never captured by any entry, \
+         disappears."
     );
     println!(
-        "  allocateur : {:.1} -> {:.1} Mo vivants (Δ {:.1} Mo, mesure 2, du début du scénario à après l'annulation)",
+        "  allocator: {:.1} -> {:.1} MiB live (Δ {:.1} MiB, measure 2, from the start of the scenario to after the undo)",
         mb(before),
         mb(after),
         mb(after.saturating_sub(before))
     );
 
     Row {
-        name: "4. Après annulation complète (scénario 2)",
+        name: "4. After a complete undo (scenario 2)",
         live_versions: versions_after_undo,
         pinned_bytes: bytes_after_undo,
         allocator_bytes: after.saturating_sub(before),
@@ -765,14 +759,14 @@ fn scenario_4_after_undo() -> Row {
 }
 
 // ===========================================================================
-// Scénario 5 — comparaison honnête, sans History
+// Scenario 5 — honest comparison, without History
 // ===========================================================================
 
-/// Le même scénario alterné que le scénario 2, mais appliqué **directement**
-/// au `Project`, sans `History` du tout. C'est la borne basse : ce que
-/// coûterait un historique qui ne retiendrait aucun buffer. Le rapport entre
-/// le scénario 2 et celui-ci est le surcoût réel du choix hybride — c'est le
-/// chiffre que la décision attend.
+/// The same alternating scenario as scenario 2, but applied **directly**
+/// to the `Project`, without any `History`. This is the lower bound: what a
+/// history that kept no buffer would cost. The ratio between
+/// scenario 2 and this one is the real overhead of the hybrid choice — it is the
+/// figure the decision is waiting for.
 fn scenario_5_no_history() -> Row {
     let before = live_bytes();
     let Fixture {
@@ -789,10 +783,10 @@ fn scenario_5_no_history() -> Row {
         target_fingerprints.push(fingerprint(&project, target));
         project
             .rename(target, &format!("Target{i}"))
-            .expect("renommage direct accepté");
+            .expect("direct rename accepted");
         project
             .set_values(target, i, ValueBlock::Float(vec![i as f64]))
-            .expect("écriture directe acceptée");
+            .expect("direct write accepted");
         for (fingerprints, &column) in other_fingerprints.iter_mut().zip(others.iter()) {
             fingerprints.push(fingerprint(&project, column));
         }
@@ -806,23 +800,23 @@ fn scenario_5_no_history() -> Row {
     let (total_versions, pinned_bytes) = total_live(&target_fingerprints, &other_fingerprints);
     let after = live_bytes();
 
-    println!("\n== Scénario 5 — même scénario, sans History (borne basse) ==");
+    println!("\n== Scenario 5 — same scenario, without History (lower bound) ==");
     println!(
-        "  versions vivantes du buffer cible : {target_versions} (personne d'autre ne clone l'arbre : mutation en place attendue)"
+        "  live versions of the target buffer: {target_versions} (nobody else clones the tree: in-place mutation expected)"
     );
     println!(
-        "  total (cible + témoins) : {total_versions} versions, {:.1} Mo épinglés (mesure 1)",
+        "  total (target + witnesses): {total_versions} versions, {:.1} MiB pinned (measure 1)",
         mb(pinned_bytes)
     );
     println!(
-        "  allocateur : {:.1} -> {:.1} Mo vivants (Δ {:.1} Mo, mesure 2)",
+        "  allocator: {:.1} -> {:.1} MiB live (Δ {:.1} MiB, measure 2)",
         mb(before),
         mb(after),
         mb(after.saturating_sub(before))
     );
 
     Row {
-        name: "5. Même scénario, sans History (borne basse)",
+        name: "5. Same scenario, without History (lower bound)",
         live_versions: target_versions,
         pinned_bytes,
         allocator_bytes: after.saturating_sub(before),
@@ -830,21 +824,21 @@ fn scenario_5_no_history() -> Row {
 }
 
 // ===========================================================================
-// Scénario 6 — suppression, le témoin
+// Scenario 6 — deletion, the witness
 // ===========================================================================
 
-/// Limite d'historique du scénario 6 : assez serrée (1 entrée) pour évincer
-/// l'entrée de suppression dès la commande suivante.
+/// History limit of scenario 6: tight enough (1 entry) to evict
+/// the deletion entry at the very next command.
 const DELETION_HISTORY_LIMIT: usize = 1;
 
-/// Ajoute une colonne de 1 000 000 `f64`, la supprime par `Command::DeleteColumn`
-/// (son buffer doit rester vivant : c'est nécessaire à l'annulation), puis
-/// pousse une commande de plus pour évincer cette entrée (limite = 1) et
-/// vérifie que le buffer est enfin libéré. Contrairement aux autres
-/// scénarios, ces deux assertions **ne sont pas des hypothèses** : elles
-/// découlent directement du code (`Entry::Structural` retient `before`, qui
-/// retient le nœud supprimé et donc son buffer ; `History::evict` retire
-/// l'entrée la plus ancienne et relâche ses `Arc`).
+/// Adds a column of 1,000,000 `f64`, deletes it with `Command::DeleteColumn`
+/// (its buffer must stay alive: it is needed for undo), then
+/// pushes one more command to evict this entry (limit = 1) and
+/// checks that the buffer is finally released. Unlike the other
+/// scenarios, these two assertions **are not hypotheses**: they
+/// follow directly from the code (`Entry::Structural` keeps `before`, which
+/// keeps the deleted node and therefore its buffer; `History::evict` removes
+/// the oldest entry and releases its `Arc`s).
 fn scenario_6_deletion_witness() -> (Row, Row) {
     let before = live_bytes();
     let Fixture {
@@ -858,30 +852,28 @@ fn scenario_6_deletion_witness() -> (Row, Row) {
     let values: Vec<f64> = (0..ROWS).map(|row| row as f64).collect();
     let victim = project
         .add_column(sheet, None, Some("Victim"), Column::from_f64(&values))
-        .expect("colonne à supprimer");
+        .expect("column to delete");
     drop(values);
 
     let victim_fingerprint = fingerprint(&project, victim);
 
     history
         .execute(&mut project, Command::DeleteColumn { column: victim })
-        .expect("suppression acceptée");
+        .expect("deletion accepted");
 
     let alive_after_delete = victim_fingerprint.weak.upgrade().is_some();
     let after_delete = live_bytes();
     assert!(
         alive_after_delete,
-        "le buffer de la colonne supprimée doit rester vivant tant que son entrée \
-         est sur la pile — sans ça, annuler la suppression serait impossible"
+        "the buffer of the deleted column must stay alive as long as its entry \
+         is on the stack — without that, undoing the deletion would be impossible"
     );
 
-    println!("\n== Scénario 6 — suppression, le témoin ==");
-    println!(
-        "  après suppression (entrée encore sur la pile) : buffer vivant = {alive_after_delete}"
-    );
+    println!("\n== Scenario 6 — deletion, the witness ==");
+    println!("  after deletion (entry still on the stack): live buffer = {alive_after_delete}");
 
-    // Pousse une commande neutre de plus : avec une limite de 1, ça évince
-    // l'entrée de suppression, qui est la plus ancienne.
+    // Push one more neutral command: with a limit of 1, it evicts
+    // the deletion entry, which is the oldest.
     history
         .execute(
             &mut project,
@@ -890,21 +882,21 @@ fn scenario_6_deletion_witness() -> (Row, Row) {
                 name: "AfterEviction".to_string(),
             },
         )
-        .expect("renommage accepté");
+        .expect("rename accepted");
 
     let alive_after_eviction = victim_fingerprint.weak.upgrade().is_some();
     let after_eviction = live_bytes();
     assert!(
         !alive_after_eviction,
-        "une fois l'entrée de suppression évincée de l'historique, plus rien ne \
-         retient le buffer : il doit être libéré"
+        "once the deletion entry is evicted from the history, nothing keeps \
+         the buffer any more: it must be released"
     );
 
     println!(
-        "  après éviction (limite = {DELETION_HISTORY_LIMIT}, une commande de plus poussée) : buffer vivant = {alive_after_eviction}"
+        "  after eviction (limit = {DELETION_HISTORY_LIMIT}, one more command pushed): live buffer = {alive_after_eviction}"
     );
     println!(
-        "  allocateur : {:.1} Mo avant le scénario, {:.1} Mo après suppression, {:.1} Mo après éviction",
+        "  allocator: {:.1} MiB before the scenario, {:.1} MiB after deletion, {:.1} MiB after eviction",
         mb(before),
         mb(after_delete),
         mb(after_eviction)
@@ -912,13 +904,13 @@ fn scenario_6_deletion_witness() -> (Row, Row) {
 
     let victim_bytes = victim_fingerprint.len * std::mem::size_of::<f64>();
     let row_delete = Row {
-        name: "6a. Suppression (entrée encore sur la pile)",
+        name: "6a. Deletion (entry still on the stack)",
         live_versions: 1,
         pinned_bytes: victim_bytes,
         allocator_bytes: after_delete.saturating_sub(before),
     };
     let row_evict = Row {
-        name: "6b. Après éviction (limite = 1)",
+        name: "6b. After eviction (limit = 1)",
         live_versions: 0,
         pinned_bytes: 0,
         allocator_bytes: after_eviction.saturating_sub(before),
@@ -927,26 +919,26 @@ fn scenario_6_deletion_witness() -> (Row, Row) {
 }
 
 // ===========================================================================
-// Scénario 7 — la seconde limite (octets) prouvée sur le motif mesuré
+// Scenario 7 — the second limit (bytes) proven on the measured pattern
 // ===========================================================================
 
-/// Même alternance que le scénario 2, mais sous
-/// `History::with_limits(100, BYTE_BOUNDED_LIMIT)` : la seconde limite
-/// (octets de charge utile retenue), ajoutée à côté de la limite en nombre
-/// d'entrées, borne-t-elle réellement le motif mesuré au scénario 2, et à
-/// quelle hauteur ?
+/// Same alternation as scenario 2, but under
+/// `History::with_limits(100, BYTE_BOUNDED_LIMIT)`: does the second limit
+/// (bytes of retained payload), added next to the limit in number of
+/// entries, really bound the pattern measured in scenario 2, and at what
+/// height?
 ///
-/// Deux affirmations, chacune sur une mesure différente :
+/// Two assertions, each on a different measure:
 ///
-/// - le **total mesuré indépendamment** (les `Weak` promouvables de ce
-///   fichier, comptés hors de la version *courante* de chaque colonne —
-///   voir [`independent_historical_bytes`], le pendant mesuré de ce que
-///   `History::retained_bytes` calcule) ne dépasse pas `BYTE_BOUNDED_LIMIT`
-///   au-delà d'une marge documentée ;
-/// - cette même mesure indépendante et `History::retained_bytes()` — deux
-///   calculs indépendants du même total — **concordent à mieux que 10 %**.
-///   Si elles divergeaient davantage, ce ne serait pas corrigé en ajustant
-///   un seuil : ce serait un résultat à rapporter tel quel.
+/// - the **independently measured total** (the upgradable `Weak`s of this
+///   file, counted outside the *current* version of each column —
+///   see [`independent_historical_bytes`], the measured counterpart of what
+///   `History::retained_bytes` computes) does not exceed `BYTE_BOUNDED_LIMIT`
+///   beyond a documented margin;
+/// - this same independent measure and `History::retained_bytes()` — two
+///   independent computations of the same total — **agree to better than 10%**.
+///   If they diverged more, it would not be fixed by adjusting
+///   a threshold: it would be a result to report as it is.
 fn scenario_7_byte_bounded_history() -> Row {
     let before = live_bytes();
     let run = run_alternating_with_limits(100, BYTE_BOUNDED_LIMIT);
@@ -958,80 +950,80 @@ fn scenario_7_byte_bounded_history() -> Row {
     let after = live_bytes();
 
     println!(
-        "\n== Scénario 7 — même scénario, historique borné à {} Mio de charge utile retenue ==",
+        "\n== Scenario 7 — same scenario, history bounded to {} MiB of retained payload ==",
         mb(BYTE_BOUNDED_LIMIT)
     );
     println!(
-        "  versions vivantes du buffer cible : {target_versions} ({:.1} Mo, mesure 1) \
-         — attendu : de l'ordre de {} (plafond / taille de colonne, arrondi), pas {}",
+        "  live versions of the target buffer: {target_versions} ({:.1} MiB, measure 1) \
+         — expected: of the order of {} (cap / column size, rounded), not {}",
         mb(target_bytes),
-        (BYTE_BOUNDED_LIMIT / column_bytes()) + 1, // +1 : la version courante, jamais un coût
+        (BYTE_BOUNDED_LIMIT / column_bytes()) + 1, // +1: the current version, never a cost
         WRITE_ITERATIONS + 1
     );
     println!(
-        "  total (cible + témoins) : {total_versions} versions, {:.1} Mo épinglés (mesure 1, \
-         inclut les versions courantes des 5 colonnes — pas un coût d'historique)",
+        "  total (target + witnesses): {total_versions} versions, {:.1} MiB pinned (measure 1, \
+         includes the current versions of the 5 columns — not a history cost)",
         mb(pinned_bytes)
     );
     println!(
-        "  total « historique seul » (mesure indépendante, hors versions courantes) : {:.2} Mo, \
-         face à un plafond de {:.1} Mo",
+        "  \"history only\" total (independent measure, excluding current versions): {:.2} MiB, \
+         against a cap of {:.1} MiB",
         mb(historical),
         mb(BYTE_BOUNDED_LIMIT)
     );
     println!(
-        "  History::retained_bytes() rapporté : {:.2} Mo",
+        "  History::retained_bytes() reported: {:.2} MiB",
         mb(reported)
     );
     println!(
-        "  allocateur : {:.1} -> {:.1} Mo vivants (Δ {:.1} Mo, mesure 2)",
+        "  allocator: {:.1} -> {:.1} MiB live (Δ {:.1} MiB, measure 2)",
         mb(before),
         mb(after),
         mb(after.saturating_sub(before))
     );
 
-    // Marge documentée : les deltas de données (avant + après, quelques
-    // `f64` par écriture) pèsent quelques centaines d'octets sur
-    // `WRITE_ITERATIONS` itérations — négligeables face au plafond, mais pas
-    // nuls — et l'éviction, strictement FIFO par construction, ne vise que
-    // la limite en octets au granule d'une entrée entière (~7,6 Mo ici) : le
-    // dernier retrait peut laisser le total jusqu'à `column_bytes()` en
-    // dessous du plafond, jamais au-dessus, sauf si la règle « jamais
-    // évincer la dernière entrée » devait un jour être atteinte ici (elle ne
-    // l'est pas : une quarantaine d'entrées survivent au plafond). Une marge
-    // d'1 Mio couvre confortablement les deltas sans masquer un dépassement
-    // réel.
+    // Documented margin: the data deltas (before + after, a few
+    // `f64` per write) weigh a few hundred bytes over
+    // `WRITE_ITERATIONS` iterations — negligible next to the cap, but not
+    // zero — and eviction, strictly FIFO by construction, targets only
+    // the byte limit at the granularity of a whole entry (~7.6 MiB here): the
+    // last removal can leave the total up to `column_bytes()`
+    // below the cap, never above, unless the rule "never
+    // evict the last entry" were ever reached here (it
+    // is not: about forty entries survive the cap). A margin
+    // of 1 MiB comfortably covers the deltas without hiding a real
+    // overshoot.
     let margin = 1024 * 1024;
     assert!(
         historical <= BYTE_BOUNDED_LIMIT + margin,
-        "le total mesuré indépendamment ({:.2} Mo) dépasse le plafond ({:.1} Mo) au-delà de la \
-         marge documentée ({:.2} Mo)",
+        "the independently measured total ({:.2} MiB) exceeds the cap ({:.1} MiB) beyond the \
+         documented margin ({:.2} MiB)",
         mb(historical),
         mb(BYTE_BOUNDED_LIMIT),
         mb(margin)
     );
 
-    // Concordance entre les deux mesures indépendantes du même total.
+    // Agreement between the two independent measures of the same total.
     let relative_diff = if historical > 0 {
         (reported as f64 - historical as f64).abs() / historical as f64
     } else {
         f64::from(u8::from(reported > 0))
     };
     println!(
-        "  concordance History::retained_bytes() / mesure indépendante : écart {:.2} %",
+        "  agreement History::retained_bytes() / independent measure: gap {:.2} %",
         relative_diff * 100.0
     );
     assert!(
         relative_diff < 0.10,
-        "History::retained_bytes() ({:.2} Mo) et la mesure indépendante ({:.2} Mo) divergent de \
-         {:.1} %, au-delà des 10 % attendus",
+        "History::retained_bytes() ({:.2} MiB) and the independent measure ({:.2} MiB) diverge by \
+         {:.1} %, beyond the expected 10 %",
         mb(reported),
         mb(historical),
         relative_diff * 100.0
     );
 
     Row {
-        name: "7. Historique borné à 64 Mo de charge utile",
+        name: "7. History bounded to 64 MiB of payload",
         live_versions: target_versions,
         pinned_bytes,
         allocator_bytes: after.saturating_sub(before),
@@ -1039,16 +1031,16 @@ fn scenario_7_byte_bounded_history() -> Row {
 }
 
 // ===========================================================================
-// Scénario 8 — colonne mixte : l'empreinte suit `mixed_buffer_bytes`
+// Scenario 8 — mixed column: the footprint follows `mixed_buffer_bytes`
 // ===========================================================================
 
-/// Coût par élément d'un buffer à types mixtes, tel que documenté par
-/// `mixed_buffer_bytes` (`history.rs`, privée au crate) : la taille d'une
-/// `MixedCell` dans le `Vec`, plus les octets UTF-8 des textes présents,
-/// quelle que soit la variante des autres cellules. Répliqué ici pour
-/// vérifier **indépendamment** le chiffre que `History::retained_bytes()`
-/// rapporte — jamais en appelant la fonction du crate, ce ne serait plus une
-/// vérification.
+/// Cost per element of a mixed-type buffer, as documented by
+/// `mixed_buffer_bytes` (`history.rs`, private to the crate): the size of a
+/// `MixedCell` in the `Vec`, plus the UTF-8 bytes of the texts present,
+/// whatever the variant of the other cells. Replicated here to
+/// check **independently** the figure that `History::retained_bytes()`
+/// reports — never by calling the function of the crate, it would no longer be a
+/// check.
 fn expected_mixed_buffer_bytes(cells: &[MixedCell]) -> usize {
     let overhead = std::mem::size_of::<MixedCell>();
     cells.iter().fold(0usize, |total, cell| {
@@ -1061,36 +1053,34 @@ fn expected_mixed_buffer_bytes(cells: &[MixedCell]) -> usize {
     })
 }
 
-/// Aucun des sept scénarios ci-dessus ne construit de colonne mixte :
-/// `mixed_buffer_bytes` (l'estimation que `column_footprint` utilise pour une
-/// colonne `Mixed`, calquée sur `text_buffer_bytes`) n'était donc jamais
-/// exercée. Même schéma que le scénario 6 (suppression, le témoin) : une
-/// colonne mixte supprimée reste retenue tant que son entrée est sur la pile
-/// (nécessaire à l'annulation), puis libérée dès qu'elle est évincée — mais
-/// ici on vérifie en plus que le chiffre **rapporté**
-/// (`History::retained_bytes()`) correspond à l'estimation documentée,
-/// calculée indépendamment.
+/// None of the seven scenarios above builds a mixed column:
+/// `mixed_buffer_bytes` (the estimate that `column_footprint` uses for a
+/// `Mixed` column, modeled on `text_buffer_bytes`) was therefore never
+/// exercised. Same scheme as scenario 6 (deletion, the witness): a
+/// deleted mixed column stays retained as long as its entry is on the stack
+/// (needed for undo), then released as soon as it is evicted — but
+/// here we also check that the **reported** figure
+/// (`History::retained_bytes()`) matches the documented estimate,
+/// computed independently.
 #[test]
 fn scenario_8_mixed_column_deletion_matches_mixed_buffer_bytes_estimate() {
     let _guard = measure_lock();
 
-    let mut project = Project::new("MesureMixte").expect("projet de mesure");
+    let mut project = Project::new("MixedMeasure").expect("measurement project");
     let root = project.root();
     project
         .add_workbook(root, Some("Book1"))
-        .expect("classeur Book1");
-    let sheet = project
-        .resolve_path("[Book1]Sheet1")
-        .expect("feuille Sheet1");
+        .expect("workbook Book1");
+    let sheet = project.resolve_path("[Book1]Sheet1").expect("sheet Sheet1");
 
-    // Un mélange de nombres, de cellules vides et de textes de longueurs
-    // variées : de quoi voir un écart si l'estimation ne comptait, par
-    // exemple, que les textes non vides, ou oubliait le coût fixe par cellule.
+    // A mix of numbers, empty cells and texts of various lengths:
+    // enough to see a gap if the estimate counted, for
+    // example, only the non-empty texts, or forgot the fixed cost per cell.
     let cells: Vec<MixedCell> = (0..10_000)
         .map(|i| match i % 3 {
             0 => MixedCell::Number(i as f64),
             1 => MixedCell::Empty,
-            _ => MixedCell::Text(format!("valeur-{i}")),
+            _ => MixedCell::Text(format!("value-{i}")),
         })
         .collect();
     let expected = expected_mixed_buffer_bytes(&cells);
@@ -1098,43 +1088,41 @@ fn scenario_8_mixed_column_deletion_matches_mixed_buffer_bytes_estimate() {
     let mut history = History::with_limit(1);
     let victim = project
         .add_column(sheet, None, Some("Victim"), Column::from_mixed(&cells))
-        .expect("colonne mixte à supprimer");
+        .expect("mixed column to delete");
 
     history
         .execute(&mut project, Command::DeleteColumn { column: victim })
-        .expect("suppression acceptée");
+        .expect("deletion accepted");
 
     let retained_after_delete = history.retained_bytes();
     println!(
-        "colonne mixte de {} cellules : mixed_buffer_bytes attendu = {expected} octets, \
-         History::retained_bytes() rapporté = {retained_after_delete} octets",
+        "mixed column of {} cells: expected mixed_buffer_bytes = {expected} bytes, \
+         History::retained_bytes() reported = {retained_after_delete} bytes",
         cells.len()
     );
     assert_eq!(
         retained_after_delete, expected,
-        "l'empreinte retenue par `History` pour la colonne mixte supprimée \
-         ({retained_after_delete} octets) ne correspond pas à l'estimation documentée de \
-         `mixed_buffer_bytes` ({expected} octets)"
+        "the footprint retained by `History` for the deleted mixed column \
+         ({retained_after_delete} bytes) does not match the documented estimate of \
+         `mixed_buffer_bytes` ({expected} bytes)"
     );
 
-    // Une commande de plus, avec une limite de 1 entrée : évince l'entrée de
-    // suppression (la plus ancienne) — plus rien ne doit rester retenu.
+    // One more command, with a limit of 1 entry: evicts the deletion
+    // entry (the oldest) — nothing must stay retained.
     history
         .execute(
             &mut project,
             Command::Rename {
                 id: sheet,
-                name: "Sheet1bis".to_string(),
+                name: "Sheet1b".to_string(),
             },
         )
-        .expect("renommage accepté");
+        .expect("rename accepted");
     let retained_after_eviction = history.retained_bytes();
-    println!(
-        "après éviction de l'entrée de suppression : {retained_after_eviction} octets retenus"
-    );
+    println!("after eviction of the deletion entry: {retained_after_eviction} bytes retained");
     assert_eq!(
         retained_after_eviction, 0,
-        "après éviction de l'entrée de suppression, plus rien ne devrait être retenu"
+        "after eviction of the deletion entry, nothing should be retained"
     );
 }
 
@@ -1143,42 +1131,42 @@ fn scenario_8_mixed_column_deletion_matches_mixed_buffer_bytes_estimate() {
 // ===========================================================================
 
 #[test]
-#[ignore = "alloue des centaines de mégaoctets ; lancer explicitement avec --ignored"]
+#[ignore = "allocates hundreds of megabytes; run explicitly with --ignored"]
 fn scenario_1_writes_only_pins_nothing_extra() {
     let _guard = measure_lock();
     print_row(&scenario_1_writes_only());
 }
 
 #[test]
-#[ignore = "alloue des centaines de mégaoctets ; lancer explicitement avec --ignored"]
+#[ignore = "allocates hundreds of megabytes; run explicitly with --ignored"]
 fn scenario_2_alternating_structure_and_writes() {
     let _guard = measure_lock();
     print_row(&scenario_2_alternating());
 }
 
 #[test]
-#[ignore = "alloue des centaines de mégaoctets ; lancer explicitement avec --ignored"]
+#[ignore = "allocates hundreds of megabytes; run explicitly with --ignored"]
 fn scenario_3_bounded_history_caps_pinned_versions() {
     let _guard = measure_lock();
     print_row(&scenario_3_bounded_history());
 }
 
 #[test]
-#[ignore = "alloue des centaines de mégaoctets ; lancer explicitement avec --ignored"]
+#[ignore = "allocates hundreds of megabytes; run explicitly with --ignored"]
 fn scenario_4_undo_keeps_everything_for_redo() {
     let _guard = measure_lock();
     print_row(&scenario_4_after_undo());
 }
 
 #[test]
-#[ignore = "alloue des centaines de mégaoctets ; lancer explicitement avec --ignored"]
+#[ignore = "allocates hundreds of megabytes; run explicitly with --ignored"]
 fn scenario_5_baseline_without_history() {
     let _guard = measure_lock();
     print_row(&scenario_5_no_history());
 }
 
 #[test]
-#[ignore = "alloue des centaines de mégaoctets ; lancer explicitement avec --ignored"]
+#[ignore = "allocates hundreds of megabytes; run explicitly with --ignored"]
 fn scenario_6_deleted_column_freed_only_after_eviction() {
     let _guard = measure_lock();
     let (row_delete, row_evict) = scenario_6_deletion_witness();
@@ -1187,16 +1175,16 @@ fn scenario_6_deleted_column_freed_only_after_eviction() {
 }
 
 #[test]
-#[ignore = "alloue des centaines de mégaoctets ; lancer explicitement avec --ignored"]
+#[ignore = "allocates hundreds of megabytes; run explicitly with --ignored"]
 fn scenario_7_byte_limit_caps_the_measured_pattern() {
     let _guard = measure_lock();
     print_row(&scenario_7_byte_bounded_history());
 }
 
-/// Rejoue les sept scénarios dans l'ordre et imprime le tableau récapitulatif
-/// final — c'est ce test qui fait foi pour le tableau de chiffres.
+/// Replays the seven scenarios in order and prints the final summary table
+/// — this is the test that is authoritative for the table of figures.
 #[test]
-#[ignore = "alloue des centaines de mégaoctets ; lancer explicitement avec --ignored"]
+#[ignore = "allocates hundreds of megabytes; run explicitly with --ignored"]
 fn summary_table_all_scenarios() {
     let _guard = measure_lock();
 

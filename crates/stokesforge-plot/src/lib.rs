@@ -1,82 +1,81 @@
-//! `PlotSpec` : la description d'un graphe, **indépendante de tout moteur de
-//! rendu**.
+//! `PlotSpec`: the description of a graph, **independent of any renderer**.
 //!
-//! Ce crate dit *ce qu'il faut tracer*. Il ne sait pas *comment* on le trace,
-//! et c'est vérifié par le compilateur : sa seule dépendance est
-//! `stokesforge-id`, pour les [`stokesforge_id::NodeId`]
-//! (`tests/no_ui_dependency.rs`). Ni `plotters`, ni `egui`, ni `typst` — pas
-//! même `serde`, la persistance ayant ses propres types d'enregistrement et
-//! faisant elle-même la conversion.
+//! This crate says *what to plot*. It does not know *how* to plot it,
+//! and the compiler checks this: its only dependency is
+//! `stokesforge-id`, for the [`stokesforge_id::NodeId`]
+//! (`tests/no_ui_dependency.rs`). No `plotters`, no `egui`, no `typst` — not
+//! even `serde`, since persistence has its own record types and
+//! does the conversion itself.
 //!
-//! # Depuis la phase R3 : `stokesforge-id`, pas `stokesforge-core`
+//! # Since phase R3: `stokesforge-id`, not `stokesforge-core`
 //!
-//! Jusqu'à la phase R3, cette dépendance était `stokesforge-core` en entier, pour
-//! ce seul type. `NodeKind::Graph` a dû se mettre à porter un [`PlotSpec`] —
-//! ce qui a fait naître l'arête inverse `stokesforge-core → stokesforge-plot` — et les
-//! deux arêtes ensemble auraient formé un cycle Cargo direct (`stokesforge-plot →
-//! stokesforge-core → stokesforge-plot`), que Cargo refuse pour des dépendances
-//! normales. `NodeId` a donc été descendu dans `stokesforge-id`, un crate minimal
-//! sans dépendance : ce crate-ci y pointe désormais, `stokesforge-core` y pointe
-//! aussi *et* dépend de `stokesforge-plot`. Rien dans l'API ou le comportement de
-//! ce crate n'a changé — seule l'adresse de son unique dépendance a bougé,
-//! vers un crate plus petit que l'ancien. Détail complet :
+//! Until phase R3, this dependency was the whole of `stokesforge-core`, for
+//! this one type. `NodeKind::Graph` had to start carrying a [`PlotSpec`] —
+//! which created the reverse edge `stokesforge-core → stokesforge-plot` — and the
+//! two edges together would have formed a direct Cargo cycle (`stokesforge-plot →
+//! stokesforge-core → stokesforge-plot`), which Cargo refuses for normal
+//! dependencies. So `NodeId` was moved down into `stokesforge-id`, a minimal crate
+//! with no dependency: this crate now points to it, and `stokesforge-core` points
+//! to it too *and* depends on `stokesforge-plot`. Nothing in the API or the
+//! behavior of this crate changed — only the address of its single dependency
+//! moved, to a crate smaller than the old one. Full detail:
 //! `stokesforge-id/src/lib.rs`.
 //!
-//! C'est la transposition exacte du « aucun Qt dans `core` » du socle, et la
-//! raison en est mesurée : la couche équivalente de la version Python a
-//! survécu à un changement complet de renderer sans qu'une ligne bouge
+//! This is the exact counterpart of the "no Qt in `core`" rule of the base, and
+//! the reason is measured: the equivalent layer of the Python version
+//! survived a complete change of renderer without a single line moving
 //! (`docs/archive/newarchitecture/roadmap-rendu.md`).
 //!
-//! # Ce que la couche décrit
+//! # What the layer describes
 //!
 //! ```text
 //! PlotSpec
 //! ├── title, background
-//! └── panels : PanelSpec       (grille row/column, au moins un panneau)
+//! └── panels : PanelSpec       (row/column grid, at least one panel)
 //!     ├── title
-//!     ├── bottom / left / right / top → AxisSpec  (échelle, limites, grille)
+//!     ├── bottom / left / right / top → AxisSpec  (scale, limits, grid)
 //!     ├── legend : LegendSpec
 //!     └── series : SeriesSpec
 //!         ├── y : NodeId, x / x_error / y_error : Option<NodeId>
 //!         ├── plot_type : scatter | line | line+scatter | bar | histogram | error_bar
-//!         ├── group : Option<u32>   (groupe de courbes du panneau, #177)
-//!         ├── line : LineSpec      (style, épaisseur, couleur)
-//!         ├── symbol : SymbolSpec  (forme, taille, couleurs)
-//!         └── axis : SeriesAxis    (gauche ou droite, et rien d'autre)
+//!         ├── group : Option<u32>   (curve group of the panel, #177)
+//!         ├── line : LineSpec      (style, width, color)
+//!         ├── symbol : SymbolSpec  (shape, size, colors)
+//!         └── axis : SeriesAxis    (left or right, and nothing else)
 //! ```
 //!
-//! # Trois décisions structurent ce crate
+//! # Three decisions shape this crate
 //!
-//! - **référence par identité** — une série désigne ses colonnes par
-//!   [`stokesforge_id::NodeId`], jamais par nom ni par chemin
-//!   (`architecture-choisie.md` §11.1). Renommer ou déplacer une colonne
-//!   laisse le graphe intact ; la supprimer produit une référence brisée
-//!   *détectable*, que le rendu devra afficher comme telle et jamais comme une
-//!   série vide. C'est littéralement la première arête de dépendance du
-//!   projet : un graphe est un nœud dérivé qui ne calcule rien ;
+//! - **reference by identity** — a series designates its columns by
+//!   [`stokesforge_id::NodeId`], never by name or path
+//!   (`architecture-choisie.md` §11.1). Renaming or moving a column
+//!   leaves the graph intact; deleting it produces a *detectable* broken
+//!   reference, which rendering must show as such and never as an empty
+//!   series. This is literally the first dependency edge of the
+//!   project: a graph is a derived node that computes nothing;
 //!
-//! - **aucune donnée** — un spec ne porte que des identités et du style. Il
-//!   pèse ses chaînes, ce qui rend l'annulation d'une modification de graphe
-//!   triviale : le delta d'annulation est l'ancien spec ;
+//! - **no data** — a spec only carries identities and style. It weighs
+//!   its strings, which makes undoing a graph change
+//!   trivial: the undo delta is the old spec;
 //!
-//! - **les états illégaux ne se valident pas, ils ne s'écrivent pas** — une
-//!   série se rattache à [`SeriesAxis`] (deux variantes) et non à
-//!   [`AxisSide`] (quatre) ; sa colonne Y est un `NodeId` et non une chaîne
-//!   qui pourrait être vide ; son nombre de classes est un
-//!   [`std::num::NonZeroU32`] qu'on n'a pas à ramener à 1 ; la position d'un
-//!   panneau dans la grille est un `usize` qu'on n'a pas à ramener à 0. Là où
-//!   la version Python levait ou corrigeait à l'exécution, il n'y a plus rien
-//!   à lever. Le seul invariant qui reste à tenir par construction est « au
-//!   moins un panneau » ([`Panels`]).
+//! - **illegal states are not validated, they cannot be written** — a
+//!   series attaches to [`SeriesAxis`] (two variants) and not to
+//!   [`AxisSide`] (four); its Y column is a `NodeId` and not a string
+//!   that could be empty; its bin count is a
+//!   [`std::num::NonZeroU32`] that does not have to be brought back to 1; the position of a
+//!   panel in the grid is a `usize` that does not have to be brought back to 0. Where
+//!   the Python version raised or corrected at run time, there is nothing left
+//!   to raise. The only invariant left to hold by construction is "at
+//!   least one panel" ([`Panels`]).
 //!
-//! # Ce qui n'est pas ici
+//! # What is not here
 //!
-//! La **résolution** (`NodeId` → colonne de l'arbre, préparation des points,
-//! classes d'histogramme, largeur de barre déduite) est la tranche suivante ;
-//! elle sera le seul endroit du chantier de rendu à connaître un `Tree`.
-//! L'**édition** (fonctions pures spec → spec) et la **sérialisation** ne sont
-//! pas non plus dans ce crate : le format sur disque appartient à
-//! `stokesforge-persistence`, qui convertit depuis ses propres enregistrements.
+//! **Resolution** (`NodeId` → tree column, point preparation,
+//! histogram bins, derived bar width) is the next slice;
+//! it will be the only place in the rendering work package that knows a `Tree`.
+//! **Editing** (pure spec → spec functions) and **serialization** are
+//! not in this crate either: the on-disk format belongs to
+//! `stokesforge-persistence`, which converts from its own records.
 
 #![cfg_attr(
     not(test),

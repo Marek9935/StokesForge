@@ -173,7 +173,7 @@ the growth of its source is undone.
 | what empties it | `Load` (the values of a file are not taken on trust) and `NewProject` |
 | what it rests on | the versions doctrine: a number never designates two contents of the same column (type + values, not the metadata) |
 | the oracle | `FormulaRecalc::Full`, the full recalculation from before #193, through `Session::spawn_with_recalc` — never in production |
-| what holds it | `tests/recalc_cible.rs` (one named case per component, with witness) and `stokesforge-robustesse` `b22` (two twin sessions, same trees at each step) |
+| what holds it | `tests/recalc_targeted.rs` (one named case per component, with witness) and `stokesforge-robustesse` `b22` (two twin sessions, same trees at each step) |
 
 ### Interruptible recalculation (#239)
 
