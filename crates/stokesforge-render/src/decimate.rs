@@ -1,80 +1,79 @@
-//! Décimation LTTB — tâche R5.5.
+//! LTTB decimation — task R5.5.
 //!
-//! # Ce que la mesure R0 0.3 dit, et ce qu'elle ne dit pas
+//! # What the R0 0.3 measurement says, and what it does not
 //!
-//! Le seuil de décision était fixé d'avance (8 ms par image de
-//! tessellation), il est franchi (22,1 ms), donc le LTTB entre en R5 : on
-//! conclut selon le seuil plutôt que de le renégocier après coup. **Mais la
-//! même mesure montre que le LTTB ne règle pas le cas mesuré**, et c'est
-//! écrit ici plutôt que dilué dans un bilan :
+//! The decision threshold was fixed in advance (8 ms per tessellation
+//! frame), it is crossed (22.1 ms), so LTTB enters R5: we conclude according
+//! to the threshold rather than renegotiate it afterwards. **But the same
+//! measurement shows that LTTB does not fix the measured case**, and it is
+//! written here rather than diluted in a summary:
 //!
-//! | séries | points/série | total | tessellation | ce que le LTTB retire |
+//! | series | points/series | total | tessellation | what LTTB removes |
 //! |---|---|---|---|---|
-//! | 50 | 6 000 | 300 k | 18,3 ms | ~73 % des points (≈ 6,5 ms) |
-//! | 500 | 600 | 300 k | 22,7 ms | **rien** |
+//! | 50 | 6,000 | 300 k | 18.3 ms | ~73 % of the points (≈ 6.5 ms) |
+//! | 500 | 600 | 300 k | 22.7 ms | **nothing** |
 //!
-//! 600 points étalés sur 1 600 px sont déjà sous-échantillonnés : il n'y a
-//! rien à décimer. Le cas de charge du document — 500 spectres de 600 points
-//! — tient sa charge du **nombre de séries**, pas de leur longueur, et le
-//! levier qui le couvre est le *feathering* (78 % du coût de tessellation,
-//! `stokesforge_render_egui::feathering`), pas celui-ci.
+//! 600 points spread over 1,600 px are already undersampled: there is
+//! nothing to decimate. The document's load case — 500 spectra of 600
+//! points — gets its load from the **number of series**, not their length,
+//! and the lever that covers it is *feathering* (78 % of the tessellation
+//! cost, `stokesforge_render_egui::feathering`), not this one.
 //!
-//! Ce module sert donc **l'autre cas**, celui de l'acquisition : quelques
-//! séries très longues. Là, il est le bon outil, et le seul qui ne demande
-//! rien au reste de l'architecture.
+//! This module therefore serves **the other case**, the acquisition one: a
+//! few very long series. There it is the right tool, and the only one that
+//! asks nothing of the rest of the architecture.
 //!
-//! # Pourquoi LTTB et pas « un point sur N »
+//! # Why LTTB and not "one point in N"
 //!
-//! *Largest Triangle Three Buckets* choisit, dans chaque tranche, le point
-//! qui forme le plus grand triangle avec le point retenu à gauche et la
-//! moyenne de la tranche de droite. Concrètement, il **garde les pics** : un
-//! artefact d'une seule mesure — exactement ce qu'un spectre sert à voir —
-//! survit à la décimation, là où un pas fixe l'efface une fois sur deux.
+//! *Largest Triangle Three Buckets* picks, in each bucket, the point that
+//! forms the largest triangle with the point kept on the left and the mean of
+//! the bucket on the right. Concretely, it **keeps the peaks**: an artifact
+//! of a single measurement — exactly what a spectrum is for seeing —
+//! survives the decimation, where a fixed step erases it every other time.
 //!
-//! Deux propriétés tenues, et testées :
+//! Two properties held, and tested:
 //!
-//! - **aucune valeur inventée** : toute sortie est un point d'entrée, jamais
-//!   une moyenne. Un réticule qui désigne un point désigne une mesure réelle
-//!   (ce dont la phase R7 aura besoin) ;
-//! - **les extrémités sont conservées**, donc le cadrage de l'axe ne bouge
-//!   pas du fait de la décimation.
+//! - **no invented value**: every output is an input point, never a mean. A
+//!   crosshair that designates a point designates a real measurement (what
+//!   phase R7 will need);
+//! - **the endpoints are kept**, so the axis framing does not move because
+//!   of the decimation.
 //!
-//! # Où il s'applique, et où il ne s'applique pas
+//! # Where it applies, and where it does not
 //!
-//! Dans le pipeline, juste avant de tracer, parce que le seuil dépend de la
-//! **largeur en pixels** de la zone de tracé — une information qui n'existe
-//! pas avant que Plotters ait réparti les marges. Il s'applique aux séries
-//! qui tracent un trait et rien d'autre : pas aux barres (dont le nombre est
-//! déjà celui des classes), pas aux séries à barres d'erreur (décimer
-//! dissocierait les moustaches de leurs points).
+//! In the pipeline, just before drawing, because the threshold depends on the
+//! **width in pixels** of the plot area — information that does not exist
+//! before Plotters has distributed the margins. It applies to the series that
+//! draw a line and nothing else: not to bars (whose number is already that of
+//! the bins), not to series with error bars (decimating would dissociate the
+//! whiskers from their points).
 
-/// Nombre de points en deçà duquel décimer n'a pas de sens.
+/// Number of points below which decimating makes no sense.
 ///
-/// L'algorithme lui-même a besoin d'au moins trois points (deux extrémités
-/// et une tranche) ; en deçà il rend l'entrée telle quelle.
+/// The algorithm itself needs at least three points (two endpoints and one
+/// bucket); below that it returns the input as is.
 pub const MIN_POINTS: usize = 3;
 
-/// Combien de points par pixel de large on accepte de garder.
+/// How many points per pixel of width we accept to keep.
 ///
-/// Deux : un tracé anti-crénelé distingue encore un aller-retour dans un
-/// même pixel, et descendre à un ferait perdre l'épaisseur visuelle d'un
-/// signal bruité. Au-delà de deux, on paye des sommets que l'écran ne peut
-/// pas montrer.
+/// Two: an anti-aliased plot still distinguishes a back-and-forth within a
+/// single pixel, and going down to one would lose the visual thickness of a
+/// noisy signal. Beyond two, we pay for vertices the screen cannot show.
 pub const POINTS_PER_PIXEL: usize = 2;
 
-/// Le seuil de décimation pour une zone de tracé de `width` pixels de large.
+/// The decimation threshold for a plot area `width` pixels wide.
 pub fn threshold_for_width(width: u32) -> usize {
     (width as usize)
         .saturating_mul(POINTS_PER_PIXEL)
         .max(MIN_POINTS)
 }
 
-/// Décime `points` à au plus `threshold` points, par *Largest Triangle Three
-/// Buckets*.
+/// Decimates `points` to at most `threshold` points, by *Largest Triangle
+/// Three Buckets*.
 ///
-/// Rend l'entrée telle quelle — sans allouer autrement que par le `Vec` de
-/// sortie — quand elle est déjà assez courte, ou quand le seuil demandé est
-/// trop petit pour que l'algorithme ait un sens.
+/// Returns the input as is — without allocating other than the output `Vec`
+/// — when it is already short enough, or when the requested threshold is too
+/// small for the algorithm to make sense.
 pub fn lttb(points: &[(f64, f64)], threshold: usize) -> Vec<(f64, f64)> {
     if threshold < MIN_POINTS || points.len() <= threshold {
         return points.to_vec();
@@ -82,26 +81,26 @@ pub fn lttb(points: &[(f64, f64)], threshold: usize) -> Vec<(f64, f64)> {
 
     let n = points.len();
     let last = n - 1;
-    // Largeur d'une tranche, en nombre de points. Fractionnaire à dessein :
-    // arrondir ici ferait dériver les tranches et perdrait les derniers
-    // points dans la dernière.
+    // Width of a bucket, in number of points. Fractional on purpose:
+    // rounding here would make the buckets drift and lose the last points
+    // in the last one.
     let bucket = (n - 2) as f64 / (threshold - 2) as f64;
 
     let mut out = Vec::with_capacity(threshold);
     out.push(points[0]);
 
-    // Point retenu à gauche : le sommet commun à tous les triangles de la
-    // tranche courante.
+    // Point kept on the left: the vertex common to all the triangles of the
+    // current bucket.
     let mut anchor = 0usize;
 
     for i in 0..threshold - 2 {
-        // Moyenne de la tranche **suivante**, qui sert de troisième sommet.
+        // Mean of the **next** bucket, which serves as the third vertex.
         let next_start = (((i + 1) as f64 * bucket).floor() as usize + 1).min(last);
         let next_end = (((i + 2) as f64 * bucket).floor() as usize + 1).min(n);
         let (mean_x, mean_y) = mean(&points[next_start..next_end.max(next_start)])
             .unwrap_or((points[last].0, points[last].1));
 
-        // Tranche courante, dans laquelle on choisit.
+        // Current bucket, in which we choose.
         let start = ((i as f64 * bucket).floor() as usize + 1).min(last);
         let end = (((i + 1) as f64 * bucket).floor() as usize + 1).min(last);
 
@@ -109,8 +108,8 @@ pub fn lttb(points: &[(f64, f64)], threshold: usize) -> Vec<(f64, f64)> {
         let mut best = start;
         let mut best_area = f64::NEG_INFINITY;
         for (offset, &(x, y)) in points[start..end.max(start)].iter().enumerate() {
-            // Deux fois l'aire du triangle (ancre, candidat, moyenne) : le
-            // facteur 1/2 est commun à tous les candidats, donc inutile.
+            // Twice the area of the triangle (anchor, candidate, mean): the
+            // factor 1/2 is common to all candidates, hence useless.
             let area = ((ax - mean_x) * (y - ay) - (ax - x) * (mean_y - ay)).abs();
             if area > best_area {
                 best_area = area;
@@ -125,7 +124,7 @@ pub fn lttb(points: &[(f64, f64)], threshold: usize) -> Vec<(f64, f64)> {
     out
 }
 
-/// Moyenne d'une tranche, ou `None` si elle est vide.
+/// Mean of a bucket, or `None` if it is empty.
 fn mean(points: &[(f64, f64)]) -> Option<(f64, f64)> {
     if points.is_empty() {
         return None;
@@ -143,83 +142,84 @@ fn mean(points: &[(f64, f64)]) -> Option<(f64, f64)> {
 mod tests {
     use super::*;
 
-    fn rampe(n: usize) -> Vec<(f64, f64)> {
+    fn ramp(n: usize) -> Vec<(f64, f64)> {
         (0..n).map(|i| (i as f64, (i as f64).sin())).collect()
     }
 
     #[test]
-    fn une_serie_deja_courte_ressort_intacte() {
-        let points = rampe(10);
+    fn an_already_short_series_comes_out_intact() {
+        let points = ramp(10);
         assert_eq!(lttb(&points, 10), points);
         assert_eq!(lttb(&points, 100), points);
     }
 
     #[test]
-    fn un_seuil_absurde_ne_decime_pas() {
-        let points = rampe(1000);
+    fn an_absurd_threshold_does_not_decimate() {
+        let points = ramp(1000);
         assert_eq!(lttb(&points, 0).len(), 1000);
         assert_eq!(lttb(&points, 2).len(), 1000);
     }
 
     #[test]
-    fn le_nombre_de_points_est_exactement_le_seuil() {
-        for seuil in [3usize, 17, 100, 999] {
-            assert_eq!(lttb(&rampe(10_000), seuil).len(), seuil, "seuil {seuil}");
-        }
-    }
-
-    #[test]
-    fn les_extremites_sont_conservees() {
-        let points = rampe(5000);
-        let decime = lttb(&points, 50);
-        assert_eq!(decime.first().copied(), points.first().copied());
-        assert_eq!(decime.last().copied(), points.last().copied());
-    }
-
-    #[test]
-    fn aucune_valeur_nest_inventee() {
-        // La propriété qui distingue le LTTB d'un moyennage : tout point
-        // rendu est un point mesuré. R7 en dépendra pour la désignation de
-        // point.
-        let points = rampe(2000);
-        let decime = lttb(&points, 61);
-        for point in &decime {
-            assert!(
-                points.contains(point),
-                "{point:?} n'est pas un point d'entrée"
+    fn the_number_of_points_is_exactly_the_threshold() {
+        for threshold in [3usize, 17, 100, 999] {
+            assert_eq!(
+                lttb(&ramp(10_000), threshold).len(),
+                threshold,
+                "threshold {threshold}"
             );
         }
     }
 
     #[test]
-    fn labscisse_reste_croissante() {
-        let points = rampe(3000);
-        let decime = lttb(&points, 120);
+    fn the_endpoints_are_kept() {
+        let points = ramp(5000);
+        let decimated = lttb(&points, 50);
+        assert_eq!(decimated.first().copied(), points.first().copied());
+        assert_eq!(decimated.last().copied(), points.last().copied());
+    }
+
+    #[test]
+    fn no_value_is_invented() {
+        // The property that distinguishes LTTB from averaging: every
+        // returned point is a measured point. R7 will depend on it for point
+        // picking.
+        let points = ramp(2000);
+        let decimated = lttb(&points, 61);
+        for point in &decimated {
+            assert!(points.contains(point), "{point:?} is not an input point");
+        }
+    }
+
+    #[test]
+    fn the_abscissa_stays_increasing() {
+        let points = ramp(3000);
+        let decimated = lttb(&points, 120);
         assert!(
-            decime.windows(2).all(|p| p[0].0 < p[1].0),
-            "le LTTB doit conserver l'ordre de parcours"
+            decimated.windows(2).all(|p| p[0].0 < p[1].0),
+            "LTTB must keep the traversal order"
         );
     }
 
     #[test]
-    fn un_pic_isole_survit_a_la_decimation() {
-        // La raison d'être du LTTB par rapport à « un point sur N » : un
-        // artefact d'une seule mesure — ce qu'un spectre sert à voir — ne
-        // doit pas disparaître.
+    fn an_isolated_peak_survives_decimation() {
+        // The reason for LTTB compared with "one point in N": an artifact of
+        // a single measurement — what a spectrum is for seeing — must not
+        // disappear.
         let mut points: Vec<(f64, f64)> = (0..1000).map(|i| (i as f64, 0.0)).collect();
         points[437].1 = 42.0;
-        let decime = lttb(&points, 50);
+        let decimated = lttb(&points, 50);
         assert!(
-            decime.contains(&(437.0, 42.0)),
-            "le pic a été effacé par la décimation"
+            decimated.contains(&(437.0, 42.0)),
+            "the peak was erased by the decimation"
         );
     }
 
     #[test]
-    fn le_seuil_suit_la_largeur() {
+    fn the_threshold_follows_the_width() {
         assert_eq!(threshold_for_width(800), 1600);
-        // Une zone de tracé dégénérée ne doit pas donner un seuil de zéro,
-        // qui ferait retomber sur « pas de décimation » par accident.
+        // A degenerate plot area must not give a threshold of zero, which
+        // would fall back on "no decimation" by accident.
         assert_eq!(threshold_for_width(0), MIN_POINTS);
     }
 }

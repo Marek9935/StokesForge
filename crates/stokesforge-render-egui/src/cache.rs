@@ -1,74 +1,74 @@
-//! Le cache de formes — tâche R4.3.
+//! The shape cache — task R4.3.
 //!
-//! # La clé, et pourquoi elle a exactement quatre termes
+//! # The key, and why it has exactly four terms
 //!
 //! `(revision, rect, pixels_per_point, view_generation)`
-//! (`architecture-choisie.md` §4.2) :
+//! (`architecture-choisie.md` §4.2):
 //!
-//! - **`revision`** — le compteur monotone de `stokesforge-session`, qui existait
-//!   déjà et dont c'est l'usage prévu (*« un client sait si son instantané
-//!   est périmé en comparant la `revision` »*). Le renderer devient un
-//!   client de plus du même protocole, au même titre que l'UI et le fil de
-//!   script ; il n'y avait rien à inventer ;
-//! - **`rect`** — le rectangle logique donné au pipeline change sa géométrie,
-//!   pas le modèle. `GraphView::paint_scaled` garde ce rectangle à
-//!   `DEFAULT_FIGURE_SIZE` et transforme les formes mises en cache en sortie :
-//!   un simple redimensionnement de fenêtre ne le change plus ;
-//! - **`pixels_per_point`** — c'est l'exception qu'`epaint` documente
-//!   lui-même dans sa source : *« storing [shapes] should also be fine with
+//! - **`revision`** — the monotonic counter of `stokesforge-session`, which
+//!   already existed and is used as intended (*"a client knows whether its
+//!   snapshot is stale by comparing the `revision`"*). The renderer becomes
+//!   one more client of the same protocol, like the UI and the script
+//!   thread; nothing had to be invented;
+//! - **`rect`** — the logical rectangle given to the pipeline changes its
+//!   geometry, not the model. `GraphView::paint_scaled` keeps this rectangle
+//!   at `DEFAULT_FIGURE_SIZE` and transforms the cached shapes on output:
+//!   a plain window resize no longer changes it;
+//! - **`pixels_per_point`** — this is the exception that `epaint` documents
+//!   itself in its source: *"storing [shapes] should also be fine with
 //!   one exception: `Shape::Text` depends on the current `pixels_per_point`
-//!   and so must be recreated every time `pixels_per_point` changes »* ;
-//! - **`view_generation`** (tâche R7.1) — le compteur de
-//!   `stokesforge_render::view::ViewState`, qui monte à chaque zoom, pan ou rectangle
-//!   de zoom élastique commis. Contrairement au *feathering* (voir plus
-//!   bas), le zoom/pan **change la géométrie tracée** — les bornes d'axe ne
-//!   sont plus celles des données — donc doit entrer dans la clé, sous
-//!   peine de servir une figure périmée depuis le cache après un geste de
-//!   navigation. Un compteur plutôt que les bornes elles-mêmes : elles
-//!   vivent dans des `f64` par panneau, pas franchement `Copy`-friendly en
-//!   nombre variable, et un entier qui change à chaque commit suffit à
-//!   invalider — la valeur exacte du cadrage n'a pas à transiter par ici.
+//!   and so must be recreated every time `pixels_per_point` changes"*;
+//! - **`view_generation`** (task R7.1) — the counter of
+//!   `stokesforge_render::view::ViewState`, which goes up on every committed
+//!   zoom, pan or elastic zoom rectangle. Unlike *feathering* (see below),
+//!   zoom/pan **changes the drawn geometry** — the axis bounds are no longer
+//!   those of the data — so it must enter the key, or a stale figure would
+//!   be served from the cache after a navigation gesture. A counter rather
+//!   than the bounds themselves: they live in per-panel `f64`s, not really
+//!   `Copy`-friendly in a variable number, and an integer that changes on
+//!   every commit is enough to invalidate — the exact value of the framing
+//!   does not have to pass through here.
 //!
-//! # Ce qui n'est délibérément *pas* dans la clé
+//! # What is deliberately *not* in the key
 //!
-//! Le *feathering*. Le couper pendant un glisser — décision du 2026-09-10,
-//! tâche R5.5 bis — change la **tessellation**, pas les `Shape`. Le cache
-//! n'en est donc pas invalidé ; c'est la retessellation qui change de coût,
-//! et elle a lieu de toute façon à chaque image. Écrit ici parce que c'est
-//! exactement le genre de terme qu'on ajouterait « par prudence » en R5,
-//! au prix d'une reconstruction complète à chaque pression de bouton.
+//! *Feathering*. Turning it off during a drag — decision of 2026-09-10,
+//! task R5.5 bis — changes the **tessellation**, not the `Shape`s. The cache
+//! is therefore not invalidated; it is the retessellation that changes cost,
+//! and it happens on every frame anyway. Written here because this is
+//! exactly the kind of term one would add "to be safe" in R5, at the price
+//! of a full rebuild on every button press.
 //!
-//! Le réticule non plus (tâche R7.3) : il se peint **par-dessus** le cache,
-//! sans l'invalider. C'est la propriété qui remplace le *blitting*
-//! `copy_from_bbox` de la version Python, et elle est gratuite tant que le
-//! réticule n'entre pas dans le pipeline Plotters.
+//! The crosshair neither (task R7.3): it is painted **on top of** the cache,
+//! without invalidating it. This is the property that replaces the
+//! `copy_from_bbox` *blitting* of the Python version, and it is free as long
+//! as the crosshair does not enter the Plotters pipeline.
 
 use egui::{Rect, Shape};
 use stokesforge_session::Revision;
 
-/// Ce qui identifie une figure déjà calculée.
+/// What identifies an already computed figure.
 ///
-/// `PartialEq` sur des `f32` : c'est voulu, et sans piège ici. Les deux
-/// termes flottants viennent d'une image à l'autre de la *même* source
-/// (la mise en page d'egui, le `pixels_per_point` du système) et sont donc
-/// bit à bit identiques tant que rien ne bouge. Une comparaison « à epsilon
-/// près » ne ferait que retarder l'invalidation d'un redimensionnement d'un
-/// demi-pixel — au prix d'une figure fausse.
+/// `PartialEq` on `f32`s: this is intended, and safe here. The two float
+/// terms come from one frame to the next from the *same* source
+/// (egui's layout, the system `pixels_per_point`) and are therefore
+/// bit for bit identical as long as nothing moves. A comparison "within
+/// epsilon" would only delay the invalidation of a half-pixel resize —
+/// at the price of a wrong figure.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CacheKey {
-    /// Révision de l'instantané de session dont la figure est issue.
+    /// Revision of the session snapshot the figure comes from.
     pub revision: Revision,
-    /// Rectangle logique utilisé par le pipeline (qui peut différer du
-    /// rectangle affiché après mise à l'échelle).
+    /// Logical rectangle used by the pipeline (which can differ from the
+    /// displayed rectangle after scaling).
     pub rect: Rect,
-    /// Échelle d'affichage au moment du calcul.
+    /// Display scale at the time of the computation.
     pub pixels_per_point: f32,
-    /// Génération de `stokesforge_render::view::ViewState` au moment du calcul — tâche
-    /// R7.1. `0` tant qu'aucun zoom ni pan n'a été commis.
+    /// Generation of `stokesforge_render::view::ViewState` at the time of the
+    /// computation — task R7.1. `0` as long as no zoom or pan was committed.
     pub view_generation: u64,
 }
 
-/// Les formes d'une figure, et de quoi savoir si elles sont encore bonnes.
+/// The shapes of a figure, and what is needed to know whether they are still valid.
 #[derive(Debug, Default)]
 pub struct ShapeCache {
     key: Option<CacheKey>,
@@ -78,46 +78,46 @@ pub struct ShapeCache {
 }
 
 impl ShapeCache {
-    /// Un cache vide.
+    /// An empty cache.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Les formes en cache. Vide tant que rien n'a été construit.
+    /// The cached shapes. Empty as long as nothing has been built.
     pub fn shapes(&self) -> &[Shape] {
         &self.shapes
     }
 
-    /// La clé des formes en cache, s'il y en a.
+    /// The key of the cached shapes, if any.
     pub fn key(&self) -> Option<CacheKey> {
         self.key
     }
 
-    /// Nombre d'images servies sans rejouer le pipeline Plotters.
+    /// Number of frames served without replaying the Plotters pipeline.
     ///
-    /// Exposé pour que la tâche R4.3 soit **vérifiable** : « une image sans
-    /// changement ne rejoue pas le pipeline » est une affirmation sur un
-    /// comportement invisible, donc une affirmation à tester.
+    /// Exposed so that task R4.3 is **verifiable**: "a frame without
+    /// change does not replay the pipeline" is a claim about an invisible
+    /// behavior, hence a claim to test.
     pub fn hits(&self) -> u64 {
         self.hits
     }
 
-    /// Nombre de reconstructions complètes.
+    /// Number of full rebuilds.
     pub fn misses(&self) -> u64 {
         self.misses
     }
 
-    /// Vide le cache sans toucher aux compteurs.
+    /// Empties the cache without touching the counters.
     pub fn invalidate(&mut self) {
         self.key = None;
         self.shapes.clear();
     }
 
-    /// Rend les formes de `key`, en les construisant si nécessaire.
+    /// Returns the shapes of `key`, building them if necessary.
     ///
-    /// En cas d'échec de `build`, le cache est laissé **vide** plutôt que
-    /// partiellement rempli : une figure à moitié construite qu'on servirait
-    /// ensuite comme valide serait pire que pas de figure du tout.
+    /// If `build` fails, the cache is left **empty** rather than partially
+    /// filled: a half-built figure that would then be served as valid would
+    /// be worse than no figure at all.
     pub fn get_or_build<T, E>(
         &mut self,
         key: CacheKey,
@@ -151,14 +151,14 @@ impl ShapeCache {
     }
 }
 
-/// Ce qu'une consultation du cache apprend à l'appelant.
+/// What a cache lookup tells the caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outcome<T> {
-    /// Ce que `build` a rendu, si le pipeline a effectivement été rejoué.
+    /// What `build` returned, if the pipeline was actually replayed.
     pub built: Option<T>,
-    /// Vrai si l'image a été servie depuis le cache.
+    /// True if the frame was served from the cache.
     pub cached: bool,
-    /// Nombre de formes servies.
+    /// Number of shapes served.
     pub shape_count: usize,
 }
 
@@ -184,47 +184,47 @@ mod tests {
         }
     }
 
-    fn une_forme(shapes: &mut Vec<Shape>) -> Result<usize, ()> {
+    fn one_shape(shapes: &mut Vec<Shape>) -> Result<usize, ()> {
         shapes.push(Shape::Noop);
         Ok(shapes.len())
     }
 
     #[test]
-    fn la_seconde_consultation_ne_reconstruit_pas() {
+    fn the_second_lookup_does_not_rebuild() {
         let mut cache = ShapeCache::new();
         let k = key(1, 200.0, 1.0);
-        assert!(!cache.get_or_build(k, une_forme).unwrap().cached);
-        assert!(cache.get_or_build(k, une_forme).unwrap().cached);
+        assert!(!cache.get_or_build(k, one_shape).unwrap().cached);
+        assert!(cache.get_or_build(k, one_shape).unwrap().cached);
         assert_eq!((cache.misses(), cache.hits()), (1, 1));
         assert_eq!(cache.shapes().len(), 1);
     }
 
     #[test]
-    fn chacun_des_quatre_termes_invalide() {
-        for suivante in [
+    fn each_of_the_four_terms_invalidates() {
+        for next in [
             key(2, 200.0, 1.0),
             key(1, 201.0, 1.0),
             key(1, 200.0, 2.0),
             key_with_view(1, 200.0, 1.0, 1),
         ] {
             let mut cache = ShapeCache::new();
-            cache.get_or_build(key(1, 200.0, 1.0), une_forme).unwrap();
+            cache.get_or_build(key(1, 200.0, 1.0), one_shape).unwrap();
             assert!(
-                !cache.get_or_build(suivante, une_forme).unwrap().cached,
-                "{suivante:?} aurait dû invalider"
+                !cache.get_or_build(next, one_shape).unwrap().cached,
+                "{next:?} should have invalidated"
             );
         }
     }
 
     #[test]
-    fn un_echec_ne_laisse_pas_de_figure_a_moitie_faite() {
+    fn a_failure_leaves_no_half_built_figure() {
         let mut cache = ShapeCache::new();
-        let echec = cache.get_or_build::<(), &str>(key(1, 200.0, 1.0), |shapes| {
+        let failure = cache.get_or_build::<(), &str>(key(1, 200.0, 1.0), |shapes| {
             shapes.push(Shape::Noop);
             shapes.push(Shape::Noop);
-            Err("le pipeline a refusé")
+            Err("the pipeline refused")
         });
-        assert_eq!(echec, Err("le pipeline a refusé"));
+        assert_eq!(failure, Err("the pipeline refused"));
         assert!(cache.shapes().is_empty());
         assert_eq!(cache.key(), None);
     }

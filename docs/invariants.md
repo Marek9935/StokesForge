@@ -12,7 +12,7 @@ gets lost.
 | 1 | No model mutation outside a command, for the clients of a session | ownership: the actor holds the `&mut Project` of the session (construction, tests and the CLI go through the primitives of `core`); review for a mutating `pub` method added to `core` (no test) |
 | 2 | No UI dependency under `stokesforge-session`, nor in the application state (`stokesforge-app-state`, #263) | `tests/no_ui_dependency.rs`, one allowlist per crate |
 | 3 | `stokesforge-plot` knows no renderer | its only dependency is `stokesforge-id` |
-| 4 | A single source of text measurement | `stokesforge-render/tests/mesure.rs` + the agreement test |
+| 4 | A single source of text measurement | `stokesforge-render/tests/measurement.rs` + the agreement test |
 | 5 | A plot feature does not enter a single backend | `stokesforge-render` is generic over `DrawingBackend` |
 | 6 | *Feathering* does not enter the cache key | `stokesforge-render-egui/tests/feathering.rs` |
 | 7 | Identifiers never reused | the allocator lives outside the tree, in `Project` |
@@ -62,8 +62,8 @@ build, conditional (`[target.…]`), optional and renamed dependencies
 (`package = …`, judged on their real name); `dev-dependencies` are out of
 scope (test tooling). Its negative witnesses live in this crate.
 
-`stokesforge-render-svg` carries the equivalent under another name
-(`tests/frontiere.rs`): it must see neither `egui`, nor `eframe`, nor `winit` —
+`stokesforge-render-svg` carries the same test
+(`tests/no_ui_dependency.rs`): it must see neither `egui`, nor `eframe`, nor `winit` —
 this is what makes **rendering testable without a graphical server**, and so in
 continuous integration.
 
@@ -120,14 +120,14 @@ the drawing.
 Three tests hold the rule, and the third is the one without which the other two
 would prove nothing:
 
-- `stokesforge-render/tests/mesure.rs`: two measurers measure identically; the
+- `stokesforge-render/tests/measurement.rs`: two measurers measure identically; the
   measurement does not depend on `pixels_per_point`; and it is **different**
   from the naive heuristic — the witness, without which two equally wrong
   paths would pass;
-- `stokesforge-render-egui/tests/accord.rs`: the same figure, screen against
+- `stokesforge-render-egui/tests/agreement.rs`: the same figure, screen against
   SVG, all primitives compared to the whole pixel, plus two families of
   witnesses;
-- `stokesforge-render-egui/tests/formes.rs`: the anchoring conventions specific
+- `stokesforge-render-egui/tests/shapes.rs`: the anchoring conventions specific
   to each backend, which the agreement test cannot compare directly.
 
 **To read**: `stokesforge-render/src/text.rs` (head), then

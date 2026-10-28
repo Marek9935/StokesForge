@@ -1,34 +1,34 @@
-//! Mise à l'échelle des formes en cache, sans flouter le texte (issue #18).
+//! Scaling of cached shapes without blurring the text (issue #18).
 //!
-//! `Shape::transform` d'epaint agrandit le maillage d'un `Shape::Text` : les
-//! glyphes restent ceux rastérisés à la taille **logique**, donc un graphe
-//! agrandi montre un bitmap étiré, flou. Ici le texte est remis en page à la
-//! taille **affichée** (police × échelle) pour que l'atlas rastérise à la
-//! bonne résolution ; les positions, elles, restent celles de la mise en page
-//! logique (la mesure de texte, invariant 4, n'est pas touchée : le pipeline
-//! a déjà décidé de tout avant cette étape).
+//! epaint's `Shape::transform` scales the mesh of a `Shape::Text`: the glyphs
+//! stay the ones rasterized at the **logical** size, so an enlarged graph
+//! shows a stretched, blurry bitmap. Here the text is laid out again at the
+//! **displayed** size (font × scale) so that the atlas rasterizes at the
+//! right resolution; the positions stay those of the logical layout (text
+//! measurement, invariant 4, is not touched: the pipeline already decided
+//! everything before this step).
 //!
-//! # Les formules Typst (issue #31)
+//! # Typst formulas (issue #31)
 //!
-//! Une formule est un `Shape::Mesh` texturé (`crate::typst_screen`), dont
-//! l'image est rastérisée à la taille logique : étirée, elle floutait comme
-//! le texte avant #18. Le maillage garde ici sa géométrie — transformée
-//! comme toute forme, donc à la même place et de la même taille — mais
-//! désigne une **autre texture** : la même formule rastérisée à
-//! `pixels_per_point × échelle`, par [`FormulaTexture::rerender`], à partir
-//! du document déjà compilé (pas de recompilation, pas de nouvelle mesure).
-//! Même boîte, même couverture de texture (0..1) : seule la finesse change.
+//! A formula is a textured `Shape::Mesh` (`crate::typst_screen`) whose image
+//! is rasterized at the logical size: stretched, it blurred like text did
+//! before #18. The mesh keeps its geometry here — transformed like any
+//! shape, so at the same place and the same size — but points to **another
+//! texture**: the same formula rasterized at `pixels_per_point × scale`, by
+//! [`FormulaTexture::rerender`], from the already compiled document (no
+//! recompilation, no new measurement). Same box, same texture coverage
+//! (0..1): only the sharpness changes.
 //!
-//! Une variante rastérisait directement à l'échelle affichée pendant la
-//! collecte. Écartée : il aurait fallu mettre le rectangle affiché dans la
-//! clé du cache principal, donc rejouer tout le pipeline Plotters à chaque
-//! pas d'un redimensionnement.
+//! One variant rasterized directly at the displayed scale during
+//! collection. Rejected: the displayed rectangle would have had to go into
+//! the key of the main cache, so the whole Plotters pipeline would replay at
+//! each step of a resize.
 //!
-//! Les textures agrandies vivent dans [`ScaledShapes`], hors du
-//! `FormulaCache` de la vue : elles ne comptent pas dans sa limite et
-//! disparaissent avec la version mise à l'échelle qui les désigne. Une
-//! texture déjà faite à la bonne résolution est reprise d'une version à
-//! l'autre (déplacer le graphe sans le redimensionner ne rastérise rien).
+//! The enlarged textures live in [`ScaledShapes`], outside the view's
+//! `FormulaCache`: they do not count toward its limit and disappear with the
+//! scaled version that points to them. A texture already made at the right
+//! resolution is carried over from one version to the next (moving the graph
+//! without resizing it rasterizes nothing).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -40,12 +40,12 @@ use stokesforge_render::formula::FormulaCache;
 
 use crate::typst_screen::FormulaTexture;
 
-/// Transforme `shape` par `transform` (mise à l'échelle uniforme + décalage),
-/// avec un texte re-rastérisé à la taille affichée.
+/// Transforms `shape` by `transform` (uniform scaling + offset), with the
+/// text rasterized again at the displayed size.
 ///
-/// `retexture` donne, pour la texture d'un maillage, celle qui doit la
-/// remplacer à l'échelle affichée — `None` pour la garder (maillage qui
-/// n'est pas une formule, ou échelle 1).
+/// `retexture` gives, for the texture of a mesh, the one that must replace
+/// it at the displayed scale — `None` to keep it (a mesh that is not a
+/// formula, or scale 1).
 pub fn transform_shape(
     context: &egui::Context,
     shape: &mut Shape,
@@ -76,19 +76,19 @@ pub fn transform_shape(
     }
 }
 
-/// Cale le maillage d'une formule sur la grille des pixels physiques, à la
-/// taille exacte de sa texture (issue #86).
+/// Snaps a formula's mesh to the physical pixel grid, at the exact size of
+/// its texture (issue #86).
 ///
-/// Une formule est une image : posée à une fraction de pixel, ou étirée
-/// d'une fraction de pixel, le filtrage linéaire la mélange avec ses voisins
-/// et les traits fins deviennent flous — sensible surtout sur un petit texte
-/// (une figure réduite dans une petite fenêtre), peu visible sur un grand.
-/// Le coin haut-gauche de la boîte tombe donc sur un pixel entier et la
-/// boîte mesure exactement `size` pixels (la texture est rastérisée à
-/// l'arrondi supérieur, d'où l'écart). Le décalage est inférieur à un pixel.
+/// A formula is an image: placed at a fraction of a pixel, or stretched by a
+/// fraction of a pixel, linear filtering blends it with its neighbors and
+/// thin strokes turn blurry — mostly noticeable on small text (a figure
+/// reduced in a small window), barely visible on a large one. So the
+/// top-left corner of the box lands on a whole pixel and the box measures
+/// exactly `size` pixels (the texture is rasterized rounded up, hence the
+/// gap). The shift is under one pixel.
 ///
-/// Sans effet sur un maillage qui n'est pas un quadrilatère aligné sur les
-/// axes (une formule tournée d'un angle quelconque ne se cale pas).
+/// No effect on a mesh that is not an axis-aligned quadrilateral (a formula
+/// rotated by an arbitrary angle is not snapped).
 fn snap_to_pixels(mesh: &mut egui::epaint::Mesh, size: [usize; 2], pixels_per_point: f32) {
     let bounds = mesh.calc_bounds();
     if mesh.vertices.len() != 4 || !bounds.is_positive() || pixels_per_point <= 0.0 {
@@ -102,7 +102,7 @@ fn snap_to_pixels(mesh: &mut egui::epaint::Mesh, size: [usize; 2], pixels_per_po
     if !axis_aligned {
         return;
     }
-    // Un quart de tour échange largeur et hauteur de la texture.
+    // A quarter turn swaps the width and height of the texture.
     let (w, h) = (size[0] as f32, size[1] as f32);
     let (physical_w, physical_h) = (
         bounds.width() * pixels_per_point,
@@ -154,23 +154,23 @@ fn transform_text(context: &egui::Context, text: &mut TextShape, transform: TSTr
     text.underline.width *= scale;
 }
 
-/// Ce qui identifie une version mise à l'échelle des formes du cache.
+/// What identifies a scaled version of the cached shapes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScaledKey {
-    /// La figure logique dont elle vient.
+    /// The logical figure it comes from.
     pub source: crate::cache::CacheKey,
-    /// Rectangle affiché (échelle **et** position).
+    /// Displayed rectangle (scale **and** position).
     pub display: egui::Rect,
 }
 
-/// Formes mises à l'échelle, gardées d'une image à l'autre tant que la figure
-/// et le rectangle affiché ne changent pas.
+/// Scaled shapes, kept from one frame to the next as long as the figure and
+/// the displayed rectangle do not change.
 #[derive(Default)]
 pub struct ScaledShapes {
     key: Option<ScaledKey>,
     shapes: Vec<Shape>,
-    /// Les formules rastérisées à l'échelle affichée, par texture d'origine
-    /// (celle du maillage en cache) — voir la tête de module.
+    /// The formulas rasterized at the displayed scale, by original texture
+    /// (the one of the cached mesh) — see the module header.
     formulas: HashMap<TextureId, Arc<FormulaTexture>>,
 }
 
@@ -185,10 +185,10 @@ impl std::fmt::Debug for ScaledShapes {
 }
 
 impl ScaledShapes {
-    /// Les formes de `source` à l'échelle de `key.display`, recalculées si la
-    /// clé a changé. `formulas` est le cache qui a produit les textures des
-    /// formules de `source` : c'est là que se retrouve le document d'une
-    /// formule à rastériser de nouveau.
+    /// The shapes of `source` at the scale of `key.display`, recomputed if the
+    /// key changed. `formulas` is the cache that produced the textures of the
+    /// formulas of `source`: it is where the document of a formula to
+    /// rasterize again is found.
     pub fn get(
         &mut self,
         context: &egui::Context,
@@ -202,8 +202,8 @@ impl ScaledShapes {
             let unscaled = (transform.scaling - 1.0).abs() < f32::EPSILON;
             let previous = std::mem::take(&mut self.formulas);
             let mut kept = HashMap::new();
-            // Construit au premier maillage rencontré seulement : une
-            // figure sans formule ne parcourt pas le cache.
+            // Built at the first mesh met only: a figure without formulas
+            // does not walk the cache.
             let mut by_id: Option<HashMap<TextureId, Arc<FormulaTexture>>> = None;
             let mut retexture = |id: TextureId| -> Option<TextureId> {
                 let by_id = by_id.get_or_insert_with(|| {
@@ -214,8 +214,8 @@ impl ScaledShapes {
                         .collect()
                 });
                 if unscaled {
-                    // Pas de nouvelle texture, mais la formule est reconnue :
-                    // son maillage est calé sur les pixels (#86).
+                    // No new texture, but the formula is recognized: its
+                    // mesh is snapped to the pixels (#86).
                     return by_id.contains_key(&id).then_some(id);
                 }
                 let sharp = match previous.get(&id) {
@@ -245,14 +245,14 @@ mod tests {
     use super::*;
     use egui::{Color32, FontId, Pos2};
 
-    fn contexte() -> egui::Context {
+    fn context() -> egui::Context {
         let context = egui::Context::default();
-        let mut sortie = context.run_ui(egui::RawInput::default(), |_| {});
-        sortie.textures_delta.clear();
+        let mut output = context.run_ui(egui::RawInput::default(), |_| {});
+        output.textures_delta.clear();
         context
     }
 
-    fn texte(context: &egui::Context, size: f32) -> Shape {
+    fn text_shape(context: &egui::Context, size: f32) -> Shape {
         let galley = context.fonts_mut(|fonts| {
             fonts.layout_no_wrap(
                 "Tension (V)".to_owned(),
@@ -263,39 +263,39 @@ mod tests {
         Shape::galley(Pos2::new(10.0, 20.0), galley, Color32::BLACK)
     }
 
-    fn taille_de_police(shape: &Shape) -> f32 {
+    fn font_size(shape: &Shape) -> f32 {
         let Shape::Text(text) = shape else {
-            panic!("un texte attendu");
+            panic!("a text shape expected");
         };
         text.galley.job.sections[0].format.font_id.size
     }
 
-    /// #18 : agrandir un graphe re-rastérise le texte à la taille affichée
-    /// au lieu d'étirer le maillage des glyphes (flou).
+    /// #18: enlarging a graph rasterizes the text again at the displayed size
+    /// instead of stretching the glyph mesh (blur).
     #[test]
-    fn le_texte_agrandi_est_remis_en_page_a_la_taille_affichee() {
-        let context = contexte();
+    fn enlarged_text_is_laid_out_again_at_the_displayed_size() {
+        let context = context();
         let transform = TSTransform::new(egui::vec2(5.0, 7.0), 2.5);
-        let mut shape = texte(&context, 12.0);
-        let logique = match &shape {
+        let mut shape = text_shape(&context, 12.0);
+        let logical = match &shape {
             Shape::Text(text) => text.galley.rect.width(),
             _ => unreachable!(),
         };
         transform_shape(&context, &mut shape, transform, &mut |_| None);
-        assert!((taille_de_police(&shape) - 30.0).abs() < 1e-4);
+        assert!((font_size(&shape) - 30.0).abs() < 1e-4);
         let Shape::Text(text) = &shape else {
             unreachable!()
         };
         assert_eq!(text.pos, Pos2::new(30.0, 57.0));
-        // La largeur reste proportionnelle : la mise en page ne dérive pas.
-        let ratio = text.galley.rect.width() / logique;
-        assert!((ratio - 2.5).abs() < 0.15, "ratio de largeur {ratio}");
+        // The width stays proportional: the layout does not drift.
+        let ratio = text.galley.rect.width() / logical;
+        assert!((ratio - 2.5).abs() < 0.15, "width ratio {ratio}");
     }
 
     #[test]
-    fn un_texte_imbrique_est_aussi_remis_en_page() {
-        let context = contexte();
-        let mut shape = Shape::Vec(vec![texte(&context, 10.0)]);
+    fn a_nested_text_is_also_laid_out_again() {
+        let context = context();
+        let mut shape = Shape::Vec(vec![text_shape(&context, 10.0)]);
         transform_shape(
             &context,
             &mut shape,
@@ -305,10 +305,10 @@ mod tests {
         let Shape::Vec(inner) = &shape else {
             unreachable!()
         };
-        assert!((taille_de_police(&inner[0]) - 20.0).abs() < 1e-4);
+        assert!((font_size(&inner[0]) - 20.0).abs() < 1e-4);
     }
 
-    fn cle(display: f32) -> ScaledKey {
+    fn key_for(display: f32) -> ScaledKey {
         ScaledKey {
             source: crate::cache::CacheKey {
                 revision: Default::default(),
@@ -321,39 +321,38 @@ mod tests {
     }
 
     #[test]
-    fn les_formes_mises_a_l_echelle_sont_gardees_tant_que_la_cle_ne_change_pas() {
-        let context = contexte();
-        let source = [texte(&context, 12.0)];
-        let key = cle(200.0);
+    fn scaled_shapes_are_kept_as_long_as_the_key_does_not_change() {
+        let context = context();
+        let source = [text_shape(&context, 12.0)];
+        let key = key_for(200.0);
         let transform = TSTransform::new(egui::Vec2::ZERO, 2.0);
-        let formules = FormulaCache::new();
+        let formulas = FormulaCache::new();
         let mut cache = ScaledShapes::default();
-        let premier = cache
-            .get(&context, key, &source, transform, &formules)
+        let first = cache
+            .get(&context, key, &source, transform, &formulas)
             .as_ptr();
         let second = cache
-            .get(&context, key, &source, transform, &formules)
+            .get(&context, key, &source, transform, &formulas)
             .as_ptr();
-        assert_eq!(premier, second, "pas de recalcul à clé identique");
+        assert_eq!(first, second, "no recomputation with an identical key");
         assert!(
-            (taille_de_police(&cache.get(&context, key, &source, transform, &formules)[0]) - 24.0)
-                .abs()
+            (font_size(&cache.get(&context, key, &source, transform, &formulas)[0]) - 24.0).abs()
                 < 1e-4
         );
     }
 
-    /// Une formule `$lambda$` rastérisée à `pixels_per_point` 1, et son
-    /// maillage ancré en (10, 20).
-    fn formule(
+    /// A `$lambda$` formula rasterized at `pixels_per_point` 1, and its mesh
+    /// anchored at (10, 20).
+    fn formula(
         context: &egui::Context,
         cache: &FormulaCache<FormulaTexture>,
     ) -> (Arc<FormulaTexture>, Shape) {
         let choice = stokesforge_render::FontChoice::default();
         let screen = crate::typst_screen::TypstScreen::new(context, cache, &choice)
-            .expect("résolution des polices échouée");
+            .expect("font resolution failed");
         let texture = screen
             .render("$lambda$", 14.0, [0, 0, 0, 255], 1.0)
-            .expect("rendu");
+            .expect("rendering");
         let anchor = plotters_backend::text_anchor::Pos::new(
             plotters_backend::text_anchor::HPos::Left,
             plotters_backend::text_anchor::VPos::Top,
@@ -367,121 +366,121 @@ mod tests {
         (texture, shape)
     }
 
-    fn maillage(shape: &Shape) -> &egui::epaint::Mesh {
+    fn mesh_of(shape: &Shape) -> &egui::epaint::Mesh {
         let Shape::Mesh(mesh) = shape else {
-            panic!("un maillage attendu");
+            panic!("a mesh expected");
         };
         mesh
     }
 
-    /// Issue #31 : agrandie deux fois, une formule désigne une texture de
-    /// deux fois plus de pixels de côté, dans **la même boîte** que le
-    /// maillage simplement étiré — la finesse change, pas la mise en page.
+    /// Issue #31: enlarged twice, a formula points to a texture with twice as
+    /// many pixels per side, in **the same box** as the simply stretched
+    /// mesh — the sharpness changes, not the layout.
     #[test]
-    fn une_formule_agrandie_est_rasterisee_a_la_taille_affichee() {
-        let context = contexte();
-        let formules = FormulaCache::new();
-        let (base, source) = formule(&context, &formules);
+    fn an_enlarged_formula_is_rasterized_at_the_displayed_size() {
+        let context = context();
+        let formulas = FormulaCache::new();
+        let (base, source) = formula(&context, &formulas);
         let transform = TSTransform::new(egui::vec2(5.0, 7.0), 2.0);
 
-        let mut etire = source.clone();
-        etire.transform(transform);
+        let mut stretched = source.clone();
+        stretched.transform(transform);
         let mut cache = ScaledShapes::default();
-        let agrandi = &cache.get(&context, cle(200.0), &[source], transform, &formules)[0];
+        let enlarged = &cache.get(&context, key_for(200.0), &[source], transform, &formulas)[0];
 
-        let (avant, apres) = (maillage(&etire), maillage(agrandi));
-        // Le maillage est calé sur les pixels (#86) : la boîte ne bouge que
-        // de moins d'un pixel physique (ppp 1 ici), pas de mise en page.
-        let (avant, apres_boite) = (avant.calc_bounds(), apres.calc_bounds());
+        let (before, after) = (mesh_of(&stretched), mesh_of(enlarged));
+        // The mesh is snapped to the pixels (#86): the box moves by less than
+        // one physical pixel (ppp 1 here), no layout change.
+        let (before, after_box) = (before.calc_bounds(), after.calc_bounds());
         assert!(
-            (avant.min - apres_boite.min).abs().max_elem() <= 1.0
-                && (avant.size() - apres_boite.size()).abs().max_elem() <= 1.0,
-            "la boîte a bougé : {avant:?} -> {apres_boite:?}"
+            (before.min - after_box.min).abs().max_elem() <= 1.0
+                && (before.size() - after_box.size()).abs().max_elem() <= 1.0,
+            "the box moved: {before:?} -> {after_box:?}"
         );
-        assert_ne!(apres.texture_id, base.id(), "texture d'origine étirée");
+        assert_ne!(after.texture_id, base.id(), "original texture stretched");
         let fine = context
             .tex_manager()
             .read()
-            .meta(apres.texture_id)
-            .expect("texture agrandie absente")
+            .meta(after.texture_id)
+            .expect("enlarged texture missing")
             .size;
         let [w, h] = base.size_pixels();
         assert!(
             fine[0].abs_diff(2 * w) <= 1 && fine[1].abs_diff(2 * h) <= 1,
-            "{fine:?} n'est pas le double de {:?}",
+            "{fine:?} is not twice {:?}",
             [w, h]
         );
         assert_eq!(
-            formules.len(),
+            formulas.len(),
             1,
-            "la texture agrandie est entrée dans le cache de la vue"
+            "the enlarged texture entered the view's cache"
         );
     }
 
-    /// Le témoin : à l'échelle 1 (un simple déplacement), rien n'est
-    /// rastérisé de nouveau — le maillage garde sa texture. Et une texture
-    /// agrandie déjà faite est reprise quand seule la position change.
+    /// The witness: at scale 1 (a simple move), nothing is rasterized again
+    /// — the mesh keeps its texture. And an enlarged texture already made is
+    /// carried over when only the position changes.
     #[test]
-    fn deplacer_sans_agrandir_ne_rasterise_rien() {
-        let context = contexte();
-        let formules = FormulaCache::new();
-        let (base, source) = formule(&context, &formules);
+    fn moving_without_enlarging_rasterizes_nothing() {
+        let context = context();
+        let formulas = FormulaCache::new();
+        let (base, source) = formula(&context, &formulas);
         let mut cache = ScaledShapes::default();
 
-        let deplace = TSTransform::new(egui::vec2(30.0, 0.0), 1.0);
+        let moved = TSTransform::new(egui::vec2(30.0, 0.0), 1.0);
         let shapes = cache.get(
             &context,
-            cle(100.0),
+            key_for(100.0),
             std::slice::from_ref(&source),
-            deplace,
-            &formules,
+            moved,
+            &formulas,
         );
-        assert_eq!(maillage(&shapes[0]).texture_id, base.id());
+        assert_eq!(mesh_of(&shapes[0]).texture_id, base.id());
 
         let double = TSTransform::new(egui::Vec2::ZERO, 2.0);
-        let premier = maillage(
+        let first = mesh_of(
             &cache.get(
                 &context,
-                cle(200.0),
+                key_for(200.0),
                 std::slice::from_ref(&source),
                 double,
-                &formules,
+                &formulas,
             )[0],
         )
         .texture_id;
-        let decale = TSTransform::new(egui::vec2(40.0, 0.0), 2.0);
-        let mut ailleurs = cle(200.0);
-        ailleurs.display = ailleurs.display.translate(egui::vec2(40.0, 0.0));
+        let shifted = TSTransform::new(egui::vec2(40.0, 0.0), 2.0);
+        let mut elsewhere = key_for(200.0);
+        elsewhere.display = elsewhere.display.translate(egui::vec2(40.0, 0.0));
         let second =
-            maillage(&cache.get(&context, ailleurs, &[source], decale, &formules)[0]).texture_id;
+            mesh_of(&cache.get(&context, elsewhere, &[source], shifted, &formulas)[0]).texture_id;
         assert_eq!(
-            premier, second,
-            "même échelle : la texture agrandie est reprise"
+            first, second,
+            "same scale: the enlarged texture is carried over"
         );
     }
 
-    /// Issue #86 : à l'écran, le maillage d'une formule tombe sur un pixel
-    /// physique entier et mesure exactement sa texture, y compris quand la
-    /// figure est réduite à une échelle qui ne tombe pas juste.
+    /// Issue #86: on screen, a formula's mesh lands on a whole physical pixel
+    /// and measures exactly its texture, including when the figure is reduced
+    /// to a scale that does not fit exactly.
     #[test]
-    fn une_formule_reduite_est_calee_sur_les_pixels() {
-        let context = contexte();
-        let formules = FormulaCache::new();
-        let (_, source) = formule(&context, &formules);
+    fn a_reduced_formula_is_snapped_to_the_pixels() {
+        let context = context();
+        let formulas = FormulaCache::new();
+        let (_, source) = formula(&context, &formulas);
         let transform = TSTransform::new(egui::vec2(5.3, 7.7), 0.63);
         let mut cache = ScaledShapes::default();
-        let formes = cache.get(&context, cle(63.0), &[source], transform, &formules);
-        let boite = maillage(&formes[0]).calc_bounds();
+        let shapes = cache.get(&context, key_for(63.0), &[source], transform, &formulas);
+        let bounds = mesh_of(&shapes[0]).calc_bounds();
         let ppp = context.pixels_per_point();
-        let entier = |v: f32| ((v * ppp) - (v * ppp).round()).abs() < 1e-3;
-        assert!(entier(boite.min.x) && entier(boite.min.y), "{boite:?}");
-        let taille = context
+        let whole = |v: f32| ((v * ppp) - (v * ppp).round()).abs() < 1e-3;
+        assert!(whole(bounds.min.x) && whole(bounds.min.y), "{bounds:?}");
+        let size = context
             .tex_manager()
             .read()
-            .meta(maillage(&formes[0]).texture_id)
+            .meta(mesh_of(&shapes[0]).texture_id)
             .expect("texture")
             .size;
-        assert!((boite.width() * ppp - taille[0] as f32).abs() < 1e-3);
-        assert!((boite.height() * ppp - taille[1] as f32).abs() < 1e-3);
+        assert!((bounds.width() * ppp - size[0] as f32).abs() < 1e-3);
+        assert!((bounds.height() * ppp - size[1] as f32).abs() < 1e-3);
     }
 }

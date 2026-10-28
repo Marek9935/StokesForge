@@ -75,5 +75,5 @@ Les scripts de distribution copient chaque texte dans
 4. Si le nom de famille interne au fichier a changé, mettre à jour
    `FontSet::sans_family_name`/`math_family_name` dans
    `crates/stokesforge-render/src/fonts.rs` — un test
-   (`les_noms_de_famille_correspondent_au_contenu_du_fichier`) échouera
+   (`family_names_match_the_file_content`) échouera
    sinon.

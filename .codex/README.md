@@ -161,7 +161,7 @@ the old implementation stays available under the `legacy-python` tag.
   `estimate_text_size`; its legend helpers can bypass these measurements.
 - Zoom/pan belong to `ViewState`, not to a mutation of the `PlotSpec`.
   Feathering stays out of the cache key; `view_generation` stays in it.
-- Preserve the boundary tests (`no_ui_dependency.rs`, `frontiere.rs`).
+- Preserve the boundary tests (`no_ui_dependency.rs`).
   A new dependency must respect the architecture before updating
   an allowlist.
 - No Python object crosses the actor channel; the script releases the
@@ -237,7 +237,7 @@ in a separate copy of the runtime; see `docs/python-matplotlib-spike.md`.
 - Rendering: check measurement, screen/SVG agreement and witnesses that must differ;
   exercise the exports concerned and the features changed.
   The manual bench for large curves (#141),
-  `stokesforge-render-egui/tests/mesure_courbes.rs`, runs with `--release`
+  `stokesforge-render-egui/tests/curve_bench.rs`, runs with `--release`
   and `--ignored`; protocol, command and measurements in `docs/rendu.md`.
 - UI: test the logic through `AppState`; for keyboard, focus or
   presentation, complete with a check in the real application

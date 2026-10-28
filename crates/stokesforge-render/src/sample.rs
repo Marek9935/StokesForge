@@ -1,39 +1,39 @@
-//! Deux graphes de démonstration, construits en code.
+//! Two demonstration graphs, built in code.
 //!
-//! # Pourquoi ils vivent dans un crate de production
+//! # Why they live in a production crate
 //!
-//! La sortie de la phase R5 demande que le critère de fin soit vrai pour un
-//! graphe **réaliste**, et que le test d'accord porte sur celui-là. Il
-//! demande aussi, depuis R4, qu'on puisse *regarder* la figure
-//! (`cargo run -p stokesforge-render-svg --example figure`). Ces deux besoins
-//! portent sur le **même** graphe : « ce qu'on regarde est exactement ce que
-//! le test compare » est ce que R4 avait noté en tête de son exemple.
+//! The exit of phase R5 requires the end criterion to hold for a
+//! **realistic** graph, and the agreement test to be about that one. It also
+//! requires, since R4, that the figure can be *looked at*
+//! (`cargo run -p stokesforge-render-svg --example figure`). These two needs
+//! are about the **same** graph: "what one looks at is exactly what the test
+//! compares" is what R4 had noted at the top of its example.
 //!
-//! Or le test d'accord vit dans `stokesforge-render-egui` (il lui faut les deux
-//! backends) et l'exemple dans `stokesforge-render-svg` (il ne doit pas voir
-//! egui). Deux crates qui ne peuvent pas dépendre l'un de l'autre : le
-//! graphe commun descend donc d'un cran, exactement comme la mesure de texte
-//! en R4 et `NodeId` en R3. Le dupliquer aurait garanti qu'il divergerait, et
-//! la divergence aurait porté précisément sur ce que le test prétend
-//! vérifier.
+//! Now the agreement test lives in `stokesforge-render-egui` (it needs both
+//! backends) and the example in `stokesforge-render-svg` (it must not see
+//! egui). Two crates that cannot depend on each other: the common graph
+//! therefore goes down one level, exactly like the text measurement in R4
+//! and `NodeId` in R3. Duplicating it would have guaranteed that it
+//! diverges, and the divergence would have been about precisely what the
+//! test claims to verify.
 //!
-//! Ce n'est pas une dépendance de développement parce qu'un `[dev-dependency]`
-//! ne traverse pas les crates ; c'est du code public, sans coût pour qui ne
-//! l'appelle pas, et il n'y a **aucun fichier `.stf` d'exemple dans le
-//! dépôt** dont on pourrait le tirer à la place.
+//! It is not a development dependency because a `[dev-dependency]` does not
+//! cross crates; it is public code, at no cost for whoever does not call it,
+//! and there is **no example `.stf` file in the repository** it could be
+//! taken from instead.
 //!
-//! # Ce que le graphe réaliste exerce
+//! # What the realistic graph exercises
 //!
-//! Tout ce que R5 ajoute, en un seul spec : cinq panneaux dans une grille
-//! 2 × 3 (donc une cellule vide), les six types de tracé, une échelle
-//! logarithmique, un axe secondaire, trois styles de trait, quatre formes de
-//! marqueur, des barres d'erreur, une légende dans chaque coin, et une
-//! **référence brisée** — qui doit se voir, pas disparaître.
+//! Everything R5 adds, in a single spec: five panels in a 2 × 3 grid (hence
+//! one empty cell), the six plot types, a logarithmic scale, a secondary
+//! axis, three line styles, four marker shapes, error bars, a legend in each
+//! corner, and a **broken reference** — which must be visible, not
+//! disappear.
 //!
-//! Les titres sont explicites sur ces figures témoins : ils éprouvent leurs
-//! bandes et la mesure du texte non ASCII dans les deux backends. Ce ne sont
-//! pas des défauts de création de graphe ; la démo de l'application, elle,
-//! suit le défaut sans titre des créations utilisateur (#103).
+//! The titles are explicit on these witness figures: they exercise their
+//! bands and the measurement of non-ASCII text in both backends. They are not
+//! defaults of graph creation; the application's demo follows the
+//! no-title default of user creations (#103).
 
 use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
 use stokesforge_core::{CoreResult, NodeId, Project};
@@ -42,35 +42,35 @@ use stokesforge_plot::{
     PlotSpec, PlotType, SeriesAxis, SeriesSpec, SymbolShape, SymbolSpec,
 };
 
-/// Un projet et le graphe qu'il porte.
+/// A project and the graph it carries.
 pub struct Sample {
-    /// Le projet, qui possède les colonnes référencées par le spec.
+    /// The project, which owns the columns referenced by the spec.
     pub project: Project,
-    /// Le graphe.
+    /// The graph.
     pub spec: PlotSpec,
 }
 
-/// Le graphe minimal de la phase R4 : une courbe, deux axes linéaires.
+/// The minimal graph of phase R4: one curve, two linear axes.
 ///
-/// Conservé tel quel — il reste le cas le plus simple, celui qui doit
-/// continuer de passer quoi qu'ajoutent les phases suivantes.
+/// Kept as is — it remains the simplest case, the one that must keep
+/// passing whatever the following phases add.
 pub fn minimal() -> CoreResult<Sample> {
-    let mut project = Project::new("Accord")?;
+    let mut project = Project::new("Agreement")?;
     let sheet = worksheet(&mut project, "Book1", "Sheet1")?;
 
     let xs: Vec<f64> = (0..64).map(|i| 400.0 + i as f64 * 5.0).collect();
     let ys: Vec<f64> = xs
         .iter()
-        .map(|x| gaussienne(*x, 520.0, 40.0, 0.9) + 0.05)
+        .map(|x| gaussian(*x, 520.0, 40.0, 0.9) + 0.05)
         .collect();
     let x = column(&mut project, sheet, "Lambda", &xs)?;
     let y = column(&mut project, sheet, "Absorbance", &ys)?;
 
     let mut panel = PanelSpec::at(0, 0);
     panel.bottom = axis("λ", "nm");
-    panel.left = axis("Absorbance mesurée", "u.a.");
+    panel.left = axis("Measured absorbance", "u.a.");
     let mut series = SeriesSpec::new_xy(x, y);
-    series.name = "Échantillon µ1".to_string();
+    series.name = "Sample µ1".to_string();
     series.line = LineSpec {
         color: "#4c78a8".to_string(),
         ..LineSpec::default()
@@ -78,7 +78,7 @@ pub fn minimal() -> CoreResult<Sample> {
     panel.series.push(series);
 
     let spec = PlotSpec {
-        title: "Spectre d'absorption — λ_max".to_string(),
+        title: "Absorption spectrum — λ_max".to_string(),
         background: "#ffffff".to_string(),
         ..PlotSpec::empty("")
     }
@@ -87,128 +87,127 @@ pub fn minimal() -> CoreResult<Sample> {
     Ok(Sample { project, spec })
 }
 
-/// Le graphe réaliste de la phase R5 — cinq panneaux, six types de tracé.
+/// The realistic graph of phase R5 — five panels, six plot types.
 ///
-/// Les libellés sont volontairement non ASCII (« λ », « ⁻¹ », « µ », « é ») :
-/// c'est là que l'heuristique par octets de Plotters se trompe le plus, donc
-/// là où le témoin du test d'accord mord le mieux (`architecture-choisie.md`
-/// §4.4).
+/// The labels are deliberately non-ASCII ("λ", "⁻¹", "µ", "é"): that is where
+/// Plotters' byte-based heuristic is most wrong, hence where the witness of
+/// the agreement test bites best (`architecture-choisie.md` §4.4).
 pub fn realistic() -> CoreResult<Sample> {
-    let mut project = Project::new("Campagne")?;
-    let sheet = worksheet(&mut project, "Mesures", "Spectres")?;
+    let mut project = Project::new("Campaign")?;
+    let sheet = worksheet(&mut project, "Measurements", "Spectra")?;
 
-    // -- (0,0) deux spectres superposés, traits de styles différents.
+    // -- (0,0) two superimposed spectra, lines of different styles.
     let lambda: Vec<f64> = (0..=140).map(|i| 400.0 + i as f64 * 2.5).collect();
-    let spectre_a: Vec<f64> = lambda
+    let spectrum_a: Vec<f64> = lambda
         .iter()
-        .map(|x| gaussienne(*x, 520.0, 38.0, 0.85) + gaussienne(*x, 610.0, 22.0, 0.32) + 0.04)
+        .map(|x| gaussian(*x, 520.0, 38.0, 0.85) + gaussian(*x, 610.0, 22.0, 0.32) + 0.04)
         .collect();
-    let spectre_b: Vec<f64> = lambda
+    let spectrum_b: Vec<f64> = lambda
         .iter()
-        .map(|x| gaussienne(*x, 545.0, 55.0, 0.62) + 0.06)
+        .map(|x| gaussian(*x, 545.0, 55.0, 0.62) + 0.06)
         .collect();
     let id_lambda = column(&mut project, sheet, "Lambda", &lambda)?;
-    let id_a = column(&mut project, sheet, "AbsA", &spectre_a)?;
-    let id_b = column(&mut project, sheet, "AbsB", &spectre_b)?;
+    let id_a = column(&mut project, sheet, "AbsA", &spectrum_a)?;
+    let id_b = column(&mut project, sheet, "AbsB", &spectrum_b)?;
 
-    let mut spectres = PanelSpec::at(0, 0);
-    spectres.title = "Spectres".to_string();
-    spectres.bottom = axis("λ", "nm");
-    spectres.left = axis("Absorbance", "u.a.");
-    spectres.legend = LegendSpec {
+    let mut spectra = PanelSpec::at(0, 0);
+    spectra.title = "Spectra".to_string();
+    spectra.bottom = axis("λ", "nm");
+    spectra.left = axis("Absorbance", "u.a.");
+    spectra.legend = LegendSpec {
         visible: true,
         position: LegendPosition::TopRight,
         anchor: None,
         ..LegendSpec::default()
     };
-    spectres.series.push(SeriesSpec {
-        name: "Échantillon µ1".to_string(),
-        line: ligne("#4c78a8", LineStyle::Solid, 2.0),
+    spectra.series.push(SeriesSpec {
+        name: "Rosé sample µ1".to_string(),
+        line: line_spec("#4c78a8", LineStyle::Solid, 2.0),
         ..SeriesSpec::new_xy(id_lambda, id_a)
     });
-    spectres.series.push(SeriesSpec {
-        name: "Témoin".to_string(),
-        line: ligne("#f58518", LineStyle::Dash, 2.0),
+    spectra.series.push(SeriesSpec {
+        name: "Control".to_string(),
+        line: line_spec("#f58518", LineStyle::Dash, 2.0),
         ..SeriesSpec::new_xy(id_lambda, id_b)
     });
 
-    // -- (0,1) cinétique : une courbe à gauche, un nuage à droite.
-    let temps: Vec<f64> = (0..=60).map(|i| i as f64 * 0.5).collect();
-    let concentration: Vec<f64> = temps.iter().map(|t| 1.0 * (-t / 8.0).exp()).collect();
-    let temperature: Vec<f64> = temps
+    // -- (0,1) kinetics: a curve on the left, a scatter on the right.
+    let time: Vec<f64> = (0..=60).map(|i| i as f64 * 0.5).collect();
+    let concentration: Vec<f64> = time.iter().map(|t| 1.0 * (-t / 8.0).exp()).collect();
+    let temperature: Vec<f64> = time
         .iter()
         .map(|t| 20.0 + 6.0 * (t / 4.0).sin() + t / 12.0)
         .collect();
-    let id_temps = column(&mut project, sheet, "Temps", &temps)?;
+    let id_time = column(&mut project, sheet, "Time", &time)?;
     let id_conc = column(&mut project, sheet, "Concentration", &concentration)?;
     let id_temp = column(&mut project, sheet, "Temperature", &temperature)?;
 
-    let mut cinetique = PanelSpec::at(0, 1);
-    cinetique.title = "Cinétique".to_string();
-    cinetique.bottom = axis("t", "min");
-    cinetique.left = axis("c", "mol·L⁻¹");
-    cinetique.right = axis("θ", "°C");
-    cinetique.legend = LegendSpec {
+    let mut kinetics = PanelSpec::at(0, 1);
+    kinetics.title = "Kinetics".to_string();
+    kinetics.bottom = axis("t", "min");
+    kinetics.left = axis("c", "mol·L⁻¹");
+    kinetics.right = axis("θ", "°C");
+    kinetics.legend = LegendSpec {
         visible: true,
         position: LegendPosition::TopRight,
         anchor: None,
         ..LegendSpec::default()
     };
-    cinetique.series.push(SeriesSpec {
+    kinetics.series.push(SeriesSpec {
         name: "Concentration".to_string(),
-        line: ligne("#54a24b", LineStyle::Solid, 2.0),
-        ..SeriesSpec::new_xy(id_temps, id_conc)
+        line: line_spec("#54a24b", LineStyle::Solid, 2.0),
+        ..SeriesSpec::new_xy(id_time, id_conc)
     });
-    cinetique.series.push(SeriesSpec {
-        name: "Température".to_string(),
+    kinetics.series.push(SeriesSpec {
+        name: "Temperature".to_string(),
         plot_type: PlotType::Scatter,
         axis: SeriesAxis::Right,
-        symbol: marqueur("#e45756", SymbolShape::Diamond, 6.0),
-        line: ligne("#e45756", LineStyle::None, 1.0),
-        ..SeriesSpec::new_xy(id_temps, id_temp)
+        symbol: symbol_spec("#e45756", SymbolShape::Diamond, 6.0),
+        line: line_spec("#e45756", LineStyle::None, 1.0),
+        ..SeriesSpec::new_xy(id_time, id_temp)
     });
 
-    // -- (0,2) étalonnage : ordonnée logarithmique et barres d'erreur.
+    // -- (0,2) calibration: logarithmic ordinate and error bars.
     let dose: Vec<f64> = (0..9).map(|i| 1.0 + i as f64 * 2.0).collect();
-    let reponse: Vec<f64> = dose.iter().map(|d| 2.0 * 10f64.powf(d / 8.0)).collect();
-    let incertitude: Vec<f64> = reponse.iter().map(|r| r * 0.18).collect();
+    let response: Vec<f64> = dose.iter().map(|d| 2.0 * 10f64.powf(d / 8.0)).collect();
+    let uncertainty: Vec<f64> = response.iter().map(|r| r * 0.18).collect();
     let id_dose = column(&mut project, sheet, "Dose", &dose)?;
-    let id_reponse = column(&mut project, sheet, "Reponse", &reponse)?;
-    let id_incertitude = column(&mut project, sheet, "Incertitude", &incertitude)?;
+    let id_response = column(&mut project, sheet, "Response", &response)?;
+    let id_uncertainty = column(&mut project, sheet, "Uncertainty", &uncertainty)?;
 
-    let mut etalonnage = PanelSpec::at(0, 2);
-    etalonnage.title = "Étalonnage".to_string();
-    etalonnage.bottom = axis("dose", "µg");
-    etalonnage.left = AxisSpec {
+    let mut calibration = PanelSpec::at(0, 2);
+    calibration.title = "Calibration".to_string();
+    calibration.bottom = axis("dose", "µg");
+    calibration.left = AxisSpec {
         scale: AxisScale::Log,
-        ..axis("réponse", "cps")
+        ..axis("response", "cps")
     };
-    etalonnage.legend = LegendSpec {
+    calibration.legend = LegendSpec {
         visible: true,
         position: LegendPosition::TopLeft,
         anchor: None,
         ..LegendSpec::default()
     };
-    etalonnage.series.push(SeriesSpec {
-        name: "Série A".to_string(),
+    calibration.series.push(SeriesSpec {
+        name: "Series A".to_string(),
         plot_type: PlotType::ErrorBar,
-        y_error: Some(id_incertitude),
-        line: ligne("#72b7b2", LineStyle::Solid, 1.0),
-        symbol: marqueur("#72b7b2", SymbolShape::Square, 7.0),
-        ..SeriesSpec::new_xy(id_dose, id_reponse)
+        y_error: Some(id_uncertainty),
+        line: line_spec("#72b7b2", LineStyle::Solid, 1.0),
+        symbol: symbol_spec("#72b7b2", SymbolShape::Square, 7.0),
+        ..SeriesSpec::new_xy(id_dose, id_response)
     });
 
-    // -- (1,0) répartition : un histogramme.
-    let residus: Vec<f64> = (0..400)
+    // -- (1,0) distribution: a histogram.
+    let residuals: Vec<f64> = (0..400)
         .map(|i| {
-            // Trois suites équiréparties de pas irrationnels **distincts**,
-            // sommées : une cloche grossière, parfaitement déterministe.
-            // Aucun générateur aléatoire ne doit entrer dans un graphe dont
-            // un test compare la sortie au pixel près. Les pas ne doivent
-            // pas non plus se compléter à un entier, faute de quoi leurs
-            // parties fractionnaires se compensent et tout l'échantillon
-            // tombe dans une seule classe — erreur commise puis corrigée
-            // ici, et visible d'un coup d'œil sur l'histogramme.
+            // Three equidistributed sequences with **distinct** irrational
+            // steps, summed: a rough bell, perfectly deterministic. No
+            // random generator may enter a graph whose output a test
+            // compares to the pixel. The steps must not complete each other
+            // to an integer either, otherwise their fractional parts cancel
+            // out and the whole sample falls into a single bin — a mistake
+            // made then fixed here, and visible at a glance on the
+            // histogram.
             let i = i as f64;
             let a = (i * 0.754_877_666_2) % 1.0;
             let b = (i * 0.569_840_290_9) % 1.0;
@@ -216,79 +215,78 @@ pub fn realistic() -> CoreResult<Sample> {
             (a + b + c - 1.5) * 2.5
         })
         .collect();
-    let id_residus = column(&mut project, sheet, "Residus", &residus)?;
+    let id_residuals = column(&mut project, sheet, "Residuals", &residuals)?;
 
-    let mut repartition = PanelSpec::at(1, 0);
-    repartition.title = "Répartition".to_string();
-    repartition.bottom = axis("écart", "u.a.");
-    repartition.left = axis("effectif", "");
-    repartition.legend = LegendSpec {
+    let mut distribution = PanelSpec::at(1, 0);
+    distribution.title = "Distribution".to_string();
+    distribution.bottom = axis("deviation", "u.a.");
+    distribution.left = axis("count", "");
+    distribution.legend = LegendSpec {
         visible: true,
         position: LegendPosition::TopLeft,
         anchor: None,
         ..LegendSpec::default()
     };
-    repartition.series.push(SeriesSpec {
-        name: "Résidus".to_string(),
+    distribution.series.push(SeriesSpec {
+        name: "Residuals".to_string(),
         plot_type: PlotType::Histogram,
-        line: ligne("#b279a2", LineStyle::Solid, 1.0),
-        ..SeriesSpec::new(id_residus)
+        line: line_spec("#b279a2", LineStyle::Solid, 1.0),
+        ..SeriesSpec::new(id_residuals)
     });
 
-    // -- (1,1) rendement : des barres, un nuage relié, et une référence
-    //    brisée qui doit se voir.
-    let lot: Vec<f64> = (1..=7).map(|i| i as f64).collect();
-    let rendement: Vec<f64> = [72.0, 81.0, 68.0, 90.0, 77.0, 85.0, 79.0].to_vec();
-    let id_lot = column(&mut project, sheet, "Lot", &lot)?;
-    let id_rendement = column(&mut project, sheet, "Rendement", &rendement)?;
-    let disparue = column(&mut project, sheet, "Disparue", &[1.0, 2.0])?;
-    project.remove(disparue)?;
+    // -- (1,1) yield: bars, a connected scatter, and a broken reference
+    //    that must be visible.
+    let batch: Vec<f64> = (1..=7).map(|i| i as f64).collect();
+    let yield_values: Vec<f64> = [72.0, 81.0, 68.0, 90.0, 77.0, 85.0, 79.0].to_vec();
+    let id_batch = column(&mut project, sheet, "Batch", &batch)?;
+    let id_yield_values = column(&mut project, sheet, "Yield", &yield_values)?;
+    let vanished = column(&mut project, sheet, "Vanished", &[1.0, 2.0])?;
+    project.remove(vanished)?;
 
-    let mut rendements = PanelSpec::at(1, 1);
-    rendements.title = "Rendement par lot".to_string();
-    rendements.bottom = axis("lot", "");
-    rendements.left = axis("rendement", "%");
-    rendements.legend = LegendSpec {
+    let mut yields = PanelSpec::at(1, 1);
+    yields.title = "Yield per batch".to_string();
+    yields.bottom = axis("batch", "");
+    yields.left = axis("yield", "%");
+    yields.legend = LegendSpec {
         visible: true,
         position: LegendPosition::BottomRight,
         anchor: None,
         ..LegendSpec::default()
     };
-    rendements.series.push(SeriesSpec {
-        name: "Rendement".to_string(),
+    yields.series.push(SeriesSpec {
+        name: "Yield".to_string(),
         plot_type: PlotType::Bar,
-        line: ligne("#eeca3b", LineStyle::Solid, 1.0),
-        ..SeriesSpec::new_xy(id_lot, id_rendement)
+        line: line_spec("#eeca3b", LineStyle::Solid, 1.0),
+        ..SeriesSpec::new_xy(id_batch, id_yield_values)
     });
-    rendements.series.push(SeriesSpec {
-        name: "Campagne précédente".to_string(),
+    yields.series.push(SeriesSpec {
+        name: "Previous campaign".to_string(),
         plot_type: PlotType::LineScatter,
-        line: ligne("#9d755d", LineStyle::DashDot, 1.0),
-        symbol: marqueur("#9d755d", SymbolShape::Triangle, 7.0),
-        ..SeriesSpec::new(disparue)
+        line: line_spec("#9d755d", LineStyle::DashDot, 1.0),
+        symbol: symbol_spec("#9d755d", SymbolShape::Triangle, 7.0),
+        ..SeriesSpec::new(vanished)
     });
 
     let spec = PlotSpec {
-        title: "Campagne du 12 septembre — série µ".to_string(),
+        title: "Campaign of September 12 — series µ".to_string(),
         background: "#ffffff".to_string(),
         ..PlotSpec::empty("")
     }
     .with_panels(Panels::new([
-        spectres,
-        cinetique,
-        etalonnage,
-        repartition,
-        rendements,
+        spectra,
+        kinetics,
+        calibration,
+        distribution,
+        yields,
     ]));
 
     Ok(Sample { project, spec })
 }
 
-/// Une gaussienne, pour fabriquer des spectres qui ressemblent à des
-/// spectres.
-fn gaussienne(x: f64, centre: f64, largeur: f64, hauteur: f64) -> f64 {
-    let u = (x - centre) / largeur;
-    hauteur * (-u * u).exp()
+/// A Gaussian, to make spectra that look like spectra.
+fn gaussian(x: f64, center: f64, width: f64, height: f64) -> f64 {
+    let u = (x - center) / width;
+    height * (-u * u).exp()
 }
 
 fn axis(label: &str, unit: &str) -> AxisSpec {
@@ -300,7 +298,7 @@ fn axis(label: &str, unit: &str) -> AxisSpec {
     }
 }
 
-fn ligne(color: &str, style: LineStyle, width: f64) -> LineSpec {
+fn line_spec(color: &str, style: LineStyle, width: f64) -> LineSpec {
     LineSpec {
         color: color.to_string(),
         style,
@@ -308,7 +306,7 @@ fn ligne(color: &str, style: LineStyle, width: f64) -> LineSpec {
     }
 }
 
-fn marqueur(color: &str, shape: SymbolShape, size: f64) -> SymbolSpec {
+fn symbol_spec(color: &str, shape: SymbolShape, size: f64) -> SymbolSpec {
     SymbolSpec {
         shape,
         size,

@@ -1,35 +1,34 @@
-//! Correspondance pixel ↔ données d'un panneau tracé — tâche R7.
+//! Pixel ↔ data mapping of a drawn panel — task R7.
 //!
-//! # Pourquoi ici, et pas dans `stokesforge-render-egui`
+//! # Why here, and not in `stokesforge-render-egui`
 //!
-//! Rien ci-dessous ne dépend d'egui : c'est de la géométrie pure, au même
-//! titre que [`crate::scale`]. Un panneau tracé a une zone de tracé en
-//! pixels ([`DrawnPanel::pixel_origin`], [`DrawnPanel::pixel_size`], ajoutés
-//! par cette tâche) et un cadrage en données ([`DrawnPanel::x_range`],
-//! [`DrawnPanel::y_range`]) ; passer de l'un à l'autre ne regarde aucun
-//! backend en particulier, et le placer ici évite exactement la duplication
-//! que la règle de `roadmap-rendu.md` (« aucune fonctionnalité n'entre dans
-//! un seul backend ») existe pour empêcher. `stokesforge-render-svg` n'en a pas
-//! l'usage aujourd'hui (un SVG statique n'a pas de curseur), mais rien ne
-//! l'empêcherait d'en avoir un jour — un lecteur SVG interactif, par
-//! exemple — sans avoir à redescendre ce module d'un cran.
+//! Nothing below depends on egui: it is pure geometry, just like
+//! [`crate::scale`]. A drawn panel has a plot area in pixels
+//! ([`DrawnPanel::pixel_origin`], [`DrawnPanel::pixel_size`], added by this
+//! task) and a framing in data ([`DrawnPanel::x_range`],
+//! [`DrawnPanel::y_range`]); going from one to the other concerns no backend
+//! in particular, and putting it here avoids exactly the duplication that
+//! the rule of `roadmap-rendu.md` (« aucune fonctionnalité n'entre dans un
+//! seul backend ») exists to prevent. `stokesforge-render-svg` has no use
+//! for it today (a static SVG has no cursor), but nothing would prevent it
+//! from having one some day — an interactive SVG viewer, for example —
+//! without having to move this module down a level.
 //!
-//! # La transformation, en une phrase
+//! # The transformation, in one sentence
 //!
-//! Un axe travaille dans un espace **transformé** ([`crate::scale::forward`])
-//! qui est linéaire par construction — y compris sur une échelle
-//! logarithmique, où c'est log₁₀(valeur) qui l'est. La correspondance
-//! pixel ↔ transformé est donc une simple interpolation linéaire ; le
-//! passage à l'espace des données se fait par [`crate::scale::inverse`] de
-//! part et d'autre. C'est ce qui fait qu'un zoom molette reste correct sur
-//! un axe log sans qu'aucun appelant n'ait à le savoir.
+//! An axis works in a **transformed** space ([`crate::scale::forward`]) that
+//! is linear by construction — including on a logarithmic scale, where it is
+//! log₁₀(value) that is. The pixel ↔ transformed mapping is thus a plain
+//! linear interpolation; going to data space is done by
+//! [`crate::scale::inverse`] on either side. This is what keeps a wheel zoom
+//! correct on a log axis without any caller having to know it.
 //!
-//! # L'axe Y est inversé, et ce module porte la seule correction
+//! # The Y axis is inverted, and this module carries the only correction
 //!
-//! Un pixel croît vers le bas ; une donnée croît vers le haut. `pixel_to_data`
-//! et `data_to_pixel` portent ce retournement une fois pour toutes — la
-//! dérivation exacte (et le sens du glisser qui s'ensuit) est vérifiée par
-//! les tests de ce module plutôt qu'affirmée en commentaire.
+//! A pixel grows downward; a datum grows upward. `pixel_to_data`
+//! and `data_to_pixel` carry this flip once and for all — the exact
+//! derivation (and the direction of the resulting drag) is verified by this
+//! module's tests rather than asserted in a comment.
 
 use crate::pipeline::DrawnPanel;
 use crate::scale::{forward, inverse};
@@ -38,43 +37,42 @@ use stokesforge_core::resolve::resolve_panel;
 use stokesforge_core::Tree;
 use stokesforge_plot::{AxisScale, AxisSpec, PlotSpec, SeriesAxis};
 
-/// La correspondance pixel ↔ données d'un panneau déjà tracé.
+/// The pixel ↔ data mapping of an already drawn panel.
 ///
-/// Un geste de cadrage, exprimé dans le repère de la zone de tracé (pixels) :
-/// le même pour tous les calques d'une case, qui partagent cette zone (#167).
+/// A framing gesture, expressed in the plot area's coordinate space (pixels):
+/// the same for all layers of a cell, which share this area (#167).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Gesture {
-    /// Zoom d'un `factor` centré sur le pixel `anchor` (voir [`PanelTransform::zoom`]).
+    /// Zoom by a `factor` centered on pixel `anchor` (see [`PanelTransform::zoom`]).
     Zoom {
-        /// Pixel qui garde sa donnée.
+        /// Pixel that keeps its datum.
         anchor: (f64, f64),
-        /// `< 1` rapproche, `> 1` éloigne.
+        /// `< 1` zooms in, `> 1` zooms out.
         factor: f64,
     },
-    /// Glisser de `(dx, dy)` pixels (voir [`PanelTransform::pan`]).
+    /// Drag by `(dx, dy)` pixels (see [`PanelTransform::pan`]).
     Pan {
-        /// Déplacement horizontal.
+        /// Horizontal displacement.
         dx: f64,
-        /// Déplacement vertical.
+        /// Vertical displacement.
         dy: f64,
     },
-    /// Rectangle de zoom entre deux coins en pixels (voir
+    /// Zoom rectangle between two corners in pixels (see
     /// [`PanelTransform::range_between`]).
     Box {
-        /// Premier coin.
+        /// First corner.
         a: (f64, f64),
-        /// Coin opposé.
+        /// Opposite corner.
         b: (f64, f64),
     },
 }
 
-/// Construite à partir d'un [`DrawnPanel`] ; se reconstruit à l'identique
-/// tant que rien n'a bougé, donc bon marché à refaire à chaque frame plutôt
-/// qu'à mettre en cache.
+/// Built from a [`DrawnPanel`]; rebuilt identically as long as nothing has
+/// moved, hence cheap to redo on every frame rather than to cache.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PanelTransform {
-    // En `f64` : le rectangle d'un panneau d'interface est fractionnaire, et un
-    // arrondi à l'entier décalerait d'un demi-pixel tout ce qu'on y place.
+    // As `f64`: the rectangle of an interface panel is fractional, and rounding
+    // to an integer would shift by half a pixel everything placed in it.
     origin: (f64, f64),
     size: (f64, f64),
     x_range: (f64, f64),
@@ -84,10 +82,10 @@ pub struct PanelTransform {
 }
 
 impl PanelTransform {
-    /// La transformation d'un panneau tracé, ou `None` si sa zone de tracé
-    /// est dégénérée (largeur ou hauteur nulle — ne devrait pas arriver pour
-    /// un panneau qui a franchi [`crate::pipeline::MIN_CELL`], mais une
-    /// division par zéro n'a pas à compter sur cette garantie indirecte).
+    /// The transformation of a drawn panel, or `None` if its plot area
+    /// is degenerate (zero width or height — should not happen for
+    /// a panel that passed [`crate::pipeline::MIN_CELL`], but a
+    /// division by zero should not rely on this indirect guarantee).
     pub fn of(panel: &DrawnPanel) -> Option<Self> {
         if panel.pixel_size.0 == 0 || panel.pixel_size.1 == 0 {
             return None;
@@ -105,16 +103,16 @@ impl PanelTransform {
         })
     }
 
-    /// La transformation d'une zone de tracé qui ne vient pas d'un
-    /// [`DrawnPanel`] — l'aperçu de la fenêtre d'analyse (#261), peint par
-    /// l'application dans un rectangle fractionnaire. `origin` est le coin
-    /// haut-gauche et `size` la taille, en pixels ; `None` si la taille n'est
-    /// pas finie et strictement positive.
+    /// The transformation of a plot area that does not come from a
+    /// [`DrawnPanel`] — the analysis window preview (#261), painted by the
+    /// application in a fractional rectangle. `origin` is the top-left
+    /// corner and `size` the size, in pixels; `None` if the size is not
+    /// finite and strictly positive.
     ///
-    /// Les bornes sont en espace de données **dans l'ordre d'affichage** : un
-    /// axe inversé se donne `(haut, bas)`, comme [`DrawnPanel::x_range`]. Sur
-    /// une échelle logarithmique elles doivent être strictement positives,
-    /// sinon [`Self::pixel_to_data`] et [`Self::data_to_pixel`] rendent `None`.
+    /// The bounds are in data space **in display order**: an inverted
+    /// axis is given as `(top, bottom)`, like [`DrawnPanel::x_range`]. On a
+    /// logarithmic scale they must be strictly positive, otherwise
+    /// [`Self::pixel_to_data`] and [`Self::data_to_pixel`] return `None`.
     pub fn new(
         origin: (f64, f64),
         size: (f64, f64),
@@ -139,9 +137,9 @@ impl PanelTransform {
         })
     }
 
-    /// La transformation d'un panneau pour une ordonnée donnée : celle de
-    /// droite si `right` et que le panneau en a une (`y2_range`), sinon
-    /// celle de gauche — la règle des séries et des textes libres (issue
+    /// The transformation of a panel for a given ordinate: the right-hand
+    /// one if `right` and the panel has one (`y2_range`), otherwise the
+    /// left-hand one — the rule for series and free texts (issue
     /// #35).
     pub fn of_axis(panel: &DrawnPanel, right: bool) -> Option<Self> {
         let mut transform = Self::of(panel)?;
@@ -152,28 +150,28 @@ impl PanelTransform {
         Some(transform)
     }
 
-    /// Vrai si le pixel donné tombe dans la zone de tracé de ce panneau.
+    /// True if the given pixel falls inside this panel's plot area.
     pub fn contains(&self, x: f64, y: f64) -> bool {
         let ((ox, oy), (w, h)) = (self.origin, self.size);
         (ox..=ox + w).contains(&x) && (oy..=oy + h).contains(&y)
     }
 
-    /// Donnée sous un pixel. `None` si l'une des deux bornes de l'un des
-    /// deux axes n'a pas d'image sur son échelle (ex. borne négative sur un
-    /// axe log) — un cas déjà possible pour un cadrage explicite incohérent
-    /// (`pipeline::axis_range`), donc à laisser remonter plutôt qu'à
-    /// paniquer.
+    /// Datum under a pixel. `None` if one of the two bounds of either
+    /// axis has no image on its scale (e.g. a negative bound on a
+    /// log axis) — a case already possible for an inconsistent explicit
+    /// framing (`pipeline::axis_range`), hence to be passed up rather than
+    /// panicked on.
     pub fn pixel_to_data(&self, x: f64, y: f64) -> Option<(f64, f64)> {
         let fx = (x - self.origin.0) / self.size.0;
-        // Le pixel croît vers le bas, la donnée vers le haut : `1.0 - fy`.
+        // The pixel grows downward, the datum upward: `1.0 - fy`.
         let fy = 1.0 - (y - self.origin.1) / self.size.1;
         let data_x = axis_from_frac(self.x_scale, self.x_range, fx)?;
         let data_y = axis_from_frac(self.y_scale, self.y_range, fy)?;
         Some((data_x, data_y))
     }
 
-    /// Pixel d'une donnée. Réciproque de [`Self::pixel_to_data`] là où
-    /// celle-ci est définie.
+    /// Pixel of a datum. Reciprocal of [`Self::pixel_to_data`] where
+    /// the latter is defined.
     pub fn data_to_pixel(&self, x: f64, y: f64) -> Option<(f64, f64)> {
         let fx = axis_to_frac(self.x_scale, self.x_range, x)?;
         let fy = axis_to_frac(self.y_scale, self.y_range, y)?;
@@ -182,7 +180,7 @@ impl PanelTransform {
         Some((px, py))
     }
 
-    /// Le cadrage `(x, y)` que ce geste donne à ces deux axes.
+    /// The `(x, y)` framing that this gesture gives to these two axes.
     pub fn apply(&self, gesture: &Gesture) -> Option<((f64, f64), (f64, f64))> {
         match *gesture {
             Gesture::Zoom { anchor, factor } => self.zoom(anchor, factor),
@@ -191,10 +189,10 @@ impl PanelTransform {
         }
     }
 
-    /// Nouveau cadrage après un zoom centré sur `anchor` (en pixel), d'un
-    /// `factor` (`< 1` rapproche, `> 1` éloigne). La donnée sous `anchor`
-    /// reste sous `anchor` après le zoom — c'est la propriété que
-    /// [`tests::zoomer_fixe_le_point_sous_le_curseur`] vérifie.
+    /// New framing after a zoom centered on `anchor` (in pixels), by a
+    /// `factor` (`< 1` zooms in, `> 1` zooms out). The datum under `anchor`
+    /// stays under `anchor` after the zoom — this is the property that
+    /// [`tests::zooming_pins_the_point_under_the_cursor`] checks.
     pub fn zoom(&self, anchor: (f64, f64), factor: f64) -> Option<((f64, f64), (f64, f64))> {
         let (ax, ay) = self.pixel_to_data(anchor.0, anchor.1)?;
         let x_range = zoom_range(self.x_scale, self.x_range, ax, factor)?;
@@ -202,22 +200,22 @@ impl PanelTransform {
         Some((x_range, y_range))
     }
 
-    /// Nouveau cadrage après un glisser de `(dx, dy)` pixels — la donnée qui
-    /// était sous le curseur au début du geste reste sous le curseur à la
-    /// fin (`tests::glisser_fait_suivre_le_contenu_au_curseur`).
+    /// New framing after a drag of `(dx, dy)` pixels — the datum that
+    /// was under the cursor at the start of the gesture stays under the cursor
+    /// at the end (`tests::dragging_makes_the_content_follow_the_cursor`).
     pub fn pan(&self, dx: f64, dy: f64) -> Option<((f64, f64), (f64, f64))> {
         let fx = dx / self.size.0;
-        // Le pixel Y est inversé par rapport à la donnée : le signe change.
+        // The pixel Y is inverted relative to the datum: the sign changes.
         let fy = -dy / self.size.1;
         let x_range = pan_range(self.x_scale, self.x_range, fx)?;
         let y_range = pan_range(self.y_scale, self.y_range, fy)?;
         Some((x_range, y_range))
     }
 
-    /// Le cadrage délimité par deux coins en pixel — le rectangle de zoom
-    /// élastique de la tâche 7.4. L'ordre des coins n'importe pas : chaque
-    /// paire est remise dans le sens de l'axe affiché, car un cadrage
-    /// « de 800 à 400 » trace l'axe à l'envers (`pipeline::axis_range`).
+    /// The framing delimited by two corners in pixels — the rubber-band
+    /// zoom rectangle of task 7.4. The order of the corners does not matter: each
+    /// pair is put back in the direction of the displayed axis, since a framing
+    /// "from 800 to 400" draws the axis upside down (`pipeline::axis_range`).
     pub fn range_between(
         &self,
         corner_a: (f64, f64),
@@ -239,8 +237,8 @@ impl PanelTransform {
     }
 }
 
-/// La fraction (0 = `range.0`, 1 = `range.1`) de la valeur `v` sur l'axe,
-/// dans l'espace transformé.
+/// The fraction (0 = `range.0`, 1 = `range.1`) of value `v` on the axis,
+/// in the transformed space.
 fn axis_to_frac(scale: AxisScale, (r0, r1): (f64, f64), v: f64) -> Option<f64> {
     let t0 = forward(scale, r0)?;
     let t1 = forward(scale, r1)?;
@@ -251,16 +249,16 @@ fn axis_to_frac(scale: AxisScale, (r0, r1): (f64, f64), v: f64) -> Option<f64> {
     Some((t - t0) / (t1 - t0))
 }
 
-/// La donnée à la fraction `frac` (0 = `range.0`, 1 = `range.1`) de l'axe.
+/// The datum at fraction `frac` (0 = `range.0`, 1 = `range.1`) of the axis.
 fn axis_from_frac(scale: AxisScale, (r0, r1): (f64, f64), frac: f64) -> Option<f64> {
     let t0 = forward(scale, r0)?;
     let t1 = forward(scale, r1)?;
     Some(inverse(scale, t0 + frac * (t1 - t0)))
 }
 
-/// Un cadrage zoomé d'un `factor` autour de la valeur `anchor`, dans
-/// l'espace transformé — la dérivation qui garantit que `anchor` garde la
-/// même fraction avant et après (donc le même pixel) est en tête de module.
+/// A framing zoomed by a `factor` around value `anchor`, in the
+/// transformed space — the derivation that guarantees `anchor` keeps the
+/// same fraction before and after (hence the same pixel) is at the top of the module.
 fn zoom_range(
     scale: AxisScale,
     (r0, r1): (f64, f64),
@@ -275,10 +273,10 @@ fn zoom_range(
     Some((inverse(scale, n0), inverse(scale, n1)))
 }
 
-/// Un cadrage décalé d'une fraction `frac` de sa propre étendue, dans
-/// l'espace transformé. `frac > 0` déplace le cadrage vers le haut de
-/// l'axe (donc, en pixel, fait apparaître comme si le contenu descendait) ;
-/// [`PanelTransform::pan`] choisit le signe de `frac` pour chaque axe.
+/// A framing shifted by a fraction `frac` of its own extent, in the
+/// transformed space. `frac > 0` moves the framing toward the top of
+/// the axis (hence, in pixels, makes the content appear to move down);
+/// [`PanelTransform::pan`] chooses the sign of `frac` for each axis.
 fn pan_range(scale: AxisScale, (r0, r1): (f64, f64), frac: f64) -> Option<(f64, f64)> {
     let t0 = forward(scale, r0)?;
     let t1 = forward(scale, r1)?;
@@ -286,11 +284,11 @@ fn pan_range(scale: AxisScale, (r0, r1): (f64, f64), frac: f64) -> Option<(f64, 
     Some((inverse(scale, t0 - shift), inverse(scale, t1 - shift)))
 }
 
-/// Le point d'une courbe déjà projetée le plus proche du curseur, en pixel.
+/// The point of an already projected curve closest to the cursor, in pixels.
 ///
-/// L'équivalent du couple `ReverseCoordTranslate` + `min_by_key`
-/// d'`architecture-choisie.md` §6 — sans le premier, dont ce module est déjà
-/// l'implémentation. Rend l'indice dans `points` et la distance en pixels.
+/// The equivalent of the `ReverseCoordTranslate` + `min_by_key` pair
+/// of `architecture-choisie.md` §6 — without the former, of which this module is already
+/// the implementation. Returns the index in `points` and the distance in pixels.
 pub fn nearest_on_curve(
     transform: &PanelTransform,
     points: &[(f64, f64)],
@@ -308,15 +306,15 @@ pub fn nearest_on_curve(
         .map(|(index, squared)| (index, squared.sqrt()))
 }
 
-/// Le cadrage automatique d'un axe sur `values`, en espace de données et dans
-/// le sens croissant.
+/// The automatic framing of an axis on `values`, in data space and in
+/// increasing direction.
 ///
-/// Les valeurs sans image sur l'échelle ([`forward`] : non finies, ou ≤ 0 en
-/// logarithmique) sont ignorées. La marge de 5 % se prend dans l'espace
-/// **transformé** — donc en proportion sur un axe log —, un cadre d'étendue
-/// nulle s'élargit de 0,5 de chaque côté, et sans valeur le cadre est `(0, 1)`
-/// transformé (`(1, 10)` en log). C'est le cadre initial de l'aperçu de la
-/// fenêtre d'analyse (#261).
+/// Values with no image on the scale ([`forward`]: non-finite, or ≤ 0 on a
+/// logarithmic scale) are ignored. The 5% margin is taken in the
+/// **transformed** space — hence proportionally on a log axis —, a frame of
+/// zero extent widens by 0.5 on each side, and with no values the frame is
+/// `(0, 1)` transformed (`(1, 10)` on log). This is the initial frame of the
+/// analysis window preview (#261).
 pub fn fit_range(values: &[f64], scale: AxisScale) -> (f64, f64) {
     let (mut low, mut high) = (f64::INFINITY, f64::NEG_INFINITY);
     for t in values.iter().filter_map(|&value| forward(scale, value)) {
@@ -334,12 +332,12 @@ pub fn fit_range(values: &[f64], scale: AxisScale) -> (f64, f64) {
     (inverse(scale, low), inverse(scale, high))
 }
 
-/// Le cadre initial d'un axe d'un graphe : [`fit_range`] sur `values`,
-/// remplacé par les bornes mémorisées de l'axe quand son cadrage n'est pas
-/// automatique, puis mis dans le sens d'affichage (`(haut, bas)` si l'axe est
-/// inversé). Même règle que le graphe (`pipeline::axis_range`, #269) : un seul
-/// retournement, que l'axe soit inversé par la case « Inversé », par des
-/// bornes `min > max`, ou par les deux.
+/// The initial frame of a graph axis: [`fit_range`] on `values`,
+/// replaced by the axis's stored bounds when its framing is not
+/// automatic, then put in display direction (`(top, bottom)` if the axis is
+/// inverted). Same rule as the graph (`pipeline::axis_range`, #269): a single
+/// flip, whether the axis is inverted by the "Inverted" checkbox, by
+/// bounds `min > max`, or by both.
 pub fn axis_frame(values: &[f64], axis: &AxisSpec) -> (f64, f64) {
     let mut range = fit_range(values, axis.scale);
     let mut reversed = false;
@@ -355,38 +353,38 @@ pub fn axis_frame(values: &[f64], axis: &AxisSpec) -> (f64, f64) {
     range
 }
 
-/// Le point de la courbe le plus proche de `x` en abscisse, avec l'ordonnée
-/// moyennée sur `n` points centrés sur lui (pour `n` pair, un de plus à droite) (l'aimantation de l'aperçu
-/// d'analyse, #181 M4 b). `None` pour une courbe vide, ou si `ys` est plus
-/// court que `xs`.
+/// The curve point closest to `x` in abscissa, with the ordinate
+/// averaged over `n` points centered on it (for even `n`, one more on the right)
+/// (the analysis preview's snapping, #181 M4 b). `None` for an empty curve, or if `ys` is
+/// shorter than `xs`.
 ///
-/// Les abscisses non finies ne sont jamais choisies ; les ordonnées non
-/// finies sont écartées de la moyenne (`None` s'il n'en reste aucune). Au bord,
-/// la fenêtre se tronque au lieu de déborder. Nommée `snap_to_curve` pour ne
-/// pas se confondre avec [`crate::scale::snap_to_decades`].
+/// Non-finite abscissas are never chosen; non-finite ordinates are
+/// dropped from the average (`None` if none remain). At the edge,
+/// the window is truncated instead of overflowing. Named `snap_to_curve` so as
+/// not to be confused with [`crate::scale::snap_to_decades`].
 pub fn snap_to_curve(xs: &[f64], ys: &[f64], x: f64, n: usize) -> Option<(f64, f64)> {
     snap_to_curve_zone(xs, ys, x, n).map(|snap| (snap.x, snap.y))
 }
 
-/// L'aimantation de [`snap_to_curve`] avec la zone qui entre dans la moyenne
-/// (#334) : de quoi montrer à l'écran ce que N moyenne.
+/// The snapping of [`snap_to_curve`] with the area that enters the average
+/// (#334): enough to show on screen what N averages.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SnapZone {
-    /// Abscisse du point de la courbe le plus proche.
+    /// Abscissa of the closest curve point.
     pub x: f64,
-    /// Ordonnée moyenne de la fenêtre.
+    /// Mean ordinate of the window.
     pub y: f64,
-    /// Plus petite abscisse finie de la fenêtre (abscisses non triées : le
-    /// minimum de la fenêtre, pas son premier point).
+    /// Smallest finite abscissa of the window (unsorted abscissas: the
+    /// minimum of the window, not its first point).
     pub x_min: f64,
-    /// Plus grande abscisse finie de la fenêtre.
+    /// Largest finite abscissa of the window.
     pub x_max: f64,
-    /// Nombre réel de points moyennés : la fenêtre tronquée au bord, sans les
-    /// ordonnées non finies.
+    /// Actual number of averaged points: the window truncated at the edge,
+    /// without the non-finite ordinates.
     pub count: usize,
 }
 
-/// [`snap_to_curve`] et la zone moyennée. Mêmes règles, mêmes `None`.
+/// [`snap_to_curve`] and the averaged area. Same rules, same `None`s.
 pub fn snap_to_curve_zone(xs: &[f64], ys: &[f64], x: f64, n: usize) -> Option<SnapZone> {
     if ys.len() < xs.len() {
         return None;
@@ -397,7 +395,7 @@ pub fn snap_to_curve_zone(xs: &[f64], ys: &[f64], x: f64, n: usize) -> Option<Sn
         .filter(|(_, value)| value.is_finite())
         .min_by(|a, b| (a.1 - x).abs().total_cmp(&(b.1 - x).abs()))?
         .0;
-    // Fenêtre de `n` points ; pour `n` pair, le point en trop est à droite.
+    // Window of `n` points; for even `n`, the extra point is on the right.
     let n = n.max(1);
     let low = nearest.saturating_sub((n - 1) / 2);
     let high = (nearest + n / 2 + 1).min(ys.len());
@@ -426,42 +424,42 @@ pub fn snap_to_curve_zone(xs: &[f64], ys: &[f64], x: f64, n: usize) -> Option<Sn
     })
 }
 
-/// Un point désigné sur une courbe : ce que [`nearest_point`] rend, en
-/// `f64` et sans type d'interface (la conversion en pixels egui est celle de
-/// `stokesforge-render-egui`, qui en fait son `PointHit`).
+/// A point picked on a curve: what [`nearest_point`] returns, as
+/// `f64` and with no interface type (the conversion to egui pixels is that of
+/// `stokesforge-render-egui`, which makes its `PointHit` from it).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NearestPoint {
-    /// Indice de la série dans `PanelSpec::series`, résolu dans le même
-    /// ordre (`ResolvedPanel::series`).
+    /// Index of the series in `PanelSpec::series`, resolved in the same
+    /// order (`ResolvedPanel::series`).
     pub series: usize,
-    /// Indice du point désigné dans sa série.
+    /// Index of the picked point in its series.
     pub point_index: usize,
-    /// Position du point, en données (jamais les exposants d'un axe
-    /// logarithmique).
+    /// Position of the point, in data (never the exponents of a
+    /// logarithmic axis).
     pub data: (f64, f64),
-    /// Position du point, en pixels de la figure.
+    /// Position of the point, in figure pixels.
     pub pixel: (f64, f64),
-    /// Distance du curseur au point, en pixels.
+    /// Distance from the cursor to the point, in pixels.
     pub distance: f64,
 }
 
-/// Le point désigné du panneau tracé `drawn_panel` sous le curseur `cursor`
-/// (pixels de la figure) — tâche R7.2, l'équivalent local de
-/// `ReverseCoordTranslate` + `min_by_key` d'`architecture-choisie.md` §6
-/// (`min_by_key` vit dans [`nearest_on_curve`], réutilisé série par série).
-/// `None` si aucun point n'est à `radius` pixels ou moins.
+/// The picked point of the drawn panel `drawn_panel` under the cursor `cursor`
+/// (figure pixels) — task R7.2, the local equivalent of
+/// `ReverseCoordTranslate` + `min_by_key` of `architecture-choisie.md` §6
+/// (`min_by_key` lives in [`nearest_on_curve`], reused series by series).
+/// `None` if no point is within `radius` pixels or less.
 ///
-/// **Limité à l'axe principal** (bas, gauche) : une série de l'axe secondaire
-/// vivrait sur un second [`PanelTransform`] (`of_axis`) qu'il faudrait
-/// construire à côté, et rien aujourd'hui n'en a l'usage. Écart assumé, pas
-/// une omission tue. Les séries masquées, brisées ou de type inconnu, et
-/// celles qui ne sont pas une courbe (histogramme, barres), sont ignorées.
+/// **Limited to the main axis** (bottom, left): a series of the secondary
+/// axis would live on a second [`PanelTransform`] (`of_axis`) that would have
+/// to be built alongside, and nothing uses it today. A deliberate gap, not
+/// a silent omission. Hidden, broken or unknown-type series, and
+/// those that are not a curve (histogram, bars), are ignored.
 ///
-/// Recalcule la géométrie plutôt que de la garder en mémoire : une série
-/// résolue ne porte que des `Arc<Vec<f64>>` clonés par compteur
-/// (`stokesforge-core::resolve`), donc le refaire à chaque survol coûte un
-/// parcours, pas une copie — moins cher que de le garder à jour à travers
-/// chaque zoom.
+/// Recomputes the geometry rather than keeping it in memory: a resolved
+/// series only carries `Arc<Vec<f64>>`s cloned by counter
+/// (`stokesforge-core::resolve`), so redoing it on every hover costs
+/// one traversal, not a copy — cheaper than keeping it up to date across
+/// each zoom.
 pub fn nearest_point(
     tree: &Tree,
     spec: &PlotSpec,
@@ -490,9 +488,9 @@ pub fn nearest_point(
         let series::Geometry::Curve { points, .. } = &prepared.geometry else {
             continue;
         };
-        // La géométrie préparée est dans l'espace transformé (log10 sur un axe
-        // log) ; `PanelTransform` attend des données et applique `forward`
-        // lui-même : sans ce retour, le logarithme serait pris deux fois (#268).
+        // The prepared geometry is in the transformed space (log10 on a log
+        // axis); `PanelTransform` expects data and applies `forward`
+        // itself: without this return, the logarithm would be taken twice (#268).
         let data_points: Vec<(f64, f64)> = points
             .iter()
             .map(|&(x, y)| {
@@ -533,10 +531,10 @@ mod tests {
     use stokesforge_core::{NodeId, Project};
     use stokesforge_plot::{PanelSpec, SeriesSpec};
 
-    /// Un panneau de 100×100 px, cadré sur `0..100` des deux côtés, en
-    /// linéaire — assez pour vérifier le sens des deux axes sans que
-    /// l'échelle log ne mélange la lecture des chiffres.
-    fn carre() -> PanelTransform {
+    /// A 100×100 px panel, framed on `0..100` on both sides, linear —
+    /// enough to check the direction of both axes without the log scale
+    /// muddling the reading of the numbers.
+    fn square() -> PanelTransform {
         PanelTransform {
             origin: (0.0, 0.0),
             size: (100.0, 100.0),
@@ -548,30 +546,30 @@ mod tests {
     }
 
     #[test]
-    fn le_coin_haut_gauche_est_x_min_y_max() {
-        let t = carre();
+    fn the_top_left_corner_is_x_min_y_max() {
+        let t = square();
         assert_eq!(t.pixel_to_data(0.0, 0.0), Some((0.0, 100.0)));
         assert_eq!(t.pixel_to_data(100.0, 100.0), Some((100.0, 0.0)));
     }
 
     #[test]
-    fn aller_retour_pixel_donnee_est_lidentite() {
-        let t = carre();
+    fn pixel_to_data_round_trip_is_the_identity() {
+        let t = square();
         for (x, y) in [(0.0, 0.0), (37.0, 61.0), (100.0, 100.0)] {
-            let (dx, dy) = t.pixel_to_data(x, y).expect("pixel dans le panneau");
-            let (px, py) = t.data_to_pixel(dx, dy).expect("donnée représentable");
+            let (dx, dy) = t.pixel_to_data(x, y).expect("pixel inside the panel");
+            let (px, py) = t.data_to_pixel(dx, dy).expect("representable datum");
             assert!((px - x).abs() < 1e-9 && (py - y).abs() < 1e-9, "{px},{py}");
         }
     }
 
     #[test]
-    fn glisser_fait_suivre_le_contenu_au_curseur() {
-        // La donnée sous le pixel (20, 30) doit se retrouver sous le pixel
-        // (20 + 15, 30 + 8) après un glisser de (15, 8) px — c'est la
-        // définition même de « faire glisser le graphe ».
-        let t = carre();
-        let (dx, dy) = t.pixel_to_data(20.0, 30.0).expect("dans le panneau");
-        let (x_range, y_range) = t.pan(15.0, 8.0).expect("pan linéaire toujours défini");
+    fn dragging_makes_the_content_follow_the_cursor() {
+        // The datum under pixel (20, 30) must end up under pixel
+        // (20 + 15, 30 + 8) after a drag of (15, 8) px — this is the very
+        // definition of "dragging the graph".
+        let t = square();
+        let (dx, dy) = t.pixel_to_data(20.0, 30.0).expect("inside the panel");
+        let (x_range, y_range) = t.pan(15.0, 8.0).expect("linear pan always defined");
         let after = PanelTransform {
             x_range,
             y_range,
@@ -579,19 +577,19 @@ mod tests {
         };
         let (px, py) = after
             .data_to_pixel(dx, dy)
-            .expect("la même donnée reste représentable");
+            .expect("the same datum stays representable");
         assert!((px - 35.0).abs() < 1e-9, "px = {px}");
         assert!((py - 38.0).abs() < 1e-9, "py = {py}");
     }
 
     #[test]
-    fn zoomer_fixe_le_point_sous_le_curseur() {
-        let t = carre();
+    fn zooming_pins_the_point_under_the_cursor() {
+        let t = square();
         let anchor = (70.0, 20.0);
         let anchor_data = t
             .pixel_to_data(anchor.0, anchor.1)
-            .expect("dans le panneau");
-        let (x_range, y_range) = t.zoom(anchor, 0.5).expect("zoom linéaire toujours défini");
+            .expect("inside the panel");
+        let (x_range, y_range) = t.zoom(anchor, 0.5).expect("linear zoom always defined");
         let after = PanelTransform {
             x_range,
             y_range,
@@ -599,15 +597,15 @@ mod tests {
         };
         let (px, py) = after
             .data_to_pixel(anchor_data.0, anchor_data.1)
-            .expect("le point sous le curseur reste représentable");
+            .expect("the point under the cursor stays representable");
         assert!((px - anchor.0).abs() < 1e-9, "px = {px}");
         assert!((py - anchor.1).abs() < 1e-9, "py = {py}");
-        // Et le cadrage a bien rétréci de moitié.
+        // And the framing did shrink by half.
         assert!((x_range.1 - x_range.0 - 50.0).abs() < 1e-9, "{x_range:?}");
     }
 
     #[test]
-    fn zoomer_sur_une_echelle_log_reste_coherent() {
+    fn zooming_on_a_log_scale_stays_consistent() {
         let t = PanelTransform {
             origin: (0.0, 0.0),
             size: (100.0, 100.0),
@@ -616,34 +614,34 @@ mod tests {
             x_scale: AxisScale::Log,
             y_scale: AxisScale::Linear,
         };
-        // Le milieu du panneau, en x, est la moyenne géométrique 1..1000,
-        // soit environ 31,6 — pas 500,5 comme en linéaire.
-        let (mid_x, _) = t.pixel_to_data(50.0, 100.0).expect("dans le panneau");
+        // The middle of the panel, in x, is the geometric mean of 1..1000,
+        // about 31.6 — not 500.5 as in linear.
+        let (mid_x, _) = t.pixel_to_data(50.0, 100.0).expect("inside the panel");
         assert!((mid_x - 31.622_776_6).abs() < 1e-4, "{mid_x}");
 
-        let (x_range, _) = t.zoom((50.0, 50.0), 0.5).expect("zoom log toujours défini");
-        // Toujours centré sur le même point après le zoom.
+        let (x_range, _) = t.zoom((50.0, 50.0), 0.5).expect("log zoom always defined");
+        // Still centered on the same point after the zoom.
         let after = PanelTransform { x_range, ..t };
-        let (px, _) = after.data_to_pixel(mid_x, 50.0).expect("représentable");
+        let (px, _) = after.data_to_pixel(mid_x, 50.0).expect("representable");
         assert!((px - 50.0).abs() < 1e-6, "px = {px}");
     }
 
     #[test]
-    fn le_rectangle_elastique_lit_les_deux_coins() {
-        let t = carre();
+    fn the_rubber_band_rectangle_reads_both_corners() {
+        let t = square();
         let (x_range, y_range) = t.range_between((10.0, 10.0), (60.0, 40.0)).unwrap();
         assert_eq!(x_range, (10.0, 60.0));
-        // Y croît vers le haut : le coin haut (pixel 10) est la donnée la plus
-        // grande, mais la paire reste dans le sens de l'axe affiché (bas → haut).
+        // Y grows upward: the top corner (pixel 10) is the largest datum,
+        // but the pair stays in the direction of the displayed axis (bottom → top).
         assert_eq!(y_range, (60.0, 90.0));
-        // Les coins pris dans l'autre ordre donnent le même cadrage.
+        // The corners taken in the other order give the same framing.
         let swapped = t.range_between((60.0, 40.0), (10.0, 10.0)).unwrap();
         assert_eq!(swapped, (x_range, y_range));
     }
 
     #[test]
-    fn hors_du_panneau_nest_plus_dans_le_panneau() {
-        let t = carre();
+    fn outside_the_panel_is_no_longer_in_the_panel() {
+        let t = square();
         assert!(t.contains(0.0, 0.0));
         assert!(t.contains(100.0, 100.0));
         assert!(!t.contains(-1.0, 50.0));
@@ -651,70 +649,70 @@ mod tests {
     }
 
     #[test]
-    fn le_point_le_plus_proche_est_bien_le_plus_proche() {
-        let t = carre();
+    fn the_closest_point_really_is_the_closest() {
+        let t = square();
         let points = [(0.0, 0.0), (50.0, 50.0), (100.0, 0.0)];
-        // Curseur près du pixel de (50, 50) (data), soit pixel (50, 50).
+        // Cursor near the pixel of (50, 50) (data), i.e. pixel (50, 50).
         let (index, distance) = nearest_on_curve(&t, &points, (52.0, 51.0)).unwrap();
         assert_eq!(index, 1);
         assert!(distance < 3.0, "{distance}");
     }
 
-    /// Un projet à une feuille dont les colonnes sont `colonnes`, et leurs
-    /// identifiants dans le même ordre.
-    fn projet(colonnes: &[Vec<f64>]) -> (Project, Vec<NodeId>) {
-        let mut project = Project::new("Désignation").expect("projet");
+    /// A project with one worksheet whose columns are `columns`, and their
+    /// identifiers in the same order.
+    fn project_with(columns: &[Vec<f64>]) -> (Project, Vec<NodeId>) {
+        let mut project = Project::new("Picking").expect("project");
         let root = project.root();
-        let book = project.add_empty_workbook(root, None).expect("classeur");
-        let sheet = project.add_worksheet(book, None).expect("feuille");
-        let ids = colonnes
+        let book = project.add_empty_workbook(root, None).expect("workbook");
+        let sheet = project.add_worksheet(book, None).expect("worksheet");
+        let ids = columns
             .iter()
-            .map(|valeurs| {
-                let colonne = Column::from_block(
+            .map(|values| {
+                let column = Column::from_block(
                     ColumnType::Numeric,
-                    ValueBlock::Float(valeurs.clone()),
+                    ValueBlock::Float(values.clone()),
                     ColumnMeta::default(),
                 )
-                .expect("colonne");
+                .expect("column");
                 project
-                    .add_column(sheet, None, None, colonne)
-                    .expect("ajout")
+                    .add_column(sheet, None, None, column)
+                    .expect("added")
             })
             .collect();
         (project, ids)
     }
 
-    /// Désigne le point sous `cursor` d'un panneau 100×100 px cadré sur
-    /// `0..100`, dont `series` sont les courbes.
-    fn designer(
-        colonnes: &[Vec<f64>],
+    /// Picks the point under `cursor` of a 100×100 px panel framed on
+    /// `0..100`, whose curves are `series`.
+    fn pick(
+        columns: &[Vec<f64>],
         series: impl Fn(&[NodeId]) -> Vec<SeriesSpec>,
         cursor: (f64, f64),
         radius: f64,
     ) -> Option<NearestPoint> {
-        let (project, ids) = projet(colonnes);
+        let (project, ids) = project_with(columns);
         let mut spec_panel = PanelSpec::at(0, 0);
         spec_panel.series.extend(series(&ids));
-        let spec = PlotSpec::empty("Désignation").with_panels(spec_panel);
+        let spec = PlotSpec::empty("Picking").with_panels(spec_panel);
         let drawn = panel(0, 0, 0);
-        let transform = PanelTransform::of(&drawn).expect("zone de tracé");
+        let transform = PanelTransform::of(&drawn).expect("plot area");
         nearest_point(project.tree(), &spec, &drawn, &transform, cursor, radius)
     }
 
-    fn diagonale() -> Vec<Vec<f64>> {
+    fn diagonal() -> Vec<Vec<f64>> {
         vec![vec![0.0, 50.0, 100.0], vec![0.0, 50.0, 100.0]]
     }
 
     #[test]
-    fn le_point_designe_est_le_plus_proche_du_curseur() {
-        // Le point (50, 50) est au pixel (50, 50) : l'ordonnée est retournée.
-        let hit = designer(
-            &diagonale(),
+    fn the_picked_point_is_the_closest_to_the_cursor() {
+        // Point (50, 50) is at pixel (50, 50): the ordinate is flipped.
+        let hit = pick(
+            &diagonal(),
             |ids| vec![SeriesSpec::new_xy(ids[0], ids[1])],
             (52.0, 51.0),
             12.0,
         )
-        .expect("un point à portée");
+        .expect("a point in range");
         assert_eq!((hit.series, hit.point_index), (0, 1));
         assert_eq!(hit.data, (50.0, 50.0));
         assert_eq!(hit.pixel, (50.0, 50.0));
@@ -722,13 +720,13 @@ mod tests {
     }
 
     #[test]
-    fn un_point_est_designe_sur_des_axes_logarithmiques() {
-        // #268 : le logarithme ne doit être pris qu'une fois.
-        let colonnes = vec![
+    fn a_point_is_picked_on_logarithmic_axes() {
+        // #268: the logarithm must be taken only once.
+        let columns = vec![
             vec![1.0, 10.0, 100.0, 1000.0],
             vec![10.0, 100.0, 1000.0, 10_000.0],
         ];
-        let (project, ids) = projet(&colonnes);
+        let (project, ids) = project_with(&columns);
         let mut spec_panel = PanelSpec::at(0, 0);
         spec_panel.bottom.scale = AxisScale::Log;
         spec_panel.left.scale = AxisScale::Log;
@@ -743,10 +741,10 @@ mod tests {
             x_scale: AxisScale::Log,
             y_scale: AxisScale::Log,
         };
-        for (index, (&x, &y)) in colonnes[0].iter().zip(&colonnes[1]).enumerate() {
+        for (index, (&x, &y)) in columns[0].iter().zip(&columns[1]).enumerate() {
             let cursor = transform.data_to_pixel(x, y).unwrap();
             let hit = nearest_point(project.tree(), &spec, &drawn, &transform, cursor, 3.0)
-                .unwrap_or_else(|| panic!("point {index} non désigné"));
+                .unwrap_or_else(|| panic!("point {index} not picked"));
             assert_eq!(hit.point_index, index);
             assert!(hit.distance < 1e-6, "{hit:?}");
             assert!((hit.data.0 / x - 1.0).abs() < 1e-9 && (hit.data.1 / y - 1.0).abs() < 1e-9);
@@ -754,66 +752,66 @@ mod tests {
     }
 
     #[test]
-    fn hors_de_portee_rien_n_est_designe() {
-        let colonnes = diagonale();
+    fn out_of_range_nothing_is_picked() {
+        let columns = diagonal();
         let series = |ids: &[NodeId]| vec![SeriesSpec::new_xy(ids[0], ids[1])];
-        // Le coin haut gauche est à plus de 12 px de la diagonale (le point
-        // le plus proche, (0, 0), est au pixel (0, 100)).
-        assert_eq!(designer(&colonnes, series, (10.0, 10.0), 12.0), None);
-        // À 20 px du point (50, 50) : hors d'un rayon de 12, dans un de 25.
-        assert_eq!(designer(&colonnes, series, (70.0, 50.0), 12.0), None);
-        let hit = designer(&colonnes, series, (70.0, 50.0), 25.0).expect("à portée");
+        // The top-left corner is more than 12 px from the diagonal (the
+        // closest point, (0, 0), is at pixel (0, 100)).
+        assert_eq!(pick(&columns, series, (10.0, 10.0), 12.0), None);
+        // 20 px from point (50, 50): outside a radius of 12, inside one of 25.
+        assert_eq!(pick(&columns, series, (70.0, 50.0), 12.0), None);
+        let hit = pick(&columns, series, (70.0, 50.0), 25.0).expect("in range");
         assert_eq!(hit.point_index, 1);
     }
 
     #[test]
-    fn une_serie_masquee_ou_de_droite_n_est_pas_designee() {
-        let colonnes = vec![
+    fn a_hidden_or_right_hand_series_is_not_picked() {
+        let columns = vec![
             vec![0.0, 50.0, 100.0],
             vec![0.0, 50.0, 100.0],
-            // Une seconde courbe, loin de la première (décalée de 10 px).
+            // A second curve, away from the first (offset by 10 px).
             vec![0.0, 40.0, 90.0],
         ];
-        let curseur = (50.0, 50.0);
-        let deux = |modifier: fn(&mut SeriesSpec)| {
+        let cursor = (50.0, 50.0);
+        let two = |modify: fn(&mut SeriesSpec)| {
             move |ids: &[NodeId]| {
-                let mut proche = SeriesSpec::new_xy(ids[0], ids[1]);
-                modifier(&mut proche);
-                vec![proche, SeriesSpec::new_xy(ids[0], ids[2])]
+                let mut near = SeriesSpec::new_xy(ids[0], ids[1]);
+                modify(&mut near);
+                vec![near, SeriesSpec::new_xy(ids[0], ids[2])]
             }
         };
-        let libre = designer(&colonnes, deux(|_| {}), curseur, 12.0).expect("à portée");
-        assert_eq!((libre.series, libre.point_index), (0, 1));
+        let free = pick(&columns, two(|_| {}), cursor, 12.0).expect("in range");
+        assert_eq!((free.series, free.point_index), (0, 1));
 
-        let masquee = designer(&colonnes, deux(|s| s.visible = false), curseur, 12.0)
-            .expect("l'autre courbe est à portée");
-        assert_eq!((masquee.series, masquee.point_index), (1, 1));
-        assert_eq!(masquee.data, (50.0, 40.0));
+        let hidden = pick(&columns, two(|s| s.visible = false), cursor, 12.0)
+            .expect("the other curve is in range");
+        assert_eq!((hidden.series, hidden.point_index), (1, 1));
+        assert_eq!(hidden.data, (50.0, 40.0));
 
-        let droite = designer(
-            &colonnes,
-            deux(|s| s.axis = stokesforge_plot::SeriesAxis::Right),
-            curseur,
+        let right = pick(
+            &columns,
+            two(|s| s.axis = stokesforge_plot::SeriesAxis::Right),
+            cursor,
             12.0,
         )
-        .expect("l'autre courbe est à portée");
-        assert_eq!(droite.series, 1);
+        .expect("the other curve is in range");
+        assert_eq!(right.series, 1);
 
-        // Seule, une série masquée ne désigne rien.
-        let seule = |ids: &[NodeId]| {
+        // Alone, a hidden series picks nothing.
+        let alone = |ids: &[NodeId]| {
             let mut s = SeriesSpec::new_xy(ids[0], ids[1]);
             s.visible = false;
             vec![s]
         };
-        assert_eq!(designer(&colonnes, seule, curseur, 12.0), None);
+        assert_eq!(pick(&columns, alone, cursor, 12.0), None);
     }
 
     #[test]
-    fn un_panneau_inconnu_du_spec_ne_designe_rien() {
-        let (project, _) = projet(&[]);
-        let spec = PlotSpec::empty("Vide").with_panels(PanelSpec::at(0, 0));
+    fn a_panel_unknown_to_the_spec_picks_nothing() {
+        let (project, _) = project_with(&[]);
+        let spec = PlotSpec::empty("Empty").with_panels(PanelSpec::at(0, 0));
         let drawn = panel(5, 0, 0);
-        let transform = PanelTransform::of(&drawn).expect("zone de tracé");
+        let transform = PanelTransform::of(&drawn).expect("plot area");
         assert_eq!(
             nearest_point(project.tree(), &spec, &drawn, &transform, (1.0, 1.0), 12.0),
             None
@@ -821,18 +819,18 @@ mod tests {
     }
 
     #[test]
-    fn le_panneau_designe_est_celui_du_calque_trace() {
-        // Le calque tracé est le second du spec : c'est ses séries qu'on lit,
-        // pas celles du premier.
-        let (project, ids) = projet(&diagonale());
+    fn the_picked_panel_is_that_of_the_drawn_layer() {
+        // The drawn layer is the second of the spec: it is its series that are
+        // read, not those of the first.
+        let (project, ids) = project_with(&diagonal());
         let mut second = PanelSpec::at(0, 1);
         second.series.push(SeriesSpec::new_xy(ids[0], ids[1]));
-        let spec = PlotSpec::empty("Deux").with_panels(stokesforge_plot::Panels::new(vec![
+        let spec = PlotSpec::empty("Two").with_panels(stokesforge_plot::Panels::new(vec![
             PanelSpec::at(0, 0),
             second,
         ]));
         let drawn = panel(1, 0, 1);
-        let transform = PanelTransform::of(&drawn).expect("zone de tracé");
+        let transform = PanelTransform::of(&drawn).expect("plot area");
         let hit = nearest_point(
             project.tree(),
             &spec,
@@ -841,22 +839,22 @@ mod tests {
             (50.0, 50.0),
             12.0,
         )
-        .expect("un point à portée");
+        .expect("a point in range");
         assert_eq!(hit.point_index, 1);
     }
 
-    // --- `PanelTransform::new`, cadre initial et aimantation (#261) ---
+    // --- `PanelTransform::new`, initial frame and snapping (#261) ---
 
     fn assert_pixel(got: Option<(f64, f64)>, want: (f64, f64)) {
-        let (x, y) = got.expect("représentable");
+        let (x, y) = got.expect("representable");
         assert!(
             (x - want.0).abs() < 1e-9 && (y - want.1).abs() < 1e-9,
-            "{x},{y} au lieu de {want:?}"
+            "{x},{y} instead of {want:?}"
         );
     }
 
     #[test]
-    fn une_origine_fractionnaire_donne_les_coins_exacts() {
+    fn a_fractional_origin_gives_the_exact_corners() {
         let t = PanelTransform::new(
             (10.5, 20.25),
             (200.0, 100.0),
@@ -865,15 +863,15 @@ mod tests {
             AxisScale::Linear,
             AxisScale::Linear,
         )
-        .expect("zone valide");
+        .expect("valid area");
         assert_pixel(t.data_to_pixel(0.0, -1.0), (10.5, 120.25));
         assert_pixel(t.data_to_pixel(10.0, 1.0), (210.5, 20.25));
-        let (x, y) = t.pixel_to_data(10.5, 120.25).expect("dans la zone");
+        let (x, y) = t.pixel_to_data(10.5, 120.25).expect("inside the area");
         assert!((x - 0.0).abs() < 1e-9 && (y + 1.0).abs() < 1e-9);
     }
 
     #[test]
-    fn une_zone_degeneree_n_a_pas_de_transformation() {
+    fn a_degenerate_area_has_no_transformation() {
         let new = |size| {
             PanelTransform::new(
                 (0.0, 0.0),
@@ -892,8 +890,8 @@ mod tests {
     }
 
     #[test]
-    fn echelle_log_inversee_et_zoom_gardent_la_correspondance_des_gestes() {
-        // X log inversé (100 à gauche, 1 à droite), Y log croissant.
+    fn an_inverted_log_scale_and_zoom_keep_the_gesture_mapping() {
+        // Inverted log X (100 on the left, 1 on the right), increasing log Y.
         let t = PanelTransform::new(
             (0.0, 0.0),
             (200.0, 100.0),
@@ -902,26 +900,26 @@ mod tests {
             AxisScale::Log,
             AxisScale::Log,
         )
-        .expect("zone valide");
+        .expect("valid area");
         let center = t.data_to_pixel(10.0, 100.0);
         assert_pixel(center, (100.0, 50.0));
-        let (x, y) = t.pixel_to_data(100.0, 50.0).expect("dans la zone");
+        let (x, y) = t.pixel_to_data(100.0, 50.0).expect("inside the area");
         assert!((x - 10.0).abs() < 1e-6 && (y - 100.0).abs() < 1e-6);
         assert_pixel(t.data_to_pixel(100.0, 10.0), (0.0, 100.0));
         assert_pixel(t.data_to_pixel(1.0, 1000.0), (200.0, 0.0));
-        let (x_range, y_range) = t.zoom((100.0, 50.0), 0.5).expect("zoom log défini");
+        let (x_range, y_range) = t.zoom((100.0, 50.0), 0.5).expect("log zoom defined");
         let zoomed = PanelTransform {
             x_range,
             y_range,
             ..t
         };
         assert_pixel(zoomed.data_to_pixel(10.0, 100.0), (100.0, 50.0));
-        // Le sens des axes survit au zoom : X reste décroissant, Y croissant.
+        // The direction of the axes survives the zoom: X stays decreasing, Y increasing.
         assert!(x_range.0 > x_range.1 && y_range.0 < y_range.1);
     }
 
     #[test]
-    fn un_rectangle_sur_un_axe_inverse_garde_le_sens_d_affichage() {
+    fn a_rectangle_on_an_inverted_axis_keeps_the_display_direction() {
         let t = PanelTransform::new(
             (0.0, 0.0),
             (100.0, 100.0),
@@ -930,13 +928,13 @@ mod tests {
             AxisScale::Linear,
             AxisScale::Linear,
         )
-        .expect("zone valide");
+        .expect("valid area");
         let (x_range, _) = t.range_between((10.0, 10.0), (60.0, 40.0)).unwrap();
         assert_eq!(x_range, (90.0, 40.0));
     }
 
     #[test]
-    fn un_zoom_ou_un_rectangle_sur_une_borne_log_invalide_ne_donne_rien() {
+    fn a_zoom_or_rectangle_on_an_invalid_log_bound_gives_nothing() {
         let t = PanelTransform::new(
             (0.0, 0.0),
             (100.0, 100.0),
@@ -945,17 +943,17 @@ mod tests {
             AxisScale::Log,
             AxisScale::Linear,
         )
-        .expect("zone valide");
+        .expect("valid area");
         assert!(t.zoom((50.0, 50.0), 0.5).is_none());
         assert!(t.range_between((10.0, 10.0), (60.0, 40.0)).is_none());
     }
 
     #[test]
-    fn le_cadre_entoure_les_valeurs_finies_avec_une_marge() {
+    fn the_frame_surrounds_the_finite_values_with_a_margin() {
         let close = |got: (f64, f64), want: (f64, f64)| {
             assert!(
                 (got.0 - want.0).abs() < 1e-12 && (got.1 - want.1).abs() < 1e-12,
-                "{got:?} au lieu de {want:?}"
+                "{got:?} instead of {want:?}"
             );
         };
         close(
@@ -969,7 +967,7 @@ mod tests {
             fit_range(&[1.0, 10.0, 100.0], AxisScale::Log),
             (10f64.powf(-0.1), 10f64.powf(2.1)),
         );
-        // Seuls les positifs comptent en log ; sans eux, une décade.
+        // Only the positives count in log; without them, one decade.
         close(
             fit_range(&[-5.0, 0.0, 1.0, 100.0], AxisScale::Log),
             (10f64.powf(-0.1), 10f64.powf(2.1)),
@@ -978,7 +976,7 @@ mod tests {
     }
 
     #[test]
-    fn le_cadre_d_un_axe_suit_son_cadrage_et_son_sens() {
+    fn an_axis_frame_follows_its_framing_and_direction() {
         let mut axis = AxisSpec::default();
         assert_eq!(axis_frame(&[0.0, 10.0], &axis).0, -0.5);
         axis.inverted = true;
@@ -987,25 +985,25 @@ mod tests {
         axis.range_min = Some(2.0);
         axis.range_max = Some(8.0);
         assert_eq!(axis_frame(&[0.0, 10.0], &axis), (8.0, 2.0));
-        // Cadrage explicite non automatique mais incomplet : on garde les données.
+        // Non-automatic explicit framing but incomplete: keep the data.
         axis.range_max = None;
         assert_eq!(axis_frame(&[0.0, 10.0], &axis), (10.5, -0.5));
-        // Cadrage explicite ignoré tant que le cadrage est automatique.
+        // Explicit framing ignored as long as the framing is automatic.
         axis.range_max = Some(8.0);
         axis.auto_range = true;
         axis.inverted = false;
         assert_eq!(axis_frame(&[0.0, 10.0], &axis), (-0.5, 10.5));
     }
 
-    /// #269 : les quatre combinaisons « bornes dans l'ordre ou non » ×
-    /// « Inversé », comme le graphe (un seul retournement).
+    /// #269: the four combinations "bounds in order or not" ×
+    /// "Inverted", like the graph (a single flip).
     #[test]
-    fn le_cadre_d_un_axe_decroissant_n_est_retourne_qu_une_fois() {
+    fn a_decreasing_axis_frame_is_flipped_only_once() {
         let mut axis = AxisSpec {
             auto_range: false,
             ..AxisSpec::default()
         };
-        for (min, max, inverted, attendu) in [
+        for (min, max, inverted, expected) in [
             (400.0, 4000.0, false, (400.0, 4000.0)),
             (4000.0, 400.0, false, (4000.0, 400.0)),
             (400.0, 4000.0, true, (4000.0, 400.0)),
@@ -1014,34 +1012,34 @@ mod tests {
             axis.range_min = Some(min);
             axis.range_max = Some(max);
             axis.inverted = inverted;
-            assert_eq!(axis_frame(&[500.0, 3000.0], &axis), attendu);
+            assert_eq!(axis_frame(&[500.0, 3000.0], &axis), expected);
         }
     }
 
     #[test]
-    fn l_aimantation_prend_le_point_le_plus_proche_et_moyenne_autour() {
+    fn snapping_takes_the_closest_point_and_averages_around_it() {
         let xs = [0.0, 1.0, 2.0, 3.0, 4.0];
         let ys = [10.0, 20.0, 60.0, 20.0, 10.0];
         assert_eq!(snap_to_curve(&xs, &ys, 2.2, 1), Some((2.0, 60.0)));
         let (x, y) = snap_to_curve(&xs, &ys, 2.2, 3).unwrap();
         assert_eq!(x, 2.0);
         assert!((y - 100.0 / 3.0).abs() < 1e-12);
-        // n pair : n points exactement, le surplus à droite.
+        // Even n: exactly n points, the surplus on the right.
         let (_, y) = snap_to_curve(&xs, &ys, 2.2, 2).unwrap();
         assert!((y - 40.0).abs() < 1e-12);
         let (_, y) = snap_to_curve(&xs, &ys, 2.2, 4).unwrap();
         assert!((y - 110.0 / 4.0).abs() < 1e-12);
-        // Au bord, la fenêtre se tronque au lieu de déborder.
+        // At the edge, the window is truncated instead of overflowing.
         assert_eq!(snap_to_curve(&xs, &ys, -5.0, 3), Some((0.0, 15.0)));
         assert_eq!(snap_to_curve(&[], &[], 1.0, 3), None);
     }
 
     #[test]
-    fn l_aimantation_ne_panique_pas_sur_des_donnees_incoherentes() {
-        // `ys` plus court que `xs` : rien, et surtout pas de panique.
+    fn snapping_does_not_panic_on_inconsistent_data() {
+        // `ys` shorter than `xs`: nothing, and above all no panic.
         assert_eq!(snap_to_curve(&[0.0, 1.0, 2.0], &[1.0], 2.0, 3), None);
-        // Une abscisse non finie n'est jamais choisie ; une ordonnée non finie
-        // est écartée de la moyenne.
+        // A non-finite abscissa is never chosen; a non-finite ordinate
+        // is dropped from the average.
         let xs = [f64::NAN, 1.0, 2.0];
         let ys = [5.0, f64::NAN, 7.0];
         assert_eq!(snap_to_curve(&xs, &ys, 1.1, 3), Some((1.0, 6.0)));
@@ -1050,25 +1048,25 @@ mod tests {
     }
 
     #[test]
-    fn la_zone_d_aimantation_suit_la_fenetre_moyennee() {
+    fn the_snapping_area_follows_the_averaged_window() {
         let xs = [0.0, 1.0, 2.0, 3.0, 4.0];
         let ys = [10.0, 20.0, 60.0, 20.0, 10.0];
-        let zone = |x, n| {
+        let area = |x, n| {
             let s = snap_to_curve_zone(&xs, &ys, x, n).unwrap();
             (s.x_min, s.x_max, s.count)
         };
-        assert_eq!(zone(2.2, 1), (2.0, 2.0, 1));
-        assert_eq!(zone(2.2, 3), (1.0, 3.0, 3));
-        // n pair : le surplus à droite.
-        assert_eq!(zone(2.2, 4), (1.0, 4.0, 4));
-        // Au bord, la zone suit la fenêtre tronquée, pas n.
-        assert_eq!(zone(-5.0, 3), (0.0, 1.0, 2));
-        assert_eq!(zone(10.0, 3), (3.0, 4.0, 2));
-        // Abscisses non triées : minimum et maximum de la fenêtre.
+        assert_eq!(area(2.2, 1), (2.0, 2.0, 1));
+        assert_eq!(area(2.2, 3), (1.0, 3.0, 3));
+        // Even n: the surplus on the right.
+        assert_eq!(area(2.2, 4), (1.0, 4.0, 4));
+        // At the edge, the area follows the truncated window, not n.
+        assert_eq!(area(-5.0, 3), (0.0, 1.0, 2));
+        assert_eq!(area(10.0, 3), (3.0, 4.0, 2));
+        // Unsorted abscissas: minimum and maximum of the window.
         let xs = [5.0, 1.0, 3.0, 9.0, 2.0];
         let s = snap_to_curve_zone(&xs, &ys, 3.1, 5).unwrap();
         assert_eq!((s.x_min, s.x_max, s.count), (1.0, 9.0, 5));
-        // Fenêtre 3, 9, 2 : ni son premier ni son dernier point ne sont les bornes.
+        // Window 3, 9, 2: neither its first nor its last point are the bounds.
         let s = snap_to_curve_zone(&xs, &ys, 9.1, 3).unwrap();
         assert_eq!((s.x_min, s.x_max), (2.0, 9.0));
         let s = snap_to_curve_zone(&xs, &ys, 3.1, 1).unwrap();

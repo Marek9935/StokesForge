@@ -1,23 +1,23 @@
-//! Des données résolues à une géométrie traçable — tâche R5.1.
+//! From resolved data to a drawable geometry — task R5.1.
 //!
-//! # Une étape séparée, et pourquoi
+//! # A separate step, and why
 //!
-//! R4 lisait les points au moment de tracer et, séparément, au moment de
-//! cadrer les axes : deux parcours, deux occasions de ne pas dire la même
-//! chose. Avec des barres et des histogrammes, ce n'est plus tenable — la
-//! géométrie d'un histogramme ne se déduit pas de ses données sans les
-//! classer, et un cadrage qui l'ignorerait couperait la dernière classe.
+//! R4 read the points at drawing time and, separately, when framing the axes:
+//! two passes, two chances of not saying the same thing. With bars and
+//! histograms, this is no longer tenable — a histogram's geometry cannot be
+//! deduced from its data without binning, and a framing that ignored it
+//! would cut off the last bin.
 //!
-//! D'où cette étape : chaque série est **préparée une fois**, en géométrie,
-//! et le cadrage comme le tracé lisent la même chose. C'est aussi ce qui
-//! rend la couverture des [`PlotType`] vérifiable : le type de tracé ne
-//! s'interprète qu'ici.
+//! Hence this step: each series is **prepared once**, into geometry, and
+//! framing and drawing read the same thing. This is also what makes the
+//! coverage of [`PlotType`] checkable: the plot type is interpreted only
+//! here.
 //!
-//! # Espace transformé
+//! # Transformed space
 //!
-//! Tout ce que ce module produit est déjà dans l'espace où la zone de tracé
-//! travaille — log₁₀ compris (voir [`crate::scale`]). Le reste du pipeline
-//! n'a plus à connaître l'échelle des axes, sauf pour étiqueter.
+//! Everything this module produces is already in the space where the plot
+//! area works — log₁₀ included (see [`crate::scale`]). The rest of the
+//! pipeline no longer needs to know the axis scale, except to label.
 
 use std::num::NonZeroU32;
 
@@ -26,31 +26,31 @@ use stokesforge_plot::{AxisScale, PlotType, SeriesAxis, SeriesSpec};
 
 use crate::scale::forward;
 
-/// Un point dans l'espace de tracé.
+/// A point in plot space.
 pub type Point = (f64, f64);
 
-/// Une moustache de barre d'erreur : deux extrémités, déjà transformées.
+/// An error-bar whisker: two ends, already transformed.
 pub type Whisker = (Point, Point);
 
-/// Ce qu'une série est devenue, une fois traduite en géométrie.
+/// What a series became, once translated into geometry.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Geometry {
-    /// Rien à tracer : type de tracé inconnu de ce lecteur, colonne vide, ou
-    /// toutes les valeurs hors de l'échelle choisie.
+    /// Nothing to draw: plot type unknown to this reader, empty column, or
+    /// all values outside the chosen scale.
     Nothing,
-    /// Une suite de points, à relier et/ou à marquer selon le type de tracé.
+    /// A sequence of points, to connect and/or mark depending on the plot type.
     Curve {
-        /// Les points, dans l'ordre de la colonne.
+        /// The points, in column order.
         points: Vec<Point>,
-        /// Les moustaches de barres d'erreur, vides si la série n'en a pas.
+        /// The error-bar whiskers, empty if the series has none.
         whiskers: Vec<Whisker>,
     },
-    /// Des barres verticales : `(bord gauche, bord droit, sommet)`.
+    /// Vertical bars: `(left edge, right edge, top)`.
     Bars(Vec<(f64, f64, f64)>),
 }
 
 impl Geometry {
-    /// Vrai si rien ne sera dessiné.
+    /// True if nothing will be drawn.
     pub fn is_empty(&self) -> bool {
         match self {
             Geometry::Nothing => true,
@@ -59,7 +59,7 @@ impl Geometry {
         }
     }
 
-    /// Nombre de points portés — ce que le LTTB peut réduire.
+    /// Number of points carried — what the LTTB can reduce.
     pub fn point_count(&self) -> usize {
         match self {
             Geometry::Nothing => 0,
@@ -68,60 +68,60 @@ impl Geometry {
         }
     }
 
-    /// Vrai si la géométrie s'appuie sur une ligne de base (les barres), qui
-    /// doit alors entrer dans le cadrage sous peine de barres flottantes.
+    /// True if the geometry rests on a baseline (the bars), which must then
+    /// enter the framing or the bars would float.
     pub fn needs_baseline(&self) -> bool {
         matches!(self, Geometry::Bars(_))
     }
 }
 
-/// Une série prête à tracer : sa géométrie, et ce qu'il faut pour la
-/// dessiner et l'inscrire en légende.
+/// A series ready to draw: its geometry, and what is needed to draw it and
+/// list it in the legend.
 #[derive(Debug)]
 pub struct Prepared<'s> {
-    /// Le spec d'origine — le style s'y lit au moment de peindre.
+    /// The original spec — the style is read from it at paint time.
     pub spec: &'s SeriesSpec,
-    /// Nom affiché, tel que la résolution l'a établi.
+    /// Displayed name, as the resolution established it.
     pub label: String,
-    /// Axe des ordonnées de rattachement.
+    /// Y axis it is attached to.
     pub axis: SeriesAxis,
-    /// La géométrie, dans l'espace de tracé.
+    /// The geometry, in plot space.
     pub geometry: Geometry,
-    /// Vrai si la référence de la série est brisée : rien à tracer, mais la
-    /// série doit **se voir** (`architecture-choisie.md` §11.1).
+    /// True if the series' reference is broken: nothing to draw, but the
+    /// series must **show** (`architecture-choisie.md` §11.1).
     pub broken: bool,
-    /// Vrai si le type de tracé vient d'une version plus récente de StokesForge
-    /// (C5, niveau 2) : rien n'est dessiné, et rien n'est perdu non plus.
+    /// True if the plot type comes from a newer version of StokesForge
+    /// (C5, level 2): nothing is drawn, and nothing is lost either.
     pub unknown_type: bool,
-    /// Nombre de points retirés par la décimation, renseigné après coup par
-    /// le pipeline.
+    /// Number of points removed by decimation, filled in afterwards by the
+    /// pipeline.
     pub decimated: usize,
-    /// Une colonne de la série vient d'un calcul pas à jour et le graphe en
-    /// avertit (#198) : trait grisé et marqueur « ! ».
+    /// A column of the series comes from a stale computation and the graph
+    /// warns about it (#198): grayed line and « ! » marker.
     pub stale: bool,
 }
 
 impl Prepared<'_> {
-    /// Vrai si quelque chose sera effectivement peint dans la zone de tracé.
+    /// True if something will actually be painted in the plot area.
     pub fn draws(&self) -> bool {
         !self.broken && !self.geometry.is_empty()
     }
 
-    /// Vrai si la série a sa place en légende.
+    /// True if the series has its place in the legend.
     ///
-    /// Une référence brisée y a droit — c'est même le seul endroit où elle
-    /// peut se montrer, puisqu'elle n'a rien à tracer.
+    /// A broken reference qualifies — it is even the only place where it can
+    /// show, since it has nothing to draw.
     pub fn in_legend(&self) -> bool {
         self.spec.show_in_legend && (self.draws() || self.broken)
     }
 
-    /// Le texte de l'entrée de légende.
+    /// The text of the legend entry.
     ///
-    /// Une référence brisée le dit. La résolution met déjà
-    /// `« (référence rompue) »` quand la série n'a pas de nom explicite ;
-    /// quand elle en a un, c'est le nom qui sort, et il faut l'annoter —
-    /// sans quoi une série nommée disparaîtrait sans bruit de la figure tout
-    /// en gardant une entrée de légende d'apparence normale.
+    /// A broken reference says so. The resolution already puts
+    /// `« (référence rompue) »` when the series has no explicit name; when it
+    /// has one, the name comes out, and it must be annotated — otherwise a
+    /// named series would silently vanish from the figure while keeping a
+    /// normal-looking legend entry.
     pub fn legend_text(&self) -> String {
         if !self.broken || self.label.contains("référence rompue") {
             return self.label.clone();
@@ -129,18 +129,18 @@ impl Prepared<'_> {
         format!("{} — référence rompue", self.label)
     }
 
-    /// Vrai si le texte de légende a été **saisi** (`SeriesSpec::name`) : du
-    /// markup Typst voulu. Faux s'il est repris de la colonne, donc à
-    /// afficher tel quel (issue #33, `formula::literal_style`).
+    /// True if the legend text was **typed** (`SeriesSpec::name`): intended
+    /// Typst markup. False if taken from the column, hence shown as is
+    /// (issue #33, `formula::literal_style`).
     pub fn legend_is_typed(&self) -> bool {
         !self.spec.name.is_empty()
     }
 }
 
-/// Prépare une série résolue, sur les échelles d'axe qui la concernent.
+/// Prepares a resolved series, on the axis scales that concern it.
 ///
-/// `y_scale` est celle de **son** axe de rattachement : une série de droite
-/// se prépare sur l'échelle de droite.
+/// `y_scale` is that of **its** attached axis: a right-hand series is
+/// prepared on the right-hand scale.
 pub fn prepare<'s>(
     resolved: &ResolvedSeries<'s>,
     x_scale: AxisScale,
@@ -164,20 +164,20 @@ pub fn prepare<'s>(
     prepared.geometry = match spec.plot_type {
         PlotType::Histogram => histogram_geometry(resolved, x_scale, y_scale),
         PlotType::Bar => bars_geometry(resolved, x_scale, y_scale),
-        // Les quatre autres tracent une suite de points ; ce qui les
-        // distingue — trait, marqueurs, moustaches — se lit au moment de
-        // peindre, pas ici, parce que la géométrie est la même.
+        // The four others draw a sequence of points; what tells them apart —
+        // line, markers, whiskers — is read at paint time, not here, because
+        // the geometry is the same.
         _ => curve_geometry(resolved, x_scale, y_scale),
     };
     prepared
 }
 
-/// Points et moustaches, en un seul parcours.
+/// Points and whiskers, in a single pass.
 ///
-/// Un seul parcours et pas deux : les colonnes d'erreur sont indexées
-/// **par point**, et filtrer les points non représentables d'un côté sans
-/// filtrer les erreurs de l'autre décalerait les moustaches d'un cran à
-/// partir du premier `NaN` — un défaut qui ne lève rien et se voit à peine.
+/// A single pass and not two: the error columns are indexed **per point**,
+/// and filtering the non-representable points on one side without filtering
+/// the errors on the other would shift the whiskers by one from the first
+/// `NaN` — a defect that raises nothing and is barely visible.
 fn curve_geometry(
     resolved: &ResolvedSeries<'_>,
     x_scale: AxisScale,
@@ -204,8 +204,8 @@ fn curve_geometry(
                 Some(x) => *x,
                 None => break,
             },
-            // Abscisse implicite : l'indice de ligne, comme la résolution le
-            // fait déjà quand aucune colonne X n'est désignée.
+            // Implicit abscissa: the row index, as the resolution already
+            // does when no X column is designated.
             None => index as f64,
         };
         let (Some(x), Some(y)) = (forward(x_scale, raw_x), forward(y_scale, raw_y)) else {
@@ -228,12 +228,12 @@ fn curve_geometry(
     Geometry::Curve { points, whiskers }
 }
 
-/// Moustache horizontale autour de `centre`, à ordonnée déjà transformée.
+/// Horizontal whisker around `center`, at an already transformed ordinate.
 ///
-/// Rend `None` quand la demi-largeur n'est pas une demi-largeur (non finie,
-/// négative) ou quand aucune des deux extrémités n'a d'image sur l'échelle.
-/// Une seule extrémité représentable donne une demi-moustache plutôt que
-/// rien : sur un axe logarithmique, c'est le cas courant près de l'origine.
+/// Returns `None` when the half-width is not a half-width (non-finite,
+/// negative) or when neither end has an image on the scale. A single
+/// representable end gives a half-whisker rather than nothing: on a
+/// logarithmic axis, this is the common case near the origin.
 fn whisker_along_x(center: f64, half: f64, y: f64, scale: AxisScale) -> Option<Whisker> {
     if !half.is_finite() || half <= 0.0 {
         return None;
@@ -244,7 +244,7 @@ fn whisker_along_x(center: f64, half: f64, y: f64, scale: AxisScale) -> Option<W
     (low != high).then_some(((low, y), (high, y)))
 }
 
-/// Moustache verticale autour de `centre`, à abscisse déjà transformée.
+/// Vertical whisker around `center`, at an already transformed abscissa.
 fn whisker_along_y(center: f64, half: f64, x: f64, scale: AxisScale) -> Option<Whisker> {
     if !half.is_finite() || half <= 0.0 {
         return None;
@@ -255,11 +255,11 @@ fn whisker_along_y(center: f64, half: f64, x: f64, scale: AxisScale) -> Option<W
     (low != high).then_some(((x, low), (x, high)))
 }
 
-/// Barres centrées sur les abscisses, de largeur déduite ou imposée.
+/// Bars centered on the abscissas, with a deduced or imposed width.
 ///
-/// La largeur vient de [`stokesforge_core::resolve::bar_width`] — du socle, et
-/// non d'ici : la déduction ne doit pas donner deux largeurs différentes
-/// selon le moteur qui peint, et c'est la même raison qui a fait naître
+/// The width comes from [`stokesforge_core::resolve::bar_width`] — from the
+/// core, not from here: the deduction must not give two different widths
+/// depending on the engine that paints, and the same reason gave birth to
 /// `PlotSpec`.
 fn bars_geometry(
     resolved: &ResolvedSeries<'_>,
@@ -295,13 +295,13 @@ fn bars_geometry(
     Geometry::Bars(bars)
 }
 
-/// Classes et effectifs, calculés par le socle.
+/// Bins and counts, computed by the core.
 ///
-/// [`stokesforge_core::resolve::histogram`] est le port de la fonction Python et
-/// vit là-bas exactement pour cette raison : deux renderers ne doivent pas
-/// classer différemment. Un histogramme ne consomme **que** sa colonne Y —
-/// `PlotType::needs_x` le dit déjà côté spec, et la résolution ne lui donne
-/// pas d'abscisse.
+/// [`stokesforge_core::resolve::histogram`] is the port of the Python
+/// function and lives there for exactly this reason: two renderers must not
+/// bin differently. A histogram consumes **only** its Y column —
+/// `PlotType::needs_x` already says so on the spec side, and the resolution
+/// gives it no abscissa.
 fn histogram_geometry(
     resolved: &ResolvedSeries<'_>,
     x_scale: AxisScale,
@@ -333,7 +333,7 @@ fn histogram_geometry(
     Geometry::Bars(bars)
 }
 
-/// Étendue d'une géométrie sur l'axe des abscisses.
+/// Extent of a geometry on the abscissa axis.
 pub fn x_extent(geometry: &Geometry) -> Option<(f64, f64)> {
     match geometry {
         Geometry::Nothing => None,
@@ -342,10 +342,10 @@ pub fn x_extent(geometry: &Geometry) -> Option<(f64, f64)> {
     }
 }
 
-/// Étendue d'une géométrie sur l'axe des ordonnées, moustaches comprises.
+/// Extent of a geometry on the ordinate axis, whiskers included.
 ///
-/// Les moustaches entrent dans le cadrage : une barre d'erreur qui sort de
-/// la zone de tracé décrit une incertitude qu'on ne voit plus.
+/// The whiskers enter the framing: an error bar that leaves the plot area
+/// describes an uncertainty that can no longer be seen.
 pub fn y_extent(geometry: &Geometry) -> Option<(f64, f64)> {
     match geometry {
         Geometry::Nothing => None,

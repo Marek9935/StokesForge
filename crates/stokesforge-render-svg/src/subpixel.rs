@@ -1,16 +1,16 @@
-//! Les chemins sous-pixel de l'export (issue #91).
+//! The export's subpixel paths (issue #91).
 //!
-//! `plotters-svg` n'écrit que des entiers. Un chemin sous-pixel
-//! ([`stokesforge_render::subpixel`]) lui est donc confié en points fixes, avec
-//! un drapeau dans `stroke-width` ; une fois le document fini, [`resolve`]
-//! retrouve ces `<polyline>` et réécrit épaisseur et sommets en pixels
-//! décimaux. Même lecture de la convention que le backend écran : une
-//! fonctionnalité de tracé n'entre jamais dans un seul backend.
+//! `plotters-svg` writes only integers. A subpixel path
+//! ([`stokesforge_render::subpixel`]) is therefore handed to it in fixed point,
+//! with a flag in `stroke-width`; once the document is finished, [`resolve`]
+//! finds those `<polyline>`s again and rewrites width and vertices in
+//! decimal pixels. Same reading of the convention as the screen backend: a
+//! drawing feature never goes into a single backend.
 
 use stokesforge_render::subpixel::{split_width, SCALE};
 
-/// Réécrit les `<polyline>` sous-pixel du document ; le reste est inchangé.
-/// Un document sans chemin sous-pixel est rendu tel quel.
+/// Rewrites the document's subpixel `<polyline>`s; the rest is unchanged.
+/// A document without a subpixel path is returned as is.
 pub fn resolve(svg: String) -> String {
     const TAG: &str = "<polyline ";
     if !svg.contains(TAG) {
@@ -30,7 +30,7 @@ pub fn resolve(svg: String) -> String {
     out
 }
 
-/// La valeur de l'attribut `name="…"` de `tag`, avec sa plage dans `tag`.
+/// The value of the `name="…"` attribute of `tag`, with its range in `tag`.
 fn attribute<'a>(tag: &'a str, name: &str) -> Option<(&'a str, std::ops::Range<usize>)> {
     let key = format!(" {name}=\"");
     let from = tag.find(&key)? + key.len();
@@ -58,8 +58,8 @@ fn rewrite(tag: &str) -> Option<String> {
         })
         .collect();
     let points = decoded?.join(" ");
-    // Les deux plages se suivent dans l'ordre d'écriture de `plotters-svg`
-    // (épaisseur avant sommets), mais on ne s'y fie pas.
+    // The two ranges follow each other in `plotters-svg`'s writing order
+    // (width before vertices), but we do not rely on it.
     let mut edits = [(width_range, real.to_string()), (points_range, points)];
     edits.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
     let mut tag = tag.to_owned();
@@ -75,7 +75,7 @@ mod tests {
     use stokesforge_render::subpixel::stroke_width;
 
     #[test]
-    fn une_polyline_sous_pixel_retrouve_ses_pixels_decimaux_et_son_epaisseur() {
+    fn a_subpixel_polyline_gets_back_its_decimal_pixels_and_its_width() {
         let flagged = stroke_width(3);
         let svg = format!(
             "<svg><polyline fill=\"none\" stroke=\"#000\" stroke-width=\"{flagged}\" points=\"16,32 24,40 \"/></svg>"
@@ -86,7 +86,7 @@ mod tests {
     }
 
     #[test]
-    fn une_polyline_ordinaire_et_le_reste_du_document_sont_intacts() {
+    fn an_ordinary_polyline_and_the_rest_of_the_document_are_intact() {
         let svg = "<svg><polyline stroke-width=\"2\" points=\"1,2 3,4 \"/><rect/></svg>".to_owned();
         assert_eq!(resolve(svg.clone()), svg);
     }

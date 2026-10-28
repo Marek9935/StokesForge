@@ -95,7 +95,7 @@ The split is not decorative; each of these three boundaries is
    review. The reading of the manifest is shared (`stokesforge-arch-guard`):
    normal, build, conditional (`[target.…]`) and renamed dependencies
    (`package = …`, judged by their real name) count; `dev-dependencies`
-   do not. `stokesforge-render` has its own `tests/frontiere.rs`, which relies on the
+   do not. `stokesforge-render` has its own `tests/no_ui_dependency.rs`, which relies on the
    same reading.
 2. **The `PlotSpec` knows no renderer.** `stokesforge-plot` depends
    only on `stokesforge-id`: no `plotters`, no `egui`, no `typst`, not even

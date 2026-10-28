@@ -1,19 +1,19 @@
-//! Le tracé des objets graphiques d'un panneau — rectangle, ellipse, ligne,
-//! flèche (issue #76) — et leur désignation sous le pointeur.
+//! Drawing a panel's graphic objects — rectangle, ellipse, line, arrow
+//! (issue #76) — and picking them under the pointer.
 //!
-//! Comme tout le rendu, c'est **ici**, générique sur le backend, et en
-//! **pixels** : les deux points de l'objet sont projetés par le pipeline
-//! (sans test d'appartenance au cadrage : un rectangle qui déborde du zoom
-//! reste tracé, rogné), puis ce module construit la géométrie et la rogne
-//! contre le rectangle de tracé ([`crate::clip`]).
+//! Like all rendering, this is **here**, generic over the backend, and in
+//! **pixels**: the object's two points are projected by the pipeline (with no
+//! framing membership test: a rectangle that overflows the zoom is still
+//! drawn, clipped), then this module builds the geometry and clips it
+//! against the plot rectangle ([`crate::clip`]).
 //!
-//! - le **trait** passe par [`clip_polyline`] : le contour d'un rectangle
-//!   dont un côté est hors cadre n'est pas replaqué sur le bord ;
-//! - le **remplissage** est le polygone rogné par Sutherland-Hodgman
-//!   ([`clip_polygon`]) — un contour fermé de l'ellipse, polygonal à
-//!   [`ellipse_segments`] côtés, est convexe, ce qui suffit à cet algorithme ;
-//! - la **pointe** d'une flèche est un triangle plein, omis quand la pointe
-//!   est hors cadre.
+//! - the **stroke** goes through [`clip_polyline`]: the outline of a rectangle
+//!   with one side outside the frame is not flattened onto the edge;
+//! - the **fill** is the polygon clipped by Sutherland-Hodgman
+//!   ([`clip_polygon`]) — a closed ellipse outline, polygonal with
+//!   [`ellipse_segments`] sides, is convex, which is enough for this algorithm;
+//! - the **head** of an arrow is a solid triangle, omitted when the tip is
+//!   outside the frame.
 
 use plotters::coord::Shift;
 use plotters::element::Polygon;
@@ -26,17 +26,17 @@ use crate::color::{parse_hex, rgba_or};
 use crate::paint::{opaque, rgba, stroke_width};
 use crate::subpixel;
 
-/// Bornes du nombre de côtés du polygone qui approche une ellipse.
+/// Bounds of the number of sides of the polygon that approximates an ellipse.
 const ELLIPSE_SEGMENTS_RANGE: (usize, usize) = (24, 2048);
-/// Flèche maximale (écart entre la corde et l'arc), en pixels, du polygone
-/// d'ellipse. Les coordonnées sont arrondies au pixel entier par le backend,
-/// donc on vise bien en dessous du demi-pixel.
+/// Maximum sagitta (gap between the chord and the arc), in pixels, of the
+/// ellipse polygon. The backend rounds coordinates to whole pixels, so we aim
+/// well below half a pixel.
 const ELLIPSE_SAGITTA: f64 = 0.1;
 
-/// Côtés du polygone qui approche une ellipse de demi-axe maximal `radius`
-/// pixels : assez pour que la corde ne s'écarte pas de l'arc de plus de
-/// [`ELLIPSE_SAGITTA`] (issue #91 : 72 côtés fixes se voyaient sur un grand
-/// cercle). Un polygone régulier inscrit reste convexe, quel que soit n.
+/// Sides of the polygon that approximates an ellipse of maximum semi-axis
+/// `radius` pixels: enough that the chord never strays from the arc by more
+/// than [`ELLIPSE_SAGITTA`] (issue #91: 72 fixed sides were visible on a large
+/// circle). A regular inscribed polygon stays convex, whatever n.
 pub fn ellipse_segments(radius: f64) -> usize {
     let (min, max) = ELLIPSE_SEGMENTS_RANGE;
     if !radius.is_finite() || radius <= ELLIPSE_SAGITTA {
@@ -47,30 +47,30 @@ pub fn ellipse_segments(radius: f64) -> usize {
     (n.ceil() as usize).clamp(min, max)
 }
 
-/// Tolérance de désignation autour du trait, en pixels.
+/// Picking tolerance around the stroke, in pixels.
 const HIT_TOLERANCE: f64 = 4.0;
 
-/// Un objet graphique tel qu'il a été tracé — de quoi le désigner sous le
-/// pointeur ([`crate::hit`]) et lui poser ses poignées.
+/// A graphic object as it was drawn — enough to pick it under the pointer
+/// ([`crate::hit`]) and give it its handles.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawnShape {
-    /// Rang dans `PanelSpec::shapes`.
+    /// Rank in `PanelSpec::shapes`.
     pub index: usize,
-    /// Sa nature.
+    /// Its kind.
     pub kind: ShapeKind,
-    /// Premier point, en pixels de backend (non rogné).
+    /// First point, in backend pixels (unclipped).
     pub p1: (f64, f64),
-    /// Second point, en pixels de backend (non rogné).
+    /// Second point, in backend pixels (unclipped).
     pub p2: (f64, f64),
-    /// Vrai si l'intérieur est rempli (donc désignable).
+    /// True if the interior is filled (hence pickable).
     pub filled: bool,
-    /// Épaisseur du trait, en pixels.
+    /// Stroke width, in pixels.
     pub width: f64,
 }
 
 impl DrawnShape {
-    /// Vrai si le pixel `(x, y)` désigne l'objet : sur son trait, ou, s'il est
-    /// rempli, dedans.
+    /// True if pixel `(x, y)` picks the object: on its stroke, or, if it is
+    /// filled, inside it.
     pub fn contains(&self, x: f64, y: f64) -> bool {
         let tolerance = HIT_TOLERANCE + self.width / 2.0;
         match self.kind {
@@ -132,9 +132,9 @@ fn distance_to_segment(p: (f64, f64), a: (f64, f64), b: (f64, f64)) -> f64 {
     ((p.0 - (a.0 + t * dx)).hypot(p.1 - (a.1 + t * dy))).abs()
 }
 
-/// Les sommets, en pixels, du contour fermé d'un rectangle ou d'une ellipse
-/// entre `p1` et `p2` (le dernier sommet n'est pas répété). Vide pour une
-/// ligne ou une flèche.
+/// The vertices, in pixels, of the closed outline of a rectangle or an
+/// ellipse between `p1` and `p2` (the last vertex is not repeated). Empty for
+/// a line or an arrow.
 pub fn outline(kind: ShapeKind, p1: (f64, f64), p2: (f64, f64)) -> Vec<(f64, f64)> {
     let (left, right) = ordered(p1.0, p2.0);
     let (top, bottom) = ordered(p1.1, p2.1);
@@ -155,9 +155,9 @@ pub fn outline(kind: ShapeKind, p1: (f64, f64), p2: (f64, f64)) -> Vec<(f64, f64
     }
 }
 
-/// La pointe d'une flèche : un triangle dont le sommet est `tip`, ouvert vers
-/// `tail`. Longueur et largeur croissent avec l'épaisseur du trait. `None` si
-/// la flèche est réduite à un point.
+/// The head of an arrow: a triangle whose apex is `tip`, open toward
+/// `tail`. Length and width grow with the stroke width. `None` if the arrow
+/// is reduced to a point.
 pub fn arrow_head(tail: (f64, f64), tip: (f64, f64), width: f64) -> Option<[(f64, f64); 3]> {
     let (dx, dy) = (tip.0 - tail.0, tip.1 - tail.1);
     let length = dx.hypot(dy);
@@ -165,8 +165,8 @@ pub fn arrow_head(tail: (f64, f64), tip: (f64, f64), width: f64) -> Option<[(f64
         return None;
     }
     let (ux, uy) = (dx / length, dy / length);
-    // Jamais plus longue que la moitié de la flèche : une petite flèche reste
-    // une flèche.
+    // Never longer than half the arrow: a small arrow stays an
+    // arrow.
     let head = (8.0 + 3.0 * width).min(length / 2.0);
     let half = head * 0.4;
     let base = (tip.0 - ux * head, tip.1 - uy * head);
@@ -177,7 +177,7 @@ pub fn arrow_head(tail: (f64, f64), tip: (f64, f64), width: f64) -> Option<[(f64
     ])
 }
 
-/// Rogne un polygone contre le rectangle `bounds` (Sutherland-Hodgman).
+/// Clips a polygon against the rectangle `bounds` (Sutherland-Hodgman).
 pub fn clip_polygon(bounds: PixelBounds, polygon: &[(f64, f64)]) -> Vec<(f64, f64)> {
     type Edge = (
         fn((f64, f64), PixelBounds) -> bool,
@@ -228,13 +228,13 @@ fn rounded(point: (f64, f64)) -> BackendCoord {
     (point.0.round() as i32, point.1.round() as i32)
 }
 
-/// Le chemin qui boucle sur `polygon`, en pixels flottants.
+/// The path that loops over `polygon`, in floating-point pixels.
 ///
-/// Un chemin dont le dernier point répète le premier reste une polyligne
-/// **ouverte** pour les backends : au point de départ, deux extrémités à bout
-/// plat se touchent sans jointure, d'où une encoche au coin (#92). On pose donc
-/// la couture au **milieu du premier côté**, où les deux extrémités sont
-/// alignées et se recollent sans trou.
+/// A path whose last point repeats the first stays an **open** polyline for
+/// the backends: at the start point, two butt-capped ends touch without a
+/// join, hence a notch at the corner (#92). So the seam is put at the
+/// **middle of the first side**, where the two ends are aligned and rejoin
+/// without a gap.
 fn closed_path(polygon: &[(f64, f64)]) -> Vec<(f64, f64)> {
     let [first, second, ..] = polygon else {
         return polygon.to_vec();
@@ -247,7 +247,7 @@ fn closed_path(polygon: &[(f64, f64)]) -> Vec<(f64, f64)> {
     path
 }
 
-/// Trace un chemin au sous-pixel ([`crate::subpixel`], #91).
+/// Draws a sub-pixel path ([`crate::subpixel`], #91).
 fn draw_subpixel_path<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     points: &[(f64, f64)],
@@ -256,8 +256,8 @@ fn draw_subpixel_path<DB: DrawingBackend>(
     area.draw(&subpixel::SubpixelPath::new(points, stroke))
 }
 
-/// Trace un objet entre les pixels `p1` et `p2`, rogné à `bounds` s'il y en a
-/// un. `ink` est la couleur d'un trait automatique.
+/// Draws an object between pixels `p1` and `p2`, clipped to `bounds` if there
+/// is one. `ink` is the color of an automatic stroke.
 pub fn draw_shape<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     shape: &ShapeSpec,
@@ -301,7 +301,7 @@ pub fn draw_shape<DB: DrawingBackend>(
         }
         return Ok(());
     }
-    // Ligne ou flèche.
+    // Line or arrow.
     let segment = match bounds {
         Some(bounds) => clip_segment(bounds, p1, p2),
         None => Some((p1, p2)),
@@ -334,7 +334,7 @@ pub fn draw_shape<DB: DrawingBackend>(
 mod tests {
     use super::*;
 
-    fn carre() -> PixelBounds {
+    fn square() -> PixelBounds {
         PixelBounds {
             x_min: 0.0,
             y_min: 0.0,
@@ -355,40 +355,40 @@ mod tests {
     }
 
     #[test]
-    fn un_rectangle_vide_se_designe_sur_son_trait_pas_dedans() {
+    fn an_empty_rectangle_is_picked_on_its_stroke_not_inside() {
         let rect = drawn(ShapeKind::Rectangle, false);
-        assert!(rect.contains(10.0, 25.0), "côté gauche");
-        assert!(rect.contains(30.0, 40.0), "côté bas");
-        assert!(!rect.contains(30.0, 25.0), "intérieur vide");
-        assert!(!rect.contains(80.0, 25.0), "dehors");
+        assert!(rect.contains(10.0, 25.0), "left side");
+        assert!(rect.contains(30.0, 40.0), "bottom side");
+        assert!(!rect.contains(30.0, 25.0), "empty interior");
+        assert!(!rect.contains(80.0, 25.0), "outside");
         assert!(drawn(ShapeKind::Rectangle, true).contains(30.0, 25.0));
     }
 
     #[test]
-    fn une_ellipse_se_designe_sur_son_contour() {
+    fn an_ellipse_is_picked_on_its_outline() {
         let ellipse = drawn(ShapeKind::Ellipse, false);
-        assert!(ellipse.contains(50.0, 25.0), "extrémité droite");
-        assert!(ellipse.contains(30.0, 10.0), "sommet");
-        assert!(!ellipse.contains(30.0, 25.0), "centre");
-        assert!(!ellipse.contains(10.0, 10.0), "coin de la boîte");
+        assert!(ellipse.contains(50.0, 25.0), "right end");
+        assert!(ellipse.contains(30.0, 10.0), "top");
+        assert!(!ellipse.contains(30.0, 25.0), "center");
+        assert!(!ellipse.contains(10.0, 10.0), "corner of the box");
         assert!(drawn(ShapeKind::Ellipse, true).contains(30.0, 25.0));
     }
 
     #[test]
-    fn une_ligne_se_designe_a_quelques_pixels() {
+    fn a_line_is_picked_within_a_few_pixels() {
         let line = drawn(ShapeKind::Line, false);
-        assert!(line.contains(30.0, 25.0), "milieu du segment");
+        assert!(line.contains(30.0, 25.0), "middle of the segment");
         assert!(line.contains(30.0, 28.0));
         assert!(!line.contains(30.0, 40.0));
-        assert!(!line.contains(80.0, 55.0), "au-delà de l'extrémité");
+        assert!(!line.contains(80.0, 55.0), "beyond the end");
     }
 
     #[test]
-    fn l_ellipse_garde_un_ecart_a_l_arc_sous_la_tolerance_quel_que_soit_le_rayon() {
+    fn the_ellipse_keeps_the_gap_to_the_arc_under_the_tolerance_whatever_the_radius() {
         for radius in [5.0, 40.0, 150.0, 600.0, 3000.0] {
             let polygon = outline(ShapeKind::Ellipse, (0.0, 0.0), (2.0 * radius, 2.0 * radius));
             assert!(polygon.len() >= ELLIPSE_SEGMENTS_RANGE.0, "{radius}");
-            // Le milieu de chaque corde est le point le plus éloigné de l'arc.
+            // The middle of each chord is the point farthest from the arc.
             let worst = polygon
                 .iter()
                 .zip(polygon.iter().cycle().skip(1))
@@ -397,32 +397,32 @@ mod tests {
                     radius - mid.0.hypot(mid.1)
                 })
                 .fold(0.0_f64, f64::max);
-            assert!(worst <= ELLIPSE_SAGITTA * 1.01, "rayon {radius} : {worst}");
+            assert!(worst <= ELLIPSE_SAGITTA * 1.01, "radius {radius}: {worst}");
         }
         assert!(ellipse_segments(600.0) > ellipse_segments(40.0));
         assert_eq!(ellipse_segments(f64::NAN), ELLIPSE_SEGMENTS_RANGE.0);
     }
 
     #[test]
-    fn la_couture_du_contour_est_au_milieu_d_un_cote_pas_dans_un_coin() {
-        // #92 : départ et arrivée au même sommet = deux bouts plats sans
-        // jointure, donc une encoche au coin haut gauche.
+    fn the_outline_seam_is_in_the_middle_of_a_side_not_at_a_corner() {
+        // #92: start and end at the same vertex = two butt-capped ends without
+        // a join, hence a notch at the top-left corner.
         let rect = outline(ShapeKind::Rectangle, (10.0, 10.0), (50.0, 30.0));
         let path = closed_path(&rect);
-        assert_eq!(path.first(), path.last(), "chemin refermé");
-        assert_eq!(path[0], (30.0, 10.0), "couture au milieu du côté haut");
+        assert_eq!(path.first(), path.last(), "closed path");
+        assert_eq!(path[0], (30.0, 10.0), "seam in the middle of the top side");
         for corner in &rect {
             assert!(
                 path[1..path.len() - 1].contains(corner),
-                "les quatre coins restent des sommets intérieurs (jointure)"
+                "the four corners stay interior vertices (join)"
             );
         }
     }
 
     #[test]
-    fn le_polygone_est_rogne_au_cadre() {
+    fn the_polygon_is_clipped_to_the_frame() {
         let rect = outline(ShapeKind::Rectangle, (-50.0, 20.0), (50.0, 200.0));
-        let clipped = clip_polygon(carre(), &rect);
+        let clipped = clip_polygon(square(), &rect);
         assert!(!clipped.is_empty());
         for (x, y) in &clipped {
             assert!(
@@ -430,18 +430,18 @@ mod tests {
                 "{x},{y}"
             );
         }
-        let hors = outline(ShapeKind::Rectangle, (200.0, 200.0), (300.0, 300.0));
-        assert!(clip_polygon(carre(), &hors).is_empty());
+        let outside = outline(ShapeKind::Rectangle, (200.0, 200.0), (300.0, 300.0));
+        assert!(clip_polygon(square(), &outside).is_empty());
     }
 
     #[test]
-    fn la_pointe_est_en_bout_de_fleche_et_jamais_plus_longue_que_la_moitie() {
+    fn the_head_is_at_the_arrow_tip_and_never_longer_than_half() {
         let head = arrow_head((0.0, 0.0), (100.0, 0.0), 1.5).unwrap();
         assert_eq!(head[0], (100.0, 0.0));
         assert!(head[1].0 < 100.0 && head[2].0 < 100.0);
-        assert!((head[1].1 + head[2].1).abs() < 1e-9, "symétrique");
-        let petite = arrow_head((0.0, 0.0), (6.0, 0.0), 1.5).unwrap();
-        assert!(petite[1].0 >= 3.0 - 1e-9, "pointe bornée à la moitié");
+        assert!((head[1].1 + head[2].1).abs() < 1e-9, "symmetric");
+        let small = arrow_head((0.0, 0.0), (6.0, 0.0), 1.5).unwrap();
+        assert!(small[1].0 >= 3.0 - 1e-9, "head capped at half");
         assert!(arrow_head((5.0, 5.0), (5.0, 5.0), 1.5).is_none());
     }
 }

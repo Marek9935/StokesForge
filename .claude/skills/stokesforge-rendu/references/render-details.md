@@ -17,7 +17,7 @@ Two decisions already arbitrated: the log scale transforms **values**, not the c
 
 ## Overlaid layers (#167, #168)
 
-A `PanelSpec` with `overlay: Some(OverlaySpec)` covers the last ordinary layer of its cell; the pipeline reserves the **union** of the cell's graduation areas (`CellPlan`). A layer is identified by its **index in `PlotSpec::panels`** (`DrawnPanel::index`), never by its rank in `DrawnPlot::panels` nor by `(row, column)`. Several layers' axes on one side stack in bands. Tests: `stokesforge-render/tests/geometrie.rs`, `stokesforge-render-svg/tests/calques.rs`.
+A `PanelSpec` with `overlay: Some(OverlaySpec)` covers the last ordinary layer of its cell; the pipeline reserves the **union** of the cell's graduation areas (`CellPlan`). A layer is identified by its **index in `PlotSpec::panels`** (`DrawnPanel::index`), never by its rank in `DrawnPlot::panels` nor by `(row, column)`. Several layers' axes on one side stack in bands. Tests: `stokesforge-render/tests/geometry.rs`, `stokesforge-render-svg/tests/layers.rs`.
 
 ## Selection handles (#98)
 
@@ -37,4 +37,4 @@ A continuous gesture (dragging free text, editing in place, moving a title or th
 
 ## Tests
 
-The architecture guards of rendering are listed in `docs/tests.md` § Guards not to break (`mesure.rs`, `accord.rs`, `feathering.rs`, `frontiere.rs`, `view`/`interact` modules, `interaction.rs`, `cache_session.rs`). Also: `stokesforge-render-egui/tests/formes.rs` (each backend's anchoring conventions). Touching Typst: the plain-text witness stays intact, and an unchanged formula title is not recompiled (`cache_session.rs`).
+The architecture guards of rendering are listed in `docs/tests.md` § Guards not to break (`measurement.rs`, `agreement.rs`, `feathering.rs`, `no_ui_dependency.rs`, `view`/`interact` modules, `interaction.rs`, `cache_session.rs`). Also: `stokesforge-render-egui/tests/shapes.rs` (each backend's anchoring conventions). Touching Typst: the plain-text witness stays intact, and an unchanged formula title is not recompiled (`cache_session.rs`).

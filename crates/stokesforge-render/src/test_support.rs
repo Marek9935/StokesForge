@@ -1,12 +1,12 @@
-//! Fabriques de test partagées par les tests unitaires du crate (`#[cfg(test)]`).
+//! Test factories shared by the crate's unit tests (`#[cfg(test)]`).
 
 use stokesforge_plot::AxisScale;
 
 use crate::pipeline::{AxisAreas, DrawnPanel};
 
-/// Un calque tracé minimal : zone de tracé `(0, 0)`–`(100, 100)` px, cadré
-/// sur `0..100` des deux côtés, en linéaire, sans axe secondaire. Les
-/// champs qui comptent pour un test se règlent ensuite sur la valeur rendue.
+/// A minimal drawn layer: plot area `(0, 0)`–`(100, 100)` px, framed on
+/// `0..100` on both sides, linear, no secondary axis. The fields that matter
+/// to a test are then set on the returned value.
 pub(crate) fn panel(index: usize, row: usize, column: usize) -> DrawnPanel {
     DrawnPanel {
         index,

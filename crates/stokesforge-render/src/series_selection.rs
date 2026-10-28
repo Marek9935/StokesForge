@@ -1,36 +1,35 @@
-//! Désignation des séries par les pixels réellement tracés (#83), et
-//! poignées de la série sélectionnée (#98).
+//! Picking series by the pixels actually drawn (#83), and handles of the
+//! selected series (#98).
 //!
-//! Le pipeline fournit ces chemins après décimation et rognage, avec le rang
-//! d'origine. Aucun second calcul des axes, aucune résolution au mouvement de
-//! souris : axe droit, histogramme et courbe suivent le même chemin que le rendu.
+//! The pipeline supplies these paths after decimation and clipping, with the
+//! original rank. No second axis computation, no resolution on mouse
+//! movement: right axis, histogram and curve follow the same path as the
+//! rendering.
 //!
-//! # Poignées de sélection (#98)
+//! # Selection handles (#98)
 //!
-//! Une série sélectionnée était repeinte en bleu par-dessus son tracé, ce qui
-//! masquait sa couleur et son style. Elle est désormais signalée comme dans
-//! OriginLab : de petits carrés pleins ([`HANDLE_SIDE`]) posés **le long du
-//! tracé** à intervalle fixe ([`HANDLE_SPACING`]), le tracé lui-même n'étant
-//! pas touché. L'espacement se mesure en pixels **d'affichage**, le long du
-//! chemin réellement tracé — pas par point de donnée —, pour rester lisible
-//! quelle que soit la densité des données, la décimation LTTB ou
-//! l'agrandissement de la fenêtre ; d'où la conversion `to_display` que
-//! l'appelant fournit à [`DrawnSeries::handle_centers`].
+//! A selected series used to be repainted in blue over its drawing, which
+//! hid its color and style. It is now flagged as in OriginLab: small solid
+//! squares ([`HANDLE_SIDE`]) placed **along the drawn path** at a fixed
+//! interval ([`HANDLE_SPACING`]), the drawing itself being left untouched.
+//! The spacing is measured in **display** pixels, along the path actually
+//! drawn — not per data point —, to stay readable whatever the data density,
+//! the LTTB decimation or the window enlargement; hence the `to_display`
+//! conversion that the caller supplies to [`DrawnSeries::handle_centers`].
 //!
-//! Ce qui n'a pas de chemin suit la même règle sur des positions discrètes
-//! ([`thinned`]) : un nuage de points reçoit ses carrés sur un sous-ensemble
-//! régulier de ses marqueurs, des barres au milieu de leur extrémité libre
-//! (côté valeur). Les moustaches ne portent pas de poignée : elles servent à
-//! désigner la série, pas à la signaler.
+//! What has no path follows the same rule on discrete positions
+//! ([`thinned`]): a scatter plot gets its squares on a regular subset of its
+//! markers, bars at the middle of their free end (value side). Whiskers
+//! carry no handle: they serve to pick the series, not to flag it.
 //!
-//! La couleur est l'encre automatique du fond de la figure
-//! ([`crate::pipeline::figure_ink`]) : noire sur fond clair, blanche sur fond
-//! sombre, indépendante de la couleur de la série.
+//! The color is the automatic ink of the figure's background
+//! ([`crate::pipeline::figure_ink`]): black on a light background, white on
+//! a dark one, independent of the series color.
 //!
-//! Les poignées sont un état de **vue**, pas du modèle : elles ne passent pas
-//! par le pipeline (la figure, son cache et l'export SVG/PDF/PNG n'en savent
-//! rien), mais par [`paint_handles`], générique sur le backend, que l'écran
-//! appelle par-dessus la figure en cache.
+//! The handles are a **view** state, not a model one: they do not go through
+//! the pipeline (the figure, its cache and the SVG/PDF/PNG export know
+//! nothing of them), but through [`paint_handles`], generic over the backend,
+//! which the screen calls over the cached figure.
 
 use crate::{DrawnPlot, PanelTransform};
 use plotters::style::RGBColor;
@@ -38,30 +37,30 @@ use plotters_backend::{DrawingBackend, DrawingErrorKind};
 
 type Pixel = (i32, i32);
 
-/// Côté d'une poignée de sélection, en pixels d'affichage — indépendant du
-/// zoom et de la taille de la fenêtre.
+/// Side of a selection handle, in display pixels — independent of the zoom
+/// and of the window size.
 pub const HANDLE_SIDE: f64 = 5.0;
 
-/// Espacement des poignées le long du tracé, en pixels d'affichage :
-/// assez serré pour suivre la forme d'une courbe, assez lâche pour ne pas la
-/// recouvrir (un carré de 5 px tous les 50 px masque 10 % du trait).
+/// Spacing of the handles along the path, in display pixels: tight enough
+/// to follow the shape of a curve, loose enough not to cover it (a 5 px
+/// square every 50 px hides 10% of the line).
 pub const HANDLE_SPACING: f64 = 50.0;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DrawnSeries {
     pub index: usize,
-    /// Les tronçons de la ligne tracée, après rognage, au seizième de pixel.
+    /// The segments of the drawn line, after clipping, at a sixteenth of a pixel.
     pub paths: Vec<Vec<(f64, f64)>>,
-    /// Les moustaches (barres d'erreur), après rognage : désignables, sans
-    /// poignée.
+    /// The whiskers (error bars), after clipping: pickable, without a
+    /// handle.
     pub whiskers: Vec<(Pixel, Pixel)>,
-    /// Les marqueurs visibles.
+    /// The visible markers.
     pub points: Vec<Pixel>,
-    /// Les barres visibles, en rectangles normalisés (coin haut-gauche, coin
-    /// bas-droit), rognés.
+    /// The visible bars, as normalized rectangles (top-left corner,
+    /// bottom-right corner), clipped.
     pub bars: Vec<(Pixel, Pixel)>,
-    /// Pour chaque barre de `bars`, le milieu de son extrémité libre (côté
-    /// valeur, pas côté ligne de base), rogné : la place de sa poignée.
+    /// For each bar of `bars`, the middle of its free end (value side, not
+    /// baseline side), clipped: the place of its handle.
     pub bar_tips: Vec<Pixel>,
 }
 
@@ -103,14 +102,13 @@ impl DrawnSeries {
             .fold(f64::INFINITY, f64::min)
     }
 
-    /// Centres des poignées de sélection, en pixels d'affichage.
+    /// Centers of the selection handles, in display pixels.
     ///
-    /// `to_display` convertit un pixel de la figure en pixel d'affichage
-    /// (l'écran agrandit ou réduit la figure) : l'espacement
-    /// [`HANDLE_SPACING`] est mesuré **après** cette conversion. Une ligne
-    /// porte ses poignées le long de ses tronçons ([`along_path`]) ; sans
-    /// ligne, les marqueurs puis les barres en reçoivent un sous-ensemble
-    /// régulier ([`thinned`]).
+    /// `to_display` converts a figure pixel into a display pixel (the screen
+    /// enlarges or shrinks the figure): the [`HANDLE_SPACING`] spacing is
+    /// measured **after** this conversion. A line carries its handles along
+    /// its segments ([`along_path`]); without a line, the markers then the
+    /// bars get a regular subset of them ([`thinned`]).
     pub fn handle_centers(&self, to_display: impl Fn((f64, f64)) -> (f64, f64)) -> Vec<(f64, f64)> {
         if !self.paths.is_empty() {
             return self
@@ -139,17 +137,17 @@ impl DrawnSeries {
     }
 }
 
-/// Points posés le long d'une polyligne, tous les `spacing` pixels de
-/// longueur parcourue : le premier sur le départ, puis un à chaque
-/// `spacing`, et l'arrivée en plus si la dernière poignée en est à plus d'un
-/// demi-intervalle — les deux bouts d'un tronçon sont ainsi toujours
-/// marqués. Un tronçon d'un seul point (ou de longueur nulle) en reçoit un.
+/// Points placed along a polyline, every `spacing` pixels of distance
+/// traveled: the first at the start, then one at each `spacing`, and the end
+/// in addition if the last handle is more than half an interval away from
+/// it — both ends of a segment are thus always marked. A segment of a
+/// single point (or of zero length) gets one.
 pub fn along_path(path: &[(f64, f64)], spacing: f64) -> Vec<(f64, f64)> {
     let Some(&first) = path.first() else {
         return Vec::new();
     };
     let mut handles = vec![first];
-    // Distance parcourue depuis la dernière poignée.
+    // Distance traveled since the last handle.
     let mut since = 0.0;
     for pair in path.windows(2) {
         let (a, b) = (pair[0], pair[1]);
@@ -157,7 +155,7 @@ pub fn along_path(path: &[(f64, f64)], spacing: f64) -> Vec<(f64, f64)> {
         if !length.is_finite() || length == 0.0 {
             continue;
         }
-        // Abscisse, sur ce segment, de la prochaine poignée.
+        // Abscissa, on this segment, of the next handle.
         let mut next = spacing - since;
         while next <= length {
             let t = next / length;
@@ -173,9 +171,9 @@ pub fn along_path(path: &[(f64, f64)], spacing: f64) -> Vec<(f64, f64)> {
     handles
 }
 
-/// Sous-ensemble régulier de positions discrètes (marqueurs, sommets de
-/// barres), dans l'ordre : la première est gardée, puis toute position à
-/// au moins `spacing` pixels de la dernière gardée.
+/// Regular subset of discrete positions (markers, bar vertices), in order:
+/// the first is kept, then every position at least `spacing` pixels from the
+/// last one kept.
 pub fn thinned(positions: impl IntoIterator<Item = (f64, f64)>, spacing: f64) -> Vec<(f64, f64)> {
     let mut kept: Vec<(f64, f64)> = Vec::new();
     for p in positions {
@@ -189,8 +187,8 @@ pub fn thinned(positions: impl IntoIterator<Item = (f64, f64)>, spacing: f64) ->
     kept
 }
 
-/// Le carré d'une poignée centrée sur `center`, en coins entiers (Plotters
-/// raisonne en entiers) : côté [`HANDLE_SIDE`] exactement.
+/// The square of a handle centered on `center`, with whole-number corners
+/// (Plotters reasons in integers): side exactly [`HANDLE_SIDE`].
 pub fn handle_square((x, y): (f64, f64)) -> (Pixel, Pixel) {
     let half = HANDLE_SIDE / 2.0;
     let left = (x - half).round() as i32;
@@ -199,9 +197,9 @@ pub fn handle_square((x, y): (f64, f64)) -> (Pixel, Pixel) {
     ((left, top), (left + side, top + side))
 }
 
-/// Peint les poignées de sélection, des carrés pleins couleur `ink`, sur
-/// n'importe quel backend — écrit une fois, ici, comme le reste du rendu
-/// (invariant 5). Les centres sont dans le repère du backend.
+/// Paints the selection handles, solid squares of color `ink`, on any
+/// backend — written once, here, like the rest of the rendering
+/// (invariant 5). The centers are in the backend's frame.
 pub fn paint_handles<DB: DrawingBackend>(
     backend: &mut DB,
     centers: &[(f64, f64)],
@@ -215,7 +213,7 @@ pub fn paint_handles<DB: DrawingBackend>(
     Ok(())
 }
 
-/// Indice du calque et rang d'origine dans le calque déclaré. À égalité, le dernier tracé gagne.
+/// Layer index and original rank within the declared layer. On a tie, the last one drawn wins.
 pub fn series_at(plot: &DrawnPlot, pixel: (f64, f64)) -> Option<(usize, usize)> {
     for panel in plot.panels.iter().rev() {
         if !PanelTransform::of(panel)?.contains(pixel.0, pixel.1) {
@@ -246,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn les_segments_et_les_barres_se_designent_entre_leurs_points() {
+    fn segments_and_bars_are_picked_between_their_points() {
         let line = DrawnSeries {
             paths: vec![vec![(0.0, 0.0), (100.0, 100.0)]],
             ..Default::default()
@@ -268,15 +266,15 @@ mod tests {
     }
 
     #[test]
-    fn les_poignees_sont_espacees_le_long_du_trace_pas_par_point() {
-        // Un coude : 0 → 120 en x, puis 80 vers le bas. Longueur 200.
+    fn handles_are_spaced_along_the_path_not_per_point() {
+        // A bend: 0 → 120 in x, then 80 downward. Length 200.
         let path = [(0.0, 0.0), (120.0, 0.0), (120.0, 80.0)];
         let handles = along_path(&path, 50.0);
         let expected = [
             (0.0, 0.0),
             (50.0, 0.0),
             (100.0, 0.0),
-            // 20 px restants du premier segment + 30 px sur le second.
+            // 20 px remaining of the first segment + 30 px on the second.
             (120.0, 30.0),
             (120.0, 80.0),
         ];
@@ -284,8 +282,8 @@ mod tests {
         for (got, want) in handles.iter().zip(expected) {
             assert!(close(*got, want), "{got:?} ≠ {want:?}");
         }
-        // Le même tracé découpé en cent points donne les mêmes poignées :
-        // l'espacement ne dépend pas de la densité des données.
+        // The same path split into a hundred points gives the same handles:
+        // the spacing does not depend on the data density.
         let dense: Vec<_> = (0..=60)
             .map(|i| (i as f64 * 2.0, 0.0))
             .chain((1..=40).map(|i| (120.0, i as f64 * 2.0)))
@@ -298,15 +296,15 @@ mod tests {
     }
 
     #[test]
-    fn l_arrivee_n_est_marquee_que_si_elle_est_loin_de_la_derniere_poignee() {
-        // 110 px : poignées à 0, 50, 100 ; l'arrivée (10 px plus loin) ne
-        // double pas la dernière.
+    fn the_end_is_marked_only_if_it_is_far_from_the_last_handle() {
+        // 110 px: handles at 0, 50, 100; the end (10 px further) does not
+        // double the last one.
         assert_eq!(along_path(&[(0.0, 0.0), (110.0, 0.0)], 50.0).len(), 3);
-        // 140 px : l'arrivée est à 40 px de la poignée à 100, elle est marquée.
+        // 140 px: the end is 40 px from the handle at 100, it is marked.
         let handles = along_path(&[(0.0, 0.0), (140.0, 0.0)], 50.0);
         assert_eq!(handles.len(), 4);
         assert!(close(handles[3], (140.0, 0.0)));
-        // Un tronçon réduit à un point en reçoit une ; un chemin vide aucune.
+        // A segment reduced to a point gets one; an empty path gets none.
         assert_eq!(along_path(&[(3.0, 4.0)], 50.0), vec![(3.0, 4.0)]);
         assert_eq!(
             along_path(&[(3.0, 4.0), (3.0, 4.0)], 50.0),
@@ -316,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn l_espacement_se_mesure_en_pixels_d_affichage() {
+    fn spacing_is_measured_in_display_pixels() {
         let series = DrawnSeries {
             paths: vec![vec![(0.0, 0.0), (200.0, 0.0)]],
             ..Default::default()
@@ -324,15 +322,15 @@ mod tests {
         let native = series.handle_centers(|(x, y)| (x, y));
         let doubled = series.handle_centers(|(x, y)| (x * 2.0, y * 2.0));
         assert_eq!(native.len(), 5);
-        // Figure affichée deux fois plus grande : deux fois plus de poignées,
-        // toujours à HANDLE_SPACING les unes des autres à l'écran.
+        // Figure displayed twice as large: twice as many handles,
+        // still HANDLE_SPACING apart on the screen.
         assert_eq!(doubled.len(), 9);
         assert!(close(doubled[1], (HANDLE_SPACING, 0.0)));
     }
 
     #[test]
-    fn un_nuage_et_des_barres_portent_un_sous_ensemble_regulier() {
-        // Marqueurs tous les 10 px : un sur cinq.
+    fn a_scatter_and_bars_carry_a_regular_subset() {
+        // Markers every 10 px: one in five.
         let scatter = DrawnSeries {
             points: (0..=20).map(|i| (i * 10, 0)).collect(),
             ..Default::default()
@@ -348,7 +346,7 @@ mod tests {
                 (200.0, 0.0)
             ]
         );
-        // Barres de 60 px de pas : chacune la sienne, sur son extrémité libre.
+        // Bars 60 px apart: each its own, on its free end.
         let bars = DrawnSeries {
             bars: vec![((0, 10), (40, 100)), ((60, 100), (100, 150))],
             bar_tips: vec![(20, 10), (80, 150)],
@@ -358,8 +356,8 @@ mod tests {
             bars.handle_centers(|(x, y)| (x, y)),
             vec![(20.0, 10.0), (80.0, 150.0)]
         );
-        // Une ligne avec marqueurs : les poignées suivent la ligne, pas les
-        // marqueurs.
+        // A line with markers: the handles follow the line, not the
+        // markers.
         let line_and_symbols = DrawnSeries {
             paths: vec![vec![(0.0, 0.0), (100.0, 0.0)]],
             points: vec![(0, 0), (7, 0), (100, 0)],
@@ -369,7 +367,7 @@ mod tests {
             line_and_symbols.handle_centers(|(x, y)| (x, y)),
             vec![(0.0, 0.0), (50.0, 0.0), (100.0, 0.0)]
         );
-        // Les moustaches seules n'en portent pas.
+        // Whiskers alone carry none.
         let whiskers = DrawnSeries {
             whiskers: vec![((0, 0), (0, 100))],
             ..Default::default()
@@ -378,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn une_poignee_est_un_carre_de_cote_fixe_centre() {
+    fn a_handle_is_a_centered_square_of_fixed_side() {
         let ((left, top), (right, bottom)) = handle_square((100.0, 40.0));
         assert_eq!(right - left, HANDLE_SIDE as i32);
         assert_eq!(bottom - top, HANDLE_SIDE as i32);

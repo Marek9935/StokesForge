@@ -1,5 +1,5 @@
-//! Régression #150 : le spectre réel reste fidèle au dézoom, sans lisser
-//! ses données. Les exports optionnels permettent de regarder les cadrages.
+//! Regression #150: the real spectrum stays faithful when zoomed out,
+//! without smoothing its data. The optional exports allow looking at the framings.
 
 use egui::{Color32, Pos2, Rect, Shape};
 use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
@@ -9,7 +9,7 @@ use stokesforge_plot::{AxisScale, PanelSpec, PlotSpec, SeriesAxis, SeriesSpec};
 use stokesforge_render::{PanelTransform, TextMeasurer};
 
 #[test]
-fn jasco_garde_les_variations_sous_pixel_aux_deux_cadrages() {
+fn jasco_keeps_the_subpixel_variations_at_both_framings() {
     let bytes = include_bytes!("../../../test/import/JascoUV_vis.csv");
     let mut recipe = ImportRecipe::new("Jasco UV-Vis");
     recipe.data_end = stokesforge_import::DataEnd::Auto;
@@ -36,9 +36,9 @@ fn jasco_garde_les_variations_sous_pixel_aux_deux_cadrages() {
     let measurer = TextMeasurer::default();
     let mut errors = Vec::new();
     for (name, ranges, right) in [
-        ("dezoom", ((250.0, 800.0), (-0.02, 1.0)), false),
+        ("zoom_out", ((250.0, 800.0), (-0.02, 1.0)), false),
         ("zoom", ((400.0, 550.0), (0.0, 0.18)), false),
-        ("log_droite", ((250.0, 800.0), (-0.02, 1.0)), true),
+        ("log_right", ((250.0, 800.0), (-0.02, 1.0)), true),
     ] {
         let mut panel = PanelSpec::at(0, 0);
         panel.legend.visible = false;
@@ -69,7 +69,7 @@ fn jasco_garde_les_variations_sous_pixel_aux_deux_cadrages() {
             &plot,
         )
         .unwrap();
-        assert_eq!(drawn.decimated_points, 0, "les 551 mesures sont conservées");
+        assert_eq!(drawn.decimated_points, 0, "the 551 measurements are kept");
         let (svg, exported) =
             stokesforge_render_svg::render_to_string_with_geometry(&plot, (800, 500), &measurer)
                 .unwrap();
@@ -100,8 +100,8 @@ fn jasco_garde_les_variations_sous_pixel_aux_deux_cadrages() {
             })
             .flatten()
             .collect();
-        // Comparer aussi les sommets des sorties réelles : une égalité de
-        // DrawnPanel seule ne prouverait pas le décodage dans les backends.
+        // Also compare the vertices of the real outputs: an equality of
+        // DrawnPanel alone would not prove the decoding in the backends.
         let svg_vertices: Vec<(f64, f64)> = svg
             .lines()
             .filter(|line| line.starts_with("<polyline") && line.contains("stroke=\"#4C78A8\""))
@@ -130,9 +130,9 @@ fn jasco_garde_les_variations_sous_pixel_aux_deux_cadrages() {
         let mut max_error = 0.0_f64;
         for (&x, &y) in xs.iter().zip(ys) {
             let (px, py) = transform.data_to_pixel(x, y).unwrap();
-            // Plotters pose l'extrémité sur le dernier pixel inclus, soit
-            // taille - 1 pour le repère principal. Son repère secondaire
-            // emploie les bords du rectangle, comme la navigation.
+            // Plotters puts the end on the last included pixel, that is
+            // size - 1 for the main frame. Its secondary frame
+            // uses the rectangle edges, like the navigation.
             let panel = &drawn.panels[0];
             let fx = if right {
                 (x.log10() - ranges.0 .0.log10()) / (ranges.0 .1.log10() - ranges.0 .0.log10())
@@ -160,7 +160,7 @@ fn jasco_garde_les_variations_sous_pixel_aux_deux_cadrages() {
     for (name, error) in errors {
         assert!(
             error <= 1.0 / 32.0 + 1e-4,
-            "{name} : écart de {error} px au lieu d'au plus 1/32 px"
+            "{name}: deviation of {error} px instead of at most 1/32 px"
         );
     }
 }

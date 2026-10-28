@@ -1,66 +1,62 @@
-//! **La source unique de mesure de texte** — tâche R4.1.
+//! **The single source of text measurement** — task R4.1.
 //!
-//! Tout ce qui, dans le chantier de rendu, répond à la question « quelle
-//! place prend cette chaîne ? » passe par ici, quel que soit le backend qui
-//! pose la question. C'est l'invariant non négociable du §4.3 de
-//! `architecture-choisie.md`, et le seul endroit du chantier où un bug est
-//! **silencieux** : un désaccord de mesure décale les axes entre l'écran et
-//! l'export sans lever la moindre erreur.
+//! Everything that, in the rendering work package, answers the question "how
+//! much room does this string take?" goes through here, whichever backend asks
+//! it. It is the non-negotiable invariant of §4.3 of `architecture-choisie.md`,
+//! and the only place of the work package where a bug is **silent**: a
+//! measurement disagreement shifts the axes between the screen and the export
+//! without raising any error.
 //!
-//! # Ce qui est partagé, et ce qui ne l'est pas
+//! # What is shared, and what is not
 //!
-//! La mesure R0 0.1 (2026-09-10) a tranché : ce sont les
-//! [`epaint::FontDefinitions`] qu'il faut partager, **pas** l'instance
-//! [`epaint::Fonts`] — qui n'est de toute façon ni `Clone` ni utilisable par
-//! `&self`. Le danger réel n'est pas « deux instances », c'est « deux jeux de
-//! polices ». Un test de dix lignes suffit à le garder, et il est écrit
-//! (`tests/mesure.rs`).
+//! The R0 0.1 measurement (2026-09-10) settled it: the
+//! [`epaint::FontDefinitions`] are what must be shared, **not** the
+//! [`epaint::Fonts`] instance — which is neither `Clone` nor usable through
+//! `&self` anyway. The real danger is not "two instances", it is "two font
+//! sets". A ten-line test is enough to guard it, and it is written
+//! (`tests/measurement.rs`).
 //!
-//! # Correction apportée par R4 : la hauteur, elle, dépend du
-//! `pixels_per_point`
+//! # Correction made by R4: the height does depend on `pixels_per_point`
 //!
-//! La précision 1 de la mesure R0 annonçait les métriques indépendantes du
-//! `pixels_per_point`. **C'est vrai des avances, faux de la hauteur de
-//! ligne**, et R4 s'en est aperçu en écrivant le test qui devait
-//! l'entériner. `epaint` cale la hauteur d'une ligne sur la grille de pixels
-//! *physiques* (`text_layout.rs` : `max_row_height =
-//! point_scale.round_to_pixel(max_row_height)`), donc sur une quantité qui
-//! change avec l'écran. Mesuré : à 9,7 pt de corps, un galley fait 11 points
-//! de haut à `pixels_per_point = 1,0` et 12 à 1,25. R0 ne pouvait pas le
-//! voir : elle comparait des avances de glyphes, pas des rectangles de
-//! galley.
+//! Precision 1 of the R0 measurement announced metrics independent of
+//! `pixels_per_point`. **That holds for advances, not for the line height**,
+//! and R4 noticed it while writing the test meant to confirm it. `epaint`
+//! snaps the height of a line to the grid of *physical* pixels
+//! (`text_layout.rs`: `max_row_height =
+//! point_scale.round_to_pixel(max_row_height)`), hence to a quantity that
+//! changes with the screen. Measured: at 9.7 pt body size, a galley is 11
+//! points high at `pixels_per_point = 1.0` and 12 at 1.25. R0 could not see
+//! it: it compared glyph advances, not galley rectangles.
 //!
-//! La conséquence serait réelle et exactement du type que la phase existe
-//! pour empêcher : `DrawingArea::titled` fait descendre la zone de tracé de
-//! la hauteur du titre, donc **la figure exportée dépendrait de l'écran de
-//! celui qui l'exporte**.
+//! The consequence would be real and exactly of the type the phase exists to
+//! prevent: `DrawingArea::titled` lowers the plot area by the title height, so
+//! **the exported figure would depend on the screen of whoever exports it**.
 //!
-//! D'où la règle, tenue par construction plutôt que par vigilance : **on
-//! mesure toujours à [`MEASUREMENT_PIXELS_PER_POINT`]**, quel que soit
-//! l'écran ; le `pixels_per_point` réel ne sert qu'à *dessiner*. C'est la
-//! raison d'être des deux méthodes de [`TextSource`], et le prix payé est
-//! d'au plus un pixel physique entre la boîte réservée et les glyphes
-//! affichés sur un écran HiDPI — invisible, et sans effet sur la géométrie,
-//! puisque le texte est ancré et non étiré.
+//! Hence the rule, held by construction rather than by vigilance: **always
+//! measure at [`MEASUREMENT_PIXELS_PER_POINT`]**, whatever the screen; the
+//! real `pixels_per_point` is used only to *draw*. This is the reason for the
+//! two methods of [`TextSource`], and the price paid is at most one physical
+//! pixel between the reserved box and the glyphs displayed on a HiDPI screen —
+//! invisible, and with no effect on the geometry, since the text is anchored
+//! and not stretched.
 //!
-//! # Ce qui n'est pas ici
+//! # What is not here
 //!
-//! Typst. Le texte ordinaire — chiffres des graduations, titres d'axe —
-//! passe par les fonts egui et **jamais** par Typst : ce serait une
-//! compilation Typst par graduation (`architecture-choisie.md` §4.3). La
-//! tâche R8.5 ajoutera un aiguillage dans [`TextSource::measure`], pas
-//! ailleurs.
+//! Typst. Ordinary text — tick digits, axis titles — goes through the egui
+//! fonts and **never** through Typst: that would be one Typst compilation per
+//! tick (`architecture-choisie.md` §4.3). Task R8.5 will add a switch in
+//! [`TextSource::measure`], nowhere else.
 //!
-//! # Ajout du 2026-09-13 — un choix de police, pas seulement un défaut
+//! # Addition of 2026-09-13 — a font choice, not only a default
 //!
-//! [`font_definitions`] rendait jusqu'ici `FontDefinitions::default()`
-//! d'epaint sans discussion. Une tâche ponctuelle (hors séquencement R0-R8)
-//! lui a donné un vrai choix — trois paires de polices embarquées
-//! (Libertinus, Fira, Noto) ou une police système par son nom, avec repli
-//! silencieux sur Noto — porté par [`crate::fonts`]. **L'invariant de ce
-//! module ne change pas** : [`font_definitions`] reste le seul endroit que
-//! les deux backends appellent, avec le même résultat des deux côtés tant
-//! que le même [`fonts::FontChoice`] leur est passé. Détail dans
+//! [`font_definitions`] used to return epaint's `FontDefinitions::default()`
+//! without discussion. A one-off task (outside the R0-R8 sequencing) gave it
+//! a real choice — three embedded font pairs (Libertinus, Fira, Noto) or a
+//! system font by its name, with a silent fallback to Noto — carried by
+//! [`crate::fonts`]. **The invariant of this module does not change**:
+//! [`font_definitions`] remains the only place both backends call, with the
+//! same result on both sides as long as they are given the same
+//! [`fonts::FontChoice`]. Details in
 //! `docs/archive/newarchitecture/architecture-choisie.md` §7.
 
 use std::sync::{Arc, Mutex};
@@ -71,85 +67,85 @@ use plotters_backend::{BackendTextStyle, FontFamily as PlottersFamily};
 
 use crate::fonts::{self, FontChoice};
 
-/// L'échelle à laquelle **toute** mesure de mise en page est faite.
+/// The scale at which **every** layout measurement is made.
 ///
-/// Fixée à 1,0 et non « celle de l'écran » : voir la correction en tête de
-/// module. Une figure ne doit pas changer de géométrie parce que
-/// l'utilisateur a branché un second écran.
+/// Fixed at 1.0 and not "the screen's": see the correction at the top of the
+/// module. A figure must not change geometry because the user plugged in a
+/// second screen.
 pub const MEASUREMENT_PIXELS_PER_POINT: f32 = 1.0;
 
-/// Facteur entre la « taille » d'une police au sens de Plotters et sa taille
-/// en points au sens d'epaint et du SVG.
+/// Factor between a font's "size" in Plotters' sense and its size in points
+/// in epaint's and SVG's sense.
 ///
-/// Ce n'est pas une constante de confort : c'est **exactement** le diviseur
-/// que `plotters-svg` écrit dans l'attribut `font-size` (`svg.rs` :
-/// `("font-size", format!("{}", style.size() / 1.24))`). Mesurer à la même
-/// taille que celle inscrite dans le SVG est ce qui fait que la boîte
-/// réservée correspond aux glyphes réellement affichés — sinon la figure
-/// exportée réserverait juste, puis dessinerait faux.
+/// This is not a convenience constant: it is **exactly** the divisor that
+/// `plotters-svg` writes in the `font-size` attribute (`svg.rs`:
+/// `("font-size", format!("{}", style.size() / 1.24))`). Measuring at the
+/// same size as the one written in the SVG is what makes the reserved box
+/// match the glyphs actually displayed — otherwise the exported figure would
+/// reserve correctly, then draw wrongly.
 pub const PLOTTERS_SIZE_PER_POINT: f64 = 1.24;
 
-/// Taille de police d'epaint, en points, pour une taille au sens de Plotters.
+/// epaint font size, in points, for a size in Plotters' sense.
 pub fn font_size(plotters_size: f64) -> f32 {
     (plotters_size / PLOTTERS_SIZE_PER_POINT) as f32
 }
 
-/// **La** définition des polices du projet, en un seul endroit.
+/// **The** project's font definition, in one single place.
 ///
-/// Résout [`FontChoice::default`] — Noto Sans, embarquée
-/// (`fonts.rs`, embed de polices du 2026-09-13) — plutôt que le
-/// `FontDefinitions::default()` brut d'epaint que cette fonction rendait
-/// jusque-là : voir [`crate::fonts`] pour le mécanisme de choix (trois
-/// paires embarquées ou police système, avec repli) et
-/// `docs/archive/newarchitecture/architecture-choisie.md` §7 pour la décision
-/// datée qui a remplacé l'ancienne phrase sur les fonts.
+/// Resolves [`FontChoice::default`] — Noto Sans, embedded
+/// (`fonts.rs`, font embedding of 2026-09-13) — rather than the raw epaint
+/// `FontDefinitions::default()` this function used to return: see
+/// [`crate::fonts`] for the choice mechanism (three embedded pairs or a system
+/// font, with a fallback) and
+/// `docs/archive/newarchitecture/architecture-choisie.md` §7 for the dated
+/// decision that replaced the old sentence on fonts.
 ///
-/// La mesure hors écran (export SVG, CLI, script) part donc du même jeu de
-/// polices que la fenêtre, ce que la mesure R0 0.1 a vérifié à 0,000000 px
-/// d'écart sur 540 comparaisons — propriété inchangée par ce choix, puisque
-/// les deux côtés continuent d'appeler cette fonction-ci et nulle autre.
+/// Off-screen measurement (SVG export, CLI, script) therefore starts from the
+/// same font set as the window, which the R0 0.1 measurement verified at
+/// 0.000000 px difference over 540 comparisons — a property unchanged by this
+/// choice, since both sides keep calling this function and no other.
 ///
-/// Pour que ce soit une propriété et non une coïncidence, l'application
-/// pose explicitement ces définitions sur son `Context` au démarrage
-/// (`stokesforge-app`) : si egui changeait un jour son défaut, la figure
-/// resterait la même des deux côtés.
+/// So that this is a property and not a coincidence, the application
+/// explicitly sets these definitions on its `Context` at startup
+/// (`stokesforge-app`): if egui ever changed its default, the figure would
+/// stay the same on both sides.
 ///
-/// **Ne pas appeler en boucle** : elle décode les polices embarquées. Un
-/// [`TextMeasurer`] par backend, construit une fois, suffit.
+/// **Do not call in a loop**: it decodes the embedded fonts. One
+/// [`TextMeasurer`] per backend, built once, is enough.
 ///
-/// Pour choisir une autre police que le défaut (une autre paire embarquée,
-/// ou une police système), voir [`font_definitions_for`].
+/// To choose a font other than the default (another embedded pair, or a
+/// system font), see [`font_definitions_for`].
 pub fn font_definitions() -> FontDefinitions {
     font_definitions_for(&FontChoice::default())
 }
 
-/// Comme [`font_definitions`], mais avec un [`FontChoice`] explicite.
+/// Like [`font_definitions`], but with an explicit [`FontChoice`].
 ///
-/// Un appelant qui veut Fira, Libertinus, ou une police système (le cas
-/// « Calibri » de la demande utilisateur) passe par ici — des deux côtés à
-/// la fois (écran et export), avec le **même** [`FontChoice`], sous peine de
-/// rompre l'invariant que ce module porte : voir [`crate::fonts::resolve`]
-/// pour le détail de la résolution et du repli.
+/// A caller who wants Fira, Libertinus, or a system font (the "Calibri" case
+/// of the user request) goes through here — on both sides at once (screen and
+/// export), with the **same** [`FontChoice`], or the invariant this module
+/// carries breaks: see [`crate::fonts::resolve`] for the details of the
+/// resolution and the fallback.
 pub fn font_definitions_for(choice: &FontChoice) -> FontDefinitions {
     fonts::resolve(choice).definitions
 }
 
-/// Les options de rendu de texte du projet.
+/// The project's text rendering options.
 ///
-/// Volontairement les valeurs par défaut d'epaint. Les fixer ici plutôt que
-/// de les laisser à l'appelant évite qu'un backend ne prenne un jour les
-/// siennes et croie mesurer comme l'autre.
+/// Deliberately epaint's default values. Fixing them here rather than leaving
+/// them to the caller avoids a backend one day taking its own and believing
+/// it measures like the other.
 pub fn text_options() -> TextOptions {
     TextOptions::default()
 }
 
-/// Traduit une famille et une taille de Plotters en [`epaint::FontId`].
+/// Translates a Plotters family and size into an [`epaint::FontId`].
 ///
-/// Les fonts par défaut d'epaint n'offrent que deux familles réelles :
-/// proportionnelle et monospace. `Serif`, `SansSerif` et toute famille
-/// nommée tombent donc sur la proportionnelle — un repli assumé plutôt qu'un
-/// échec, et de toute façon identique des deux côtés, ce qui est la seule
-/// chose dont dépend l'accord des axes.
+/// epaint's default fonts offer only two real families: proportional and
+/// monospace. `Serif`, `SansSerif` and any named family therefore fall back to
+/// the proportional one — a deliberate fallback rather than a failure, and
+/// identical on both sides anyway, which is the only thing the agreement of
+/// the axes depends on.
 pub fn font_id<S: BackendTextStyle>(style: &S) -> FontId {
     let family = match style.family() {
         PlottersFamily::Monospace => FontFamily::Monospace,
@@ -160,48 +156,46 @@ pub fn font_id<S: BackendTextStyle>(style: &S) -> FontId {
     FontId::new(font_size(style.size()), family)
 }
 
-/// Arrondi d'une taille de galley vers le `(u32, u32)` que Plotters attend.
+/// Rounds a galley size to the `(u32, u32)` Plotters expects.
 ///
-/// Vers le haut : une boîte réservée trop petite tronque le libellé, une
-/// boîte trop grande ne coûte qu'un pixel de marge. Fonction partagée pour
-/// que l'arrondi lui-même ne puisse pas diverger entre les deux backends.
+/// Upward: a reserved box that is too small truncates the label, a box that
+/// is too large costs only one pixel of margin. Shared function so that the
+/// rounding itself cannot diverge between the two backends.
 pub fn round_size(size: Vec2) -> (u32, u32) {
     (size.x.max(0.0).ceil() as u32, size.y.max(0.0).ceil() as u32)
 }
 
-/// Ce qui sait mettre un texte en page — pour le mesurer, et pour le
-/// dessiner.
+/// Whatever can lay out a text — to measure it, and to draw it.
 ///
-/// Les deux méthodes sont distinctes **à dessein**, et c'est le seul endroit
-/// du chantier où la distinction compte :
+/// The two methods are distinct **on purpose**, and this is the only place of
+/// the work package where the distinction matters:
 ///
-/// - [`measure`](TextSource::measure) décide de la **géométrie** de la
-///   figure. Elle doit rendre le même nombre partout : même machine ou non,
-///   même écran ou non, écran ou export. Toute implémentation la calcule à
-///   [`MEASUREMENT_PIXELS_PER_POINT`] ;
-/// - [`layout`](TextSource::layout) produit le `Galley` qui sera **dessiné**.
-///   Celui-là doit être mis en page au `pixels_per_point` de la cible, sans
-///   quoi le texte serait flou ; et, quand il y a un `egui::Context`, il doit
-///   venir de lui, parce qu'un `Galley` porte les coordonnées UV de ses
-///   glyphes **dans l'atlas qui l'a mis en page** — un `Shape::Text`
-///   construit sur un `Galley` étranger serait tesselé contre l'atlas du
-///   `Context` et afficherait n'importe quoi.
+/// - [`measure`](TextSource::measure) decides the **geometry** of the figure.
+///   It must return the same number everywhere: same machine or not, same
+///   screen or not, screen or export. Every implementation computes it at
+///   [`MEASUREMENT_PIXELS_PER_POINT`];
+/// - [`layout`](TextSource::layout) produces the `Galley` that will be
+///   **drawn**. That one must be laid out at the target's `pixels_per_point`,
+///   otherwise the text would be blurry; and, when there is an
+///   `egui::Context`, it must come from it, because a `Galley` carries the UV
+///   coordinates of its glyphs **in the atlas that laid it out** — a
+///   `Shape::Text` built on a foreign `Galley` would be tessellated against
+///   the `Context`'s atlas and display garbage.
 ///
-/// Ce que les deux méthodes doivent avoir en commun, et c'est tout, ce sont
-/// les [`font_definitions`].
+/// What the two methods must have in common, and that is all, are the
+/// [`font_definitions`].
 pub trait TextSource {
-    /// La place que prend `text`, en points, à l'échelle de mesure.
+    /// The room `text` takes, in points, at the measurement scale.
     fn measure(&self, text: &str, font_id: FontId) -> Vec2;
 
-    /// Le `Galley` à dessiner, à l'échelle d'affichage de la cible.
+    /// The `Galley` to draw, at the target's display scale.
     fn layout(&self, text: &str, font_id: FontId, color: Color32) -> Arc<Galley>;
 }
 
-/// La mesure, telle que `DrawingBackend::estimate_text_size` doit la rendre.
+/// The measurement, as `DrawingBackend::estimate_text_size` must return it.
 ///
-/// Les deux backends appellent **cette fonction-ci**, pas une transcription
-/// chacun de leur côté : c'est ce qui rend la tâche R4.5 vérifiable plutôt
-/// qu'espérée.
+/// Both backends call **this function**, not a transcription each on their
+/// own side: this is what makes task R4.5 verifiable rather than hoped for.
 pub fn estimate<T: TextSource + ?Sized, S: BackendTextStyle>(
     source: &T,
     text: &str,
@@ -210,38 +204,37 @@ pub fn estimate<T: TextSource + ?Sized, S: BackendTextStyle>(
     round_size(source.measure(text, font_id(style)))
 }
 
-/// Une instance d'[`epaint::Fonts`] hors `Context`, prête à mesurer et à
-/// mettre en page.
+/// An [`epaint::Fonts`] instance outside a `Context`, ready to measure and
+/// lay out.
 ///
-/// Construite sur [`font_definitions`] et [`text_options`], donc sur la même
-/// source que l'écran. Le `Mutex` n'est pas une précaution de concurrence
-/// mais une nécessité de signature : `Fonts::layout` prend `&mut self` alors
-/// que `DrawingBackend::estimate_text_size` prend `&self`. Le coût est sans
-/// rapport avec celui de la mise en page elle-même, et le cache de galleys
-/// d'epaint amortit les graduations répétées.
+/// Built on [`font_definitions`] and [`text_options`], hence on the same
+/// source as the screen. The `Mutex` is not a concurrency precaution but a
+/// signature necessity: `Fonts::layout` takes `&mut self` while
+/// `DrawingBackend::estimate_text_size` takes `&self`. Its cost is unrelated
+/// to that of the layout itself, and epaint's galley cache absorbs repeated
+/// ticks.
 pub struct TextMeasurer {
     fonts: Mutex<Fonts>,
     pixels_per_point: f32,
 }
 
 impl TextMeasurer {
-    /// Une source de texte dont les `Galley` seront mis en page à
-    /// `pixels_per_point`, mesurant avec [`FontChoice::default`] (Noto Sans
-    /// embarquée).
+    /// A text source whose `Galley`s will be laid out at `pixels_per_point`,
+    /// measuring with [`FontChoice::default`] (embedded Noto Sans).
     ///
-    /// Ce paramètre ne concerne **que** le dessin : la mesure se fait
-    /// toujours à [`MEASUREMENT_PIXELS_PER_POINT`].
+    /// This parameter concerns **only** drawing: measurement is always done at
+    /// [`MEASUREMENT_PIXELS_PER_POINT`].
     ///
-    /// Pour choisir une autre police, voir [`Self::with_font_choice`].
+    /// To choose another font, see [`Self::with_font_choice`].
     pub fn new(pixels_per_point: f32) -> Self {
         Self::with_font_choice(pixels_per_point, &FontChoice::default())
     }
 
-    /// Comme [`Self::new`], mais avec un [`FontChoice`] explicite.
+    /// Like [`Self::new`], but with an explicit [`FontChoice`].
     ///
-    /// À appeler avec le **même** [`FontChoice`] que celui posé sur le
-    /// `egui::Context` de l'écran (`stokesforge-app`) : c'est ce qui tient
-    /// l'invariant de ce module quand la police n'est pas le défaut — voir
+    /// To be called with the **same** [`FontChoice`] as the one set on the
+    /// screen's `egui::Context` (`stokesforge-app`): this is what holds the
+    /// invariant of this module when the font is not the default — see
     /// [`crate::fonts`].
     pub fn with_font_choice(pixels_per_point: f32, choice: &FontChoice) -> Self {
         Self {
@@ -250,12 +243,12 @@ impl TextMeasurer {
         }
     }
 
-    /// L'échelle de mise en page des `Galley` dessinés par cette source.
+    /// The layout scale of the `Galley`s drawn by this source.
     pub fn pixels_per_point(&self) -> f32 {
         self.pixels_per_point
     }
 
-    /// Met en page à une échelle donnée.
+    /// Lays out at a given scale.
     fn layout_at(
         &self,
         pixels_per_point: f32,
@@ -263,10 +256,9 @@ impl TextMeasurer {
         font_id: FontId,
         color: Color32,
     ) -> Arc<Galley> {
-        // Verrou empoisonné : un `layout` ne peut paniquer que sur un défaut
-        // d'epaint, et refuser de mesurer ferait échouer un export pour une
-        // raison que l'appelant ne peut pas corriger. On reprend la donnée
-        // telle quelle.
+        // Poisoned lock: a `layout` can panic only on an epaint defect, and
+        // refusing to measure would make an export fail for a reason the
+        // caller cannot fix. We take the data back as it is.
         let mut fonts = self.fonts.lock().unwrap_or_else(|err| err.into_inner());
         fonts
             .with_pixels_per_point(pixels_per_point)
@@ -275,8 +267,8 @@ impl TextMeasurer {
 }
 
 impl Default for TextMeasurer {
-    /// À `pixels_per_point = 1.0` : la valeur juste pour l'export, où un
-    /// « pixel » de Plotters est une unité SVG et rien d'autre.
+    /// At `pixels_per_point = 1.0`: the right value for the export, where a
+    /// Plotters "pixel" is an SVG unit and nothing else.
     fn default() -> Self {
         Self::new(MEASUREMENT_PIXELS_PER_POINT)
     }
@@ -311,13 +303,12 @@ impl TextSource for TextMeasurer {
 mod tests {
     use super::*;
 
-    /// Le fait qui justifie [`MEASUREMENT_PIXELS_PER_POINT`], verrouillé
-    /// **dans le sens de l'affirmation** : oui, la hauteur d'un galley
-    /// dépend bien de l'échelle d'affichage. Si epaint corrigeait ce
-    /// comportement un jour, ce test tomberait et la constante pourrait
-    /// disparaître — c'est exactement ce qu'on veut savoir.
+    /// The fact that justifies [`MEASUREMENT_PIXELS_PER_POINT`], locked **in
+    /// the affirmative direction**: yes, a galley's height does depend on the
+    /// display scale. If epaint ever fixed this behavior, this test would fail
+    /// and the constant could go away — which is exactly what we want to know.
     #[test]
-    fn la_hauteur_dun_galley_depend_bien_du_pixels_per_point() {
+    fn a_galley_height_does_depend_on_pixels_per_point() {
         let source = TextMeasurer::new(1.0);
         let font = FontId::new(font_size(12.0), FontFamily::Proportional);
         let a = source
@@ -330,8 +321,8 @@ mod tests {
             .height();
         assert_ne!(
             a, b,
-            "epaint ne cale plus la hauteur de ligne sur la grille de pixels \
-             physiques : MEASUREMENT_PIXELS_PER_POINT n'a plus de raison d'être"
+            "epaint no longer snaps the line height to the physical pixel grid: \
+             MEASUREMENT_PIXELS_PER_POINT no longer has a reason to exist"
         );
     }
 }

@@ -1,9 +1,9 @@
-//! Ce que l'export doit produire, indépendamment du test d'accord.
+//! What the export must produce, independently of the agreement test.
 //!
-//! Le test d'accord (`stokesforge-render-egui/tests/accord.rs`) prouve que les
-//! deux backends sont *d'accord*. Il ne prouve pas que ce sur quoi ils
-//! s'accordent est un document SVG valide et complet — deux figures vides
-//! seraient parfaitement d'accord. D'où ce fichier.
+//! The agreement test (`stokesforge-render-egui/tests/agreement.rs`) proves that the
+//! two backends *agree*. It does not prove that what they agree on
+//! is a valid and complete SVG document — two empty figures would
+//! agree perfectly. Hence this file.
 
 use stokesforge_core::column::{Column, ColumnMeta, ColumnType, ValueBlock};
 use stokesforge_core::resolve::resolve_spec;
@@ -12,16 +12,16 @@ use stokesforge_plot::{AxisSpec, LineSpec, PanelSpec, PlotSpec, SeriesSpec};
 use stokesforge_render::TextMeasurer;
 use stokesforge_render_svg::{naive_estimate, render_spec, render_to_file, render_to_string};
 
-struct Projet {
+struct Fixture {
     project: Project,
     spec: PlotSpec,
 }
 
-fn projet() -> Projet {
-    let mut project = Project::new("Export").expect("projet");
+fn fixture() -> Fixture {
+    let mut project = Project::new("Export").expect("project");
     let root = project.root();
-    let book = project.add_empty_workbook(root, None).expect("classeur");
-    let sheet = project.add_worksheet(book, None).expect("feuille");
+    let book = project.add_empty_workbook(root, None).expect("workbook");
+    let sheet = project.add_worksheet(book, None).expect("worksheet");
     let xs: Vec<f64> = (0..40).map(|i| i as f64 * 0.25).collect();
     let ys: Vec<f64> = xs.iter().map(|x| x.exp() / 10.0).collect();
     let x = project
@@ -33,7 +33,7 @@ fn projet() -> Projet {
 
     let mut panel = PanelSpec::at(0, 0);
     panel.bottom = AxisSpec {
-        label: "Temps".into(),
+        label: "Time".into(),
         unit: "s".into(),
         grid: true,
         ..AxisSpec::default()
@@ -53,12 +53,12 @@ fn projet() -> Projet {
     panel.series.push(series);
 
     let spec = PlotSpec {
-        title: "Réponse impulsionnelle".into(),
+        title: "Impulse response".into(),
         background: "#ffffff".into(),
         ..PlotSpec::empty("")
     }
     .with_panels(panel);
-    Projet { project, spec }
+    Fixture { project, spec }
 }
 
 fn numeric(values: &[f64]) -> Column {
@@ -67,122 +67,122 @@ fn numeric(values: &[f64]) -> Column {
         ValueBlock::Float(values.to_vec()),
         ColumnMeta::default(),
     )
-    .expect("colonne")
+    .expect("column")
 }
 
-fn tree(projet: &Projet) -> &Tree {
-    projet.project.tree()
+fn tree(fixture: &Fixture) -> &Tree {
+    fixture.project.tree()
 }
 
 #[test]
-fn le_document_porte_la_figure_entiere() {
-    let projet = projet();
+fn the_document_carries_the_whole_figure() {
+    let fixture = fixture();
     let document = render_spec(
-        tree(&projet),
-        &projet.spec,
+        tree(&fixture),
+        &fixture.spec,
         (800, 600),
         &TextMeasurer::default(),
     )
     .expect("export");
 
-    assert!(document.starts_with("<svg"), "en-tête SVG absent");
+    assert!(document.starts_with("<svg"), "SVG header missing");
     assert!(
         document.trim_end().ends_with("</svg>"),
-        "document non refermé"
+        "document not closed"
     );
     assert!(document.contains("width=\"800\""));
     assert!(document.contains("height=\"600\""));
 
-    // Le titre, les libellés d'axe et la couleur de la série. Le non-ASCII
-    // est vérifié tel quel : `plotters-svg` échappe `<`, `>` et `&`, pas
-    // l'UTF-8, et un jour où il le ferait il faudrait s'en apercevoir.
-    assert!(document.contains("Réponse impulsionnelle"));
+    // The title, the axis labels and the series color. Non-ASCII
+    // is checked as is: `plotters-svg` escapes `<`, `>` and `&`, not
+    // UTF-8, and the day it did we would need to notice.
+    assert!(document.contains("Impulse response"));
     assert!(document.contains("Réponse (µV)"));
-    assert!(document.contains("Temps (s)"));
+    assert!(document.contains("Time (s)"));
     assert!(
         document.contains("#E45756"),
-        "la couleur de la série n'est pas dans le document"
+        "the series color is not in the document"
     );
     assert!(
         document.matches("<polyline").count() > 5,
-        "trop peu de polylignes : la grille ou la courbe manque"
+        "too few polylines: the grid or the curve is missing"
     );
 }
 
 #[test]
-fn une_serie_brisee_ne_vide_pas_le_document() {
-    // §11.1 : une référence brisée est un état, pas une panne. L'export doit
-    // sortir la figure quand même.
-    let mut projet = projet();
-    if let Some(panel) = projet.spec.panels.get_mut(0) {
+fn a_broken_series_does_not_empty_the_document() {
+    // §11.1: a broken reference is a state, not a failure. The export must
+    // output the figure all the same.
+    let mut fixture = fixture();
+    if let Some(panel) = fixture.spec.panels.get_mut(0) {
         panel
             .series
             .push(SeriesSpec::new(NodeId::from_raw(u64::MAX)));
     }
-    let plot = resolve_spec(tree(&projet), &projet.spec);
+    let plot = resolve_spec(tree(&fixture), &fixture.spec);
     assert_eq!(plot.broken_series().count(), 1);
 
     let document = render_to_string(&plot, (640, 480), &TextMeasurer::default()).expect("export");
-    assert!(document.contains("Réponse impulsionnelle"));
-    assert!(document.contains("#E45756"), "la série valide est tracée");
+    assert!(document.contains("Impulse response"));
+    assert!(document.contains("#E45756"), "the valid series is plotted");
 }
 
 #[test]
-fn ecriture_sur_disque() {
-    let projet = projet();
-    let plot = resolve_spec(tree(&projet), &projet.spec);
-    let dossier = tempfile::tempdir().expect("dossier temporaire");
-    let cible = dossier.path().join("figure.svg");
-    render_to_file(&cible, &plot, (400, 300), &TextMeasurer::default()).expect("écriture");
-    let contenu = std::fs::read_to_string(&cible).expect("relecture");
-    assert!(contenu.starts_with("<svg"));
-    assert!(contenu.len() > 500, "document suspicieusement court");
+fn writing_to_disk() {
+    let fixture = fixture();
+    let plot = resolve_spec(tree(&fixture), &fixture.spec);
+    let dir = tempfile::tempdir().expect("temporary directory");
+    let target = dir.path().join("figure.svg");
+    render_to_file(&target, &plot, (400, 300), &TextMeasurer::default()).expect("write");
+    let content = std::fs::read_to_string(&target).expect("read back");
+    assert!(content.starts_with("<svg"));
+    assert!(content.len() > 500, "suspiciously short document");
 }
 
 #[test]
-fn le_temoin_naif_reproduit_bien_lheuristique_de_plotters() {
-    // `naive_estimate` n'existe que pour servir de témoin. Un témoin faux
-    // est pire qu'aucun témoin : il ferait croire à une différence là où il
-    // n'y en a pas. Les deux propriétés qui le caractérisent sont donc
-    // vérifiées ici — largeur proportionnelle au **nombre d'octets**, et
-    // insensibilité au dessin réel des glyphes.
+fn the_naive_witness_does_reproduce_plotters_heuristic() {
+    // `naive_estimate` exists only to serve as a witness. A wrong witness
+    // is worse than no witness: it would suggest a difference where there
+    // is none. The two properties that characterize it are therefore
+    // checked here — width proportional to the **number of bytes**, and
+    // insensitivity to the actual drawing of the glyphs.
     assert_eq!(naive_estimate("111", 20.0), naive_estimate("WWW", 20.0));
     assert_eq!(
         naive_estimate("λ", 20.0),
         naive_estimate("ab", 20.0),
-        "« λ » fait deux octets : l'heuristique doit le compter comme deux \
-         caractères, c'est tout son défaut"
+        "\"λ\" is two bytes: the heuristic must count it as two \
+         characters, that is its whole flaw"
     );
-    let (largeur, hauteur) = naive_estimate("0,5", 20.0);
-    assert!(largeur > 0 && hauteur > 0);
+    let (width, height) = naive_estimate("0,5", 20.0);
+    assert!(width > 0 && height > 0);
 }
 
 #[test]
-fn le_separateur_decimal_du_graphe_vaut_pour_l_export() {
-    let mut projet = projet();
-    // Un axe de 0 à 1 : des graduations décimales (0.2, 0.4…) à coup sûr.
-    if let Some(panel) = projet.spec.panels.get_mut(0) {
+fn the_graphs_decimal_separator_applies_to_the_export() {
+    let mut fixture = fixture();
+    // An axis from 0 to 1: decimal ticks (0.2, 0.4…) for sure.
+    if let Some(panel) = fixture.spec.panels.get_mut(0) {
         panel.left.auto_range = false;
         panel.left.range_min = Some(0.0);
         panel.left.range_max = Some(1.0);
     }
-    let rendre = |projet: &Projet| {
+    let render = |fixture: &Fixture| {
         render_spec(
-            tree(projet),
-            &projet.spec,
+            tree(fixture),
+            &fixture.spec,
             (800, 600),
             &TextMeasurer::default(),
         )
         .expect("export")
     };
-    // Témoin : au point, des graduations décimales existent et aucune virgule
-    // ne figure dans un nombre.
-    let au_point = rendre(&projet);
-    assert!(au_point.contains("\n0.2\n"), "graduation décimale au point");
-    assert!(!au_point.contains("\n0,2\n"));
+    // Witness: with a point, decimal ticks exist and no comma
+    // appears in a number.
+    let with_point = render(&fixture);
+    assert!(with_point.contains("\n0.2\n"), "decimal tick with a point");
+    assert!(!with_point.contains("\n0,2\n"));
 
-    projet.spec.decimal_comma = true;
-    let a_la_virgule = rendre(&projet);
-    assert!(a_la_virgule.contains("\n0,2\n"), "graduation à la virgule");
-    assert!(!a_la_virgule.contains("\n0.2\n"));
+    fixture.spec.decimal_comma = true;
+    let with_comma = render(&fixture);
+    assert!(with_comma.contains("\n0,2\n"), "tick with a comma");
+    assert!(!with_comma.contains("\n0.2\n"));
 }

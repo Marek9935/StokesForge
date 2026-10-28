@@ -1,47 +1,46 @@
-//! Des chemins au **sous-pixel**, malgré des coordonnées de Plotters entières
-//! (issue #91).
+//! **Sub-pixel** paths, despite Plotters' integer coordinates (issue #91).
 //!
-//! `DrawingBackend::draw_path` ne prend que des `BackendCoord` (`i32`) : un
-//! cercle dont chaque sommet est arrondi au pixel a des plats et des crans,
-//! quel que soit son nombre de côtés — plus de côtés n'y change rien, l'erreur
-//! est l'arrondi lui-même (±0,5 px), visible surtout à l'export vectoriel.
+//! `DrawingBackend::draw_path` only takes `BackendCoord` (`i32`): a circle
+//! whose every vertex is rounded to the pixel has flats and notches, however
+//! many sides it has — more sides change nothing, the error is the rounding
+//! itself (±0.5 px), mostly visible in vector export.
 //!
-//! Plutôt qu'un trait de plus sur tout le pipeline, un chemin sous-pixel est
-//! un `draw_path` ordinaire à deux conventions, que les **deux** backends
-//! lisent (jamais un seul — invariant 5) :
+//! Rather than one more argument through the whole pipeline, a sub-pixel path
+//! is an ordinary `draw_path` with two conventions, which **both** backends
+//! read (never just one — invariant 5):
 //!
-//! - les coordonnées sont des **points fixes** : pixel × [`SCALE`] ;
-//! - l'épaisseur porte un drapeau ([`stroke_width`]) qui le signale.
+//! - the coordinates are **fixed-point**: pixel × [`SCALE`];
+//! - the width carries a flag ([`stroke_width`]) that signals it.
 //!
-//! Un backend qui ignore la convention (un backend de test) trace le chemin
-//! seize fois trop grand : c'est voulu, ça se voit. Le backend écran
-//! (`stokesforge-render-egui`) décode au tracé ; l'export SVG
-//! (`stokesforge-render-svg::subpixel`) réécrit les `<polyline>` marquées une
-//! fois le document fini, `plotters-svg` n'écrivant que des entiers.
+//! A backend that ignores the convention (a test backend) draws the path
+//! sixteen times too large: this is intended, it shows. The screen backend
+//! (`stokesforge-render-egui`) decodes at draw time; the SVG export
+//! (`stokesforge-render-svg::subpixel`) rewrites the marked `<polyline>`s
+//! once the document is finished, since `plotters-svg` writes only integers.
 
 use plotters::coord::CoordTranslate;
 use plotters::element::{CoordMapper, Drawable, PointCollection};
 use plotters::style::ShapeStyle;
 use plotters_backend::{BackendCoord, DrawingBackend, DrawingErrorKind};
 
-/// Facteur du point fixe : 1/16 de pixel.
+/// Fixed-point factor: 1/16 of a pixel.
 pub const SCALE: i32 = 16;
 
-/// Drapeau d'une épaisseur de chemin sous-pixel — très au-dessus de toute
-/// épaisseur réelle (bornée à 20, `ShapeSpec::WIDTH_RANGE`).
+/// Flag of a sub-pixel path width — far above any real width (capped at 20,
+/// `ShapeSpec::WIDTH_RANGE`).
 const FLAG: u32 = 1 << 24;
 
-/// L'épaisseur à donner au style d'un chemin sous-pixel.
+/// The width to give to the style of a sub-pixel path.
 pub fn stroke_width(width: u32) -> u32 {
     width | FLAG
 }
 
-/// L'épaisseur réelle d'un style, et si son chemin est sous-pixel.
+/// The real width of a style, and whether its path is sub-pixel.
 pub fn split_width(width: u32) -> (u32, bool) {
     (width & !FLAG, width & FLAG != 0)
 }
 
-/// Un point en pixels, en point fixe.
+/// A point in pixels, as fixed-point.
 pub fn encode((x, y): (f64, f64)) -> BackendCoord {
     (
         (x * SCALE as f64).round() as i32,
@@ -49,15 +48,15 @@ pub fn encode((x, y): (f64, f64)) -> BackendCoord {
     )
 }
 
-/// Un point fixe, en pixels.
+/// A fixed-point point, in pixels.
 pub fn decode((x, y): BackendCoord) -> (f64, f64) {
     (x as f64 / SCALE as f64, y as f64 / SCALE as f64)
 }
 
-/// Le passage de l'aire de dessin au backend **sans** `Rect::truncate` : la
-/// correspondance ordinaire de Plotters ramène chaque point dans le rectangle
-/// de l'aire, ce qui écraserait un point fixe (seize fois plus grand qu'un
-/// pixel) contre le coin.
+/// The drawing area's pass to the backend **without** `Rect::truncate`: the
+/// ordinary Plotters mapping brings every point back into the area's
+/// rectangle, which would crush a fixed-point point (sixteen times larger
+/// than a pixel) against the corner.
 pub struct Unclamped;
 
 impl CoordMapper for Unclamped {
@@ -71,8 +70,8 @@ impl CoordMapper for Unclamped {
     }
 }
 
-/// Un chemin sous-pixel : `points` en points fixes ([`encode`]), l'épaisseur
-/// de `style` déjà marquée ([`stroke_width`]). À tracer par
+/// A sub-pixel path: `points` as fixed-point ([`encode`]), the width of
+/// `style` already marked ([`stroke_width`]). To be drawn with
 /// `DrawingArea::draw`.
 pub struct SubpixelPath {
     points: Vec<BackendCoord>,
@@ -80,8 +79,8 @@ pub struct SubpixelPath {
 }
 
 impl SubpixelPath {
-    /// Un chemin entre ces points, en pixels, de ce style (épaisseur réelle :
-    /// le drapeau est posé ici).
+    /// A path between these points, in pixels, of this style (real width:
+    /// the flag is set here).
     pub fn new(points: &[(f64, f64)], style: ShapeStyle) -> Self {
         Self {
             points: points.iter().copied().map(encode).collect(),
@@ -117,7 +116,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn le_drapeau_se_pose_et_se_retire_sans_toucher_l_epaisseur() {
+    fn the_flag_sets_and_clears_without_touching_the_width() {
         for width in [0, 1, 2, 20] {
             assert_eq!(split_width(stroke_width(width)), (width, true));
             assert_eq!(split_width(width), (width, false));
@@ -125,7 +124,7 @@ mod tests {
     }
 
     #[test]
-    fn le_point_fixe_garde_le_seizieme_de_pixel() {
+    fn the_fixed_point_keeps_a_sixteenth_of_a_pixel() {
         let point = (12.3125, -4.0625);
         assert_eq!(decode(encode(point)), point);
         assert!((decode(encode((1.01, 2.0))).0 - 1.01).abs() <= 0.5 / SCALE as f64);

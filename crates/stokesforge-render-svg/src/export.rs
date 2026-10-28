@@ -1,14 +1,14 @@
-//! Exporter un graphe dans un fichier SVG, PDF ou PNG — le point d'entrée de
-//! l'application (issue #34).
+//! Export a graph to an SVG, PDF or PNG file — the application's entry
+//! point (issue #34).
 //!
-//! Toujours **avec Typst** : titres, titres d'axe et légende sont composés
-//! comme à l'écran (`render_to_string_with_typst`), puis le PDF et le PNG
-//! sont tirés de ce SVG (`document_to_pdf`, `document_to_png`), comme le
-//! reste de ce crate. Le format se lit sur l'extension du fichier choisi.
+//! Always **with Typst**: titles, axis titles and legend are composed
+//! as on the screen (`render_to_string_with_typst`), then the PDF and the PNG
+//! are derived from that SVG (`document_to_pdf`, `document_to_png`), like the
+//! rest of this crate. The format is read from the chosen file's extension.
 //!
-//! Ce module ne sait rien du zoom : l'appelant passe le `PlotSpec` déjà
-//! cadré (`stokesforge_render_egui::GraphView::framed_spec`), pour exporter ce
-//! qu'on voit sans toucher au modèle.
+//! This module knows nothing about zoom: the caller passes the `PlotSpec`
+//! already framed (`stokesforge_render_egui::GraphView::framed_spec`), to
+//! export what is seen without touching the model.
 
 use std::path::Path;
 
@@ -21,29 +21,29 @@ use crate::{
     SvgTextMode,
 };
 
-/// Le format d'un export.
+/// The format of an export.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ExportFormat {
-    /// SVG ; `text` dit si le texte composé par Typst reste du texte SVG ou
-    /// sort en contours (#162).
+    /// SVG; `text` says whether the text composed by Typst stays SVG text or
+    /// comes out as outlines (#162).
     Svg {
-        /// Texte ou contours.
+        /// Text or outlines.
         text: SvgTextMode,
     },
-    /// PDF, tiré du SVG en mode texte : le texte y est sélectionnable.
+    /// PDF, derived from the SVG in text mode: the text is selectable.
     Pdf,
-    /// PNG, tiré du SVG en contours (indépendant des polices installées),
-    /// agrandi de `scale` (1 = la taille de la figure).
+    /// PNG, derived from the SVG as outlines (independent of the installed
+    /// fonts), enlarged by `scale` (1 = the size of the figure).
     Png {
-        /// Facteur appliqué à la taille de la figure.
+        /// Factor applied to the figure's size.
         scale: f32,
     },
 }
 
 impl ExportFormat {
-    /// Le format que désigne l'extension de `path`, sans casse ; un PNG est
-    /// rastérisé à `png_scale`, un SVG écrit son texte selon `svg_text`. `None` pour une extension inconnue ou
-    /// absente.
+    /// The format designated by the extension of `path`, case-insensitive; a
+    /// PNG is rasterized at `png_scale`, an SVG writes its text according to
+    /// `svg_text`. `None` for an unknown or missing extension.
     pub fn from_path(path: &Path, png_scale: f32, svg_text: SvgTextMode) -> Option<Self> {
         let extension = path.extension()?.to_str()?.to_ascii_lowercase();
         match extension.as_str() {
@@ -55,30 +55,30 @@ impl ExportFormat {
     }
 }
 
-/// Ce qui peut rater pendant un export vers un fichier.
+/// What can go wrong during an export to a file.
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
-    /// Le tracé SVG lui-même.
+    /// The SVG drawing itself.
     #[error(transparent)]
     Svg(#[from] SvgError),
-    /// La conversion en PDF.
+    /// The conversion to PDF.
     #[error(transparent)]
     Pdf(#[from] PdfError),
-    /// La rastérisation en PNG.
+    /// The rasterization to PNG.
     #[error(transparent)]
     Png(#[from] PngError),
-    /// L'écriture du fichier.
+    /// Writing the file.
     #[error("could not write {path}: {source}")]
     Write {
-        /// Chemin visé.
+        /// Target path.
         path: String,
-        /// Cause système.
+        /// System cause.
         source: std::io::Error,
     },
 }
 
 impl ExportFormat {
-    /// Le mode de texte du SVG d'où ce format est tiré.
+    /// The text mode of the SVG this format is derived from.
     fn text_mode(self) -> SvgTextMode {
         match self {
             Self::Svg { text } => text,
@@ -88,7 +88,7 @@ impl ExportFormat {
     }
 }
 
-/// Le document SVG composé (Typst compris) converti vers `format`.
+/// The composed SVG document (Typst included) converted to `format`.
 fn convert(document: &str, format: ExportFormat) -> Result<Vec<u8>, ExportError> {
     Ok(match format {
         ExportFormat::Svg { .. } => document.as_bytes().to_vec(),
@@ -97,7 +97,7 @@ fn convert(document: &str, format: ExportFormat) -> Result<Vec<u8>, ExportError>
     })
 }
 
-/// Le contenu du fichier d'export, sans l'écrire.
+/// The content of the export file, without writing it.
 pub fn export_bytes(
     plot: &ResolvedPlot<'_>,
     size: (u32, u32),
@@ -109,11 +109,11 @@ pub fn export_bytes(
     convert(&document, format)
 }
 
-/// Plusieurs formats d'une **même** figure (le presse-papiers, #149), dans
-/// l'ordre de `formats`. La figure n'est tracée et composée par Typst qu'une
-/// fois **par mode de texte** demandé, les conversions étant tirées de ce
-/// SVG ; chaque conversion réussit ou échoue seule, de sorte qu'un format raté
-/// n'emporte pas les autres. `Err` seulement si le tracé lui-même échoue.
+/// Several formats of the **same** figure (the clipboard, #149), in the
+/// order of `formats`. The figure is plotted and composed by Typst only once
+/// **per requested text mode**, the conversions being derived from that
+/// SVG; each conversion succeeds or fails alone, so that a failed format
+/// does not take the others down. `Err` only if the drawing itself fails.
 pub fn export_bytes_many(
     plot: &ResolvedPlot<'_>,
     size: (u32, u32),
@@ -146,7 +146,7 @@ pub fn export_bytes_many(
         .collect())
 }
 
-/// Exporte le graphe résolu dans `path`.
+/// Exports the resolved graph to `path`.
 pub fn export_to_file(
     path: impl AsRef<Path>,
     plot: &ResolvedPlot<'_>,
@@ -168,8 +168,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn le_format_se_lit_sur_lextension() {
-        let png = |nom: &str| ExportFormat::from_path(Path::new(nom), 4.0, SvgTextMode::Text);
+    fn the_format_is_read_from_the_extension() {
+        let png = |name: &str| ExportFormat::from_path(Path::new(name), 4.0, SvgTextMode::Text);
         assert_eq!(
             png("a.svg"),
             Some(ExportFormat::Svg {
@@ -179,6 +179,6 @@ mod tests {
         assert_eq!(png("a.PDF"), Some(ExportFormat::Pdf));
         assert_eq!(png("a.png"), Some(ExportFormat::Png { scale: 4.0 }));
         assert_eq!(png("a.jpg"), None);
-        assert_eq!(png("sans_extension"), None);
+        assert_eq!(png("no_extension"), None);
     }
 }

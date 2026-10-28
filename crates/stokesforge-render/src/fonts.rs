@@ -1,98 +1,96 @@
-//! Choix de police — texte et Math — embarquée ou système.
+//! Font choice — text and Math — embedded or system.
 //!
-//! Tâche ponctuelle du 2026-09-13, hors séquencement R0-R8 : embarquer trois
-//! paires police-de-texte-sans-serif + police-Math (Libertinus, Fira, Noto)
-//! et donner à [`text::font_definitions`] un vrai choix plutôt que le
-//! `FontDefinitions::default()` d'epaint qu'elle rendait jusqu'ici sans
-//! discussion. Voir `docs/archive/newarchitecture/architecture-choisie.md` §7 pour
-//! la décision documentée et sa date : elle remplace la phrase « Fonts
-//! embarquées uniquement, scan système désactivé », qui datait d'avant cette
-//! tâche.
+//! One-off task of 2026-09-13, outside the R0-R8 sequencing: embed three
+//! pairs of sans-serif text font + Math font (Libertinus, Fira, Noto) and give
+//! [`text::font_definitions`] a real choice rather than epaint's
+//! `FontDefinitions::default()` that it returned until now without
+//! discussion. See `docs/archive/newarchitecture/architecture-choisie.md` §7
+//! for the documented decision and its date: it replaces the sentence « Fonts
+//! embarquées uniquement, scan système désactivé », which predated this task.
 //!
-//! # Ce que ce module garantit, et pourquoi c'est le seul endroit qui compte
+//! # What this module guarantees, and why it is the only place that matters
 //!
-//! [`text::font_definitions`] reste la **source unique de mesure de texte**
-//! (`text.rs`, tâche R4.1) : l'écran et l'export continuent d'appeler
-//! exactement la même fonction, donc de partager le même jeu de polices,
-//! quel que soit le choix demandé. Ce module ne casse pas cet invariant —
-//! il lui donne un paramètre ([`FontChoice`]) au lieu de le figer sur le
-//! défaut d'epaint. Un appelant qui change de police sans passer le même
-//! [`FontChoice`] des deux côtés reproduirait exactement le défaut que
-//! `text.rs` existe pour empêcher ; ce module ne peut rien y faire seul,
-//! d'où l'unique point d'entrée [`resolve`] plutôt que deux fonctions
-//! séparées « pour l'écran » et « pour l'export ».
+//! [`text::font_definitions`] remains the **single source of text
+//! measurement** (`text.rs`, task R4.1): the screen and the export keep
+//! calling exactly the same function, hence sharing the same font set,
+//! whatever choice is requested. This module does not break this invariant —
+//! it gives it a parameter ([`FontChoice`]) instead of freezing it on epaint's
+//! default. A caller who changes the font without passing the same
+//! [`FontChoice`] on both sides would reproduce exactly the defect `text.rs`
+//! exists to prevent; this module can do nothing about it alone, hence the
+//! single entry point [`resolve`] rather than two separate functions "for the
+//! screen" and "for the export".
 //!
-//! # Les trois paires embarquées
+//! # The three embedded pairs
 //!
-//! Sous licence SIL Open Font License 1.1 (vérifiée sur chaque source,
-//! détail et provenance dans `vendor/fonts/README.md`) :
+//! Under the SIL Open Font License 1.1 (verified on each source, details and
+//! provenance in `vendor/fonts/README.md`):
 //!
-//! | [`FontSet`] | Texte | Math |
+//! | [`FontSet`] | Text | Math |
 //! |---|---|---|
 //! | [`FontSet::Libertinus`] | Libertinus Sans | Libertinus Math |
 //! | [`FontSet::Fira`] | Fira Sans | Fira Math |
 //! | [`FontSet::Noto`] | Noto Sans | Noto Sans Math |
 //!
-//! [`FontSet::Noto`] est le [`Default`] du type : c'est la police utilisée
-//! quand rien n'est demandé, et celle sur laquelle on replie silencieusement
-//! quand une police système demandée est introuvable — les deux rôles que la
-//! demande utilisateur assigne à Noto.
+//! [`FontSet::Noto`] is the type's [`Default`]: it is the font used when
+//! nothing is requested, and the one silently fallen back on when a requested
+//! system font is not found — the two roles the user request assigns to Noto.
 //!
-//! # Police système, et repli
+//! # System font, and fallback
 //!
-//! [`FontChoice::System`] désigne une police par son nom (« Calibri », par
-//! exemple). La résolution ([`resolve`]) la cherche sur la machine courante
-//! via `fontdb` — le même mécanisme, en substance, que celui que
-//! `stokesforge-render-svg::pdf` utilise déjà côté export pour ne pas perdre le
-//! texte silencieusement (`architecture-choisie.md` §5, R6). Introuvable ⇒
-//! repli sur [`FontSet::Noto`], sans erreur : un nom de police qui ne
-//! correspond à rien sur la machine où le projet est rouvert ne doit ni
-//! planter, ni faire disparaître le texte, ni remonter une erreur qu'aucun
-//! utilisateur de graphe ne doit avoir à traiter.
+//! [`FontChoice::System`] designates a font by its name ("Calibri", for
+//! example). The resolution ([`resolve`]) looks for it on the current machine
+//! through `fontdb` — in substance the same mechanism as the one
+//! `stokesforge-render-svg::pdf` already uses on the export side so as not to
+//! lose text silently (`architecture-choisie.md` §5, R6). Not found ⇒ fallback
+//! to [`FontSet::Noto`], without error: a font name that matches nothing on
+//! the machine where the project is reopened must neither crash, nor make the
+//! text disappear, nor raise an error that no graph user should have to
+//! handle.
 //!
-//! # Ce qui n'est pas ici
+//! # What is not here
 //!
-//! Rien ne câble ce mécanisme dans `stokesforge_plot::PlotSpec` : le spec n'a
-//! aujourd'hui aucun champ de police (vérifié dans
-//! `crates/stokesforge-plot/src/{spec,series,axis,panel,legend,style}.rs`), et
-//! lui en ajouter un toucherait au format `.stf` persisté — une décision
-//! hors du périmètre de cette tâche (`CLAUDE.md`, piège « format `.stf` »).
-//! [`resolve`] est écrit pour qu'un futur champ n'ait qu'à lui passer un
-//! [`FontChoice`], sans reprise.
+//! Nothing wires this mechanism into `stokesforge_plot::PlotSpec`: the spec
+//! has no font field today (verified in
+//! `crates/stokesforge-plot/src/{spec,series,axis,panel,legend,style}.rs`),
+//! and adding one would touch the persisted `.stf` format — a decision outside
+//! the scope of this task (`CLAUDE.md`, pitfall "`.stf` format").
+//! [`resolve`] is written so that a future field only has to pass it a
+//! [`FontChoice`], with no rework.
 //!
-//! Le texte ordinaire (graduations, titres d'axe) continue de passer par les
-//! fonts egui et jamais par Typst : seule une formule (`$...$`, R8, feature
-//! `typst`, `architecture-choisie.md` §4.3) consomme les polices Math, via
-//! [`crate::formula::resolve_fonts_with_math`]. [`FontSet::math_bytes`] les
-//! expose donc en octets bruts — pas en `epaint::FontData`, puisque rien ne
-//! consomme ce type pour du Math — pour ce seul appelant.
+//! Ordinary text (ticks, axis titles) keeps going through the egui fonts and
+//! never through Typst: only a formula (`$...$`, R8, feature `typst`,
+//! `architecture-choisie.md` §4.3) consumes the Math fonts, through
+//! [`crate::formula::resolve_fonts_with_math`]. [`FontSet::math_bytes`] thus
+//! exposes them as raw bytes — not as `epaint::FontData`, since nothing
+//! consumes that type for Math — for this single caller.
 
 use std::sync::Arc;
 
 use epaint::text::{FontData, FontDefinitions, FontFamily};
 
-/// Une des trois paires police-de-texte-sans-serif + police-Math embarquées
-/// dans le binaire (`vendor/fonts/`, voir le manifeste à côté).
+/// One of the three sans-serif text font + Math font pairs embedded in the
+/// binary (`vendor/fonts/`, see the manifest next to it).
 ///
-/// [`Default`] vaut [`FontSet::Noto`] : c'est la police utilisée quand rien
-/// n'est demandé, et celle sur laquelle [`resolve`] replie silencieusement
-/// une police système introuvable.
+/// [`Default`] is [`FontSet::Noto`]: it is the font used when nothing is
+/// requested, and the one [`resolve`] silently falls back on when a system
+/// font is not found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FontSet {
-    /// Libertinus Sans (texte) + Libertinus Math.
+    /// Libertinus Sans (text) + Libertinus Math.
     Libertinus,
-    /// Fira Sans (texte) + Fira Math.
+    /// Fira Sans (text) + Fira Math.
     Fira,
-    /// Noto Sans (texte) + Noto Sans Math — le défaut et le repli.
+    /// Noto Sans (text) + Noto Sans Math — the default and the fallback.
     Noto,
 }
 
 impl FontSet {
-    /// Les trois paires, dans l'ordre où la demande utilisateur les cite.
+    /// The three pairs, in the order the user request lists them.
     pub const ALL: [FontSet; 3] = [FontSet::Libertinus, FontSet::Fira, FontSet::Noto];
 
-    /// Le nom de famille de la police de texte, tel qu'embarqué dans le
-    /// fichier lui-même (vérifié à la récupération, voir le manifeste).
+    /// The family name of the text font, as embedded in the file itself
+    /// (verified at retrieval, see the manifest).
     pub fn sans_family_name(self) -> &'static str {
         match self {
             FontSet::Libertinus => "Libertinus Sans",
@@ -101,7 +99,7 @@ impl FontSet {
         }
     }
 
-    /// Le nom de famille de la police Math associée.
+    /// The family name of the associated Math font.
     pub fn math_family_name(self) -> &'static str {
         match self {
             FontSet::Libertinus => "Libertinus Math",
@@ -110,8 +108,8 @@ impl FontSet {
         }
     }
 
-    /// Les octets bruts du fichier de police de texte, embarqués dans le
-    /// binaire à la compilation.
+    /// The raw bytes of the text font file, embedded in the binary at compile
+    /// time.
     pub fn sans_bytes(self) -> &'static [u8] {
         match self {
             FontSet::Libertinus => {
@@ -126,13 +124,13 @@ impl FontSet {
         }
     }
 
-    /// Les octets bruts du fichier de police Math, embarqués dans le binaire
-    /// à la compilation.
+    /// The raw bytes of the Math font file, embedded in the binary at compile
+    /// time.
     ///
-    /// Seul appelant : [`crate::formula::resolve_fonts_with_math`] (R8,
-    /// feature `typst`) — voir la documentation du module. Octets bruts et
-    /// non `epaint::FontData` : c'est ce consommateur Typst qui décide de la
-    /// forme qu'il lui faut, pas ce module.
+    /// Only caller: [`crate::formula::resolve_fonts_with_math`] (R8, feature
+    /// `typst`) — see the module documentation. Raw bytes and not
+    /// `epaint::FontData`: it is this Typst consumer that decides the form it
+    /// needs, not this module.
     pub fn math_bytes(self) -> &'static [u8] {
         match self {
             FontSet::Libertinus => {
@@ -149,27 +147,26 @@ impl FontSet {
 }
 
 impl Default for FontSet {
-    /// Noto Sans / Noto Sans Math — le point 1 de la demande utilisateur.
+    /// Noto Sans / Noto Sans Math — point 1 of the user request.
     fn default() -> Self {
         FontSet::Noto
     }
 }
 
-/// La police de texte demandée à [`resolve`].
+/// The text font requested from [`resolve`].
 ///
-/// [`Default`] vaut [`FontChoice::Embedded`]`(`[`FontSet::Noto`]`)` : sans
-/// rien spécifier, StokesForge utilise Noto.
+/// [`Default`] is [`FontChoice::Embedded`]`(`[`FontSet::Noto`]`)`: with
+/// nothing specified, StokesForge uses Noto.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FontChoice {
-    /// Une des trois paires embarquées, désignée explicitement.
+    /// One of the three embedded pairs, designated explicitly.
     Embedded(FontSet),
-    /// Une police du système, par son nom exact (par exemple `"Calibri"`).
+    /// A system font, by its exact name (for example `"Calibri"`).
     ///
-    /// « Il doit toujours être possible de récupérer/utiliser les polices
-    /// système à la place » : ce n'est donc pas une police à défaut de
-    /// mieux, mais un choix de premier ordre, au même titre qu'une des
-    /// trois paires embarquées. Introuvable sur la machine courante ⇒
-    /// [`resolve`] replie silencieusement sur [`FontSet::Noto`].
+    /// "It must always be possible to retrieve/use the system fonts instead":
+    /// so this is not a font of last resort, but a first-class choice, on a
+    /// par with one of the three embedded pairs. Not found on the current
+    /// machine ⇒ [`resolve`] silently falls back to [`FontSet::Noto`].
     System(String),
 }
 
@@ -179,58 +176,57 @@ impl Default for FontChoice {
     }
 }
 
-/// D'où vient réellement la police de texte après résolution — pour un
-/// appelant qui veut savoir si un repli a eu lieu (diagnostics, tests),
-/// sans que cela change la [`FontDefinitions`] rendue.
+/// Where the text font really comes from after resolution — for a caller who
+/// wants to know whether a fallback happened (diagnostics, tests), without it
+/// changing the returned [`FontDefinitions`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FontSource {
-    /// Une des trois paires embarquées, telle que demandée.
+    /// One of the three embedded pairs, as requested.
     Embedded(FontSet),
-    /// La police système demandée a été trouvée et est utilisée telle
-    /// quelle.
+    /// The requested system font was found and is used as is.
     System(String),
-    /// La police système demandée était introuvable sur cette machine : on a
-    /// replié sur Noto, silencieusement. Le nom conservé est celui qui a été
-    /// demandé, pas celui utilisé — utile pour un diagnostic, jamais montré
-    /// comme une erreur à l'utilisateur.
+    /// The requested system font was not found on this machine: we fell back
+    /// to Noto, silently. The name kept is the one that was requested, not the
+    /// one used — useful for a diagnostic, never shown to the user as an
+    /// error.
     FallenBackToNoto {
-        /// Le nom qui avait été demandé et n'a pas été trouvé.
+        /// The name that was requested and not found.
         requested: String,
     },
 }
 
-/// Le résultat de [`resolve`] : les [`FontDefinitions`] réellement à poser
-/// sur un `epaint::Fonts` (écran ou export, indifféremment — c'est tout
-/// l'invariant de ce module), la provenance de la police de texte, et la
-/// police Math à associer, pour le consommateur Typst (R8).
+/// The result of [`resolve`]: the [`FontDefinitions`] to actually set on an
+/// `epaint::Fonts` (screen or export, indifferently — that is the whole
+/// invariant of this module), the provenance of the text font, and the Math
+/// font to pair with it, for the Typst consumer (R8).
 #[derive(Debug, Clone)]
 pub struct ResolvedFonts {
-    /// À poser tel quel sur un `epaint::Fonts` ou un `egui::Context`.
+    /// To be set as is on an `epaint::Fonts` or an `egui::Context`.
     pub definitions: FontDefinitions,
-    /// D'où vient la police de texte utilisée.
+    /// Where the text font used comes from.
     pub source: FontSource,
-    /// La police Math à associer à cette résolution.
+    /// The Math font to pair with this resolution.
     ///
-    /// Pour un choix embarqué, c'est la Math de la même paire. Pour une
-    /// police système — trouvée ou non — c'est [`FontSet::Noto`] : une
-    /// police système n'a pas de compagne Math, et Noto est déjà le repli
-    /// du reste du mécanisme. L'appelant Typst (R8,
-    /// `crate::formula::resolve_fonts_with_math`) a ainsi toujours une
-    /// police Math cohérente à utiliser, sans avoir à deviner.
+    /// For an embedded choice, it is the Math of the same pair. For a system
+    /// font — found or not — it is [`FontSet::Noto`]: a system font has no
+    /// Math companion, and Noto is already the fallback of the rest of the
+    /// mechanism. The Typst caller (R8,
+    /// `crate::formula::resolve_fonts_with_math`) thus always has a coherent
+    /// Math font to use, without having to guess.
     pub math: FontSet,
 }
 
-/// Résout un [`FontChoice`] en polices réellement utilisables.
+/// Resolves a [`FontChoice`] into fonts that are really usable.
 ///
-/// **Le** point d'entrée de ce module : un appelant qui a besoin de
-/// [`FontDefinitions`] (pour semer un `egui::Context`, ou pour construire un
-/// [`text::TextMeasurer`] côté export) passe toujours par ici, avec le même
-/// [`FontChoice`] des deux côtés — c'est ce qui tient l'invariant de
-/// `text.rs`.
+/// **The** entry point of this module: a caller that needs
+/// [`FontDefinitions`] (to seed an `egui::Context`, or to build a
+/// [`text::TextMeasurer`] on the export side) always goes through here, with
+/// the same [`FontChoice`] on both sides — this is what holds the invariant
+/// of `text.rs`.
 ///
-/// La recherche d'une police système (`FontChoice::System`) scanne le
-/// système de fichiers (`fontdb`, chargement des polices système) : ne pas
-/// appeler en boucle serrée, comme pour [`text::TextMeasurer`] déjà.
+/// Looking up a system font (`FontChoice::System`) scans the file system
+/// (`fontdb`, loading of the system fonts): do not call in a tight loop, as
+/// already for [`text::TextMeasurer`].
 pub fn resolve(choice: &FontChoice) -> ResolvedFonts {
     match choice {
         FontChoice::Embedded(set) => ResolvedFonts {
@@ -259,16 +255,16 @@ pub fn resolve(choice: &FontChoice) -> ResolvedFonts {
     }
 }
 
-/// Construit des [`FontDefinitions`] dont la famille [`FontFamily::Proportional`]
-/// commence par `name`, suivie des secours d'epaint déjà présents (emoji,
-/// `Ubuntu-Light`) — inchangés, pour ne pas perdre la couverture de
-/// caractères qu'ils offrent sur ce que `name` ne couvre pas. La famille
-/// [`FontFamily::Monospace`] n'est pas touchée : elle est hors du périmètre
-/// de cette tâche (embed « sans-serif + Math », pas monospace).
+/// Builds [`FontDefinitions`] whose [`FontFamily::Proportional`] family starts
+/// with `name`, followed by epaint's fallbacks already present (emoji,
+/// `Ubuntu-Light`) — unchanged, so as not to lose the character coverage they
+/// offer on what `name` does not cover. The [`FontFamily::Monospace`] family
+/// is untouched: it is outside the scope of this task (embedding "sans-serif
+/// + Math", not monospace).
 ///
-/// `bytes` est ignoré (et peut être vide) quand `owned` porte déjà les
-/// données — c'est le cas d'une police système, dont les octets viennent de
-/// `fontdb` et non d'un `include_bytes!`.
+/// `bytes` is ignored (and may be empty) when `owned` already carries the
+/// data — this is the case of a system font, whose bytes come from `fontdb`
+/// and not from an `include_bytes!`.
 fn definitions_for(name: &str, bytes: &'static [u8], owned: Option<FontData>) -> FontDefinitions {
     let mut definitions = FontDefinitions::default();
     let data = owned.unwrap_or_else(|| FontData::from_static(bytes));
@@ -291,18 +287,18 @@ fn definitions_for(name: &str, bytes: &'static [u8], owned: Option<FontData>) ->
     definitions
 }
 
-/// Cherche une police système par son nom exact, et rend ses octets bruts
-/// (avec l'index de face à l'intérieur du fichier) si elle existe.
+/// Looks up a system font by its exact name, and returns its raw bytes (with
+/// the face index inside the file) if it exists.
 ///
-/// `None` couvre aussi bien « aucune police de ce nom » que « trouvée, mais
-/// ses octets n'ont pas pu être lus » : dans les deux cas, [`resolve`]
-/// replie sur Noto sans faire de différence, exactement comme la demande
-/// utilisateur le prescrit (« sans erreur bloquante, sans texte perdu »).
+/// `None` covers both "no font of this name" and "found, but its bytes could
+/// not be read": in both cases, [`resolve`] falls back to Noto without
+/// distinction, exactly as the user request prescribes ("no blocking error, no
+/// lost text").
 ///
-/// `pub(crate)` (et non privée) depuis la tâche du 2026-09-13 sur
-/// `formula.rs` : Typst a besoin des mêmes octets bruts pour construire ses
-/// propres `typst::text::Font`, texte et Math — même mécanisme de
-/// résolution système, pas un second à écrire pour ce seul consommateur.
+/// `pub(crate)` (and not private) since the task of 2026-09-13 on
+/// `formula.rs`: Typst needs the same raw bytes to build its own
+/// `typst::text::Font`s, text and Math — same system resolution mechanism,
+/// not a second one to write for this single consumer.
 pub(crate) fn load_system_font(name: &str) -> Option<FontData> {
     let database = system_database();
     let query = fontdb::Query {
@@ -317,10 +313,10 @@ pub(crate) fn load_system_font(name: &str) -> Option<FontData> {
     })
 }
 
-/// La base des polices du système, scannée **une fois** par processus : le
-/// scan coûte de quelques dizaines de millisecondes à une seconde, et sert
-/// aussi bien la résolution d'une police par son nom que la liste proposée
-/// par la barre de format de texte (issue #63).
+/// The system font database, scanned **once** per process: the scan costs
+/// from a few tens of milliseconds to a second, and serves both the
+/// resolution of a font by its name and the list offered by the text format
+/// bar (issue #63).
 fn system_database() -> &'static fontdb::Database {
     static DATABASE: std::sync::OnceLock<fontdb::Database> = std::sync::OnceLock::new();
     DATABASE.get_or_init(|| {
@@ -330,13 +326,13 @@ fn system_database() -> &'static fontdb::Database {
     })
 }
 
-/// Les familles qu'un texte peut demander par `#text(font: "…")` : d'abord
-/// les trois polices de texte embarquées (toujours présentes, donc
-/// reproductibles d'une machine à l'autre), puis celles du système, triées
-/// et sans doublon. Une figure qui nomme une police du système ne se
-/// recompose à l'identique que sur une machine qui l'a (issue #63).
+/// The families a text can request through `#text(font: "…")`: first the
+/// three embedded text fonts (always present, hence reproducible from one
+/// machine to another), then the system ones, sorted and without duplicates.
+/// A figure that names a system font is recomposed identically only on a
+/// machine that has it (issue #63).
 ///
-/// Le premier appel scanne le système (voir [`system_database`]).
+/// The first call scans the system (see [`system_database`]).
 pub fn available_families() -> &'static [FamilyEntry] {
     static FAMILIES: std::sync::OnceLock<Vec<FamilyEntry>> = std::sync::OnceLock::new();
     FAMILIES.get_or_init(|| {
@@ -362,13 +358,13 @@ pub fn available_families() -> &'static [FamilyEntry] {
     })
 }
 
-/// Une famille proposée par [`available_families`].
+/// A family offered by [`available_families`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FamilyEntry {
-    /// Le nom de famille, tel que Typst le reconnaît.
+    /// The family name, as Typst recognizes it.
     pub name: String,
-    /// Embarquée dans StokesForge (donc présente partout), par opposition à une
-    /// police du système.
+    /// Embedded in StokesForge (hence present everywhere), as opposed to a
+    /// system font.
     pub embedded: bool,
 }
 
@@ -376,9 +372,9 @@ pub struct FamilyEntry {
 mod tests {
     use super::*;
 
-    /// Point 1 de la demande utilisateur : sans rien spécifier, c'est Noto.
+    /// Point 1 of the user request: with nothing specified, it is Noto.
     #[test]
-    fn sans_rien_demander_le_choix_par_defaut_est_noto() {
+    fn the_default_choice_when_nothing_is_requested_is_noto() {
         assert_eq!(FontChoice::default(), FontChoice::Embedded(FontSet::Noto));
         let resolved = resolve(&FontChoice::default());
         assert_eq!(resolved.source, FontSource::Embedded(FontSet::Noto));
@@ -389,17 +385,17 @@ mod tests {
             .contains_key(FontSet::Noto.sans_family_name()));
     }
 
-    /// Une police système qui ne peut exister sur aucune machine de test
-    /// (nom délibérément absurde) doit replier sur Noto sans paniquer ni
-    /// remonter d'erreur.
+    /// A system font that cannot exist on any test machine (deliberately
+    /// absurd name) must fall back to Noto without panicking or raising an
+    /// error.
     #[test]
-    fn une_police_systeme_introuvable_replie_silencieusement_sur_noto() {
-        let nom = "Police StokesForge Qui Ne Peut Pas Exister — Test R.13";
-        let resolved = resolve(&FontChoice::System(nom.to_owned()));
+    fn a_missing_system_font_silently_falls_back_to_noto() {
+        let name = "StokesForge Font That Cannot Exist — Test R.13";
+        let resolved = resolve(&FontChoice::System(name.to_owned()));
         assert_eq!(
             resolved.source,
             FontSource::FallenBackToNoto {
-                requested: nom.to_owned()
+                requested: name.to_owned()
             }
         );
         assert_eq!(resolved.math, FontSet::Noto);
@@ -407,8 +403,8 @@ mod tests {
             .definitions
             .font_data
             .contains_key(FontSet::Noto.sans_family_name()));
-        // Le premier choix de la famille proportionnelle doit être Noto, pas
-        // seulement présent quelque part dans la table des polices.
+        // The first choice of the proportional family must be Noto, not merely
+        // present somewhere in the font table.
         assert_eq!(
             resolved
                 .definitions
@@ -420,10 +416,10 @@ mod tests {
         );
     }
 
-    /// Les trois paires embarquées se résolvent chacune sur leur propre
-    /// police, texte et Math cohérentes entre elles.
+    /// Each of the three embedded pairs resolves to its own font, text and
+    /// Math consistent with each other.
     #[test]
-    fn chaque_paire_embarquee_se_resout_sur_elle_meme() {
+    fn each_embedded_pair_resolves_to_itself() {
         for set in FontSet::ALL {
             let resolved = resolve(&FontChoice::Embedded(set));
             assert_eq!(resolved.source, FontSource::Embedded(set));
@@ -444,40 +440,40 @@ mod tests {
         }
     }
 
-    /// Les six fichiers de police embarqués sont bien des polices — pas des
-    /// octets vides ni un placeholder : chacun doit parser avec `skrifa`,
-    /// la même bibliothèque qu'utilise `epaint` pour les mettre en page.
+    /// The six embedded font files really are fonts — not empty bytes nor a
+    /// placeholder: each must parse with `skrifa`, the same library `epaint`
+    /// uses to lay them out.
     #[test]
-    fn les_six_fichiers_embarques_sont_des_polices_valides() {
+    fn the_six_embedded_files_are_valid_fonts() {
         for set in FontSet::ALL {
             for bytes in [set.sans_bytes(), set.math_bytes()] {
-                assert!(!bytes.is_empty(), "{set:?} : fichier vide");
+                assert!(!bytes.is_empty(), "{set:?}: empty file");
                 skrifa::FontRef::new(bytes)
-                    .unwrap_or_else(|err| panic!("{set:?} : police invalide ({err})"));
+                    .unwrap_or_else(|err| panic!("{set:?}: invalid font ({err})"));
             }
         }
     }
 
-    /// Les noms de famille annoncés par [`FontSet`] correspondent à ce que
-    /// le fichier de police lui-même déclare — sinon `fontdb` (côté export,
-    /// `stokesforge-render-svg::pdf`) et `epaint` (côté écran) ne s'accorderaient
-    /// pas sur le nom à chercher.
+    /// The family names announced by [`FontSet`] match what the font file
+    /// itself declares — otherwise `fontdb` (export side,
+    /// `stokesforge-render-svg::pdf`) and `epaint` (screen side) would not
+    /// agree on the name to look for.
     #[test]
-    fn les_noms_de_famille_correspondent_au_contenu_du_fichier() {
+    fn family_names_match_the_file_content() {
         use skrifa::raw::TableProvider;
         use skrifa::string::StringId;
 
         for set in FontSet::ALL {
-            for (bytes, attendu) in [
+            for (bytes, expected) in [
                 (set.sans_bytes(), set.sans_family_name()),
                 (set.math_bytes(), set.math_family_name()),
             ] {
                 let font = skrifa::FontRef::new(bytes)
-                    .unwrap_or_else(|err| panic!("{set:?} : police invalide ({err})"));
+                    .unwrap_or_else(|err| panic!("{set:?}: invalid font ({err})"));
                 let name = font.name().unwrap_or_else(|err| {
-                    panic!("{set:?} : table `name` absente ({err})");
+                    panic!("{set:?}: `name` table missing ({err})");
                 });
-                let trouve = name
+                let found = name
                     .name_record()
                     .iter()
                     .filter(|record| {
@@ -487,12 +483,12 @@ mod tests {
                     .any(|record| {
                         record
                             .string(name.string_data())
-                            .map(|s| s.to_string() == attendu)
+                            .map(|s| s.to_string() == expected)
                             .unwrap_or(false)
                     });
                 assert!(
-                    trouve,
-                    "{set:?} : aucun nom de famille du fichier n'égale « {attendu} »"
+                    found,
+                    "{set:?}: no family name of the file equals \"{expected}\""
                 );
             }
         }

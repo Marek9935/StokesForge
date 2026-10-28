@@ -1,71 +1,68 @@
-//! Le pipeline Plotters, **écrit une fois pour les deux backends**.
+//! The Plotters pipeline, **written once for both backends**.
 //!
-//! # Pourquoi ce module n'est pas dans chacun des deux crates de backend
+//! # Why this module is not in each of the two backend crates
 //!
-//! Le critère de fin du chantier est « axes au même endroit, vérifié par un
-//! test » (`roadmap-rendu.md`). Un test peut constater un désaccord ; il ne
-//! peut pas empêcher qu'il naisse. Si le backend egui et le backend SVG
-//! appelaient chacun leur `ChartBuilder`, la moindre divergence de marge, de
-//! taille de police ou d'ordre d'appel deviendrait un désaccord à trouver
-//! après coup. Ici il n'y a **qu'une** suite d'appels Plotters, générique sur
-//! `DB: DrawingBackend`, et les deux backends ne diffèrent plus que par la
-//! façon de poser des pixels.
+//! The end criterion of the work package is "axes in the same place, checked
+//! by a test" (`roadmap-rendu.md`). A test can notice a disagreement; it
+//! cannot prevent one from arising. If the egui backend and the SVG backend
+//! each called their own `ChartBuilder`, the slightest divergence in margin,
+//! font size or call order would become a disagreement to find after the
+//! fact. Here there is **only one** sequence of Plotters calls, generic over
+//! `DB: DrawingBackend`, and the two backends now differ only in the way
+//! they put pixels down.
 //!
-//! C'est la transposition de la règle que la phase R5 se donne — « aucune
-//! fonctionnalité n'entre dans un seul backend » — au niveau où elle est
-//! gratuite : la structure, plutôt que la discipline. **R5 n'a eu à écrire
-//! aucune ligne de rendu dans un backend** : tout ce que la phase ajoute —
-//! types de tracé, échelles, légende, panneaux, décimation — est ici.
+//! This is the transposition of the rule phase R5 gives itself — "no feature
+//! enters a single backend" — to the level where it is free: structure,
+//! rather than discipline. **R5 did not have to write a single line of
+//! rendering in a backend**: everything the phase adds — plot types, scales,
+//! legend, panels, decimation — is here.
 //!
-//! # Périmètre, phase R5
+//! # Scope, phase R5
 //!
-//! Le `PlotSpec` réel : les six [`stokesforge_plot::PlotType`], les deux
-//! [`stokesforge_plot::AxisScale`], l'axe secondaire, les styles de trait et de
-//! marqueur, la légende, la grille de panneaux, et la décimation LTTB. Ce
-//! qui manque encore est signalé par un `// R6 :` ou `// R7 :` à l'endroit
-//! exact où il s'insérera, pas par une liste en tête de fichier qui se
-//! périmerait.
+//! The real `PlotSpec`: the six [`stokesforge_plot::PlotType`]s, the two
+//! [`stokesforge_plot::AxisScale`]s, the secondary axis, the line and marker
+//! styles, the legend, the panel grid, and LTTB decimation. What is still
+//! missing is flagged by a `// R6:` or `// R7:` at the exact place where it
+//! will be inserted, not by a list at the top of the file that would go
+//! stale.
 //!
-//! # Comment un panneau se trace, dans l'ordre
+//! # How a panel is drawn, in order
 //!
-//! L'ordre n'est pas libre, et chaque étape dépend de ce que la précédente
-//! a appris :
+//! The order is not free, and each step depends on what the previous one
+//! learned:
 //!
-//! 1. **préparer** chaque série en géométrie ([`crate::series`]), ce qui
-//!    applique l'échelle de son axe et classe les histogrammes. Le cadrage
-//!    et le tracé liront la même géométrie, donc ne pourront pas la lire
-//!    différemment ;
-//! 2. **cadrer** les axes sur cette géométrie ;
-//! 3. **construire** la zone de tracé — c'est seulement là que la largeur en
-//!    pixels existe ;
-//! 4. **décimer** ([`crate::decimate`]), qui a besoin de cette largeur ;
-//! 5. **peindre**, en pixels ([`crate::paint`]) ;
-//! 6. **la légende**, par-dessus, et mesurée par le même chemin que les
-//!    axes ([`crate::legend`]) ;
-//! 7. **les textes libres** (issue #35), tout au-dessus : centrés sur leur
-//!    point de données, projeté comme une série ; un point hors du cadrage
-//!    n'est pas dessiné, un texte peut déborder sur les graduations.
+//! 1. **prepare** each series into geometry ([`crate::series`]), which
+//!    applies the scale of its axis and bins the histograms. The framing and
+//!    the drawing will read the same geometry, so they cannot read it
+//!    differently;
+//! 2. **frame** the axes on this geometry;
+//! 3. **build** the plot area — only there does the width in pixels exist;
+//! 4. **decimate** ([`crate::decimate`]), which needs this width;
+//! 5. **paint**, in pixels ([`crate::paint`]);
+//! 6. **the legend**, on top, and measured by the same path as the axes
+//!    ([`crate::legend`]);
+//! 7. **the free texts** (issue #35), on the very top: centered on their data
+//!    point, projected like a series; a point outside the framing is not
+//!    drawn, a text can overflow onto the ticks.
 //!
-//! # Où la mesure de texte entre dans la géométrie
+//! # Where text measurement enters the geometry
 //!
-//! Ce n'est pas anecdotique, et c'est ce qui rend le test d'accord (R4.5,
-//! étendu en R5.6) autre chose qu'une formalité : `DrawingArea::titled` —
-//! appelé dès que le graphe ou un panneau a un titre — demande la hauteur du
-//! titre à `estimate_text_size`, puis fait **descendre le haut de la zone de
-//! tracé** de cette hauteur. Une mesure fausse de quelques pixels déplace
-//! donc la zone entière, axes compris, sans qu'aucune erreur ne soit levée.
-//! C'est exactement le défaut silencieux décrit en
-//! `architecture-choisie.md` §4.4, et le test d'accord le prend par là. La
-//! légende passe par le même chemin, pour la même raison
-//! ([`crate::legend`]).
+//! This is not anecdotal, and it is what makes the agreement test (R4.5,
+//! extended in R5.6) more than a formality: `DrawingArea::titled` — called as
+//! soon as the graph or a panel has a title — asks `estimate_text_size` for
+//! the height of the title, then **moves the top of the plot area down** by
+//! that height. A measurement wrong by a few pixels therefore shifts the
+//! whole area, axes included, without any error being raised. This is
+//! exactly the silent defect described in `architecture-choisie.md` §4.4,
+//! and the agreement test catches it there. The legend goes through the same
+//! path, for the same reason ([`crate::legend`]).
 //!
-//! # Deux styles de texte, selon le rôle
+//! # Two text styles, depending on the role
 //!
-//! Les graduations prennent `text_style` (mise en page `epaint`) ; titre du
-//! graphe, titres de panneau, titres d'axe et légende prennent
-//! [`rich_style`], que les backends compilent par Typst (issue #32, voir
-//! [`crate::formula`]). C'est ici, et seulement ici, que le rôle d'un texte
-//! est décidé.
+//! The ticks take `text_style` (`epaint` layout); graph title, panel titles,
+//! axis titles and legend take [`rich_style`], which the backends compile
+//! through Typst (issue #32, see [`crate::formula`]). It is here, and only
+//! here, that the role of a text is decided.
 
 use plotters::coord::Shift;
 use plotters::prelude::*;
@@ -84,294 +81,290 @@ use crate::paint::{self, opaque, rgba, PAPER};
 use crate::scale;
 use crate::series::{self, Geometry, Prepared};
 
-/// Taille (au sens de Plotters) du titre du graphe.
+/// Size (in Plotters' sense) of the graph title.
 pub const TITLE_SIZE: f64 = 24.0;
-/// Taille (au sens de Plotters) du titre d'un panneau.
+/// Size (in Plotters' sense) of a panel title.
 ///
-/// Plus petite que celle du graphe : dans une grille, le titre du graphe
-/// doit rester celui qu'on lit en premier.
+/// Smaller than the graph's: in a grid, the graph title must remain the one
+/// read first.
 pub const PANEL_TITLE_SIZE: f64 = 16.0;
-/// Taille (au sens de Plotters) des chiffres de graduation.
+/// Size (in Plotters' sense) of the tick numbers.
 pub const LABEL_SIZE: f64 = 14.0;
-/// Taille (au sens de Plotters) des titres d'axe.
+/// Size (in Plotters' sense) of the axis titles.
 pub const AXIS_DESC_SIZE: f64 = 16.0;
-/// Marge extérieure du graphe, en unités de backend.
+/// Outer margin of the graph, in backend units.
 pub const MARGIN: u32 = 12;
-/// Hauteur réservée aux graduations et au titre de l'axe du bas.
+/// Height reserved for the ticks and the title of the bottom axis.
 pub const X_LABEL_AREA: u32 = 52;
-/// Largeur réservée aux graduations et au titre d'un axe vertical.
+/// Width reserved for the ticks and the title of a vertical axis.
 pub const Y_LABEL_AREA: u32 = 64;
-/// Aire de graduation d'un axe miroir sans libellés (#176) : les tirets seuls.
+/// Tick area of a mirror axis without labels (#176): the tick marks alone.
 pub const BARE_LABEL_AREA: u32 = 12;
-/// Famille de police demandée à Plotters. Elle est traduite en
-/// [`epaint::FontFamily::Proportional`] par [`crate::text::font_id`] ; ce que
-/// Plotters en fait par lui-même n'a aucune importance, ses fonts étant
-/// désactivées.
+/// Font family requested from Plotters. It is translated into
+/// [`epaint::FontFamily::Proportional`] by [`crate::text::font_id`]; what
+/// Plotters does with it by itself does not matter, its fonts being
+/// disabled.
 pub const FONT_FAMILY: &str = "sans-serif";
 
-/// Nombre de cellules au-delà duquel la grille déclarée est abandonnée au
-/// profit d'une grille compacte.
+/// Number of cells beyond which the declared grid is abandoned in favor of a
+/// compact grid.
 ///
-/// `PlotSpec::rows()` et `columns()` valent `max(position) + 1` : une
-/// position de panneau venue d'un fichier peut valoir n'importe quoi (rien
-/// ne la borne à la lecture, et le spec le documente en `saturating_add`),
-/// donc une grille déclarée peut valoir des milliards de cellules pour deux
-/// panneaux. Découper la zone en autant est impossible ; le repli est décrit
-/// dans [`grid_of`].
+/// `PlotSpec::rows()` and `columns()` are `max(position) + 1`: a panel
+/// position coming from a file can be anything (nothing bounds it on
+/// reading, and the spec documents it with `saturating_add`), so a declared
+/// grid can be billions of cells for two panels. Splitting the area into so
+/// many is impossible; the fallback is described in [`grid_of`].
 pub const MAX_CELLS: usize = 256;
 
-/// Dimensions en deçà desquelles une cellule n'est plus une zone de tracé.
+/// Dimensions below which a cell is no longer a plot area.
 ///
-/// Un panneau plus petit que cela n'a la place ni de ses graduations ni de
-/// son cadre ; il est compté comme omis plutôt que dessiné en bouillie.
+/// A panel smaller than this has room for neither its ticks nor its frame;
+/// it is counted as omitted rather than drawn as a mess.
 pub const MIN_CELL: (u32, u32) = (48, 36);
 
-/// Taille par défaut d'une figure StokesForge, en pixels — `(largeur, hauteur)`.
+/// Default size of a StokesForge figure, in pixels — `(width, height)`.
 ///
-/// Choix délibéré, pas encore un réglage. 4/3, comme visé — mais provisoire
-/// (valeurs à revoir). Toute forme de configurabilité future (par graphe, par
-/// export) passe par ce point unique plutôt que par une constante recopiée
-/// dans chaque backend — `stokesforge-render-svg` (`DEFAULT_SIZE`, export) l'utilise
-/// comme taille fixe de page ; `stokesforge-app` (vue écran, F11) ne s'en sert que
-/// pour son ratio 4/3, la figure étant mise à l'échelle « contain » dans
-/// l'espace disponible de la fenêtre (`graph_view_contents`).
+/// Deliberate choice, not yet a setting. 4/3, as aimed — but provisional
+/// (values to revisit). Any future configurability (per graph, per export)
+/// goes through this single point rather than through a constant copied into
+/// each backend — `stokesforge-render-svg` (`DEFAULT_SIZE`, export) uses it
+/// as the fixed page size; `stokesforge-app` (screen view, F11) only uses it
+/// for its 4/3 ratio, the figure being scaled "contain" into the window's
+/// available space (`graph_view_contents`).
 pub const DEFAULT_FIGURE_SIZE: (u32, u32) = (480, 360);
 
-/// Ce qu'un panneau a fini par tracer — de quoi écrire un test sans relire
-/// des pixels.
+/// What a panel ended up drawing — enough to write a test without rereading
+/// pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrawnPanel {
-    /// Indice du calque dans [`PlotSpec::panels`] : l'identité d'un calque
-    /// (plusieurs calques peuvent se superposer dans la même case).
+    /// Index of the layer in [`PlotSpec::panels`]: the identity of a layer
+    /// (several layers can be superimposed in the same cell).
     pub index: usize,
-    /// Le calque est superposé à un autre (#167) : son axe X est en haut si
-    /// `x_top`, son axe Y à droite si `y_right`.
+    /// The layer is superimposed on another (#167): its X axis is on top if
+    /// `x_top`, its Y axis on the right if `y_right`.
     pub overlay: Option<stokesforge_plot::OverlaySpec>,
-    /// Position déclarée du panneau dans la grille.
+    /// Declared position of the panel in the grid.
     pub row: usize,
-    /// Idem, en colonne.
+    /// Same, as a column.
     pub column: usize,
-    /// Bornes retenues en X, **dans l'espace des données** : sur une échelle
-    /// logarithmique, ce sont bien des valeurs et non leurs logarithmes.
+    /// Bounds kept on X, **in data space**: on a logarithmic scale, these are
+    /// indeed values and not their logarithms.
     pub x_range: (f64, f64),
-    /// Idem pour l'ordonnée de gauche.
+    /// Same for the left ordinate.
     pub y_range: (f64, f64),
-    /// Bornes de l'ordonnée de droite, si une série s'y rattache.
+    /// Bounds of the right ordinate, if a series is attached to it.
     pub y2_range: Option<(f64, f64)>,
-    /// Coin haut-gauche de la zone de tracé, en pixels de backend.
+    /// Top-left corner of the plot area, in backend pixels.
     ///
-    /// Ajouté en R7 (tâche 7.2/7.3) : c'est ce qui, combiné à
-    /// [`Self::pixel_size`] et aux bornes ci-dessus, donne la correspondance
-    /// pixel ↔ données qu'`interact::PanelTransform` construit — sans
-    /// redécouvrir le calcul de grille ni les aires de graduation, puisque
-    /// ce sont les pixels **réellement** alloués par Plotters
-    /// (`plotting.get_base_pixel()`) qui sont recopiés ici, pas une
-    /// approximation reconstruite à côté.
+    /// Added in R7 (task 7.2/7.3): this is what, combined with
+    /// [`Self::pixel_size`] and the bounds above, gives the pixel ↔ data
+    /// correspondence that `interact::PanelTransform` builds — without
+    /// rediscovering the grid computation or the tick areas, since it is the
+    /// pixels **actually** allocated by Plotters
+    /// (`plotting.get_base_pixel()`) that are copied here, not an
+    /// approximation rebuilt on the side.
     pub pixel_origin: (i32, i32),
-    /// Dimensions de la zone de tracé, en pixels de backend.
+    /// Dimensions of the plot area, in backend pixels.
     pub pixel_size: (u32, u32),
-    /// Échelle de l'axe des abscisses, telle qu'elle a été appliquée.
+    /// Scale of the abscissa axis, as it was applied.
     pub x_scale: AxisScale,
-    /// Échelle de l'ordonnée de gauche.
+    /// Scale of the left ordinate.
     pub y_scale: AxisScale,
-    /// Échelle de l'ordonnée de droite (sans effet si [`Self::y2_range`]
-    /// est `None`).
+    /// Scale of the right ordinate (no effect if [`Self::y2_range`]
+    /// is `None`).
     pub y2_scale: AxisScale,
-    /// Nombre de séries réellement tracées.
+    /// Number of series actually drawn.
     pub drawn_series: usize,
-    /// Nombre de séries laissées de côté parce que leur référence est
-    /// brisée. Jamais une erreur : `architecture-choisie.md` §11.1 en fait un
-    /// état de première classe, à afficher et non à taire — elles
-    /// apparaissent en légende, en gris et annotées.
+    /// Number of series set aside because their reference is broken. Never an
+    /// error: `architecture-choisie.md` §11.1 makes it a first-class state,
+    /// to display and not to hide — they appear in the legend, in grey and
+    /// annotated.
     pub broken_series: usize,
-    /// Nombre de séries dont le type de tracé vient d'une version plus
-    /// récente de StokesForge (C5, niveau 2) : rien n'est dessiné, rien n'est
-    /// perdu.
+    /// Number of series whose plot type comes from a more recent version of
+    /// StokesForge (C5, level 2): nothing is drawn, nothing is lost.
     pub unknown_series: usize,
-    /// Nombre d'entrées inscrites en légende.
+    /// Number of entries written in the legend.
     pub legend_entries: usize,
-    /// Nombre de points retirés par la décimation LTTB.
+    /// Number of points removed by LTTB decimation.
     pub decimated_points: usize,
-    /// Aires de graduation réellement allouées autour de la zone de tracé —
-    /// de quoi retrouver, sans relire des pixels, quel axe (ou quel titre
-    /// d'axe) est sous un clic ([`crate::hit`]).
+    /// Tick areas actually allocated around the plot area — enough to find,
+    /// without rereading pixels, which axis (or which axis title) is under a
+    /// click ([`crate::hit`]).
     pub axis_areas: AxisAreas,
-    /// Les textes libres réellement tracés (issue #35), dans l'ordre du
-    /// spec ; un texte hors du cadrage visible n'y figure pas.
+    /// The free texts actually drawn (issue #35), in spec order; a text
+    /// outside the visible framing is not listed.
     pub annotations: Vec<DrawnAnnotation>,
-    /// Les objets graphiques réellement tracés (issue #76), dans l'ordre du
-    /// spec (du dessous au dessus). Contrairement à un texte libre, un objet
-    /// qui déborde du cadrage visible y figure : il est tracé rogné, mais
-    /// désignable par la partie visible.
+    /// The graphic objects actually drawn (issue #76), in spec order (from
+    /// bottom to top). Unlike a free text, an object that overflows the
+    /// visible framing is listed: it is drawn clipped, but can be picked by
+    /// its visible part.
     pub shapes: Vec<crate::shapes::DrawnShape>,
-    /// Géométrie visible des séries, après décimation et rognage (#83).
+    /// Visible geometry of the series, after decimation and clipping (#83).
     pub series_geometry: Vec<crate::series_selection::DrawnSeries>,
-    /// Les titres et la légende de ce panneau (issue #53) : titre du
-    /// panneau, titres d'axe, cadre de la légende. Un texte à sa place par
-    /// défaut y figure aussi, avec une position **approchée** (Plotters le
-    /// pose lui-même) ; c'est assez pour le désigner et pour partir de là
-    /// quand on le déplace.
+    /// The titles and the legend of this panel (issue #53): panel title, axis
+    /// titles, legend frame. A text in its default place is listed too, with
+    /// an **approximate** position (Plotters places it itself); this is
+    /// enough to pick it and to start from there when it is moved.
     pub texts: Vec<DrawnText>,
-    /// Les lignes de la légende, une par entrée dessinée.
+    /// The rows of the legend, one per drawn entry.
     pub legend_rows: Vec<DrawnLegendRow>,
 }
 
-/// Un titre ou une légende tel qu'il a été tracé (issue #53).
+/// A title or a legend as it was drawn (issue #53).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawnText {
-    /// Le texte désigné.
+    /// The designated text.
     pub target: TextTarget,
-    /// Centre, en pixels de backend.
+    /// Center, in backend pixels.
     pub center: (f64, f64),
-    /// Taille du texte **non tourné**, en pixels de backend.
+    /// Size of the **unrotated** text, in backend pixels.
     pub size: (u32, u32),
-    /// Rotation, en degrés, sens antihoraire (les titres d'axe vertical).
+    /// Rotation, in degrees, counterclockwise (vertical axis titles).
     pub rotation: f64,
-    /// Vrai si le texte est posé sur son ancre ([`TextAnchor`]), faux s'il
-    /// est à sa place par défaut — alors `center` est approché.
+    /// True if the text is placed on its anchor ([`TextAnchor`]), false if it
+    /// is in its default place — then `center` is approximate.
     pub anchored: bool,
 }
 
 impl DrawnText {
-    /// Vrai si le pixel `(x, y)` tombe dans le rectangle tourné du texte.
+    /// True if the pixel `(x, y)` falls in the rotated rectangle of the text.
     pub fn contains(&self, x: f64, y: f64) -> bool {
         rotated_contains(self.center, self.size, self.rotation, x, y)
     }
 }
 
-/// Une ligne de la légende : l'entrée qu'elle montre, et où.
+/// A row of the legend: the entry it shows, and where.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawnLegendRow {
-    /// Rang de la série dans `PanelSpec::series`.
+    /// Rank of the series in `PanelSpec::series`.
     pub series: usize,
-    /// Milieu vertical de la ligne, en pixels de backend.
+    /// Vertical middle of the row, in backend pixels.
     pub center_y: f64,
-    /// Hauteur de la ligne.
+    /// Height of the row.
     pub height: f64,
 }
 
-/// Un texte libre tel qu'il a été tracé — de quoi le désigner sous le
-/// pointeur ([`crate::hit`]), rotation comprise.
+/// A free text as it was drawn — enough to pick it under the pointer
+/// ([`crate::hit`]), rotation included.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DrawnAnnotation {
-    /// Indice dans `PanelSpec::annotations`.
+    /// Index in `PanelSpec::annotations`.
     pub index: usize,
-    /// Centre du texte, en pixels de backend.
+    /// Center of the text, in backend pixels.
     pub center: (f64, f64),
-    /// Taille du texte **non tourné**, en pixels de backend.
+    /// Size of the **unrotated** text, in backend pixels.
     pub size: (u32, u32),
-    /// Rotation, en degrés, sens antihoraire.
+    /// Rotation, in degrees, counterclockwise.
     pub rotation: f64,
 }
 
 impl DrawnAnnotation {
-    /// Vrai si le pixel `(x, y)` tombe dans le rectangle tourné du texte.
+    /// True if the pixel `(x, y)` falls in the rotated rectangle of the text.
     pub fn contains(&self, x: f64, y: f64) -> bool {
         rotated_contains(self.center, self.size, self.rotation, x, y)
     }
 }
 
-/// Le pixel `(x, y)` est-il dans le rectangle `size` centré en `center` et
-/// tourné de `rotation` degrés (antihoraire) ?
+/// Is the pixel `(x, y)` inside the rectangle `size` centered at `center` and
+/// rotated by `rotation` degrees (counterclockwise)?
 fn rotated_contains(center: (f64, f64), size: (u32, u32), rotation: f64, x: f64, y: f64) -> bool {
     let (dx, dy) = (x - center.0, y - center.1);
-    // Le texte est tourné dans le sens antihoraire à l'écran (axe y vers le
-    // bas) ; on ramène le point dans le repère du texte droit par la
-    // rotation inverse.
+    // The text is rotated counterclockwise on screen (y axis downward); we
+    // bring the point back into the frame of the straight text by the
+    // inverse rotation.
     let (sin, cos) = rotation.to_radians().sin_cos();
     let (u, v) = (dx * cos - dy * sin, dx * sin + dy * cos);
     u.abs() <= size.0 as f64 / 2.0 && v.abs() <= size.1 as f64 / 2.0
 }
 
-/// Une aire de graduation : son épaisseur en pixels (0 si l'axe est masqué
-/// ou absent), et si un titre d'axe y est écrit — Plotters le pose contre le
-/// bord **extérieur** de l'aire (en bas pour l'axe du bas, à gauche pour
-/// celui de gauche, à droite pour l'axe secondaire).
+/// A tick area: its thickness in pixels (0 if the axis is hidden or absent),
+/// and whether an axis title is written in it — Plotters places it against
+/// the **outer** edge of the area (at the bottom for the bottom axis, on the
+/// left for the left one, on the right for the secondary axis).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AxisArea {
-    /// Épaisseur, en pixels de backend, perpendiculairement à l'axe.
+    /// Thickness, in backend pixels, perpendicular to the axis.
     pub size: u32,
-    /// Vrai si l'axe porte un titre (libellé ou unité non vides).
+    /// True if the axis carries a title (non-empty label or unit).
     pub titled: bool,
-    /// Distance, en pixels, entre la zone de tracé et le bord intérieur de
-    /// l'aire : 0 en général, un multiple de `size` pour l'axe d'un calque
-    /// superposé empilé derrière les axes des calques plus anciens (#168).
+    /// Distance, in pixels, between the plot area and the inner edge of the
+    /// area: 0 in general, a multiple of `size` for the axis of a
+    /// superimposed layer stacked behind the axes of older layers (#168).
     pub offset: u32,
 }
 
-/// Les aires de graduation d'un panneau.
+/// The tick areas of a panel.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AxisAreas {
-    /// Sous la zone de tracé (abscisses).
+    /// Below the plot area (abscissa).
     pub bottom: AxisArea,
-    /// À gauche (ordonnée principale).
+    /// On the left (main ordinate).
     pub left: AxisArea,
-    /// À droite (ordonnée secondaire), si une série s'y rattache, ou l'axe Y
-    /// d'un calque superposé (#167).
+    /// On the right (secondary ordinate), if a series is attached to it, or
+    /// the Y axis of a superimposed layer (#167).
     pub right: AxisArea,
-    /// Au-dessus de la zone de tracé : l'axe X d'un calque superposé (#167).
+    /// Above the plot area: the X axis of a superimposed layer (#167).
     pub top: AxisArea,
 }
 
-/// Ce qu'un graphe a fini par tracer.
+/// What a graph ended up drawing.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DrawnPlot {
-    /// Les panneaux effectivement dessinés, dans l'ordre du spec.
+    /// The panels actually drawn, in spec order.
     pub panels: Vec<DrawnPanel>,
-    /// Nombre de panneaux laissés de côté faute de place ([`MIN_CELL`]).
+    /// Number of panels set aside for lack of room ([`MIN_CELL`]).
     pub omitted_panels: usize,
-    /// Nombre total de séries tracées, tous panneaux confondus.
+    /// Total number of series drawn, all panels together.
     pub drawn_series: usize,
-    /// Nombre total de références brisées.
+    /// Total number of broken references.
     pub broken_series: usize,
-    /// Nombre total de séries à type de tracé inconnu.
+    /// Total number of series with an unknown plot type.
     pub unknown_series: usize,
-    /// Nombre total de points retirés par la décimation.
+    /// Total number of points removed by decimation.
     pub decimated_points: usize,
-    /// Hauteur, en pixels de backend, de la bande du titre du graphe en haut
-    /// de la figure (0 sans titre).
+    /// Height, in backend pixels, of the graph title band at the top of the
+    /// figure (0 without a title).
     pub title_height: u32,
-    /// Le titre du graphe tel qu'il a été tracé (issue #53) ; `None` sans
-    /// titre.
+    /// The graph title as it was drawn (issue #53); `None` without a
+    /// title.
     pub title: Option<DrawnText>,
 }
 
 impl DrawnPlot {
-    /// Le cadrage en X du premier panneau — la commodité du cas courant, qui
-    /// n'en a qu'un.
+    /// The X framing of the first panel — the convenience of the common case,
+    /// which has only one.
     pub fn x_range(&self) -> (f64, f64) {
         self.panels.first().map_or((0.0, 1.0), |p| p.x_range)
     }
 
-    /// Le cadrage en Y du premier panneau.
+    /// The Y framing of the first panel.
     pub fn y_range(&self) -> (f64, f64) {
         self.panels.first().map_or((0.0, 1.0), |p| p.y_range)
     }
 
-    /// Le panneau d'indice donné.
+    /// The panel with the given index.
     pub fn panel(&self, index: usize) -> Option<&DrawnPanel> {
         self.panels.get(index)
     }
 }
 
-/// Le fond de la figure, blanc s'il n'est pas lisible.
+/// The background of the figure, white if it is not readable.
 fn figure_background(spec: &PlotSpec) -> (u8, u8, u8, u8) {
     rgba_or(&spec.background, opaque(PAPER))
 }
 
-/// Encre automatique de la figure : celle de tout texte et de toute échelle
-/// dont la couleur est laissée vide, et des poignées d'une série
-/// sélectionnée (#98) — blanche sur un fond sombre, sombre sinon. Un fond
-/// (semi-)transparent est jugé composé sur du blanc, comme l'écran le peint.
+/// Automatic ink of the figure: that of any text and any scale whose color is
+/// left empty, and of the handles of a selected series (#98) — white on a
+/// dark background, dark otherwise. A (semi-)transparent background is judged
+/// composited on white, as the screen paints it.
 pub fn figure_ink(spec: &PlotSpec) -> (u8, u8, u8) {
     auto_ink(over_white(figure_background(spec)))
 }
 
-/// Trace le graphe résolu sur le backend donné.
+/// Draws the resolved graph on the given backend.
 ///
-/// Consomme le backend — c'est la convention de Plotters
-/// ([`IntoDrawingArea`]) et elle tombe juste : un backend ne sert qu'à une
-/// figure.
+/// Consumes the backend — this is Plotters' convention
+/// ([`IntoDrawingArea`]) and it is right: a backend serves only one figure.
 pub fn draw<DB: DrawingBackend>(
     backend: DB,
     plot: &ResolvedPlot<'_>,
@@ -380,10 +373,10 @@ pub fn draw<DB: DrawingBackend>(
     draw_on(&root, plot)
 }
 
-/// Trace le graphe résolu sur une zone de dessin déjà construite.
+/// Draws the resolved graph on an already built drawing area.
 ///
-/// Séparée de [`draw`] pour que l'appelant qui possède déjà une
-/// [`DrawingArea`] n'ait pas à en refaire une.
+/// Separate from [`draw`] so that a caller that already owns a
+/// [`DrawingArea`] does not have to make another.
 pub fn draw_on<DB: DrawingBackend>(
     root: &DrawingArea<DB, Shift>,
     plot: &ResolvedPlot<'_>,
@@ -391,22 +384,21 @@ pub fn draw_on<DB: DrawingBackend>(
     let spec = plot.spec;
     let background = figure_background(spec);
     let ink = figure_ink(spec);
-    // Un fond d'opacité nulle n'est pas peint du tout : la figure exportée
-    // (SVG, PNG, PDF) n'a pas de fond, pour s'intégrer à une autre
-    // présentation.
+    // A background of zero opacity is not painted at all: the exported figure
+    // (SVG, PNG, PDF) has no background, to blend into another
+    // presentation.
     if background.3 > 0 {
         root.fill(&rgba(background))?;
     }
 
-    // `titled` mesure le titre et rabaisse d'autant le haut de la zone : le
-    // point où `estimate_text_size` entre dans la géométrie (voir la doc de
-    // tête).
+    // `titled` measures the title and lowers the top of the area by as much:
+    // the point where `estimate_text_size` enters the geometry (see the head
+    // doc).
     //
-    // Un titre déplacé (issue #53) garde sa bande, **vide** : la mise en page
-    // ne dépend pas de l'endroit où le titre est posé — sinon la zone de
-    // tracé changerait de taille au lâcher, et le titre, ancré aux données,
-    // sauterait. Il est tracé sur son ancre une fois les panneaux faits,
-    // par-dessus.
+    // A moved title (issue #53) keeps its band, **empty**: the layout does not
+    // depend on where the title is placed — otherwise the plot area would
+    // change size on drop, and the title, anchored to the data, would jump. It
+    // is drawn on its anchor once the panels are done, on top.
     let title_color = rgba_or(&spec.title_color, opaque(ink));
     let title_style = font_style(
         &spec.title_font,
@@ -451,23 +443,23 @@ pub fn draw_on<DB: DrawingBackend>(
     };
     let mut first_projection: Option<Projection> = None;
 
-    // Toute la figure, en coordonnées d'écran : les textes déplacés (titres,
-    // légende, textes libres) s'y tracent sans être ramenés dans la cellule
-    // ou la zone de tracé (`BackendCoordOnly` rogne chaque point sur le
-    // rectangle de sa zone, #163).
+    // The whole figure, in screen coordinates: moved texts (titles, legend,
+    // free texts) are drawn there without being brought back into the cell or
+    // the plot area (`BackendCoordOnly` clips each point to the rectangle of
+    // its area, #163).
     let canvas = root.use_screen_coord();
     let layout = grid_of(spec, plot.panels.len());
     let cells = area.split_evenly((layout.rows, layout.columns));
 
-    // Les aires de graduation de chaque case : l'union de ce que demandent
-    // ses calques, pour que les calques superposés (#167) partagent une zone
-    // de tracé identique. `bases` garde, par case, le dernier calque ordinaire
-    // tracé : celui qu'un calque superposé recouvre.
+    // The tick areas of each cell: the union of what its layers ask for, so
+    // that superimposed layers (#167) share an identical plot area. `bases`
+    // keeps, per cell, the last ordinary layer drawn: the one a superimposed
+    // layer covers.
     let mut plans: std::collections::HashMap<usize, CellPlan> = std::collections::HashMap::new();
-    // Le rang de chaque calque superposé parmi ceux de sa case qui affichent un
-    // axe du même côté (#168) : 0 contre la zone de tracé. Il vient de l'ordre
-    // des calques, jamais d'un niveau stocké : un calque supprimé ne laisse
-    // donc pas de bande vide.
+    // The rank of each superimposed layer among those of its cell that show an
+    // axis on the same side (#168): 0 against the plot area. It comes from the
+    // order of the layers, never from a stored level: a deleted layer
+    // therefore leaves no empty band.
     let mut ranks: Vec<(u32, u32)> = Vec::with_capacity(plot.panels.len());
     for (index, panel) in plot.panels.iter().enumerate() {
         if let Some(cell) = layout.cells.get(index) {
@@ -479,9 +471,10 @@ pub fn draw_on<DB: DrawingBackend>(
         }
     }
     let mut bases = std::collections::HashMap::new();
-    // La légende d'un calque ordinaire liste aussi les courbes des calques
-    // superposés qui le recouvrent (#172) : `overlays_of` donne, par indice de
-    // calque ordinaire, les calques superposés qui le suivent dans sa case.
+    // The legend of an ordinary layer also lists the curves of the
+    // superimposed layers that cover it (#172): `overlays_of` gives, per
+    // ordinary layer index, the superimposed layers that follow it in its
+    // cell.
     let mut overlays_of: std::collections::HashMap<usize, Vec<usize>> =
         std::collections::HashMap::new();
     let mut last_base: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
@@ -543,10 +536,10 @@ pub fn draw_on<DB: DrawingBackend>(
     }
 
     if let Some(anchor) = title_anchor {
-        // Le titre du graphe n'appartient à aucun panneau : son ancre est
-        // lue dans le repère du premier panneau tracé. Sans projection
-        // possible (panneau omis, axe logarithmique ≤ 0), il retombe en haut
-        // et au centre de la figure plutôt que de disparaître.
+        // The graph title belongs to no panel: its anchor is read in the
+        // frame of the first drawn panel. With no possible projection (omitted
+        // panel, logarithmic axis ≤ 0), it falls back to the top center of
+        // the figure rather than disappearing.
         let pixel = first_projection
             .as_ref()
             .and_then(|projection| projection.pixel(anchor))
@@ -566,9 +559,9 @@ pub fn draw_on<DB: DrawingBackend>(
     Ok(drawn)
 }
 
-/// La zone sous la bande qu'un titre occuperait, **sans** écrire le titre :
-/// la même hauteur que `DrawingArea::titled` de Plotters (hauteur du texte
-/// plus deux marges de 5 px au plus), mesurée par le même chemin.
+/// The area under the band a title would occupy, **without** writing the
+/// title: the same height as Plotters' `DrawingArea::titled` (text height
+/// plus two margins of at most 5 px), measured by the same path.
 fn reserve_title_band<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     text: &str,
@@ -582,15 +575,15 @@ fn reserve_title_band<DB: DrawingBackend>(
         .shrink((0, band as i32), (width, height.saturating_sub(band))))
 }
 
-/// L'ancre, si elle est exploitable ([`TextAnchor::is_finite`]) : une ancre
-/// abîmée laisse le texte à sa place par défaut.
+/// The anchor, if usable ([`TextAnchor::is_finite`]): a damaged anchor leaves
+/// the text in its default place.
 fn usable_anchor(anchor: Option<TextAnchor>) -> Option<TextAnchor> {
     anchor.filter(TextAnchor::is_finite)
 }
 
-/// La zone de tracé d'un panneau et ses cadrages : de quoi poser une
-/// [`TextAnchor`] en pixels — la même correspondance que
-/// `crate::interact::PanelTransform`, qui sert au glisser.
+/// The plot area of a panel and its framings: enough to place a
+/// [`TextAnchor`] in pixels — the same correspondence as
+/// `crate::interact::PanelTransform`, which serves the drag.
 struct Projection {
     origin: (i32, i32),
     size: (u32, u32),
@@ -599,10 +592,10 @@ struct Projection {
 }
 
 impl Projection {
-    /// Le pixel de l'ancre — **sans** exiger qu'elle tombe dans le cadrage :
-    /// un titre vit hors de la zone de tracé. `None` si l'échelle n'a pas
-    /// d'image de cette valeur (≤ 0 sur un axe logarithmique) ou si le
-    /// cadrage est dégénéré.
+    /// The pixel of the anchor — **without** requiring that it fall within
+    /// the framing: a title lives outside the plot area. `None` if the scale
+    /// has no image of this value (≤ 0 on a logarithmic axis) or if the
+    /// framing is degenerate.
     fn pixel(&self, anchor: TextAnchor) -> Option<(i32, i32)> {
         let right = anchor.axis == SeriesAxis::Right && self.right_active;
         let (y_scale, y_range) = if right {
@@ -623,9 +616,9 @@ impl Projection {
     }
 }
 
-/// Trace `text` (Typst) centré sur `pixel`, tourné de `rotation` degrés
-/// (antihoraire), et rend la taille du texte **droit**, mesurée par le même
-/// chemin que tout le reste.
+/// Draws `text` (Typst) centered on `pixel`, rotated by `rotation` degrees
+/// (counterclockwise), and returns the size of the **straight** text,
+/// measured by the same path as everything else.
 fn draw_centered_text<DB: DrawingBackend>(
     area: &DrawingArea<DB, Shift>,
     text: &str,
@@ -636,8 +629,8 @@ fn draw_centered_text<DB: DrawingBackend>(
     use plotters::style::text_anchor::{HPos, Pos, VPos};
     let centered = Pos::new(HPos::Center, VPos::Center);
     let straight = style.pos(centered);
-    // Le style d'un texte riche saisi porte la police de sa zone dans sa
-    // famille (`formula::rich_style_font`) : le style tourné la reprend.
+    // The style of an entered rich text carries the font of its area in its
+    // family (`formula::rich_style_font`): the rotated style takes it over.
     let font = match style.font.get_family() {
         FontFamily::Name(name) => crate::formula::font_of_family(name),
         _ => None,
@@ -656,35 +649,35 @@ fn draw_centered_text<DB: DrawingBackend>(
     Ok(measured)
 }
 
-/// La grille de panneaux : combien de lignes, combien de colonnes, et dans
-/// quelle cellule va chaque panneau.
+/// The panel grid: how many rows, how many columns, and in which cell each
+/// panel goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
-    /// Lignes de la grille.
+    /// Rows of the grid.
     pub rows: usize,
-    /// Colonnes de la grille.
+    /// Columns of the grid.
     pub columns: usize,
-    /// Indice de cellule de chaque panneau, dans l'ordre du spec.
+    /// Cell index of each panel, in spec order.
     pub cells: Vec<usize>,
 }
 
-/// Répartit les panneaux dans une grille — tâche R5.4.
+/// Distributes the panels into a grid — task R5.4.
 ///
-/// Le cas nominal est celui que la roadmap décrit : `spec.rows()` ×
-/// `spec.columns()`, chaque panneau dans la cellule que son `row`/`column`
-/// désigne. Deux panneaux à la même position se superposent, le dernier
-/// gagne — ce n'est pas un état que le rendu a à arbitrer.
+/// The nominal case is the one the roadmap describes: `spec.rows()` ×
+/// `spec.columns()`, each panel in the cell its `row`/`column` designates.
+/// Two panels at the same position are superimposed, the last one wins — this
+/// is not a state the rendering has to arbitrate.
 ///
-/// **Le repli existe parce que les positions ne sont pas bornées.** `row` et
-/// `column` sont des `usize` libres que rien ne valide à la lecture d'un
-/// fichier (`stokesforge-plot` le documente, et `PlotSpec::rows` s'en protège
-/// déjà par un `saturating_add`). Deux panneaux en `0` et en `usize::MAX`
-/// déclarent une grille de `usize::MAX` lignes : indécoupable. Au-delà de
-/// [`MAX_CELLS`], les panneaux sont donc rangés **dans l'ordre de
-/// déclaration** dans la grille la plus carrée qui les contienne. La figure
-/// n'est alors pas celle que le spec décrit, mais elle est lisible et
-/// déterministe, et les deux backends la produisent à l'identique — ce qui
-/// est la seule propriété que ce module a le droit de promettre.
+/// **The fallback exists because positions are not bounded.** `row` and
+/// `column` are free `usize`s that nothing validates when a file is read
+/// (`stokesforge-plot` documents it, and `PlotSpec::rows` already protects
+/// itself with a `saturating_add`). Two panels at `0` and at `usize::MAX`
+/// declare a grid of `usize::MAX` rows: impossible to split. Beyond
+/// [`MAX_CELLS`], the panels are therefore laid out **in declaration order**
+/// in the squarest grid that contains them. The figure is then not the one
+/// the spec describes, but it is readable and deterministic, and both
+/// backends produce it identically — which is the only property this module
+/// has the right to promise.
 pub fn grid_of(spec: &PlotSpec, panels: usize) -> Layout {
     let rows = spec.rows();
     let columns = spec.columns();
@@ -713,31 +706,31 @@ pub fn grid_of(spec: &PlotSpec, panels: usize) -> Layout {
     }
 }
 
-/// Les aires de graduation réservées dans une case de la grille : l'union de
-/// ce que demandent tous ses calques, pour que les calques superposés (#167)
-/// aient exactement la même zone de tracé.
+/// The tick areas reserved in a grid cell: the union of what all its layers
+/// ask for, so that superimposed layers (#167) have exactly the same plot
+/// area.
 #[derive(Debug, Clone, Copy, Default)]
 struct CellPlan {
     bottom: bool,
     top: bool,
     left: bool,
     right: bool,
-    /// Un calque superposé de la case a son propre axe en haut / à droite :
-    /// il prime sur un axe miroir (#176).
+    /// A superimposed layer of the cell has its own axis at the top / on the
+    /// right: it takes precedence over a mirror axis (#176).
     top_overlay: bool,
     right_overlay: bool,
-    /// Nombre de calques superposés de la case qui affichent leur axe en
-    /// haut / à droite : chacun a sa bande, empilées vers l'extérieur dans
-    /// l'ordre des calques (#168).
+    /// Number of superimposed layers of the cell that show their axis at the
+    /// top / on the right: each has its band, stacked outward in the order of
+    /// the layers (#168).
     top_levels: u32,
     right_levels: u32,
-    /// Un calque ordinaire de la case demande un axe miroir en haut / à
-    /// droite, et si l'un d'eux garde ses libellés.
+    /// An ordinary layer of the cell asks for a mirror axis at the top / on
+    /// the right, and whether one of them keeps its labels.
     top_mirror: bool,
     right_mirror: bool,
     top_labels: bool,
     right_labels: bool,
-    /// Une série est rattachée à l'axe de droite : c'est un vrai axe.
+    /// A series is attached to the right axis: it is a real axis.
     right_data: bool,
 }
 
@@ -779,25 +772,25 @@ impl CellPlan {
 }
 
 impl CellPlan {
-    /// Bandes de l'aire de droite quand des calques superposés y affichent un
-    /// axe : une par calque, plus celle de l'axe de droite à données (#168).
+    /// Bands of the right area when superimposed layers show an axis there:
+    /// one per layer, plus that of the right data axis (#168).
     fn right_slots(&self) -> u32 {
         (self.right_levels + u32::from(self.right_data)).max(1)
     }
 
-    /// Le miroir du haut est tracé : demandé, et pas d'axe propre d'un calque
-    /// superposé à cet endroit.
+    /// The top mirror is drawn: requested, and no own axis of a
+    /// superimposed layer at that place.
     fn mirror_top(&self) -> bool {
         self.top_mirror && !self.top_overlay
     }
 
-    /// Le miroir de droite est tracé, même règle.
+    /// The right mirror is drawn, same rule.
     fn mirror_right(&self) -> bool {
         self.right_mirror && !self.right_overlay
     }
 
-    /// La taille voulue pour l'aire du haut : un miroir sans libellés n'a
-    /// besoin que de ses tirets.
+    /// The wanted size for the top area: a mirror without labels only needs
+    /// its tick marks.
     fn top_wanted(&self) -> u32 {
         if self.top_overlay {
             X_LABEL_AREA.saturating_mul(self.top_levels.max(1))
@@ -808,8 +801,8 @@ impl CellPlan {
         }
     }
 
-    /// Même chose pour l'aire de droite (un vrai axe de droite y garde la
-    /// sienne : `right` est alors déjà vrai sans miroir).
+    /// Same for the right area (a real right axis keeps its own there:
+    /// `right` is then already true without a mirror).
     fn right_wanted(&self) -> u32 {
         if self.right_overlay {
             Y_LABEL_AREA.saturating_mul(self.right_slots())
@@ -821,7 +814,7 @@ impl CellPlan {
     }
 }
 
-/// Ce qu'un calque superposé (#167) hérite du calque ordinaire qu'il recouvre.
+/// What a superimposed layer (#167) inherits from the ordinary layer it covers.
 struct BaseFrame<DB: DrawingBackend> {
     area: DrawingArea<DB, Shift>,
     x_range: (f64, f64),
@@ -830,7 +823,7 @@ struct BaseFrame<DB: DrawingBackend> {
     y_scale: AxisScale,
 }
 
-/// Trace un panneau dans sa cellule.
+/// Draws a panel in its cell.
 #[allow(clippy::too_many_arguments)]
 fn draw_panel<DB: DrawingBackend>(
     cell: &DrawingArea<DB, Shift>,
@@ -846,13 +839,13 @@ fn draw_panel<DB: DrawingBackend>(
 ) -> Result<(DrawnPanel, Projection, BaseFrame<DB>), DrawingAreaErrorKind<DB::ErrorType>> {
     let spec = panel.spec;
     let figure_width = canvas.dim_in_pixel().0;
-    // Un calque superposé sans calque à recouvrir se trace comme un calque
-    // ordinaire.
+    // A superimposed layer without a layer to cover is drawn like an ordinary
+    // layer.
     let overlay = spec.overlay.filter(|_| base.is_some());
     let base = base.filter(|_| overlay.is_some());
     let x_own = overlay.is_none_or(|o| o.x_top);
     let y_own = overlay.is_none_or(|o| o.y_right);
-    // Encre automatique du panneau, voir `draw_on`.
+    // Automatic ink of the panel, see `draw_on`.
     let ink = auto_ink(over_white(background));
     let x_scale = match base {
         Some(base) if !x_own => base.x_scale,
@@ -864,10 +857,10 @@ fn draw_panel<DB: DrawingBackend>(
     };
     let y2_scale = spec.right.scale;
 
-    // 1 — préparation. Une série invisible ne figure nulle part : ni tracée,
-    // ni cadrée, ni en légende.
-    // `source` garde le rang de chaque série dans `PanelSpec::series` : la
-    // légende désigne ses lignes par ce rang (issue #53).
+    // 1 — preparation. An invisible series appears nowhere: neither drawn,
+    // nor framed, nor in the legend.
+    // `source` keeps the rank of each series in `PanelSpec::series`: the
+    // legend designates its rows by this rank (issue #53).
     let (source, mut prepared): (Vec<usize>, Vec<Prepared<'_>>) = panel
         .series
         .iter()
@@ -882,15 +875,15 @@ fn draw_panel<DB: DrawingBackend>(
             (rank, series::prepare(series, x_scale, scale))
         })
         .unzip();
-    // Un calque superposé n'a pas d'ordonnée secondaire : tout se trace sur
-    // son axe Y.
+    // A superimposed layer has no secondary ordinate: everything is drawn on
+    // its Y axis.
     if overlay.is_some() {
         for series in &mut prepared {
             series.axis = SeriesAxis::Left;
         }
     }
 
-    // Axes miroirs (#176), sauf là où un calque superposé a son propre axe.
+    // Mirror axes (#176), except where a superimposed layer has its own axis.
     let mirror_top = overlay.is_none() && plan.mirror_top() && spec.mirrors_top();
     let mirror_right = overlay.is_none() && plan.mirror_right() && spec.mirrors_right();
     let right_active = overlay.is_none()
@@ -899,7 +892,7 @@ fn draw_panel<DB: DrawingBackend>(
             .iter()
             .any(|series| series.axis == SeriesAxis::Right);
 
-    // 2 — cadrage, dans l'espace transformé.
+    // 2 — framing, in the transformed space.
     let x_range = match base {
         Some(base) if !x_own => base.x_range,
         _ => {
@@ -943,9 +936,9 @@ fn draw_panel<DB: DrawingBackend>(
         )
     });
 
-    // 3 — la zone de tracé. Le titre du panneau la rabaisse, comme celui du
-    // graphe rabaisse la figure entière.
-    // Un titre déplacé (issue #53) garde sa bande vide, voir `draw_on`.
+    // 3 — the plot area. The panel title lowers it, as the graph title lowers
+    // the whole figure.
+    // A moved title (issue #53) keeps its empty band, see `draw_on`.
     let panel_title_anchor =
         usable_anchor(spec.title_anchor).filter(|_| spec.title_visible && !spec.title.is_empty());
     let title_style = font_style(
@@ -955,8 +948,8 @@ fn draw_panel<DB: DrawingBackend>(
         canvas.dim_in_pixel().0,
     );
     let area = if let Some(base) = base {
-        // Dimension liée : la zone de tracé du calque recouvert, titre
-        // compris ; un calque superposé n'a pas de titre à lui.
+        // Linked dimension: the plot area of the covered layer, title
+        // included; a superimposed layer has no title of its own.
         base.area.clone()
     } else if !spec.title_visible || spec.title.is_empty() {
         cell.clone()
@@ -986,9 +979,8 @@ fn draw_panel<DB: DrawingBackend>(
         });
     }
     let (width, height) = area.dim_in_pixel();
-    // Les aires de graduation sont plafonnées à un tiers de la cellule :
-    // dans une grille, 64 px de libellés sur un panneau de 150 px ne
-    // laisseraient plus rien à tracer.
+    // The tick areas are capped at a third of the cell: in a grid, 64 px of
+    // labels on a 150 px panel would leave nothing to draw.
     let x_label_area = label_area(plan.bottom, X_LABEL_AREA, height);
     let top_label_area = label_area(plan.top, plan.top_wanted(), height);
     let y_label_area = label_area(plan.left, Y_LABEL_AREA, width);
@@ -1003,19 +995,18 @@ fn draw_panel<DB: DrawingBackend>(
         .right_y_label_area_size(right_label_area);
     let chart = builder.build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?;
 
-    // L'axe secondaire est **toujours** attaché, même inutilisé : il ne
-    // prend à l'axe principal que les aires du haut et de la droite, qui
-    // n'existent pas quand on ne les a pas demandées. Une seule forme de
-    // `chart` pour les deux cas, donc un seul chemin de tracé — le prix
-    // d'une branche ici serait deux fois le même code de série.
+    // The secondary axis is **always** attached, even unused: it takes from
+    // the main axis only the top and right areas, which do not exist when
+    // they were not asked for. A single shape of `chart` for both cases,
+    // hence a single drawing path — the price of a branch here would be the
+    // same series code twice.
     let secondary = y2_range.unwrap_or(y_range);
     let mut chart = chart.set_secondary_coord(x_range.0..x_range.1, secondary.0..secondary.1);
-    // Les aires de graduation de ce calque seul : un axe n'a d'aire que là
-    // où il est affiché (le plan de la case en réserve aussi pour les autres
-    // calques).
-    // Pour un calque superposé, la bande de son axe : l'aire de la case
-    // partagée à parts égales entre les axes qui s'y empilent, la sienne
-    // décalée de `rank` bandes vers l'extérieur (#168).
+    // The tick areas of this layer alone: an axis has an area only where it
+    // is displayed (the cell plan reserves it for the other layers too).
+    // For a superimposed layer, the band of its axis: the area of the cell
+    // shared in equal parts between the axes stacked there, its own shifted
+    // by `rank` bands outward (#168).
     let top_stride = top_label_area / plan.top_levels.max(1);
     let right_stride = right_label_area / plan.right_slots();
     let top_offset = rank.0 * top_stride;
@@ -1051,9 +1042,9 @@ fn draw_panel<DB: DrawingBackend>(
         ),
     };
 
-    // Positions en pixels des graduations, pour les tirets que le pipeline
-    // trace lui-même (#344) : celles que Plotters donne à ses libellés, sur
-    // le même intervalle, projetées par la zone de tracé.
+    // Pixel positions of the ticks, for the tick marks the pipeline draws itself
+    // (#344): those Plotters gives to its labels, on the same interval,
+    // projected by the plot area.
     let frame = {
         let plotting = chart.plotting_area();
         (plotting.get_base_pixel(), plotting.dim_in_pixel())
@@ -1069,8 +1060,8 @@ fn draw_panel<DB: DrawingBackend>(
         .into_iter()
         .map(|v| chart.plotting_area().map_coordinate(&(x_range.0, v)).1)
         .collect();
-    // Les axes du haut et de droite se projettent par le repère secondaire,
-    // dont l'arrondi diffère parfois d'un pixel de celui du repère principal.
+    // The top and right axes are projected by the secondary frame, whose
+    // rounding sometimes differs by a pixel from that of the main frame.
     let x2_ticks_px: Vec<i32> = ticks_of(x_scale, x_range)
         .into_iter()
         .map(|v| {
@@ -1097,9 +1088,9 @@ fn draw_panel<DB: DrawingBackend>(
     })
     .collect();
 
-    // Les sous-graduations (#344) : positions calculées en valeurs, puis
-    // projetées comme les graduations principales (jamais interpolées entre
-    // les pixels de celles-ci : arrondi, axe inversé, échelle log).
+    // The minor ticks (#344): positions computed as values, then projected
+    // like the major ticks (never interpolated between the pixels of those:
+    // rounding, inverted axis, log scale).
     let minor_of = |axis: &AxisSpec, scale: AxisScale, range: (f64, f64)| -> Vec<f64> {
         if axis.minor_ticks {
             scale::minor_key_points(scale, range, axis.minor_tick_count)
@@ -1142,14 +1133,13 @@ fn draw_panel<DB: DrawingBackend>(
     })
     .collect();
 
-    // 4 — les axes. Chaque axe a ses couleurs (titre, échelle), et le
-    // `configure_mesh` de Plotters n'a qu'un style de titre et qu'un style
-    // de ligne d'axe pour les deux : l'axe du bas et celui de gauche sont
-    // donc tracés en deux passes, chacune coupant l'autre axe. La géométrie
-    // n'en dépend pas — les aires de graduation sont fixées par le
-    // `ChartBuilder` plus haut.
-    // Un titre d'axe déplacé n'est plus écrit par Plotters (l'aire de
-    // graduation reste réservée) : il est posé sur son ancre plus bas.
+    // 4 — the axes. Each axis has its own colors (title, scale), and
+    // Plotters' `configure_mesh` has only one title style and one axis line
+    // style for both: the bottom axis and the left one are therefore drawn in
+    // two passes, each cutting the other axis. The geometry does not depend
+    // on it — the tick areas are fixed by the `ChartBuilder` above.
+    // A moved axis title is no longer written by Plotters (the tick area
+    // stays reserved): it is placed on its anchor further down.
     let axis_anchor = |axis: &AxisSpec| {
         usable_anchor(axis.title_anchor)
             .filter(|_| axis.title_visible && !axis.display_label().is_empty())
@@ -1168,8 +1158,8 @@ fn draw_panel<DB: DrawingBackend>(
     let tick_y = scale::TickFormat::new(y_scale, y_range).with_decimal_comma(decimal_comma);
     let format_x = |value: &f64| tick_x.format(*value);
     let format_y = |value: &f64| tick_y.format(*value);
-    // Les nombres d'un axe : aucun (#176, les tirets restent), tous, ou un sur
-    // n (#344).
+    // The numbers of an axis: none (#176, the tick marks stay), all, or one in n
+    // (#344).
     let shown_x = |axis: &AxisSpec| -> Box<dyn Fn(&f64) -> String> {
         if axis.tick_labels {
             let format = tick_x.with_label_every(axis.label_every, x_range);
@@ -1190,9 +1180,9 @@ fn draw_panel<DB: DrawingBackend>(
     let labels_top = shown_x(&spec.top);
     let labels_left = shown_y(&spec.left);
     let labels_right = shown_y(&spec.right);
-    // Un calque superposé n'a ni axe en bas ni axe à gauche : ses axes
-    // s'affichent en haut et à droite, par les axes secondaires de Plotters
-    // (même repère que le calque lui-même, voir plus bas).
+    // A superimposed layer has neither a bottom axis nor a left axis: its axes
+    // are displayed at the top and on the right, through Plotters' secondary
+    // axes (same frame as the layer itself, see below).
     if overlay.is_none() {
         let colors = AxisColors::of(&spec.bottom, ink, figure_width);
         let custom = custom_ticks(&spec.bottom);
@@ -1300,7 +1290,7 @@ fn draw_panel<DB: DrawingBackend>(
             }
         };
         let colors = AxisColors::of(&spec.right, ink, figure_width);
-        // Les tirets du haut ne comptent que si le miroir du haut est tracé.
+        // The top tick marks only count if the top mirror is drawn.
         let top_custom = mirror_top && custom_ticks(&spec.top);
         let custom = custom_ticks(&spec.right) || top_custom;
         for pass in mesh_passes(
@@ -1368,9 +1358,9 @@ fn draw_panel<DB: DrawingBackend>(
         }
     }
 
-    // Les axes miroirs (#176) : mêmes échelle, bornes et graduations que le
-    // bas et la gauche, sans titre. Un axe de droite à données est déjà tracé
-    // plus haut ; seul le miroir du haut s'ajoute alors.
+    // The mirror axes (#176): same scale, bounds and ticks as the bottom and
+    // the left, without a title. A right axis with data is already drawn
+    // above; only the top mirror is then added.
     if (mirror_top || mirror_right) && y2_range.is_none() {
         let colors = AxisColors::of(&spec.bottom, ink, figure_width);
         let custom_top = mirror_top && custom_ticks(&spec.top);
@@ -1446,11 +1436,11 @@ fn draw_panel<DB: DrawingBackend>(
         }
     }
 
-    // Les axes d'un calque superposé : chacun dans une zone « axe seul » qui
-    // reprend les bords de la zone de tracé dans le sens de l'axe et se place
-    // à sa bande (Plotters colle l'axe secondaire à la zone de tracé ; un
-    // axe plus loin en demande une autre, #168). Même style pour les deux axes
-    // : celui de l'axe X, ou de l'axe Y si c'est le seul affiché.
+    // The axes of a superimposed layer: each in an "axis only" area that
+    // takes the edges of the plot area along the axis direction and sits in
+    // its band (Plotters sticks the secondary axis to the plot area; an axis
+    // further out asks for another, #168). Same style for both axes: that of
+    // the X axis, or of the Y axis if it is the only one displayed.
     if let Some(o) = overlay {
         let show_x = o.x_top && spec.bottom.visible && top_area > 0;
         let show_y = o.y_right && spec.left.visible && right_area > 0;
@@ -1485,7 +1475,7 @@ fn draw_panel<DB: DrawingBackend>(
             }
         }
         if show_y {
-            // Le bord droit de la zone « axe seul » est celui de la bande.
+            // The right edge of the "axis only" area is that of the band.
             let right_edge = width.saturating_sub(right_label_area) + right_offset + right_area;
             let x0 = right_edge.saturating_sub(2 * MARGIN + right_area + stub);
             let w = right_edge - x0;
@@ -1512,18 +1502,18 @@ fn draw_panel<DB: DrawingBackend>(
         }
     }
 
-    // 5 — les séries, en pixels.
+    // 5 — the series, in pixels.
     let plotting = chart.plotting_area();
     let origin = plotting.get_base_pixel();
     let size = plotting.dim_in_pixel();
     let screen = plotting.use_screen_coord();
     let threshold = decimate::threshold_for_width(size.0);
 
-    // Plotters trace un axe vertical un pixel hors de la zone (à gauche, ou à
-    // droite) et un axe horizontal un pixel hors d'elle (en bas, ou en haut) :
-    // les coins communs de deux axes tracés restent vides. On les comble, pour
-    // toute la case (le plan réunit les axes de tous ses calques), depuis le
-    // calque ordinaire.
+    // Plotters draws a vertical axis one pixel outside the area (on the left,
+    // or on the right) and a horizontal axis one pixel outside it (at the
+    // bottom, or at the top): the common corners of two drawn axes stay empty.
+    // We fill them, for the whole cell (the plan gathers the axes of all its
+    // layers), from the ordinary layer.
     if overlay.is_none() {
         let (left, right) = (origin.0 - 1, origin.0 + size.0 as i32);
         let (top, bottom) = (origin.1 - 1, origin.1 + size.1 as i32);
@@ -1535,8 +1525,8 @@ fn draw_panel<DB: DrawingBackend>(
             (plan.right, plan.top, right, top),
         ] {
             if vertical && horizontal {
-                // En L, recouvrant les deux lignes d'axe : un simple point du coin
-                // ne les rejoindrait qu'en diagonale.
+                // L-shaped, covering both axis lines: a simple corner point
+                // would only join them diagonally.
                 let along_x = if x == left { x + 1 } else { x - 1 };
                 let along_y = if y == top { y + 1 } else { y - 1 };
                 canvas.draw(&PathElement::new(
@@ -1613,13 +1603,14 @@ fn draw_panel<DB: DrawingBackend>(
         legend_rows: Vec::new(),
     };
 
-    // Les titres d'axe à leur place par défaut : position approchée (Plotters
-    // les pose contre le bord extérieur de l'aire de graduation), de quoi les
-    // désigner et partir de là quand on les déplace (issue #53).
+    // The axis titles in their default place: approximate position (Plotters
+    // places them against the outer edge of the tick area), enough to pick
+    // them and to start from there when they are moved (issue #53).
     let (plot_x, plot_y) = (origin.0 as f64, origin.1 as f64);
     let (plot_w, plot_h) = (size.0 as f64, size.1 as f64);
-    // `side` est l'axe du spec, `place` le bord où il est affiché (un calque
-    // superposé met son axe X en haut et son axe Y à droite, #167).
+    // `side` is the axis of the spec, `place` the edge where it is displayed
+    // (a superimposed layer puts its X axis at the top and its Y axis on the
+    // right, #167).
     let placed: [(
         &AxisSpec,
         Option<TextAnchor>,
@@ -1683,7 +1674,7 @@ fn draw_panel<DB: DrawingBackend>(
         let text_size = area.estimate_text_size(&label, &colors.title_style)?;
         let half = text_size.1 as f64 / 2.0;
         let area_size = area_size as f64;
-        // Un axe de calque superposé empilé (#168) est décalé vers l'extérieur.
+        // A stacked superimposed-layer axis (#168) is shifted outward.
         let shift = match (overlay.is_some(), place) {
             (true, PlotAxisSide::Top) => top_offset as f64,
             (true, PlotAxisSide::Right) => right_offset as f64,
@@ -1716,10 +1707,10 @@ fn draw_panel<DB: DrawingBackend>(
         });
     }
 
-    // Le rectangle de tracé, en pixels : c'est contre lui que les segments
-    // d'une courbe sont rognés avant `paint::polyline` (voir `crate::clip`),
-    // et non contre le cadrage en données — un axe logarithmique n'y serait
-    // pas linéaire (doc de tête de `clip`).
+    // The plot rectangle, in pixels: it is against this that the segments of
+    // a curve are clipped before `paint::polyline` (see `crate::clip`), and
+    // not against the framing in data — a logarithmic axis would not be
+    // linear there (head doc of `clip`).
     let bounds = PixelBounds::of_panel(origin, size);
 
     for (rank, series) in source.iter().copied().zip(&mut prepared) {
@@ -1757,7 +1748,7 @@ fn draw_panel<DB: DrawingBackend>(
         drawn.drawn_series += 1;
     }
 
-    // 6 — la légende, par-dessus, et mesurée comme les axes.
+    // 6 — the legend, on top, and measured like the axes.
     let projection = Projection {
         origin,
         size,
@@ -1777,8 +1768,8 @@ fn draw_panel<DB: DrawingBackend>(
         .filter(|(_, series)| series.in_legend())
         .map(|(index, _)| source[index])
         .collect();
-    // Les courbes des calques superposés suivent, calque par calque (#172) ;
-    // elles n'ont pas de rang dans ce panneau, donc pas de ligne désignable.
+    // The curves of the superimposed layers follow, layer by layer (#172);
+    // they have no rank in this panel, hence no pickable row.
     let overlay_prepared: Vec<Prepared<'_>> = legend_overlays
         .iter()
         .flat_map(|layer| {
@@ -1852,8 +1843,8 @@ fn draw_panel<DB: DrawingBackend>(
             .collect();
     }
 
-    // Les titres déplacés, posés sur leur ancre (issue #53) : par-dessus les
-    // séries et la légende, comme les textes libres juste après.
+    // The moved titles, placed on their anchor (issue #53): on top of the
+    // series and the legend, like the free texts right after.
     let centered = |anchor: TextAnchor| {
         projection.pixel(anchor).unwrap_or((
             origin.0 + (size.0 / 2) as i32,
@@ -1902,9 +1893,9 @@ fn draw_panel<DB: DrawingBackend>(
         y2: y2_range.map(|range| (y2_scale, range)),
     };
 
-    // 6 bis — les objets graphiques (issue #76), du dessous au dessus, sous
-    // les textes libres. Projetés sans test d'appartenance au cadrage : un
-    // rectangle qui déborde du zoom est rogné, pas omis.
+    // 6 bis — the graphic objects (issue #76), from bottom to top, under the
+    // free texts. Projected without a test of membership in the framing: a
+    // rectangle that overflows the zoom is clipped, not omitted.
     for (index, shape) in spec.shapes.iter().enumerate() {
         let right = shape.axis == SeriesAxis::Right && right_active;
         if !shape.visible || !shape.is_finite() {
@@ -1934,9 +1925,9 @@ fn draw_panel<DB: DrawingBackend>(
         });
     }
 
-    // 7 — les textes libres, par-dessus tout (issue #35). Comme un titre
-    // ancré, ils ne sont pas bornés au cadrage : un texte posé dans les
-    // marges reste tracé (#163).
+    // 7 — the free texts, on the very top (issue #35). Like an anchored
+    // title, they are not bounded to the framing: a text placed in the
+    // margins is still drawn (#163).
     for (index, annotation) in spec.annotations.iter().enumerate() {
         if !annotation.visible {
             continue;
@@ -1955,11 +1946,10 @@ fn draw_panel<DB: DrawingBackend>(
         }
     }
 
-    // R7 : le réticule, le rectangle de zoom élastique et la désignation de
-    // point se peignent **par-dessus** ce qui précède, et surtout par-dessus
-    // le cache de `Shape` — donc pas ici, sous peine de rejouer tout le
-    // pipeline à chaque mouvement de souris (`architecture-choisie.md`
-    // §4.2, tâche 7.3).
+    // R7: the crosshair, the elastic zoom rectangle and point picking are
+    // painted **on top of** what precedes, and above all on top of the
+    // `Shape` cache — so not here, lest the whole pipeline be replayed at each
+    // mouse move (`architecture-choisie.md` §4.2, task 7.3).
     let frame = BaseFrame {
         area,
         x_range,
@@ -1970,8 +1960,8 @@ fn draw_panel<DB: DrawingBackend>(
     Ok((drawn, projection, frame))
 }
 
-/// Les cadrages d'un panneau, dans l'espace transformé, avec leur échelle —
-/// de quoi projeter un point de données comme une série.
+/// The framings of a panel, in the transformed space, with their scale —
+/// enough to project a data point like a series.
 struct Ranges {
     x: (AxisScale, (f64, f64)),
     y: (AxisScale, (f64, f64)),
@@ -1979,21 +1969,21 @@ struct Ranges {
 }
 
 impl Ranges {
-    /// Le point `(x, y)` dans l'espace transformé, **sans** test
-    /// d'appartenance au cadrage (objets graphiques #76, textes libres #163) ; `None`
-    /// seulement si l'échelle ne le représente pas (≤ 0 sur un axe log).
+    /// The point `(x, y)` in the transformed space, **without** a test of
+    /// membership in the framing (graphic objects #76, free texts #163);
+    /// `None` only if the scale cannot represent it (≤ 0 on a log axis).
     fn forward(&self, x: f64, y: f64, right: bool) -> Option<(f64, f64)> {
         let (y_scale, _) = if right { self.y2? } else { self.y };
         Some((scale::forward(self.x.0, x)?, scale::forward(y_scale, y)?))
     }
 }
 
-/// Trace un texte libre centré sur `pixel`, et rend ce qui a été tracé.
+/// Draws a free text centered on `pixel`, and returns what was drawn.
 ///
-/// Texte riche saisi (Typst), tourné par Typst d'un angle libre
-/// ([`crate::formula::rotated_family`]). La taille rapportée est celle du
-/// texte **droit**, mesurée par le même chemin : le rectangle désignable
-/// est ce rectangle, tourné autour du centre.
+/// Entered rich text (Typst), rotated by Typst at a free angle
+/// ([`crate::formula::rotated_family`]). The reported size is that of the
+/// **straight** text, measured by the same path: the pickable rectangle is
+/// this rectangle, rotated around the center.
 fn draw_annotation<DB: DrawingBackend>(
     screen: &DrawingArea<DB, Shift>,
     annotation: &stokesforge_plot::AnnotationSpec,
@@ -2007,12 +1997,12 @@ fn draw_annotation<DB: DrawingBackend>(
     let color = rgba_or(&annotation.color, opaque(ink));
     let size = annotation.effective_size();
     let rotation = annotation.effective_rotation();
-    // Une largeur fixée (fraction de la figure, plafonnée à elle) fait passer
-    // le texte à la ligne dans une boîte de cette largeur (#244).
+    // A fixed width (fraction of the figure, capped to it) makes the text wrap
+    // in a box of this width (#244).
     let layout = annotation.effective_width().map(|fraction| {
         (
-            // Arrondie au pixel : le nom de famille du style est retenu pour
-            // toujours (`formula::interned`), une largeur par valeur.
+            // Rounded to the pixel: the style's family name is retained
+            // forever (`formula::interned`), one width per value.
             (fraction * f64::from(screen.dim_in_pixel().0))
                 .round()
                 .max(1.0),
@@ -2034,8 +2024,8 @@ fn draw_annotation<DB: DrawingBackend>(
     }))
 }
 
-/// Peint une série préparée, et rend le nombre de points que la décimation a
-/// retirés.
+/// Paints a prepared series, and returns the number of points that
+/// decimation removed.
 fn paint_series<DB: DrawingBackend>(
     screen: &DrawingArea<DB, Shift>,
     map: impl Fn((f64, f64)) -> plotters_backend::BackendCoord,
@@ -2050,9 +2040,9 @@ fn paint_series<DB: DrawingBackend>(
     match &series.geometry {
         Geometry::Nothing => Ok((0, geometry)),
         Geometry::Bars(bars) => {
-            // La ligne de base d'une barre est zéro quand l'axe sait le
-            // représenter, et le bas du cadrage sinon — sur une échelle
-            // logarithmique, zéro n'a pas de place.
+            // The baseline of a bar is zero when the axis can represent it,
+            // and the bottom of the framing otherwise — on a logarithmic
+            // scale, zero has no place.
             let baseline = scale_baseline(ranges.1);
             let rects: Vec<_> = bars
                 .iter()
@@ -2063,9 +2053,9 @@ fn paint_series<DB: DrawingBackend>(
             } else {
                 paint::bars(screen, &rects, &spec.line, ink)?;
             }
-            // `a` est le coin côté valeur, `b` le coin côté ligne de base :
-            // l'extrémité libre de la barre (la place de sa poignée de
-            // sélection, #98) se lit avant que le rectangle soit normalisé.
+            // `a` is the corner on the value side, `b` the corner on the
+            // baseline side: the free end of the bar (the place of its
+            // selection handle, #98) is read before the rectangle is normalized.
             (geometry.bars, geometry.bar_tips) = rects
                 .into_iter()
                 .filter_map(|(a, b)| {
@@ -2077,8 +2067,8 @@ fn paint_series<DB: DrawingBackend>(
                         top = top.max(bounds.y_min as i32);
                         bottom = bottom.min(bounds.y_max as i32);
                     }
-                    // `clamp` seulement une fois le rectangle jugé non vide :
-                    // il panique sur des bornes inversées.
+                    // `clamp` only once the rectangle is judged non-empty: it
+                    // panics on inverted bounds.
                     (left <= right && top <= bottom).then(|| {
                         let tip = ((left + right) / 2, a.1.clamp(top, bottom));
                         (((left, top), (right, bottom)), tip)
@@ -2093,10 +2083,9 @@ fn paint_series<DB: DrawingBackend>(
             Ok((0, geometry))
         }
         Geometry::Curve { points, whiskers } => {
-            // Décimer une série à moustaches dissocierait les barres
-            // d'erreur de leurs points ; décimer un nuage de points sans
-            // trait n'a pas de sens non plus, le LTTB raisonnant le long
-            // d'un chemin.
+            // Decimating a series with whiskers would dissociate the error
+            // bars from their points; decimating a scatter without a line
+            // makes no sense either, LTTB reasoning along a path.
             let decimable =
                 spec.plot_type.draws_line() && whiskers.is_empty() && points.len() > threshold;
             let decimated = decimable.then(|| decimate::lttb(points, threshold));
@@ -2104,10 +2093,10 @@ fn paint_series<DB: DrawingBackend>(
             let removed = points.len() - drawn_points.len();
 
             if spec.plot_type.draws_line() && spec.line.style != stokesforge_plot::LineStyle::None {
-                // Les extrémités entières de Plotters fixent le repère (dernier
-                // pixel inclus, axe Y inversé). Interpoler dans l'espace déjà
-                // transformé évite son arrondi par sommet : au dézoom celui-ci
-                // fabriquait des marches sur le spectre Jasco (#150).
+                // Plotters' integer endpoints fix the frame (last pixel
+                // included, inverted Y axis). Interpolating in the already
+                // transformed space avoids its per-vertex rounding: when
+                // zooming out, this made steps on the Jasco spectrum (#150).
                 let (xr, yr) = ranges;
                 let a = map((xr.0, yr.0));
                 let b = map((xr.1, yr.1));
@@ -2120,14 +2109,14 @@ fn paint_series<DB: DrawingBackend>(
                         )
                     })
                     .collect();
-                // Rognage géométrique contre le rectangle de tracé, **avant**
-                // `paint::polyline_f64` : un segment qui traverse le panneau est
-                // coupé à l'intersection réelle plutôt que ramené sur le bord
-                // par composante (le défaut documenté en tête de
-                // `crate::paint`, corrigé par `crate::clip`). Sans cadrage
-                // qui déborde des données, chaque segment reste entièrement
-                // dans `bounds` et ce rognage ne change rien : `clip_segment`
-                // rend alors le segment tel quel.
+                // Geometric clipping against the plot rectangle, **before**
+                // `paint::polyline_f64`: a segment that crosses the panel is
+                // cut at the real intersection rather than brought back onto
+                // the edge per component (the defect documented at the top of
+                // `crate::paint`, fixed by `crate::clip`). With a framing
+                // that does not overflow the data, each segment stays entirely
+                // inside `bounds` and this clipping changes nothing:
+                // `clip_segment` then returns the segment as is.
                 match bounds {
                     Some(bounds) => {
                         for run in clip::clip_polyline_f64(bounds, &precise) {
@@ -2196,8 +2185,8 @@ fn paint_series<DB: DrawingBackend>(
     }
 }
 
-/// Où poser le marqueur d'une série pas à jour : juste au-dessus de son dernier
-/// point (il ne le cache pas), ramené dans le rectangle de tracé.
+/// Where to put the marker of an out-of-date series: just above its last
+/// point (it does not hide it), brought back into the plot rectangle.
 fn stale_marker_at(point: (i32, i32), bounds: Option<PixelBounds>) -> (i32, i32) {
     const INSET: i32 = 10;
     let (x, y) = (point.0, point.1 - 12);
@@ -2216,8 +2205,8 @@ fn stale_marker_at(point: (i32, i32), bounds: Option<PixelBounds>) -> (i32, i32)
     }
 }
 
-/// Géométrie de désignation identique aux sommets réellement envoyés au
-/// backend (seizièmes de pixel), plutôt qu'un second arrondi entier.
+/// Picking geometry identical to the vertices actually sent to the backend
+/// (sixteenths of a pixel), rather than a second integer rounding.
 fn quantized_path(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
     points
         .iter()
@@ -2226,7 +2215,7 @@ fn quantized_path(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
         .collect()
 }
 
-/// La ligne de base des barres, dans l'espace transformé.
+/// The baseline of the bars, in the transformed space.
 fn scale_baseline((low, high): (f64, f64)) -> f64 {
     let (bottom, top) = if low <= high {
         (low, high)
@@ -2236,7 +2225,7 @@ fn scale_baseline((low, high): (f64, f64)) -> f64 {
     0.0f64.clamp(bottom, top)
 }
 
-/// Vrai si au moins une série de cet axe repose sur une ligne de base.
+/// True if at least one series of this axis rests on a baseline.
 fn needs_baseline(prepared: &[Prepared<'_>], axis: SeriesAxis) -> bool {
     prepared
         .iter()
@@ -2244,10 +2233,10 @@ fn needs_baseline(prepared: &[Prepared<'_>], axis: SeriesAxis) -> bool {
         .any(|series| series.geometry.needs_baseline())
 }
 
-/// Étendue d'un ensemble de séries préparées.
+/// Extent of a set of prepared series.
 ///
-/// `axis` restreint aux séries d'un axe donné (pour les ordonnées) ; `None`
-/// prend tout (pour les abscisses, communes aux deux axes verticaux).
+/// `axis` restricts to the series of a given axis (for the ordinates); `None`
+/// takes everything (for the abscissas, common to both vertical axes).
 fn extent_of(
     prepared: &[Prepared<'_>],
     extent: impl Fn(&Geometry) -> Option<(f64, f64)>,
@@ -2272,12 +2261,12 @@ fn extent_of(
     seen.then_some((min, max))
 }
 
-/// Bornes d'un axe, dans l'espace transformé.
+/// Bounds of an axis, in the transformed space.
 ///
-/// Le cadrage explicite du spec prime s'il est complet **et** représentable
-/// sur l'échelle choisie ; sinon l'étendue des données ; sinon `0..1`.
-/// Un cadrage « de 800 à 400 » (`range_min > range_max`) trace l'axe à
-/// l'envers, comme [`AxisSpec::inverted`] : les deux ne s'additionnent pas.
+/// The explicit framing of the spec takes precedence if it is complete **and**
+/// representable on the chosen scale; otherwise the extent of the data;
+/// otherwise `0..1`. A framing "from 800 to 400" (`range_min > range_max`)
+/// draws the axis reversed, like [`AxisSpec::inverted`]: the two do not add up.
 fn axis_range(
     spec: &AxisSpec,
     scale: AxisScale,
@@ -2311,10 +2300,10 @@ fn axis_range(
     }
 }
 
-/// Joint l'axe d'un calque superposé à celui du calque recouvert (#174) : mêmes
-/// bornes aux coins, graduations en face. Sans effet hors calque superposé, en
-/// échelle logarithmique (les décades s'alignent déjà) ou avec une étendue
-/// fixée à la main.
+/// Joins the axis of a superimposed layer to that of the covered layer (#174):
+/// same bounds at the corners, ticks opposite. No effect outside a
+/// superimposed layer, on a logarithmic scale (decades already align) or with
+/// an extent set by hand.
 fn join_to_base(
     spec: &AxisSpec,
     scale: AxisScale,
@@ -2333,30 +2322,30 @@ fn join_to_base(
     }
 }
 
-/// L'étendue des données, élargie de ce qu'il faut pour être un cadrage.
+/// The extent of the data, widened by what it takes to be a framing.
 fn padded(scale: AxisScale, data: Option<(f64, f64)>, with_baseline: bool) -> (f64, f64) {
-    // Pas de données : `0..1`, qui vaut « une décade » sur une échelle
-    // logarithmique puisque l'intervalle y est déjà celui des exposants.
+    // No data: `0..1`, which is worth "one decade" on a logarithmic scale
+    // since the interval there is already that of the exponents.
     let Some((mut min, mut max)) = data else {
         return (0.0, 1.0);
     };
     if with_baseline {
-        // Une barre qui ne montre pas d'où elle part ment sur sa hauteur.
+        // A bar that does not show where it starts lies about its height.
         if let Some(baseline) = scale::forward(scale, 0.0) {
             min = min.min(baseline);
             max = max.max(baseline);
         }
     }
     if matches!(scale, AxisScale::Log) {
-        // Les décades tiennent lieu de marge : élargir avant de s'y
-        // accrocher ne changerait rien la plupart du temps, et ajouterait
-        // une décade vide le reste du temps.
+        // The decades stand in for a margin: widening before snapping to them
+        // would change nothing most of the time, and would add an empty
+        // decade the rest of the time.
         return scale::snap_to_decades((min, max));
     }
     if min == max {
-        // Une série constante, ou un seul point : sans cet écartement,
-        // `build_cartesian_2d` recevrait un intervalle vide et Plotters
-        // diviserait par zéro en projetant.
+        // A constant series, or a single point: without this spreading,
+        // `build_cartesian_2d` would receive an empty interval and Plotters
+        // would divide by zero when projecting.
         let pad = if min == 0.0 { 1.0 } else { min.abs() * 0.05 };
         return (min - pad, max + pad);
     }
@@ -2364,14 +2353,14 @@ fn padded(scale: AxisScale, data: Option<(f64, f64)>, with_baseline: bool) -> (f
     (min - pad, max + pad)
 }
 
-/// Remet un intervalle transformé dans l'espace des données, pour être
-/// rapporté à l'appelant.
+/// Puts a transformed interval back into the data space, to be reported to
+/// the caller.
 fn data_range(scale: AxisScale, (low, high): (f64, f64)) -> (f64, f64) {
     (scale::inverse(scale, low), scale::inverse(scale, high))
 }
 
-/// Aire de graduation effective : celle demandée, plafonnée au tiers de la
-/// dimension disponible, nulle si l'axe est masqué.
+/// Effective tick area: the requested one, capped at a third of the available
+/// dimension, zero if the axis is hidden.
 fn label_area(visible: bool, wanted: u32, available: u32) -> u32 {
     if !visible {
         return 0;
@@ -2379,21 +2368,20 @@ fn label_area(visible: bool, wanted: u32, available: u32) -> u32 {
     wanted.min(available / 3)
 }
 
-/// Le style des **graduations**, à la taille et dans la couleur données
-/// (opacité comprise) : mis en page par `epaint`, jamais par Typst. Titres,
-/// titres d'axe et légende prennent [`rich_style`] (issue #32).
+/// The style of the **ticks**, at the given size and in the given color
+/// (opacity included): laid out by `epaint`, never by Typst. Titles, axis
+/// titles and legend take [`rich_style`] (issue #32).
 fn text_style(size: f64, color: (u8, u8, u8, u8)) -> TextStyle<'static> {
     (FONT_FAMILY, size).into_font().color(&rgba(color))
 }
 
-/// Le style d'un texte riche saisi (titre, titre d'axe, légende) : la couleur
-/// donnée, le corps et la police de sa zone (issues #77, #78), `default_size`
-/// et la police du graphe quand ils ne sont pas réglés.
+/// The style of an entered rich text (title, axis title, legend): the given
+/// color, the size and font of its area (issues #77, #78), `default_size` and
+/// the graph's font when they are not set.
 ///
-/// `figure_width` est la largeur de la figure en pixels de backend : une
-/// largeur de zone (#244) est une fraction de celle-ci, arrondie au pixel
-/// (le nom de famille du style est retenu pour toujours), et vaut aussi pour
-/// un titre vertical.
+/// `figure_width` is the width of the figure in backend pixels: an area width
+/// (#244) is a fraction of it, rounded to the pixel (the style's family name
+/// is retained forever), and also holds for a vertical title.
 fn font_style(
     font: &stokesforge_plot::TextFont,
     default_size: f64,
@@ -2414,19 +2402,18 @@ fn font_style(
     )
 }
 
-/// Opacité des lignes principales de la grille, dans la couleur de
-/// l'échelle — celle que Plotters donne par défaut sur du noir.
+/// Opacity of the main grid lines, in the color of the scale — the one
+/// Plotters gives by default on black.
 const GRID_BOLD_OPACITY: f64 = 0.2;
-/// Opacité des lignes secondaires de la grille.
+/// Opacity of the secondary grid lines.
 const GRID_LIGHT_OPACITY: f64 = 0.1;
 
-/// Teinte sans effet : Plotters saute les tracés d'alpha nul (egui comme SVG).
+/// A tint with no effect: Plotters skips drawings of zero alpha (egui and SVG alike).
 const NO_INK: RGBAColor = RGBAColor(0, 0, 0, 0.0);
 
-/// Les tirets de cet axe ne sont pas ceux de Plotters (#344) : coupés, d'un
-/// autre sens que vers l'extérieur, ou réglés dans « Avancé » (longueur,
-/// épaisseur, couleur). Le défaut reste celui de Plotters, pour que les
-/// figures existantes ne bougent pas d'un pixel.
+/// The tick marks of this axis are not Plotters' (#344): cut, of a direction
+/// other than outward, or set in "Advanced" (length, thickness, color). The
+/// default stays Plotters', so that existing figures do not move by a pixel.
 fn custom_ticks(axis: &AxisSpec) -> bool {
     !axis.ticks
         || axis.tick_direction != TickDirection::Out
@@ -2435,29 +2422,29 @@ fn custom_ticks(axis: &AxisSpec) -> bool {
         || !axis.tick_mark_color.is_empty()
 }
 
-/// Une passe de `configure_mesh` / `configure_secondary_axes` sur un axe.
+/// One pass of `configure_mesh` / `configure_secondary_axes` on an axis.
 ///
-/// Plotters ne trace les tirets qu'avec la ligne d'axe, et place les nombres
-/// à deux fois la longueur des tirets : sans tirets, ils collent à la ligne.
-/// Un axe aux tirets maison passe donc en deux passes : les nombres seuls
-/// (ligne et tirets d'alpha nul, écart d'origine), puis la ligne seule
-/// (tirets de longueur nulle, nombres vides). Le pipeline trace ensuite les
-/// tirets ([`draw_ticks`]).
+/// Plotters only draws the tick marks along with the axis line, and places the
+/// numbers at twice the length of the tick marks: without tick marks, they stick to
+/// the line. An axis with custom tick marks therefore takes two passes: the
+/// numbers alone (line and tick marks of zero alpha, original gap), then the line
+/// alone (tick marks of zero length, empty numbers). The pipeline then draws the
+/// tick marks ([`draw_ticks`]).
 #[derive(Debug, Clone, Copy)]
 struct MeshPass {
-    /// Grille et titre : une seule passe les trace.
+    /// Grid and title: a single pass draws them.
     rest: bool,
-    /// Les nombres sont écrits (sinon aucune graduation demandée).
+    /// The numbers are written (otherwise no tick is requested).
     labels: bool,
-    /// La ligne d'axe est tracée (sinon d'alpha nul).
+    /// The axis line is drawn (otherwise of zero alpha).
     line: bool,
-    /// Tirets de longueur nulle.
+    /// Tick marks of zero length.
     zero_ticks: bool,
 }
 
 impl MeshPass {
-    /// Nombre de graduations à demander : aucune dans la passe « ligne
-    /// seule », qui n'écrit rien (pas même un texte vide).
+    /// Number of ticks to request: none in the "line only" pass, which writes
+    /// nothing (not even an empty text).
     fn count(self, count: usize) -> usize {
         if self.labels {
             count
@@ -2498,19 +2485,19 @@ fn mesh_passes(custom: bool, labels: bool) -> Vec<MeshPass> {
     }
 }
 
-/// Longueur des tirets de Plotters : 5 % du plus petit côté de la zone de
-/// tracé, plafonnée à 5 px (`(5u32).percent().max(5)` : `max` borne par le
-/// haut, il ne garantit pas un minimum).
+/// Length of Plotters' tick marks: 5 % of the smaller side of the plot area,
+/// capped at 5 px (`(5u32).percent().max(5)`: `max` bounds from above, it
+/// does not guarantee a minimum).
 fn tick_length(size: (u32, u32)) -> i32 {
     ((f64::from(size.0.min(size.1)) * 0.05).round() as i32).min(5)
 }
 
-/// Plafond d'une longueur de tiret demandée à la main (#344) : une valeur venue
-/// d'un fichier ou d'un script peut valoir n'importe quoi (invariant 10).
+/// Cap of a tick mark length requested by hand (#344): a value coming from a file
+/// or a script can be anything (invariant 10).
 const MAX_TICK_LENGTH: f64 = 50.0;
 
-/// Les tirets d'un côté, réglages « Avancé » résolus (#344) : longueur en pixels,
-/// épaisseur et couleur. Le style n'est posé que par [`draw_marks`].
+/// The tick marks of one side, "Advanced" settings resolved (#344): length in
+/// pixels, thickness and color. The style is set only by [`draw_marks`].
 #[derive(Clone, Copy)]
 struct MarkStyle {
     len: i32,
@@ -2519,8 +2506,8 @@ struct MarkStyle {
 }
 
 impl MarkStyle {
-    /// Les grands tirets : la longueur demandée si elle est un nombre fini
-    /// (bornée à `0..=MAX_TICK_LENGTH`), sinon l'automatique.
+    /// The major tick marks: the requested length if it is a finite number
+    /// (bounded to `0..=MAX_TICK_LENGTH`), otherwise the automatic one.
     fn major(axis: &AxisSpec, plot_size: (u32, u32), ink: (u8, u8, u8, u8)) -> Self {
         let len = match axis.tick_length {
             Some(len) if len.is_finite() => len.clamp(0.0, MAX_TICK_LENGTH).round() as i32,
@@ -2529,8 +2516,8 @@ impl MarkStyle {
         Self::with_len(axis, len, ink)
     }
 
-    /// Les petits tirets : la longueur demandée, sinon la moitié (arrondie au-dessus)
-    /// des grands tirets effectifs.
+    /// The minor tick marks: the requested length, otherwise half (rounded up) of
+    /// the effective major tick marks.
     fn minor(axis: &AxisSpec, plot_size: (u32, u32), ink: (u8, u8, u8, u8)) -> Self {
         let len = match axis.minor_tick_length {
             Some(len) if len.is_finite() => len.clamp(0.0, MAX_TICK_LENGTH).round() as i32,
@@ -2548,9 +2535,9 @@ impl MarkStyle {
     }
 }
 
-/// Trace les tirets d'un côté : un segment par graduation, de part et d'autre
-/// de la ligne d'axe selon [`TickDirection`]. Même géométrie que Plotters
-/// pour « vers l'extérieur » (la ligne est à un pixel de la zone de tracé).
+/// Draws the tick marks of one side: one segment per tick, on either side of the
+/// axis line according to [`TickDirection`]. Same geometry as Plotters for
+/// "outward" (the line is one pixel from the plot area).
 fn draw_ticks<DB: DrawingBackend>(
     canvas: &DrawingArea<DB, Shift>,
     side: PlotAxisSide,
@@ -2572,9 +2559,9 @@ fn draw_ticks<DB: DrawingBackend>(
     )
 }
 
-/// Trace les sous-graduations d'un côté (#344) : moitié de la longueur des
-/// tirets principaux (arrondie au-dessus) sauf réglage « Avancé », même sens.
-/// Rien quand les sous-graduations sont éteintes.
+/// Draws the minor ticks of one side (#344): half the length of the major
+/// tick marks (rounded up) unless set in "Advanced", same direction. Nothing
+/// when the minor ticks are off.
 fn draw_minor_ticks<DB: DrawingBackend>(
     canvas: &DrawingArea<DB, Shift>,
     side: PlotAxisSide,
@@ -2596,9 +2583,9 @@ fn draw_minor_ticks<DB: DrawingBackend>(
     )
 }
 
-/// Un segment de longueur `style.len` par position, de part et d'autre de la
-/// ligne d'axe selon `direction`. Le seul endroit qui pose le style des tirets
-/// (invariant 5 : une seule écriture pour les deux backends).
+/// A segment of length `style.len` per position, on either side of the axis
+/// line according to `direction`. The only place that sets the style of the
+/// tick marks (invariant 5: a single write for both backends).
 fn draw_marks<DB: DrawingBackend>(
     canvas: &DrawingArea<DB, Shift>,
     side: PlotAxisSide,
@@ -2613,7 +2600,7 @@ fn draw_marks<DB: DrawingBackend>(
     }
     let ((x0, y0), size) = frame;
     let (w, h) = (size.0 as i32, size.1 as i32);
-    // Sens du dehors sur la perpendiculaire, et pixel de la ligne.
+    // Outward direction on the perpendicular, and pixel of the line.
     let (outward, line) = match side {
         PlotAxisSide::Left => (-1, x0 - 1),
         PlotAxisSide::Right => (1, x0 + w),
@@ -2630,7 +2617,7 @@ fn draw_marks<DB: DrawingBackend>(
         PlotAxisSide::Top | PlotAxisSide::Bottom => (x0, x0 + w - 1),
     };
     let horizontal_axis = matches!(side, PlotAxisSide::Top | PlotAxisSide::Bottom);
-    // « Both » est symétrique : `from` négatif suffit quel que soit le côté.
+    // "Both" is symmetric: a negative `from` is enough whichever the side.
     let (a, b) = (line + from, line + to);
     for &p in positions.iter().filter(|&&p| p >= low && p <= high) {
         let points = if horizontal_axis {
@@ -2650,11 +2637,11 @@ fn draw_marks<DB: DrawingBackend>(
     Ok(())
 }
 
-/// Couleurs effectives d'un axe : celles du spec, ou l'encre automatique
-/// quand elles sont vides.
+/// Effective colors of an axis: those of the spec, or the automatic ink when
+/// they are empty.
 struct AxisColors {
     ticks: (u8, u8, u8, u8),
-    /// Le style du titre de l'axe : couleur, police et corps de sa zone.
+    /// The style of the axis title: color, font and size of its area.
     title_style: TextStyle<'static>,
 }
 
@@ -2667,9 +2654,9 @@ impl AxisColors {
         }
     }
 
-    /// Pose ces couleurs sur une passe de `configure_mesh` : libellés et
-    /// ligne d'axe dans la couleur de l'échelle, grille dans la même,
-    /// atténuée, titre de l'axe dans la sienne.
+    /// Sets these colors on a pass of `configure_mesh`: labels and axis line
+    /// in the color of the scale, grid in the same, attenuated, axis title in
+    /// its own.
     fn apply<X, Y, DB>(&self, mesh: &mut plotters::chart::MeshStyle<'_, '_, X, Y, DB>)
     where
         X: plotters::coord::ranged1d::Ranged<ValueType = f64>
@@ -2693,13 +2680,13 @@ mod tests {
     use stokesforge_plot::{PanelSpec, Panels};
 
     fn spec_with(panels: Vec<PanelSpec>) -> PlotSpec {
-        PlotSpec::empty("Grille").with_panels(Panels::new(panels))
+        PlotSpec::empty("Grid").with_panels(Panels::new(panels))
     }
 
-    /// « De 800 à 400 » trace l'axe à l'envers ; « de 400 à 800 » à l'endroit ;
-    /// la case « Reverse axis » en plus ne s'additionne pas.
+    /// "From 800 to 400" draws the axis reversed; "from 400 to 800" the right
+    /// way round; the "Reverse axis" box on top does not add up.
     #[test]
-    fn un_cadrage_de_800_a_400_trace_l_axe_a_l_envers() {
+    fn a_framing_from_800_to_400_draws_the_axis_reversed() {
         let mut axis = AxisSpec {
             auto_range: false,
             range_min: Some(800.0),
@@ -2730,7 +2717,7 @@ mod tests {
     }
 
     #[test]
-    fn la_grille_declaree_est_celle_du_spec() {
+    fn the_declared_grid_is_the_spec_one() {
         let spec = spec_with(vec![
             PanelSpec::at(0, 0),
             PanelSpec::at(0, 1),
@@ -2738,12 +2725,12 @@ mod tests {
         ]);
         let layout = grid_of(&spec, 3);
         assert_eq!((layout.rows, layout.columns), (2, 2));
-        // Ordre ligne par ligne, comme `split_evenly`.
+        // Row by row order, like `split_evenly`.
         assert_eq!(layout.cells, vec![0, 1, 2]);
     }
 
     #[test]
-    fn un_trou_dans_la_grille_reste_un_trou() {
+    fn a_hole_in_the_grid_stays_a_hole() {
         let spec = spec_with(vec![PanelSpec::at(0, 0), PanelSpec::at(1, 2)]);
         let layout = grid_of(&spec, 2);
         assert_eq!((layout.rows, layout.columns), (2, 3));
@@ -2751,31 +2738,31 @@ mod tests {
     }
 
     #[test]
-    fn une_position_demesuree_ne_fait_pas_decouper_linfini() {
-        // Le cas que `PlotSpec::rows` documente déjà : une position venue
-        // d'un fichier n'est bornée par rien.
+    fn an_oversized_position_does_not_split_into_infinity() {
+        // The case `PlotSpec::rows` already documents: a position coming from
+        // a file is bounded by nothing.
         let spec = spec_with(vec![PanelSpec::at(0, 0), PanelSpec::at(usize::MAX, 0)]);
         let layout = grid_of(&spec, 2);
         assert!(
             layout.rows * layout.columns <= MAX_CELLS,
-            "{layout:?} est indécoupable"
+            "{layout:?} cannot be split"
         );
         assert_eq!(layout.cells, vec![0, 1]);
     }
 
     #[test]
-    fn la_ligne_de_base_reste_dans_le_cadrage() {
+    fn the_baseline_stays_within_the_framing() {
         assert_eq!(scale_baseline((-5.0, 5.0)), 0.0);
-        // Sur une échelle logarithmique, le cadrage ne contient pas zéro :
-        // les barres partent du bas de l'axe.
+        // On a logarithmic scale, the framing does not contain zero: the bars
+        // start from the bottom of the axis.
         assert_eq!(scale_baseline((1.0, 3.0)), 1.0);
-        // Axe inversé : le bas est la plus grande des deux bornes.
+        // Inverted axis: the bottom is the larger of the two bounds.
         assert_eq!(scale_baseline((5.0, -5.0)), 0.0);
         assert_eq!(scale_baseline((3.0, 1.0)), 1.0);
     }
 
     #[test]
-    fn une_aire_de_graduation_ne_mange_pas_la_cellule() {
+    fn a_tick_area_does_not_eat_the_cell() {
         assert_eq!(label_area(true, 64, 600), 64);
         assert_eq!(label_area(true, 64, 90), 30);
         assert_eq!(label_area(false, 64, 600), 0);

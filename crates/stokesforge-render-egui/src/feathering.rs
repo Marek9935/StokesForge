@@ -1,87 +1,87 @@
-//! Le levier d'anticrénelage — tâche R5.5 bis.
+//! The anti-aliasing lever — task R5.5 bis.
 //!
-//! # Ce que la mesure R0 0.3 a trouvé, et que le plan n'avait pas prévu
+//! # What measurement R0 0.3 found, and the plan had not foreseen
 //!
-//! Le *feathering* — la frange d'un pixel qu'`epaint` ajoute à chaque trait
-//! pour l'adoucir — pèse **78 % du coût de tessellation** : 22,1 ms par
-//! image avec, **4,88 ms sans**, sur le même graphe de 300 000 points. Le
-//! couper fait donc repasser le cas de charge du document *sous* le seuil de
-//! 8 ms, là où le LTTB n'y retirerait rien ([`stokesforge_render::decimate`]).
-//! C'est le levier le plus rentable du chantier, et il n'était pas dans la
-//! liste du §4.2 d'`architecture-choisie.md` avant la mesure.
+//! *Feathering* — the one-pixel fringe that `epaint` adds to every stroke
+//! to soften it — accounts for **78% of the tessellation cost**: 22.1 ms per
+//! frame with it, **4.88 ms without**, on the same 300,000-point graph.
+//! Turning it off therefore brings the document's load case back *under* the
+//! 8 ms threshold, where LTTB would gain nothing there
+//! ([`stokesforge_render::decimate`]). It is the most profitable lever of the
+//! work package, and it was not in the list of §4.2 of `architecture-choisie.md`
+//! before the measurement.
 //!
-//! **Décidé le 2026-09-10** : il se coupe à l'entrée en interaction souris,
-//! se rétablit au relâchement. Le crénelage ne se voit pas sur une image qui
-//! bouge, et c'est exactement pendant le déplacement que les 22,1 ms font
-//! mal. Ce n'est donc pas un réglage exposé à l'utilisateur, mais un **état
-//! du rendu**.
+//! **Decided on 2026-09-10**: it is turned off on entering mouse interaction
+//! and restored on release. Aliasing is not visible on a moving image, and
+//! it is exactly during the movement that the 22.1 ms hurt. It is therefore
+//! not a setting exposed to the user, but a **rendering state**.
 //!
-//! # Ce que R5 construit, et ce que R7.3 a câblé par-dessus
+//! # What R5 builds, and what R7.3 wired on top
 //!
-//! R5 pose **le levier**, pas l'événement qui l'actionne : détecter un
-//! glisser était le travail de la phase R7 (Interaction), câblé depuis.
-//! La frontière est restée nette :
+//! R5 provides **the lever**, not the event that triggers it: detecting a
+//! drag was the job of phase R7 (Interaction), wired since.
+//! The boundary stayed clean:
 //!
-//! - **R5 fournit** [`Feathering`], [`apply`] et [`current`] : de quoi dire
-//!   « dessine sans frange » / « dessine avec », et savoir où on en est ;
-//! - **R7.3 fournit l'appel**, dans `lib.rs` : à l'entrée du glisser
-//!   (`Response::dragged()` — pan ou rectangle de zoom, les deux comptent),
-//!   `apply(ctx, Feathering::Off)` ; au relâchement,
-//!   `apply(ctx, Feathering::Full)`. Rien d'autre n'était à écrire ici, et ce
-//!   module n'a pas changé depuis.
+//! - **R5 provides** [`Feathering`], [`apply`] and [`current`]: the means to
+//!   say "draw without fringe" / "draw with", and to know where we stand;
+//! - **R7.3 provides the call**, in `lib.rs`: on entering the drag
+//!   (`Response::dragged()` — pan or zoom rectangle, both count),
+//!   `apply(ctx, Feathering::Off)`; on release,
+//!   `apply(ctx, Feathering::Full)`. Nothing else had to be written here, and
+//!   this module has not changed since.
 //!
-//! # Pourquoi ce n'est pas dans [`crate::cache`], ni dans `stokesforge-render`
+//! # Why this is not in [`crate::cache`], nor in `stokesforge-render`
 //!
-//! Deux frontières, chacune pour une raison différente, et toutes deux
-//! faciles à franchir par inadvertance :
+//! Two boundaries, each for a different reason, and both
+//! easy to cross by mistake:
 //!
-//! - **pas dans la clé de cache.** Couper la frange change la
-//!   *tessellation*, pas les `Shape` — et la tessellation a lieu à chaque
-//!   image de toute façon. Ajouter un terme à la clé
-//!   `(revision, rect, pixels_per_point)` ferait reconstruire toute la
-//!   figure à chaque pression de bouton, c'est-à-dire payer cher
-//!   exactement au moment qu'on voulait alléger. `architecture-choisie.md`
-//!   §4.2 le dit explicitement ; [`crate::cache`] le redit ; et
-//!   `tests/feathering.rs` le vérifie, parce qu'un troisième rappel écrit
-//!   ne vaut pas une vérification ;
-//! - **pas dans `stokesforge-render`.** [`egui::epaint::TessellationOptions`] est
-//!   un réglage de la pile egui, en **aval** de la collecte des `Shape`.
-//!   `stokesforge-render` ne connaît ni `egui` ni le `Context`, et
-//!   `stokesforge-render-svg` n'a pas de tessellation du tout : un SVG décrit des
-//!   courbes, il ne les triangule pas. C'est le seul endroit de R5 où la
-//!   règle « aucune fonctionnalité dans un seul backend » ne s'applique pas,
-//!   et ce n'est pas une entorse : il n'y a rien à mettre de l'autre côté.
+//! - **not in the cache key.** Turning off the fringe changes the
+//!   *tessellation*, not the `Shape`s — and the tessellation happens on every
+//!   frame anyway. Adding a term to the key
+//!   `(revision, rect, pixels_per_point)` would rebuild the whole
+//!   figure on every button press, that is, pay dearly
+//!   at exactly the moment we wanted to lighten. `architecture-choisie.md`
+//!   §4.2 says so explicitly; [`crate::cache`] says it again; and
+//!   `tests/feathering.rs` checks it, because a third written reminder
+//!   is not worth a check;
+//! - **not in `stokesforge-render`.** [`egui::epaint::TessellationOptions`] is
+//!   a setting of the egui stack, **downstream** of the collection of `Shape`s.
+//!   `stokesforge-render` knows neither `egui` nor the `Context`, and
+//!   `stokesforge-render-svg` has no tessellation at all: an SVG describes
+//!   curves, it does not triangulate them. This is the only place of R5 where
+//!   the rule "no feature in a single backend" does not apply,
+//!   and it is not a breach: there is nothing to put on the other side.
 //!
-//! # Pourquoi c'est un réglage de `Context` et non de [`crate::GraphView`]
+//! # Why this is a `Context` setting and not one of [`crate::GraphView`]
 //!
-//! `TessellationOptions` vit dans les options du `Context`, donc pour toute
-//! la fenêtre. Une `GraphView` qui le poserait au moment de peindre le
-//! poserait pour tous les autres widgets de l'image, et deux vues en
-//! poseraient deux valeurs contradictoires. L'appelant est le seul à savoir
-//! quand une interaction commence ; la fonction est donc libre, et prend le
-//! `Context` en paramètre plutôt que d'aller le chercher.
+//! `TessellationOptions` lives in the `Context` options, so for the whole
+//! window. A `GraphView` that set it at paint time would set it
+//! for all the other widgets of the frame, and two views would
+//! set two contradictory values. The caller is the only one who knows
+//! when an interaction starts; the function is therefore free, and takes the
+//! `Context` as a parameter rather than fetching it.
 
-/// L'état de la frange d'anticrénelage.
+/// The state of the anti-aliasing fringe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Feathering {
-    /// Frange active : la qualité pleine, le régime de repos.
+    /// Fringe on: full quality, the resting mode.
     #[default]
     Full,
-    /// Frange coupée : le régime d'interaction, ~4,5× moins cher à
-    /// tesseler.
+    /// Fringe off: the interaction mode, ~4.5x cheaper to
+    /// tessellate.
     Off,
 }
 
 impl Feathering {
-    /// Vrai si la frange est active.
+    /// True if the fringe is on.
     pub fn is_on(self) -> bool {
         matches!(self, Feathering::Full)
     }
 
-    /// Le régime correspondant à « une interaction est en cours ».
+    /// The mode matching "an interaction is in progress".
     ///
-    /// Sert au câblage R7.3 (`lib.rs`) en une ligne, sans avoir à se
-    /// rappeler dans quel sens va le booléen.
+    /// Serves the R7.3 wiring (`lib.rs`) in one line, without having to
+    /// remember which way the boolean goes.
     pub fn during_drag(dragging: bool) -> Self {
         if dragging {
             Feathering::Off
@@ -91,10 +91,10 @@ impl Feathering {
     }
 }
 
-/// Pose le régime d'anticrénelage sur un contexte egui.
+/// Sets the anti-aliasing mode on an egui context.
 ///
-/// Rend le régime **précédent**, pour que l'appelant puisse le rétablir sans
-/// avoir à le mémoriser lui-même.
+/// Returns the **previous** mode, so that the caller can restore it without
+/// having to remember it itself.
 pub fn apply(context: &egui::Context, feathering: Feathering) -> Feathering {
     context.options_mut(|options| {
         let previous = from_flag(options.tessellation_options.feathering);
@@ -103,7 +103,7 @@ pub fn apply(context: &egui::Context, feathering: Feathering) -> Feathering {
     })
 }
 
-/// Le régime en vigueur sur ce contexte.
+/// The mode in force on this context.
 pub fn current(context: &egui::Context) -> Feathering {
     context.options(|options| from_flag(options.tessellation_options.feathering))
 }
@@ -121,13 +121,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn le_regime_par_defaut_est_la_qualite_pleine() {
+    fn the_default_mode_is_full_quality() {
         assert_eq!(Feathering::default(), Feathering::Full);
         assert!(Feathering::default().is_on());
     }
 
     #[test]
-    fn le_sens_du_declencheur_de_r7_est_ecrit_une_fois() {
+    fn the_direction_of_the_r7_trigger_is_written_once() {
         assert_eq!(Feathering::during_drag(true), Feathering::Off);
         assert_eq!(Feathering::during_drag(false), Feathering::Full);
     }
