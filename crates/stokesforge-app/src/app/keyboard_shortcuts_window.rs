@@ -25,7 +25,7 @@ pub(super) fn keyboard_shortcuts_window(
         &tr!("keyboard-shortcuts-title"),
         PlainSize::Content(egui::vec2(480.0, 460.0)),
         |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            theme::page_scroll_area().show(ui, |ui| {
                 for area in HelpArea::ALL {
                     theme::section_title(ui, area.title());
                     egui::Grid::new(("keyboard_shortcuts", area as u8))

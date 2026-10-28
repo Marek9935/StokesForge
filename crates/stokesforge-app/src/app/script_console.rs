@@ -156,6 +156,7 @@ fn script_fields_contents(
     });
 
     ui.separator();
+    // RAW-SCROLL(#347): console output log, not a page
     egui::ScrollArea::vertical()
         .max_height(SCRIPT_OUTPUT_HEIGHT)
         .show(ui, |ui| match output {

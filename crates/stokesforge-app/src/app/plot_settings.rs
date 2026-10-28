@@ -136,7 +136,7 @@ pub(super) fn column_metadata_window(
         &title,
         PlainSize::Class(SizeClass::Medium),
         |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            crate::theme::page_scroll_area().show(ui, |ui| {
                 egui::Grid::new("stokesforge_column_metadata_grid")
                     .num_columns(3)
                     .striped(true)
@@ -269,7 +269,7 @@ fn plot_settings_contents(
                 );
             }
         } else {
-            egui::ScrollArea::vertical()
+            crate::theme::page_scroll_area()
                 .auto_shrink([false, false])
                 .show(ui, |ui| match chosen_tab {
                     PlotSettingsTab::Graph => {

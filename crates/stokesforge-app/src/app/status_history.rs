@@ -46,7 +46,7 @@ pub(super) fn status_history_window(
                 empty_state(ui, tr!("status-history-empty"));
                 return;
             }
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            crate::theme::page_scroll_area().show(ui, |ui| {
                 for message in state.status_history().collect::<Vec<_>>().into_iter().rev() {
                     ui.horizontal(|ui| {
                         ui.weak(tr!("status-history-time", time = clock(message.wall)));

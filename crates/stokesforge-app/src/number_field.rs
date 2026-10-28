@@ -465,6 +465,7 @@ fn preset_popup_contents(
 ) -> Option<Option<f64>> {
     let offset = usize::from(quantity.auto == AutoKind::Field);
     let mut picked = None;
+    // RAW-SCROLL(#347): drop-down list, menu-like: no end margin
     egui::ScrollArea::vertical()
         .max_height(180.0)
         .show(ui, |ui| {

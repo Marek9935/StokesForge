@@ -124,6 +124,7 @@ fn values_panel(
     tree: &stokesforge_core::Tree,
     series: Option<&stokesforge_core::SeriesRef>,
 ) {
+    // RAW-SCROLL(#347): values list of fixed height (VALUES_HEIGHT)
     egui::ScrollArea::vertical()
         .id_salt("stokesforge_analysis_values")
         .max_height(VALUES_HEIGHT)
@@ -231,7 +232,7 @@ pub(super) fn analysis_window(
                     egui::vec2(FORM_WIDTH, full.y),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        egui::ScrollArea::vertical()
+                        theme::page_scroll_area()
                             .id_salt("stokesforge_analysis_form")
                             .auto_shrink([false, false])
                             .show(ui, |ui| form_body(ui, id, form, &tree, &graphs));

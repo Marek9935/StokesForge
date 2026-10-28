@@ -16,6 +16,7 @@ Read when painting a scroll bar, tabs, a selectable list or tree, a section titl
 
 ## Check
 
+- [ ] a scrolling page uses `theme::page_scroll_area()` (end margin, #347); a raw `ScrollArea::vertical()`/`::both()` carries `// RAW-SCROLL(#347): <why>`
 - [ ] no local `ScrollStyle`; a bar's room read by `theme::scroll_bar_allocated_width`
 - [ ] tabs by `tab_strip`; lists and trees by `list_row` / `ListRowBackground`; composed rows at `LIST_ROW_HEIGHT` (`with_list_row_height`)
 - [ ] keyboard-walked list (S-K9): `list_row::read_navigation` and `neighbour` on visible rows, focus by `paint_focus_outline`

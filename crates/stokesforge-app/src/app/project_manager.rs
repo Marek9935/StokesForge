@@ -533,6 +533,7 @@ pub(super) fn project_manager_contents_from_tree(
             .retain(|entry| !entry.is_folder() || memory.order.contains(entry));
         data.insert_temp(memory_key, memory);
     });
+    // RAW-SCROLL(#347): tree: the area under the last row is the drop target of object_dnd::end_of_frame
     let response = egui::ScrollArea::vertical().show(ui, |ui| {
         crate::tree_lines::begin_tree(ui);
         for node in tree {

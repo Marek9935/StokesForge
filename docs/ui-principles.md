@@ -17,6 +17,10 @@ Each interface element has **one** building block; it is not redone by hand.
   help: `hover_help`; a long job: `busy`.
 - A color: `theme.rs` only (and the `color_field` picker). A spacing:
   `theme::SPACE_ITEM` / `SPACE_SECTION`, never a literal number.
+- A page that scrolls (settings tab, form, help list):
+  `theme::page_scroll_area()`, which keeps `SPACE_SECTION` under the last
+  control (#347; seen on the Axes tab, #344). A tree, table, canvas or
+  computed-height list stays raw with `// RAW-SCROLL(#347): <why>`.
 - A key: the `app/shortcuts.rs` registry. A cursor: `app/cursors.rs`.
   A file picker: `file_picker.rs`.
 

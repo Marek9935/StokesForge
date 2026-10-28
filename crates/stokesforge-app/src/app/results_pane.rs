@@ -138,6 +138,7 @@ pub(super) fn results_pane(
             ui.scope_builder(egui::UiBuilder::new().max_rect(list_rect), |ui| {
                 ui.set_clip_rect(list_rect.intersect(ui.clip_rect()));
                 {
+                    // RAW-SCROLL(#347): list of results, rows are the content: no end margin
                     egui::ScrollArea::vertical()
                         .id_salt(id.with("list"))
                         .auto_shrink([false, false])
@@ -228,6 +229,7 @@ fn detail(
             }
         });
         ui.label(tr!("results-replace-hint"));
+        // RAW-SCROLL(#347): fixed-height output box, not a page
         egui::ScrollArea::vertical()
             .id_salt(id.with(("trace", calc_id.raw())))
             .show(ui, |ui| {
@@ -299,6 +301,7 @@ fn detail(
         ui.label(egui::RichText::new(tr!("results-no-values")).weak());
         return;
     }
+    // RAW-SCROLL(#347): table, rows are the content: no end margin
     egui::ScrollArea::both()
         .id_salt(id.with(("table", calc_id.raw())))
         .auto_shrink([false, false])

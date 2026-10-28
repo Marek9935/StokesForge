@@ -249,6 +249,7 @@ fn import_line_preview_widget(
             total = preview.total_data_lines
         ));
     }
+    // RAW-SCROLL(#347): table preview, rows are the content: no end margin
     egui::ScrollArea::both()
         .id_salt("stokesforge_import_preview_scroll")
         .auto_shrink([false, false])
@@ -1074,6 +1075,7 @@ fn import_step_columns(ui: &mut egui::Ui, state: &mut AppState) {
             .column_kinds
             .resize(columns.len(), stokesforge_import::ColumnKind::Auto);
     }
+    // RAW-SCROLL(#347): table preview, rows are the content: no end margin
     egui::ScrollArea::both()
         .id_salt("stokesforge_import_columns_scroll")
         .auto_shrink([false, false])
@@ -1184,7 +1186,7 @@ fn import_step_metadata(ui: &mut egui::Ui, state: &mut AppState) {
             .iter()
             .any(|name| name.trim().eq_ignore_ascii_case(key.trim()))
     };
-    egui::ScrollArea::vertical()
+    crate::theme::page_scroll_area()
         .id_salt("stokesforge_import_metadata_scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -1420,7 +1422,7 @@ pub(super) fn import_window(ctx: &egui::Context, state: &mut AppState, actions: 
             ui.columns(2, |columns| {
                 columns[0].set_min_height(body_height);
                 columns[0].set_max_height(body_height);
-                egui::ScrollArea::vertical()
+                crate::theme::page_scroll_area()
                     .id_salt("stokesforge_import_step_scroll")
                     .max_height(body_height)
                     .auto_shrink([false, false])
