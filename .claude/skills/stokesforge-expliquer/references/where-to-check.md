@@ -19,7 +19,7 @@ Read from `stokesforge-expliquer` before answering. Pages route; the code decide
 | interface words, translation | `docs/textes-interface.md` § 2. Glossary | catalogues `crates/stokesforge-app-state/i18n/{en,fr}/` |
 | the split into crates and its reasons | `docs/architecture.md` § What each crate holds | `cargo metadata --no-deps --format-version 1 --offline` |
 | what must never break | `docs/invariants.md` | the « Ce qui la tient » column of its table |
-| licence (plain GPL-3.0-or-later; extra permission only on written request, #348) | `docs/licence-et-extensions.md` § License and extension interfaces | — |
+| licence (plain GPL-3.0-or-later; extra permission only on written request, #348) | `docs/licence-et-extensions.md` § Additional permission: withdrawn, can be requested | — |
 | the *why* of a precise decision | the module's `//!` header | — |
 | an option ruled out and its reason | `docs/archive/` (not maintained, written before the PlotYx → StokesForge renaming: `CLAUDE.md` § Contexte) | — |
 
