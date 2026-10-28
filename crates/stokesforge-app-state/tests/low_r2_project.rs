@@ -1,10 +1,9 @@
-//! Le décompte des R² faibles d'un projet entier (#290), de bout en bout depuis
-//! l'état : un arbre de calculs bâti à la main (12 reconvolutions et 1
-//! ajustement à R² < 0,6, plus des calculs qui ne comptent pas), ouvert dans
-//! une session, puis lu par `AppState`. Le scénario réel (ajustement puis
-//! reconvolution recalculés) coûterait une IRF et des ajustements non linéaires
-//! pour ne rien prouver de plus sur le décompte ; les cas de recalcul vivent
-//! dans `analysis_state.rs`.
+//! The count of low R² for a whole project (#290), end to end from the
+//! state: a calculation tree built by hand (12 reconvolutions and 1 fit with
+//! R² < 0.6, plus calculations that do not count), opened in a session, then
+//! read by `AppState`. The real scenario (fit then reconvolution recalculated)
+//! would cost an IRF and nonlinear fits for nothing more proven about the
+//! count; the recalculation cases live in `analysis_state.rs`.
 
 use stokesforge_analysis::correct::CorrectOp;
 use stokesforge_analysis::deconv::ReconvSpec;
@@ -19,7 +18,7 @@ use stokesforge_core::{
 };
 use stokesforge_session::Session;
 
-fn resultat(r2: f64) -> SeriesResult {
+fn series_result(r2: f64) -> SeriesResult {
     SeriesResult {
         values: vec![
             ResultValue {
@@ -52,7 +51,7 @@ fn reconvolution() -> Operation {
     }
 }
 
-fn ajustement() -> Operation {
+fn fit_operation() -> Operation {
     Operation::Fit {
         spec: FitSpec {
             model: Model::Linear,
@@ -63,13 +62,13 @@ fn ajustement() -> Operation {
     }
 }
 
-struct Monde {
+struct World {
     project: Project,
     sheet: NodeId,
     n: usize,
 }
 
-impl Monde {
+impl World {
     fn new() -> Self {
         let mut project = Project::new("P").unwrap();
         let book = project.add_workbook(project.root(), Some("Book")).unwrap();
@@ -81,8 +80,8 @@ impl Monde {
         }
     }
 
-    /// Ajoute un calcul de `operation` dont les séries ont les `r2` donnés.
-    fn calcul(&mut self, operation: Operation, r2: &[f64], keep: bool, dialog: bool) {
+    /// Adds a calculation of `operation` whose series have the given `r2`.
+    fn add_calculation(&mut self, operation: Operation, r2: &[f64], keep: bool, dialog: bool) {
         self.n += 1;
         let series: Vec<SeriesRef> = r2
             .iter()
@@ -111,7 +110,7 @@ impl Monde {
                 aux: None,
                 outputs: Vec::new(),
                 results: if keep {
-                    r2.iter().map(|r| resultat(*r)).collect()
+                    r2.iter().map(|r| series_result(*r)).collect()
                 } else {
                     Vec::new()
                 },
@@ -122,7 +121,7 @@ impl Monde {
             .unwrap();
     }
 
-    fn ouvre(self, dir: &std::path::Path) -> (Session, AppState) {
+    fn open_in(self, dir: &std::path::Path) -> (Session, AppState) {
         i18n::set_language(Language::English);
         let session = Session::spawn(self.project, None).unwrap();
         let state = AppState::new_with_preferences(
@@ -135,7 +134,7 @@ impl Monde {
     }
 }
 
-fn groupes(state: &AppState) -> Vec<(OperationKind, usize)> {
+fn groups_of(state: &AppState) -> Vec<(OperationKind, usize)> {
     state
         .low_r2_groups()
         .iter()
@@ -143,27 +142,27 @@ fn groupes(state: &AppState) -> Vec<(OperationKind, usize)> {
         .collect()
 }
 
-/// Un seul test : la langue est globale à ce binaire.
+/// A single test: the language is global to this binary.
 #[test]
-fn douze_reconvolutions_et_un_ajustement_se_lisent_de_bout_en_bout() {
+fn twelve_reconvolutions_and_one_fit_read_end_to_end() {
     let dir = tempfile::tempdir().unwrap();
-    let mut monde = Monde::new();
-    // L'ajustement d'abord dans l'arbre, les reconvolutions ensuite : l'ordre
-    // d'apparition ne décide pas de l'ordre des lignes.
-    monde.calcul(ajustement(), &[0.3], true, true);
+    let mut world = World::new();
+    // The fit first in the tree, the reconvolutions after: the order of
+    // appearance does not decide the order of the rows.
+    world.add_calculation(fit_operation(), &[0.3], true, true);
     for k in 0..12 {
-        // Un réglage `low_r2_dialog` coupé sur la moitié : la pastille les compte.
-        monde.calcul(
+        // A `low_r2_dialog` setting turned off on half of them: the badge counts them.
+        world.add_calculation(
             reconvolution(),
             &[0.1 + f64::from(k) * 0.01],
             true,
             k % 2 == 0,
         );
     }
-    // Ce qui ne doit pas compter.
-    monde.calcul(ajustement(), &[0.95, 0.6, f64::NAN], true, true); // bons, pile au seuil, NaN
-    monde.calcul(reconvolution(), &[0.2], false, true); // « Show » : rien gardé
-    monde.calcul(
+    // What must not count.
+    world.add_calculation(fit_operation(), &[0.95, 0.6, f64::NAN], true, true); // good, right at the threshold, NaN
+    world.add_calculation(reconvolution(), &[0.2], false, true); // "Show": nothing kept
+    world.add_calculation(
         Operation::Correct {
             op: CorrectOp::Subtract,
         },
@@ -171,10 +170,10 @@ fn douze_reconvolutions_et_un_ajustement_se_lisent_de_bout_en_bout() {
         true,
         true,
     );
-    let (_session, mut state) = monde.ouvre(dir.path());
+    let (_session, mut state) = world.open_in(dir.path());
 
     assert_eq!(
-        groupes(&state),
+        groups_of(&state),
         vec![(OperationKind::Fit, 1), (OperationKind::Reconvolution, 12)]
     );
     assert_eq!(state.low_r2_total(), 13);
@@ -186,38 +185,38 @@ fn douze_reconvolutions_et_un_ajustement_se_lisent_de_bout_en_bout() {
         stokesforge_app_state::r_squared::badge_text(state.low_r2_total()),
         "13 low R²"
     );
-    // Ouvrir un projet n'est pas un recalcul : pas de boîte, mais la pastille
-    // et sa liste fonctionnent.
+    // Opening a project is not a recalculation: no dialog, but the badge
+    // and its list work.
     assert!(state.alert().is_none());
     state.dispatch(Action::OpenLowR2List);
     assert!(state.low_r2_list_open());
-    assert!(state.alert().is_none(), "la liste n'est pas une alerte");
+    assert!(state.alert().is_none(), "the list is not an alert");
     state.dispatch(Action::CloseLowR2List);
     state.dispatch(Action::CloseLowR2List);
-    assert!(!state.low_r2_list_open(), "fermer deux fois : idempotent");
-    assert_eq!(state.low_r2_total(), 13, "fermer la liste ne vide rien");
+    assert!(!state.low_r2_list_open(), "closing twice: idempotent");
+    assert_eq!(state.low_r2_total(), 13, "closing the list empties nothing");
 }
 
 #[test]
-fn le_comptage_est_par_serie_et_non_par_calcul() {
+fn the_count_is_per_series_and_not_per_calculation() {
     let dir = tempfile::tempdir().unwrap();
-    let mut monde = Monde::new();
-    // Un calcul à 3 séries dont 2 en défaut.
-    monde.calcul(ajustement(), &[0.1, 0.9, 0.2], true, true);
-    let (_session, state) = monde.ouvre(dir.path());
-    assert_eq!(groupes(&state), vec![(OperationKind::Fit, 2)]);
+    let mut world = World::new();
+    // A calculation with 3 series, 2 of them at fault.
+    world.add_calculation(fit_operation(), &[0.1, 0.9, 0.2], true, true);
+    let (_session, state) = world.open_in(dir.path());
+    assert_eq!(groups_of(&state), vec![(OperationKind::Fit, 2)]);
     assert_eq!(state.low_r2_total(), 2);
 }
 
 #[test]
-fn un_projet_sans_r2_faible_n_a_ni_groupe_ni_liste() {
+fn a_project_without_a_low_r2_has_neither_group_nor_list() {
     let dir = tempfile::tempdir().unwrap();
-    let mut monde = Monde::new();
-    monde.calcul(ajustement(), &[0.99, 0.6], true, true);
-    let (_session, mut state) = monde.ouvre(dir.path());
+    let mut world = World::new();
+    world.add_calculation(fit_operation(), &[0.99, 0.6], true, true);
+    let (_session, mut state) = world.open_in(dir.path());
     assert!(state.low_r2_groups().is_empty());
     assert_eq!(state.low_r2_total(), 0);
-    // La pastille n'a rien à lister : l'ouverture est sans effet.
+    // The badge has nothing to list: opening has no effect.
     state.dispatch(Action::OpenLowR2List);
     assert!(!state.low_r2_list_open());
 }

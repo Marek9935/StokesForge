@@ -1,7 +1,7 @@
-//! Déplacer des colonnes (#319, sous-menu `Move ▸`) : un seul Ctrl+Z, aucune
-//! fenêtre « Colonne utilisée » (une formule suit sa colonne, #321), la
-//! sélection reste sur les colonnes déplacées. La logique d'ordre est testée à
-//! part, sans état (`column_move::tests`).
+//! Moving columns (#319, `Move ▸` submenu): a single Ctrl+Z, no "Column used"
+//! window (a formula follows its column, #321), the selection stays on the
+//! moved columns. The ordering logic is tested separately, without state
+//! (`column_move::tests`).
 
 use stokesforge_app_state::column_move::ColumnMove;
 use stokesforge_app_state::i18n::{self, Language};
@@ -16,7 +16,7 @@ struct Setup {
     cols: Vec<NodeId>,
 }
 
-/// Une feuille `A`, `B`, `C`, `D`, `E` de valeurs distinctes sur 3 lignes.
+/// A sheet `A`, `B`, `C`, `D`, `E` of distinct values over 3 rows.
 fn setup(dir: &std::path::Path) -> Setup {
     i18n::set_language(Language::English);
     let mut project = Project::new("P").unwrap();
@@ -90,27 +90,27 @@ fn first_cell(s: &Setup, column: NodeId) -> String {
     s.state.cell_text(column, 0)
 }
 
-/// `A [B] C [D] E`, Left : `B A D C E`, en **un seul** Undo qui rend l'ordre
-/// d'origine, libellé « Move Columns ». Témoin : sans macro, deux Undo.
+/// `A [B] C [D] E`, Left: `B A D C E`, in **a single** Undo that gives back the
+/// original order, label "Move Columns". Witness: without a macro, two Undos.
 #[test]
-fn deux_colonnes_deplacees_font_une_seule_entree_d_historique() {
+fn two_moved_columns_make_a_single_history_entry() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
     move_selection(&mut s, &[c[1], c[3]], ColumnMove::Left);
     assert_eq!(order(&s), vec![c[1], c[0], c[3], c[2], c[4]]);
-    let label = s.state.undo_label().expect("une entrée à annuler");
+    let label = s.state.undo_label().expect("an entry to undo");
     assert!(label.contains("Move Columns"), "{label}");
 
     s.state.dispatch(Action::Undo);
-    assert_eq!(order(&s), c, "un seul Undo rend l'ordre d'origine");
-    // Rien de plus à annuler : la macro était la seule entrée.
+    assert_eq!(order(&s), c, "a single Undo gives back the original order");
+    // Nothing more to undo: the macro was the only entry.
     assert!(!s.state.can_undo());
 }
 
-/// Une seule colonne : une entrée `Move`, nommée.
+/// A single column: a named `Move` entry.
 #[test]
-fn une_colonne_seule_est_une_entree_move_nommee() {
+fn a_single_column_is_a_named_move_entry() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -122,9 +122,9 @@ fn une_colonne_seule_est_une_entree_move_nommee() {
     assert_eq!(order(&s), c);
 }
 
-/// Un geste qui ne change rien n'écrit rien (l'entrée du menu est grisée).
+/// A gesture that changes nothing writes nothing (the menu entry is disabled).
 #[test]
-fn un_geste_sans_effet_n_ecrit_rien() {
+fn a_gesture_with_no_effect_writes_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -136,11 +136,11 @@ fn un_geste_sans_effet_n_ecrit_rien() {
     assert!(!s.state.can_undo());
 }
 
-/// Une formule lit une colonne ; la déplacer n'ouvre aucune fenêtre « Colonne
-/// utilisée », et la formule garde ses valeurs. Témoin : appeler
-/// `open_column_use` dans `move_columns`.
+/// A formula reads a column; moving it opens no "Column used" window, and the
+/// formula keeps its values. Witness: call `open_column_use` in
+/// `move_columns`.
 #[test]
-fn deplacer_une_colonne_lue_par_une_formule_n_ouvre_aucune_fenetre() {
+fn moving_a_column_read_by_a_formula_opens_no_window() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -149,27 +149,27 @@ fn deplacer_une_colonne_lue_par_une_formule_n_ouvre_aucune_fenetre() {
     s.state.header_editing_mut().unwrap().buffer = "A*2".to_string();
     s.state.commit_header_edit();
     let value = first_cell(&s, c[2]);
-    assert_eq!(value, "20", "formule posée");
+    assert_eq!(value, "20", "formula set");
 
     move_selection(&mut s, &[c[0]], ColumnMove::Right);
 
-    assert_eq!(s.state.column_use_lines(), None, "aucune fenêtre");
-    assert_eq!(first_cell(&s, c[2]), value, "valeurs de la formule gardées");
+    assert_eq!(s.state.column_use_lines(), None, "no window");
+    assert_eq!(first_cell(&s, c[2]), value, "the formula values are kept");
     assert_eq!(
         s.state.tree().formula_letters(c[2]).as_deref(),
         Some("B*2"),
-        "la lettre affichée suit la colonne lue"
+        "the displayed letter follows the read column"
     );
-    // Lire une autre colonne que celle qui bouge : tout aussi muet.
+    // Reading a column other than the one that moves: just as silent.
     move_selection(&mut s, &[c[1]], ColumnMove::First);
     assert_eq!(s.state.column_use_lines(), None);
     assert_eq!(first_cell(&s, c[2]), value);
 }
 
-/// Après le déplacement, la sélection couvre les mêmes colonnes (par identifiant,
-/// y compris une plage).
+/// After the move, the selection covers the same columns (by identifier,
+/// including a range).
 #[test]
-fn la_selection_reste_sur_les_colonnes_deplacees() {
+fn the_selection_stays_on_the_moved_columns() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -183,14 +183,14 @@ fn la_selection_reste_sur_les_colonnes_deplacees() {
         let selected = s
             .state
             .selection(s.sheet)
-            .expect("la sélection survit")
+            .expect("the selection survives")
             .columns(s.state.tree(), s.sheet);
         let mut expected = columns.clone();
         expected.sort_by_key(|id| order(&s).iter().position(|o| o == id));
         assert_eq!(selected, expected, "{to:?}");
         s.state.dispatch(Action::Undo);
     }
-    // Une plage (Maj-clic) B..C bouge d'un bloc : toujours sélectionnée.
+    // A range (Shift-click) B..C moves as a block: still selected.
     s.state.select_column(s.sheet, c[1]);
     s.state.extend_column_selection(s.sheet, c[2]);
     s.state.dispatch(Action::MoveColumns {
@@ -208,15 +208,15 @@ fn la_selection_reste_sur_les_colonnes_deplacees() {
 }
 
 fn status_text(s: &Setup) -> String {
-    s.state.status().expect("un message d'état").text.clone()
+    s.state.status().expect("a status message").text.clone()
 }
 
-/// La barre d'état dit le libellé du **groupe** (« Move Columns »), comme
-/// l'annulation, et non celui de la dernière étape (« Move “B” ») que `execute`
-/// y avait posé. Une colonne seule garde son libellé nommé. Témoin : retirer le
-/// remplacement à la clôture du groupe (`end_grouped_macro`).
+/// The status bar says the label of the **group** ("Move Columns"), like the
+/// undo, and not that of the last step ("Move “B”") that `execute` had put
+/// there. A single column keeps its named label. Witness: remove the
+/// replacement when the group closes (`end_grouped_macro`).
 #[test]
-fn la_barre_d_etat_dit_le_libelle_du_groupe_apres_un_deplacement_multiple() {
+fn the_status_bar_says_the_group_label_after_a_multiple_move() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -227,10 +227,10 @@ fn la_barre_d_etat_dit_le_libelle_du_groupe_apres_un_deplacement_multiple() {
     assert_eq!(status_text(&s), "Move “B”");
 }
 
-/// Même règle pour tout groupe fermé par `end_grouped_macro`, pas seulement
-/// Move : ici le type de plusieurs colonnes. Témoin : le même.
+/// Same rule for any group closed by `end_grouped_macro`, not only
+/// Move: here the type of several columns. Witness: the same.
 #[test]
-fn la_barre_d_etat_dit_le_libelle_du_groupe_pour_un_autre_groupe() {
+fn the_status_bar_says_the_group_label_for_another_group() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();

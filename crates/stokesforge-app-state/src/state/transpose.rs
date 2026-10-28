@@ -1,19 +1,19 @@
-//! Analyser des lignes (#253) : une ligne se transpose dans une feuille liée,
-//! puis sa colonne s'analyse avec les outils des colonnes.
+//! Analyze rows (#253): a row is transposed into a linked sheet, then its
+//! column is analyzed with the column tools.
 //!
-//! Le geste (clic droit d'une courbe « ligne », Object Manager, Graph ›
-//! Selection, menu Analysis du classeur sur des lignes entières) ouvre un
-//! groupe annulable `AnalyzeRows`, crée ou complète la feuille transposée
-//! (`Command::TransposeRows`), puis ouvre la fenêtre d'analyse sur ses
-//! colonnes. Le groupe reste ouvert tant que la fenêtre l'est (elle est
-//! modale) : Apply le clôt avec le calcul, Cancel l'avorte et la feuille n'a
-//! jamais existé. L'analyse elle-même n'a aucune règle propre : le résultat
-//! suit exactement le fonctionnement d'une colonne.
+//! The gesture (right-click of a "row" curve, Object Manager, Graph ›
+//! Selection, workbook Analysis menu on whole rows) opens an undoable
+//! `AnalyzeRows` group, creates or completes the transposed sheet
+//! (`Command::TransposeRows`), then opens the analysis window on its
+//! columns. The group stays open as long as the window is (it is modal):
+//! Apply closes it with the calculation, Cancel aborts it and the sheet
+//! never existed. The analysis itself has no rule of its own: the result
+//! follows exactly the behavior of a column.
 //!
-//! Le même module porte la remise à jour d'une feuille transposée
-//! (`Command::RecalculateTranspose`) : sans confirmation quand elle est
-//! seulement périmée, avec confirmation quand une valeur d'une colonne créée
-//! par le lien a été éditée (les valeurs éditées seraient écrasées).
+//! The same module carries the update of a transposed sheet
+//! (`Command::RecalculateTranspose`): without confirmation when it is only
+//! out of date, with confirmation when a value of a column created by the
+//! link has been edited (the edited values would be overwritten).
 
 use stokesforge_commands::{Command, HistoryLabel, MacroKind};
 use stokesforge_core::{NodeId, SeriesRef};
@@ -23,21 +23,21 @@ use crate::analysis::{AnalysisForm, Preset};
 use crate::errors;
 use crate::tr;
 
-/// Ce que l'interface sait d'une feuille transposée liée.
+/// What the interface knows about a linked transposed sheet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransposeInfo {
-    /// La feuille source.
+    /// The source sheet.
     pub source: NodeId,
-    /// Son nom, tel que la feuille transposée le cite.
+    /// Its name, as the transposed sheet cites it.
     pub source_name: String,
-    /// La source ne vaut plus ce que le lien a lu.
+    /// The source is no longer worth what the link read.
     pub stale: bool,
-    /// Une valeur d'une colonne créée par le lien a été éditée.
+    /// A value of a column created by the link has been edited.
     pub modified: bool,
 }
 
 impl AppState {
-    /// L'état du lien de `sheet`, si c'est une feuille transposée liée.
+    /// The state of the link of `sheet`, if it is a linked transposed sheet.
     pub fn transpose_info(&self, sheet: NodeId) -> Option<TransposeInfo> {
         let tree = &self.snapshot.tree;
         let link = tree.transpose_link(sheet)?;
@@ -50,17 +50,17 @@ impl AppState {
         })
     }
 
-    /// La feuille dont la remise à jour attend la confirmation d'écraser des
-    /// valeurs éditées.
+    /// The sheet whose update is waiting for confirmation to overwrite edited
+    /// values.
     pub fn pending_transpose_relink(&self) -> Option<NodeId> {
         self.pending_transpose_relink
     }
 
-    /// Ouvre l'analyse sur des lignes `(feuille, ligne)` : crée ou complète la
-    /// feuille transposée de chaque feuille (un seul groupe annulable), puis
-    /// ouvre la fenêtre sur les colonnes de la transposée. Un refus (colonne
-    /// sans x', colonne de texte) se dit dans la barre d'état et ne laisse
-    /// rien derrière lui.
+    /// Opens the analysis on rows `(sheet, row)`: creates or completes the
+    /// transposed sheet of each sheet (a single undoable group), then opens
+    /// the window on the columns of the transposed one. A refusal (column
+    /// without x', text column) is said in the status bar and leaves nothing
+    /// behind.
     pub(super) fn open_row_analysis(&mut self, preset: &Preset, rows: &[(NodeId, usize)]) {
         self.abort_row_macro();
         if rows.is_empty() {
@@ -120,7 +120,7 @@ impl AppState {
         self.analysis_rows_macro = true;
     }
 
-    /// Clôt le groupe `AnalyzeRows` : l'analyse vient d'être validée.
+    /// Closes the `AnalyzeRows` group: the analysis has just been validated.
     pub(super) fn end_row_macro(&mut self) {
         if !std::mem::take(&mut self.analysis_rows_macro) {
             return;
@@ -132,8 +132,8 @@ impl AppState {
         self.refresh();
     }
 
-    /// Avorte le groupe `AnalyzeRows` : la fenêtre est fermée sans analyse, la
-    /// feuille transposée créée pour elle disparaît.
+    /// Aborts the `AnalyzeRows` group: the window is closed without analysis,
+    /// the transposed sheet created for it disappears.
     pub(super) fn abort_row_macro(&mut self) {
         if !std::mem::take(&mut self.analysis_rows_macro) {
             return;
@@ -142,9 +142,8 @@ impl AppState {
         self.refresh();
     }
 
-    /// « Recalculate » d'une feuille transposée : tout de suite si elle est
-    /// seulement périmée, après confirmation si des valeurs éditées seraient
-    /// écrasées.
+    /// "Recalculate" of a transposed sheet: right away if it is only out of
+    /// date, after confirmation if edited values would be overwritten.
     pub(super) fn recalculate_transpose(&mut self, sheet: NodeId) {
         let Some(info) = self.transpose_info(sheet) else {
             self.fail(tr!("status-transpose-not-linked"));
@@ -157,7 +156,7 @@ impl AppState {
         self.execute(Command::RecalculateTranspose { sheet });
     }
 
-    /// Réponse à la confirmation de la remise à jour.
+    /// Answer to the confirmation of the update.
     pub(super) fn confirm_transpose_relink(&mut self, accept: bool) {
         let Some(sheet) = self.pending_transpose_relink.take() else {
             return;

@@ -1,20 +1,20 @@
-//! Sélecteurs de fichiers natifs hors du fil de l'interface (issue #192).
+//! Native file pickers off the interface thread (issue #192).
 //!
-//! `rfd` attend la réponse du portail (`xdg-desktop-portal`) dans une boucle
-//! sans délai d'expiration : appelé sur le fil d'egui, un sélecteur fermé sans
-//! réponse (clic sur l'application, sous GNOME/Wayland) gelait toute
-//! l'application. Le sélecteur s'ouvre donc sur un fil à part et rend son choix
-//! par un canal ; l'interface sonde ce canal à chaque image
-//! ([`FilePicker::poll`]) et reste vivante quoi qu'il arrive — au pire une
-//! demande reste en attente, jamais une application gelée.
+//! `rfd` waits for the portal's answer (`xdg-desktop-portal`) in a loop with
+//! no timeout: called on egui's thread, a picker closed without an answer
+//! (a click on the application, under GNOME/Wayland) froze the whole
+//! application. So the picker opens on a separate thread and returns its
+//! choice through a channel; the interface polls this channel on every frame
+//! ([`FilePicker::poll`]) and stays alive whatever happens — at worst a
+//! request stays pending, never a frozen application.
 //!
-//! Les sept sélecteurs de l'application passent par [`PickRequest`], poussé
-//! comme [`crate::state::Action::PickFile`] ; `StokesForgeApp` le démarre et
-//! applique la réponse. Un seul sélecteur est *suivi* à la fois : une nouvelle
-//! demande **remplace** la précédente. Sans cela, un sélecteur fermé sans que le
-//! portail ne réponde resterait « en attente » à jamais et empêcherait d'en
-//! rouvrir un (suite de #192) ; son fil, bloqué dans `rfd`, est abandonné et sa
-//! réponse éventuelle est jetée.
+//! The application's seven pickers go through [`PickRequest`], pushed as
+//! [`crate::state::Action::PickFile`]; `StokesForgeApp` starts it and applies
+//! the answer. Only one picker is *tracked* at a time: a new request
+//! **replaces** the previous one. Without that, a picker closed without the
+//! portal answering would stay "pending" forever and prevent opening another
+//! (follow-up of #192); its thread, blocked in `rfd`, is abandoned and its
+//! possible answer is dropped.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
@@ -23,24 +23,24 @@ use stokesforge_plot::PlotSpec;
 
 use crate::tr;
 
-/// Ce que l'on demande à l'utilisateur de choisir, avec de quoi appliquer la
-/// réponse.
+/// What the user is asked to choose, with what is needed to apply the
+/// answer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum PickRequest {
-    /// File › Open : un projet à charger.
+    /// File › Open: a project to load.
     OpenProject,
-    /// File › Save As : la destination du projet (nom suggéré).
+    /// File › Save As: the project's destination (suggested name).
     SaveProjectAs { suggested: String },
-    /// Export du graphe : spec déjà cadré par la vue, nom suggéré.
+    /// Graph export: spec already framed by the view, suggested name.
     ExportGraph {
         spec: Box<PlotSpec>,
         file_name: String,
     },
-    /// Assistant d'import : enregistrer la recette dans un fichier JSON.
+    /// Import wizard: save the recipe to a JSON file.
     ExportImportRecipe { file_name: String },
-    /// Assistant d'import : lire une recette JSON.
+    /// Import wizard: read a JSON recipe.
     ImportImportRecipe,
-    /// Assistant d'import : fichiers à importer (dossier de départ facultatif).
+    /// Import wizard: files to import (starting folder optional).
     AddImportFiles { directory: Option<PathBuf> },
 }
 
@@ -78,7 +78,7 @@ impl PickRequest {
         }
     }
 
-    /// Lance le sélecteur (bloquant) ; à appeler sur le fil dédié.
+    /// Runs the picker (blocking); to be called on the dedicated thread.
     fn run(&self, dialog: rfd::FileDialog) -> Option<Vec<PathBuf>> {
         match self {
             Self::SaveProjectAs { .. }
@@ -92,7 +92,7 @@ impl PickRequest {
     }
 }
 
-/// La réponse d'un sélecteur : `None` si annulé ou fermé sans choix.
+/// A picker's answer: `None` if cancelled or closed without a choice.
 pub type Picked = Option<Vec<PathBuf>>;
 
 struct Pending {
@@ -100,30 +100,30 @@ struct Pending {
     receiver: Receiver<Picked>,
 }
 
-/// Le sélecteur en cours, s'il y en a un.
+/// The picker in progress, if there is one.
 #[derive(Default)]
 pub struct FilePicker {
     pending: Option<Pending>,
 }
 
 impl FilePicker {
-    /// Un sélecteur est-il ouvert ?
+    /// Is a picker open?
     pub fn is_open(&self) -> bool {
         self.pending.is_some()
     }
 
-    /// Ouvre le sélecteur sur un fil à part, en abandonnant celui qui était
-    /// suivi (peut-être mort côté portail). `wake` réveille l'interface quand
-    /// la réponse est prête.
+    /// Opens the picker on a separate thread, abandoning the one that was
+    /// tracked (perhaps dead on the portal side). `wake` wakes the interface
+    /// when the answer is ready.
     pub fn start(&mut self, request: PickRequest, wake: impl Fn() + Send + 'static) {
         let dialog = request.dialog();
         let worker = request.clone();
         self.start_with(request, wake, move || worker.run(dialog));
     }
 
-    /// [`Self::start`] avec l'exécution du sélecteur injectée : les tests y
-    /// passent un faux, sans quoi `rfd` ouvrirait un vrai sélecteur du portail
-    /// (une fenêtre qui resterait ouverte après le test).
+    /// [`Self::start`] with the picker's execution injected: tests pass a
+    /// fake one, otherwise `rfd` would open a real portal picker (a window
+    /// that would stay open after the test).
     fn start_with(
         &mut self,
         request: PickRequest,
@@ -138,8 +138,8 @@ impl FilePicker {
         self.pending = Some(Pending { request, receiver });
     }
 
-    /// La réponse du sélecteur terminé, une seule fois. Ne bloque jamais ; un
-    /// fil mort sans réponse vaut « annulé ».
+    /// The answer of the finished picker, once only. Never blocks; a dead
+    /// thread with no answer counts as "cancelled".
     pub fn poll(&mut self) -> Option<(PickRequest, Picked)> {
         let pending = self.pending.as_ref()?;
         let picked = match pending.receiver.try_recv() {
@@ -156,10 +156,10 @@ impl FilePicker {
 mod tests {
     use super::*;
 
-    /// Suite de #192 : un sélecteur fermé sans réponse du portail ne doit pas
-    /// empêcher d'en rouvrir un.
+    /// Follow-up of #192: a picker closed without a portal answer must not
+    /// prevent opening another one.
     #[test]
-    fn une_nouvelle_demande_remplace_un_selecteur_reste_sans_reponse() {
+    fn a_new_request_replaces_a_picker_left_unanswered() {
         let (_sender, receiver) = channel::<Picked>();
         let mut picker = FilePicker {
             pending: Some(Pending {
@@ -167,21 +167,21 @@ mod tests {
                 receiver,
             }),
         };
-        // Faux sélecteur : jamais de vrai `rfd` dans un test.
+        // Fake picker: never a real `rfd` in a test.
         picker.start_with(PickRequest::ImportImportRecipe, || {}, || None);
-        let pending = picker.pending.as_ref().expect("suivi");
+        let pending = picker.pending.as_ref().expect("tracked");
         assert_eq!(pending.request, PickRequest::ImportImportRecipe);
     }
 
     #[test]
-    fn sans_selecteur_ouvert_le_sondage_ne_bloque_pas() {
+    fn without_an_open_picker_polling_does_not_block() {
         let mut picker = FilePicker::default();
         assert!(!picker.is_open());
         assert!(picker.poll().is_none());
     }
 
     #[test]
-    fn un_fil_mort_sans_reponse_vaut_annule() {
+    fn a_dead_thread_with_no_answer_counts_as_cancelled() {
         let (sender, receiver) = channel::<Picked>();
         drop(sender);
         let mut picker = FilePicker {
@@ -190,15 +190,15 @@ mod tests {
                 receiver,
             }),
         };
-        let (request, picked) = picker.poll().expect("réponse");
+        let (request, picked) = picker.poll().expect("answer");
         assert_eq!(request, PickRequest::OpenProject);
         assert_eq!(picked, None);
         assert!(!picker.is_open());
     }
 
     #[test]
-    fn une_reponse_attendue_laisse_l_appelant_libre() {
-        // Le sélecteur n'a pas répondu : le sondage rend la main aussitôt.
+    fn a_pending_answer_leaves_the_caller_free() {
+        // The picker has not answered: polling returns immediately.
         let (_sender, receiver) = channel::<Picked>();
         let mut picker = FilePicker {
             pending: Some(Pending {

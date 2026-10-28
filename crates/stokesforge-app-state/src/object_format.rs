@@ -1,32 +1,32 @@
-//! Format d'objet : ce que la partie « format d'objet » de la barre « Tools » règle sur un objet
-//! graphique sélectionné (issue #64, après #76), ou le trait d’une série
-//! sélectionnée depuis Object Manager (#83).
+//! Object format: what the "object format" part of the "Tools" bar sets on a
+//! selected graphic object (issue #64, after #76), or the line of a series
+//! selected from Object Manager (#83).
 //!
-//! Contrairement au format de texte ([`crate::text_format`]), qui écrit des
-//! balises dans un texte, ici chaque réglage est un **champ du modèle**
-//! ([`stokesforge_plot::ShapeSpec`]) : couleur de trait, couleur de remplissage
-//! (dont l'alpha est l'opacité, `#RRGGBBAA`), épaisseur. La barre n'envoie donc
-//! que la valeur choisie ; l'application la pose sur l'objet sélectionné par
-//! une seule `Action::SetShape`, annulable.
+//! Unlike the text format ([`crate::text_format`]), which writes tags into a
+//! text, here each setting is a **model field**
+//! ([`stokesforge_plot::ShapeSpec`]): line color, fill color (whose alpha is
+//! the opacity, `#RRGGBBAA`), thickness. So the bar only sends the chosen
+//! value; the application applies it to the selected object through a single
+//! undoable `Action::SetShape`.
 //!
-//! Tout est pur, testé sans fenêtre.
+//! Everything is pure, tested without a window.
 
 use stokesforge_plot::{SeriesSpec, ShapeSpec};
 
-/// Un réglage que la barre sait poser.
+/// A setting that the bar knows how to apply.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ObjectFormat {
-    /// Couleur du trait ; vide = automatique (contraste avec le fond).
+    /// Line color; empty = automatic (contrasts with the background).
     LineColor(String),
-    /// Couleur de remplissage ; vide = aucun. Sans effet sur une ligne ou une
-    /// flèche, qui n'ont pas de surface.
+    /// Fill color; empty = none. No effect on a line or an arrow, which have
+    /// no surface.
     FillColor(String),
-    /// Épaisseur du trait, en points.
+    /// Line thickness, in points.
     LineWidth(f64),
 }
 
 impl ObjectFormat {
-    /// Pose les réglages de trait sur la série sélectionnée (#83).
+    /// Applies the line settings to the selected series (#83).
     pub fn apply_series(&self, series: &mut SeriesSpec) -> bool {
         let before = series.clone();
         match self {
@@ -39,7 +39,7 @@ impl ObjectFormat {
         *series != before
     }
 
-    /// Pose le réglage sur `shape`. Rend `true` si l'objet a changé.
+    /// Applies the setting to `shape`. Returns `true` if the object changed.
     pub fn apply(&self, shape: &mut ShapeSpec) -> bool {
         let before = shape.clone();
         match self {
@@ -69,7 +69,7 @@ mod tests {
     }
 
     #[test]
-    fn chaque_reglage_pose_son_champ_et_dit_s_il_a_change() {
+    fn each_setting_sets_its_field_and_says_whether_it_changed() {
         let mut rect = shape(ShapeKind::Rectangle);
         assert!(ObjectFormat::LineColor("#aa3311".into()).apply(&mut rect));
         assert!(ObjectFormat::FillColor("#33669980".into()).apply(&mut rect));
@@ -77,13 +77,13 @@ mod tests {
         assert_eq!(rect.line_color, "#aa3311");
         assert_eq!(rect.fill_color, "#33669980");
         assert_eq!(rect.line_width, 3.0);
-        // Le même réglage ne change rien.
+        // The same setting changes nothing.
         assert!(!ObjectFormat::LineWidth(3.0).apply(&mut rect));
         assert!(!ObjectFormat::LineColor("#aa3311".into()).apply(&mut rect));
     }
 
     #[test]
-    fn une_ligne_ou_une_fleche_n_a_pas_de_remplissage() {
+    fn a_line_or_an_arrow_has_no_fill() {
         for kind in [ShapeKind::Line, ShapeKind::Arrow] {
             let mut line = shape(kind);
             assert!(!ObjectFormat::FillColor("#336699".into()).apply(&mut line));
@@ -92,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn une_epaisseur_invalide_ne_pose_rien() {
+    fn an_invalid_thickness_applies_nothing() {
         let mut rect = shape(ShapeKind::Rectangle);
         for width in [0.0, -2.0, f64::NAN, f64::INFINITY] {
             assert!(!ObjectFormat::LineWidth(width).apply(&mut rect));
@@ -105,7 +105,7 @@ mod tests {
 mod series_tests {
     use super::*;
     #[test]
-    fn le_trait_de_la_serie_se_regle_sans_changer_les_symboles() {
+    fn the_series_line_is_set_without_changing_the_symbols() {
         let mut spec = SeriesSpec::new(stokesforge_core::NodeId::from_raw(1));
         let symbol = spec.symbol.clone();
         assert!(ObjectFormat::LineColor("#cc3300".into()).apply_series(&mut spec));

@@ -54,6 +54,8 @@ without a message, see `docs/persistance.md`).
   swaps the bounds.
 - The "Closed Frame" box (Axes page and layer menu) disappears from the
   interface; its settings are made per axis (mirrors, ticks).
+- The default name proposed when exporting a graph without a name is
+  "graph" (was "graphe") (#374).
 
 ## [1.0.0] - 2026-10-27
 

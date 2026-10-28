@@ -1,8 +1,8 @@
-//! « Colonne utilisée par un calcul » (#306) : la fenêtre qui s'ouvre après
-//! la suppression de colonnes lues par une formule ou un calcul d'analyse
-//! (`Close` ne fait rien, `Undo` annule le geste ; le déplacement d'une colonne,
-//! lui, n'ouvre rien : `column_move.rs`, #319), et la question de
-//! Ctrl+Maj+C sur des colonnes à formule (valeurs ou formules).
+//! "Column used by a calculation" (#306): the window that opens after columns
+//! read by a formula or an analysis calculation are deleted (`Close` does
+//! nothing, `Undo` undoes the gesture; moving a column, for its part, opens
+//! nothing: `column_move.rs`, #319), and the question on Ctrl+Shift+C on
+//! formula columns (values or formulas).
 
 use stokesforge_analysis::model::Model;
 use stokesforge_app_state::analysis::Preset;
@@ -18,7 +18,7 @@ struct Setup {
     cols: Vec<NodeId>,
 }
 
-/// Une feuille `A` (X), `B` (Y), `C`, `D` ordinaires, sur 5 lignes.
+/// A sheet with plain `A` (X), `B` (Y), `C`, `D`, over 5 rows.
 fn setup(dir: &std::path::Path) -> Setup {
     i18n::set_language(Language::English);
     let mut project = Project::new("P").unwrap();
@@ -77,7 +77,7 @@ fn column_count(s: &Setup) -> usize {
 }
 
 #[test]
-fn supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_rien() {
+fn deleting_a_column_read_by_a_formula_opens_the_list_then_close_does_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -89,15 +89,15 @@ fn supprimer_une_colonne_lue_par_une_formule_ouvre_la_liste_puis_close_ne_fait_r
     );
     s.state.dispatch(Action::CloseColumnUse);
     assert_eq!(s.state.column_use_lines(), None);
-    assert_eq!(column_count(&s), 3, "Close ne rend pas la colonne");
+    assert_eq!(column_count(&s), 3, "Close does not give the column back");
 }
 
-/// #321 : une formule retient les colonnes par identifiant, une lettre qui
-/// glisse ne change donc rien à ce qu'elle lit — supprimer A n'avertit pas
-/// `C = B*2` (qui s'affiche désormais `A*2`, B étant devenue la première
-/// colonne). Le lecteur d'une colonne supprimée, lui, est toujours listé.
+/// #321: a formula keeps its columns by identifier, so a sliding letter
+/// changes nothing about what it reads: deleting A does not warn
+/// `C = B*2` (which now displays as `A*2`, B having become the first
+/// column). The reader of a deleted column is still listed.
 #[test]
-fn les_lettres_qui_glissent_ne_comptent_pas_seule_la_colonne_lue_compte() {
+fn sliding_letters_do_not_count_only_the_read_column_does() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -106,15 +106,15 @@ fn les_lettres_qui_glissent_ne_comptent_pas_seule_la_colonne_lue_compte() {
     assert_eq!(
         s.state.column_use_lines(),
         None,
-        "C ne lit pas A : B change de lettre, pas de colonne"
+        "C does not read A: B changes letter, not column"
     );
     assert_eq!(
         s.state.tree().formula_letters(c[2]).as_deref(),
         Some("A*2"),
-        "la lettre affichée suit la colonne"
+        "the displayed letter follows the column"
     );
 
-    // Témoin : supprimer B, que C lit, ouvre la liste.
+    // Witness: deleting B, which C reads, opens the list.
     delete(&mut s, &[c[1]]);
     assert_eq!(
         s.state.column_use_lines(),
@@ -123,7 +123,7 @@ fn les_lettres_qui_glissent_ne_comptent_pas_seule_la_colonne_lue_compte() {
 }
 
 #[test]
-fn une_colonne_sans_lecteur_n_ouvre_rien() {
+fn a_column_without_a_reader_opens_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -133,7 +133,7 @@ fn une_colonne_sans_lecteur_n_ouvre_rien() {
 }
 
 #[test]
-fn undo_rend_la_colonne_et_la_formule_en_un_pas_et_plusieurs_colonnes_font_une_liste() {
+fn undo_gives_back_the_column_and_the_formula_in_one_step_and_several_columns_make_one_list() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -143,17 +143,17 @@ fn undo_rend_la_colonne_et_la_formule_en_un_pas_et_plusieurs_colonnes_font_une_l
     assert_eq!(
         s.state.column_use_lines(),
         Some(vec!["D (formula)".to_string()]),
-        "une seule liste pour tout le geste"
+        "a single list for the whole gesture"
     );
     assert_eq!(column_count(&s), 2);
     s.state.dispatch(Action::UndoColumnUse);
     assert_eq!(s.state.column_use_lines(), None);
-    assert_eq!(column_count(&s), 4, "un seul Undo rend les deux colonnes");
+    assert_eq!(column_count(&s), 4, "a single Undo gives back both columns");
     assert_eq!(s.state.column_meta(c[3]), before);
 }
 
 #[test]
-fn un_calcul_d_analyse_est_liste_par_sa_famille_et_sa_premiere_sortie() {
+fn an_analysis_calculation_is_listed_by_its_family_and_its_first_output() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -174,22 +174,22 @@ fn un_calcul_d_analyse_est_liste_par_sa_famille_et_sa_premiere_sortie() {
         .outputs
         .iter()
         .find_map(|o| o.column)
-        .expect("une colonne de sortie");
+        .expect("an output column");
 
-    // Supprimer Y (B) : le calcul lit B, il est listé.
+    // Delete Y (B): the calculation reads B, so it is listed.
     delete(&mut s, &[c[1]]);
-    let lines = s.state.column_use_lines().expect("fenêtre ouverte");
+    let lines = s.state.column_use_lines().expect("window open");
     assert_eq!(lines.len(), 1);
     assert!(lines[0].starts_with("Fit → [Book]Sheet1!"), "{lines:?}");
     s.state.dispatch(Action::UndoColumnUse);
 
-    // Témoin : supprimer sa colonne de sortie n'ouvre rien (il disparaît avec).
+    // Witness: deleting its output column opens nothing (it disappears with it).
     delete(&mut s, &[first_output]);
     assert_eq!(s.state.column_use_lines(), None);
 }
 
 #[test]
-fn supprimer_un_classeur_emporte_ses_calculs_sans_rien_signaler() {
+fn deleting_a_workbook_takes_its_calculations_with_it_without_signaling_anything() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -199,16 +199,16 @@ fn supprimer_un_classeur_emporte_ses_calculs_sans_rien_signaler() {
         columns: vec![c[0], c[1]],
     });
     s.state.dispatch(Action::ApplyAnalysis);
-    // Les sorties vivent dans le même classeur : il emporte le calcul avec
-    // lui, rien à signaler.
+    // The outputs live in the same workbook: it takes the calculation with
+    // it, nothing to signal.
     let book = s.state.tree().parent(s.sheet).unwrap().unwrap();
     s.state.dispatch(Action::DeleteObjects(vec![book]));
-    assert!(s.state.tree().node(book).is_none(), "classeur supprimé");
+    assert!(s.state.tree().node(book).is_none(), "workbook deleted");
     assert_eq!(s.state.column_use_lines(), None);
 }
 
 #[test]
-fn ctrl_maj_c_sur_une_colonne_formule_pose_la_question() {
+fn ctrl_shift_c_on_a_formula_column_asks_the_question() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();
@@ -219,15 +219,15 @@ fn ctrl_maj_c_sur_une_colonne_formule_pose_la_question() {
     assert_eq!(s.state.pending_full_copy(), Some(s.sheet));
     s.state
         .dispatch(Action::ConfirmFullColumnsCopy(FullColumnsCopy::Values));
-    let values = s.state.take_object_clipboard_text().expect("texte copié");
-    assert!(!values.contains("A*2"), "la ligne Formule reste vide");
+    let values = s.state.take_object_clipboard_text().expect("text copied");
+    assert!(!values.contains("A*2"), "the Formula row stays empty");
     assert_eq!(s.state.pending_full_copy(), None);
 
     s.state.select_column(s.sheet, c[2]);
     s.state.copy_full_columns(s.sheet);
     s.state
         .dispatch(Action::ConfirmFullColumnsCopy(FullColumnsCopy::Formulas));
-    let formulas = s.state.take_object_clipboard_text().expect("texte copié");
+    let formulas = s.state.take_object_clipboard_text().expect("text copied");
     assert!(formulas.contains("A*2"));
 
     s.state.select_column(s.sheet, c[2]);
@@ -238,7 +238,7 @@ fn ctrl_maj_c_sur_une_colonne_formule_pose_la_question() {
 }
 
 #[test]
-fn ctrl_maj_c_sans_formule_copie_directement() {
+fn ctrl_shift_c_without_a_formula_copies_directly() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let c = s.cols.clone();

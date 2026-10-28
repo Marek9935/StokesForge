@@ -1,63 +1,63 @@
-//! Les erreurs des crates du dessous, mises en phrase dans la langue de
-//! l'interface (issue #47, chantier #39).
+//! The errors of the crates below, put into sentences in the interface language
+//! (issue #47, work package #39).
 //!
-//! # Le partage des rôles
+//! # How the roles are split
 //!
-//! Les crates du dessous (`core`, `commands`, `persistence`, `import`,
-//! `script`…) rendent des erreurs **structurées** : une variante par cause, ses
-//! champs en données. Leur `Display` (`#[error(...)]`) est en **anglais**, brut :
-//! c'est ce que lisent le CLI, les scripts `pyst` et les journaux, et il n'est
-//! jamais traduit — aucun de ces crates ne dépend de Fluent. L'application, elle,
-//! associe chaque variante à une clé `error-*` du catalogue (`i18n/en/
-//! stokesforge_app.ftl`) et affiche la phrase du catalogue, dans la langue choisie.
+//! The crates below (`core`, `commands`, `persistence`, `import`, `script`...)
+//! return **structured** errors: one variant per cause, its fields as data.
+//! Their `Display` (`#[error(...)]`) is in raw **English**: it is what the CLI,
+//! the `pyst` scripts and the logs read, and it is never translated — none of
+//! these crates depends on Fluent. The application, for its part, maps each
+//! variant to an `error-*` key of the catalog (`i18n/en/stokesforge_app.ftl`)
+//! and displays the catalog's sentence, in the chosen language.
 //!
-//! Une fonction `error_message` par famille d'erreurs, chacune dans son
-//! sous-module : [`model`], [`commands`], [`session`], [`file`], [`import`],
-//! [`formula`], [`render`], [`export`], [`io`] et, avec la feature `python`, `script`.
-//! Toute erreur **affichée** à l'utilisateur passe par l'une d'elles, jamais par
+//! One `error_message` function per family of errors, each in its own submodule:
+//! [`model`], [`commands`], [`session`], [`file`], [`import`], [`formula`],
+//! [`render`], [`export`], [`io`] and, with the `python` feature, `script`. Every
+//! error **shown** to the user goes through one of them, never through
 //! `to_string()`.
 //!
-//! # Ajouter une variante d'erreur
+//! # Adding an error variant
 //!
-//! Le `match` de chaque fonction est **exhaustif, sans `_`** : une variante
-//! nouvelle ne compile pas tant qu'elle n'est pas traitée ici. Deux traitements :
+//! The `match` of each function is **exhaustive, without `_`**: a new variant
+//! does not compile until it is handled here. Two treatments:
 //!
-//! - lui donner une clé `error-<famille>-<cause>` (texte selon le glossaire et
-//!   `docs/textes-interface.md` : ce qui s'est passé, puis quoi faire, sans jargon
-//!   interne — pas de *nœud*, *session*, *macro*, *commande*) et l'employer par
-//!   [`crate::tr!`] avec ses champs en arguments nommés ;
-//! - ou, à défaut, la laisser retomber sur son `Display` anglais par
-//!   [`fallback`] : rien ne disparaît, mais le texte n'est pas traduit.
+//! - give it an `error-<family>-<cause>` key (text following the glossary and
+//!   `docs/textes-interface.md`: what happened, then what to do, without
+//!   internal jargon — no *node*, *session*, *macro*, *command*) and use it
+//!   through [`crate::tr!`] with its fields as named arguments;
+//! - or, failing that, let it fall back to its English `Display` through
+//!   [`fallback`]: nothing disappears, but the text is not translated.
 //!
-//! Le test de chaque famille construit **une valeur de chaque variante** et
-//! échoue si l'une d'elles n'est pas listée (un `match` sans `_` dans le test) ou
-//! si son message est du jargon interne.
+//! The test of each family builds **one value of each variant** and fails if one
+//! of them is not listed (a `match` without `_` in the test) or if its message
+//! is internal jargon.
 //!
-//! # Ce qui reste brut
+//! # What stays raw
 //!
-//! Les champs `detail` (une cause décrite en anglais par le crate d'origine : la
-//! raison d'un nom refusé, la ligne d'un fichier corrompu) et les messages du
-//! système (`std::io::Error`) sont repris tels quels dans la phrase : ils sont en
-//! anglais quelle que soit la langue de l'interface. Les structurer davantage
-//! reviendrait à dupliquer la logique des crates du dessous.
+//! The `detail` fields (a cause described in English by the originating crate:
+//! the reason a name was refused, the line of a corrupted file) and the system
+//! messages (`std::io::Error`) are taken as is into the sentence: they are in
+//! English whatever the interface language. Structuring them further would
+//! amount to duplicating the logic of the crates below.
 
 use std::fmt::Display;
 
-/// Le texte brut anglais d'une erreur, pour une variante sans clé de catalogue.
+/// The raw English text of an error, for a variant with no catalog key.
 ///
-/// Rien ne disparaît : une cause que personne n'a encore mise en phrase
-/// s'affiche par son `Display`, qui est lisible.
+/// Nothing disappears: a cause nobody has put into a sentence yet is displayed
+/// through its `Display`, which is readable.
 pub fn fallback(error: &dyn Display) -> String {
     error.to_string()
 }
 
-/// Erreurs du modèle de données (`stokesforge-core`).
+/// Errors of the data model (`stokesforge-core`).
 pub mod model {
     use stokesforge_core::CoreError;
 
     use crate::tr;
 
-    /// La phrase d'une [`CoreError`].
+    /// The sentence of a [`CoreError`].
     pub fn error_message(error: &CoreError) -> String {
         match error {
             CoreError::InvalidName(detail) => {
@@ -103,8 +103,8 @@ pub mod model {
         use super::*;
         use stokesforge_core::NodeId;
 
-        /// Une valeur de chaque variante ; le `match` sans `_` oblige à en
-        /// ajouter une pour chaque variante nouvelle.
+        /// One value of each variant; the `match` without `_` forces adding one for
+        /// each new variant.
         fn every_variant() -> Vec<CoreError> {
             let samples = vec![
                 CoreError::InvalidName("the name is empty".into()),
@@ -155,21 +155,21 @@ pub mod model {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
         #[test]
-        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+        fn every_variant_has_its_sentence_and_no_jargon() {
             for error in every_variant() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
         }
 
         #[test]
-        fn les_champs_entrent_dans_la_phrase() {
-            // Ces phrases sont comparées en anglais : la langue ne dépend pas
-            // de l\'environnement (`STOKESFORGE_LANG`, préférences) de celui qui teste.
+        fn the_fields_enter_the_sentence() {
+            // These sentences are compared in English: the language does not depend on the
+            // environment (`STOKESFORGE_LANG`, preferences) of whoever runs the test.
             crate::i18n::set_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&CoreError::DuplicateName("Sheet1 in Book1".into())),
@@ -190,13 +190,13 @@ pub mod model {
     }
 }
 
-/// Erreurs du bus de commandes (`stokesforge-commands`).
+/// Errors of the command bus (`stokesforge-commands`).
 pub mod commands {
     use stokesforge_commands::CommandError;
 
     use crate::tr;
 
-    /// La phrase d'une [`CommandError`].
+    /// The sentence of a [`CommandError`].
     pub fn error_message(error: &CommandError) -> String {
         match error {
             CommandError::Core(error) => super::model::error_message(error),
@@ -236,21 +236,21 @@ pub mod commands {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
         #[test]
-        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+        fn every_variant_has_its_sentence_and_no_jargon() {
             for error in every_variant() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
         }
 
         #[test]
-        fn une_erreur_du_modele_garde_sa_phrase() {
-            // Ces phrases sont comparées en anglais : la langue ne dépend pas
-            // de l\'environnement (`STOKESFORGE_LANG`, préférences) de celui qui teste.
+        fn a_model_error_keeps_its_sentence() {
+            // These sentences are compared in English: the language does not depend on the
+            // environment (`STOKESFORGE_LANG`, preferences) of whoever runs the test.
             crate::i18n::set_language(crate::i18n::Language::English);
             let core = CoreError::IdentifiersExhausted;
             assert_eq!(
@@ -265,14 +265,14 @@ pub mod commands {
     }
 }
 
-/// Erreurs de la session (`stokesforge-session`) : celles du bus et du fichier,
-/// transmises sans réécriture.
+/// Errors of the session (`stokesforge-session`): those of the bus and of the
+/// file, passed on without rewriting.
 pub mod session {
     use stokesforge_session::SessionError;
 
     use crate::tr;
 
-    /// La phrase d'une [`SessionError`].
+    /// The sentence of a [`SessionError`].
     pub fn error_message(error: &SessionError) -> String {
         match error {
             SessionError::Command(error) => super::commands::error_message(error),
@@ -305,12 +305,12 @@ pub mod session {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
         #[test]
-        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+        fn every_variant_has_its_sentence_and_no_jargon() {
             for error in every_variant() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
@@ -318,13 +318,13 @@ pub mod session {
     }
 }
 
-/// Erreurs de lecture et d'écriture d'un fichier `.stf` (`stokesforge-persistence`).
+/// Read and write errors of a `.stf` file (`stokesforge-persistence`).
 pub mod file {
     use stokesforge_persistence::PersistenceError;
 
     use crate::tr;
 
-    /// La phrase d'une [`PersistenceError`].
+    /// The sentence of a [`PersistenceError`].
     pub fn error_message(error: &PersistenceError) -> String {
         match error {
             PersistenceError::Io { path, source } => tr!(
@@ -333,8 +333,8 @@ pub mod file {
                 detail = source.to_string()
             ),
             PersistenceError::TooLarge { path, size, limit } => {
-                // En Mo, arrondi au supérieur pour la taille : « 513 Mo »
-                // pour une limite de 512, jamais « 512 Mo, limite 512 Mo ».
+                // In MB, rounded up for the size: "513 MB" for a limit of 512, never "512 MB,
+                // limit 512 MB".
                 let size_mb = i64::try_from(size.div_ceil(1 << 20)).unwrap_or(i64::MAX);
                 let limit_mb = i64::try_from(*limit >> 20).unwrap_or(i64::MAX);
                 tr!(
@@ -458,21 +458,21 @@ pub mod file {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
         #[test]
-        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+        fn every_variant_has_its_sentence_and_no_jargon() {
             for error in every_variant() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
         }
 
         #[test]
-        fn les_champs_entrent_dans_la_phrase() {
-            // Ces phrases sont comparées en anglais : la langue ne dépend pas
-            // de l\'environnement (`STOKESFORGE_LANG`, préférences) de celui qui teste.
+        fn the_fields_enter_the_sentence() {
+            // These sentences are compared in English: the language does not depend on the
+            // environment (`STOKESFORGE_LANG`, preferences) of whoever runs the test.
             crate::i18n::set_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&PersistenceError::NotAStokesForgeFile {
@@ -492,7 +492,7 @@ pub mod file {
     }
 }
 
-/// Erreurs d'analyse d'un fichier d'appareil (`stokesforge-import`,
+/// Parse errors of an instrument file (`stokesforge-import`,
 /// `stokesforge-importer`).
 pub mod import {
     use stokesforge_import::ImportError;
@@ -502,7 +502,7 @@ pub mod import {
 
     use crate::tr;
 
-    /// La phrase d'une [`ImportError`].
+    /// The sentence of an [`ImportError`].
     pub fn error_message(error: &ImportError) -> String {
         match error {
             ImportError::NotText => tr!("error-import-binary"),
@@ -512,7 +512,7 @@ pub mod import {
         }
     }
 
-    /// La phrase d'une [`ImportReadError`] de l'assistant d'import.
+    /// The sentence of an [`ImportReadError`] of the import wizard.
     pub fn read_message(error: &ImportReadError) -> String {
         match error {
             ImportReadError::NoImport => tr!("error-import-not-open"),
@@ -525,7 +525,7 @@ pub mod import {
         }
     }
 
-    /// La phrase d'un [`ImportFailure`] : le fichier, puis ce qui s'est passé.
+    /// The sentence of an [`ImportFailure`]: the file, then what happened.
     pub fn failure_message(failure: &ImportFailure) -> String {
         let detail = match &failure.cause {
             ImportFailureCause::Read(message) => super::fallback(message),
@@ -559,21 +559,21 @@ pub mod import {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
         #[test]
-        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+        fn every_variant_has_its_sentence_and_no_jargon() {
             for error in every_variant() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
         }
 
         #[test]
-        fn un_fichier_en_echec_nomme_le_fichier_et_la_cause() {
-            // Ces phrases sont comparées en anglais : la langue ne dépend pas
-            // de l\'environnement (`STOKESFORGE_LANG`, préférences) de celui qui teste.
+        fn a_failed_file_names_the_file_and_the_cause() {
+            // These sentences are compared in English: the language does not depend on the
+            // environment (`STOKESFORGE_LANG`, preferences) of whoever runs the test.
             crate::i18n::set_language(crate::i18n::Language::English);
             let failure = ImportFailure {
                 path: "/data/a.csv".into(),
@@ -592,13 +592,13 @@ pub mod import {
     }
 }
 
-/// Erreurs d'une formule de colonne calculée (`stokesforge-core::formula`).
+/// Errors of a calculated-column formula (`stokesforge-core::formula`).
 pub mod formula {
     use stokesforge_core::FormulaError;
 
     use crate::tr;
 
-    /// La phrase d'une [`FormulaError`].
+    /// The sentence of a [`FormulaError`].
     pub fn error_message(error: &FormulaError) -> String {
         match error {
             FormulaError::Parse(detail) => tr!("error-formula-invalid", detail = detail.as_str()),
@@ -639,31 +639,31 @@ pub mod formula {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
         #[test]
-        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+        fn every_variant_has_its_sentence_and_no_jargon() {
             for error in every_variant() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
         }
 
         #[test]
-        fn la_colonne_supprimee_dit_quoi_remplacer() {
-            // Comparée en anglais : la langue ne dépend pas de l'environnement.
+        fn the_deleted_column_says_what_to_replace() {
+            // Compared in English: the language does not depend on the environment.
             crate::i18n::set_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&FormulaError::DeletedColumn),
                 "Column deleted. Replace #REF with a column letter"
             );
-            // Le `Display` du crate du dessous reste de l'anglais brut.
+            // The `Display` of the crate below stays raw English.
             assert_eq!(
                 FormulaError::DeletedColumn.to_string(),
                 "the formula reads a column that no longer exists in the worksheet"
             );
-            // Le catalogue français porte la même clé.
+            // The French catalog carries the same key.
             let fr = include_str!("../i18n/fr/stokesforge_app.ftl");
             assert!(fr.contains(
                 "error-formula-deleted-column = Colonne supprimée. Remplacer #REF par une lettre de colonne"
@@ -671,24 +671,24 @@ pub mod formula {
         }
 
         #[test]
-        fn l_erreur_de_formule_trop_profonde_est_mise_en_phrase() {
+        fn the_too_deep_formula_error_is_put_into_a_sentence() {
             use stokesforge_core::{ColumnFormula, FormulaPart, NodeId};
-            let formule = ColumnFormula::from_parts(vec![
+            let formula = ColumnFormula::from_parts(vec![
                 FormulaPart::Text("(".repeat(101)),
                 FormulaPart::Column(NodeId::from_raw(1)),
                 FormulaPart::Text(")".repeat(101)),
             ]);
-            let erreur = formule.compile().unwrap_err();
-            assert_eq!(erreur, FormulaError::TooDeep);
-            // Comparée en anglais : la langue ne dépend pas de l'environnement.
+            let error = formula.compile().unwrap_err();
+            assert_eq!(error, FormulaError::TooDeep);
+            // Compared in English: the language does not depend on the environment.
             crate::i18n::set_language(crate::i18n::Language::English);
             assert_eq!(
-                error_message(&erreur),
+                error_message(&error),
                 "The formula is nested too deeply. Simplify it (fewer nested parentheses or chained terms)"
             );
-            // Le `Display` du crate du dessous reste de l'anglais brut.
-            assert_eq!(erreur.to_string(), "formula nested too deeply");
-            // Le catalogue français porte la même clé.
+            // The `Display` of the crate below stays raw English.
+            assert_eq!(error.to_string(), "formula nested too deeply");
+            // The French catalog carries the same key.
             let fr = include_str!("../i18n/fr/stokesforge_app.ftl");
             assert!(fr.contains(
                 "error-formula-too-deep = La formule est trop imbriquée. La simplifier (moins de parenthèses imbriquées ou de termes enchaînés)"
@@ -697,19 +697,19 @@ pub mod formula {
     }
 }
 
-/// Erreurs d'un calcul d'analyse (`stokesforge-analysis`, #181).
+/// Errors of an analysis computation (`stokesforge-analysis`, #181).
 pub mod analysis {
     use stokesforge_analysis::expr::{ExprError, ExprErrorKind};
     use stokesforge_analysis::AnalysisError;
 
     use crate::tr;
 
-    /// Un compte pour Fluent, qui ne convertit pas `usize`.
+    /// A count for Fluent, which does not convert `usize`.
     fn number(count: usize) -> i64 {
         i64::try_from(count).unwrap_or(i64::MAX)
     }
 
-    /// La phrase d'une [`AnalysisError`].
+    /// The sentence of an [`AnalysisError`].
     pub fn error_message(error: &AnalysisError) -> String {
         match error {
             AnalysisError::NotEnoughPoints { found, needed } => tr!(
@@ -757,8 +757,8 @@ pub mod analysis {
             AnalysisError::EmptyReference => tr!("error-analysis-empty-reference"),
             AnalysisError::EmptyResponse => tr!("error-analysis-empty-response"),
             AnalysisError::EmptyRange => tr!("error-analysis-empty-range"),
-            // Le nom est une clé interne du crate de calcul : chacune de celles
-            // que l'utilisateur peut provoquer a sa phrase.
+            // The name is an internal key of the computation crate: each one the user can
+            // trigger has its sentence.
             AnalysisError::InvalidParameter { name } => match name.as_str() {
                 "peaks" => tr!("error-analysis-no-peak"),
                 "sigma" => tr!("error-analysis-bad-sigma"),
@@ -775,7 +775,7 @@ pub mod analysis {
         }
     }
 
-    /// La phrase d'une erreur de lecture d'expression de modèle, avec sa position.
+    /// The sentence of a model-expression read error, with its position.
     pub fn expr_message(error: &ExprError) -> String {
         let position = number(error.position);
         match &error.kind {
@@ -820,7 +820,7 @@ pub mod analysis {
         use super::*;
 
         #[test]
-        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+        fn every_variant_has_its_sentence_and_no_jargon() {
             let samples = [
                 AnalysisError::NotEnoughPoints {
                     found: 2,
@@ -859,7 +859,7 @@ pub mod analysis {
                 AnalysisError::LengthMismatch,
                 AnalysisError::OutputUnwritable,
             ];
-            // Un `match` sans `_` : une variante sans exemple ne compile pas.
+            // A `match` without `_`: a variant with no example does not compile.
             for sample in &samples {
                 match sample {
                     AnalysisError::NotEnoughPoints { .. }
@@ -887,24 +887,24 @@ pub mod analysis {
         }
 
         #[test]
-        fn l_erreur_de_profondeur_d_expression_est_mise_en_phrase_avec_sa_position() {
+        fn the_expression_depth_error_is_put_into_a_sentence_with_its_position() {
             use stokesforge_analysis::expr::{Expr, ExprErrorKind};
-            let formule = "(".repeat(101) + "1" + &")".repeat(101);
-            let erreur = Expr::parse(&formule).unwrap_err();
-            assert_eq!(erreur.kind, ExprErrorKind::TooDeep);
-            assert_eq!(erreur.position, 101);
-            // Comparée en anglais : la langue ne dépend pas de l'environnement.
+            let formula = "(".repeat(101) + "1" + &")".repeat(101);
+            let error = Expr::parse(&formula).unwrap_err();
+            assert_eq!(error.kind, ExprErrorKind::TooDeep);
+            assert_eq!(error.position, 101);
+            // Compared in English: the language does not depend on the environment.
             crate::i18n::set_language(crate::i18n::Language::English);
             assert_eq!(
-                expr_message(&erreur),
+                expr_message(&error),
                 "Expression nested too deeply (position 101)"
             );
-            // Enveloppée dans l'erreur d'analyse, la phrase garde le détail.
+            // Wrapped in the analysis error, the sentence keeps the detail.
             assert_eq!(
-                error_message(&AnalysisError::BadExpression(erreur)),
+                error_message(&AnalysisError::BadExpression(error)),
                 "The model expression is invalid: Expression nested too deeply (position 101)"
             );
-            // Le catalogue français porte la même clé et le même champ.
+            // The French catalog carries the same key and the same field.
             let fr = include_str!("../i18n/fr/stokesforge_app.ftl");
             assert!(fr.contains(
                 "error-analysis-expr-too-deep = Expression trop imbriquée (position { $position })"
@@ -913,13 +913,13 @@ pub mod analysis {
     }
 }
 
-/// Erreurs d'affichage d'un graphe (`stokesforge-render`, #255).
+/// Display errors of a graph (`stokesforge-render`, #255).
 pub mod render {
     use stokesforge_render::RenderError;
 
     use crate::tr;
 
-    /// La phrase d'une [`RenderError`].
+    /// The sentence of a [`RenderError`].
     pub fn error_message(error: &RenderError) -> String {
         match error {
             RenderError::UnknownNode(_) => tr!("error-render-unknown-graph"),
@@ -948,12 +948,12 @@ pub mod render {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
         #[test]
-        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+        fn every_variant_has_its_sentence_and_no_jargon() {
             for error in every_variant() {
                 crate::errors::tests_support::check(&error, &error_message(&error));
             }
@@ -961,7 +961,7 @@ pub mod render {
     }
 }
 
-/// Erreurs d'export d'un graphe en SVG, PDF ou PNG (`stokesforge-render-svg`).
+/// Errors exporting a graph to SVG, PDF or PNG (`stokesforge-render-svg`).
 pub mod export {
     use stokesforge_render_svg::export::ExportError;
     use stokesforge_render_svg::pdf::PdfError;
@@ -978,7 +978,7 @@ pub mod export {
         )
     }
 
-    /// La phrase d'une [`SvgError`].
+    /// The sentence of a [`SvgError`].
     pub fn svg_error_message(error: &SvgError) -> String {
         match error {
             SvgError::Drawing(detail) => tr!("error-export-drawing", detail = detail.as_str()),
@@ -987,7 +987,7 @@ pub mod export {
         }
     }
 
-    /// La phrase d'une [`PdfError`].
+    /// The sentence of a [`PdfError`].
     pub fn pdf_error_message(error: &PdfError) -> String {
         match error {
             PdfError::Svg(error) => svg_error_message(error),
@@ -997,7 +997,7 @@ pub mod export {
         }
     }
 
-    /// La phrase d'une [`PngError`].
+    /// The sentence of a [`PngError`].
     pub fn png_error_message(error: &PngError) -> String {
         match error {
             PngError::Svg(error) => svg_error_message(error),
@@ -1015,7 +1015,7 @@ pub mod export {
         }
     }
 
-    /// La phrase d'une [`ExportError`].
+    /// The sentence of an [`ExportError`].
     pub fn error_message(error: &ExportError) -> String {
         match error {
             ExportError::Svg(error) => svg_error_message(error),
@@ -1051,7 +1051,7 @@ pub mod export {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
@@ -1075,7 +1075,7 @@ pub mod export {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
@@ -1106,7 +1106,7 @@ pub mod export {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
@@ -1130,12 +1130,12 @@ pub mod export {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
         #[test]
-        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+        fn every_variant_has_its_sentence_and_no_jargon() {
             for error in svg_variants() {
                 crate::errors::tests_support::check(&error, &svg_error_message(&error));
             }
@@ -1151,9 +1151,9 @@ pub mod export {
         }
 
         #[test]
-        fn les_champs_entrent_dans_la_phrase() {
-            // Ces phrases sont comparées en anglais : la langue ne dépend pas
-            // de l\'environnement (`STOKESFORGE_LANG`, préférences) de celui qui teste.
+        fn the_fields_enter_the_sentence() {
+            // These sentences are compared in English: the language does not depend on the
+            // environment (`STOKESFORGE_LANG`, preferences) of whoever runs the test.
             crate::i18n::set_language(crate::i18n::Language::English);
             assert_eq!(
                 error_message(&ExportError::Write {
@@ -1173,8 +1173,8 @@ pub mod export {
     }
 }
 
-/// Erreurs du moteur de script (`stokesforge-script`, `stokesforge-python`), seulement
-/// avec la feature `python` qui les tire dans l'application.
+/// Errors of the script engine (`stokesforge-script`, `stokesforge-python`),
+/// only with the `python` feature that pulls them into the application.
 #[cfg(feature = "python")]
 pub mod script {
     use stokesforge_python::interpreter::PythonError;
@@ -1182,7 +1182,7 @@ pub mod script {
 
     use crate::tr;
 
-    /// La phrase d'une [`PythonError`].
+    /// The sentence of a [`PythonError`].
     pub fn python_error_message(error: &PythonError) -> String {
         match error {
             PythonError::HomeNotFound(path) => {
@@ -1193,7 +1193,7 @@ pub mod script {
         }
     }
 
-    /// La phrase d'une [`ScriptError`].
+    /// The sentence of a [`ScriptError`].
     pub fn error_message(error: &ScriptError) -> String {
         match error {
             ScriptError::Thread(source) => {
@@ -1225,7 +1225,7 @@ pub mod script {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
@@ -1248,12 +1248,12 @@ pub mod script {
                 };
                 seen[index] = true;
             }
-            assert!(seen.iter().all(|&s| s), "une variante n'a pas d'exemple");
+            assert!(seen.iter().all(|&s| s), "a variant has no example");
             samples
         }
 
         #[test]
-        fn chaque_variante_a_sa_phrase_et_pas_de_jargon() {
+        fn every_variant_has_its_sentence_and_no_jargon() {
             for error in python_variants() {
                 crate::errors::tests_support::check(&error, &python_error_message(&error));
             }
@@ -1264,19 +1264,19 @@ pub mod script {
     }
 }
 
-/// Erreurs du système de fichiers (`std::io::Error`).
+/// File-system errors (`std::io::Error`).
 ///
-/// Aucune famille du dessous ne les traduit : l'application les met en phrase
-/// ici, par leur `ErrorKind`. Exception voulue à la règle « `match` sans `_` » :
-/// `ErrorKind` est `#[non_exhaustive]`, le repli `error-io-other` couvre tout
-/// genre non listé (et en reprend le texte brut du système).
+/// No family below translates them: the application puts them into sentences
+/// here, by their `ErrorKind`. Intended exception to the rule "`match` without
+/// `_`": `ErrorKind` is `#[non_exhaustive]`, the `error-io-other` fallback covers
+/// any kind not listed (and takes the system's raw text from it).
 pub mod io {
     use std::io::ErrorKind;
 
     use crate::tr;
 
-    /// La cause d'une [`std::io::Error`], en groupe nominal ou verbal court,
-    /// destinée à compléter une phrase de contexte (`{ $cause }`).
+    /// The cause of a [`std::io::Error`], as a short noun or verb phrase, meant to
+    /// complete a context sentence (`{ $cause }`).
     pub fn error_message(error: &std::io::Error) -> String {
         match error.kind() {
             ErrorKind::NotFound => tr!("error-io-not-found"),
@@ -1291,8 +1291,8 @@ pub mod io {
             ErrorKind::IsADirectory => tr!("error-io-is-directory"),
             ErrorKind::NotADirectory => tr!("error-io-not-directory"),
             ErrorKind::TimedOut => tr!("error-io-timed-out"),
-            // `ErrorKind` est `#[non_exhaustive]` : un `match` exhaustif est
-            // impossible, le repli reprend le texte brut du système.
+            // `ErrorKind` is `#[non_exhaustive]`: an exhaustive `match` is impossible, the
+            // fallback takes the system's raw text.
             _ => tr!("error-io-other", detail = error.to_string()),
         }
     }
@@ -1303,8 +1303,8 @@ pub mod io {
         use crate::errors::tests_support::check;
 
         #[test]
-        fn chaque_genre_liste_a_sa_phrase_et_le_repli_reprend_le_texte_du_systeme() {
-            let genres = [
+        fn every_listed_kind_has_its_sentence_and_the_fallback_takes_the_system_text() {
+            let kinds = [
                 ErrorKind::NotFound,
                 ErrorKind::PermissionDenied,
                 ErrorKind::AlreadyExists,
@@ -1319,58 +1319,59 @@ pub mod io {
                 ErrorKind::NotADirectory,
                 ErrorKind::TimedOut,
             ];
-            let mut phrases = std::collections::HashSet::new();
-            for genre in genres {
-                let erreur = std::io::Error::from(genre);
-                let phrase = error_message(&erreur);
-                check(&erreur, &phrase);
-                assert!(!phrase.contains("error-io"), "clé non résolue : {phrase}");
-                phrases.insert(phrase);
+            let mut sentences = std::collections::HashSet::new();
+            for kind in kinds {
+                let io_error = std::io::Error::from(kind);
+                let sentence = error_message(&io_error);
+                check(&io_error, &sentence);
+                assert!(!sentence.contains("error-io"), "unresolved key: {sentence}");
+                sentences.insert(sentence);
             }
-            // Deux genres seulement partagent une phrase (disque plein / quota).
-            assert_eq!(phrases.len(), genres.len() - 1);
-            let autre = std::io::Error::other("Device on fire");
-            let phrase = error_message(&autre);
-            check(&autre, &phrase);
-            assert!(phrase.contains("Device on fire"), "{phrase}");
+            // Only two kinds share a sentence (disk full / quota).
+            assert_eq!(sentences.len(), kinds.len() - 1);
+            let other_error = std::io::Error::other("Device on fire");
+            let sentence = error_message(&other_error);
+            check(&other_error, &sentence);
+            assert!(sentence.contains("Device on fire"), "{sentence}");
         }
     }
 }
 
-/// Le contrôle commun des tests de chaque famille.
+/// The check common to the tests of each family.
 #[cfg(any(test, feature = "test-support"))]
 pub mod tests_support {
     use std::fmt::Display;
 
-    /// Mots du jargon interne qu'une phrase d'erreur n'emploie pas
-    /// (`docs/textes-interface.md`, R9). Les `detail` des exemples n'en
-    /// contiennent aucun : un mot interdit ne peut venir que du catalogue.
+    /// Internal jargon words that an error sentence does not use
+    /// (`docs/textes-interface.md`, R9). The `detail`s of the examples contain none:
+    /// a forbidden word can only come from the catalog.
     const JARGON: &[&str] = &[
         "node", "session", "tree", "macro", "command", "handle", "snapshot", "please", "sorry",
     ];
 
-    /// `message` est la phrase du catalogue de `error` : pas vide, sans jargon,
-    /// sans point final ni point d'exclamation, en Sentence case. Elle peut
-    /// coïncider avec le `Display` anglais (« X is not a StokesForge file ») : ce qui
-    /// garantit que la variante est associée, c'est le `match` exhaustif.
+    /// `message` is the catalog sentence of `error`: not empty, without jargon,
+    /// without a final period or exclamation mark, in Sentence case. It may
+    /// coincide with the English `Display` ("X is not a StokesForge file"): what
+    /// guarantees that the variant is mapped is the exhaustive `match`.
+    ///
     pub fn check(error: &dyn Display, message: &str) {
         let raw = error.to_string();
-        assert!(!message.trim().is_empty(), "message vide pour {raw:?}");
+        assert!(!message.trim().is_empty(), "empty message for {raw:?}");
         let lower = message.to_lowercase();
         for word in JARGON {
             assert!(
                 !lower.contains(word),
-                "jargon interne « {word} » dans {message:?}"
+                "internal jargon \"{word}\" in {message:?}"
             );
         }
         assert!(
             !message.ends_with('.') && !message.contains('!'),
-            "ponctuation finale dans {message:?}"
+            "final punctuation in {message:?}"
         );
         let first = message.chars().next();
         assert!(
             first.is_some_and(|c| !c.is_lowercase()),
-            "pas de majuscule initiale dans {message:?}"
+            "no initial capital in {message:?}"
         );
     }
 }

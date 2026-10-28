@@ -3,25 +3,25 @@ name = "stokesforge-app-state"
 version = "1.0.0"
 edition.workspace = true
 license.workspace = true
-description = "État de l'application StokesForge sans interface graphique (#263) : décisions, préférences, sélection, textes et erreurs mises en phrase, testables sans fenêtre."
+description = "StokesForge application state without a graphical interface (#263): decisions, preferences, selection, texts and errors put into sentences, testable without a window."
 
 [lints]
 workspace = true
 
 [features]
 default = []
-# Le pont Python (fil de script + interpréteur embarqué) est optionnel :
-# sans cette feature, le crate compile, teste et s'exécute sans tirer PyO3 ni
-# exiger d'interpréteur vendorisé. La console de script reste visible mais
-# désactivée (cf. `state::AppState::script_available`). `stokesforge-app` la
-# relaie par sa propre feature `python`.
+# The Python bridge (script thread + embedded interpreter) is optional:
+# without this feature, the crate compiles, tests and runs without pulling in
+# PyO3 or requiring a vendored interpreter. The script console stays visible
+# but disabled (see `state::AppState::script_available`). `stokesforge-app`
+# relays it through its own `python` feature.
 python = ["dep:stokesforge-script", "dep:stokesforge-python"]
-# Les gardes d'isolation de ce qui touche à l'utilisateur réel (#250) : le
-# chemin des préférences (`preferences::default_path`), la langue de départ
-# (`i18n::startup_language`) et `set_object_manager_open_for_test` ne sont
-# isolés que sous `cfg(test)`, qui ne vaut que pour les tests de CE crate. Les
-# tests de `stokesforge-app` (qui bâtissent un `AppState`) l'activent par leur
-# dev-dependency. Jamais dans un build normal.
+# The isolation guards for everything that touches the real user (#250): the
+# preferences path (`preferences::default_path`), the startup language
+# (`i18n::startup_language`) and `set_object_manager_open_for_test` are
+# isolated only under `cfg(test)`, which holds only for the tests of THIS
+# crate. The `stokesforge-app` tests (which build an `AppState`) turn it on
+# through their dev-dependency. Never in a normal build.
 test-support = []
 
 [dependencies]
@@ -33,38 +33,38 @@ stokesforge-importer = { path = "../stokesforge-importer" }
 stokesforge-session = { path = "../stokesforge-session" }
 stokesforge-persistence = { path = "../stokesforge-persistence" }
 stokesforge-plot = { path = "../stokesforge-plot" }
-# `RenderError` (mise en phrase dans `errors.rs`) et la géométrie de graphe sans
-# egui.
+# `RenderError` (put into a sentence in `errors.rs`) and the graph geometry
+# without egui.
 stokesforge-render = { path = "../stokesforge-render" }
-# Export du graphe en SVG, PDF ou PNG (issue #34) : le même pipeline que
-# l'écran. Aucune commande : l'export ne touche pas le modèle.
+# Graph export to SVG, PDF or PNG (issue #34): the same pipeline as the
+# screen. No command: the export does not touch the model.
 stokesforge-render-svg = { path = "../stokesforge-render-svg" }
-# Chemins optionnels, activés uniquement par la feature `python` de CE crate :
-# c'est elle qui active la feature `python` de chacun (dont dépend l'existence
-# même de leurs types publics, cf. la doc de tête de leurs `lib.rs`).
+# Optional paths, turned on only by the `python` feature of THIS crate: it
+# turns on the `python` feature of each one (the existence of their public
+# types depends on it, see the top doc of their `lib.rs`).
 stokesforge-script = { path = "../stokesforge-script", optional = true, features = ["python"] }
 stokesforge-python = { path = "../stokesforge-python", optional = true, features = ["python"] }
-# Sélecteur de fichiers natif (`file_picker`). N'apporte ici que
-# `raw-window-handle` : ni egui, ni winit.
+# Native file picker (`file_picker`). Brings in only `raw-window-handle`
+# here: neither egui nor winit.
 rfd = "0.17.2"
 directories = "5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Interface multilingue (issue #41, chantier #39) : Fluent. `fl!`
-# (i18n-embed-fl) vérifie à la compilation qu'une clé et ses arguments existent
-# dans le catalogue `en` ; rust-embed embarque `i18n/` dans le binaire.
-# `fluent-syntax` sert à produire la pseudo-langue `en-XA` depuis le catalogue
-# `en` (`i18n::pseudo`).
+# Multilingual interface (issue #41, work package #39): Fluent. `fl!`
+# (i18n-embed-fl) checks at compile time that a key and its arguments exist
+# in the `en` catalog; rust-embed embeds `i18n/` in the binary.
+# `fluent-syntax` is used to produce the `en-XA` pseudo-locale from the `en`
+# catalog (`i18n::pseudo`).
 i18n-embed = { version = "0.16.0", features = ["fluent-system", "desktop-requester"] }
 i18n-embed-fl = "0.10.1"
 rust-embed = "8.12.0"
 fluent-syntax = "0.12"
 
 [dev-dependencies]
-# `test-support` pour les tests d'intégration de ce crate (#329) : `cfg(test)` ne
-# vaut que pour ses tests unitaires. Sans cette ligne, `cargo test -p
-# stokesforge-app-state --test <nom>`, lancé seul, lit (et peut écrire) le vrai
-# `preferences.json` ; en `--workspace`, l'unification des features la masquait.
+# `test-support` for the integration tests of this crate (#329): `cfg(test)`
+# holds only for its unit tests. Without this line, `cargo test -p
+# stokesforge-app-state --test <name>`, run alone, reads (and may write) the
+# real `preferences.json`; with `--workspace`, feature unification hid it.
 stokesforge-app-state = { path = ".", features = ["test-support"] }
 stokesforge-arch-guard = { path = "../stokesforge-arch-guard" }
 tempfile = "3"

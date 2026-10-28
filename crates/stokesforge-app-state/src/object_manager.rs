@@ -1,29 +1,29 @@
-//! Projection en lecture du graphe actif pour Object Manager (#81–85).
+//! Read-only projection of the active graph for Object Manager (#81–85).
 //!
-//! Le panneau ne possède ni contenus ni sélection : le spec vient de
-//! l'instantané, la sélection de GraphView. Les parents commandent tous leurs
-//! contenus en une écriture du spec ; les axes et la disposition restent en
-//! place. Le groupe ne commande que les séries. Un parent mixte se révèle au
-//! clic. Les adresses restent locales au spec : un déplacement suit le contenu,
-//! une suppression efface la sélection plutôt que de viser son voisin.
+//! The panel owns neither contents nor selection: the spec comes from the
+//! snapshot, the selection from GraphView. Parents control all their contents
+//! in a single write of the spec; the axes and the layout stay in place. The
+//! group controls only the series. A mixed parent reveals itself on click.
+//! Addresses stay local to the spec: a move follows the content, a deletion
+//! clears the selection rather than aiming at its neighbor.
 //!
-//! Axes (#111, #147, #171, #176) : sous chaque calque, un groupe « Axes »
-//! réunit une ligne par axe tracé. Il est caché par défaut et listé par sa
-//! propre bascule « Show Axes » (même motif que les textes,
-//! `object_manager_show_scales`). La case d'un axe commande `AxisSpec::visible`
-//! (ligne, graduations et libellés d'un coup) ; pour le haut et la droite d'un
-//! calque ordinaire, ce sont des **axes miroirs** (#176) et la case commande
-//! `AxisSpec::mirror` — grisée quand un calque superposé occupe ce côté. La
-//! case du groupe ([`VisibilityTarget::Axes`]) commande ses axes. Les cases du
-//! graphique et du calque ne comptent les axes que **listés** (bascule « Show
-//! Axes », [`Shown::scales`]) ; la case du groupe de tracés n'a que ses séries.
+//! Axes (#111, #147, #171, #176): under each layer, an "Axes" group gathers
+//! one row per plotted axis. It is hidden by default and listed by its own
+//! "Show Axes" toggle (same pattern as the texts, `object_manager_show_scales`).
+//! An axis's checkbox controls `AxisSpec::visible` (line, ticks and labels at
+//! once); for the top and the right of an ordinary layer, these are **mirror
+//! axes** (#176) and the checkbox controls `AxisSpec::mirror` — disabled when
+//! an overlaid layer occupies that side. The group's checkbox
+//! ([`VisibilityTarget::Axes`]) controls its axes. The graph's and the layer's
+//! checkboxes count axes only when **listed** ("Show Axes" toggle,
+//! [`Shown::scales`]); the plot group's checkbox has only its series.
 //!
-//! Vue par défaut (#102, #214) : calques, groupes de tracés et séries, plus les
-//! objets libres (formes, textes libres). Les textes liés — titre du graphique
-//! et des calques, titres d'axes, légende — ne sont jamais listés : ils
-//! s'éditent par double-clic ou dans les propriétés. L'état d'une case parente
-//! et son basculement ne comptent que les enfants **affichés** dans l'arbre
-//! (#173, [`VisibilityTarget::contents_shown`]).
+//! Default view (#102, #214): layers, plot groups and series, plus the free
+//! objects (shapes, free texts). Linked texts — graph and layer titles, axis
+//! titles, legend — are never listed: they are edited by double-click or in
+//! the properties. The state of a parent checkbox and its toggling count only
+//! the children **shown** in the tree (#173,
+//! [`VisibilityTarget::contents_shown`]).
 
 use stokesforge_core::{series_label, NodeId, Tree};
 use stokesforge_plot::{
@@ -36,20 +36,20 @@ pub enum VisibilityTarget {
     Graph,
     Panel(usize),
     Group(usize),
-    /// Un groupe de séries (#197) : un parent comme les autres, dont la case
-    /// ne commande que ses membres.
+    /// A series group (#197): a parent like the others, whose checkbox
+    /// controls only its members.
     SeriesGroup(SeriesGroupRef),
     Series(SeriesRef),
     Text(TextTarget),
     Annotation(AnnotationRef),
     Shape(ShapeRef),
-    /// Une échelle (ligne d'axe, graduations et libellés) : `AxisSpec::visible`.
+    /// A scale (axis line, ticks and labels): `AxisSpec::visible`.
     Axis(AxisRef),
-    /// Le groupe des quatre axes d'un calque : il ne commande que ces axes.
+    /// The group of a layer's four axes: it controls only those axes.
     Axes(usize),
 }
 
-/// Un axe d'un calque, adressé par l'indice du calque dans `PlotSpec::panels`.
+/// An axis of a layer, addressed by the layer's index in `PlotSpec::panels`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AxisRef {
     pub panel: usize,
@@ -60,9 +60,9 @@ impl AxisRef {
     fn get(self, spec: &PlotSpec) -> Option<&stokesforge_plot::AxisSpec> {
         spec.panels.get(self.panel).map(|p| p.axis(self.side))
     }
-    /// L'axe est un miroir (#176) : le haut d'un calque ordinaire, ou sa droite
-    /// quand aucune série n'y est rattachée. Sa case commande alors
-    /// `AxisSpec::mirror`, et non `visible`.
+    /// The axis is a mirror (#176): the top of an ordinary layer, or its right
+    /// when no series is attached to it. Its checkbox then controls
+    /// `AxisSpec::mirror`, not `visible`.
     fn is_mirror(self, spec: &PlotSpec) -> bool {
         spec.panels.get(self.panel).is_some_and(|panel| {
             panel.overlay.is_none()
@@ -73,8 +73,8 @@ impl AxisRef {
                 }
         })
     }
-    /// Un miroir que la figure ignore : un calque superposé de la même case a
-    /// déjà son propre axe de ce côté (#176). Sa case est grisée.
+    /// A mirror that the figure ignores: an overlaid layer of the same cell
+    /// already has its own axis on that side (#176). Its checkbox is disabled.
     fn blocked(self, spec: &PlotSpec) -> bool {
         let Some(panel) = spec.panels.get(self.panel) else {
             return false;
@@ -88,7 +88,7 @@ impl AxisRef {
                     })
             })
     }
-    /// La valeur de la case : le miroir ou la visibilité de l'axe.
+    /// The checkbox value: the mirror or the axis's visibility.
     fn shown(self, spec: &PlotSpec) -> Option<bool> {
         let axis = self.get(spec)?;
         Some(if self.is_mirror(spec) {
@@ -114,7 +114,7 @@ impl AxisRef {
     }
 }
 
-/// Les quatre axes d'un calque ordinaire, dans l'ordre d'affichage de l'arbre.
+/// The four axes of an ordinary layer, in the tree's display order.
 pub const AXIS_SIDES: [AxisSide; 4] = [
     AxisSide::Bottom,
     AxisSide::Left,
@@ -122,12 +122,13 @@ pub const AXIS_SIDES: [AxisSide; 4] = [
     AxisSide::Top,
 ];
 
-/// Les axes qu'un calque affiche vraiment, donc ceux que l'arbre liste (#171).
-/// Un axe que la figure ne trace pas n'a pas de ligne : sa case serait sans effet.
+/// The axes that a layer really displays, hence those the tree lists (#171).
+/// An axis that the figure does not draw has no row: its checkbox would have
+/// no effect.
 ///
-/// Un calque superposé range son axe X dans `bottom` et son axe Y dans
-/// `left`, mais les affiche en haut et à droite, et seulement s'il a une
-/// échelle propre (`x_top` / `y_right`) : ses autres lignes seraient mortes.
+/// An overlaid layer stores its X axis in `bottom` and its Y axis in
+/// `left`, but displays them at the top and on the right, and only if it has
+/// its own scale (`x_top` / `y_right`): its other rows would be dead.
 pub fn axis_sides(panel: &stokesforge_plot::PanelSpec) -> Vec<AxisSide> {
     match panel.overlay {
         Some(overlay) => [
@@ -137,13 +138,13 @@ pub fn axis_sides(panel: &stokesforge_plot::PanelSpec) -> Vec<AxisSide> {
         .into_iter()
         .filter_map(|(shown, side)| shown.then_some(side))
         .collect(),
-        // Haut et droite : un axe miroir de celui du bas / de gauche (#176), ou,
-        // à droite, le vrai axe des séries qui y sont rattachées.
+        // Top and right: a mirror axis of the bottom / left one (#176), or,
+        // on the right, the real axis of the series attached to it.
         None => AXIS_SIDES.to_vec(),
     }
 }
-/// Ce que l'arbre affiche, donc ce que comptent les cases parentes (#173) :
-/// le groupe « Axes » est listé par sa bascule.
+/// What the tree displays, hence what the parent checkboxes count (#173):
+/// the "Axes" group is listed by its toggle.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Shown {
     pub scales: bool,
@@ -151,7 +152,7 @@ pub struct Shown {
 }
 
 impl Shown {
-    /// Objets libres listés, axes non (feuilles : la valeur n'importe pas).
+    /// Free objects listed, axes not (leaves: the value does not matter).
     pub const BASE: Self = Self {
         scales: false,
         objects: true,
@@ -175,13 +176,13 @@ pub struct Visibility {
 }
 
 impl VisibilityTarget {
-    /// Feuilles concernées ; un titre vide ne rend pas un parent indéterminé.
+    /// Leaves concerned; an empty title does not make a parent indeterminate.
     pub fn contents(self, spec: &PlotSpec) -> Vec<Self> {
         self.contents_shown(spec, Shown::BASE)
     }
-    /// Feuilles que l'arbre **affiche** sous ce parent (#173) : sans les
-    /// textes liés (#214) ni les axes non listés, qui ne comptent ni dans
-    /// l'état de la case ni dans son basculement.
+    /// Leaves that the tree **displays** under this parent (#173): without the
+    /// linked texts (#214) or the unlisted axes, which count neither in the
+    /// checkbox's state nor in its toggling.
     pub fn contents_shown(self, spec: &PlotSpec, shown: Shown) -> Vec<Self> {
         if let Self::Axes(index) = self {
             let Some(panel) = spec.panels.get(index) else {
@@ -255,15 +256,15 @@ impl VisibilityTarget {
             | Self::Axes(_) => None,
         }
     }
-    /// Vrai pour l'axe miroir qu'un calque du dessus dessine déjà (#176) : la
-    /// raison de sa case grisée (#226).
+    /// True for the mirror axis that a layer above already draws (#176): the
+    /// reason for its disabled checkbox (#226).
     pub fn is_blocked_mirror(self, spec: &PlotSpec) -> bool {
         matches!(self, Self::Axis(axis) if axis.blocked(spec))
     }
     pub fn visibility(self, spec: &PlotSpec) -> Visibility {
         self.visibility_shown(spec, Shown::BASE)
     }
-    /// État de la case, d'après les seuls enfants affichés (#173).
+    /// State of the checkbox, from the displayed children only (#173).
     pub fn visibility_shown(self, spec: &PlotSpec, shown: Shown) -> Visibility {
         let values: Vec<bool> = self
             .contents_shown(spec, shown)
@@ -277,12 +278,12 @@ impl VisibilityTarget {
             enabled: !values.is_empty() && !blocked,
         }
     }
-    /// Cible périmée ou valeur identique : aucune entrée d'historique.
+    /// Stale target or identical value: no history entry.
     pub fn set(self, spec: &mut PlotSpec, visible: bool) -> bool {
         self.set_shown(spec, visible, Shown::BASE)
     }
-    /// Comme [`Self::set`], sur les seuls enfants affichés (#173) : un texte
-    /// caché garde son état.
+    /// Like [`Self::set`], on the displayed children only (#173): a hidden
+    /// text keeps its state.
     pub fn set_shown(self, spec: &mut PlotSpec, visible: bool, shown: Shown) -> bool {
         let mut changed = false;
         for leaf in self.contents_shown(spec, shown) {
@@ -349,7 +350,7 @@ impl VisibilityTarget {
     }
 }
 
-/// Les adresses de rang suivent le contenu après suppression d'un voisin.
+/// Rank addresses follow the content after a neighbor is deleted.
 pub fn selection_after_remove(
     selected: Option<VisibilityTarget>,
     removed: VisibilityTarget,
@@ -376,10 +377,10 @@ pub fn selection_after_remove(
     })
 }
 
-/// Undo/redo peut changer les rangs sans passer par le geste d'interface.
-/// Retrouver le contenu exact permet de suivre une permutation ; une édition
-/// de style ou de texte conserve l'adresse quand le nombre de contenus reste
-/// identique. Sans correspondant après une suppression, on désélectionne.
+/// Undo/redo can change ranks without going through the interface gesture.
+/// Finding the exact content makes it possible to follow a permutation; a
+/// style or text edit keeps the address when the number of contents stays the
+/// same. With no match after a deletion, the selection is cleared.
 pub fn selection_after_history(
     previous: &PlotSpec,
     next: &PlotSpec,
@@ -464,8 +465,8 @@ pub struct SeriesRow {
     pub label: String,
     pub spec: SeriesSpec,
     pub selected: bool,
-    /// Une colonne de la série vient d'un calcul pas à jour et le graphe
-    /// veut l'avertissement (#198).
+    /// A column of the series comes from an out-of-date calculation and the
+    /// graph wants the warning (#198).
     pub stale: bool,
 }
 #[derive(Debug, Clone, Copy)]
@@ -481,21 +482,21 @@ pub struct ObjectRow {
     pub kind: ObjectKind,
     pub selected: bool,
 }
-/// Un groupe de séries listé sous un calque (#197).
+/// A series group listed under a layer (#197).
 #[derive(Debug, Clone)]
 pub struct GroupRow {
     pub target: SeriesGroupRef,
-    /// Le nom affiché : celui qu'on a donné, sinon « Group n ».
+    /// The displayed name: the one given, otherwise "Group n".
     pub name: String,
-    /// Rangs des membres dans [`LayerRow::series`].
+    /// Ranks of the members in [`LayerRow::series`].
     pub members: Vec<usize>,
     pub selected: bool,
 }
-/// Un emplacement de la liste des séries d'un calque : la projection commune
-/// à l'Object Manager et à la fenêtre des séries (#197).
+/// A slot of a layer's series list: the projection shared by the Object
+/// Manager and the series window (#197).
 #[derive(Debug, Clone)]
 pub enum LayerSlot {
-    /// Rang d'une série hors groupe dans [`LayerRow::series`].
+    /// Rank of a series outside any group in [`LayerRow::series`].
     Single(usize),
     Group(GroupRow),
 }
@@ -503,10 +504,10 @@ pub enum LayerSlot {
 pub struct LayerRow {
     pub index: usize,
     pub series: Vec<SeriesRow>,
-    /// Les séries rangées en emplacements : une série seule ou un groupe et
-    /// tous ses membres (`PanelSpec::slots`).
+    /// The series arranged in slots: a lone series or a group and all its
+    /// members (`PanelSpec::slots`).
     pub slots: Vec<LayerSlot>,
-    /// Les lignes du groupe « Axes » (#111) ; vide sans la bascule.
+    /// The rows of the "Axes" group (#111); empty without the toggle.
     pub axes: Vec<ObjectRow>,
     pub objects: Vec<ObjectRow>,
 }
@@ -517,8 +518,8 @@ pub struct ObjectTree {
     pub layers: Vec<LayerRow>,
 }
 
-/// Le nom d'un axe **à l'endroit où il est affiché** : l'axe X d'un calque
-/// superposé est en haut, son axe Y à droite (#171).
+/// The name of an axis **where it is displayed**: the X axis of an overlaid
+/// layer is at the top, its Y axis on the right (#171).
 fn axis_label(panel: &stokesforge_plot::PanelSpec, side: AxisSide) -> String {
     if panel.overlay.is_some() {
         let axis = match side {
@@ -536,9 +537,9 @@ fn axis_label(panel: &stokesforge_plot::PanelSpec, side: AxisSide) -> String {
     crate::tr!("plot-target-axis", axis = axis)
 }
 
-/// Le nom affiché d'un groupe de séries (#197) : celui qu'on lui a donné,
-/// sinon « Group n ». Partout où un groupe porte un nom (liste des séries,
-/// Object Manager, choix d'appartenance), il vient d'ici.
+/// The displayed name of a series group (#197): the one given to it, otherwise
+/// "Group n". Everywhere a group carries a name (series list, Object Manager,
+/// membership choice), it comes from here.
 pub fn group_title(panel: &PanelSpec, group: u32) -> String {
     panel.group_label(group).map_or_else(
         || crate::tr!("curve-group-name", number = group),
@@ -555,15 +556,14 @@ pub fn object_tree(tree: &Tree, graph: NodeId, selected: Option<SeriesRef>) -> O
         true,
     )
 }
-/// Les textes liés (titre du graphique et des calques, titres d'axes,
-/// légende) ne sont jamais listés (#214) : ils s'éditent par double-clic sur la
-/// figure ou dans la fenêtre des propriétés. Le groupe « Objects » ne reçoit
-/// que les objets libres (textes libres, formes), et seulement avec
-/// `show_objects`.
+/// Linked texts (graph and layer titles, axis titles, legend) are never listed
+/// (#214): they are edited by double-click on the figure or in the properties
+/// window. The "Objects" group receives only the free objects (free texts,
+/// shapes), and only with `show_objects`.
 ///
-/// `show_scales` : lister sous chaque calque le groupe « Axes », une ligne par
-/// axe (les quatre, y compris ceux masqués par défaut) (#111). Faux par
-/// défaut, même motif.
+/// `show_scales`: list the "Axes" group under each layer, one row per axis
+/// (all four, including those hidden by default) (#111). False by default,
+/// same pattern.
 pub fn object_tree_with_selection(
     tree: &Tree,
     graph: NodeId,
@@ -584,8 +584,8 @@ pub fn object_tree_with_selection(
     ))
 }
 
-/// [`object_tree_with_selection`] pour un spec donné : l'aperçu d'un
-/// glisser-déposer en cours se peint sans que le modèle ait changé.
+/// [`object_tree_with_selection`] for a given spec: the preview of a drag and
+/// drop in progress is painted without the model having changed.
 pub fn object_tree_of_spec(
     tree: &Tree,
     graph: NodeId,
@@ -706,19 +706,19 @@ pub fn object_tree_of_spec(
     }
 }
 
-/// Les décisions pures de la projection, sans fenêtre (venues d'`app.rs` avec
-/// #121 ; le contrat bout en bout, annulable et persistant, est dans
+/// The pure decisions of the projection, without a window (came from `app.rs`
+/// with #121; the end-to-end contract, undoable and persistent, is in
 /// `tests/shell.rs`).
 #[cfg(test)]
 mod tests {
     use stokesforge_core::NodeId;
     use stokesforge_plot::{PlotSpec, SeriesRef, SeriesSpec};
 
-    /// #171 : un calque superposé ne liste que les axes qu'il affiche, nommés
-    /// là où ils sont affichés ; la case de son groupe « Axes » ne commande
-    /// que ceux-là.
+    /// #171: an overlaid layer lists only the axes it displays, named where
+    /// they are displayed; the checkbox of its "Axes" group controls only
+    /// those.
     #[test]
-    fn un_calque_superpose_liste_ses_axes_la_ou_ils_sont_affiches() {
+    fn an_overlaid_layer_lists_its_axes_where_they_are_displayed() {
         use crate::object_manager::{axis_label, axis_sides, VisibilityTarget as T};
         use stokesforge_plot::{AxisSide, OverlaySpec, PanelSpec, Panels};
         let base = PanelSpec::at(0, 0);
@@ -739,10 +739,10 @@ mod tests {
         assert_eq!(T::Axes(0).contents(&spec).len(), 4);
         assert_eq!(T::Axes(1).contents(&spec).len(), 2);
     }
-    /// #176 : les lignes haut et droite d'un calque ordinaire commandent le
-    /// miroir ; un calque superposé qui occupe le côté grise la case.
+    /// #176: the top and right rows of an ordinary layer control the mirror;
+    /// an overlaid layer that occupies the side disables the checkbox.
     #[test]
-    fn les_cases_haut_et_droite_commandent_les_miroirs() {
+    fn the_top_and_right_checkboxes_control_the_mirrors() {
         use crate::object_manager::{AxisRef, VisibilityTarget as T};
         use stokesforge_plot::{AxisSide, OverlaySpec, PanelSpec, Panels};
         let base = PanelSpec::at(0, 0);
@@ -759,24 +759,21 @@ mod tests {
         assert!(top.set(&mut spec, true) && right.set(&mut spec, true));
         let panel = &spec.panels[0];
         assert!(panel.top.mirror && panel.right.mirror);
-        assert!(
-            !panel.top.visible,
-            "la visibilité de l'axe n'est pas touchée"
-        );
+        assert!(!panel.top.visible, "the axis's visibility is not touched");
         assert!(panel.mirrors_top() && panel.mirrors_right());
         assert!(top.visibility(&spec).checked);
-        // Un calque superposé aux axes propres prime : cases grisées.
-        let haut = PanelSpec::overlay_on(&base, OverlaySpec::new(true, false));
-        spec.panels = Panels::new(vec![spec.panels[0].clone(), haut]);
+        // An overlaid layer with its own axes takes precedence: checkboxes disabled.
+        let upper = PanelSpec::overlay_on(&base, OverlaySpec::new(true, false));
+        spec.panels = Panels::new(vec![spec.panels[0].clone(), upper]);
         assert!(!top.visibility(&spec).enabled);
         assert!(right.visibility(&spec).enabled);
     }
 
-    /// Axes listés (« Show Axes ») : les cases du calque et du graphique les
-    /// comptent et les commandent, comme tout enfant affiché ; le groupe de
-    /// tracés, lui, n'a que ses séries.
+    /// Listed axes ("Show Axes"): the layer's and the graph's checkboxes count
+    /// and control them, like any displayed child; the plot group, for its
+    /// part, has only its series.
     #[test]
-    fn les_axes_listes_comptent_pour_le_calque_et_le_graphique() {
+    fn listed_axes_count_for_the_layer_and_the_graph() {
         use crate::object_manager::{Shown, VisibilityTarget as T};
         use stokesforge_plot::{PanelSpec, Panels};
         let mut base = PanelSpec::at(0, 0);
@@ -786,47 +783,47 @@ mod tests {
             scales: true,
             ..Shown::BASE
         };
-        // Série décochée, axes cochés : le calque et le graphique sont mixtes.
+        // Series unchecked, axes checked: the layer and the graph are mixed.
         assert!(T::Group(0).set_shown(&mut spec, false, axes));
         assert!(T::Group(0).visibility_shown(&spec, axes).enabled);
         for parent in [T::Panel(0), T::Graph] {
             assert!(parent.visibility_shown(&spec, axes).mixed, "{parent:?}");
             assert!(!parent.visibility_shown(&spec, Shown::BASE).mixed);
         }
-        // Un clic sur le calque ne laisse pas les axes seuls cochés.
+        // A click on the layer does not leave the axes alone checked.
         assert!(T::Panel(0).set_shown(&mut spec, false, axes));
         assert!(!spec.panels[0].bottom.visible && !spec.panels[0].left.visible);
         assert!(!T::Panel(0).visibility_shown(&spec, axes).mixed);
     }
 
-    /// #173, #214 : un texte lié n'est jamais listé ; il ne rend pas son
-    /// parent indéterminé et un clic sur ce parent ne le bascule pas.
+    /// #173, #214: a linked text is never listed; it does not make its parent
+    /// indeterminate and a click on that parent does not toggle it.
     #[test]
-    fn un_parent_ne_tient_compte_que_des_enfants_affiches() {
+    fn a_parent_only_accounts_for_displayed_children() {
         use crate::object_manager::{Shown, VisibilityTarget as T};
         use stokesforge_plot::{OverlaySpec, PanelSpec, Panels, TextTarget};
         let mut base = PanelSpec::at(0, 0);
         base.series.push(SeriesSpec::new(NodeId::from_raw(900)));
-        let mut haut = PanelSpec::overlay_on(&base, OverlaySpec::default());
-        haut.series.push(SeriesSpec::new(NodeId::from_raw(901)));
-        let mut spec = PlotSpec::empty("Test").with_panels(Panels::new(vec![base, haut]));
+        let mut upper = PanelSpec::overlay_on(&base, OverlaySpec::default());
+        upper.series.push(SeriesSpec::new(NodeId::from_raw(901)));
+        let mut spec = PlotSpec::empty("Test").with_panels(Panels::new(vec![base, upper]));
         spec.title = String::new();
-        // La légende du calque 2 est masquée à la création.
-        let legende = T::Text(TextTarget::Legend { panel: 1 });
-        assert_eq!(legende.value(&spec), Some(false));
+        // The legend of layer 2 is hidden at creation.
+        let legend = T::Text(TextTarget::Legend { panel: 1 });
+        assert_eq!(legend.value(&spec), Some(false));
         for parent in [T::Graph, T::Panel(1)] {
-            let affiche = parent.visibility_shown(&spec, Shown::BASE);
-            assert!(affiche.checked && !affiche.mixed, "{parent:?}");
+            let shown = parent.visibility_shown(&spec, Shown::BASE);
+            assert!(shown.checked && !shown.mixed, "{parent:?}");
         }
-        // Décocher puis recocher le parent laisse le texte dans son état.
+        // Unchecking then rechecking the parent leaves the text in its state.
         assert!(T::Panel(1).set_shown(&mut spec, false, Shown::BASE));
-        assert_eq!(legende.value(&spec), Some(false));
+        assert_eq!(legend.value(&spec), Some(false));
         assert!(T::Panel(1).set_shown(&mut spec, true, Shown::BASE));
-        assert_eq!(legende.value(&spec), Some(false));
+        assert_eq!(legend.value(&spec), Some(false));
     }
 
     #[test]
-    fn supprimer_un_voisin_ne_selectionne_pas_le_suivant() {
+    fn deleting_a_neighbor_does_not_select_the_next_one() {
         use crate::object_manager::{selection_after_remove, VisibilityTarget as T};
         use stokesforge_plot::{AnnotationRef, ShapeRef};
         let a = AnnotationRef { panel: 1, index: 3 };
@@ -854,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn undo_redo_suit_la_serie_reordonnee_et_garde_une_edition_de_style() {
+    fn undo_redo_follows_the_reordered_series_and_keeps_a_style_edit() {
         use crate::object_manager::{selection_after_history, VisibilityTarget as T};
         let mut before = PlotSpec::default();
         for name in ["A", "B", "C"] {

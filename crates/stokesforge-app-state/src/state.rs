@@ -1,48 +1,47 @@
-//! L'état du banc d'essai, **sans aucune dépendance à egui**.
+//! The state of the test bench, **with no dependency on egui**.
 //!
-//! # Pourquoi ce découpage
+//! # Why this split
 //!
-//! Une fenêtre ne se teste pas en intégration continue. Toute la logique du
-//! banc vit donc ici, pilotée par un enum d'[`Action`] ; la couche `eframe`
-//! (module `stokesforge_app::app`) ne fait que traduire clavier et souris en actions
-//! et peindre l'état. C'est ce qui rend la boucle complète — modèle →
-//! commande → annulation → sauvegarde → rechargement — vérifiable
-//! automatiquement (`tests/shell.rs`).
+//! A window cannot be tested in continuous integration. All the bench logic
+//! therefore lives here, driven by an [`Action`] enum; the `eframe` layer
+//! (module `stokesforge_app::app`) only translates keyboard and mouse into
+//! actions and paints the state. This is what makes the complete loop — model →
+//! command → undo → save → reload — checkable automatically
+//! (`tests/shell.rs`).
 //!
-//! # Deux règles de conduite
+//! # Two rules of conduct
 //!
-//! 1. [`AppState::dispatch`] **ne rend jamais d'erreur** : toute erreur
-//!    devient un [`StatusMessage`] affiché à l'utilisateur. Un banc d'essai
-//!    qui meurt sur une saisie invalide ne prouve rien.
-//! 2. L'instantané détenu est **figé** (l'arbre du modèle est persistant) : il
-//!    faut le redemander à l'acteur après chaque mutation, ce que fait
-//!    [`AppState::refresh`], appelé par `dispatch` après toute action qui a pu
-//!    changer le modèle.
+//! 1. [`AppState::dispatch`] **never returns an error**: every error becomes
+//!    a [`StatusMessage`] shown to the user. A test bench that dies on an
+//!    invalid input proves nothing.
+//! 2. The snapshot it holds is **frozen** (the model tree is persistent): it
+//!    must be requested again from the actor after each mutation, which is
+//!    what [`AppState::refresh`] does, called by `dispatch` after any action
+//!    that may have changed the model.
 //!
-//! # Le script Python (feature `python`)
+//! # The Python script (feature `python`)
 //!
-//! Trois décisions, prises ici et nulle part ailleurs :
+//! Three decisions, made here and nowhere else:
 //!
-//! 1. **L'interpréteur ne démarre jamais à l'ouverture de la fenêtre.**
-//!    [`AppState::new`] ne construit ni ne touche à `stokesforge_script::
-//!    ScriptEngine` ; seul le premier [`Action::RunScript`] le fait, via
-//!    `AppState::run_script`. Le temps de démarrage de l'interpréteur est
-//!    l'un des motifs du portage — le perdre à l'ouverture annulerait le
-//!    bénéfice.
-//! 2. **`RunScript` ne bloque jamais l'appelant.** `ScriptEngine::run`, lui,
-//!    bloque jusqu'au terme du script — l'appeler depuis la boucle de rendu
-//!    figerait la fenêtre, y compris le bouton « Arrêter ». `run_script` lance
-//!    donc (la création paresseuse du moteur comprise) sur un **fil détaché**
-//!    et revient aussitôt ; [`AppState::poll_script`], à appeler à **chaque
-//!    image** par `stokesforge_app::app` (et par un test qui attend une exécution),
-//!    sonde le résultat par `try_recv` et l'applique dès qu'il est prêt —
-//!    rafraîchissement de l'instantané compris. C'est ce qui rend `dispatch`
-//!    sûr à appeler depuis la boucle de rendu pour **toutes** les actions,
-//!    script inclus, sans cas particulier côté `stokesforge_app::app`.
-//! 3. **Une exception de script n'est pas une erreur d'application.** Elle
-//!    atterrit dans la sortie ([`AppState::script_output`]) avec sa trace
-//!    d'appels ; le message de statut posé par `poll_script` reste neutre
-//!    (niveau `Info`), et l'état reste utilisable.
+//! 1. **The interpreter never starts when the window opens.**
+//!    [`AppState::new`] neither builds nor touches `stokesforge_script::
+//!    ScriptEngine`; only the first [`Action::RunScript`] does, through
+//!    `AppState::run_script`. The interpreter startup time is one of the
+//!    reasons for the port — losing it at opening would cancel the benefit.
+//! 2. **`RunScript` never blocks the caller.** `ScriptEngine::run`, on the
+//!    other hand, blocks until the script ends — calling it from the render
+//!    loop would freeze the window, including the "Stop" button. `run_script`
+//!    therefore starts (lazy engine creation included) on a **detached
+//!    thread** and returns at once; [`AppState::poll_script`], to be called
+//!    on **every frame** by `stokesforge_app::app` (and by a test that waits
+//!    for a run), polls the result with `try_recv` and applies it as soon as
+//!    it is ready — snapshot refresh included. This is what makes `dispatch`
+//!    safe to call from the render loop for **all** actions, script included,
+//!    with no special case on the `stokesforge_app::app` side.
+//! 3. **A script exception is not an application error.** It lands in the
+//!    output ([`AppState::script_output`]) with its call trace; the status
+//!    message set by `poll_script` stays neutral (level `Info`), and the state
+//!    remains usable.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -87,1024 +86,1016 @@ pub use analysis::{CalculationDelete, StaleExport};
 pub use autosave::{RecoveryRow, AUTOSAVE_RETRY};
 pub use column_use::FullColumnsCopy;
 
-/// Durée pendant laquelle une commande attend la fin du recalcul de formules
-/// qu'elle a lancé avant de rendre la main à l'interface (#239) : un recalcul
-/// plus court que ça reste invisible et synchrone.
+/// How long a command waits for the formula recalculation it started to
+/// finish before handing control back to the interface (#239): a recalculation
+/// shorter than that stays invisible and synchronous.
 const RECALC_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 
-/// Ce que l'utilisateur peut demander. La couche fenêtre ne fait que produire
-/// ces valeurs ; elle ne touche jamais l'acteur directement.
-// `ImportFiles` porte une recette d'import entière, bien plus grosse que les
-// autres variantes : l'`Action` est consommée aussitôt, le boîtage n'y gagnerait rien.
+/// What the user can ask for. The window layer only produces these values; it
+/// never touches the actor directly.
+// `ImportFiles` carries a whole import recipe, much bigger than the other
+// variants: the `Action` is consumed at once, boxing would gain nothing.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
-    /// Annule la dernière entrée d'historique.
+    /// Undoes the last history entry.
     Undo,
-    /// Rétablit la dernière entrée annulée.
+    /// Redoes the last undone entry.
     Redo,
-    /// Enregistre le projet dans le fichier courant ([`AppState::path`]).
+    /// Saves the project to the current file ([`AppState::path`]).
     Save,
-    /// Enregistre sous `path` et en fait le fichier courant. Sur échec, le
-    /// chemin précédent est rétabli : le Ctrl+S suivant n'écrit pas sur le
-    /// fichier qui vient d'échouer (#315).
+    /// Saves as `path` and makes it the current file. On failure, the previous
+    /// path is restored: the next Ctrl+S does not write to the file that just
+    /// failed (#315).
     SaveAs {
-        /// Destination choisie.
+        /// Chosen destination.
         path: String,
     },
-    /// Recharge le projet depuis le fichier courant.
+    /// Reloads the project from the current file.
     Load,
-    /// Demande un projet vide ; attend la réponse « Discard Changes · Cancel ·
-    /// Save » si du travail serait perdu (S-F3, #229).
+    /// Asks for an empty project; waits for the answer "Discard Changes · Cancel ·
+    /// Save" if work would be lost (S-F3, #229).
     NewProject {
-        /// Saisie encore locale à une vue, notamment une fenêtre détachée.
+        /// Input still local to a view, notably a detached window.
         pending_edits: bool,
     },
-    /// Demande d'ouvrir le projet `path` (File › Open…) ; même attente que
-    /// [`Action::NewProject`]. Un échec de lecture garde le projet et le
-    /// chemin courants et se dit par un dialogue bloquant (S-M8).
+    /// Asks to open the project `path` (File › Open…); same wait as
+    /// [`Action::NewProject`]. A read failure keeps the current project and
+    /// path and is reported by a blocking dialog (S-M8).
     OpenProject {
-        /// Fichier choisi.
+        /// Chosen file.
         path: String,
-        /// Saisie encore locale à une vue.
+        /// Input still local to a view.
         pending_edits: bool,
     },
-    /// Demande de quitter (Quit, fermeture de la fenêtre) ; même attente.
-    /// Quand rien ne retient plus l'application,
-    /// [`AppState::take_quit_ready`] le dit à la fenêtre.
+    /// Asks to quit (Quit, window close); same wait. When nothing holds the
+    /// application back any more, [`AppState::take_quit_ready`] tells the
+    /// window.
     Quit {
-        /// Saisie encore locale à une vue.
+        /// Input still local to a view.
         pending_edits: bool,
     },
-    /// Réponse au dialogue « Discard Changes · Cancel · Save » (S-F4).
+    /// Answer to the "Discard Changes · Cancel · Save" dialog (S-F4).
     ConfirmUnsaved(UnsavedChoice),
-    /// Ferme le dialogue d'un échec grave (S-M8).
+    /// Closes the dialog of a serious failure (S-M8).
     DismissAlert,
-    /// Réponse à la confirmation d'écrasement d'un fichier exporté (S-F3).
+    /// Answer to the overwrite confirmation of an exported file (S-F3).
     ConfirmOverwrite(bool),
-    /// Réponse à « Enregistrer écraserait le fichier lu sans ce que la lecture
-    /// a écarté » (#309, F3) : `true` écrit, `false` abandonne (et oublie le
-    /// geste qui attendait l'enregistrement).
+    /// Answer to "Saving would overwrite the file that was read without what
+    /// the read discarded" (#309, F3): `true` writes, `false` gives up (and
+    /// forgets the gesture that was waiting for the save).
     ConfirmDiscardedSave(bool),
-    /// Ajoute un graphique vide à la racine, annulable comme un tracé.
+    /// Adds an empty graph at the root, undoable like a plot.
     AddGraph,
-    /// Ajoute un classeur et sa feuille initiale à la racine du projet.
+    /// Adds a workbook and its initial sheet at the root of the project.
     ///
-    /// Le menu Fichier ne porte pas de destination ambiguë : un nouveau
-    /// classeur appartient toujours au dossier racine du projet ouvert.
+    /// The File menu carries no ambiguous destination: a new workbook always
+    /// belongs to the root folder of the open project.
     AddWorkbook,
-    /// Ajoute un dossier vide dans `parent`, sous le premier nom « FolderN »
-    /// libre parmi ses enfants (#326). Le menu Fichier et la barre d'outils
-    /// visent la racine ; le clic droit sur un dossier du Project Manager vise
-    /// ce dossier — seul geste qui crée dans un sous-dossier.
+    /// Adds an empty folder in `parent`, under the first free name "FolderN"
+    /// among its children (#326). The File menu and the toolbar target the
+    /// root; the right-click on a folder of the Project Manager targets that
+    /// folder — the only gesture that creates in a subfolder.
     AddFolder {
-        /// Dossier d'accueil.
+        /// Host folder.
         parent: NodeId,
     },
-    /// Sélectionne la feuille affichée dans la grille du classeur qui la
-    /// contient (le classeur est déduit du parent de `id` dans l'arbre) — un
-    /// classeur affiché dans son propre onglet `stokesforge_app::app`, la sélection
-    /// d'une feuille dans l'un n'affecte jamais celle d'un autre classeur
-    /// ouvert simultanément.
+    /// Selects the sheet displayed in the grid of the workbook that contains
+    /// it (the workbook is deduced from the parent of `id` in the tree) — a
+    /// workbook shown in its own tab `stokesforge_app::app`, selecting a sheet
+    /// in one never affects that of another workbook open at the same time.
     SelectSheet(NodeId),
-    /// Passe l'onglet de `sheet` en édition de son nom (double-clic, F2, menu
-    /// contextuel) et la sélectionne.
+    /// Puts the tab of `sheet` into name editing (double-click, F2, context
+    /// menu) and selects it.
     BeginRenameSheet(NodeId),
-    /// Valide le nom saisi pour `sheet`. Nom vide ou déjà pris dans le
-    /// classeur : l'ancien nom reste, un message l'explique, aucune entrée
-    /// d'historique.
+    /// Commits the name typed for `sheet`. Empty name or already taken in the
+    /// workbook: the old name stays, a message explains it, no history entry.
     CommitRenameSheet {
-        /// Feuille renommée.
+        /// Renamed sheet.
         sheet: NodeId,
-        /// Nom saisi.
+        /// Typed name.
         name: String,
     },
-    /// Abandonne l'édition du nom d'une feuille (Échap).
+    /// Abandons the editing of a sheet name (Esc).
     CancelRenameSheet,
-    /// Duplique `sheet` (colonnes comprises) juste après elle, et affiche la
-    /// copie.
+    /// Duplicates `sheet` (columns included) right after it, and shows the
+    /// copy.
     DuplicateSheet(NodeId),
-    /// Supprime `sheet`, sans confirmation : Ctrl+Z la rend (S-F3, #229) ; le
-    /// message nomme les graphes qui en traçaient des colonnes. Refusée pour
-    /// la dernière feuille d'un classeur.
+    /// Deletes `sheet`, without confirmation: Ctrl+Z gives it back (S-F3, #229);
+    /// the message names the graphs that plotted columns of it. Refused for
+    /// the last sheet of a workbook.
     DeleteSheet(NodeId),
-    /// Renomme un objet du Project Manager après édition en place.
+    /// Renames a Project Manager object after in-place editing.
     RenameObject { id: NodeId, name: String },
-    /// Valide tous les noms saisis pendant un seul geste de renommage.
+    /// Commits all the names typed during a single rename gesture.
     RenameObjects(Vec<(NodeId, String)>),
-    /// Copie la sélection vers le transport système.
+    /// Copies the selection to the system transport.
     CopyObjects(Vec<NodeId>),
-    /// Duplique la sélection dans ses dossiers d'origine.
+    /// Duplicates the selection in its original folders.
     DuplicateObjects(Vec<NodeId>),
-    /// Colle le transport système dans un dossier.
+    /// Pastes the system transport into a folder.
     PasteObjects { parent: NodeId, text: String },
-    /// Révèle les classeurs embarqués référencés par ce graphique.
+    /// Reveals the embedded workbooks referenced by this graph.
     ShowGraphData { graph: NodeId },
-    /// Révèle le classeur des colonnes d'une seule courbe (menu de la courbe,
-    /// #152) : pas de choix ambigu entre les courbes d'un graphique.
+    /// Reveals the workbook of the columns of a single curve (curve menu,
+    /// #152): no ambiguous choice among the curves of a graph.
     ShowSeriesData {
         graph: NodeId,
         series: stokesforge_plot::SeriesRef,
     },
-    /// Supprime la sélection, sans confirmation : un seul Ctrl+Z la rend
-    /// (S-F3, #229) ; le message nomme les graphes qui en utilisaient les
-    /// données.
+    /// Deletes the selection, without confirmation: a single Ctrl+Z gives it
+    /// back (S-F3, #229); the message names the graphs that used its data.
     DeleteObjects(Vec<NodeId>),
-    /// Déplace la sélection en un seul geste annulable.
+    /// Moves the selection in a single undoable gesture.
     MoveObjects { ids: Vec<NodeId>, parent: NodeId },
-    /// Valide la saisie d'une cellule : le texte tel que tapé, à convertir
-    /// selon le type de la colonne.
+    /// Commits the input of a cell: the text as typed, to be converted
+    /// according to the column type.
     CommitCell {
-        /// Colonne visée.
+        /// Target column.
         column: NodeId,
-        /// Ligne visée.
+        /// Target row.
         row: usize,
-        /// Texte saisi, non converti.
+        /// Typed text, not converted.
         text: String,
     },
-    /// Ajoute une colonne en fin de `sheet`.
+    /// Adds a column at the end of `sheet`.
     AddColumn {
-        /// Feuille visée — explicite, puisque plusieurs classeurs peuvent
-        /// être affichés simultanément, chacun dans son propre onglet.
+        /// Target sheet — explicit, since several workbooks can be displayed
+        /// at the same time, each in its own tab.
         sheet: NodeId,
     },
-    /// Ajoute une feuille en fin de `book`, avec un nom généré par
-    /// `stokesforge-core` (`Command::AddWorksheet { name: None, .. }`, même
-    /// convention que [`Action::AddWorkbook`] pour le nom du classeur).
+    /// Adds a sheet at the end of `book`, with a name generated by
+    /// `stokesforge-core` (`Command::AddWorksheet { name: None, .. }`, same
+    /// convention as [`Action::AddWorkbook`] for the workbook name).
     AddWorksheet {
-        /// Classeur visé.
+        /// Target workbook.
         book: NodeId,
     },
-    /// Ajoute une colonne en fin de `sheet` puis y sélectionne `row` — Tab
-    /// sur la dernière colonne d'une ligne de données, symétrique de
-    /// [`Action::CommitCellAndAdvance`] (Entrée sur la dernière ligne d'une
-    /// colonne) mais pour l'axe des colonnes : la colonne visée n'existe pas
-    /// encore au moment où l'action est poussée (contrairement à une ligne,
-    /// qui n'est qu'un indice), la sélection ne peut donc se poser qu'une
-    /// fois la colonne réellement créée, dans le traitement de cette action
-    /// — jamais avant, comme `AppState::select_cell` le fait pour
-    /// `CommitCellAndAdvance`.
+    /// Adds a column at the end of `sheet` then selects `row` in it — Tab
+    /// on the last column of a data row, symmetric to
+    /// [`Action::CommitCellAndAdvance`] (Enter on the last row of a column)
+    /// but for the column axis: the target column does not exist yet when the
+    /// action is pushed (unlike a row, which is only an index), so the
+    /// selection can only be set once the column is really created, in the
+    /// handling of this action — never before, as `AppState::select_cell`
+    /// does for `CommitCellAndAdvance`.
     AddColumnAndSelect {
-        /// Feuille visée.
+        /// Target sheet.
         sheet: NodeId,
-        /// Ligne à sélectionner dans la nouvelle colonne.
+        /// Row to select in the new column.
         row: usize,
     },
-    /// Ajoute une colonne en fin de `sheet` puis y sélectionne `field` —
-    /// pendant de [`Action::AddColumnAndSelect`] côté en-tête : Tab valide
-    /// sur le champ Formule (le dernier des quatre) de la dernière colonne,
-    /// même raison pour laquelle la sélection ne peut se poser qu'une fois
-    /// la colonne réellement créée.
+    /// Adds a column at the end of `sheet` then selects `field` in it —
+    /// counterpart of [`Action::AddColumnAndSelect`] on the header side: Tab
+    /// commits in the Formula field (the last of the four) of the last
+    /// column, for the same reason the selection can only be set once the
+    /// column is really created.
     AddColumnAndSelectHeaderField {
-        /// Feuille visée.
+        /// Target sheet.
         sheet: NodeId,
-        /// Champ d'en-tête à sélectionner dans la nouvelle colonne.
+        /// Header field to select in the new column.
         field: HeaderField,
     },
-    /// Change le type d'une colonne — choix explicite de l'utilisateur
-    /// depuis l'en-tête, conversion destructrice assumée (`Column::
-    /// set_column_type`, `stokesforge-core`) : un texte non numérique dans une
-    /// colonne qui devient `Numeric` disparaît (`NaN`), comme le reste déjà
-    /// pour une saisie directe.
+    /// Changes the type of a column — explicit user choice from the header,
+    /// destructive conversion accepted (`Column::set_column_type`,
+    /// `stokesforge-core`): a non-numeric text in a column that becomes
+    /// `Numeric` disappears (`NaN`), as is already the case for a direct input.
     SetColumnType {
-        /// Colonne visée.
+        /// Target column.
         column: NodeId,
-        /// Type demandé.
+        /// Requested type.
         column_type: ColumnType,
     },
-    /// Change le rôle de tracé d'une colonne (`ColumnMeta::role`) — choix
-    /// explicite depuis le sous-menu « Rôle » du menu contextuel de
-    /// l'en-tête, à côté du type. N'affecte, pour l'instant, que
-    /// l'affichage (`A(x)`…) et la persistance : rien côté résolution de
-    /// série ne le lit encore.
+    /// Changes the plot role of a column (`ColumnMeta::role`) — explicit
+    /// choice from the "Role" submenu of the header context menu, next to the
+    /// type. For now it only affects the display (`A(x)`…) and persistence:
+    /// nothing on the series resolution side reads it yet.
     SetColumnRole {
-        /// Colonne visée.
+        /// Target column.
         column: NodeId,
-        /// Rôle demandé.
+        /// Requested role.
         role: ColumnRole,
     },
-    /// Déplace des colonnes dans leur feuille (#319, sous-menu `Move ▸` du clic
-    /// droit des lettres et du menu Colonnes) : `columns` bouge vers `to`, en
-    /// un seul geste annulable (une entrée `Move` pour une colonne, une macro
-    /// `MoveColumns` pour plusieurs). Aucune fenêtre « colonne utilisée » : une
-    /// formule suit sa colonne (#321). Sans effet quand le geste ne changerait
-    /// rien (l'entrée du menu est alors grisée). La sélection reste sur les
-    /// colonnes déplacées.
+    /// Moves columns within their sheet (#319, `Move ▸` submenu of the right-click
+    /// on the letters and of the Columns menu): `columns` moves to `to`, in a
+    /// single undoable gesture (one `Move` entry for one column, one
+    /// `MoveColumns` macro for several). No "column in use" window: a
+    /// formula follows its column (#321). No effect when the gesture would
+    /// change nothing (the menu entry is then greyed out). The selection stays
+    /// on the moved columns.
     MoveColumns {
-        /// Feuille des colonnes.
+        /// Sheet of the columns.
         sheet: NodeId,
-        /// Colonnes à déplacer (la sélection).
+        /// Columns to move (the selection).
         columns: Vec<NodeId>,
-        /// Où elles vont.
+        /// Where they go.
         to: crate::column_move::ColumnMove,
     },
-    /// Fixe la largeur d'une colonne de la grille, en points logiques (#325),
-    /// à la **fin** d'un redimensionnement fait à la main. Réglage de vue,
-    /// comme la géométrie d'une fenêtre : ni historique ni `revision` (Ctrl+Z
-    /// ne l'annule pas), enregistré dans le `.stf` par colonne. N'émet pas de
-    /// commande ; voir [`AppState::set_column_width`].
+    /// Sets the width of a grid column, in logical points (#325), at the
+    /// **end** of a manual resize. A view setting, like a window's geometry:
+    /// no history and no `revision` (Ctrl+Z does not undo it), saved in the
+    /// `.stf` per column. Emits no command; see [`AppState::set_column_width`].
     SetColumnWidth {
-        /// Colonne redimensionnée.
+        /// Resized column.
         column: NodeId,
-        /// Nouvelle largeur.
+        /// New width.
         width: f32,
     },
-    /// Remet des colonnes à la largeur par défaut (#330) : leur clé quitte la
-    /// table (la grille applique alors son défaut). Même statut que
-    /// `SetColumnWidth` : ni historique ni `revision`, pas de commande ; voir
+    /// Resets columns to the default width (#330): their key leaves the table
+    /// (the grid then applies its default). Same status as `SetColumnWidth`:
+    /// no history and no `revision`, no command; see
     /// [`AppState::reset_column_widths`].
     ResetColumnWidths {
-        /// Colonnes visées (une sélection est traitée en entier).
+        /// Target columns (a selection is handled as a whole).
         columns: Vec<NodeId>,
     },
-    /// Insère `count` lignes à `at` dans `sheet`.
+    /// Inserts `count` rows at `at` in `sheet`.
     InsertRows {
-        /// Feuille visée.
+        /// Target sheet.
         sheet: NodeId,
-        /// Ligne d'insertion.
+        /// Insertion row.
         at: usize,
-        /// Nombre de lignes insérées.
+        /// Number of inserted rows.
         count: usize,
     },
-    /// Supprime `count` lignes à `at` dans `sheet`.
+    /// Deletes `count` rows at `at` in `sheet`.
     DeleteRows {
-        /// Feuille visée.
+        /// Target sheet.
         sheet: NodeId,
-        /// Première ligne supprimée.
+        /// First deleted row.
         at: usize,
-        /// Nombre de lignes supprimées.
+        /// Number of deleted rows.
         count: usize,
     },
-    /// Remplace le texte d'une note en bloc (perte de focus de l'éditeur,
-    /// comme [`Action::CommitCell`] pour une cellule de grille).
+    /// Replaces the text of a note as a block (editor loses focus, like
+    /// [`Action::CommitCell`] for a grid cell).
     SetNoteText {
-        /// Note visée.
+        /// Target note.
         note: NodeId,
-        /// Nouveau texte.
+        /// New text.
         text: String,
     },
-    /// Lance le script actuellement dans la zone de saisie
+    /// Runs the script currently in the input area
     /// ([`AppState::script_source`]).
     ///
-    /// **Ne bloque pas** : voir la section « Le script Python » en tête de ce
-    /// module. Sans la feature `python`, produit un [`StatusMessage`]
-    /// explicite et n'envoie aucune commande.
+    /// **Does not block**: see the section "The Python script" at the top of
+    /// this module. Without the `python` feature, produces an explicit
+    /// [`StatusMessage`] and sends no command.
     RunScript,
-    /// Demande l'arrêt du script en cours. Sans effet s'il n'y en a pas.
-    /// Ne bloque pas.
+    /// Asks to stop the running script. No effect if there is none.
+    /// Does not block.
     InterruptScript,
-    /// Valide la saisie d'une cellule (comme [`Action::CommitCell`]) puis,
-    /// si `row` était la dernière ligne de `column` et que la validation a
-    /// réussi, ajoute une ligne à `sheet` — Entrée sur la dernière cellule
-    /// d'une colonne.
+    /// Commits the input of a cell (like [`Action::CommitCell`]) then, if
+    /// `row` was the last row of `column` and the commit succeeded, adds a
+    /// row to `sheet` — Enter on the last cell of a column.
     CommitCellAndAdvance {
-        /// Colonne visée.
+        /// Target column.
         column: NodeId,
-        /// Ligne visée.
+        /// Target row.
         row: usize,
-        /// Texte saisi, non converti.
+        /// Typed text, not converted.
         text: String,
-        /// Feuille à laquelle ajouter une ligne si besoin.
+        /// Sheet to add a row to if needed.
         sheet: NodeId,
     },
-    /// Vide le contenu des cellules actuellement sélectionnées dans `sheet`,
-    /// sans décaler ce qui suit — Retour arrière ou Ctrl+X.
+    /// Clears the content of the cells currently selected in `sheet`,
+    /// without shifting what follows — Backspace or Ctrl+X.
     ClearSelectedCells {
-        /// Feuille visée.
+        /// Target sheet.
         sheet: NodeId,
     },
-    /// Retire la formule des colonnes dont le champ Formule est sélectionné
-    /// dans `sheet` **en gardant** leurs valeurs (clic droit, #236). Le retrait
-    /// ordinaire (champ vidé) supprime aussi les valeurs.
+    /// Removes the formula of the columns whose Formula field is selected in
+    /// `sheet` **keeping** their values (right-click, #236). The ordinary
+    /// removal (field emptied) also deletes the values.
     RemoveFormulaKeepData {
-        /// Feuille visée.
+        /// Target sheet.
         sheet: NodeId,
     },
-    /// Même retrait, pour des colonnes entières (menu Workbook › Columns,
-    /// #236) : les colonnes sans formule sont ignorées.
+    /// Same removal, for whole columns (Workbook › Columns menu, #236):
+    /// columns without a formula are ignored.
     RemoveColumnsFormulaKeepData {
-        /// Colonnes visées.
+        /// Target columns.
         columns: Vec<NodeId>,
     },
-    /// Vide le contenu des cellules actuellement sélectionnées dans `sheet`
-    /// **et** fait remonter les cellules suivantes de chaque colonne
-    /// touchée, indépendamment — touche Suppr.
+    /// Clears the content of the cells currently selected in `sheet`
+    /// **and** moves the following cells of each touched column up,
+    /// independently — Delete key.
     DeleteSelectedCells {
-        /// Feuille visée.
+        /// Target sheet.
         sheet: NodeId,
     },
-    /// Colle `text` à partir de l'ancre de la sélection courante de `sheet`
-    /// — Ctrl+V. `text` est le texte reçu d'egui (`egui::Event::Paste`),
-    /// c'est-à-dire le contenu du presse-papier **système** : [`AppState::
-    /// paste`] compare `text` à ce qu'il a lui-même poussé au presse-papier
-    /// ([`AppState::copy_selection`]/[`AppState::copy_full_columns`]) pour
-    /// décider de rejouer sa structure interne ou de traiter `text` comme un
-    /// texte externe — voir la matrice de comportement en tête de ce
+    /// Pastes `text` from the anchor of the current selection of `sheet`
+    /// — Ctrl+V. `text` is the text received from egui (`egui::Event::Paste`),
+    /// that is, the content of the **system** clipboard: [`AppState::
+    /// paste`] compares `text` with what it pushed to the clipboard itself
+    /// ([`AppState::copy_selection`]/[`AppState::copy_full_columns`]) to
+    /// decide whether to replay its internal structure or to handle `text` as
+    /// external text — see the behavior matrix at the top of this
     /// module.
     Paste {
-        /// Feuille visée.
+        /// Target sheet.
         sheet: NodeId,
-        /// Texte reçu du presse-papier système.
+        /// Text received from the system clipboard.
         text: String,
     },
-    /// Colle en position absolue depuis le presse-papier interne — Ctrl+Maj+
-    /// V. `egui-winit` le traduit en le **même** `egui::Event::Paste` que
-    /// Ctrl+V (`is_paste_command` ne teste jamais `shift`) : `stokesforge_app::app`
-    /// les distingue en lisant `modifiers.shift` au moment de l'événement,
-    /// et jette le texte porté par l'événement — tout vient ici du dernier
-    /// [`AppState::copy_selection`]/
-    /// [`AppState::copy_full_columns`] de cette session. Sans effet si rien
-    /// n'a encore été copié.
+    /// Pastes at the absolute position from the internal clipboard — Ctrl+Shift+
+    /// V. `egui-winit` translates it into the **same** `egui::Event::Paste` as
+    /// Ctrl+V (`is_paste_command` never tests `shift`): `stokesforge_app::app`
+    /// tells them apart by reading `modifiers.shift` at the time of the event,
+    /// and throws away the text carried by the event — everything here comes
+    /// from the last [`AppState::copy_selection`]/
+    /// [`AppState::copy_full_columns`] of this session. No effect if nothing
+    /// has been copied yet.
     PasteAbsolute {
-        /// Feuille visée.
+        /// Target sheet.
         sheet: NodeId,
     },
-    /// Change le type de toutes les `columns` en **un seul pas d'annulation**
-    /// (menu des colonnes sur une sélection multiple, #159).
+    /// Changes the type of all the `columns` in **a single undo step**
+    /// (columns menu on a multiple selection, #159).
     SetColumnsType {
-        /// Colonnes visées.
+        /// Target columns.
         columns: Vec<NodeId>,
-        /// Nouveau type.
+        /// New type.
         column_type: ColumnType,
     },
-    /// Change le rôle de toutes les `columns` en un seul pas d'annulation.
+    /// Changes the role of all the `columns` in a single undo step.
     SetColumnsRole {
-        /// Colonnes visées.
+        /// Target columns.
         columns: Vec<NodeId>,
-        /// Nouveau rôle.
+        /// New role.
         role: ColumnRole,
     },
-    /// Sélectionne toutes les colonnes visibles de `sheet`, en-tête compris,
-    /// même sans ligne — Ctrl+A dans la grille, Edit › Select All et case du
-    /// coin (#159). État d'interface pur : ni modèle ni historique.
+    /// Selects all the visible columns of `sheet`, header included,
+    /// even without a row — Ctrl+A in the grid, Edit › Select All and corner
+    /// box (#159). Pure interface state: no model, no history.
     SelectAll {
-        /// Feuille visée.
+        /// Target sheet.
         sheet: NodeId,
     },
-    /// Remplace le nom long affiché d'une colonne
+    /// Replaces the displayed long name of a column
     /// ([`stokesforge_core::ColumnMeta::long_name`]).
     SetColumnLongName {
-        /// Colonne visée.
+        /// Target column.
         column: NodeId,
-        /// Nouveau nom long.
+        /// New long name.
         text: String,
     },
-    /// Remplace l'unité affichée d'une colonne
+    /// Replaces the displayed unit of a column
     /// ([`stokesforge_core::ColumnMeta::unit`]).
     SetColumnUnit {
-        /// Colonne visée.
+        /// Target column.
         column: NodeId,
-        /// Nouvelle unité.
+        /// New unit.
         text: String,
     },
-    /// Remplace le commentaire affiché d'une colonne
+    /// Replaces the displayed comment of a column
     /// ([`stokesforge_core::ColumnMeta::comment`]).
     SetColumnComment {
-        /// Colonne visée.
+        /// Target column.
         column: NodeId,
-        /// Nouveau commentaire.
+        /// New comment.
         text: String,
     },
-    /// Remplace la valeur x' d'une colonne
-    /// ([`stokesforge_core::ColumnMeta::x_prime`], #164) : texte vide =
-    /// effacée ; un texte qui n'est pas un nombre fini est refusé (barre
-    /// d'état), rien n'est écrit.
+    /// Replaces the x' value of a column
+    /// ([`stokesforge_core::ColumnMeta::x_prime`], #164): empty text =
+    /// cleared; a text that is not a finite number is refused (status
+    /// bar), nothing is written.
     SetColumnXPrime {
-        /// Colonne visée.
+        /// Target column.
         column: NodeId,
-        /// Valeur saisie.
+        /// Typed value.
         text: String,
     },
-    /// Remplace la formule d'une colonne
-    /// ([`stokesforge_core::ColumnMeta::formula`]) — l'évaluation reste celle
-    /// de `stokesforge_core::formula` / `stokesforge-session::actor`, hors du
-    /// périmètre de cette action. Le texte est saisi en **lettres** ; il est
-    /// converti en identifiants de colonnes par
-    /// [`stokesforge_core::Tree::formula_from_letters`] (#321). Un refus (lettre
-    /// inconnue, auto-référence, `#REF`) est dit dans la barre d'état et rien
-    /// n'est écrit.
+    /// Replaces the formula of a column
+    /// ([`stokesforge_core::ColumnMeta::formula`]) — evaluation stays that
+    /// of `stokesforge_core::formula` / `stokesforge-session::actor`, outside
+    /// the scope of this action. The text is typed in **letters**; it is
+    /// converted into column identifiers by
+    /// [`stokesforge_core::Tree::formula_from_letters`] (#321). A refusal
+    /// (unknown letter, self-reference, `#REF`) is reported in the status bar
+    /// and nothing is written.
     SetColumnFormula {
-        /// Colonne visée.
+        /// Target column.
         column: NodeId,
-        /// Nouvelle formule en lettres, ou `None` pour une colonne non calculée.
+        /// New formula in letters, or `None` for an uncomputed column.
         formula: Option<String>,
     },
-    /// Importe les fichiers vers la destination choisie dans le dialogue.
-    /// Tout le lot (toutes les feuilles, toutes les colonnes) tient dans une
-    /// seule entrée d'historique.
+    /// Imports the files to the destination chosen in the dialog.
+    /// The whole batch (all sheets, all columns) fits in a single history
+    /// entry.
     ImportFiles {
-        /// Destination des feuilles produites.
+        /// Destination of the produced sheets.
         destination: ImportDestination,
-        /// Réglages d'analyse à appliquer à chaque fichier.
+        /// Analysis settings to apply to each file.
         recipe: stokesforge_import::ImportRecipe,
-        /// Fichiers à importer, chacun dans sa propre feuille.
+        /// Files to import, each in its own sheet.
         paths: Vec<std::path::PathBuf>,
     },
-    /// Fichiers déposés sur l'application (glisser-déposer) : importés sans
-    /// passer par la fenêtre d'import quand ils se lisent correctement, voir
-    /// [`file_drop_plan`]. Même macro d'historique « Importer » que
+    /// Files dropped on the application (drag and drop): imported without
+    /// going through the import window when they read correctly, see
+    /// [`file_drop_plan`]. Same "Import" history macro as
     /// [`Action::ImportFiles`].
     DropFiles {
-        /// Fichiers déposés, dans l'ordre fourni par le système.
+        /// Dropped files, in the order given by the system.
         paths: Vec<std::path::PathBuf>,
-        /// Classeur sous le curseur au moment du dépôt, s'il y en avait un.
+        /// Workbook under the cursor at the time of the drop, if there was one.
         target_book: Option<NodeId>,
     },
-    /// Comme [`Action::ImportFiles`], mais l'analyse des fichiers se fait sur
-    /// un fil de fond, avec progression : l'interface ne se fige pas. Les
-    /// feuilles sont créées à la fin ([`AppState::poll_import`]).
+    /// Like [`Action::ImportFiles`], but the analysis of the files runs on
+    /// a background thread, with progress: the interface does not freeze. The
+    /// sheets are created at the end ([`AppState::poll_import`]).
     StartImport {
-        /// Destination des feuilles produites.
+        /// Destination of the produced sheets.
         destination: ImportDestination,
-        /// Réglages d'analyse à appliquer à chaque fichier.
+        /// Analysis settings to apply to each file.
         recipe: stokesforge_import::ImportRecipe,
-        /// Fichiers à importer.
+        /// Files to import.
         paths: Vec<std::path::PathBuf>,
     },
-    /// Reprend le dernier import dans l'assistant, pour le corriger : s'il est
-    /// encore la dernière entrée de l'historique, il est d'abord annulé.
+    /// Reopens the last import in the wizard, to correct it: if it is still
+    /// the last history entry, it is undone first.
     ReopenLastImport,
-    /// Actualise les colonnes importées de `sheet` depuis leurs fichiers source
-    /// (relus avec la recette mémorisée), **en place** : les colonnes gardent
-    /// leur identité, donc les graphes qui les tracent restent valides.
+    /// Refreshes the imported columns of `sheet` from their source files
+    /// (reread with the stored recipe), **in place**: the columns keep
+    /// their identity, so the graphs that plot them stay valid.
     RefreshFromSource {
-        /// Feuille à actualiser.
+        /// Sheet to refresh.
         sheet: NodeId,
     },
-    /// Ouvre la fenêtre (lecture seule) des métadonnées de fichier de
-    /// `column` — clic sur la ligne « Métadonnées » de l'en-tête.
+    /// Opens the (read-only) window of the file metadata of
+    /// `column` — click on the "Metadata" row of the header.
     ViewColumnMetadata {
-        /// Colonne dont on consulte les métadonnées.
+        /// Column whose metadata is viewed.
         column: NodeId,
     },
-    /// Ferme la fenêtre des métadonnées.
+    /// Closes the metadata window.
     CloseColumnMetadata,
-    /// Ouvre la fenêtre des 50 derniers messages de la barre d'état (S-M6).
+    /// Opens the window of the last 50 status bar messages (S-M6).
     OpenStatusHistory,
-    /// Ferme la fenêtre d'historique des messages.
+    /// Closes the message history window.
     CloseStatusHistory,
-    /// Ouvre la liste des R² faibles du projet par type (pastille, #290).
+    /// Opens the list of the project's low R² by type (badge, #290).
     OpenLowR2List,
-    /// Ferme cette liste.
+    /// Closes this list.
     CloseLowR2List,
-    /// Arrête l'import en fond après le fichier en cours (#232, S-P2) : rien
-    /// n'est créé.
+    /// Stops the background import after the current file (#232, S-P2): nothing
+    /// is created.
     StopImport,
-    /// Arrête le recalcul de formules en cours (#239, S-P2) : la commande qui
-    /// l'a déclenché est annulée, comme par Ctrl+Z.
+    /// Stops the running formula recalculation (#239, S-P2): the command that
+    /// triggered it is undone, as by Ctrl+Z.
     StopRecalc,
     /// Ouvre Help › Keyboard Shortcuts (#231, S-K5).
     OpenKeyboardShortcuts,
-    /// Ferme la fenêtre des raccourcis clavier.
+    /// Closes the keyboard shortcuts window.
     CloseKeyboardShortcuts,
     /// Ouvre File › Preferences (#148).
     OpenPreferences,
-    /// Ferme la fenêtre des préférences.
+    /// Closes the preferences window.
     ClosePreferences,
-    /// Ouvre la fenêtre d'analyse (#181) sur les colonnes Y sélectionnées de
-    /// `sheet`, chacune avec le X le plus proche à sa gauche. Rien ne s'ouvre
-    /// sans colonne Y.
+    /// Opens the analysis window (#181) on the selected Y columns of
+    /// `sheet`, each with the nearest X to its left. Nothing opens
+    /// without a Y column.
     OpenAnalysis {
-        /// La famille d'opération et la méthode préchoisie.
+        /// The operation family and the pre-chosen method.
         preset: crate::analysis::Preset,
-        /// Feuille contenant les colonnes.
+        /// Sheet containing the columns.
         sheet: NodeId,
-        /// Colonnes sélectionnées au moment du geste.
+        /// Columns selected at the time of the gesture.
         columns: Vec<NodeId>,
     },
-    /// Ouvre l'analyse sur les couples exacts du graphe et son cadrage de vue.
+    /// Opens the analysis on the exact pairs of the graph and its view framing.
     OpenGraphAnalysis {
         preset: crate::analysis::Preset,
         graph: NodeId,
         series: Vec<stokesforge_plot::SeriesRef>,
         spec: Box<PlotSpec>,
     },
-    /// Ouvre l'analyse sur des **lignes** `(feuille, ligne)` (#253, 0 = la
-    /// première) : la feuille transposée liée est créée ou complétée, dans un
-    /// seul groupe annulable avec le calcul, puis la fenêtre s'ouvre sur ses
-    /// colonnes.
+    /// Opens the analysis on **rows** `(sheet, row)` (#253, 0 = the
+    /// first): the linked transposed sheet is created or completed, in a
+    /// single undoable group with the computation, then the window opens on its
+    /// columns.
     OpenRowAnalysis {
-        /// La famille d'opération et la méthode préchoisie.
+        /// The operation family and the pre-chosen method.
         preset: crate::analysis::Preset,
-        /// Les lignes visées.
+        /// The target rows.
         rows: Vec<(NodeId, usize)>,
     },
-    /// Remet à jour une feuille transposée depuis sa source (#253) ; demande
-    /// confirmation si des valeurs éditées seraient écrasées.
+    /// Updates a transposed sheet from its source (#253); asks for
+    /// confirmation if edited values would be overwritten.
     RecalculateTranspose {
-        /// La feuille transposée.
+        /// The transposed sheet.
         sheet: NodeId,
     },
-    /// Réponse à cette confirmation (`true` : écraser et remettre à jour).
+    /// Answer to this confirmation (`true`: overwrite and update).
     ConfirmTransposeRelink(bool),
-    /// Rouvre une des dernières analyses lancées (#249) sur la sélection
-    /// courante : la fenêtre s'ouvre avec ses réglages ; avec `run` (Ctrl+clic)
-    /// elle est lancée tout de suite si rien ne manque.
+    /// Reopens one of the last analyses run (#249) on the current
+    /// selection: the window opens with its settings; with `run` (Ctrl+click)
+    /// it is run at once if nothing is missing.
     OpenRecentAnalysis {
-        /// Rang dans [`AppState::analysis_recent`], 0 pour la plus récente.
+        /// Rank in [`AppState::analysis_recent`], 0 for the most recent.
         index: usize,
         run: bool,
         target: crate::analysis::RecentTarget,
     },
-    /// « Restore Original Data » (#248) : rend aux colonnes qu'une correction a
-    /// remplacées leurs valeurs d'avant, écrase les saisies faites depuis ;
-    /// `Ctrl+Z` annule. Porte la trace de la correction (ligne de Results).
+    /// "Restore Original Data" (#248): gives back to the columns that a correction
+    /// replaced their earlier values, overwrites the input made since;
+    /// `Ctrl+Z` undoes. Carries the trace of the correction (Results row).
     RestoreOriginalData(NodeId),
-    /// Rouvre un calcul existant dans la fenêtre d'analyse.
+    /// Reopens an existing calculation in the analysis window.
     EditCalculation(NodeId),
-    /// Fin d'un glisser de poignée sur le graphe (#199) : le calcul reçoit la
-    /// nouvelle position, en **une** entrée d'historique (`UpdateCalculation`).
+    /// End of a handle drag on the graph (#199): the calculation receives the
+    /// new position, in **one** history entry (`UpdateCalculation`).
     MoveCalculationHandle {
         calculation: NodeId,
         slot: crate::analysis::HandleSlot,
         x: f64,
         y: f64,
     },
-    /// Ferme la fenêtre d'analyse sans rien enregistrer.
+    /// Closes the analysis window without saving anything.
     CloseAnalysis,
-    /// Valide la fenêtre d'analyse : un calcul neuf ou modifié, une seule
-    /// entrée d'historique.
+    /// Commits the analysis window: a new or modified calculation, a single
+    /// history entry.
     ApplyAnalysis,
-    /// Réponse au remplacement d'une source tracée par plusieurs courbes.
+    /// Answer to the replacement of a source plotted by several curves.
     ConfirmAnalysisReplacement(bool),
-    /// Recalcule des calculs, hors historique ; liste vide : tous les calculs
-    /// périmés.
+    /// Recalculates calculations, outside history; empty list: all the stale
+    /// calculations.
     RecalculateCalculations(Vec<NodeId>),
-    /// Retire un calcul et laisse ses colonnes devenir ordinaires.
+    /// Removes a calculation and lets its columns become ordinary.
     DetachCalculation(NodeId),
-    /// Demande la suppression d'un calcul : ouvre la confirmation.
+    /// Asks to delete a calculation: opens the confirmation.
     RequestDeleteCalculation(NodeId),
-    /// Réponse à la confirmation de [`Action::RequestDeleteCalculation`].
+    /// Answer to the confirmation of [`Action::RequestDeleteCalculation`].
     ConfirmDeleteCalculation(CalculationDelete),
-    /// Réponse à la confirmation d'un export de graphe qui montre des séries
-    /// pas à jour (#198, maquette M9 a).
+    /// Answer to the confirmation of a graph export that shows series that
+    /// are not up to date (#198, mockup M9 a).
     ConfirmStaleExport(StaleExport),
-    /// Ferme la fenêtre « colonne utilisée par un calcul » sans rien faire (#306).
+    /// Closes the "Column in use" window without doing anything (#306).
     CloseColumnUse,
-    /// Réponse à la question de Ctrl+Maj+C sur des colonnes à formule (#306).
+    /// Answer to the Ctrl+Shift+C question on columns with a formula (#306).
     ConfirmFullColumnsCopy(FullColumnsCopy),
-    /// Annule la suppression que la fenêtre « colonne utilisée » vient de signaler (#306).
+    /// Undoes the deletion that the "Column in use" window just reported (#306).
     UndoColumnUse,
-    /// Crée un graphe à partir des colonnes sélectionnées d'une feuille de
-    /// classeur — menu contextuel de l'en-tête de colonne. Le nouveau graphe
-    /// est ajouté dans le même dossier parent que le classeur ([`Command::
-    /// AddGraph`]), avec une série par colonne de rôle
-    /// [`stokesforge_core::ColumnRole::Y`] parmi `columns`, appariée à la colonne
-    /// X la plus proche à sa gauche dans la feuille (voir [`AppState::
-    /// plot_columns`] pour la règle complète). N'envoie aucune commande si
-    /// `columns` ne contient aucun Y : pas de graphe vide.
+    /// Creates a graph from the selected columns of a workbook sheet —
+    /// context menu of the column header. The new graph is added in the same
+    /// parent folder as the workbook ([`Command::
+    /// AddGraph`]), with one series per column of role
+    /// [`stokesforge_core::ColumnRole::Y`] among `columns`, paired with the
+    /// nearest X column to its left in the sheet (see [`AppState::
+    /// plot_columns`] for the full rule). Sends no command if
+    /// `columns` contains no Y: no empty graph.
     PlotColumns {
-        /// Feuille contenant les colonnes.
+        /// Sheet containing the columns.
         sheet: NodeId,
-        /// Colonnes sélectionnées au moment du geste.
+        /// Columns selected at the time of the gesture.
         columns: Vec<NodeId>,
-        /// Type de tracé demandé pour chaque série créée.
+        /// Plot type requested for each created series.
         plot_type: PlotType,
     },
-    /// Ajoute des séries à un graphe existant, construites depuis des
-    /// colonnes de classeur — même règle d'appariement X/Y que
-    /// [`Action::PlotColumns`], mais en relisant le [`stokesforge_plot::PlotSpec`]
-    /// courant du graphe plutôt qu'en en créant un nouveau
-    /// ([`Command::SetPlotSpec`]). Sert le glisser d'une sélection de colonnes
-    /// vers un graphe (#160) : un seul pas d'annulation.
+    /// Adds series to an existing graph, built from workbook
+    /// columns — same X/Y pairing rule as
+    /// [`Action::PlotColumns`], but by rereading the current
+    /// [`stokesforge_plot::PlotSpec`] of the graph rather than creating a new one
+    /// ([`Command::SetPlotSpec`]). Serves the drag of a column selection
+    /// to a graph (#160): a single undo step.
     AddSeriesToGraph {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Calque visé, par son indice dans le graphe. Le dépôt passe le
-        /// calque actif du graphe (#161). Les colonnes Y2 vont, elles, sur le
-        /// second calque superposé à celui-ci (#167), créé au besoin.
+        /// Target layer, by its index in the graph. The drop passes the
+        /// active layer of the graph (#161). The Y2 columns go to the
+        /// second layer overlaid on this one (#167), created if needed.
         panel: usize,
-        /// Colonnes à ajouter en séries.
+        /// Columns to add as series.
         columns: Vec<NodeId>,
-        /// Type de tracé demandé pour chaque nouvelle série ; `None` prend
-        /// celui du calque visé (voir [`panel_plot_type`]).
+        /// Plot type requested for each new series; `None` takes
+        /// that of the target layer (see [`panel_plot_type`]).
         plot_type: Option<PlotType>,
     },
-    /// Trace des **lignes** entières d'une feuille vers un graphe (#166) :
-    /// une série par ligne, dont les points sont les valeurs de la ligne dans
-    /// les colonnes qui portent un x', placés selon ce x' (la ligne spéciale
-    /// x' joue le rôle d'un second X). `axis` dit où : voir [`RowAxis`]. Un
-    /// seul pas d'annulation, calque nouveau compris.
+    /// Plots whole **rows** of a sheet to a graph (#166):
+    /// one series per row, whose points are the values of the row in
+    /// the columns that carry an x', placed according to that x' (the special
+    /// x' row plays the role of a second X). `axis` says where: see [`RowAxis`]. A
+    /// single undo step, new layer included.
     AddRowsToGraph {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Calque visé (le calque actif, #161).
+        /// Target layer (the active layer, #161).
         panel: usize,
-        /// Feuille d'où viennent les lignes.
+        /// Sheet the rows come from.
         sheet: NodeId,
-        /// Lignes tracées (0 = la première).
+        /// Plotted rows (0 = the first).
         rows: Vec<usize>,
-        /// Axe X des séries.
+        /// X axis of the series.
         axis: RowAxis,
     },
-    /// Crée un graphe qui trace des **lignes** entières d'une feuille (menu
-    /// Plot d'une sélection de lignes, #166) : une série par ligne, contre les
-    /// x' des colonnes. Refusée sans colonne x'. Un seul pas d'annulation.
+    /// Creates a graph that plots whole **rows** of a sheet (Plot
+    /// menu of a row selection, #166): one series per row, against the
+    /// x' of the columns. Refused without an x' column. A single undo step.
     PlotRows {
-        /// Feuille d'où viennent les lignes.
+        /// Sheet the rows come from.
         sheet: NodeId,
-        /// Lignes tracées (0 = la première).
+        /// Plotted rows (0 = the first).
         rows: Vec<usize>,
-        /// Type de tracé de chaque série.
+        /// Plot type of each series.
         plot_type: PlotType,
     },
-    /// Réponse à la question de [`RowAxis::Ask`] : `Some` choisit l'axe,
-    /// `None` abandonne le dépôt.
+    /// Answer to the question of [`RowAxis::Ask`]: `Some` chooses the axis,
+    /// `None` abandons the drop.
     ConfirmRowDrop(Option<RowAxis>),
-    /// Ajoute à un graphe un calque superposé à celui de `panel` (#167), à la
-    /// manière du « New Layer (Axes) » d'Origin : `x_top` affiche son axe X
-    /// en haut, `y_right` son axe Y à droite, chacun avec son échelle ; un
-    /// axe non affiché suit celui du calque recouvert. Un seul pas
-    /// d'annulation.
+    /// Adds to a graph a layer overlaid on that of `panel` (#167), in the
+    /// manner of Origin's "New Layer (Axes)": `x_top` shows its X axis
+    /// at the top, `y_right` its Y axis on the right, each with its own scale; an
+    /// axis not shown follows that of the covered layer. A single undo
+    /// step.
     AddLayer {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Calque (ordinaire ou superposé) dont on recouvre le calque de base.
+        /// Layer (ordinary or overlaid) whose base layer is covered.
         panel: usize,
-        /// Axe X du nouveau calque en haut, à l'échelle propre.
+        /// X axis of the new layer at the top, with its own scale.
         x_top: bool,
-        /// Axe Y du nouveau calque à droite, à l'échelle propre.
+        /// Y axis of the new layer on the right, with its own scale.
         y_right: bool,
     },
-    /// Ouvre ou ferme le panneau ; préférence de la personne, hors historique.
+    /// Opens or closes the panel; a user preference, outside history.
     SetObjectManagerOpen(bool),
-    /// Liste ou cache les échelles (axes) dans l'Object Manager (#111).
+    /// Lists or hides the scales (axes) in the Object Manager (#111).
     SetObjectManagerShowScales(bool),
-    /// Liste ou cache le groupe « Objects » (objets libres) dans l'Object Manager.
+    /// Lists or hides the "Objects" group (free objects) in the Object Manager.
     SetObjectManagerShowObjects(bool),
-    /// Repli initial d'une famille, hors projet et historique (#139).
+    /// Initial fold state of a family, outside project and history (#139).
     SetObjectManagerGroupOpen {
         group: ObjectManagerGroup,
         open: bool,
     },
-    /// Rétablit les valeurs initiales sans effacer les replis courants.
+    /// Restores the initial values without erasing the current fold states.
     ResetObjectManagerSettings,
-    /// Visibilité d'un contenu ou d'un ensemble de contenus (#81–82).
+    /// Visibility of a content or of a set of contents (#81–82).
     SetPlotVisibility {
         graph: NodeId,
         target: crate::object_manager::VisibilityTarget,
         visible: bool,
     },
-    /// Ferme ou rouvre le cadre d'un calque (#344) : une seule entrée
-    /// d'historique, que l'Annuler défait d'un bloc.
+    /// Closes or reopens the frame of a layer (#344): a single history
+    /// entry, which Undo reverts as a block.
     SetClosedFrame {
         graph: NodeId,
         panel: usize,
         closed: bool,
     },
-    /// Retire un contenu du graphe par la même voie depuis menu et arbre.
+    /// Removes a content from the graph through the same path from menu and tree.
     RemovePlotObject {
         graph: NodeId,
         target: crate::object_manager::VisibilityTarget,
     },
-    /// Pose une série dans un conteneur (glisser-déposer) : seule (`group`
-    /// `None`) ou dans un groupe, à ce rang de ce conteneur — voir
-    /// `PanelSpec::place_series`. Une seule entrée d'historique par geste,
-    /// qu'il réordonne, fasse entrer dans un groupe ou en fasse sortir.
+    /// Places a series in a container (drag and drop): alone (`group`
+    /// `None`) or in a group, at this rank of this container — see
+    /// `PanelSpec::place_series`. A single history entry per gesture,
+    /// whether it reorders, moves into a group or moves out of one.
     PlaceSeries {
         graph: NodeId,
         source: stokesforge_plot::SeriesRef,
         group: Option<u32>,
         position: usize,
     },
-    /// Pose un groupe de séries au rang `position` parmi les emplacements de
-    /// son calque (glisser-déposer).
+    /// Places a series group at rank `position` among the slots of
+    /// its layer (drag and drop).
     PlaceSeriesGroup {
         graph: NodeId,
         group: stokesforge_plot::SeriesGroupRef,
         position: usize,
     },
-    /// Remet un texte libre ou une forme au rang `index` de sa catégorie, dans
-    /// son calque (glisser-déposer) : l'ordre des objets est l'ordre de
-    /// superposition.
+    /// Puts a free text or a shape back at rank `index` of its category, in
+    /// its layer (drag and drop): the order of the objects is the
+    /// stacking order.
     ReorderObject {
         graph: NodeId,
         target: crate::object_manager::VisibilityTarget,
         index: usize,
     },
-    /// Remonte ou descend une série d'un cran (#197) : elle reste dans son
-    /// groupe, ou saute par-dessus un groupe entier.
+    /// Moves a series up or down one step (#197): it stays in its
+    /// group, or jumps over a whole group.
     MoveSeries {
         graph: NodeId,
         series: stokesforge_plot::SeriesRef,
         up: bool,
     },
-    /// Remonte ou descend un groupe de séries en bloc (#197).
+    /// Moves a series group up or down as a block (#197).
     MoveSeriesGroup {
         graph: NodeId,
         group: stokesforge_plot::SeriesGroupRef,
         up: bool,
     },
-    /// Donne son nom à un groupe de séries ; un nom vide rend le nom
-    /// automatique (#197).
+    /// Names a series group; an empty name gives back the automatic
+    /// name (#197).
     RenameSeriesGroup {
         graph: NodeId,
         group: stokesforge_plot::SeriesGroupRef,
         name: String,
     },
-    /// Dissout un groupe de séries : ses séries restent, simples, avec leur
-    /// style (#197). Supprimer le groupe et ses séries passe par
+    /// Dissolves a series group: its series stay, plain, with their
+    /// style (#197). Deleting the group and its series goes through
     /// [`Action::RemovePlotObject`].
     UngroupSeries {
         graph: NodeId,
         group: stokesforge_plot::SeriesGroupRef,
     },
-    /// Propriétés sur la série ou le calque exacts.
+    /// Properties on the exact series or layer.
     OpenObjectProperties {
         graph: NodeId,
         target: crate::object_manager::VisibilityTarget,
     },
-    /// Remplace en bloc le [`PlotSpec`] d'un graphe — fenêtre des
-    /// propriétés d'un graphe ([`Command::SetPlotSpec`]). Poussée à la
-    /// validation d'un brouillon ([`AppState::commit_plot_edit`]), jamais à
-    /// chaque frappe ou chaque pixel de glisser : voir la doc de tête de
+    /// Replaces the [`PlotSpec`] of a graph as a block — properties
+    /// window of a graph ([`Command::SetPlotSpec`]). Pushed when a
+    /// draft is committed ([`AppState::commit_plot_edit`]), never on
+    /// each keystroke or each pixel of a drag: see the top-level doc of
     /// [`PlotEdit`].
     SetPlotSpec {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Nouvelle description du graphe.
+        /// New description of the graph.
         spec: PlotSpec,
     },
-    /// Ouvre (ou ramène sur l'onglet voulu) la fenêtre des propriétés du
-    /// graphe `graph` — clic droit sur un composant du graphe, ou menu
-    /// « Graphique ». `axis` choisit l'axe affiché par l'onglet « Axes »
-    /// (`None` : garder celui déjà choisi).
+    /// Opens (or brings to the wanted tab) the properties window of the
+    /// graph `graph` — right-click on a graph component, or the
+    /// "Graph" menu. `axis` chooses the axis shown by the "Axes" tab
+    /// (`None`: keep the one already chosen).
     OpenPlotSettings {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Onglet à afficher.
+        /// Tab to show.
         tab: PlotSettingsTab,
-        /// Axe à afficher dans l'onglet « Axes ».
+        /// Axis to show in the "Axes" tab.
         axis: Option<PlotAxis>,
     },
-    /// Enregistre une couleur pour `usage`, dans le projet (commande
-    /// annulable [`Command::SetSavedColors`]) ou pour l'utilisateur (fichier
-    /// de configuration, [`crate::user_colors`], hors historique).
+    /// Saves a color for `usage`, in the project (undoable command
+    /// [`Command::SetSavedColors`]) or for the user (configuration file,
+    /// [`crate::user_colors`], outside history).
     SaveColor {
-        /// Usage : courbes, texte ou fonds.
+        /// Usage: curves, text or backgrounds.
         usage: ColorUsage,
-        /// Couleur `#RRGGBB` ou `#RRGGBBAA`.
+        /// Color `#RRGGBB` or `#RRGGBBAA`.
         color: String,
-        /// Où l'enregistrer.
+        /// Where to save it.
         target: SaveTarget,
     },
-    /// Retire une couleur enregistrée — pendant de [`Action::SaveColor`].
+    /// Removes a saved color — counterpart of [`Action::SaveColor`].
     RemoveSavedColor {
-        /// Usage : courbes, texte ou fonds.
+        /// Usage: curves, text or backgrounds.
         usage: ColorUsage,
-        /// Couleur à retirer.
+        /// Color to remove.
         color: String,
-        /// D'où la retirer.
+        /// Where to remove it from.
         target: SaveTarget,
     },
-    /// Enregistre un nuancier (#178) sous `name`, dans le projet (commande
-    /// annulable [`Command::SetSavedColors`]) ou pour l'utilisateur ; un
-    /// nuancier de même nom est remplacé.
+    /// Saves a color gradient (#178) under `name`, in the project (undoable command
+    /// [`Command::SetSavedColors`]) or for the user; a color gradient of the
+    /// same name is replaced.
     SaveGradient {
-        /// Nom choisi par l'utilisateur.
+        /// Name chosen by the user.
         name: String,
-        /// Arrêts `#RRGGBB`, au moins deux.
+        /// `#RRGGBB` stops, at least two.
         stops: Vec<String>,
-        /// Où l'enregistrer.
+        /// Where to save it.
         target: SaveTarget,
     },
-    /// Supprime le nuancier enregistré `name` — pendant de
+    /// Deletes the saved color gradient `name` — counterpart of
     /// [`Action::SaveGradient`].
     RemoveSavedGradient {
-        /// Nom du nuancier.
+        /// Name of the color gradient.
         name: String,
-        /// D'où le supprimer.
+        /// Where to delete it from.
         target: SaveTarget,
     },
-    /// Ouvre un sélecteur de fichiers natif sur un fil à part (issue #192) ;
-    /// la fenêtre l'intercepte, `AppState::dispatch` ne fait rien.
+    /// Opens a native file picker on a separate thread (issue #192);
+    /// the window intercepts it, `AppState::dispatch` does nothing.
     PickFile(crate::file_picker::PickRequest),
-    /// Exporte un graphe en SVG, PDF ou PNG (issue #34), le format lu sur
-    /// l'extension de `path` (`.svg` si elle manque).
+    /// Exports a graph as SVG, PDF or PNG (issue #34), the format read from
+    /// the extension of `path` (`.svg` if it is missing).
     ///
-    /// `spec` est le spec **déjà cadré** par la vue — le zoom courant,
-    /// `GraphView::framed_spec` : l'export montre ce qu'on voit. Le modèle
-    /// n'est pas touché, donc aucune commande (un zoom ne s'annule pas, un
-    /// export non plus).
+    /// `spec` is the spec **already framed** by the view — the current zoom,
+    /// `GraphView::framed_spec`: the export shows what you see. The model
+    /// is not touched, so no command (a zoom cannot be undone, nor can an
+    /// export).
     ExportGraph {
-        /// Fichier à écrire.
+        /// File to write.
         path: PathBuf,
-        /// Spec cadré à exporter.
+        /// Framed spec to export.
         spec: Box<PlotSpec>,
     },
-    /// Copie le graphe vers une application externe (issue #149) : SVG, PNG
-    /// puis PDF de la **même** figure, offerts ensemble au presse-papiers
-    /// système — c'est l'application destinataire qui choisit.
+    /// Copies the graph to an external application (issue #149): SVG, PNG
+    /// then PDF of the **same** figure, offered together to the system
+    /// clipboard — the receiving application chooses.
     ///
-    /// Comme [`Action::ExportGraph`], `spec` est le spec **déjà cadré** par la
-    /// vue (`GraphView::framed_spec`) et le modèle n'est pas touché : ni
-    /// commande, ni historique. L'action prépare les octets
-    /// ([`AppState::take_figure_clipboard`]) ; c'est la fenêtre qui les offre
-    /// au système, parce qu'elle seule connaît son affichage.
+    /// Like [`Action::ExportGraph`], `spec` is the spec **already framed** by the
+    /// view (`GraphView::framed_spec`) and the model is not touched: no
+    /// command, no history. The action prepares the bytes
+    /// ([`AppState::take_figure_clipboard`]); the window offers them
+    /// to the system, because only it knows its display.
     CopyGraphFigure {
-        /// Spec cadré à copier.
+        /// Framed spec to copy.
         spec: Box<PlotSpec>,
     },
-    /// Règle l'agrandissement des exports PNG ([`PNG_EXPORT_SCALES`]).
+    /// Sets the scale of PNG exports ([`PNG_EXPORT_SCALES`]).
     SetPngExportScale(f32),
-    /// Mémorise la taille et la position d'une sorte de dialogue à sa
-    /// fermeture (S-F8, #228). Préférence de l'application : ni commande, ni
-    /// historique, ni `.stf`.
+    /// Remembers the size and position of a kind of dialog when it is
+    /// closed (S-F8, #228). Application preference: no command, no
+    /// history, no `.stf`.
     RememberDialogGeometry {
-        /// La sorte de dialogue (clé tirée de son identifiant).
+        /// The kind of dialog (key drawn from its identifier).
         kind: String,
         geometry: crate::preferences::DialogGeometry,
     },
-    /// Règle l'écriture du texte des exports SVG, texte ou contours (#162).
-    /// Préférence de l'application : ni commande, ni historique, ni `.stf`.
+    /// Sets how the text of SVG exports is written, text or outlines (#162).
+    /// Application preference: no command, no history, no `.stf`.
     SetSvgTextMode(stokesforge_render_svg::SvgTextMode),
-    /// Règle le plafond de taille d'un `.stf` à l'ouverture, en Mo (A2, #316).
-    /// Préférence de l'application : ni commande, ni historique, ni `.stf`.
+    /// Sets the size cap of a `.stf` at opening, in MB (A2, #316).
+    /// Application preference: no command, no history, no `.stf`.
     SetMaxFileMb(u32),
-    /// Budget global de cellules à l'ouverture, en millions (B1, #316).
+    /// Global cell budget at opening, in millions (B1, #316).
     SetMaxCellsM(u32),
-    /// Active ou coupe la sauvegarde automatique (#317). Préférence de
-    /// l'application : ni commande, ni historique, ni `.stf`.
+    /// Turns the automatic save on or off (#317). Application
+    /// preference: no command, no history, no `.stf`.
     SetAutosave(bool),
-    /// Règle la période de la sauvegarde automatique, en minutes (#317) ;
-    /// ramenée à 1–60.
+    /// Sets the period of the automatic save, in minutes (#317);
+    /// clamped to 1–60.
     SetAutosaveMinutes(u32),
-    /// Récupération (#317) : ouvre la copie `path` dans la fenêtre courante,
-    /// derrière « Enregistrer ? » s'il y a du travail ; la liste reste ouverte.
+    /// Recovery (#317): opens the copy `path` in the current window,
+    /// behind "Save?" if there is work; the list stays open.
     RecoveryOpen(PathBuf),
-    /// Récupération : laisse la copie sur disque, elle sera reproposée au
-    /// prochain démarrage.
+    /// Recovery: leaves the copy on disk, it will be offered again at the
+    /// next startup.
     RecoveryIgnore(PathBuf),
-    /// Récupération : demande la suppression de la copie (confirmation).
+    /// Recovery: asks to delete the copy (confirmation).
     RecoveryDelete(PathBuf),
-    /// Réponse à la confirmation de suppression d'une copie.
+    /// Answer to the confirmation of the deletion of a copy.
     ConfirmRecoveryDelete(bool),
-    /// Ferme la fenêtre de récupération : chaque copie restante est ignorée.
+    /// Closes the recovery window: each remaining copy is ignored.
     CloseRecovery,
-    /// Règle l'ordre et l'état des formats offerts par Copy Graph (#148,
-    /// #149). Préférence de l'application : ni commande, ni historique, ni
+    /// Sets the order and state of the formats offered by Copy Graph (#148,
+    /// #149). Application preference: no command, no history, no
     /// `.stf`.
     SetCopyFormats(Vec<crate::preferences::CopyFormatEntry>),
-    /// Règle les rangées d'en-tête (Metadata, x') que montrent les **nouveaux**
-    /// classeurs. Préférence de l'application : ni commande, ni historique, ni
-    /// `.stf` ; les classeurs ouverts gardent leur propre réglage.
+    /// Sets the header rows (Metadata, x') that **new** workbooks show.
+    /// Application preference: no command, no history, no
+    /// `.stf`; open workbooks keep their own setting.
     SetWorkbookHeaderDefaults { metadata: bool, x_prime: bool },
-    /// Permet ou coupe la boîte « R² très faible » (#288). Préférence de
-    /// l'application, comme [`Action::SetWorkbookHeaderDefaults`] ; le réglage
-    /// de chaque calcul (`Calculation::low_r2_dialog`) la coupe aussi.
+    /// Allows or turns off the "Very low R²" box (#288). Application
+    /// preference, like [`Action::SetWorkbookHeaderDefaults`]; the setting
+    /// of each calculation (`Calculation::low_r2_dialog`) turns it off too.
     SetAnalysisLowR2Dialog(bool),
-    /// Pose un texte libre (issue #35) : remplace celui de `target`, ou
-    /// l'ajoute si `target` est le rang qui suit le dernier
-    /// ([`AnnotationRef::set`]). **Une** modification du modèle, donc une
-    /// entrée d'historique — quel que soit le nombre d'images qu'a duré
-    /// l'édition sur place ou le glisser, dont l'aperçu vit dans la vue.
+    /// Sets a free text (issue #35): replaces that of `target`, or
+    /// adds it if `target` is the rank after the last
+    /// ([`AnnotationRef::set`]). **One** model change, hence one
+    /// history entry — whatever the number of frames the in-place
+    /// editing or the drag lasted, whose preview lives in the view.
     SetAnnotation {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Adresse du texte.
+        /// Address of the text.
         target: AnnotationRef,
-        /// Sa nouvelle version.
+        /// Its new version.
         annotation: Box<AnnotationSpec>,
     },
-    /// Retire un texte libre (Suppr, menu contextuel).
+    /// Removes a free text (Delete, context menu).
     RemoveAnnotation {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Adresse du texte.
+        /// Address of the text.
         target: AnnotationRef,
     },
-    /// Pose un objet graphique (issue #76) : remplace celui de `target`, ou
-    /// l'ajoute si `target` est le rang qui suit le dernier
-    /// ([`ShapeRef::set`]). Comme [`Action::SetAnnotation`], **une** entrée
-    /// d'historique quel que soit le nombre d'images du geste.
+    /// Sets a graphic object (issue #76): replaces that of `target`, or
+    /// adds it if `target` is the rank after the last
+    /// ([`ShapeRef::set`]). Like [`Action::SetAnnotation`], **one** history
+    /// entry whatever the number of frames of the gesture.
     SetShape {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Adresse de l'objet.
+        /// Address of the object.
         target: ShapeRef,
-        /// Sa nouvelle version.
+        /// Its new version.
         shape: Box<ShapeSpec>,
     },
-    /// Ouvre la macro d'historique de la fenêtre des propriétés d'un objet
-    /// (S-F1) : les réglages sont appliqués en direct, un seul Ctrl+Z les défait.
+    /// Opens the history macro of the properties window of an object
+    /// (S-F1): settings are applied live, a single Ctrl+Z undoes them.
     BeginShapeEdit,
-    /// Referme la macro de [`Action::BeginShapeEdit`] : `keep` (OK) la garde
-    /// comme une entrée d'historique, sinon (Cancel) elle est avortée et
-    /// l'objet retrouve son état d'ouverture.
+    /// Closes the macro of [`Action::BeginShapeEdit`]: `keep` (OK) keeps it
+    /// as a history entry, otherwise (Cancel) it is aborted and the
+    /// object gets back its state at opening.
     EndShapeEdit {
-        /// OK (`true`) ou Cancel (`false`).
+        /// OK (`true`) or Cancel (`false`).
         keep: bool,
     },
-    /// Retire un objet graphique (Suppr, menu).
+    /// Removes a graphic object (Delete, menu).
     RemoveShape {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Adresse de l'objet.
+        /// Address of the object.
         target: ShapeRef,
     },
-    /// Change le rang d'empilement d'un objet graphique.
+    /// Changes the stacking rank of a graphic object.
     ReorderShape {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Adresse de l'objet.
+        /// Address of the object.
         target: ShapeRef,
-        /// Où le mettre.
+        /// Where to put it.
         order: ShapeOrder,
     },
-    /// Pose la position d'un titre ou de la légende (issue #53) : le glisser
-    /// qui s'achève, ou, avec `anchor: None`, « Reset Position ». Une
-    /// modification du modèle ([`Command::SetPlotSpec`]), comme
+    /// Sets the position of a title or of the legend (issue #53): the drag
+    /// that ends, or, with `anchor: None`, "Reset Position". A
+    /// model change ([`Command::SetPlotSpec`]), like
     /// [`Action::SetAnnotation`].
     SetTextAnchor {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Le texte déplacé.
+        /// The moved text.
         target: TextTarget,
-        /// Sa nouvelle ancre ; `None` le remet à sa place par défaut.
+        /// Its new anchor; `None` puts it back at its default place.
         anchor: Option<TextAnchor>,
     },
-    /// Pose la police et le corps d'un titre ou de la légende (issues #77,
-    /// #78) : un attribut de la zone entière, pas une balise dans son texte.
-    /// Une modification du modèle ([`Command::SetPlotSpec`]).
+    /// Sets the font and size of a title or of the legend (issues #77,
+    /// #78): an attribute of the whole area, not a tag in its text.
+    /// A model change ([`Command::SetPlotSpec`]).
     SetTextFont {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Le texte réglé.
+        /// The adjusted text.
         target: TextTarget,
-        /// Sa nouvelle police et son nouveau corps.
+        /// Its new font and its new size.
         font: stokesforge_plot::TextFont,
     },
-    /// Pose la couleur d'un titre, d'un titre d'axe ou de la légende (issue
-    /// #90) : un attribut de la zone entière, comme la police. Vide =
-    /// automatique. Une modification du modèle ([`Command::SetPlotSpec`]).
+    /// Sets the color of a title, an axis title or the legend (issue
+    /// #90): an attribute of the whole area, like the font. Empty =
+    /// automatic. A model change ([`Command::SetPlotSpec`]).
     SetTextColor {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Le texte réglé.
+        /// The adjusted text.
         target: TextTarget,
-        /// Sa nouvelle couleur (`#RRGGBB[AA]`), vide pour l'automatique.
+        /// Its new color (`#RRGGBB[AA]`), empty for automatic.
         color: String,
     },
-    /// Remet **tous** les titres et la légende du graphe à leur place par
-    /// défaut (menu *Graph*).
+    /// Puts **all** the titles and the legend of the graph back at their
+    /// default place (*Graph* menu).
     ResetTextAnchors {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
     },
-    /// Remplace le texte saisi d'un titre (double-clic, éditeur sur place).
+    /// Replaces the typed text of a title (double-click, in-place editor).
     SetTextContent {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// Le titre édité.
+        /// The edited title.
         target: TextTarget,
-        /// Son nouveau texte (markup Typst).
+        /// Its new text (Typst markup).
         text: String,
     },
-    /// Renomme une série telle qu'elle se lit en légende (double-clic sur
-    /// une entrée). Un nom vide rend la série à son nom dérivé de la colonne.
+    /// Renames a series as it reads in the legend (double-click on
+    /// an entry). An empty name gives the series back its name derived from the column.
     SetLegendEntryName {
-        /// Graphe visé.
+        /// Target graph.
         graph: NodeId,
-        /// La série.
+        /// The series.
         series: SeriesRef,
-        /// Son nouveau nom en légende.
+        /// Its new name in the legend.
         name: String,
     },
 }
 
-/// Les agrandissements proposés pour un export PNG : la figure fait
-/// 480 × 360 points (`DEFAULT_FIGURE_SIZE`), donc ×4 donne 1920 × 1440 px,
-/// environ 300 ppp pour une figure de 16 cm de large.
+/// The magnifications offered for a PNG export: the figure is
+/// 480 × 360 points (`DEFAULT_FIGURE_SIZE`), so ×4 gives 1920 × 1440 px,
+/// about 300 dpi for a figure 16 cm wide.
 pub const PNG_EXPORT_SCALES: [f32; 3] = [1.0, 2.0, 4.0];
 
-/// L'agrandissement PNG par défaut : la résolution d'une figure de
-/// publication.
+/// The default PNG magnification: the resolution of a publication
+/// figure.
 pub const DEFAULT_PNG_EXPORT_SCALE: f32 = 4.0;
 
-/// Le nom de fichier proposé pour exporter `graph` : son nom dans le projet,
-/// en `.svg`, sans séparateur de chemin.
+/// The file name offered to export `graph`: its name in the project,
+/// as `.svg`, without path separator.
 pub fn export_file_name(tree: &Tree, graph: NodeId) -> String {
     let name = tree
         .node(graph)
-        .map_or("graphe", |node| node.name())
+        .map_or("graph", |node| node.name())
         .replace(['/', '\\'], "_");
     format!("{name}.svg")
 }
 
-/// Où enregistrer une couleur du sélecteur de couleur.
+/// Where to save a color of the color picker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SaveTarget {
-    /// Dans le projet : la couleur voyage avec le fichier `.stf`, et
-    /// l'enregistrer s'annule par Ctrl+Z. Le choix par défaut.
+    /// In the project: the color travels with the `.stf` file, and
+    /// saving it is undone by Ctrl+Z. The default choice.
     #[default]
     Project,
-    /// Pour l'utilisateur : la couleur reste sur cette machine, proposée
-    /// dans tous les projets.
+    /// For the user: the color stays on this machine, offered
+    /// in all projects.
     User,
 }
 
 impl SaveTarget {
-    /// Libellé du choix.
+    /// Label of the choice.
     pub fn label(self) -> String {
         match self {
             SaveTarget::Project => crate::tr!("color-target-project"),
@@ -1113,79 +1104,79 @@ impl SaveTarget {
     }
 }
 
-/// Gravité d'un message de la barre d'état (S-M4).
+/// Severity of a status bar message (S-M4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusLevel {
-    /// Information normale : s'efface d'elle-même après [`INFO_LIFETIME`] (S-M5).
+    /// Normal information: fades by itself after [`INFO_LIFETIME`] (S-M5).
     Info,
-    /// Avertissement : « impossible pour l'instant » (annuler à vide), pas un
-    /// échec. Reste jusqu'au message suivant.
+    /// Warning: "impossible for now" (undo with nothing to undo), not a
+    /// failure. Stays until the next message.
     Warning,
-    /// Échec (chemin illisible, script en erreur). Reste jusqu'au message
-    /// suivant.
+    /// Failure (unreadable path, script in error). Stays until the next
+    /// message.
     Error,
 }
 
-/// Durée d'affichage d'une information avant qu'elle s'efface (S-M5).
+/// How long an information is displayed before it fades (S-M5).
 pub const INFO_LIFETIME: std::time::Duration = std::time::Duration::from_secs(8);
 
-/// Nombre de messages gardés pour l'historique de la barre d'état (S-M6).
+/// Number of messages kept for the status bar history (S-M6).
 pub const STATUS_HISTORY_LEN: usize = 50;
 
-/// Une forme de la figure copiée (#149) : ses octets et le format d'export qui
-/// les a produits. Neutre vis-à-vis du système : le type MIME et l'offre au
-/// presse-papiers sont l'affaire de la fenêtre (`app/figure_copy.rs`).
+/// One form of the copied figure (#149): its bytes and the export format that
+/// produced them. Neutral toward the system: the MIME type and the offer to the
+/// clipboard are the window's business (`app/figure_copy.rs`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct FigureBytes {
-    /// Le format d'export qui a produit `bytes`.
+    /// The export format that produced `bytes`.
     pub format: stokesforge_render_svg::ExportFormat,
-    /// Le contenu.
+    /// The content.
     pub bytes: Vec<u8>,
 }
 
-/// Un message à afficher à l'utilisateur, avec sa gravité et son heure.
+/// A message to show to the user, with its severity and its time.
 ///
-/// Le niveau sépare trois choses que Qt distinguait par le grisage d'une
-/// action : « impossible pour l'instant » (annuler à vide) est un
-/// avertissement, **pas** une erreur, alors qu'un chemin illisible en est une.
+/// The level separates three things that Qt told apart by greying out an
+/// action: "impossible for now" (undo with nothing to undo) is a
+/// warning, **not** an error, whereas an unreadable path is one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StatusMessage {
-    /// Texte affiché.
+    /// Displayed text.
     pub text: String,
-    /// Gravité.
+    /// Severity.
     pub level: StatusLevel,
-    /// Instant monotone de l'émission (pour l'effacement).
+    /// Monotonic instant of emission (for fading).
     pub at: std::time::Instant,
-    /// Heure murale de l'émission (pour l'historique).
+    /// Wall-clock time of emission (for the history).
     pub wall: std::time::SystemTime,
 }
 
 impl StatusMessage {
-    /// Vrai si le message signale un échec.
+    /// True if the message reports a failure.
     pub fn is_error(&self) -> bool {
         self.level == StatusLevel::Error
     }
 }
 
-/// Ce qu'une exécution de script a produit, tel que l'état applicatif le
-/// présente.
+/// What a script run produced, as the application state
+/// presents it.
 ///
-/// Copie **volontairement indépendante** de `stokesforge_script::ScriptOutcome` :
-/// `state.rs` doit rester lisible, et sa surface publique stable, que la
-/// feature `python` soit active ou non — [`AppState::script_output`] rend ce
-/// type dans les deux configurations plutôt que d'exposer un type qui
-/// n'existerait que sous la feature.
+/// A copy **deliberately independent** of `stokesforge_script::ScriptOutcome`:
+/// `state.rs` must stay readable, and its public surface stable, whether the
+/// `python` feature is active or not — [`AppState::script_output`] returns this
+/// type in both configurations rather than exposing a type that
+/// would only exist under the feature.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ScriptOutput {
-    /// Ce que le script a écrit sur la sortie standard (`print`).
+    /// What the script wrote on standard output (`print`).
     pub stdout: String,
-    /// Ce que le script a écrit sur la sortie d'erreur.
+    /// What the script wrote on the error output.
     pub stderr: String,
-    /// Message d'erreur **avec sa trace d'appels Python complète**, si le
-    /// script a levé une exception. La barre d'état la marque comme erreur
-    /// (S-M10) et renvoie ici, à la console, pour le détail.
+    /// Error message **with its full Python call trace**, if the
+    /// script raised an exception. The status bar marks it as an error
+    /// (S-M10) and points here, to the console, for the detail.
     pub error: Option<String>,
-    /// Vrai si l'exécution s'est arrêtée sur une interruption demandée
+    /// True if the run stopped on a requested interruption
     /// ([`Action::InterruptScript`]).
     pub interrupted: bool,
 }
@@ -1202,24 +1193,23 @@ impl From<ScriptOutcome> for ScriptOutput {
     }
 }
 
-/// Ce que [`AppState::cell_text`] affiche pour une valeur **absente**
-/// (`Cell::Text(None)`) — voir sa documentation (A9, option 2). Un espace
-/// insécable plutôt qu'une chaîne vide : il occupe la cellule comme un blanc
-/// ordinaire (rien à l'écran ne « saute aux yeux »), mais reste, en mémoire,
-/// une chaîne différente de `""` — donc distincte d'une chaîne vide
-/// **présente**. Choisi plutôt qu'un caractère visible (`—`, `∅`, `?`) parce
-/// qu'aucun de ceux-là n'est une réponse illégitime à « qu'est-ce qu'un
-/// utilisateur pourrait vouloir taper dans une cellule de texte ? » — un
-/// espace insécable, lui, n'est accessible à la frappe sur aucun clavier
-/// usuel.
+/// What [`AppState::cell_text`] displays for an **absent** value
+/// (`Cell::Text(None)`) — see its documentation (A9, option 2). A non-breaking
+/// space rather than an empty string: it fills the cell like an
+/// ordinary blank (nothing on screen "catches the eye"), but stays, in memory,
+/// a string different from `""` — hence distinct from a **present** empty
+/// string. Chosen rather than a visible character (`—`, `∅`, `?`) because
+/// none of those is an illegitimate answer to "what might a user want to
+/// type in a text cell?" — a non-breaking space, on the other hand, can be
+/// typed on no usual keyboard.
 pub const MISSING_TEXT_DISPLAY: &str = "\u{00A0}";
 
-/// Plafond d'identifiants nommés dans l'avertissement de chargement : au-delà,
-/// la liste est abrégée par « … » (le compte, lui, reste exact).
+/// Cap on the identifiers named in the load warning: beyond it,
+/// the list is abridged by "…" (the count stays exact).
 const DISCARDED_IDS_SHOWN: usize = 5;
 
-/// « 2 calculations and 1 correction record » : ce qu'une lecture a écarté,
-/// compté ; `None` quand rien ne l'a été.
+/// "2 calculations and 1 correction record": what a read discarded,
+/// counted; `None` when nothing was.
 fn discarded_what(calculations: usize, corrections: usize) -> Option<String> {
     let calculations_part = (calculations > 0)
         .then(|| crate::tr!("status-load-discarded-calculations", count = calculations));
@@ -1236,10 +1226,10 @@ fn discarded_what(calculations: usize, corrections: usize) -> Option<String> {
     }
 }
 
-/// L'avertissement de chargement pour ce que la lecture a écarté (#278,
-/// #309) : calculs **et** traces de correction dans un seul message qui les
-/// compte, `None` quand rien ne l'a été. Les identifiants sont ceux du
-/// fichier ; les calculs d'abord, puis les traces.
+/// The load warning for what the read discarded (#278,
+/// #309): calculations **and** correction records in a single message that
+/// counts them, `None` when nothing was discarded. The identifiers are those of the
+/// file; calculations first, then records.
 fn discarded_calculations_text(report: &stokesforge_session::LoadReport) -> Option<String> {
     let calculations = &report.discarded_calculations;
     let corrections = &report.discarded_corrections;
@@ -1258,7 +1248,7 @@ fn discarded_calculations_text(report: &stokesforge_session::LoadReport) -> Opti
     if total > DISCARDED_IDS_SHOWN {
         ids.push_str(", …");
     }
-    // Le français accorde « écartée » avec les seules traces : deux clés.
+    // In French the past participle agrees with records alone: two keys.
     Some(if calculations.is_empty() {
         crate::tr!(
             "status-load-discarded-corrections-only",
@@ -1276,15 +1266,16 @@ fn discarded_calculations_text(report: &stokesforge_session::LoadReport) -> Opti
     })
 }
 
-/// Construit le bloc de valeurs d'une colonne collée depuis un TSV : la
-/// colonne d'indice `col_index` de chaque ligne de `rows` (une ligne plus
-/// courte fournit une case vide ; les collages de lignes de données passent
-/// par [`value_block_keeping_absent_cells`], qui garde la valeur existante),
-/// lue selon `kind` par la règle unique de la saisie, [`ValueBlock::from_texts`] (#258) — dates des colonnes `DateTime`,
-/// `inf` / `nan` gardés en texte, case vide = valeur manquante. Un texte qui
-/// ne rentre pas dans une colonne `Numeric`/`DateTime` rend un bloc `Mixed`
-/// avec `true` : l'appelant écrit alors par `Command::SetCellsPromoting` et
-/// non `Command::SetCells`, exactement comme une saisie tolérante au clavier.
+/// Builds the value block of a column pasted from a TSV: the
+/// column of index `col_index` of each line of `rows` (a shorter line
+/// provides an empty cell; pastes of data rows go
+/// through [`value_block_keeping_absent_cells`], which keeps the existing value),
+/// read according to `kind` by the single input rule, [`ValueBlock::from_texts`]
+/// (#258) — dates of `DateTime` columns,
+/// `inf` / `nan` kept as text, empty cell = missing value. A text that
+/// does not fit in a `Numeric`/`DateTime` column returns a `Mixed` block
+/// with `true`: the caller then writes with `Command::SetCellsPromoting` and
+/// not `Command::SetCells`, exactly like a tolerant keyboard input.
 fn value_block_from_tsv_column(
     kind: ColumnType,
     rows: &[Vec<String>],
@@ -1297,14 +1288,14 @@ fn value_block_from_tsv_column(
     ValueBlock::from_texts(kind, &texts)
 }
 
-/// Bloc d'un collage de lignes de données (#311) pour la colonne `col_index` :
-/// une case **absente** (ligne plus courte que la colonne visée) garde la
-/// valeur que la colonne portait déjà, une case présente et vide reste une
-/// valeur manquante. Le bloc s'arrête à la dernière case présente : une
-/// colonne n'est jamais allongée par des cases absentes. `None` quand aucune
-/// case n'est présente. Les cases gardées se lisent par [`Column::cell`] (un
-/// `MixedCell`, jamais repassé en texte) ; le bloc, lui, vient de
-/// [`value_block_from_tsv_column`], donc `promoting` est celui de la saisie.
+/// Block of a data-row paste (#311) for column `col_index`:
+/// an **absent** cell (row shorter than the target column) keeps the
+/// value the column already held, a present and empty cell stays a missing
+/// value. The block stops at the last present cell: a
+/// column is never lengthened by absent cells. `None` when no
+/// cell is present. The kept cells are read by [`Column::cell`] (a
+/// `MixedCell`, never converted back to text); the block itself comes from
+/// [`value_block_from_tsv_column`], so `promoting` is that of the input.
 fn value_block_keeping_absent_cells(
     column: &Column,
     start: usize,
@@ -1338,11 +1329,11 @@ fn value_block_keeping_absent_cells(
     Some((block, promoting))
 }
 
-/// Vrai si `column` (supposée `Mixed`) ne porterait que des nombres et des
-/// cases vides — au moins un nombre — une fois `write` écrit (`None` : telle
-/// qu'elle est). Une case texte, même `""`, l'en empêche. Sert à la
-/// repromotion en `Numeric` ([`AppState::auto_promote_mixed_column_if_all_numeric`])
-/// et à savoir, **avant** d'écrire un collage, s'il y en aura une.
+/// True if `column` (assumed `Mixed`) would hold only numbers and
+/// empty cells — at least one number — once `write` is written (`None`: as
+/// it is). A text cell, even `""`, prevents it. Serves the
+/// repromotion to `Numeric` ([`AppState::auto_promote_mixed_column_if_all_numeric`])
+/// and to know, **before** writing a paste, whether there will be one.
 fn column_all_numeric_after(column: &Column, write: Option<(usize, &ValueBlock)>) -> bool {
     let rows = column
         .len()
@@ -1365,29 +1356,29 @@ fn column_all_numeric_after(column: &Column, write: Option<(usize, &ValueBlock)>
     any_present
 }
 
-/// Corps de [`AppState::cell_text`], factorisé sur un `&Tree` plutôt que sur
-/// `&self` : c'est ce qui permet à une fenêtre détachée
-/// (`stokesforge_app::app::StokesForgeApp::show_detached_tabs`, qui ne porte qu'un clone
-/// de [`Snapshot`], jamais `AppState` elle-même — voir sa doc de tête) de
-/// peindre une grille identique à celle du dock, sans dupliquer la règle
-/// d'affichage (`MISSING_TEXT_DISPLAY`, bascule scientifique A9/C4 — voir
-/// [`AppState::cell_text`] pour le détail de ces choix).
+/// Body of [`AppState::cell_text`], factored over a `&Tree` rather than over
+/// `&self`: this is what lets a detached window
+/// (`stokesforge_app::app::StokesForgeApp::show_detached_tabs`, which carries only a clone
+/// of [`Snapshot`], never `AppState` itself — see its top-level doc) paint
+/// a grid identical to that of the dock, without duplicating the display rule
+/// (`MISSING_TEXT_DISPLAY`, scientific toggle A9/C4 — see
+/// [`AppState::cell_text`] for the detail of these choices).
 pub fn cell_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
     cell_in(tree, column, row, format_exact, MISSING_TEXT_DISPLAY)
 }
 
-/// Ce que le copier écrit pour une case (#259) : comme [`cell_text_in`], mais
-/// une valeur **manquante** donne la chaîne vide, jamais
-/// [`MISSING_TEXT_DISPLAY`] qui n'a de sens qu'à l'écran. La case manquante
-/// est traitée ici, avant la mise en texte : retirer l'espace insécable après
-/// coup effacerait aussi ceux qu'un utilisateur a vraiment tapés dans un texte.
+/// What copy writes for a cell (#259): like [`cell_text_in`], but
+/// a **missing** value gives the empty string, never
+/// [`MISSING_TEXT_DISPLAY`], which only makes sense on screen. The missing cell
+/// is handled here, before the conversion to text: removing the non-breaking space
+/// afterwards would also erase those a user really typed in a text.
 pub(crate) fn cell_copy_text_in(tree: &Tree, column: NodeId, row: usize) -> String {
     cell_in(tree, column, row, format_exact, "")
 }
 
-/// Ce que la grille **peint** (#222) : comme [`cell_text_in`], mais un nombre
-/// n'a que 6 chiffres significatifs. L'édition, le copier et la comparaison de
-/// saisie lisent toujours [`cell_text_in`], la valeur entière.
+/// What the grid **paints** (#222): like [`cell_text_in`], but a number
+/// has only 6 significant digits. Editing, copy and input comparison
+/// always read [`cell_text_in`], the whole value.
 pub(crate) fn cell_display_in(tree: &Tree, column: NodeId, row: usize) -> String {
     cell_in(tree, column, row, format_grid, MISSING_TEXT_DISPLAY)
 }
@@ -1402,17 +1393,17 @@ fn cell_in(
     let Some(column) = tree.node(column).and_then(Node::as_column) else {
         return String::new();
     };
-    // Une colonne **mixte** se lit par `Column::cell`, pas par `Column::get` :
-    // seul ce chemin distingue une cellule vide (`Empty`) d'une cellule texte
-    // sans valeur — que `get` confond toutes deux en `Cell::Text(None)`.
-    // `Empty` est la valeur manquante de `Mixed`, qu'elle prenne la place
-    // d'un `NaN` ou d'un `None` : il n'y a plus de type `Text` homogène pour
-    // qui trancherait entre « manquant numérique » (`""`) et « manquant
-    // texte » (`MISSING_TEXT_DISPLAY`). A9 tranche pour l'espace insécable —
-    // le même traitement que `Cell::Text(None)` ci-dessous — parce que la
-    // distinction qui compte à l'écran est entre « valeur manquante » et
-    // « chaîne vide présente » ([`MixedCell::Text(String::new())`]), pas
-    // entre les origines possibles d'une cellule manquante.
+    // A **mixed** column is read by `Column::cell`, not by `Column::get`:
+    // only this path tells an empty cell (`Empty`) from a text cell
+    // without a value — which `get` confuses, both as `Cell::Text(None)`.
+    // `Empty` is the missing value of `Mixed`, whether it takes the place
+    // of a `NaN` or of a `None`: there is no homogeneous `Text` type left
+    // to decide between "numeric missing" (`""`) and "text
+    // missing" (`MISSING_TEXT_DISPLAY`). A9 decides for the non-breaking space —
+    // the same treatment as `Cell::Text(None)` below — because the
+    // distinction that matters on screen is between "missing value" and
+    // "present empty string" ([`MixedCell::Text(String::new())`]), not
+    // between the possible origins of a missing cell.
     if column.column_type() == ColumnType::Mixed {
         return match column.cell(row) {
             MixedCell::Empty => missing_text.to_string(),
@@ -1423,8 +1414,8 @@ fn cell_in(
     }
     match column.get(row) {
         Cell::Float(value) if value.is_nan() => String::new(),
-        // Date/Time (#218) : ISO 8601, la même forme à l'écran, à l'édition et
-        // au copier ; hors de l'an 0–9999, le nombre brut plutôt qu'une date fausse.
+        // Date/Time (#218): ISO 8601, the same form on screen, in editing and
+        // in copy; outside year 0–9999, the raw number rather than a wrong date.
         Cell::Float(value) if column.column_type() == ColumnType::DateTime => {
             stokesforge_core::datetime::format_datetime(value).unwrap_or_else(|| number(value))
         }
@@ -1434,14 +1425,14 @@ fn cell_in(
     }
 }
 
-/// Vrai si la cellule `(column, row)` porte une valeur **numérique** — sert
-/// à aligner le corps de la grille comme un tableur (nombres à droite, texte
-/// à gauche, voir `app::grid::cell_widget`). Pour une colonne `Mixed`, le
-/// type se lit par cellule (`Column::cell`), pas par colonne : deux lignes
-/// voisines peuvent s'aligner différemment. `false` pour une cellule vide
-/// (numérique manquante ou texte manquant) : un vide n'a pas de sens à
-/// pousser à droite plutôt qu'à gauche, et le laisser à gauche évite qu'une
-/// colonne entièrement vide ait l'air random d'une ligne à l'autre.
+/// True if the cell `(column, row)` holds a **numeric** value — serves
+/// to align the grid body like a spreadsheet (numbers right, text
+/// left, see `app::grid::cell_widget`). For a `Mixed` column, the
+/// type is read per cell (`Column::cell`), not per column: two neighboring
+/// rows can align differently. `false` for an empty cell
+/// (missing numeric or missing text): an empty cell has no sense being
+/// pushed right rather than left, and leaving it left avoids an entirely
+/// empty column looking random from one row to the next.
 pub(crate) fn cell_is_numeric_in(tree: &Tree, column: NodeId, row: usize) -> bool {
     let Some(column) = tree.node(column).and_then(Node::as_column) else {
         return false;
@@ -1452,7 +1443,7 @@ pub(crate) fn cell_is_numeric_in(tree: &Tree, column: NodeId, row: usize) -> boo
     matches!(column.get(row), Cell::Float(value) if !value.is_nan())
 }
 
-/// Corps de [`AppState::visible_columns`], factorisé sur un `&Tree` — voir
+/// Body of [`AppState::visible_columns`], factored over a `&Tree` — see
 /// [`cell_text_in`].
 pub fn visible_columns_in(tree: &Tree, sheet: NodeId) -> Vec<(NodeId, String, ColumnType)> {
     let Some(node) = tree.node(sheet) else {
@@ -1468,33 +1459,33 @@ pub fn visible_columns_in(tree: &Tree, sheet: NodeId) -> Vec<(NodeId, String, Co
         .collect()
 }
 
-/// Le nom d'une série « ligne » (#166) : « Row n », avec le numéro affiché
-/// (1 = la première ligne). La phrase est de l'interface ; `compose` la reçoit.
+/// The name of a "row" series (#166): "Row n", with the displayed number
+/// (1 = the first row). The sentence is interface text; `compose` receives it.
 fn row_series_name(row: usize) -> String {
     crate::tr!("graph-row-series", number = (row + 1))
 }
 
-/// Nom affiché d'une série dans la liste de la fenêtre des propriétés : la
-/// même règle que la légende du graphe, [`stokesforge_core::series_label`] (source
-/// unique, issue #25).
+/// Displayed name of a series in the list of the properties window: the
+/// same rule as the graph legend, [`stokesforge_core::series_label`] (single
+/// source, issue #25).
 pub fn series_list_label(tree: &Tree, series: &stokesforge_plot::SeriesSpec) -> String {
     stokesforge_core::series_label(series, tree)
 }
 
-/// Charge utile du glisser de **lignes entières** d'une feuille vers un graphe
-/// ouvert (#166) : proposée seulement quand la feuille porte une ligne x'
+/// Payload of the drag of **whole rows** of a sheet to an open
+/// graph (#166): offered only when the sheet carries an x' row
 /// ([`AppState::row_drag_payload`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RowDragPayload {
-    /// Feuille d'où viennent les lignes.
+    /// Sheet the rows come from.
     pub sheet: NodeId,
-    /// Lignes glissées, croissantes (0 = la première).
+    /// Dragged rows, ascending (0 = the first).
     pub rows: Vec<usize>,
 }
 
-/// L'[`Action`] produite par le dépôt de `payload` sur le calque `panel` du
-/// graphe `graph` : [`RowAxis::Ask`], l'axe étant décidé par l'état (question
-/// posée seulement si le graphe a déjà un X).
+/// The [`Action`] produced by dropping `payload` on layer `panel` of
+/// graph `graph`: [`RowAxis::Ask`], the axis being decided by the state (question
+/// asked only if the graph already has an X).
 pub fn drop_rows_action(payload: &RowDragPayload, graph: NodeId, panel: usize) -> Action {
     Action::AddRowsToGraph {
         graph,
@@ -1505,46 +1496,46 @@ pub fn drop_rows_action(payload: &RowDragPayload, graph: NodeId, panel: usize) -
     }
 }
 
-/// Axe X des séries de lignes déposées sur un graphe (#166).
+/// X axis of the series of rows dropped on a graph (#166).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowAxis {
-    /// Laisser l'état décider : le graphe a déjà un X → dialogue (nouvel axe
-    /// par défaut, axe présent, annuler) ; sinon l'axe X principal, sans
+    /// Let the state decide: the graph already has an X → dialog (new default
+    /// axis, present axis, cancel); otherwise the main X axis, without a
     /// question.
     Ask,
-    /// Un nouveau calque superposé, avec son propre axe X (en haut).
+    /// A new overlaid layer, with its own X axis (at the top).
     New,
-    /// L'axe X du calque visé.
+    /// The X axis of the target layer.
     Present,
 }
 
-/// Le geste qui remplacerait ou fermerait un projet non enregistré (S-F3,
-/// #229) : il attend la réponse « Discard Changes · Cancel · Save » (S-F4).
+/// The gesture that would replace or close an unsaved project (S-F3,
+/// #229): it waits for the answer "Discard Changes · Cancel · Save" (S-F4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnsavedGesture {
     /// File › New Project.
     NewProject,
-    /// File › Open… : le projet choisi.
+    /// File › Open…: the chosen project.
     Open(String),
-    /// Quit, ou la fermeture de la fenêtre.
+    /// Quit, or closing the window.
     Quit,
-    /// Récupération (#317) : la copie de secours à ouvrir.
+    /// Recovery (#317): the backup copy to open.
     OpenRecovery(PathBuf),
 }
 
-/// La réponse au dialogue « Discard Changes · Cancel · Save » (S-F4).
+/// The answer to the "Discard Changes · Cancel · Save" dialog (S-F4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnsavedChoice {
-    /// Abandonner les changements et poursuivre le geste.
+    /// Give up the changes and carry on with the gesture.
     Discard,
-    /// Ne rien faire.
+    /// Do nothing.
     Cancel,
-    /// Enregistrer (en demandant où si le projet n'a pas de fichier), puis
-    /// poursuivre le geste si l'enregistrement a réussi.
+    /// Save (asking where if the project has no file), then
+    /// carry on with the gesture if the save succeeded.
     Save,
 }
 
-/// Le fichier source d'un chargement qui a écarté des données (#309, F3).
+/// The source file of a load that discarded data (#309, F3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct DiscardedSource {
     path: PathBuf,
@@ -1553,7 +1544,7 @@ struct DiscardedSource {
 }
 
 impl DiscardedSource {
-    /// `None` pour un rapport propre.
+    /// `None` for a clean report.
     fn of(path: PathBuf, report: &stokesforge_session::LoadReport) -> Option<Self> {
         (!report.is_clean()).then_some(Self {
             path,
@@ -1563,40 +1554,40 @@ impl DiscardedSource {
     }
 }
 
-/// Un enregistrement suspendu à la réponse de la confirmation d'écrasement
-/// d'un fichier dont la lecture a écarté des données (#309, F3).
+/// A save suspended on the answer to the overwrite confirmation
+/// of a file whose read discarded data (#309, F3).
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingDiscardedSave {
-    /// Le chemin à rétablir si la réponse est Cancel (Save As vers la source).
+    /// The path to restore if the answer is Cancel (Save As to the source).
     restore_path: Option<String>,
 }
 
-/// Un échec grave hors fenêtre (S-M8, #229) : dit par un dialogue bloquant,
-/// avec une action possible, jamais par la seule barre d'état.
+/// A serious failure outside the window (S-M8, #229): reported by a blocking dialog,
+/// with a possible action, never by the status bar alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alert {
-    /// Ce qui a échoué ; décide du titre et de l'action proposée.
+    /// What failed; decides the title and the proposed action.
     pub kind: AlertKind,
-    /// Le message d'erreur, déjà mis en phrase.
+    /// The error message, already put into a sentence.
     pub message: String,
 }
 
-/// Les échecs graves (S-M8).
+/// The serious failures (S-M8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlertKind {
-    /// L'enregistrement du projet a échoué : Save As… est proposé.
+    /// Saving the project failed: Save As… is offered.
     SaveFailed,
-    /// Le projet choisi n'a pas pu être lu : Open… est proposé.
+    /// The chosen project could not be read: Open… is offered.
     OpenFailed,
-    /// R² d'un calcul est très faible (#288) : un simple avertissement, que
-    /// Close seul referme. Le message nomme les calculs en défaut.
+    /// The R² of a calculation is very low (#288): a plain warning, which
+    /// Close alone dismisses. The message names the calculations at fault.
     LowRSquared,
-    /// L'acteur de session est mort (#310) : le modèle est perdu. Close ferme
-    /// l'application ; le message dit où la copie de secours a été écrite.
+    /// The session actor is dead (#310): the model is lost. Close closes
+    /// the application; the message says where the backup copy was written.
     SessionLost,
 }
 
-/// Dépôt de lignes qui attend la réponse au dialogue d'axe (#166).
+/// Row drop waiting for the answer to the axis dialog (#166).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingRowDrop {
     graph: NodeId,
@@ -1605,28 +1596,28 @@ pub struct PendingRowDrop {
     rows: Vec<usize>,
 }
 
-/// Charge utile du glisser-déposer d'une sélection de colonnes de classeur
-/// vers un graphe ouvert — chantier « glisser une sélection vers un graphe »
-/// (voir [`Action::AddSeriesToGraph`]). Typée plutôt qu'une chaîne : c'est ce
-/// qu'exigent `egui::Response::dnd_set_drag_payload`/`dnd_hover_payload`/
-/// `dnd_release_payload` (`Any + Send + Sync`), et ce que [`drop_payload_action`]
-/// relit au dépôt pour construire l'action. `Clone` : `stokesforge_app::app` la clone
-/// une fois par bord de grille testé (gauche puis droite) avant de savoir
-/// lequel a effectivement démarré le glisser.
+/// Payload of the drag and drop of a selection of workbook columns
+/// to an open graph — work package "drag a selection to a graph"
+/// (see [`Action::AddSeriesToGraph`]). Typed rather than a string: this is what
+/// `egui::Response::dnd_set_drag_payload`/`dnd_hover_payload`/
+/// `dnd_release_payload` require (`Any + Send + Sync`), and what [`drop_payload_action`]
+/// rereads at the drop to build the action. `Clone`: `stokesforge_app::app` clones it
+/// once per grid edge tested (left then right) before knowing
+/// which one actually started the drag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColumnDragPayload {
-    /// Feuille d'où viennent les colonnes.
+    /// Sheet the columns come from.
     pub sheet: NodeId,
-    /// Colonnes glissées, dans l'ordre de [`AppState::column_drag_payload`].
+    /// Dragged columns, in the order of [`AppState::column_drag_payload`].
     pub columns: Vec<NodeId>,
 }
 
-/// L'[`Action`] produite par le dépôt de `payload` sur le calque `panel` du
-/// graphe `graph` — toujours [`Action::AddSeriesToGraph`], sans type de tracé
-/// imposé : les séries prennent celui du calque (#160, voir
-/// [`panel_plot_type`]). Fonction pure, séparée du code de peinture de
-/// `stokesforge_app::app::graph_window::graph_drop_target` pour être testable sans
-/// fenêtre.
+/// The [`Action`] produced by dropping `payload` on layer `panel` of
+/// graph `graph` — always [`Action::AddSeriesToGraph`], with no imposed
+/// plot type: the series take that of the layer (#160, see
+/// [`panel_plot_type`]). A pure function, separate from the painting code of
+/// `stokesforge_app::app::graph_window::graph_drop_target` so it is testable without a
+/// window.
 pub fn drop_payload_action(payload: &ColumnDragPayload, graph: NodeId, panel: usize) -> Action {
     Action::AddSeriesToGraph {
         graph,
@@ -1636,13 +1627,13 @@ pub fn drop_payload_action(payload: &ColumnDragPayload, graph: NodeId, panel: us
     }
 }
 
-/// Corps de [`AppState::row_count`], factorisé sur un `&Tree` — voir
+/// Body of [`AppState::row_count`], factored over a `&Tree` — see
 /// [`cell_text_in`].
 pub fn row_count_in(tree: &Tree, sheet: NodeId) -> usize {
     tree.row_count(sheet).unwrap_or(0)
 }
 
-/// Corps de [`AppState::worksheets_of`], factorisé sur un `&Tree` — voir
+/// Body of [`AppState::worksheets_of`], factored over a `&Tree` — see
 /// [`cell_text_in`].
 pub fn worksheets_of_in(tree: &Tree, book: NodeId) -> Vec<(NodeId, String)> {
     let Some(node) = tree.node(book) else {
@@ -1654,7 +1645,7 @@ pub fn worksheets_of_in(tree: &Tree, book: NodeId) -> Vec<(NodeId, String)> {
         .collect()
 }
 
-/// Corps de [`AppState::note_text`], factorisé sur un `&Tree` — voir
+/// Body of [`AppState::note_text`], factored over a `&Tree` — see
 /// [`cell_text_in`].
 pub fn note_text_in(tree: &Tree, note: NodeId) -> Option<String> {
     match tree.node(note)?.kind() {
@@ -1663,57 +1654,57 @@ pub fn note_text_in(tree: &Tree, note: NodeId) -> Option<String> {
     }
 }
 
-/// Nom d'un nœud, ou `"{missing} {id} (deleted)"` s'il n'existe plus dans
-/// `tree` — pendant de `stokesforge_app::app::tab::node_title`, factorisé sur un `&Tree`
-/// pour la même raison que [`cell_text_in`].
+/// Name of a node, or `"{missing} {id} (deleted)"` if it no longer exists in
+/// `tree` — counterpart of `stokesforge_app::app::tab::node_title`, factored over a `&Tree`
+/// for the same reason as [`cell_text_in`].
 pub fn node_title_in(tree: &Tree, id: NodeId, missing: impl FnOnce() -> String) -> String {
     tree.node(id)
         .map(|node| node.name().to_string())
         .unwrap_or_else(|| crate::tr!("window-deleted", kind = missing(), id = id.to_string()))
 }
 
-/// Saisie en cours dans une cellule.
+/// Input in progress in a cell.
 ///
-/// Une seule cellule est éditable à la fois : c'est ce qui permet à la grille
-/// virtualisée de ne garder qu'un tampon, et non un par cellule visible. Le
-/// tampon n'est envoyé au modèle qu'à la validation (perte de focus ou
-/// Entrée), jamais à chaque frappe — sinon l'historique compterait une entrée
-/// par caractère.
+/// Only one cell is editable at a time: this is what lets the virtualized
+/// grid keep a single buffer, not one per visible cell. The
+/// buffer is sent to the model only at commit (focus loss or
+/// Enter), never on each keystroke — otherwise history would count one entry
+/// per character.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellEdit {
-    /// Colonne en cours de saisie.
+    /// Column being edited.
     pub column: NodeId,
-    /// Ligne en cours de saisie.
+    /// Row being edited.
     pub row: usize,
-    /// Texte tapé jusqu'ici.
+    /// Text typed so far.
     pub buffer: String,
-    /// L'édition s'est ouverte sur une frappe (le tampon est ce qui vient d'être
-    /// tapé) : le champ garde alors son curseur au lieu de tout sélectionner à
-    /// l'ouverture (S-T4, #224).
+    /// The editing opened on a keystroke (the buffer is what was just
+    /// typed): the field then keeps its cursor instead of selecting everything on
+    /// opening (S-T4, #224).
     pub typed: bool,
 }
 
-/// Champ de [`stokesforge_core::ColumnMeta`] éditable dans l'en-tête empilé d'une
-/// colonne — voir [`HeaderEdit`].
+/// Field of [`stokesforge_core::ColumnMeta`] editable in the stacked header of a
+/// column — see [`HeaderEdit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HeaderField {
-    /// Ligne spéciale x' ([`stokesforge_core::ColumnMeta::x_prime`], #164) :
-    /// une valeur numérique par colonne, au-dessus du nom long.
+    /// Special x' row ([`stokesforge_core::ColumnMeta::x_prime`], #164):
+    /// one numeric value per column, above the long name.
     XPrime,
-    /// Nom long ([`stokesforge_core::ColumnMeta::long_name`]).
+    /// Long name ([`stokesforge_core::ColumnMeta::long_name`]).
     LongName,
-    /// Unité ([`stokesforge_core::ColumnMeta::unit`]).
+    /// Unit ([`stokesforge_core::ColumnMeta::unit`]).
     Unit,
-    /// Commentaire ([`stokesforge_core::ColumnMeta::comment`]).
+    /// Comment ([`stokesforge_core::ColumnMeta::comment`]).
     Comment,
-    /// Formule ([`stokesforge_core::ColumnMeta::formula`]).
+    /// Formula ([`stokesforge_core::ColumnMeta::formula`]).
     Formula,
 }
 
-/// Valeur saisie dans la ligne x' : `Ok(None)` pour un texte vide, `Err`
-/// quand ce n'est pas un nombre fini (texte, NaN, infini). L'erreur n'a pas de
-/// contenu : l'appelant n'a qu'un message à poser (`error-*`), d'où l'`allow`
-/// que la visibilité `pub` (#263) rend nécessaire.
+/// Value typed in the x' row: `Ok(None)` for an empty text, `Err`
+/// when it is not a finite number (text, NaN, infinity). The error has no
+/// content: the caller only has a message to set (`error-*`), hence the `allow`
+/// that the `pub` visibility (#263) makes necessary.
 #[allow(clippy::result_unit_err)]
 pub fn parse_x_prime(text: &str) -> Result<Option<f64>, ()> {
     let trimmed = text.trim();
@@ -1726,24 +1717,24 @@ pub fn parse_x_prime(text: &str) -> Result<Option<f64>, ()> {
     }
 }
 
-/// Pourquoi un champ d'en-tête refuse un texte ([`HeaderField::write_text`]).
+/// Why a header field refuses a text ([`HeaderField::write_text`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum HeaderTextRefused {
-    /// x' : ce n'est pas un nombre fini.
+    /// x': it is not a finite number.
     NotANumber,
-    /// Formule : lettre inconnue, auto-référence ou `#REF`.
+    /// Formula: unknown letter, self-reference or `#REF`.
     Formula(stokesforge_core::FormulaError),
 }
 
 impl HeaderField {
-    /// Nombre de champs empilés. Le rang d'un champ dans la grille est
-    /// `index() - COUNT` (`-COUNT..=-1`), les lignes de données commençant à 0.
+    /// Number of stacked fields. The rank of a field in the grid is
+    /// `index() - COUNT` (`-COUNT..=-1`), data rows starting at 0.
     pub const COUNT: usize = 5;
 
-    /// Position parmi les champs, dans l'ordre où ils sont empilés à
-    /// l'écran (de haut en bas, 0 = `XPrime`) — sert à comparer deux
-    /// champs pour savoir si l'un est « au-dessus » de l'autre, en
-    /// particulier pour la plage de champs d'en-tête sélectionnée (voir
+    /// Position among the fields, in the order they are stacked on
+    /// screen (top to bottom, 0 = `XPrime`) — serves to compare two
+    /// fields to know whether one is "above" the other, in
+    /// particular for the range of selected header fields (see
     /// [`crate::selection::Selection::is_header_field_selected`]).
     pub fn index(self) -> usize {
         match self {
@@ -1755,11 +1746,11 @@ impl HeaderField {
         }
     }
 
-    /// Inverse de [`HeaderField::index`] — `index` au-delà du dernier vaut
-    /// `Formula`, jamais de panique : les appelants ([`crate::selection::
-    /// Selection::cleared_header_fields`]/[`AppState::copy_selection`]) ne
-    /// passent que des rangs déjà bornés à `-COUNT..=-1`, mais une saturation
-    /// silencieuse est plus sûre qu'un `match` incomplet si ça changeait.
+    /// Inverse of [`HeaderField::index`] — an `index` beyond the last one gives
+    /// `Formula`, never a panic: the callers ([`crate::selection::
+    /// Selection::cleared_header_fields`]/[`AppState::copy_selection`]) only
+    /// pass ranks already bounded to `-COUNT..=-1`, but a silent
+    /// saturation is safer than an incomplete `match` if that changed.
     pub(crate) fn from_index(index: usize) -> Self {
         match index {
             0 => HeaderField::XPrime,
@@ -1770,10 +1761,10 @@ impl HeaderField {
         }
     }
 
-    /// Texte du champ de `column` (dont `meta` est la méta), tel qu'on
-    /// l'affiche et le copie. La formule s'affiche en **lettres actuelles**
-    /// (`Tree::formula_letters`, #321) : elles suivent les colonnes, `#REF`
-    /// pour une colonne lue qui n'est plus dans la feuille.
+    /// Text of the field of `column` (whose metadata is `meta`), as it is
+    /// displayed and copied. The formula is displayed in **current letters**
+    /// (`Tree::formula_letters`, #321): they follow the columns, `#REF`
+    /// for a read column that is no longer in the sheet.
     pub(crate) fn text_of(self, tree: &Tree, column: NodeId, meta: &ColumnMeta) -> String {
         match self {
             HeaderField::XPrime => meta.x_prime.map(format_exact).unwrap_or_default(),
@@ -1784,12 +1775,12 @@ impl HeaderField {
         }
     }
 
-    /// Écrit `text` dans le champ de `column` (dont `meta` est la méta). Refus
-    /// (rien n'est écrit) quand le texte n'est pas une valeur du champ : x'
-    /// refuse tout ce qui n'est pas un nombre fini, la formule refuse une
-    /// lettre inconnue, la colonne elle-même ou `#REF` — un texte vide
-    /// l'efface. Le passage lettres vers identifiants est
-    /// `Tree::formula_from_letters`, jamais une écriture à part.
+    /// Writes `text` into the field of `column` (whose metadata is `meta`). Refusal
+    /// (nothing is written) when the text is not a value of the field: x'
+    /// refuses anything that is not a finite number, the formula refuses an
+    /// unknown letter, the column itself or `#REF` — an empty text
+    /// erases it. The letters-to-identifiers conversion is
+    /// `Tree::formula_from_letters`, never a separate write.
     pub(crate) fn write_text(
         self,
         tree: &Tree,
@@ -1831,192 +1822,192 @@ impl HeaderField {
         }
     }
 
-    /// Champ du rang `rank` (`-COUNT..=-1`) de la grille.
+    /// Field of rank `rank` (`-COUNT..=-1`) of the grid.
     pub fn from_rank(rank: isize) -> Self {
         Self::from_index((rank + Self::COUNT as isize) as usize)
     }
 
-    /// Rang du champ dans la grille (`-COUNT..=-1`).
+    /// Rank of the field in the grid (`-COUNT..=-1`).
     pub fn rank(self) -> isize {
         self.index() as isize - Self::COUNT as isize
     }
 }
 
-/// Zone de la grille que touche la sélection courante — l'en-tête, les
-/// données, ou des colonnes entières. Les trois sont mutuellement
-/// exclusives : un rectangle ne traverse jamais la frontière en-tête/données
-/// et une plage de colonnes est un geste à part (voir la doc de tête de
+/// Grid area touched by the current selection — the header, the
+/// data, or whole columns. The three are mutually
+/// exclusive: a rectangle never crosses the header/data boundary
+/// and a range of columns is a gesture of its own (see the top-level doc of
 /// [`crate::selection`]).
 ///
-/// Sert à contextualiser les menus contextuels de la grille
-/// ([`AppState::grid_menu`]) : c'est la même liste de gestes partout, mais
-/// nommée selon ce qui est réellement sélectionné — « Vider le champ » sur
-/// un champ d'en-tête, « Vider les cellules » sur des données, « Vider les
-/// colonnes » sur une plage de colonnes.
+/// Serves to contextualize the grid context menus
+/// ([`AppState::grid_menu`]): it is the same list of gestures everywhere, but
+/// named according to what is really selected — "Clear the field" on
+/// a header field, "Clear the cells" on data, "Clear the
+/// columns" on a range of columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GridZone {
-    /// Rectangle de champs d'en-tête (Nom long, Unité, Commentaire,
-    /// Formule).
+    /// Rectangle of header fields (Long Name, Unit, Comment,
+    /// Formula).
     Header,
-    /// Rectangle de cellules de données.
+    /// Rectangle of data cells.
     Data,
-    /// Plage de colonnes entières (rangée des lettres).
+    /// Range of whole columns (letters row).
     Columns,
-    /// Plage de lignes entières (gouttière des numéros de ligne).
+    /// Range of whole rows (row number gutter).
     Rows,
 }
 
-/// Ce qu'un menu contextuel de la grille doit proposer pour la sélection
-/// courante — construit par [`AppState::grid_menu`], rendu par
+/// What a grid context menu must offer for the current
+/// selection — built by [`AppState::grid_menu`], rendered by
 /// `app::grid::grid_edit_menu`.
 ///
-/// Ce type ne porte **que la décision** (quels gestes ont un sens ici,
-/// comment les nommer, lesquels sont grisés) et jamais de widget : c'est ce
-/// qui permet de le vérifier par les tests d'intégration sans UI de
-/// `tests/shell.rs`, comme tout le reste de la matrice copier/coller.
+/// This type carries **only the decision** (which gestures make sense here,
+/// how to name them, which are greyed out) and never a widget: this is
+/// what lets it be checked by the UI-free integration tests of
+/// `tests/shell.rs`, like all the rest of the copy/paste matrix.
 ///
-/// Les gestes listés sont exactement les raccourcis clavier de la grille
-/// (voir la doc de tête de ce module, section copier/coller, et le bloc
-/// clavier de `app::grid::grid_contents`) : aucun menu n'offre ici
-/// d'action qui n'aurait pas d'équivalent au clavier.
+/// The listed gestures are exactly the keyboard shortcuts of the grid
+/// (see the top-level doc of this module, copy/paste section, and the
+/// keyboard block of `app::grid::grid_contents`): no menu offers here
+/// an action that would have no keyboard equivalent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridMenu {
-    /// Zone touchée par la sélection.
+    /// Area touched by the selection.
     pub zone: GridZone,
-    /// Vrai si la sélection couvre plus d'une case (plusieurs colonnes,
-    /// plusieurs rangs, ou les deux) — décide du pluriel des libellés.
-    /// Exception pour [`GridZone::Rows`] : ses libellés (« la ligne »/« les
-    /// lignes ») parlent de lignes, pas de cases, donc `plural` n'y compte
-    /// que le nombre de lignes couvertes — une seule ligne sélectionnée sur
-    /// une feuille à plusieurs colonnes touche déjà plusieurs cases mais
-    /// reste « la ligne » au singulier.
+    /// True if the selection covers more than one cell (several columns,
+    /// several ranks, or both) — decides the plural of the labels.
+    /// Exception for [`GridZone::Rows`]: its labels ("the row"/"the
+    /// rows") speak of rows, not cells, so `plural` there counts
+    /// only the number of rows covered — a single selected row on
+    /// a sheet with several columns already touches several cells but
+    /// stays "the row" in the singular.
     pub plural: bool,
-    /// Vrai si la sélection touche plus d'une colonne. Distinct de
-    /// [`GridMenu::plural`], qui compte les *cases* : trois cellules
-    /// empilées dans une seule colonne sont plurielles sans être
-    /// multi-colonnes, et « Copier avec l'en-tête » (qui raisonne en
-    /// colonnes entières, jamais en cases) doit rester au singulier.
+    /// True if the selection touches more than one column. Distinct from
+    /// [`GridMenu::plural`], which counts *cells*: three cells
+    /// stacked in a single column are plural without being
+    /// multi-column, and "Copy with Header" (which reasons in
+    /// whole columns, never in cells) must stay singular.
     pub multi_column: bool,
-    /// Vrai si « Supprimer et décaler » (Suppr, deuxième pression) a un sens
-    /// ici. Faux dans l'en-tête : un champ n'est pas répété par ligne, il
-    /// n'y a rien à faire remonter, et Suppr s'y contente de vider — voir
-    /// [`AppState::delete_selected_cells`]. L'offrir quand même y ferait
-    /// deux entrées de menu pour un seul et même effet.
+    /// True if "Delete and Shift Up" (Delete, second press) makes sense
+    /// here. False in the header: a field is not repeated per row, there is
+    /// nothing to move up, and Delete just clears there — see
+    /// [`AppState::delete_selected_cells`]. Offering it anyway would make
+    /// two menu entries for one and the same effect.
     pub offers_delete_shift: bool,
-    /// Vrai si « Coller à l'identique » (Ctrl+Maj+V) a de quoi travailler :
-    /// il rejoue le presse-papier **interne**, donc reste sans effet tant
-    /// que rien n'a été copié depuis la grille dans cette session (un texte
-    /// externe n'a pas de rang d'origine à rejouer).
+    /// True if "Paste in Place" (Ctrl+Shift+V) has something to work with:
+    /// it replays the **internal** clipboard, so it has no effect as long as
+    /// nothing has been copied from the grid in this session (an external text
+    /// has no original rank to replay).
     pub paste_absolute_enabled: bool,
-    /// Faux si la sélection est un ensemble de colonnes non contigu (#159) :
-    /// la cible d'un collage y serait ambiguë, Paste et Paste in Place sont
-    /// grisés.
+    /// False if the selection is a non-contiguous set of columns (#159):
+    /// the target of a paste would be ambiguous there, Paste and Paste in Place are
+    /// greyed out.
     pub paste_enabled: bool,
-    /// Faux si la sélection multiple n'a pas de copie univoque (#159) : des
-    /// blocs de cellules qui ne partagent ni leurs lignes ni leurs colonnes.
-    /// Copy et Cut sont alors grisés.
+    /// False if the multiple selection has no unambiguous copy (#159): blocks
+    /// of cells that share neither their rows nor their columns.
+    /// Copy and Cut are then greyed out.
     pub copy_enabled: bool,
-    /// Vrai si le champ Formule d'au moins une colonne sélectionnée porte une
-    /// formule : « Remove Formula, Keep Data » (#236) a alors un sens.
+    /// True if the Formula field of at least one selected column carries a
+    /// formula: "Remove Formula, Keep Data" (#236) then makes sense.
     pub offers_keep_formula_data: bool,
 }
 
 impl GridMenu {
-    /// Nom de ce qui est sélectionné, accordé en nombre (« la cellule »,
-    /// « les champs », « les lignes »…).
+    /// Name of what is selected, agreed in number ("the cell",
+    /// "the fields", "the rows"…).
     ///
-    /// # Délibérément **pas** utilisé par le menu contextuel
+    /// # Deliberately **not** used by the context menu
     ///
-    /// Les entrées du menu contextuel disent « Copier », pas « Copier la
-    /// cellule » : le clic droit vient de se poser sur ce qui est
-    /// sélectionné, le répéter dans chaque entrée n'apprend rien et allonge
-    /// le menu. Cette méthode-ci (et [`GridMenu::copy_full_columns_label`])
-    /// est conservée pour les surfaces d'UI à venir où l'on ne voit **pas**
-    /// ce qu'on vise — une barre de menus, une info-bulle, une ligne de
-    /// statut, une confirmation — où nommer la cible redevient utile. Elle
-    /// reste verrouillée par les tests de `tests/shell.rs` pour qu'elle
-    /// suive la matrice de sélection en attendant.
+    /// The context menu entries say "Copy", not "Copy the
+    /// cell": the right-click has just landed on what is
+    /// selected, repeating it in each entry teaches nothing and lengthens
+    /// the menu. This method (and [`GridMenu::copy_full_columns_label`])
+    /// is kept for future UI surfaces where you do **not** see
+    /// what you are aiming at — a menu bar, a tooltip, a status
+    /// line, a confirmation — where naming the target becomes useful again. It
+    /// stays locked by the tests of `tests/shell.rs` so that it
+    /// follows the selection matrix in the meantime.
     pub fn target_label(&self) -> &'static str {
         match (self.zone, self.plural) {
-            (GridZone::Header, false) => "le champ",
-            (GridZone::Header, true) => "les champs",
-            (GridZone::Data, false) => "la cellule",
-            (GridZone::Data, true) => "les cellules",
-            (GridZone::Columns, false) => "la colonne",
-            (GridZone::Columns, true) => "les colonnes",
-            (GridZone::Rows, false) => "la ligne",
-            (GridZone::Rows, true) => "les lignes",
+            (GridZone::Header, false) => "the field",
+            (GridZone::Header, true) => "the fields",
+            (GridZone::Data, false) => "the cell",
+            (GridZone::Data, true) => "the cells",
+            (GridZone::Columns, false) => "the column",
+            (GridZone::Columns, true) => "the columns",
+            (GridZone::Rows, false) => "the row",
+            (GridZone::Rows, true) => "the rows",
         }
     }
 
-    /// Libellé développé de « Copier avec l'en-tête » (Ctrl+Maj+C), qui
-    /// promeut toujours en entier la ou les colonnes touchées, quelle que
-    /// soit la forme de la sélection — voir [`AppState::copy_full_columns`].
-    /// Comme [`GridMenu::target_label`], gardée pour une UI future : le menu
-    /// contextuel, lui, dit simplement « Copier avec l'en-tête ».
+    /// Expanded label of "Copy with Header" (Ctrl+Shift+C), which
+    /// always promotes the touched column(s) in full, whatever
+    /// the shape of the selection — see [`AppState::copy_full_columns`].
+    /// Like [`GridMenu::target_label`], kept for a future UI: the context
+    /// menu simply says "Copy with Header".
     pub fn copy_full_columns_label(&self) -> &'static str {
         if self.multi_column {
-            "Copier les colonnes entières"
+            "Copy entire columns"
         } else {
-            "Copier la colonne entière"
+            "Copy entire column"
         }
     }
 }
 
-/// Ce qui a été copié dans la grille depuis le dernier [`AppState::
-/// copy_selection`]/[`AppState::copy_full_columns`], tel que
-/// [`AppState::paste`]/[`AppState::paste_absolute`] en ont besoin — voir la
-/// matrice de comportement en tête de ce module (section copier/coller).
+/// What was copied in the grid since the last [`AppState::
+/// copy_selection`]/[`AppState::copy_full_columns`], as
+/// [`AppState::paste`]/[`AppState::paste_absolute`] need it — see the
+/// behavior matrix at the top of this module (copy/paste section).
 ///
-/// Remplace l'ancien marqueur de contrôle (`HEADER_LINE_MARKER`, retiré) qui
-/// polluait le presse-papier système d'un caractère de contrôle collé tel
-/// quel dans un tableur externe : le presse-papier **système** ne reçoit
-/// plus qu'un texte TSV propre ([`grid_clipboard_to_text`]) ; cette
-/// structure-ci vit uniquement dans [`AppState::grid_clipboard`] et n'est
-/// rejouée au collage que si le texte reçu est identique à celui qu'on a
-/// nous-même poussé au presse-papier ([`AppState::clipboard_text`]) — sans
-/// quoi une copie externe entre-temps (un autre programme, ou même un
-/// Ctrl+C hors de StokesForge) rejouerait silencieusement une structure qui ne
-/// correspond plus à ce que porte réellement le presse-papier.
+/// Replaces the old control marker (`HEADER_LINE_MARKER`, removed) that
+/// polluted the system clipboard with a control character pasted as is
+/// into an external spreadsheet: the **system** clipboard now receives
+/// only a clean TSV text ([`grid_clipboard_to_text`]); this
+/// structure lives only in [`AppState::grid_clipboard`] and is
+/// replayed at paste only if the received text is identical to the one we
+/// ourselves pushed to the clipboard ([`AppState::clipboard_text`]) — without
+/// which an external copy in between (another program, or even a
+/// Ctrl+C outside StokesForge) would silently replay a structure that no
+/// longer matches what the clipboard actually holds.
 #[derive(Debug, Clone, PartialEq)]
 enum GridClipboard {
-    /// Une seule case copiée (cellule de donnée ou champ d'en-tête) : son
-    /// texte seul, rien d'autre — permet par exemple de copier la formule
-    /// d'une colonne dans le champ Formule d'une autre.
+    /// A single copied cell (data cell or header field): its
+    /// text only, nothing else — allows for example to copy the formula
+    /// of a column into the Formula field of another.
     Text(String),
-    /// Rectangle de plusieurs cases copié par Ctrl+C : se colle en se
-    /// décalant sur l'ancre (voir [`AppState::paste`]).
+    /// Rectangle of several cells copied by Ctrl+C: pasted by
+    /// shifting onto the anchor (see [`AppState::paste`]).
     Relative(RelativeCopy),
-    /// Colonne(s) entières copiées par Ctrl+Maj+C (en-tête et corps) : se
-    /// colle à ses rangs d'origine (voir [`AppState::paste`]).
+    /// Whole column(s) copied by Ctrl+Shift+C (header and body): pasted
+    /// at its original ranks (see [`AppState::paste`]).
     FullColumns(Vec<FullColumnCopy>),
 }
 
-/// Rectangle relatif copié par Ctrl+C ([`GridClipboard::Relative`]) : soit
-/// des champs d'en-tête, soit des lignes de données, jamais les deux — une
-/// sélection ne traverse plus la frontière en-tête/données (voir la doc de
-/// tête de [`crate::selection`]). `start` porte le rang d'origine de la
-/// première rangée copiée, pour qu'[`AppState::paste_absolute`] puisse
-/// rejouer chaque rangée sur son rang d'origine plutôt que décalée sur
-/// l'ancre.
+/// Relative rectangle copied by Ctrl+C ([`GridClipboard::Relative`]): either
+/// header fields or data rows, never both — a
+/// selection no longer crosses the header/data boundary (see the top-level doc of
+/// [`crate::selection`]). `start` carries the original rank of the
+/// first copied rank, so that [`AppState::paste_absolute`] can
+/// replay each rank at its original rank rather than shifted onto the
+/// anchor.
 #[derive(Debug, Clone, PartialEq)]
 enum RelativeCopy {
     HeaderFields {
-        /// Champ d'origine de la première rangée de `rows`.
+        /// Original field of the first rank of `rows`.
         start: HeaderField,
-        /// Une rangée par champ copié, dans l'ordre où ils sont empilés à
-        /// l'écran ; une valeur par colonne touchée.
+        /// One rank per copied field, in the order they are stacked on
+        /// screen; one value per touched column.
         rows: Vec<Vec<String>>,
     },
     DataRows {
-        /// Ligne d'origine de la première rangée de `rows`.
+        /// Original row of the first rank of `rows`.
         start: usize,
-        /// Une rangée par ligne copiée ; une valeur par colonne touchée.
+        /// One rank per copied row; one value per touched column.
         rows: Vec<Vec<String>>,
     },
 }
 
-/// Une colonne copiée en entier par Ctrl+Maj+C — voir
+/// A column copied in full by Ctrl+Shift+C — see
 /// [`GridClipboard::FullColumns`].
 #[derive(Debug, Clone, PartialEq)]
 struct FullColumnCopy {
@@ -2025,18 +2016,18 @@ struct FullColumnCopy {
     unit: String,
     comment: String,
     formula: Option<String>,
-    /// Corps de la colonne, ligne 0 en premier — la longueur propre de
-    /// cette colonne, indépendante des autres colonnes touchées par la même
-    /// copie (une feuille autorise des colonnes de longueurs différentes,
-    /// voir `demo_project` dans `tests/shell.rs`).
+    /// Body of the column, row 0 first — the own length of
+    /// this column, independent of the other columns touched by the same
+    /// copy (a sheet allows columns of different lengths,
+    /// see `demo_project` in `tests/shell.rs`).
     data: Vec<String>,
 }
 
-/// Texte propre (TSV, sans caractère de contrôle) pour le presse-papier
-/// **système** — ce que colle un tableur externe qui reçoit `clipboard`, au
-/// format Excel/LibreOffice de [`stokesforge_core::tsv`] (case entre
-/// guillemets si elle porte une tabulation, un saut de ligne ou un guillemet).
-/// Un [`GridClipboard::Text`] n'a pas de forme tabulaire : une seule case.
+/// Clean text (TSV, no control character) for the **system**
+/// clipboard — what an external spreadsheet pastes when it receives `clipboard`, in the
+/// Excel/LibreOffice format of [`stokesforge_core::tsv`] (cell in
+/// quotes if it carries a tab, a line break or a quote).
+/// A [`GridClipboard::Text`] has no tabular form: a single cell.
 fn grid_clipboard_to_text(clipboard: &GridClipboard) -> String {
     match clipboard {
         GridClipboard::Text(text) => tsv::encode_cell(text),
@@ -2067,18 +2058,18 @@ fn grid_clipboard_to_text(clipboard: &GridClipboard) -> String {
     }
 }
 
-/// Reconstruit un [`GridClipboard`] depuis un texte externe (pas le nôtre :
-/// voir [`GridClipboard`]) — un tableur ou un éditeur de texte tiers n'a
-/// aucune notion de champ d'en-tête, donc jamais de
-/// [`GridClipboard::FullColumns`] ni de [`RelativeCopy::HeaderFields`] par
-/// ce chemin. Sans tabulation ni retour à la ligne, `text` devient un
-/// [`GridClipboard::Text`] (règle 1 de la matrice : s'écrit dans la case
-/// ancrée, quelle qu'elle soit) ; sinon un [`RelativeCopy::DataRows`] parti
-/// de la ligne 0 (règle 1 aussi : un rectangle tabulé ou multi-lignes est
-/// traité comme un rectangle relatif de corps).
+/// Rebuilds a [`GridClipboard`] from an external text (not our own:
+/// see [`GridClipboard`]) — a third-party spreadsheet or text editor has
+/// no notion of a header field, so never a
+/// [`GridClipboard::FullColumns`] nor a [`RelativeCopy::HeaderFields`] by
+/// this path. Without a tab or a newline, `text` becomes a
+/// [`GridClipboard::Text`] (rule 1 of the matrix: written into the
+/// anchored cell, whatever it is); otherwise a [`RelativeCopy::DataRows`] starting
+/// at row 0 (rule 1 too: a tabbed or multi-line rectangle is
+/// handled as a relative rectangle of body).
 fn external_clipboard_from_text(text: &str) -> GridClipboard {
     let mut rows = tsv::decode(text);
-    // Une seule case (même entre guillemets, même multiligne) : un texte.
+    // A single cell (even quoted, even multiline): a text.
     if rows.len() <= 1 && rows.first().is_none_or(|row| row.len() <= 1) {
         let cell = rows.pop().and_then(|mut row| row.pop());
         return GridClipboard::Text(cell.unwrap_or_default());
@@ -2086,19 +2077,19 @@ fn external_clipboard_from_text(text: &str) -> GridClipboard {
     GridClipboard::Relative(RelativeCopy::DataRows { start: 0, rows })
 }
 
-/// Colonne visée par `cursor`, quelle que soit sa sorte — [`GridCursor`]
-/// n'expose pas cet accesseur hors de [`crate::selection`] ; ses appelants
-/// dans ce module (le collage, voir [`AppState::apply_paste`]) le
-/// reconstruisent par ce filtrage plutôt que par une méthode publique
-/// supplémentaire sur un type dont l'API reste par ailleurs minimale.
+/// Column targeted by `cursor`, whatever its kind — [`GridCursor`]
+/// does not expose this accessor outside [`crate::selection`]; its callers
+/// in this module (the paste, see [`AppState::apply_paste`]) rebuild it
+/// by this filtering rather than by an extra public method on a
+/// type whose API otherwise stays minimal.
 fn grid_cursor_column(cursor: GridCursor) -> NodeId {
     match cursor {
         GridCursor::Data(column, _) | GridCursor::Header(column, _) => column,
     }
 }
 
-/// Direction d'un déplacement clavier d'une cellule dans la grille (flèches
-/// directionnelles) — voir [`AppState::move_selection`].
+/// Direction of a keyboard move of a cell in the grid (arrow
+/// keys) — see [`AppState::move_selection`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoveDirection {
     Up,
@@ -2107,58 +2098,58 @@ pub enum MoveDirection {
     Right,
 }
 
-/// Saisie en cours dans un champ d'en-tête (nom long, unité, commentaire,
-/// formule). Le pendant exact de [`CellEdit`] pour l'en-tête empilé d'une
-/// colonne — un seul champ éditable à la fois, y compris entre colonnes
-/// différentes, envoyé au modèle seulement à la validation.
+/// Input in progress in a header field (long name, unit, comment,
+/// formula). The exact counterpart of [`CellEdit`] for the stacked header of a
+/// column — a single editable field at a time, including across different
+/// columns, sent to the model only at commit.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeaderEdit {
-    /// Colonne en cours de saisie.
+    /// Column being edited.
     pub column: NodeId,
-    /// Champ en cours de saisie.
+    /// Field being edited.
     pub field: HeaderField,
-    /// Texte tapé jusqu'ici.
+    /// Text typed so far.
     pub buffer: String,
-    /// Voir [`CellEdit::typed`].
+    /// See [`CellEdit::typed`].
     pub typed: bool,
 }
 
-/// Saisie en cours dans une note. Le pendant exact de [`CellEdit`] pour
-/// `stokesforge_app::app::Tab::Note` : un seul tampon à la fois (voir la doc de
-/// [`AppState::note_editing`]), envoyé au modèle seulement à la validation.
+/// Input in progress in a note. The exact counterpart of [`CellEdit`] for
+/// `stokesforge_app::app::Tab::Note`: a single buffer at a time (see the doc of
+/// [`AppState::note_editing`]), sent to the model only at commit.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NoteEdit {
-    /// Note en cours de saisie.
+    /// Note being edited.
     pub note: NodeId,
-    /// Texte tapé jusqu'ici.
+    /// Text typed so far.
     pub buffer: String,
 }
 
-/// Nature d'onglet actif, vue par [`AppState`] — un miroir minimal de
-/// l'énumération privée `Tab` de `stokesforge_app::app`, juste assez pour que la
-/// question « le menu « Graphique » doit-il s'afficher ? »
-/// ([`active_graph`]) se pose sans fenêtre, dans
-/// `tests/shell.rs`. `stokesforge_app::app` traduit son `Tab` vers celui-ci au seul
-/// point de contact (`StokesForgeApp::ui`), rien d'autre ne le lit.
+/// Kind of active tab, as seen by [`AppState`] — a minimal mirror of the
+/// private `Tab` enum of `stokesforge_app::app`, just enough for the
+/// question "must the "Graph" menu be shown?"
+/// ([`active_graph`]) to be asked without a window, in
+/// `tests/shell.rs`. `stokesforge_app::app` translates its `Tab` into this one at the only
+/// point of contact (`StokesForgeApp::ui`), nothing else reads it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ActiveTabKind {
-    /// Aucun onglet actif (dock vide, ou rien de focalisé cette image-ci).
+    /// No active tab (empty dock, or nothing focused this frame).
     #[default]
     None,
-    /// Un classeur.
+    /// A workbook.
     Book(NodeId),
-    /// Un graphe.
+    /// A graph.
     Graph(NodeId),
-    /// Une matrice.
+    /// A matrix.
     Matrix(NodeId),
-    /// Une note.
+    /// A note.
     Note(NodeId),
 }
 
-/// Le graphe sélectionné, d'après la nature de l'onglet actif — `None` sauf
-/// pour [`ActiveTabKind::Graph`]. Décide la présence du menu « Graphique »
-/// dans la barre de menus. Fonction pure, séparée du code de peinture de
-/// `stokesforge_app::app` pour être testable sans fenêtre.
+/// The selected graph, from the kind of the active tab — `None` except
+/// for [`ActiveTabKind::Graph`]. Decides the presence of the "Graph" menu
+/// in the menu bar. A pure function, separate from the painting code of
+/// `stokesforge_app::app` so it is testable without a window.
 pub fn active_graph(active: ActiveTabKind) -> Option<NodeId> {
     match active {
         ActiveTabKind::Graph(id) => Some(id),
@@ -2166,28 +2157,28 @@ pub fn active_graph(active: ActiveTabKind) -> Option<NodeId> {
     }
 }
 
-/// Onglets thématiques de la fenêtre des propriétés d'un graphe, dans leur
-/// ordre d'affichage.
+/// Thematic tabs of the graph properties window, in their display
+/// order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlotSettingsTab {
-    /// Le graphe entier : titre, fond.
+    /// The whole graph: title, background.
     Graph,
-    /// La zone de tracé : titre du panneau, grilles.
+    /// The plot area: panel title, grids.
     PlotArea,
-    /// Un axe : titre, échelle, bornes, affichage.
+    /// An axis: title, scale, bounds, display.
     Axes,
-    /// Les séries tracées : pas un onglet de la fenêtre du graphe mais leur
-    /// propre fenêtre (#179), ouverte par le double-clic sur une courbe.
+    /// The plotted series: not a tab of the graph window but their
+    /// own window (#179), opened by double-clicking a curve.
     Series,
-    /// La légende.
+    /// The legend.
     Legend,
-    /// Les couleurs globales : fond, texte, axes, thèmes prédéfinis.
+    /// The global colors: background, text, axes, predefined themes.
     Theme,
 }
 
 impl PlotSettingsTab {
-    /// Les onglets de la fenêtre du graphe, dans l'ordre d'affichage (les séries
-    /// ont leur fenêtre, #179).
+    /// The tabs of the graph window, in display order (the series
+    /// have their own window, #179).
     pub const ALL: [PlotSettingsTab; 5] = [
         PlotSettingsTab::Graph,
         PlotSettingsTab::PlotArea,
@@ -2196,7 +2187,7 @@ impl PlotSettingsTab {
         PlotSettingsTab::Theme,
     ];
 
-    /// Libellé de l'onglet.
+    /// Label of the tab.
     pub fn label(self) -> String {
         match self {
             PlotSettingsTab::Graph => tr!("plot-tab-general"),
@@ -2209,21 +2200,21 @@ impl PlotSettingsTab {
     }
 }
 
-/// Un axe éditable du (premier) panneau d'un graphe.
+/// An editable axis of the (first) panel of a graph.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlotAxis {
-    /// Abscisses, en bas.
+    /// X axis, at the bottom.
     Bottom,
-    /// Ordonnée principale, à gauche.
+    /// Main Y axis, on the left.
     Left,
-    /// Ordonnée secondaire, à droite.
+    /// Secondary Y axis, on the right.
     Right,
-    /// Abscisse secondaire, en haut : l'axe miroir du bas (#176).
+    /// Secondary X axis, at the top: the mirror axis of the bottom one (#176).
     Top,
 }
 
 impl PlotAxis {
-    /// Libellé de l'axe.
+    /// Label of the axis.
     pub fn label(self) -> String {
         match self {
             PlotAxis::Bottom => tr!("plot-axis-bottom"),
@@ -2234,40 +2225,40 @@ impl PlotAxis {
     }
 }
 
-/// Où mettre un objet graphique dans l'ordre d'empilement
+/// Where to put a graphic object in the stacking order
 /// ([`Action::ReorderShape`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShapeOrder {
-    /// Au-dessus de tous les autres objets du panneau.
+    /// Above all the other objects of the panel.
     ToFront,
-    /// Sous tous les autres objets du panneau.
+    /// Below all the other objects of the panel.
     ToBack,
 }
 
-/// Un composant d'un graphe visé par un clic droit — traduit par
-/// `stokesforge_app::app` depuis ce que le rendu désigne sous le pointeur.
+/// A graph component targeted by a right-click — translated by
+/// `stokesforge_app::app` from what the renderer designates under the pointer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlotTarget {
-    /// Le fond de la figure, hors de tout composant.
+    /// The figure background, outside any component.
     Background,
-    /// Le titre du graphe.
+    /// The graph title.
     Title,
-    /// La zone de tracé.
+    /// The plot area.
     PlotArea,
-    /// Un axe (ligne et graduations).
+    /// An axis (line and tick marks).
     Axis(PlotAxis),
-    /// Le titre d'un axe.
+    /// The title of an axis.
     AxisTitle(PlotAxis),
-    /// Un texte libre (issue #35).
+    /// A free text (issue #35).
     Annotation(AnnotationRef),
-    /// La légende (cadre ou entrée, issue #53).
+    /// The legend (frame or entry, issue #53).
     Legend,
-    /// Un objet graphique : rectangle, ellipse, ligne ou flèche (issue #76).
+    /// A graphic object: rectangle, ellipse, line or arrow (issue #76).
     Object(ShapeRef),
 }
 
 impl PlotTarget {
-    /// Nom du composant, en tête du menu contextuel.
+    /// Name of the component, at the top of the context menu.
     pub fn label(self) -> String {
         match self {
             PlotTarget::Background => tr!("plot-target-graph"),
@@ -2281,8 +2272,8 @@ impl PlotTarget {
         }
     }
 
-    /// L'onglet (et l'axe) de la fenêtre des propriétés qui règle ce
-    /// composant.
+    /// The tab (and the axis) of the properties window that sets this
+    /// component.
     pub fn settings_page(self) -> (PlotSettingsTab, Option<PlotAxis>) {
         match self {
             PlotTarget::Background | PlotTarget::Title => (PlotSettingsTab::Graph, None),
@@ -2296,62 +2287,62 @@ impl PlotTarget {
         }
     }
 
-    /// L'action qui ouvre les propriétés de ce composant sur `graph`.
+    /// The action that opens the properties of this component on `graph`.
     pub fn open_settings(self, graph: NodeId) -> Action {
         let (tab, axis) = self.settings_page();
         Action::OpenPlotSettings { graph, tab, axis }
     }
 }
 
-/// État de la fenêtre des propriétés d'un graphe : quel graphe, quel onglet,
-/// quel axe dans l'onglet « Axes ». État d'UI pur ; les valeurs éditées
-/// vivent dans le brouillon [`PlotEdit`].
+/// State of the graph properties window: which graph, which tab,
+/// which axis in the "Axes" tab. Pure UI state; the edited values
+/// live in the draft [`PlotEdit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlotSettings {
-    /// Graphe dont la fenêtre règle les propriétés.
+    /// Graph whose properties the window sets.
     pub graph: NodeId,
-    /// Onglet affiché.
+    /// Displayed tab.
     pub tab: PlotSettingsTab,
-    /// Axe affiché dans l'onglet « Axes ».
+    /// Axis displayed in the "Axes" tab.
     pub axis: PlotAxis,
 }
 
-/// Brouillon d'édition de la fenêtre des propriétés d'un graphe : un
-/// [`PlotSpec`] entier tenu hors de l'historique jusqu'à validation, sur le
-/// même principe que [`NoteEdit`]/[`HeaderEdit`] — sauf qu'ici l'objet édité
-/// est un graphe entier plutôt qu'un seul champ. La raison : le panneau
-/// mélange une douzaine de petits widgets (titre, axes, style de chaque
-/// série, légende) qui doivent tous voir et modifier le **même** brouillon
-/// pour que « annuler un aller-retour dans le panneau » ait un sens — un
-/// tampon par champ serait autant de mécanismes de va-et-vient avec le
-/// modèle à maintenir séparément.
+/// Edit draft of the graph properties window: a whole
+/// [`PlotSpec`] held outside history until commit, on the
+/// same principle as [`NoteEdit`]/[`HeaderEdit`] — except that here the edited object
+/// is a whole graph rather than a single field. The reason: the panel
+/// mixes a dozen small widgets (title, axes, style of each
+/// series, legend) that must all see and modify the **same** draft
+/// for "undoing a round trip in the panel" to make sense — one
+/// buffer per field would be as many back-and-forth mechanisms with the
+/// model to maintain separately.
 ///
-/// [`AppState::commit_plot_edit`] n'envoie [`Command::SetPlotSpec`] que si
-/// `spec` diverge effectivement du spec courant du modèle : relâcher un
-/// curseur qui n'a pas bougé, ou perdre le focus d'un champ texte non
-/// modifié, ne doit pas empiler une entrée d'historique inutile.
+/// [`AppState::commit_plot_edit`] sends [`Command::SetPlotSpec`] only if
+/// `spec` actually differs from the current spec of the model: releasing a
+/// slider that did not move, or losing the focus of an unmodified text field,
+/// must not stack a useless history entry.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlotEdit {
-    /// Graphe en cours d'édition.
+    /// Graph being edited.
     pub graph: NodeId,
-    /// Description en cours de saisie, pas encore validée.
+    /// Description being typed, not yet committed.
     pub spec: PlotSpec,
-    /// Série actuellement choisie dans la liste, pour l'édition détaillée —
-    /// état d'UI pur, jamais envoyé au modèle.
+    /// Series currently chosen in the list, for detailed editing —
+    /// pure UI state, never sent to the model.
     pub selected_series: usize,
-    /// Calque affiché par les propriétés ; indépendant de son rang de série.
+    /// Layer shown by the properties; independent of its series rank.
     pub selected_panel: usize,
-    /// Le spec du modèle sur lequel le brouillon est parti (ou qu'il vient
-    /// de valider). Tant que `spec` lui est égal, le brouillon n'a rien en
-    /// cours : si le modèle change sous lui (Annuler, Rétablir, script,
-    /// glisser-déposer d'une colonne), [`AppState::begin_plot_edit`] le
-    /// réaligne au lieu de montrer des valeurs périmées — qu'une validation
-    /// suivante réécrirait par-dessus l'annulation.
+    /// The spec of the model the draft started from (or just
+    /// committed). As long as `spec` equals it, the draft has nothing in
+    /// progress: if the model changes under it (Undo, Redo, script,
+    /// drag and drop of a column), [`AppState::begin_plot_edit`] realigns
+    /// it instead of showing stale values — which a following commit
+    /// would write back over the undo.
     pub base: PlotSpec,
 }
 
-/// Destination d'un lot d'import. Chaque fichier produit une feuille ; les
-/// nouveaux classeurs ne sont créés qu'après analyse réussie d'un fichier.
+/// Destination of an import batch. Each file produces a sheet; new
+/// workbooks are created only after a file is successfully analyzed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportDestination {
     ActiveBook(NodeId),
@@ -2359,21 +2350,21 @@ pub enum ImportDestination {
     NewBookForAll,
 }
 
-/// Ce qu'un dépôt de fichiers demande de faire — voir [`file_drop_plan`].
+/// What a file drop asks to do — see [`file_drop_plan`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DropPlan {
-    /// Projets `.stf` : chacun s'ouvre dans une nouvelle fenêtre StokesForge.
+    /// `.stf` projects: each opens in a new StokesForge window.
     pub projects: Vec<PathBuf>,
-    /// Fichiers de données à importer.
+    /// Data files to import.
     pub data: Vec<PathBuf>,
-    /// Destination des fichiers de données.
+    /// Destination of the data files.
     pub destination: ImportDestination,
 }
 
-/// Décision pure d'un dépôt : le lieu du dépôt fixe la destination (un
-/// classeur sous le curseur reçoit une feuille par fichier, n'importe où
-/// ailleurs un nouveau classeur partagé), l'extension `.stf` fait d'un
-/// fichier un projet à ouvrir plutôt qu'une donnée à importer.
+/// Pure decision of a drop: the drop location sets the destination (a
+/// workbook under the cursor receives one sheet per file, anywhere
+/// else a shared new workbook), the `.stf` extension makes a
+/// file a project to open rather than data to import.
 pub fn file_drop_plan(paths: &[PathBuf], target_book: Option<NodeId>) -> DropPlan {
     let is_project = |path: &PathBuf| {
         path.extension()
@@ -2390,10 +2381,10 @@ pub fn file_drop_plan(paths: &[PathBuf], target_book: Option<NodeId>) -> DropPla
     }
 }
 
-/// Un fichier « se lit correctement » quand la recette le découpe en au moins
-/// une colonne et une ligne dont une valeur est un nombre. Sinon le dépôt
-/// ouvre la fenêtre d'import plutôt que de créer une feuille vide ou
-/// illisible.
+/// A file "reads well" when the recipe splits it into at least
+/// one column and one row of which a value is a number. Otherwise the drop
+/// opens the import window rather than creating an empty or
+/// unreadable sheet.
 fn reads_well(bytes: &[u8], recipe: &stokesforge_import::ImportRecipe) -> bool {
     stokesforge_import::parse(bytes, recipe).is_ok_and(|table| {
         table
@@ -2403,8 +2394,8 @@ fn reads_well(bytes: &[u8], recipe: &stokesforge_import::ImportRecipe) -> bool {
     })
 }
 
-/// Dernier import réussi : de quoi le reprendre dans l'assistant pour le
-/// corriger (« Régler le dernier import… »).
+/// Last successful import: what is needed to reopen it in the wizard
+/// to correct it ("Reopen Last Import…").
 #[derive(Debug, Clone)]
 struct LastImport {
     destination: ImportDestination,
@@ -2412,107 +2403,107 @@ struct LastImport {
     paths: Vec<PathBuf>,
 }
 
-/// D'où vient un import en fond : de l'assistant/menu (une recette choisie
-/// par l'utilisateur) ou d'un dépôt de fichiers (un modèle par fichier).
+/// Where a background import comes from: the wizard/menu (a recipe chosen
+/// by the user) or a file drop (one template per file).
 enum ImportSource {
     Menu(stokesforge_import::ImportRecipe),
     Drop {
-        /// Modèle des fichiers que le choix automatique ne reconnaît pas.
+        /// Template of the files that the automatic choice does not recognize.
         fallback: stokesforge_import::ImportRecipe,
-        /// Classeur sous le curseur au moment du dépôt.
+        /// Workbook under the cursor at the time of the drop.
         target_book: Option<NodeId>,
     },
 }
 
-/// Ce que le fil d'import rend : les éléments lus, les fichiers qui ne se
-/// lisent pas (dépôt seulement) et les modèles utilisés.
+/// What the import thread returns: the items read, the files that cannot
+/// be read (drop only) and the templates used.
 struct ImportReply {
     items: Vec<ImportItem>,
     unreadable: Vec<PathBuf>,
     models: Vec<String>,
 }
 
-/// Import en cours sur un fil de fond : la lecture et l'analyse des fichiers
-/// (la partie lente) ne bloquent pas l'interface ; les feuilles sont créées
-/// par [`AppState::poll_import`] quand tout est prêt.
+/// Import in progress on a background thread: reading and analyzing the files
+/// (the slow part) do not block the interface; the sheets are created
+/// by [`AppState::poll_import`] when everything is ready.
 struct ImportJob {
     destination: ImportDestination,
-    /// `Some(classeur cible)` pour un dépôt, `None` pour l'import de menu.
+    /// `Some(target workbook)` for a drop, `None` for the menu import.
     dropped: Option<Option<NodeId>>,
     total: usize,
     done: Arc<std::sync::atomic::AtomicUsize>,
-    /// Posé par Stop : le fil d'analyse s'arrête entre deux fichiers.
+    /// Set by Stop: the analysis thread stops between two files.
     stop: Arc<std::sync::atomic::AtomicBool>,
     started: std::time::Instant,
     reply: mpsc::Receiver<ImportReply>,
-    /// Réponse reçue mais pas appliquée : les propriétés du graphe sont
-    /// ouvertes et leur macro d'historique absorberait l'import.
+    /// Reply received but not applied: the graph properties are
+    /// open and their history macro would absorb the import.
     ready: Option<ImportReply>,
 }
 
-/// État transitoire de la fenêtre d'import (voir `stokesforge_app::app` pour son
-/// rendu) : jamais dans l'historique, jamais envoyé à l'acteur — même
-/// famille que [`HeaderEdit`]/[`CellEdit`]/[`NoteEdit`]. Porte tout ce que la
-/// fenêtre a besoin de retenir entre deux images, y compris le
-/// [`stokesforge_import::store::RecipeStore`] chargé une seule fois à l'ouverture
-/// (pas rechargé à chaque image — `RecipeStore::load` touche le disque).
+/// Transient state of the import window (see `stokesforge_app::app` for its
+/// rendering): never in history, never sent to the actor — same
+/// family as [`HeaderEdit`]/[`CellEdit`]/[`NoteEdit`]. Carries everything the
+/// window needs to remember between two frames, including the
+/// [`stokesforge_import::store::RecipeStore`] loaded once at opening
+/// (not reloaded each frame — `RecipeStore::load` touches the disk).
 pub struct ImportState {
-    /// Classeur actif à l'ouverture, disponible même après un changement de destination.
+    /// Active workbook at opening, available even after a change of destination.
     pub active_book: Option<NodeId>,
-    /// Destination choisie ; le classeur actif est proposé s'il existe.
+    /// Chosen destination; the active workbook is offered if it exists.
     pub destination: ImportDestination,
-    /// Recette en cours d'édition dans la fenêtre.
+    /// Recipe being edited in the window.
     pub recipe: stokesforge_import::ImportRecipe,
-    /// Fichiers choisis (« Choisir des fichiers… »), dans l'ordre du
-    /// sélecteur.
+    /// Chosen files ("Choose Files to Import"), in the order of the
+    /// picker.
     pub paths: Vec<std::path::PathBuf>,
-    /// Modèles enregistrés, chargés une fois à l'ouverture de la fenêtre.
+    /// Saved templates, loaded once when the window opens.
     pub store: stokesforge_import::RecipeStore,
-    /// Nom sous lequel enregistrer la recette courante comme modèle (champ
-    /// texte de la fenêtre, distinct de `recipe.name` : on ne veut pas
-    /// écraser le nom du modèle chargé tant que « Enregistrer le modèle »
-    /// n'a pas été cliqué).
+    /// Name under which to save the current recipe as a template (text
+    /// field of the window, distinct from `recipe.name`: we do not want to
+    /// overwrite the name of the loaded template until "Save Template"
+    /// has been clicked).
     pub save_as_name: String,
-    /// Étape courante de l'assistant.
+    /// Current step of the wizard.
     pub step: ImportStep,
-    /// Fichier montré dans l'aperçu (indice dans `paths`).
+    /// File shown in the preview (index in `paths`).
     pub preview_index: usize,
-    /// Modèle dont la suppression attend une confirmation.
+    /// Template whose deletion awaits a confirmation.
     pub confirm_delete: Option<String>,
-    /// Fichiers importés récemment, chargés à l'ouverture.
+    /// Recently imported files, loaded at opening.
     pub recent: stokesforge_import::RecentFiles,
-    /// Recette telle qu'elle était au chargement du modèle : sert à dire
-    /// qu'elle a été modifiée sans être enregistrée.
+    /// Recipe as it was when the template was loaded: serves to say
+    /// that it was modified without being saved.
     baseline: stokesforge_import::ImportRecipe,
-    /// Aperçu retenu pendant une frappe (S-T1, #224) : la recette telle qu'elle
-    /// était avant la frappe et l'instant du dernier changement ; tant qu'il
-    /// est là, les aperçus se calculent sur cette recette, pas sur `recipe`.
+    /// Preview held during typing (S-T1, #224): the recipe as it
+    /// was before the typing and the instant of the last change; as long as it
+    /// is there, previews are computed on this recipe, not on `recipe`.
     held_preview: Option<(stokesforge_import::ImportRecipe, f64)>,
-    /// La recette à la dernière image, pour reconnaître un changement.
+    /// The recipe at the last frame, to recognize a change.
     seen_recipe: stokesforge_import::ImportRecipe,
-    /// Octets des fichiers choisis, lus une seule fois par chemin (le fichier
-    /// n'est plus relu à chaque image).
+    /// Bytes of the chosen files, read once per path (the file
+    /// is no longer reread each frame).
     bytes: std::cell::RefCell<ImportBytesCache>,
 }
 
-/// Pause de frappe avant qu'un aperçu se recalcule (S-T1, #224), en secondes.
+/// Typing pause before a preview is recomputed (S-T1, #224), in seconds.
 pub const PREVIEW_PAUSE_SECONDS: f64 = 0.3;
 
 impl ImportState {
-    /// La recette sur laquelle se calculent les aperçus : celle d'avant la
-    /// frappe tant que la pause n'est pas écoulée, sinon la recette courante.
+    /// The recipe on which previews are computed: the one from before the
+    /// typing as long as the pause has not elapsed, otherwise the current recipe.
     pub fn preview_recipe(&self) -> &stokesforge_import::ImportRecipe {
         self.held_preview
             .as_ref()
             .map_or(&self.recipe, |(recipe, _)| recipe)
     }
 
-    /// À appeler une fois par image, **après** la peinture des champs. `typing` :
-    /// un champ texte a le focus ; `now` : l'instant de l'image. Pendant une
-    /// frappe, un changement de la recette ne se voit dans les aperçus qu'après
-    /// [`PREVIEW_PAUSE_SECONDS`] sans autre changement ; hors frappe (liste,
-    /// case, bouton) il est immédiat. Rend le temps restant avant la mise à
-    /// jour, à demander comme prochaine image.
+    /// To call once per frame, **after** painting the fields. `typing`:
+    /// a text field has the focus; `now`: the instant of the frame. During
+    /// typing, a change of the recipe shows in the previews only after
+    /// [`PREVIEW_PAUSE_SECONDS`] without another change; outside typing (list,
+    /// box, button) it is immediate. Returns the time remaining before the
+    /// update, to request as the next frame.
     pub fn debounce_preview(&mut self, typing: bool, now: f64) -> Option<f64> {
         if !typing {
             self.held_preview = None;
@@ -2534,56 +2525,56 @@ impl ImportState {
     }
 }
 
-/// Réglage proposé par le clic droit sur une ligne de l'aperçu.
+/// Setting offered by the right-click on a line of the preview.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportLineAction {
-    /// « Les données commencent ici ».
+    /// "Start Data Here".
     DataStartsHere,
-    /// « Cette ligne donne les unités ».
+    /// "Use as Units Line".
     UnitsLine,
-    /// « Fin des données ici » (la ligne est la première du pied de page).
+    /// "End Data Here" (the line is the first of the footer).
     DataEndsHere,
-    /// « Annuler la coupure automatique ».
+    /// "Disable Auto Data End".
     NoAutoCut,
 }
 
-/// Octets lus par chemin (ou le message d'échec de lecture).
+/// Bytes read per path (or the read failure message).
 type ImportBytesCache = std::collections::HashMap<PathBuf, Result<Arc<Vec<u8>>, ImportReadError>>;
 
-/// Pourquoi l'assistant d'import ne peut pas montrer un fichier : donnée, sans
-/// phrase — `errors::import::read_message` la met en phrase à l'affichage.
+/// Why the import wizard cannot show a file: data, without a
+/// sentence — `errors::import::read_message` puts it into a sentence at display.
 #[derive(Debug, Clone)]
 pub enum ImportReadError {
-    /// L'assistant n'est pas ouvert.
+    /// The wizard is not open.
     NoImport,
-    /// Le fichier `path` n'a pas pu être lu.
+    /// The file `path` could not be read.
     Read {
         path: PathBuf,
         error: Arc<std::io::Error>,
     },
-    /// Le contenu du fichier n'est pas un tableau lisible.
+    /// The content of the file is not a readable table.
     Parse(stokesforge_import::ImportError),
 }
 
-/// Les six étapes de l'assistant d'import, façon assistant ASCII d'Origin.
+/// The six steps of the import wizard, in the manner of Origin's ASCII wizard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImportStep {
-    /// Fichier(s) et modèle.
+    /// File(s) and template.
     Files,
-    /// Séparateur et décimale.
+    /// Delimiter and decimal.
     Format,
-    /// En-tête et fin des données.
+    /// Header and end of the data.
     Header,
-    /// Désignation colonne par colonne.
+    /// Column-by-column designation.
     Columns,
-    /// Métadonnées à conserver.
+    /// Metadata to keep.
     Metadata,
-    /// Destination et enregistrement du modèle.
+    /// Destination and saving of the template.
     Destination,
 }
 
 impl ImportStep {
-    /// Toutes les étapes, dans l'ordre.
+    /// All the steps, in order.
     pub const ALL: [ImportStep; 6] = [
         ImportStep::Files,
         ImportStep::Format,
@@ -2593,7 +2584,7 @@ impl ImportStep {
         ImportStep::Destination,
     ];
 
-    /// Titre affiché.
+    /// Displayed title.
     pub fn title(self) -> String {
         match self {
             ImportStep::Files => tr!("import-step-files-title"),
@@ -2609,295 +2600,295 @@ impl ImportStep {
         Self::ALL.iter().position(|step| *step == self).unwrap_or(0)
     }
 
-    /// Étape suivante (la dernière reste elle-même).
+    /// Next step (the last one stays itself).
     pub fn next(self) -> Self {
         Self::ALL[(self.index() + 1).min(Self::ALL.len() - 1)]
     }
 
-    /// Étape précédente (la première reste elle-même).
+    /// Previous step (the first one stays itself).
     pub fn previous(self) -> Self {
         Self::ALL[self.index().saturating_sub(1)]
     }
 }
 
-/// Une colonne du résultat d'import, pour l'étape « Colonnes ».
+/// A column of the import result, for the "Columns" step.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportColumnPreview {
-    /// Nom (ligne de noms de colonnes) ou vide.
+    /// Name (column names line) or empty.
     pub name: String,
-    /// Nom long (sous-en-tête) ou vide.
+    /// Long name (subheader) or empty.
     pub long_name: String,
-    /// Unité (sous-en-tête) ou vide.
+    /// Unit (subheader) or empty.
     pub unit: String,
-    /// Colonne à types mixtes (texte conservé).
+    /// Mixed-type column (text kept).
     pub mixed: bool,
-    /// Premières valeurs, mises en forme.
+    /// First values, formatted.
     pub samples: Vec<String>,
 }
 
-/// Nature d'une fenêtre du [`ProjectTreeNode`] montré par le panneau Project
-/// Manager — le sous-ensemble de `NodeKind::is_window()` qui a une fenêtre à
-/// ouvrir côté UI (`Unknown` n'en a pas : rien à afficher pour une nature de
-/// nœud que ce lecteur ne comprend pas, invariant 10).
+/// Kind of window of the [`ProjectTreeNode`] shown by the Project
+/// Manager panel — the subset of `NodeKind::is_window()` that has a window to
+/// open on the UI side (`Unknown` has none: nothing to show for a node
+/// kind that this reader does not understand, invariant 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowKind {
-    /// Classeur — `stokesforge_app::app` l'ouvre en `Tab::Book`.
+    /// Workbook — `stokesforge_app::app` opens it as `Tab::Book`.
     Book,
-    /// Graphe — `Tab::Graph`.
+    /// Graph — `Tab::Graph`.
     Graph,
-    /// Matrice — `Tab::Matrix`.
+    /// Matrix — `Tab::Matrix`.
     Matrix,
     /// Note — `Tab::Note`.
     Note,
 }
 
-/// Un nœud tel que le panneau Project Manager le montre : un dossier
-/// dépliable, ou une fenêtre feuille cliquable. Construit par
-/// [`AppState::project_tree`], qui **s'arrête** à `Workbook`/`Graph`/
-/// `Matrix`/`Note` — jamais de descente dans les feuilles d'un classeur ni
-/// dans le contenu d'un graphe, ces natures sont des feuilles de cet arbre-là
-/// même si elles ne le sont pas de `Tree` (`Workbook` a des `Worksheet`
-/// enfants dans le modèle, mais aucun dans cette vue).
+/// A node as the Project Manager panel shows it: an expandable
+/// folder, or a clickable leaf window. Built by
+/// [`AppState::project_tree`], which **stops** at `Workbook`/`Graph`/
+/// `Matrix`/`Note` — never descending into the sheets of a workbook nor
+/// into the content of a graph, these kinds are leaves of that tree
+/// even if they are not leaves of `Tree` (`Workbook` has `Worksheet`
+/// children in the model, but none in this view).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectTreeNode {
-    /// Dossier de rangement.
+    /// Storage folder.
     Folder {
-        /// Identifiant du dossier.
+        /// Identifier of the folder.
         id: NodeId,
-        /// Nom affiché.
+        /// Displayed name.
         name: String,
-        /// Enfants ordonnés, dossiers et fenêtres mêlés — l'ordre de l'arbre.
+        /// Ordered children, folders and windows mixed — the order of the tree.
         children: Vec<ProjectTreeNode>,
     },
-    /// Fenêtre cliquable, jamais développée davantage.
+    /// Clickable window, never expanded further.
     Window {
-        /// Identifiant de la fenêtre.
+        /// Identifier of the window.
         id: NodeId,
-        /// Nom affiché.
+        /// Displayed name.
         name: String,
-        /// Nature de la fenêtre.
+        /// Kind of the window.
         kind: WindowKind,
     },
 }
 
-/// L'état du banc d'essai : une poignée vers l'acteur, le dernier instantané
-/// reçu, ce qui est sélectionné, le chemin de fichier courant, le dernier
-/// message et la saisie en cours.
+/// The state of the test bench: a handle to the actor, the last snapshot
+/// received, what is selected, the current file path, the last message
+/// and the entry in progress.
 pub struct AppState {
-    /// Poignée cliente vers l'acteur qui possède le `Project`.
+    /// Client handle to the actor that owns the `Project`.
     handle: SessionHandle,
-    /// Dernier instantané reçu : figé, à rafraîchir après toute mutation.
+    /// Last snapshot received: frozen, to be refreshed after any mutation.
     snapshot: Snapshot,
-    /// Feuille affichée dans la grille de chaque classeur **ouvert** —
-    /// `Workbook -> Worksheet` sélectionnée dans son propre onglet
-    /// `app::tab::Tab::Book`. Un classeur qui n'a pas d'entrée ici (ou
-    /// dont l'entrée est devenue invalide) retombe sur sa première feuille,
-    /// voir [`AppState::selected_sheet_in`] — la carte n'a donc jamais besoin
-    /// d'être pré-remplie.
+    /// Sheet shown in the grid of each **open** workbook —
+    /// the `Workbook -> Worksheet` selected in its own tab
+    /// `app::tab::Tab::Book`. A workbook with no entry here (or
+    /// whose entry became invalid) falls back to its first sheet,
+    /// see [`AppState::selected_sheet_in`] — so the map never needs
+    /// to be pre-filled.
     selected_sheets: std::collections::HashMap<NodeId, NodeId>,
-    /// Chemin du fichier de travail (saisi à la main, cf. `stokesforge_app::app`).
+    /// Path of the working file (typed by hand, see `stokesforge_app::app`).
     path: String,
-    /// Repère conservateur de l'enregistrement, sans épingler les buffers
-    /// d'un ancien arbre. Une annulation demande aussi confirmation.
+    /// Conservative mark of the last save, without pinning the buffers
+    /// of an old tree. An undo also asks for confirmation.
     saved_revision: Option<(u64, u64)>,
-    /// Sauvegarde automatique et récupération (#317, `state/autosave.rs`).
+    /// Autosave and recovery (#317, `state/autosave.rs`).
     autosave: autosave::AutosaveState,
-    /// Geste qui attend la réponse « Discard Changes · Cancel · Save » (S-F4).
+    /// Gesture waiting for the answer "Discard Changes · Cancel · Save" (S-F4).
     unsaved_pending: Option<UnsavedGesture>,
-    /// Geste à poursuivre une fois le projet enregistré (réponse Save).
+    /// Gesture to continue once the project is saved (Save answer).
     after_save: Option<UnsavedGesture>,
-    /// Plus rien ne retient l'application : la fenêtre peut se fermer.
+    /// Nothing holds the application any more: the window can close.
     quit_ready: bool,
-    /// Échec grave en attente de lecture (S-M8).
+    /// Serious failure waiting to be read (S-M8).
     alert: Option<Alert>,
-    /// Export qui écraserait un fichier que le sélecteur n'a pas vu (S-F3).
+    /// Export that would overwrite a file the picker has not seen (S-F3).
     pending_overwrite: Option<(PathBuf, Box<PlotSpec>)>,
-    /// Le fichier **source** du dernier chargement et ce que sa lecture a
-    /// écarté, tant que cela n'a pas été enregistré (#309, F3) : l'écraser
-    /// supprimerait ces données du disque, d'où la confirmation. Posé par
-    /// [`AppState::mark_loaded`] et `load` (rien si le fichier est propre) ;
-    /// effacé par un enregistrement réussi vers ce chemin, `new_project` ou
-    /// un autre chargement.
+    /// The **source** file of the last load and what its read
+    /// discarded, as long as that has not been saved (#309, F3): overwriting it
+    /// would delete that data from disk, hence the confirmation. Set by
+    /// [`AppState::mark_loaded`] and `load` (nothing if the file is clean);
+    /// cleared by a successful save to this path, `new_project` or
+    /// another load.
     discarded_source: Option<DiscardedSource>,
-    /// L'enregistrement attend la réponse à la confirmation ci-dessus ;
-    /// distinct d'un échec (aucune alerte, `after_save` conservé).
+    /// The save is waiting for the answer to the confirmation above;
+    /// distinct from a failure (no alert, `after_save` kept).
     pending_discarded_save: Option<PendingDiscardedSave>,
-    /// Feuille dont l'onglet est en édition de nom.
+    /// Sheet whose tab is in name editing.
     renaming_sheet: Option<NodeId>,
-    /// Dépôt de lignes en attente du choix de l'axe X (#166).
+    /// Row drop waiting for the choice of the X axis (#166).
     pending_row_drop: Option<PendingRowDrop>,
     object_clipboard_origin: String,
     object_clipboard_output: Option<String>,
-    /// Les représentations de la figure à offrir au système, préparées par
-    /// [`Action::CopyGraphFigure`] et relevées par la fenêtre (#149).
+    /// The representations of the figure to offer to the system, prepared by
+    /// [`Action::CopyGraphFigure`] and picked up by the window (#149).
     figure_clipboard: Option<Vec<FigureBytes>>,
     copied_objects: Vec<(NodeId, NodeId, bool)>,
-    /// Agrandissement des exports PNG (issue #34), un de
-    /// [`PNG_EXPORT_SCALES`]. Préférence de session, pas du projet.
+    /// Scale of PNG exports (issue #34), one of
+    /// [`PNG_EXPORT_SCALES`]. Session preference, not part of the project.
     png_export_scale: f32,
     object_manager_open: bool,
     object_manager_preferences: Preferences,
-    /// Dernier message destiné à l'utilisateur.
+    /// Last message meant for the user.
     status: Option<StatusMessage>,
-    /// Les 50 derniers messages de la barre d'état (S-M6).
+    /// The last 50 status bar messages (S-M6).
     status_log: std::collections::VecDeque<StatusMessage>,
-    /// La fenêtre d'historique des messages est ouverte.
+    /// The message history window is open.
     status_history_open: bool,
-    /// Les R² faibles du projet par type (#290), recalculés à chaque instantané.
+    /// The project's low R² values by type (#290), recomputed at each snapshot.
     low_r2_groups: Vec<crate::r_squared::LowRSquaredGroup>,
-    /// La liste de la pastille « R² faibles » est ouverte (#290) : un état à
-    /// part, qui n'écrase pas `alert`.
+    /// The list of the "low R²" badge is open (#290): a separate
+    /// state, which does not overwrite `alert`.
     low_r2_list_open: bool,
     keyboard_shortcuts_open: bool,
-    /// La fenêtre des préférences est ouverte (#148).
+    /// The preferences window is open (#148).
     preferences_open: bool,
-    /// Erreur survenue pendant qu'un dialogue modal est ouvert (S-M7, #228) :
-    /// elle s'affiche dans le pied du dialogue, jamais dans la barre d'état.
+    /// Error raised while a modal dialog is open (S-M7, #228):
+    /// it shows in the dialog footer, never in the status bar.
     dialog_error: Option<String>,
-    /// Saisie de cellule en cours, s'il y en a une.
+    /// Cell entry in progress, if any.
     editing: Option<CellEdit>,
-    /// Saisie de note en cours, s'il y en a une (voir [`NoteEdit`]).
+    /// Note entry in progress, if any (see [`NoteEdit`]).
     note_editing: Option<NoteEdit>,
-    /// Brouillon en cours de la fenêtre des propriétés d'un graphe, s'il y
-    /// en a un (voir [`PlotEdit`]).
+    /// Current draft of a graph's properties window, if there
+    /// is one (see [`PlotEdit`]).
     plot_edit: Option<PlotEdit>,
-    /// Fenêtre des propriétés du graphe, si elle est ouverte (voir
+    /// Graph properties window, if it is open (see
     /// [`PlotSettings`]).
     plot_settings: Option<PlotSettings>,
-    /// Une macro d'historique est ouverte pour la fenêtre des propriétés :
-    /// ses gestes s'appliquent en direct (aperçu) mais ne forment qu'une
-    /// entrée d'historique, posée à la validation ; l'annulation la rejette.
+    /// A history macro is open for the properties window:
+    /// its gestures apply live (preview) but form only one
+    /// history entry, set on confirmation; cancelling rejects it.
     plot_macro_open: bool,
-    /// Couleurs enregistrées pour l'utilisateur, hors projet (voir
+    /// Colors saved for the user, outside the project (see
     /// [`crate::user_colors`]).
     user_colors: UserColors,
-    /// Sélection courante de la grille de chaque feuille affichée — état UI
-    /// pur, jamais dans l'historique (voir la doc de tête de
-    /// [`crate::selection`]). Clé absente = pas de sélection dans cette
-    /// feuille.
+    /// Current grid selection of each displayed sheet — pure UI
+    /// state, never in the history (see the head doc of
+    /// [`crate::selection`]). Missing key = no selection in this
+    /// sheet.
     selection: std::collections::HashMap<NodeId, Selection>,
-    /// Saisie en cours dans un champ d'en-tête de colonne, s'il y en a une.
+    /// Entry in progress in a column header field, if any.
     header_editing: Option<HeaderEdit>,
-    /// Dernier presse-papier de grille structuré, posé par [`AppState::
-    /// copy_selection`]/[`AppState::copy_full_columns`] — état UI pur, comme
-    /// [`AppState::selection`] : jamais dans l'historique, jamais envoyé à
-    /// l'acteur. `None` tant que rien n'a encore été copié dans cette
-    /// session (ou après un collage qui l'a laissé intact : copier ne le
-    /// vide jamais, seul un nouveau `copy_selection`/`copy_full_columns` le
-    /// remplace).
+    /// Last structured grid clipboard, set by [`AppState::
+    /// copy_selection`]/[`AppState::copy_full_columns`] — pure UI state, like
+    /// [`AppState::selection`]: never in the history, never sent to
+    /// the actor. `None` as long as nothing has been copied in this
+    /// session (or after a paste that left it intact: copying never
+    /// empties it, only a new `copy_selection`/`copy_full_columns`
+    /// replaces it).
     grid_clipboard: Option<GridClipboard>,
-    /// Texte exact poussé au presse-papier **système** en même temps que
-    /// [`AppState::grid_clipboard`] — sert à [`AppState::paste`] à décider
-    /// si le texte reçu d'egui est notre propre copie (rejoue la structure)
-    /// ou un texte externe (voir [`external_clipboard_from_text`]).
+    /// Exact text pushed to the **system** clipboard at the same time as
+    /// [`AppState::grid_clipboard`] — lets [`AppState::paste`] decide
+    /// whether the text received from egui is our own copy (replays the structure)
+    /// or external text (see [`external_clipboard_from_text`]).
     clipboard_text: Option<String>,
-    /// Une copie locale du viewport détaché doit être transférée une fois à
-    /// la racine ; sans ce drapeau, sa vieille copie écraserait toute copie
-    /// plus récente faite dans une autre fenêtre à chaque image.
+    /// A local copy in the detached viewport must be transferred once to
+    /// the root; without this flag, its stale copy would overwrite any more
+    /// recent copy made in another window at every frame.
     clipboard_dirty: bool,
-    /// Sélection sur laquelle Suppr vient déjà de **vider** les cases (pas
-    /// encore supprimé) — voir [`AppState::consume_delete_key`]. `Some`
-    /// entre les deux temps d'une double pression sur Suppr : une deuxième
-    /// pression sur *exactement* la même sélection de la même feuille
-    /// supprime (décale ce qui suit) plutôt que de re-vider ce qui est déjà
-    /// vide. Réinitialisé dès que la sélection change (elle ne compare plus
-    /// égale à l'ancre mémorisée) ou explicitement par [`AppState::
-    /// forget_delete_repeat`] avant toute autre mutation de la grille sur la
-    /// même sélection, pour qu'un Suppr après un Couper/Retour arrière/
-    /// collage reparte au premier temps plutôt que de supprimer par
+    /// Selection on which Delete has just **emptied** the cells (not yet
+    /// deleted) — see [`AppState::consume_delete_key`]. `Some`
+    /// between the two steps of a double press on Delete: a second
+    /// press on *exactly* the same selection of the same sheet
+    /// deletes (shifts what follows) rather than emptying again what is already
+    /// empty. Reset as soon as the selection changes (it no longer compares
+    /// equal to the remembered anchor) or explicitly by [`AppState::
+    /// forget_delete_repeat`] before any other grid mutation on the
+    /// same selection, so that a Delete after a Cut/Backspace/
+    /// paste starts again at the first step rather than deleting by
     /// surprise.
     delete_repeat: Option<(NodeId, Selection)>,
-    /// État de la fenêtre d'import, tant qu'elle est ouverte — voir
+    /// State of the import window, as long as it is open — see
     /// [`ImportState`].
     import_state: Option<ImportState>,
-    /// Projets `.stf` déposés, à ouvrir chacun dans une nouvelle fenêtre
-    /// StokesForge : l'état ne lance aucun processus (testable sans fenêtre), la
-    /// couche fenêtre les vide par [`AppState::take_projects_to_open`].
+    /// Dropped `.stf` projects, each to open in a new StokesForge
+    /// window: the state starts no process (testable without a window), the
+    /// window layer empties them through [`AppState::take_projects_to_open`].
     projects_to_open: Vec<PathBuf>,
-    /// Colonne dont la fenêtre des métadonnées de fichier est ouverte
-    /// (lecture seule, transitoire : jamais dans l'historique).
+    /// Column whose file metadata window is open
+    /// (read-only, transient: never in the history).
     metadata_view: Option<NodeId>,
-    /// Formulaire de la fenêtre d'analyse, s'il est ouvert (#181).
+    /// Form of the analysis window, if it is open (#181).
     analysis: Option<crate::analysis::AnalysisForm>,
-    /// « Keep in Results » : le dernier choix de la session (M5), repris à
-    /// l'ouverture suivante.
+    /// "Keep in Results": the last choice of the session (M5), reused at
+    /// the next opening.
     analysis_keep_results: bool,
-    /// Pour chaque calcul à R² très faible, l'empreinte de ce R² au dernier
-    /// instantané : la boîte (#288) ne s'ouvre que quand elle change.
+    /// For each calculation with a very low R², the fingerprint of that R² at the last
+    /// snapshot: the box (#288) opens only when it changes.
     low_r2_seen: std::collections::BTreeMap<NodeId, Vec<(usize, u64)>>,
-    /// Les dernières analyses lancées, la plus récente en tête (#249).
+    /// The latest analyses run, the most recent first (#249).
     analysis_recent: Vec<crate::analysis_recent::RecentAnalysis>,
-    /// Calcul dont la suppression attend confirmation (M8).
+    /// Calculation whose deletion waits for confirmation (M8).
     pending_calculation_delete: Option<NodeId>,
     pending_analysis_replacement: bool,
-    /// Le groupe `AnalyzeRows` ouvert pour la fenêtre d'analyse en cours
-    /// (#253) : clos par Apply, avorté par Cancel.
+    /// The `AnalyzeRows` group open for the current analysis window
+    /// (#253): closed by Apply, aborted by Cancel.
     analysis_rows_macro: bool,
-    /// Feuille transposée dont la remise à jour attend la confirmation
-    /// d'écraser des valeurs éditées (#253).
+    /// Transposed sheet whose refresh waits for the confirmation
+    /// to overwrite edited values (#253).
     pending_transpose_relink: Option<NodeId>,
-    /// L'export (ou la copie) d'un graphe qui montre des séries pas à jour, en
-    /// attente de la réponse de l'utilisateur (#198).
+    /// The export (or copy) of a graph that shows out-of-date series,
+    /// waiting for the user's answer (#198).
     pending_stale_export: Option<Action>,
-    /// Fenêtre « colonne utilisée par un calcul » ouverte après une
-    /// suppression (#306).
+    /// "Column used by a calculation" window open after a
+    /// deletion (#306).
     column_use: Option<column_use::ColumnUseNotice>,
-    /// Feuille dont Ctrl+Maj+C attend la réponse « valeurs ou formules »
-    /// (#306) : posé seulement quand une colonne copiée porte une formule.
+    /// Sheet whose Ctrl+Shift+C waits for the answer "values or formulas"
+    /// (#306): set only when a copied column carries a formula.
     pending_full_copy: Option<NodeId>,
-    /// Import en cours sur un fil de fond.
+    /// Import in progress on a background thread.
     import_job: Option<ImportJob>,
-    /// Début du recalcul de formules que l'interface n'a pas attendu (#239) ;
-    /// `None` quand aucun ne court. Tant qu'il est posé, l'instantané n'est
-    /// pas rafraîchi (l'acteur ne répondrait qu'à la fin) et la barre d'état
-    /// montre l'indicateur et Stop.
+    /// Start of a formula recalculation the interface did not wait for (#239);
+    /// `None` when none is running. As long as it is set, the snapshot is
+    /// not refreshed (the actor would answer only at the end) and the status bar
+    /// shows the indicator and Stop.
     recalc_since: Option<std::time::Instant>,
-    /// Plus haute révision rendue par l'acteur à une commande de cette
-    /// interface. Pendant un recalcul long l'instantané n'est pas relu
-    /// (`recalc_since`) : sans ce repère, [`AppState::has_unsaved_work`] ne
-    /// verrait pas la commande déjà appliquée et fermer la fenêtre perdrait
-    /// la modification sans poser la question.
+    /// Highest revision returned by the actor to a command from this
+    /// interface. During a long recalculation the snapshot is not re-read
+    /// (`recalc_since`): without this mark, [`AppState::has_unsaved_work`] would not
+    /// see the command already applied and closing the window would lose
+    /// the change without asking.
     applied_revision: u64,
-    /// L'acteur de session est mort (panic, #310) : le modèle est perdu, plus
-    /// rien ne s'enregistre ni ne s'ouvre ; on ne peut que fermer.
+    /// The session actor is dead (panic, #310): the model is lost, nothing
+    /// can be saved or opened any more; one can only close.
     session_lost: bool,
-    /// Fermer sans poser « Discard Changes · Cancel · Save » : la démonstration
-    /// forcée par `STOKESFORGE_DEMO=1` (développement, captures) est jetable.
-    /// Ne vaut que pour Quit ; New et Open… demandent toujours.
+    /// Close without asking "Discard Changes · Cancel · Save": the demo
+    /// forced by `STOKESFORGE_DEMO=1` (development, captures) is disposable.
+    /// Applies to Quit only; New and Open… always ask.
     quit_without_prompt: bool,
-    /// Où écrire la copie de secours quand l'acteur meurt ; `None` : aucune
-    /// (tests). Voir [`crate::recovery`].
+    /// Where to write the backup copy when the actor dies; `None`: none
+    /// (tests). See [`crate::recovery`].
     recovery_dir: Option<PathBuf>,
-    /// Dernier import réussi, pour le reprendre dans l'assistant.
+    /// Last successful import, to resume it in the wizard.
     last_import: Option<LastImport>,
-    /// Fichiers importés avec succès, à inscrire aux fichiers récents par la
-    /// couche fenêtre ([`AppState::take_imported_paths`]).
+    /// Files imported successfully, to be added to the recent files by the
+    /// window layer ([`AppState::take_imported_paths`]).
     recent_to_record: Vec<PathBuf>,
-    /// Texte de la zone de script.
+    /// Text of the script area.
     script_source: String,
-    /// Sortie de la dernière exécution de script, s'il y en a eu une.
+    /// Output of the last script run, if there has been one.
     script_output: Option<ScriptOutput>,
-    /// Descripteur de l'interpréteur embarqué, posé par [`AppState::
-    /// set_python`]. `None` tant qu'il n'a pas été posé — l'interpréteur
-    /// lui-même n'est démarré ni ici ni là, seulement au premier script.
+    /// Descriptor of the embedded interpreter, set by [`AppState::
+    /// set_python`]. `None` until it has been set — the interpreter
+    /// itself is started neither here nor there, only at the first script.
     #[cfg(feature = "python")]
     python: Option<EmbeddedPython>,
-    /// Le moteur de script, une fois démarré (au premier [`Action::
-    /// RunScript`] réussi). Partagé par `Arc` avec le fil détaché qui
-    /// exécute le script en cours, s'il y en a un.
+    /// The script engine, once started (at the first successful [`Action::
+    /// RunScript`]). Shared by `Arc` with the detached thread that
+    /// runs the current script, if there is one.
     #[cfg(feature = "python")]
     engine: Option<Arc<ScriptEngine>>,
-    /// Canal de réponse d'une exécution en cours sur un fil détaché.
-    /// `Some` tant que [`AppState::poll_script`] n'a pas reçu de réponse.
+    /// Reply channel of a run in progress on a detached thread.
+    /// `Some` until [`AppState::poll_script`] has received a reply.
     #[cfg(feature = "python")]
     pending_script: Option<mpsc::Receiver<PendingScriptResult>>,
 }
 
-/// Ce que le fil détaché d'exécution rend à [`AppState::poll_script`] : le
-/// moteur (nouvellement créé ou réutilisé, pour que l'appelant le mette en
-/// cache) et le résultat du script, déjà réduit à un message si l'hôte a
-/// refusé ou échoué — une [`stokesforge_script::ScriptError`] n'a pas à traverser
-/// ce canal, `state.rs` n'en a pas besoin au-delà de son message.
+/// What the detached run thread hands back to [`AppState::poll_script`]: the
+/// engine (newly created or reused, so the caller can put it in
+/// the cache) and the script result, already reduced to a message if the host
+/// refused or failed — a [`stokesforge_script::ScriptError`] need not cross
+/// this channel, `state.rs` does not need it beyond its message.
 #[cfg(feature = "python")]
 type PendingScriptResult = (
     Option<Arc<ScriptEngine>>,
@@ -2905,23 +2896,23 @@ type PendingScriptResult = (
 );
 
 impl AppState {
-    /// Construit l'état depuis une poignée d'acteur. `Err` seulement si
-    /// l'acteur ne répond pas — il n'y a alors rien à afficher du tout.
+    /// Builds the state from an actor handle. `Err` only if
+    /// the actor does not answer — there is then nothing to display at all.
     ///
-    /// Ne présélectionne aucune feuille : avec un classeur par onglet
-    /// (`stokesforge_app::app::Tab::Book`), il n'y a plus de « la » grille à préparer
-    /// à l'ouverture — chaque onglet de classeur retombe sur sa première
-    /// feuille de lui-même ([`AppState::selected_sheet_in`]) dès qu'il
-    /// s'ouvre.
+    /// Preselects no sheet: with one workbook per tab
+    /// (`stokesforge_app::app::Tab::Book`), there is no longer "the" grid to prepare
+    /// at opening — each workbook tab falls back to its first
+    /// sheet by itself ([`AppState::selected_sheet_in`]) as soon as it
+    /// opens.
     ///
-    /// Ne touche **jamais** à l'interpréteur Python : voir la section « Le
-    /// script Python » en tête de ce module.
+    /// **Never** touches the Python interpreter: see the section "The
+    /// Python script" at the top of this module.
     pub fn new(handle: SessionHandle, path: String) -> SessionResult<Self> {
         Self::new_with_preferences(handle, path, Preferences::load())
     }
 
-    /// Injection du stockage, notamment pour tester les actions sans écrire
-    /// les préférences de la machine de l'utilisateur.
+    /// Storage injection, notably to test actions without writing
+    /// the preferences of the user's machine.
     pub fn new_with_preferences(
         handle: SessionHandle,
         path: String,
@@ -2930,8 +2921,8 @@ impl AppState {
         let snapshot = handle.snapshot()?;
         let keep_results_default = preferences.analysis_keep_results();
         let analysis_recent = preferences.analysis_recent().to_vec();
-        // Jamais déduit de `path` : un fichier qui existe n'est pas un projet
-        // chargé (#315). `main` pose le repère par [`AppState::mark_loaded`].
+        // Never deduced from `path`: a file that exists is not a loaded
+        // project (#315). `main` sets the mark through [`AppState::mark_loaded`].
         let saved_revision = None;
         let autosave = autosave::AutosaveState::at((snapshot.revision, snapshot.geometry_revision));
         let mut state = Self {
@@ -3020,14 +3011,14 @@ impl AppState {
         Ok(state)
     }
 
-    /// Donne à un viewport détaché (classeur ou note) son propre état
-    /// transitoire — grille, saisie de cellule ou de note —, adossé au même
-    /// acteur. Il peut ainsi employer exactement les mêmes widgets que la
-    /// fenêtre flottante sans verrouiller l'état de la racine.
+    /// Gives a detached viewport (workbook or note) its own transient
+    /// state — grid, cell or note entry —, backed by the same
+    /// actor. It can thus use exactly the same widgets as the
+    /// floating window without locking the root's state.
     pub fn fork_for_detached_view(&self) -> SessionResult<Self> {
-        // Identité d'émetteur propre à la vue détachée : avec un simple `clone`,
-        // ses écritures seraient absorbées dans une macro ouverte par la
-        // racine (propriétés du graphe) puis emportées par son annulation
+        // Sender identity specific to the detached view: with a plain `clone`,
+        // its writes would be absorbed into a macro opened by the
+        // root (graph properties) then carried away by its undo
         // (issue #21).
         let mut view = Self::new(self.handle.with_new_identity(), self.path.clone())?;
         view.snapshot = self.snapshot.clone();
@@ -3042,20 +3033,20 @@ impl AppState {
         Ok(view)
     }
 
-    /// Rafraîchit la lecture d'un viewport sans toucher à sa sélection ni à
-    /// ses tampons de saisie. L'instantané vient de l'état principal.
+    /// Refreshes a viewport's read without touching its selection or
+    /// its entry buffers. The snapshot comes from the main state.
     pub fn sync_detached_snapshot(&mut self, snapshot: Snapshot) {
         self.snapshot = snapshot;
         self.revalidate_selection();
     }
 
-    /// Synchronise l'éditeur des onglets sans écraser la sélection locale.
+    /// Synchronizes the tab editor without overwriting the local selection.
     pub fn sync_detached_sheet_editor(&mut self, root: &Self) {
         self.renaming_sheet = root.renaming_sheet;
     }
 
-    /// Réunit l'interaction d'un classeur détaché avec la voie de commande
-    /// principale avant que ses actions différées soient dispatchées.
+    /// Joins the interaction of a detached workbook to the main command
+    /// path before its deferred actions are dispatched.
     pub fn adopt_detached_book_view(&mut self, source: &mut Self, book: NodeId) {
         if let Some(sheet) = source.selected_sheet_in(book) {
             self.selected_sheets.insert(book, sheet);
@@ -3072,32 +3063,32 @@ impl AppState {
             self.clipboard_text = source.clipboard_text.clone();
             source.clipboard_dirty = false;
         }
-        // La question de Ctrl+Maj+C se pose dans la fenêtre principale (#306).
+        // The Ctrl+Shift+C question is asked in the main window (#306).
         if let Some(sheet) = source.pending_full_copy.take() {
             self.pending_full_copy = Some(sheet);
         }
     }
 
-    /// Dernier instantané reçu.
+    /// Last snapshot received.
     pub fn snapshot(&self) -> &Snapshot {
         &self.snapshot
     }
 
-    /// Arbre du dernier instantané.
+    /// Tree of the last snapshot.
     pub fn tree(&self) -> &Arc<Tree> {
         &self.snapshot.tree
     }
 
-    /// Feuille affichée dans la grille du classeur `book` : la dernière
-    /// sélectionnée par [`Action::SelectSheet`] pour ce classeur si elle
-    /// existe encore et lui appartient toujours, sinon sa première feuille.
-    /// `None` seulement si `book` n'a plus aucune feuille (ou n'existe plus).
+    /// Sheet shown in the grid of workbook `book`: the last one
+    /// selected by [`Action::SelectSheet`] for this workbook if it
+    /// still exists and still belongs to it, otherwise its first sheet.
+    /// `None` only if `book` has no sheet left (or no longer exists).
     ///
-    /// Toujours recalculé, jamais mis en cache : c'est ce qui rend la carte
-    /// [`AppState::selected_sheets`](Self) auto-cicatrisante — un classeur
-    /// jamais explicitement sélectionné, ou dont la sélection a été rendue
-    /// invalide par une suppression, retombe de lui-même sur sa première
-    /// feuille au prochain appel, sans passage par [`AppState::refresh`].
+    /// Always recomputed, never cached: this is what makes the map
+    /// [`AppState::selected_sheets`](Self) self-healing — a workbook
+    /// never explicitly selected, or whose selection was made
+    /// invalid by a deletion, falls back by itself to its first
+    /// sheet at the next call, without going through [`AppState::refresh`].
     pub fn selected_sheet_in(&self, book: NodeId) -> Option<NodeId> {
         let tree = &self.snapshot.tree;
         if let Some(&sheet) = self.selected_sheets.get(&book) {
@@ -3114,22 +3105,22 @@ impl AppState {
         })
     }
 
-    /// Chemin du fichier de travail.
+    /// Path of the working file.
     pub fn path(&self) -> &str {
         &self.path
     }
 
-    /// Remplace le chemin du fichier de travail.
+    /// Replaces the path of the working file.
     pub fn set_path(&mut self, path: String) {
         self.path = path;
     }
 
-    /// Déclare le projet courant **chargé depuis** [`AppState::path`] : il
-    /// n'a alors rien à enregistrer. Appelé par le binaire après un vrai
-    /// chargement, jamais pour un projet de démonstration ni parce qu'un
-    /// fichier du même nom existe (#315). Le `report` de cette lecture est dit
-    /// comme celui du menu Fichier (#309) : sinon le premier Enregistrer
-    /// supprimerait sans bruit ce que la lecture a écarté.
+    /// Declares the current project **loaded from** [`AppState::path`]: it
+    /// then has nothing to save. Called by the binary after a real
+    /// load, never for a demo project nor because a file of the
+    /// same name exists (#315). The `report` of this read is told
+    /// like that of the File menu (#309): otherwise the first Save
+    /// would silently delete what the read discarded.
     pub fn mark_loaded(&mut self, report: &stokesforge_session::LoadReport) {
         self.saved_revision = Some((self.snapshot.revision, self.snapshot.geometry_revision));
         self.autosave_mark_clean();
@@ -3139,13 +3130,13 @@ impl AppState {
         }
     }
 
-    /// Enregistre la géométrie de la fenêtre de contenu `node` auprès de
-    /// l'acteur. Ce réglage de vue ne passe pas par l'historique : déplacer
-    /// une fenêtre ne doit pas ajouter une étape à annuler.
+    /// Records the geometry of content window `node` with the
+    /// actor. This view setting does not go through the history: moving
+    /// a window must not add a step to undo.
     ///
-    /// Ne rafraîchit pas l'instantané après chaque déplacement : l'acteur
-    /// possède déjà la géométrie que sa prochaine sauvegarde sérialisera, et
-    /// un aller-retour par image rendrait le glisser inutilement coûteux.
+    /// Does not refresh the snapshot after each move: the actor
+    /// already holds the geometry its next save will serialize, and
+    /// a round trip per frame would make dragging needlessly costly.
     pub fn set_window_geometry(
         &mut self,
         node: NodeId,
@@ -3159,18 +3150,18 @@ impl AppState {
         }
     }
 
-    /// Enregistre la largeur de la colonne `column` auprès de l'acteur (#325).
-    /// Même statut que [`AppState::set_window_geometry`] : un réglage de vue
-    /// qui ne passe pas par l'historique (rien à annuler) et que la
-    /// sauvegarde écrit dans le `.stf`, par `NodeId`.
+    /// Records the width of column `column` with the actor (#325).
+    /// Same status as [`AppState::set_window_geometry`]: a view setting
+    /// that does not go through the history (nothing to undo) and that the
+    /// save writes into the `.stf`, by `NodeId`.
     ///
-    /// Ne rafraîchit pas l'instantané — un aller-retour de plus pour rien : la
-    /// copie locale de la table est seulement tenue à jour, pour que
-    /// [`AppState::column_width`] relise ce qui vient d'être posé avant le
-    /// prochain rafraîchissement (le compteur `geometry_revision`, lui, est
-    /// celui de l'acteur, lu au rafraîchissement : c'est lui qui marque alors
-    /// le projet modifié). Une largeur qui n'est pas un réel fini strictement
-    /// positif est ignorée par l'acteur.
+    /// Does not refresh the snapshot — one more round trip for nothing: the
+    /// local copy of the table is only kept up to date, so that
+    /// [`AppState::column_width`] reads back what was just set before the
+    /// next refresh (the `geometry_revision` counter, for its part, is
+    /// the actor's, read at refresh: it is what then marks
+    /// the project modified). A width that is not a strictly positive
+    /// finite real is ignored by the actor.
     pub fn set_column_width(&mut self, column: NodeId, width: f32) {
         match self.handle.set_column_width(column, width) {
             Ok(_) => {
@@ -3185,9 +3176,9 @@ impl AppState {
         }
     }
 
-    /// Celles des colonnes `columns` qui ont une largeur retenue (#330) : ce
-    /// que « remettre à la largeur par défaut » peut encore changer. Vide =
-    /// l'entrée de menu est grisée.
+    /// Those of the columns `columns` that have a retained width (#330): what
+    /// "reset to default width" can still change. Empty =
+    /// the menu entry is greyed out.
     pub fn columns_with_width(&self, columns: &[NodeId]) -> Vec<NodeId> {
         columns
             .iter()
@@ -3196,8 +3187,8 @@ impl AppState {
             .collect()
     }
 
-    /// Toutes les colonnes de `sheet` (#330), pour « remettre toute la feuille
-    /// à la largeur par défaut ».
+    /// All the columns of `sheet` (#330), for "reset the whole sheet
+    /// to default width".
     pub fn sheet_column_ids(&self, sheet: NodeId) -> Vec<NodeId> {
         self.visible_columns(sheet)
             .into_iter()
@@ -3205,10 +3196,10 @@ impl AppState {
             .collect()
     }
 
-    /// Remet les colonnes `columns` à la largeur par défaut auprès de l'acteur
-    /// (#330) : leur clé est retirée, ici aussi dans la copie locale de
-    /// l'instantané (comme [`AppState::set_column_width`]), pour que
-    /// [`AppState::column_width`] rende `None` avant le prochain rafraîchissement.
+    /// Resets the columns `columns` to the default width with the actor
+    /// (#330): their key is removed, here too in the local copy of
+    /// the snapshot (like [`AppState::set_column_width`]), so that
+    /// [`AppState::column_width`] returns `None` before the next refresh.
     pub fn reset_column_widths(&mut self, columns: &[NodeId]) {
         match self.handle.reset_column_widths(columns) {
             Ok(_) => {
@@ -3224,21 +3215,21 @@ impl AppState {
         }
     }
 
-    /// La largeur retenue de la colonne `column`, en points logiques ; `None`
-    /// pour une colonne jamais redimensionnée (la grille applique alors sa
-    /// largeur par défaut). Lue sur l'instantané : voir
+    /// The retained width of column `column`, in logical points; `None`
+    /// for a column never resized (the grid then applies its
+    /// default width). Read from the snapshot: see
     /// [`AppState::set_column_width`].
     pub fn column_width(&self, column: NodeId) -> Option<f32> {
         self.snapshot.column_widths.get(&column).copied()
     }
 
-    /// Dernier message destiné à l'utilisateur.
+    /// Last message meant for the user.
     pub fn status(&self) -> Option<&StatusMessage> {
         self.status.as_ref()
     }
 
-    /// L'erreur à montrer dans le pied du dialogue modal ouvert (S-M7, #228) ;
-    /// aucune quand aucun dialogue de contenu n'est ouvert.
+    /// The error to show in the footer of the open modal dialog (S-M7, #228);
+    /// none when no content dialog is open.
     pub fn dialog_error(&self) -> Option<&str> {
         if self.modal_dialog_open() {
             self.dialog_error.as_deref()
@@ -3247,49 +3238,49 @@ impl AppState {
         }
     }
 
-    /// Un dialogue modal de contenu est-il ouvert (import, propriétés du
-    /// graphe, analyse) ? Ses erreurs vont alors dans son pied (S-M7).
+    /// Is a content modal dialog open (import, graph properties,
+    /// analysis)? Its errors then go in its footer (S-M7).
     fn modal_dialog_open(&self) -> bool {
         self.import_state.is_some() || self.plot_settings.is_some() || self.analysis.is_some()
     }
 
-    /// La taille et la position mémorisées de chaque sorte de dialogue (S-F8).
+    /// The remembered size and position of each kind of dialog (S-F8).
     pub fn dialog_geometries(
         &self,
     ) -> &std::collections::BTreeMap<String, crate::preferences::DialogGeometry> {
         self.object_manager_preferences.dialog_geometries()
     }
 
-    /// Texte actuel de la zone de script.
+    /// Current text of the script area.
     pub fn script_source(&self) -> &str {
         &self.script_source
     }
 
-    /// Remplace le texte de la zone de script.
+    /// Replaces the text of the script area.
     pub fn set_script_source(&mut self, source: String) {
         self.script_source = source;
     }
 
-    /// Sortie de la dernière exécution de script, s'il y en a eu une.
+    /// Output of the last script run, if there has been one.
     pub fn script_output(&self) -> Option<&ScriptOutput> {
         self.script_output.as_ref()
     }
 
-    /// Vrai si ce binaire embarque le pont Python (feature `python`).
+    /// True if this binary embeds the Python bridge (feature `python`).
     ///
-    /// Reflète uniquement la **compilation**, pas la localisation d'un
-    /// interpréteur : un binaire compilé avec la feature mais qui n'a pas
-    /// trouvé son préfixe embarqué (`AppState::set_python` jamais appelé)
-    /// reste `true` ici, et [`Action::RunScript`] l'explique à l'exécution —
-    /// le même choix que pour toute autre action de ce banc (échouer avec un
-    /// message plutôt que griser par anticipation).
+    /// Reflects only the **compilation**, not the location of an
+    /// interpreter: a binary compiled with the feature but that did not
+    /// find its embedded prefix (`AppState::set_python` never called)
+    /// stays `true` here, and [`Action::RunScript`] explains it at run time —
+    /// the same choice as for every other action of this bench (fail with a
+    /// message rather than grey out in advance).
     #[must_use]
     pub fn script_available(&self) -> bool {
         cfg!(feature = "python")
     }
 
-    /// Vrai pendant qu'un script s'exécute (entre [`Action::RunScript`] et le
-    /// [`AppState::poll_script`] qui en récupère le résultat).
+    /// True while a script is running (between [`Action::RunScript`] and the
+    /// [`AppState::poll_script`] that collects its result).
     #[must_use]
     pub fn script_running(&self) -> bool {
         #[cfg(feature = "python")]
@@ -3302,18 +3293,18 @@ impl AppState {
         }
     }
 
-    /// Pose le descripteur de l'interpréteur embarqué à utiliser au premier
-    /// script. **Ne démarre rien** : `EmbeddedPython::locate`/`with_home` ne
-    /// touchent pas à CPython, seul `ScriptEngine::spawn` le fait — et lui
-    /// n'est appelé que depuis [`AppState::run_script`].
+    /// Sets the descriptor of the embedded interpreter to use at the first
+    /// script. **Starts nothing**: `EmbeddedPython::locate`/`with_home` do not
+    /// touch CPython, only `ScriptEngine::spawn` does — and it
+    /// is called only from [`AppState::run_script`].
     #[cfg(feature = "python")]
     pub fn set_python(&mut self, python: EmbeddedPython) {
         self.python = Some(python);
     }
 
-    /// Libellé de l'action « Annuler » : `Some("Undo Edit Cells in Column A")`
-    /// (mis en phrase par [`history_text`]), ou `None` si la pile est vide
-    /// (l'entrée de menu est alors grisée).
+    /// Label of the "Undo" action: `Some("Undo Edit Cells in Column A")`
+    /// (put into a sentence by [`history_text`]), or `None` if the stack is empty
+    /// (the menu entry is then greyed out).
     pub fn undo_label(&self) -> Option<String> {
         self.snapshot
             .history
@@ -3322,7 +3313,7 @@ impl AppState {
             .map(|label| tr!("history-undo-entry", label = history_text(label)))
     }
 
-    /// Libellé de l'action « Rétablir », `None` si rien à rétablir.
+    /// Label of the "Redo" action, `None` if nothing to redo.
     pub fn redo_label(&self) -> Option<String> {
         self.snapshot
             .history
@@ -3331,48 +3322,48 @@ impl AppState {
             .map(|label| tr!("history-redo-entry", label = history_text(label)))
     }
 
-    /// Vrai s'il y a quelque chose à annuler.
+    /// True if there is something to undo.
     pub fn can_undo(&self) -> bool {
         self.snapshot.history.can_undo
     }
 
-    /// Révision courante de l'instantané — sert à `stokesforge_app::app` à détecter,
-    /// après un [`AppState::dispatch`], si l'action a réellement produit une
-    /// commande (`Action::PlotColumns` sur une sélection sans Y n'en envoie
-    /// aucune, la révision ne bouge pas).
+    /// Current revision of the snapshot — used by `stokesforge_app::app` to detect,
+    /// after an [`AppState::dispatch`], whether the action really produced a
+    /// command (`Action::PlotColumns` on a selection without Y sends
+    /// none, the revision does not move).
     pub fn revision(&self) -> stokesforge_session::Revision {
         self.snapshot.revision
     }
 
-    /// Vrai s'il y a quelque chose à rétablir.
+    /// True if there is something to redo.
     pub fn can_redo(&self) -> bool {
         self.snapshot.history.can_redo
     }
 
-    /// Colonnes de `sheet`, dans l'ordre du modèle : `(NodeId, nom, type)`.
-    /// Vide si `sheet` n'est pas (ou plus) une feuille de ce projet.
+    /// Columns of `sheet`, in model order: `(NodeId, name, type)`.
+    /// Empty if `sheet` is not (or no longer) a sheet of this project.
     pub fn visible_columns(&self, sheet: NodeId) -> Vec<(NodeId, String, ColumnType)> {
         visible_columns_in(&self.snapshot.tree, sheet)
     }
 
-    /// Le [`PlotSpec`] courant de `graph`, ou `None` si ce n'est pas (ou
-    /// plus) un graphe de ce projet.
+    /// The current [`PlotSpec`] of `graph`, or `None` if it is not (or
+    /// no longer) a graph of this project.
     pub fn plot_spec(&self, graph: NodeId) -> Option<PlotSpec> {
         current_plot_spec(&self.snapshot.tree, graph)
     }
 
-    /// Charge utile du glisser d'une sélection de colonnes de `sheet` vers un
-    /// graphe ouvert ([`ColumnDragPayload`]), ou `None` si `sheet` n'a
-    /// aucune sélection ou si sa sélection ne couvre aucune colonne
-    /// ([`Selection::columns`]) — pas de glisser possible sans colonne, même
-    /// depuis la zone de prise. `stokesforge_app::app::grid::grid_contents` l'appelle à
-    /// chaque image pour savoir s'il y a quoi que ce soit à proposer au
-    /// glisser ; ne rien avoir sélectionné y désactive la zone de prise tout
-    /// entière plutôt que de la laisser démarrer un glisser vide.
+    /// Drag payload of a selection of columns of `sheet` to an
+    /// open graph ([`ColumnDragPayload`]), or `None` if `sheet` has
+    /// no selection or if its selection covers no column
+    /// ([`Selection::columns`]) — no drag is possible without a column, even
+    /// from the grab zone. `stokesforge_app::app::grid::grid_contents` calls it
+    /// every frame to know whether there is anything at all to offer to the
+    /// drag; having nothing selected disables the whole grab zone
+    /// there rather than letting it start an empty drag.
     pub fn column_drag_payload(&self, sheet: NodeId) -> Option<ColumnDragPayload> {
         let selection = self.selection(sheet)?;
-        // Seule une sélection de colonnes **entières** se glisse (#160) :
-        // pas de cases ni de lignes.
+        // Only a selection of **whole** columns can be dragged (#160):
+        // no cells or rows.
         if !selection.is_columns() {
             return None;
         }
@@ -3384,11 +3375,11 @@ impl AppState {
         }
     }
 
-    /// Charge utile du glisser de lignes de `sheet` vers un graphe
-    /// ([`RowDragPayload`]), ou `None` hors des deux préconditions de #166 :
-    /// une sélection de **lignes entières** (gouttière des numéros), et la
-    /// ligne spéciale x' présente — au moins une colonne de la feuille en
-    /// porte une valeur. Sans x', pas de geste : une ligne n'a pas d'abscisse.
+    /// Drag payload of rows of `sheet` to a graph
+    /// ([`RowDragPayload`]), or `None` outside the two preconditions of #166:
+    /// a selection of **whole rows** (row-number gutter), and the special
+    /// x' row present — at least one column of the sheet
+    /// carries a value in it. Without x', no gesture: a row has no abscissa.
     pub fn row_drag_payload(&self, sheet: NodeId) -> Option<RowDragPayload> {
         let selection = self.selection(sheet)?;
         if !selection.is_full_rows() || x_prime_columns(&self.snapshot.tree, sheet).is_empty() {
@@ -3403,76 +3394,76 @@ impl AppState {
         (!rows.is_empty()).then_some(RowDragPayload { sheet, rows })
     }
 
-    /// Le dépôt de lignes qui attend le choix de l'axe X (#166), avec le
-    /// nombre de lignes concernées, ou `None`.
+    /// The row drop waiting for the choice of the X axis (#166), with the
+    /// number of rows concerned, or `None`.
     pub fn pending_row_drop(&self) -> Option<(NodeId, usize)> {
         self.pending_row_drop
             .as_ref()
             .map(|pending| (pending.graph, pending.rows.len()))
     }
 
-    /// Nombre de lignes de `sheet` — le **maximum** des longueurs de ses
-    /// colonnes, pas la longueur de la première : une feuille n'est pas un
-    /// tableau rectangulaire. 0 si `sheet` n'est pas (ou plus) une feuille.
+    /// Number of rows of `sheet` — the **maximum** of the lengths of its
+    /// columns, not the length of the first: a sheet is not a
+    /// rectangular table. 0 if `sheet` is not (or no longer) a sheet.
     pub fn row_count(&self, sheet: NodeId) -> usize {
         row_count_in(&self.snapshot.tree, sheet)
     }
 
-    /// Texte à afficher dans une cellule : [`MISSING_TEXT_DISPLAY`] pour une
-    /// valeur absente (`Cell::Text(None)`, y compris hors bornes — `get`
-    /// rend `None` au-delà de la fin d'une colonne texte), `""` pour une
-    /// valeur manquante numérique (`NaN`) ou pour une chaîne vide
-    /// **présente** (`Cell::Text(Some(String::new()))`), sinon la valeur
-    /// formatée.
+    /// Text to display in a cell: [`MISSING_TEXT_DISPLAY`] for an
+    /// absent value (`Cell::Text(None)`, including out of bounds — `get`
+    /// returns `None` past the end of a text column), `""` for a
+    /// numeric missing value (`NaN`) or for an empty string that is
+    /// **present** (`Cell::Text(Some(String::new()))`), otherwise the
+    /// formatted value.
     ///
-    /// # A9 (option 2, `guide-de-correction-robustesse.md` §F1/§F8) — deux
-    /// choses différentes ne doivent pas avoir la même apparence
+    /// # A9 (option 2, `guide-de-correction-robustesse.md` §F1/§F8) — two
+    /// different things must not look the same
     ///
-    /// Le modèle distingue `Some("")` (une chaîne vide qu'on a écrite) de
-    /// `None` (rien n'a jamais été écrit) — c'est la seule valeur manquante
-    /// du texte (voir la doc de tête de `column.rs`, invariant F1). Avant ce
-    /// correctif, `cell_text` rendait `""` dans les deux cas : rien, à
-    /// l'écran, ne permettait de savoir laquelle des deux était sous les
-    /// yeux — l'anomalie A9 (moitié affichage ; l'autre moitié, la survie de
-    /// `Some("")` à la traversée d'une cellule, est déjà corrigée dans
+    /// The model distinguishes `Some("")` (an empty string that was written) from
+    /// `None` (nothing was ever written) — the only missing value
+    /// of text (see the head doc of `column.rs`, invariant F1). Before this
+    /// fix, `cell_text` returned `""` in both cases: nothing, on
+    /// screen, told which of the two was in front of
+    /// the eyes — anomaly A9 (the display half; the other half, the survival of
+    /// `Some("")` when crossing a cell, is already fixed in
     /// `commit_cell`, option 1).
     ///
-    /// La convention retenue ici : une valeur **absente** s'affiche comme un
-    /// unique espace insécable U+00A0 ([`MISSING_TEXT_DISPLAY`]) — visible
-    /// nulle part (il occupe la cellule comme un blanc), mais distinct de la
-    /// chaîne vide en mémoire, et d'un caractère qu'un utilisateur ne tape
-    /// jamais en cherchant à écrire du texte ordinaire (contrairement à un
-    /// tiret ou un point d'interrogation, que « rien » comme « — » sont
-    /// d'authentiques réponses possibles à une question). Une chaîne vide
-    /// **présente** garde `""` : c'est littéralement ce qu'elle est.
+    /// The convention chosen here: an **absent** value displays as a
+    /// single non-breaking space U+00A0 ([`MISSING_TEXT_DISPLAY`]) — visible
+    /// nowhere (it fills the cell like a blank), but distinct from the
+    /// empty string in memory, and from a character a user never types
+    /// when trying to write ordinary text (unlike a
+    /// dash or a question mark, since "nothing" as well as "—" are
+    /// genuine possible answers to a question). An empty string that is
+    /// **present** keeps `""`: that is literally what it is.
     ///
-    /// # Formatage numérique
+    /// # Numeric formatting
     ///
-    /// Un nombre s'écrit en **valeur exacte** (`format_exact`, de
-    /// `stokesforge-core`, #222) : c'est le texte d'édition, de copie et de
-    /// comparaison de saisie, identique à la conversion
-    /// `Column::set_column_type` (§F8). Ce que la grille *peint* est
-    /// [`AppState::cell_display`], arrondi à 6 chiffres.
+    /// A number is written as its **exact value** (`format_exact`, from
+    /// `stokesforge-core`, #222): it is the text for editing, copying and
+    /// comparing entries, identical to the conversion
+    /// `Column::set_column_type` (§F8). What the grid *paints* is
+    /// [`AppState::cell_display`], rounded to 6 digits.
     pub fn cell_text(&self, column: NodeId, row: usize) -> String {
         cell_text_in(&self.snapshot.tree, column, row)
     }
 
-    /// Le texte que la grille peint pour une cellule (6 chiffres significatifs,
-    /// #222). Pour tout le reste — édition, copie, comparaison —
+    /// The text the grid paints for a cell (6 significant digits,
+    /// #222). For everything else — editing, copying, comparing —
     /// [`AppState::cell_text`].
     pub fn cell_display(&self, column: NodeId, row: usize) -> String {
         cell_display_in(&self.snapshot.tree, column, row)
     }
 
-    /// Vrai si `(column, row)` porte une valeur numérique — voir
+    /// True if `(column, row)` carries a numeric value — see
     /// [`cell_is_numeric_in`].
     pub fn cell_is_numeric(&self, column: NodeId, row: usize) -> bool {
         cell_is_numeric_in(&self.snapshot.tree, column, row)
     }
 
-    /// Métadonnées d'affichage d'une colonne (rôle, unité, nom long,
-    /// commentaire, formule) — [`stokesforge_core::ColumnMeta::default`] si
-    /// `column` n'est pas (ou plus) une colonne de ce projet.
+    /// Display metadata of a column (role, unit, long name,
+    /// comment, formula) — [`stokesforge_core::ColumnMeta::default`] if
+    /// `column` is not (or no longer) a column of this project.
     pub fn column_meta(&self, column: NodeId) -> ColumnMeta {
         self.snapshot
             .tree
@@ -3482,29 +3473,29 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    /// Sélection courante de la grille de `sheet`, s'il y en a une.
+    /// Current grid selection of `sheet`, if there is one.
     pub fn selection(&self, sheet: NodeId) -> Option<&Selection> {
         self.selection.get(&sheet)
     }
 
-    /// Pose une sélection d'une seule cellule (l'ancre d'un futur
-    /// rectangle) — simple clic. Mutation transitoire (comme
-    /// [`AppState::begin_edit`]) : sans effet sur le modèle, donc sûre à
-    /// appeler directement pendant le rendu plutôt que via [`Action`].
+    /// Sets a single-cell selection (the anchor of a future
+    /// rectangle) — simple click. Transient mutation (like
+    /// [`AppState::begin_edit`]): no effect on the model, so safe to
+    /// call directly during rendering rather than through [`Action`].
     pub fn select_cell(&mut self, sheet: NodeId, column: NodeId, row: usize) {
         self.selection.insert(sheet, Selection::cell(column, row));
     }
 
-    /// Étend la sélection courante de `sheet` jusqu'à `(column, row)`, en
-    /// gardant l'ancre déjà posée — glisser ou Maj-clic. Continue un
-    /// rectangle déjà commencé sur un champ d'en-tête, mais s'arrête à la
-    /// frontière plutôt que de la traverser (voir [`Selection::
-    /// extend_row_to`] et la doc de tête de [`crate::selection`]) ; pose une
-    /// sélection d'une seule cellule si `sheet` n'en avait pas encore, ou si
-    /// la sélection en cours est une plage de colonnes (rangée des lettres),
-    /// une plage de lignes (gouttière des numéros de ligne) ou une plage de
-    /// champ d'en-tête entier (libellé de champ dans la gouttière) — ces
-    /// glissers-là restent des gestes distincts, voir [`AppState::
+    /// Extends the current selection of `sheet` up to `(column, row)`,
+    /// keeping the anchor already set — drag or Shift-click. Continues a
+    /// rectangle already started in a header field, but stops at the
+    /// boundary rather than crossing it (see [`Selection::
+    /// extend_row_to`] and the head doc of [`crate::selection`]); sets a
+    /// single-cell selection if `sheet` had none yet, or if
+    /// the current selection is a range of columns (letter row),
+    /// a range of rows (row-number gutter) or a range of
+    /// whole header fields (field label in the gutter) — those
+    /// drags remain distinct gestures, see [`AppState::
     /// extend_column_selection`]/[`AppState::extend_row_selection`]/
     /// [`AppState::extend_header_row_selection`].
     pub fn extend_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
@@ -3520,15 +3511,15 @@ impl AppState {
         }
     }
 
-    /// Sélectionne `column` dans son entier — clic sur sa lettre d'en-tête.
+    /// Selects `column` entirely — click on its header letter.
     pub fn select_column(&mut self, sheet: NodeId, column: NodeId) {
         self.selection.insert(sheet, Selection::column(column));
     }
 
-    /// Ctrl+clic sur une lettre : ajoute ou retire `column` de la sélection
-    /// et y déplace l'ancre (#159). Repose une sélection simple si la
-    /// sélection en cours n'est pas un ensemble de colonnes — une seule sorte
-    /// à la fois.
+    /// Ctrl+click on a letter: adds or removes `column` from the selection
+    /// and moves the anchor there (#159). Sets a simple selection again if the
+    /// current selection is not a set of columns — only one kind
+    /// at a time.
     pub fn toggle_column_selection(&mut self, sheet: NodeId, column: NodeId) {
         match self.selection.get_mut(&sheet) {
             Some(selection) if selection.is_columns() => {
@@ -3539,9 +3530,9 @@ impl AppState {
         self.drop_selection_if_empty(sheet);
     }
 
-    /// Maj+clic sur une lettre : la sélection devient la plage ancre →
-    /// `column` (les colonnes posées au Ctrl+clic disparaissent). Le
-    /// Ctrl+Maj+clic et le glisser, additifs, passent par
+    /// Shift+click on a letter: the selection becomes the range anchor →
+    /// `column` (the columns set by Ctrl+click disappear). Ctrl+Shift+click
+    /// and the drag, which are additive, go through
     /// [`AppState::extend_column_selection`].
     pub fn extend_column_selection_replacing(&mut self, sheet: NodeId, column: NodeId) {
         match self.selection.get_mut(&sheet) {
@@ -3550,14 +3541,14 @@ impl AppState {
         }
     }
 
-    /// Étend la plage de colonnes courante de `sheet` jusqu'à `column`, en
-    /// gardant l'ancre déjà posée — glisser ou Maj-clic sur la rangée des
-    /// lettres. Pose une sélection d'une seule colonne si `sheet` n'en avait
-    /// pas encore, ou si la sélection en cours n'est pas déjà une plage de
-    /// colonnes — un glisser qui franchit la frontière depuis les données,
-    /// les champs d'en-tête ou la gouttière des numéros de ligne vers la
-    /// rangée des lettres repose toujours une sélection simple, même
-    /// politique qu'au clavier (voir [`AppState::move_selection`]).
+    /// Extends the current column range of `sheet` up to `column`,
+    /// keeping the anchor already set — drag or Shift-click on the letter
+    /// row. Sets a single-column selection if `sheet` had none
+    /// yet, or if the current selection is not already a range of
+    /// columns — a drag that crosses the boundary from the data,
+    /// the header fields or the row-number gutter to the letter
+    /// row always sets a simple selection again, same
+    /// policy as on the keyboard (see [`AppState::move_selection`]).
     pub fn extend_column_selection(&mut self, sheet: NodeId, column: NodeId) {
         match self.selection.get_mut(&sheet) {
             Some(selection) if selection.is_columns() => selection.extend_columns_to(column),
@@ -3565,8 +3556,8 @@ impl AppState {
         }
     }
 
-    /// Retire de `sheet` une sélection que le dernier geste a vidée (Ctrl+clic
-    /// qui retire la dernière colonne, ligne ou case).
+    /// Removes from `sheet` a selection that the last gesture emptied (Ctrl+click
+    /// that removes the last column, row or cell).
     fn drop_selection_if_empty(&mut self, sheet: NodeId) {
         let empty = self
             .selection
@@ -3577,7 +3568,7 @@ impl AppState {
         }
     }
 
-    /// Ctrl+clic sur un numéro de ligne : ajoute ou retire `row` (#159).
+    /// Ctrl+click on a row number: adds or removes `row` (#159).
     pub fn toggle_row_selection(&mut self, sheet: NodeId, row: usize) {
         match self.selection.get_mut(&sheet) {
             Some(selection) if selection.is_full_rows() => selection.toggle_row(row),
@@ -3586,8 +3577,8 @@ impl AppState {
         self.drop_selection_if_empty(sheet);
     }
 
-    /// Maj+clic sur un numéro de ligne : la plage ancre → `row` remplace
-    /// tout ; le Ctrl+Maj+clic et le glisser passent par
+    /// Shift+click on a row number: the range anchor → `row` replaces
+    /// everything; Ctrl+Shift+click and the drag go through
     /// [`AppState::extend_row_selection`].
     pub fn extend_row_selection_replacing(&mut self, sheet: NodeId, row: usize) {
         match self.selection.get_mut(&sheet) {
@@ -3598,9 +3589,9 @@ impl AppState {
         }
     }
 
-    /// Ctrl+clic sur une cellule : ajoute ou retire la case (#159). Repose
-    /// une sélection simple si la sélection en cours n'est pas un ensemble de
-    /// cases de la même zone.
+    /// Ctrl+click on a cell: adds or removes the cell (#159). Sets
+    /// a simple selection again if the current selection is not a set of
+    /// cells of the same zone.
     pub fn toggle_cell_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
         let target = GridCursor::Data(column, row);
         let handled = match self.selection.get_mut(&sheet) {
@@ -3613,8 +3604,8 @@ impl AppState {
         self.drop_selection_if_empty(sheet);
     }
 
-    /// Ctrl+clic sur un champ d'en-tête : même règle que
-    /// [`AppState::toggle_cell_selection`], côté en-tête.
+    /// Ctrl+click on a header field: same rule as
+    /// [`AppState::toggle_cell_selection`], header side.
     pub fn toggle_header_field_selection(
         &mut self,
         sheet: NodeId,
@@ -3632,8 +3623,8 @@ impl AppState {
         self.drop_selection_if_empty(sheet);
     }
 
-    /// Ctrl+glisser depuis une cellule : ouvre un nouveau rectangle en
-    /// gardant les précédents (#159).
+    /// Ctrl+drag from a cell: opens a new rectangle while
+    /// keeping the previous ones (#159).
     pub fn add_cell_selection(&mut self, sheet: NodeId, column: NodeId, row: usize) {
         let handled = match self.selection.get_mut(&sheet) {
             Some(selection) => selection.add_cell(GridCursor::Data(column, row)),
@@ -3644,7 +3635,7 @@ impl AppState {
         }
     }
 
-    /// Ctrl+glisser depuis un champ d'en-tête : pendant de
+    /// Ctrl+drag from a header field: counterpart of
     /// [`AppState::add_cell_selection`].
     pub fn add_header_field_selection(
         &mut self,
@@ -3661,20 +3652,20 @@ impl AppState {
         }
     }
 
-    /// Sélectionne `row` dans son entier (toutes les colonnes visibles de
-    /// `sheet`) — clic sur son numéro dans la gouttière. Pendant de
+    /// Selects `row` entirely (all the visible columns of
+    /// `sheet`) — click on its number in the gutter. Counterpart of
     /// [`AppState::select_column`].
     pub fn select_row(&mut self, sheet: NodeId, row: usize) {
         self.selection.insert(sheet, Selection::row(row));
     }
 
-    /// Étend la plage de lignes courante de `sheet` jusqu'à `row`, en
-    /// gardant l'ancre déjà posée — glisser ou Maj-clic sur la gouttière des
-    /// numéros de ligne. Pose une sélection d'une seule ligne si `sheet`
-    /// n'en avait pas encore, ou si la sélection en cours n'est pas déjà une
-    /// plage de lignes — un glisser qui franchit la frontière depuis les
-    /// données, les champs d'en-tête ou la rangée des lettres vers la
-    /// gouttière repose toujours une sélection simple, pendant de
+    /// Extends the current row range of `sheet` up to `row`,
+    /// keeping the anchor already set — drag or Shift-click on the row-number
+    /// gutter. Sets a single-row selection if `sheet`
+    /// had none yet, or if the current selection is not already a
+    /// range of rows — a drag that crosses the boundary from the
+    /// data, the header fields or the letter row to the
+    /// gutter always sets a simple selection again, counterpart of
     /// [`AppState::extend_column_selection`].
     pub fn extend_row_selection(&mut self, sheet: NodeId, row: usize) {
         match self.selection.get_mut(&sheet) {
@@ -3683,25 +3674,25 @@ impl AppState {
         }
     }
 
-    /// Sélectionne un champ d'en-tête précis (nom long/unité/commentaire/
-    /// formule) — simple clic, même comportement que [`AppState::
-    /// select_cell`] pour une cellule de données.
+    /// Selects a specific header field (long name/unit/comment/
+    /// formula) — simple click, same behavior as [`AppState::
+    /// select_cell`] for a data cell.
     pub fn select_header_field(&mut self, sheet: NodeId, column: NodeId, field: HeaderField) {
         self.selection
             .insert(sheet, Selection::header_field(column, field));
     }
 
-    /// Étend la plage courante de `sheet` jusqu'au champ `(column, field)`,
-    /// en gardant l'ancre déjà posée — glisser ou Maj-clic sur une des 4
-    /// rangées de champs. Continue un rectangle déjà commencé dans les
-    /// données, mais s'arrête à la frontière plutôt que de la traverser
-    /// (voir [`Selection::extend_row_to`] et la doc de tête de [`crate::
-    /// selection`]) ; pose une sélection d'un seul champ si `sheet` n'en
-    /// avait pas encore, ou si la sélection en cours est une plage de
-    /// colonnes (rangée des lettres), une plage de lignes (gouttière des
-    /// numéros de ligne) ou une plage de champ d'en-tête entier (libellé de
-    /// champ dans la gouttière) — ces glissers-là restent des gestes
-    /// distincts, voir [`AppState::extend_column_selection`]/[`AppState::
+    /// Extends the current range of `sheet` up to the field `(column, field)`,
+    /// keeping the anchor already set — drag or Shift-click on one of the 4
+    /// field rows. Continues a rectangle already started in the
+    /// data, but stops at the boundary rather than crossing it
+    /// (see [`Selection::extend_row_to`] and the head doc of [`crate::
+    /// selection`]); sets a single-field selection if `sheet` had
+    /// none yet, or if the current selection is a range of
+    /// columns (letter row), a range of rows (row-number
+    /// gutter) or a range of whole header fields (field label
+    /// in the gutter) — those drags remain distinct
+    /// gestures, see [`AppState::extend_column_selection`]/[`AppState::
     /// extend_row_selection`]/[`AppState::extend_header_row_selection`].
     pub fn extend_header_field_selection(
         &mut self,
@@ -3721,22 +3712,22 @@ impl AppState {
         }
     }
 
-    /// Sélectionne `field` dans son entier (toutes les colonnes visibles de
-    /// `sheet`) — clic sur son libellé dans la gouttière (« Long Name »,
-    /// « Units », « Comments », « F(x)= »). Pendant de [`AppState::
-    /// select_row`], côté en-tête.
+    /// Selects `field` entirely (all the visible columns of
+    /// `sheet`) — click on its label in the gutter ("Long Name",
+    /// "Units", "Comments", "F(x)="). Counterpart of [`AppState::
+    /// select_row`], header side.
     pub fn select_header_row(&mut self, sheet: NodeId, field: HeaderField) {
         self.selection.insert(sheet, Selection::header_row(field));
     }
 
-    /// Étend la plage de champ d'en-tête entier courante de `sheet` jusqu'à
-    /// `field`, en gardant l'ancre déjà posée — glisser ou Maj-clic sur un
-    /// libellé de champ dans la gouttière. Pose une sélection d'un seul
-    /// champ entier si `sheet` n'en avait pas encore, ou si la sélection en
-    /// cours n'est pas déjà une plage de ce genre — un glisser qui franchit
-    /// la frontière depuis les données, les champs d'en-tête d'une seule
-    /// colonne ou la rangée des lettres vers la gouttière repose toujours
-    /// une sélection simple, pendant de [`AppState::extend_row_selection`].
+    /// Extends the current whole-header-field range of `sheet` up to
+    /// `field`, keeping the anchor already set — drag or Shift-click on a
+    /// field label in the gutter. Sets a single whole-field
+    /// selection if `sheet` had none yet, or if the current selection
+    /// is not already a range of this kind — a drag that crosses
+    /// the boundary from the data, the header fields of a single
+    /// column or the letter row to the gutter always sets
+    /// a simple selection again, counterpart of [`AppState::extend_row_selection`].
     pub fn extend_header_row_selection(&mut self, sheet: NodeId, field: HeaderField) {
         match self.selection.get_mut(&sheet) {
             Some(selection) if selection.is_header_rows() => selection.extend_header_rows_to(field),
@@ -3744,14 +3735,14 @@ impl AppState {
         }
     }
 
-    /// Efface la sélection de `sheet` (sans effet sur le modèle).
+    /// Clears the selection of `sheet` (no effect on the model).
     pub fn deselect_all(&mut self, sheet: NodeId) {
         self.selection.remove(&sheet);
     }
 
-    /// Colonnes visibles de `sheet`, dans l'ordre — juste les identifiants,
-    /// pour la navigation clavier ([`AppState::move_selection`]/
-    /// [`AppState::move_selection_tab`]) comme pour [`AppState::paste`].
+    /// Visible columns of `sheet`, in order — just the identifiers,
+    /// for keyboard navigation ([`AppState::move_selection`]/
+    /// [`AppState::move_selection_tab`]) as for [`AppState::paste`].
     fn column_order(&self, sheet: NodeId) -> Vec<NodeId> {
         self.visible_columns(sheet)
             .into_iter()
@@ -3759,29 +3750,29 @@ impl AppState {
             .collect()
     }
 
-    /// Déplace la sélection de `sheet` d'une case dans `direction` (flèches
-    /// directionnelles), en gardant l'ancre déjà posée si `extend`
-    /// (Maj+flèche étend le rectangle plutôt que déplacer la case
-    /// sélectionnée). Haut/Bas traversent la frontière entre l'en-tête (les
-    /// 4 champs, voir [`HeaderField`]) et les données : Haut depuis la
-    /// première ligne de données rejoint le champ Formule (le plus bas des
-    /// 4), Bas depuis le champ Formule rejoint la première ligne de
-    /// données, Haut depuis le champ Nom long (le plus haut) ne fait rien —
-    /// la rangée des lettres n'entre pas dans cette navigation, il faut la
-    /// cliquer pour la sélectionner (voir [`Selection::grid_cursor`]).
-    /// Franchir cette frontière repose toujours une sélection d'une seule
-    /// case, même sous Maj : une plage ne peut pas mélanger cellules de
-    /// données et champs d'en-tête. Gauche/Droite, eux, ne changent jamais
-    /// de rangée. Clampé aux bords de la grille — jamais de retour à la
-    /// ligne (voir [`AppState::move_selection_tab`] pour ça) ni d'ajout de
-    /// ligne (réservé à [`AppState::commit_cell_and_advance`], déclenché par
-    /// la validation d'une saisie, pas par la navigation seule). Sans effet
-    /// si `sheet` a une plage de colonnes sélectionnée (rangée des lettres)
-    /// ou aucune sélection — mutation transitoire, comme [`AppState::
+    /// Moves the selection of `sheet` by one cell in `direction` (arrow
+    /// keys), keeping the anchor already set if `extend`
+    /// (Shift+arrow extends the rectangle rather than moving the selected
+    /// cell). Up/Down cross the boundary between the header (the
+    /// 4 fields, see [`HeaderField`]) and the data: Up from the
+    /// first data row reaches the Formula field (the lowest of the
+    /// 4), Down from the Formula field reaches the first data
+    /// row, Up from the Long Name field (the highest) does nothing —
+    /// the letter row does not enter this navigation, it must be
+    /// clicked to be selected (see [`Selection::grid_cursor`]).
+    /// Crossing this boundary always sets a single-cell selection again,
+    /// even under Shift: a range cannot mix data cells
+    /// and header fields. Left/Right never change
+    /// row. Clamped to the grid edges — never wraps to the next
+    /// line (see [`AppState::move_selection_tab`] for that) nor adds a
+    /// row (reserved to [`AppState::commit_cell_and_advance`], triggered by
+    /// the confirmation of an entry, not by navigation alone). No effect
+    /// if `sheet` has a range of columns selected (letter row)
+    /// or no selection — transient mutation, like [`AppState::
     /// select_cell`].
     pub fn move_selection(&mut self, sheet: NodeId, direction: MoveDirection, extend: bool) {
-        /// Rangée traversée par la navigation aux flèches : soit un des 4
-        /// champs d'en-tête, soit une ligne de données — voir la doc de
+        /// Row crossed by the arrow-key navigation: either one of the 4
+        /// header fields, or a data row — see the doc of
         /// [`AppState::move_selection`].
         #[derive(Clone, Copy, PartialEq, Eq)]
         enum Row {
@@ -3845,10 +3836,10 @@ impl AppState {
         let Some(&to_column) = order.get(to_index) else {
             return;
         };
-        // Franchir la frontière en-tête/données repose toujours une
-        // sélection réduite à une seule case, même sous Maj — mélanger
-        // cellules de données et champs d'en-tête dans une même plage
-        // n'aurait pas de sens (voir la doc de tête de cette méthode).
+        // Crossing the header/data boundary always sets a selection reduced to a
+        // single cell again, even under Shift — mixing data
+        // cells and header fields in one range would make no
+        // sense (see the head doc of this method).
         let extend = extend && !crossed;
         match to_row {
             Row::Data(row) => {
@@ -3868,25 +3859,25 @@ impl AppState {
         }
     }
 
-    /// Déplace la sélection de `sheet` d'une case vers la colonne suivante
-    /// (`backward: false`) ou précédente (`true`), avec retour à la ligne
-    /// aux bords — Tab/Maj+Tab, comme dans tout tableur : Tab en fin de
-    /// ligne repart au début de la ligne suivante, Maj+Tab en début de ligne
-    /// revient à la fin de la précédente. Traverse aussi la frontière entre
-    /// l'en-tête (les 4 champs) et les données, contrairement aux flèches
-    /// directionnelles (voir [`AppState::move_selection`]) qui la
-    /// traversent mais sans jamais entrer en jeu avec Tab : Tab depuis
-    /// Formule (le plus bas des 4 champs) de la **dernière** colonne entre
-    /// dans les données à `Data(0)` de la **première** colonne ; Maj+Tab
-    /// depuis `Data(0)` de la première colonne fait le chemin inverse et
-    /// rejoint Formule de la dernière colonne — le point d'entrée symétrique
-    /// dans l'en-tête. Au sein de l'en-tête ou des données seules, Tab
-    /// circule normalement (colonne suivante/précédente, champ suivant/
-    /// précédent ou ligne suivante/précédente aux bords de colonne),
-    /// clampé sans autre franchissement de frontière. Jamais d'extension de
-    /// sélection (Tab n'étend pas, contrairement aux flèches sous Maj) ; les
-    /// mêmes gardes que [`AppState::move_selection`] sinon (sans effet si
-    /// `sheet` a une plage de colonnes sélectionnée ou aucune sélection).
+    /// Moves the selection of `sheet` by one cell to the next column
+    /// (`backward: false`) or the previous one (`true`), wrapping to the line
+    /// at the edges — Tab/Shift+Tab, as in any spreadsheet: Tab at the end of a
+    /// row restarts at the beginning of the next row, Shift+Tab at the start of a row
+    /// goes back to the end of the previous one. Also crosses the boundary between
+    /// the header (the 4 fields) and the data, unlike the arrow
+    /// keys (see [`AppState::move_selection`]) which cross it
+    /// but never come into play with Tab: Tab from the
+    /// Formula field (the lowest of the 4 fields) of the **last** column enters
+    /// the data at `Data(0)` of the **first** column; Shift+Tab
+    /// from `Data(0)` of the first column does the reverse path and
+    /// reaches Formula of the last column — the symmetric entry point
+    /// into the header. Within the header or the data alone, Tab
+    /// moves normally (next/previous column, next/previous field
+    /// or next/previous row at the column edges),
+    /// clamped with no other boundary crossing. Never extends the
+    /// selection (Tab does not extend, unlike the arrows under Shift); the
+    /// same guards as [`AppState::move_selection`] otherwise (no effect if
+    /// `sheet` has a range of columns selected or no selection).
     pub fn move_selection_tab(&mut self, sheet: NodeId, backward: bool) {
         let Some(from) = self.selection.get(&sheet).and_then(Selection::grid_cursor) else {
             return;
@@ -3904,10 +3895,10 @@ impl AppState {
         };
         let last_index = order.len() - 1;
 
-        /// Champ suivant/précédent une fois toutes les colonnes parcourues
-        /// pour le champ courant, `None` aux bornes (Formule en avançant,
-        /// Nom long en reculant) — Tab parcourt d'abord les colonnes à champ
-        /// fixe, voir la doc de [`AppState::move_selection_tab`].
+        /// Next/previous field once all the columns have been traversed
+        /// for the current field, `None` at the limits (Formula going forward,
+        /// Long Name going back) — Tab first traverses the columns of a
+        /// fixed field, see the doc of [`AppState::move_selection_tab`].
         fn step_field(field: HeaderField, backward: bool) -> Option<HeaderField> {
             use HeaderField::{Comment, Formula, LongName, Unit, XPrime};
             match (field, backward) {
@@ -3968,59 +3959,59 @@ impl AppState {
         }
     }
 
-    /// Vrai si `(column, row)` fait partie de la sélection de `sheet`.
+    /// True if `(column, row)` is part of the selection of `sheet`.
     pub fn is_selected(&self, sheet: NodeId, column: NodeId, row: usize) -> bool {
         self.selection
             .get(&sheet)
             .is_some_and(|selection| selection.contains(&self.snapshot.tree, sheet, column, row))
     }
 
-    /// Vrai si `column` est sélectionnée dans son entier (clic sur sa lettre
-    /// d'en-tête).
+    /// True if `column` is selected entirely (click on its header
+    /// letter).
     pub fn is_column_selected(&self, sheet: NodeId, column: NodeId) -> bool {
         self.selection.get(&sheet).is_some_and(|selection| {
             selection.is_column_selected(&self.snapshot.tree, sheet, column)
         })
     }
 
-    /// Vrai si `row` est sélectionnée dans son entier (clic sur son numéro
-    /// dans la gouttière) — pendant de [`AppState::is_column_selected`].
+    /// True if `row` is selected entirely (click on its number
+    /// in the gutter) — counterpart of [`AppState::is_column_selected`].
     pub fn is_row_selected(&self, sheet: NodeId, row: usize) -> bool {
         self.selection
             .get(&sheet)
             .is_some_and(|selection| selection.is_row_selected(row))
     }
 
-    /// Vrai si `field` est sélectionné dans son entier (clic sur son
-    /// libellé dans la gouttière) — pendant de [`AppState::is_row_selected`],
-    /// côté en-tête.
+    /// True if `field` is selected entirely (click on its
+    /// label in the gutter) — counterpart of [`AppState::is_row_selected`],
+    /// header side.
     pub fn is_header_row_selected(&self, sheet: NodeId, field: HeaderField) -> bool {
         self.selection
             .get(&sheet)
             .is_some_and(|selection| selection.is_header_row_selected(field))
     }
 
-    /// Vrai si `column` est touchée par la sélection courante de `sheet`,
-    /// quelle que soit sa sorte (une seule cellule de données de cette
-    /// colonne suffit) — voir [`Selection::touches_column`]. Distinct de
-    /// [`AppState::is_column_selected`], qui ne vaut que pour un clic direct
-    /// sur la rangée des lettres.
+    /// True if `column` is touched by the current selection of `sheet`,
+    /// whatever its kind (a single data cell of this
+    /// column is enough) — see [`Selection::touches_column`]. Distinct from
+    /// [`AppState::is_column_selected`], which holds only for a direct click
+    /// on the letter row.
     pub fn column_touched_by_selection(&self, sheet: NodeId, column: NodeId) -> bool {
         self.selection
             .get(&sheet)
             .is_some_and(|selection| selection.touches_column(&self.snapshot.tree, sheet, column))
     }
 
-    /// Vrai si `row` est touchée par la sélection courante de `sheet` —
-    /// pendant de [`AppState::column_touched_by_selection`], côté lignes.
+    /// True if `row` is touched by the current selection of `sheet` —
+    /// counterpart of [`AppState::column_touched_by_selection`], row side.
     pub fn row_touched_by_selection(&self, sheet: NodeId, row: usize) -> bool {
         self.selection
             .get(&sheet)
             .is_some_and(|selection| selection.touches_row(row))
     }
 
-    /// Vrai si `sheet` est actuellement sélectionnée dans son entier : toutes
-    /// ses colonnes visibles, par la case du coin ou Ctrl+A (voir
+    /// True if `sheet` is currently selected entirely: all
+    /// its visible columns, through the corner cell or Ctrl+A (see
     /// [`AppState::select_all`]).
     pub fn is_all_selected(&self, sheet: NodeId) -> bool {
         let order = self.column_order(sheet);
@@ -4035,9 +4026,9 @@ impl AppState {
                 .is_some_and(Selection::is_columns)
     }
 
-    /// Sélectionne **toutes** les colonnes visibles de `sheet`, en-tête
-    /// compris et même sans ligne (#159) — case du coin, Ctrl+A, Edit ›
-    /// Select All. Sans effet sur une feuille sans colonne.
+    /// Selects **all** the visible columns of `sheet`, header
+    /// included and even without rows (#159) — corner cell, Ctrl+A, Edit ›
+    /// Select All. No effect on a sheet without columns.
     pub fn select_all(&mut self, sheet: NodeId) {
         let order = self.column_order(sheet);
         if let Some(selection) = Selection::all_columns(&order) {
@@ -4045,8 +4036,8 @@ impl AppState {
         }
     }
 
-    /// Vrai si `(column, field)` fait partie de la plage de champs d'en-tête
-    /// actuellement sélectionnée dans `sheet`.
+    /// True if `(column, field)` is part of the range of header fields
+    /// currently selected in `sheet`.
     pub fn is_header_field_selected(
         &self,
         sheet: NodeId,
@@ -4058,23 +4049,23 @@ impl AppState {
         })
     }
 
-    /// Champ d'en-tête sélectionné dans `sheet`, s'il y en a un — pour les
-    /// raccourcis clavier (Ctrl+C/Suppr) scopés à la grille.
+    /// Header field selected in `sheet`, if there is one — for the
+    /// keyboard shortcuts (Ctrl+C/Delete) scoped to the grid.
     pub fn selected_header_field(&self, sheet: NodeId) -> Option<(NodeId, HeaderField)> {
         self.selection.get(&sheet)?.selected_header_field()
     }
 
-    /// Ce que le menu contextuel de la grille doit proposer pour la
-    /// sélection courante de `sheet` — voir [`GridMenu`]. `None` si `sheet`
-    /// n'a pas de sélection ou si elle ne désigne plus de colonne valide
-    /// (colonne supprimée entre-temps) : il n'y a alors pas de menu à
-    /// ouvrir, plutôt qu'un menu dont chaque entrée serait sans effet.
+    /// What the grid context menu must offer for the
+    /// current selection of `sheet` — see [`GridMenu`]. `None` if `sheet`
+    /// has no selection or if it no longer designates a valid column
+    /// (column deleted in the meantime): there is then no menu to
+    /// open, rather than a menu whose every entry would have no effect.
     ///
-    /// Un clic droit pose toujours une sélection avant d'arriver ici (voir
+    /// A right click always sets a selection before arriving here (see
     /// `app::grid::cell_widget`/`app::grid::header_field_widget`/
-    /// `app::grid::column_header_widget`, qui réduisent la sélection à la
-    /// case visée si le clic droit tombe en dehors) : le `None` ne se
-    /// produit en pratique que sur une feuille vidée sous le curseur.
+    /// `app::grid::column_header_widget`, which reduce the selection to the
+    /// targeted cell if the right click falls outside it): the `None` occurs
+    /// in practice only on a sheet emptied under the cursor.
     pub fn grid_menu(&self, sheet: NodeId) -> Option<GridMenu> {
         let selection = self.selection.get(&sheet)?;
         let columns = selection.columns(&self.snapshot.tree, sheet);
@@ -4083,22 +4074,22 @@ impl AppState {
         }
         let multi_column = columns.len() > 1;
         let (zone, plural) = if selection.is_full_rows() {
-            // Une plage de lignes entières touche par construction toutes
-            // les colonnes de la feuille : `multi_column` n'a donc rien à
-            // voir avec le pluriel ici, contrairement aux autres zones (voir
-            // la doc de `GridMenu::plural`) — seul le nombre de *lignes*
-            // couvertes décide de « la ligne » vs « les lignes ».
+            // A range of whole rows touches by construction all
+            // the columns of the sheet: `multi_column` therefore has nothing to
+            // do with the plural here, unlike the other zones (see
+            // the doc of `GridMenu::plural`) — only the number of *rows*
+            // covered decides between "the row" and "the rows".
             let rows_span = selection
                 .row_range()
                 .map(|(lo, hi)| hi.saturating_sub(lo))
                 .unwrap_or(0);
             (GridZone::Rows, rows_span > 0)
         } else {
-            // `full_rank_range` distingue les deux zones d'un rectangle par
-            // le signe de ses rangs (négatifs = en-tête, voir
-            // `crate::selection::GridCursor::rank`) ; `None` ne reste que
-            // pour une plage de colonnes entières, qui n'a pas de rang
-            // unique.
+            // `full_rank_range` tells the two zones of a rectangle apart by
+            // the sign of its ranks (negative = header, see
+            // `crate::selection::GridCursor::rank`); `None` remains only
+            // for a range of whole columns, which has no single
+            // rank.
             let (zone, rank_span) = match selection.full_rank_range() {
                 Some((lo, hi)) if hi < 0 => (GridZone::Header, hi - lo),
                 Some((lo, hi)) => (GridZone::Data, hi - lo),
@@ -4121,30 +4112,30 @@ impl AppState {
         })
     }
 
-    /// Copie la sélection courante de `sheet` — Ctrl+C (et la première
-    /// moitié de Ctrl+X, voir `stokesforge_app::app`). `None` si `sheet` n'a pas de
-    /// sélection ou si elle ne désigne plus de colonne valide (rien à
-    /// pousser au presse-papier).
+    /// Copies the current selection of `sheet` — Ctrl+C (and the first
+    /// half of Ctrl+X, see `stokesforge_app::app`). `None` if `sheet` has no
+    /// selection or if it no longer designates a valid column (nothing to
+    /// push to the clipboard).
     ///
-    /// Pose à la fois [`AppState::grid_clipboard`] (rejoué par
-    /// [`AppState::paste`]/[`AppState::paste_absolute`]) et
-    /// [`AppState::clipboard_text`] (pour reconnaître cette copie au
-    /// collage), et rend le texte à pousser au presse-papier **système** —
-    /// voir la matrice de comportement en tête de ce module :
+    /// Sets both [`AppState::grid_clipboard`] (replayed by
+    /// [`AppState::paste`]/[`AppState::paste_absolute`]) and
+    /// [`AppState::clipboard_text`] (to recognize this copy at
+    /// paste time), and returns the text to push to the **system** clipboard —
+    /// see the behavior matrix at the top of this module:
     ///
-    /// - une seule case sélectionnée (cellule ou champ d'en-tête) →
-    ///   [`GridClipboard::Text`], son texte seul ;
-    /// - plusieurs cases, toutes dans l'en-tête ou toutes dans les données
-    ///   (jamais les deux, voir la doc de tête de [`crate::selection`]) →
-    ///   [`GridClipboard::Relative`] ;
-    /// - une plage de colonnes entières (rangée des lettres) →
-    ///   [`GridClipboard::Relative`] aussi, sur tout le corps de chaque
-    ///   colonne (pas d'en-tête : une plage de colonnes n'est pas un
-    ///   rectangle de champs).
+    /// - a single cell selected (cell or header field) →
+    ///   [`GridClipboard::Text`], its text alone;
+    /// - several cells, all in the header or all in the data
+    ///   (never both, see the head doc of [`crate::selection`]) →
+    ///   [`GridClipboard::Relative`];
+    /// - a range of whole columns (letter row) →
+    ///   [`GridClipboard::Relative`] too, over the whole body of each
+    ///   column (no header: a range of columns is not a
+    ///   rectangle of fields).
     ///
-    /// Une valeur manquante s'écrit comme une chaîne vide (jamais
-    /// [`MISSING_TEXT_DISPLAY`], qui n'a de sens que pour l'écran, pas pour
-    /// un échange avec un tableur externe).
+    /// A missing value is written as an empty string (never
+    /// [`MISSING_TEXT_DISPLAY`], which makes sense only for the screen, not for
+    /// an exchange with an external spreadsheet).
     pub fn copy_selection(&mut self, sheet: NodeId) -> Option<String> {
         let selection = self.selection.get(&sheet)?;
         let tree = &self.snapshot.tree;
@@ -4157,9 +4148,9 @@ impl AppState {
         } else if let Some((column, row)) = selection.single_cell() {
             GridClipboard::Text(cell_copy_text_in(tree, column, row))
         } else if !selection.is_columns() {
-            // Un ou plusieurs blocs : bout à bout dans l'ordre de la feuille
-            // (#159) quand ils partagent leurs lignes ou leurs colonnes,
-            // sinon rien n'est copié (voir `Selection::copy_layout`).
+            // One or several blocks: end to end in the order of the sheet
+            // (#159) when they share their rows or their columns,
+            // otherwise nothing is copied (see `Selection::copy_layout`).
             let (columns, ranges) = selection.copy_layout(tree, sheet)?;
             let ranks: Vec<isize> = ranges.iter().flat_map(|&(lo, hi)| lo..=hi).collect();
             let first = *ranks.first()?;
@@ -4192,11 +4183,11 @@ impl AppState {
                 })
             }
         } else {
-            // Plage de colonnes entières (rangée des lettres) :
-            // `full_rank_range` n'a pas de sens, il n'y a pas de rang unique
-            // à couvrir — on copie tout le corps de chaque colonne touchée,
-            // à partir de sa propre longueur (des colonnes de longueurs
-            // différentes sont autorisées).
+            // Range of whole columns (letter row):
+            // `full_rank_range` makes no sense, there is no single rank
+            // to cover — we copy the whole body of each touched column,
+            // starting from its own length (columns of different
+            // lengths are allowed).
             let len = columns
                 .iter()
                 .filter_map(|&column| tree.node(column).and_then(Node::as_column))
@@ -4223,18 +4214,18 @@ impl AppState {
         Some(text)
     }
 
-    /// Copie en entier (en-tête + corps) les colonnes touchées par la
-    /// sélection courante de `sheet` — Ctrl+Maj+C, quelle que soit la forme
-    /// de la sélection (une seule case, un rectangle, une plage de
-    /// colonnes) : c'est toujours la ou les colonnes qu'elle touche qui sont
-    /// promues en entier. `None` si `sheet` n'a pas de sélection ou si elle
-    /// ne désigne plus de colonne valide. Voir la matrice de comportement en
-    /// tête de ce module.
+    /// Copies entirely (header + body) the columns touched by the
+    /// current selection of `sheet` — Ctrl+Shift+C, whatever the shape
+    /// of the selection (a single cell, a rectangle, a range of
+    /// columns): it is always the column(s) it touches that are
+    /// promoted entirely. `None` if `sheet` has no selection or if it
+    /// no longer designates a valid column. See the behavior matrix at the
+    /// top of this module.
     ///
-    /// Quand une des colonnes porte une formule, rien n'est copié encore : la
-    /// question « valeurs ou formules » est posée (#306,
-    /// [`AppState::pending_full_copy`]) et la copie suit la réponse
-    /// ([`Action::ConfirmFullColumnsCopy`]). `None` aussi dans ce cas.
+    /// When one of the columns carries a formula, nothing is copied yet: the
+    /// question "values or formulas" is asked (#306,
+    /// [`AppState::pending_full_copy`]) and the copy follows the answer
+    /// ([`Action::ConfirmFullColumnsCopy`]). `None` in this case too.
     pub fn copy_full_columns(&mut self, sheet: NodeId) -> Option<String> {
         let selection = self.selection.get(&sheet)?;
         let tree = &self.snapshot.tree;
@@ -4252,14 +4243,14 @@ impl AppState {
         self.copy_full_columns_with(sheet, true)
     }
 
-    /// La feuille dont Ctrl+Maj+C attend la réponse « valeurs ou formules ».
+    /// The sheet whose Ctrl+Shift+C waits for the answer "values or formulas".
     pub fn pending_full_copy(&self) -> Option<NodeId> {
         self.pending_full_copy
     }
 
-    /// Copie en entier les colonnes touchées par la sélection de `sheet`,
-    /// avec ou sans leur formule (`keep_formula`) ; l'en-tête est toujours
-    /// copié.
+    /// Copies entirely the columns touched by the selection of `sheet`,
+    /// with or without their formula (`keep_formula`); the header is always
+    /// copied.
     fn copy_full_columns_with(&mut self, sheet: NodeId, keep_formula: bool) -> Option<String> {
         let selection = self.selection.get(&sheet)?;
         let tree = &self.snapshot.tree;
@@ -4284,8 +4275,8 @@ impl AppState {
                     long_name: meta.long_name,
                     unit: meta.unit,
                     comment: meta.comment,
-                    // Le presse-papiers porte des **lettres** (F8) : relues
-                    // dans la feuille d'arrivée au collage.
+                    // The clipboard carries **letters** (F8): read back
+                    // in the destination sheet at paste time.
                     formula: tree.formula_letters(column).filter(|_| keep_formula),
                     data,
                 }
@@ -4299,20 +4290,20 @@ impl AppState {
         Some(text)
     }
 
-    /// Texte affiché d'un champ d'en-tête (hors édition) — même détail que
-    /// `app::grid::header_field_widget`, factorisé ici pour être partagé
-    /// avec [`AppState::copy_selection`]/[`AppState::copy_full_columns`].
+    /// Displayed text of a header field (outside editing) — same detail as
+    /// `app::grid::header_field_widget`, factored out here to be shared
+    /// with [`AppState::copy_selection`]/[`AppState::copy_full_columns`].
     pub fn header_field_display_text(&self, column: NodeId, field: HeaderField) -> String {
         field.text_of(&self.snapshot.tree, column, &self.column_meta(column))
     }
 
-    /// Pourquoi le texte en cours de saisie dans le champ **Formule** est
-    /// refusé : une lettre qui ne désigne aucune colonne de la feuille, la
-    /// colonne elle-même, ou `#REF` modifié (#321). `None` pour tout le reste :
-    /// un texte vide (efface), le texte affiché tel quel (rien n'est écrit, même
-    /// avec `#REF`) et une **erreur de syntaxe**, qui s'enregistre (la colonne
-    /// se remplit de `---`). C'est le seul endroit qui décide ; la grille
-    /// garde le champ ouvert et peint le refus.
+    /// Why the text being typed in the **Formula** field is
+    /// refused: a letter that designates no column of the sheet, the column
+    /// itself, or a modified `#REF` (#321). `None` for everything else:
+    /// an empty text (clears), the displayed text as is (nothing is written, even
+    /// with `#REF`) and a **syntax error**, which is saved (the column
+    /// fills with `---`). This is the only place that decides; the grid
+    /// keeps the field open and paints the refusal.
     pub fn header_edit_refusal(&self) -> Option<String> {
         let edit = self.header_editing.as_ref()?;
         if edit.field != HeaderField::Formula {
@@ -4330,9 +4321,9 @@ impl AppState {
             .map(|error| errors::formula::error_message(&error))
     }
 
-    /// La phrase qui dit pourquoi la formule de `column` ne se calcule plus,
-    /// quand elle lit une colonne supprimée (`#REF`, #321) : la grille la
-    /// peint en cadre sur la case Formule.
+    /// The sentence saying why the formula of `column` no longer computes,
+    /// when it reads a deleted column (`#REF`, #321): the grid
+    /// paints it as a frame on the Formula cell.
     pub fn formula_issue(&self, column: NodeId) -> Option<String> {
         self.snapshot
             .tree
@@ -4340,22 +4331,22 @@ impl AppState {
             .then(|| errors::formula::error_message(&stokesforge_core::FormulaError::DeletedColumn))
     }
 
-    /// Saisie en cours dans un champ d'en-tête de colonne, s'il y en a une.
+    /// Entry in progress in a column header field, if there is one.
     pub fn header_editing(&self) -> Option<&HeaderEdit> {
         self.header_editing.as_ref()
     }
 
-    /// Saisie en cours dans un champ d'en-tête, modifiable.
+    /// Entry in progress in a header field, mutable.
     pub fn header_editing_mut(&mut self) -> Option<&mut HeaderEdit> {
         self.header_editing.as_mut()
     }
 
-    /// Ouvre la saisie d'un champ d'en-tête, tampon initialisé à sa valeur
-    /// actuelle. Remplace sans valider une éventuelle saisie précédente, et
-    /// annule au passage une saisie de cellule en cours — une seule chose
-    /// éditable à la fois dans la fenêtre (sans quoi une cellule et un champ
-    /// d'en-tête peuvent se retrouver simultanément en édition, chacun
-    /// réclamant le focus clavier pour lui-même).
+    /// Opens the entry of a header field, buffer initialized to its current
+    /// value. Replaces without committing any previous entry, and
+    /// cancels along the way a cell entry in progress — only one
+    /// editable thing at a time in the window (otherwise a cell and a header
+    /// field could be in editing simultaneously, each
+    /// claiming keyboard focus for itself).
     pub fn begin_header_edit(&mut self, column: NodeId, field: HeaderField) {
         self.editing = None;
         let buffer = self.header_field_display_text(column, field);
@@ -4367,13 +4358,13 @@ impl AppState {
         });
     }
 
-    /// Abandonne la saisie d'en-tête en cours sans rien écrire.
+    /// Abandons the header entry in progress without writing anything.
     pub fn cancel_header_edit(&mut self) {
         self.header_editing = None;
     }
 
-    /// Valide la saisie d'en-tête en cours. Sans effet s'il n'y a pas de
-    /// saisie ouverte.
+    /// Commits the header entry in progress. No effect if there is no
+    /// entry open.
     pub fn commit_header_edit(&mut self) {
         let Some(edit) = self.header_editing.take() else {
             return;
@@ -4392,9 +4383,9 @@ impl AppState {
                 text: edit.buffer,
             },
             HeaderField::Formula => {
-                // Ne pas toucher au champ n'écrit rien : valider tel quel le
-                // texte affiché (surtout s'il porte `#REF`, qu'on ne peut pas
-                // réécrire) laisse la formule stockée en l'état.
+                // Not touching the field writes nothing: committing as is the
+                // displayed text (especially if it carries `#REF`, which cannot be
+                // rewritten) leaves the stored formula as it is.
                 if edit.buffer == self.header_field_display_text(edit.column, HeaderField::Formula)
                 {
                     return;
@@ -4412,22 +4403,22 @@ impl AppState {
         self.dispatch(action);
     }
 
-    /// Saisie de cellule en cours, s'il y en a une.
+    /// Cell entry in progress, if there is one.
     pub fn editing(&self) -> Option<&CellEdit> {
         self.editing.as_ref()
     }
 
-    /// Saisie en cours, modifiable : la couche fenêtre y branche son
-    /// `TextEdit` pour que les frappes atterrissent dans le tampon sans
-    /// toucher au modèle.
+    /// Entry in progress, mutable: the window layer plugs its
+    /// `TextEdit` into it so that keystrokes land in the buffer without
+    /// touching the model.
     pub fn editing_mut(&mut self) -> Option<&mut CellEdit> {
         self.editing.as_mut()
     }
 
-    /// Ouvre la saisie d'une cellule, tampon initialisé au texte affiché.
-    /// Remplace sans valider une éventuelle saisie précédente : c'est à
-    /// l'appelant de valider avant, s'il le souhaite. Annule au passage une
-    /// saisie d'en-tête en cours — voir la même remarque sur
+    /// Opens the entry of a cell, buffer initialized to the displayed text.
+    /// Replaces without committing any previous entry: it is up to
+    /// the caller to commit first, if desired. Cancels along the way a
+    /// header entry in progress — see the same remark on
     /// [`AppState::begin_header_edit`].
     pub fn begin_edit(&mut self, column: NodeId, row: usize) {
         self.header_editing = None;
@@ -4440,13 +4431,13 @@ impl AppState {
         });
     }
 
-    /// Abandonne la saisie en cours sans rien écrire.
+    /// Abandons the entry in progress without writing anything.
     pub fn cancel_edit(&mut self) {
         self.editing = None;
     }
 
-    /// Valide la saisie en cours (équivaut à [`Action::CommitCell`] sur le
-    /// tampon). Sans effet s'il n'y a pas de saisie ouverte.
+    /// Commits the entry in progress (equivalent to [`Action::CommitCell`] on the
+    /// buffer). No effect if there is no entry open.
     pub fn commit_edit(&mut self) {
         let Some(edit) = self.editing.take() else {
             return;
@@ -4458,35 +4449,35 @@ impl AppState {
         });
     }
 
-    /// Saisie de note en cours, s'il y en a une. Le pendant exact de
-    /// [`AppState::editing`] pour une note — un seul tampon à la fois, pour
-    /// la même raison de principe (même si rien ici ne force la limite à un
-    /// seul tampon : une note n'est pas virtualisée comme une grille d'un
-    /// million de lignes, mais suivre la même convention garde `stokesforge_app::app`
-    /// simple, un seul mécanisme d'édition différée à comprendre).
+    /// Note entry in progress, if there is one. The exact counterpart of
+    /// [`AppState::editing`] for a note — one buffer at a time, for
+    /// the same reason of principle (even though nothing here forces the limit to a
+    /// single buffer: a note is not virtualized like a grid of a
+    /// million rows, but following the same convention keeps `stokesforge_app::app`
+    /// simple, a single deferred-editing mechanism to understand).
     pub fn note_editing(&self) -> Option<&NoteEdit> {
         self.note_editing.as_ref()
     }
 
-    /// Saisie de note en cours, modifiable.
+    /// Note entry in progress, mutable.
     pub fn note_editing_mut(&mut self) -> Option<&mut NoteEdit> {
         self.note_editing.as_mut()
     }
 
-    /// Ouvre la saisie d'une note, tampon initialisé à son texte actuel (vide
-    /// si `note` n'est pas — ou plus — une note de ce projet).
+    /// Opens the entry of a note, buffer initialized to its current text (empty
+    /// if `note` is not — or no longer — a note of this project).
     pub fn begin_note_edit(&mut self, note: NodeId) {
         let buffer = self.note_text(note).unwrap_or_default();
         self.note_editing = Some(NoteEdit { note, buffer });
     }
 
-    /// Abandonne la saisie de note en cours sans rien écrire.
+    /// Abandons the note entry in progress without writing anything.
     pub fn cancel_note_edit(&mut self) {
         self.note_editing = None;
     }
 
-    /// Valide la saisie de note en cours (équivaut à [`Action::SetNoteText`]
-    /// sur le tampon). Sans effet s'il n'y a pas de saisie ouverte.
+    /// Commits the note entry in progress (equivalent to [`Action::SetNoteText`]
+    /// on the buffer). No effect if there is no entry open.
     pub fn commit_note_edit(&mut self) {
         let Some(edit) = self.note_editing.take() else {
             return;
@@ -4497,28 +4488,28 @@ impl AppState {
         });
     }
 
-    /// Brouillon courant de la fenêtre des propriétés d'un graphe, s'il y
-    /// en a un.
+    /// Current draft of a graph's properties window, if there
+    /// is one.
     pub fn plot_edit(&self) -> Option<&PlotEdit> {
         self.plot_edit.as_ref()
     }
 
-    /// Brouillon courant, modifiable — c'est là que les widgets du panneau
-    /// écrivent, sans passer par une commande.
+    /// Current draft, mutable — this is where the panel's widgets
+    /// write, without going through a command.
     pub fn plot_edit_mut(&mut self) -> Option<&mut PlotEdit> {
         self.plot_edit.as_mut()
     }
 
-    /// Ouvre (ou conserve) le brouillon d'édition du graphe `graph`. À
-    /// appeler à chaque image par la fenêtre des propriétés, *avant* de
-    /// peindre quoi que ce soit : ne réinitialise le brouillon que s'il n'y
-    /// en a pas encore, ou s'il portait sur un autre graphe — repeindre la
-    /// même image sur le même graphe ne doit jamais effacer une saisie en
-    /// cours. Un brouillon sans saisie en cours suit en revanche le modèle
-    /// (voir [`PlotEdit::base`]). `graph` sans
-    /// spec (nœud supprimé, ou pas un graphe) laisse le brouillon inchangé :
-    /// c'est à l'appelant de vérifier `self.tree().node(graph)` avant
-    /// d'afficher le panneau (voir `node_title` dans `stokesforge_app::app::tab`).
+    /// Opens (or keeps) the editing draft of graph `graph`. To be
+    /// called every frame by the properties window, *before* painting
+    /// anything: resets the draft only if there is none yet,
+    /// or if it was about another graph — repainting the same
+    /// frame on the same graph must never erase an entry in
+    /// progress. A draft with no entry in progress does follow the model
+    /// (see [`PlotEdit::base`]). A `graph` without
+    /// spec (node deleted, or not a graph) leaves the draft unchanged:
+    /// it is up to the caller to check `self.tree().node(graph)` before
+    /// showing the panel (see `node_title` in `stokesforge_app::app::tab`).
     pub fn begin_plot_edit(&mut self, graph: NodeId) {
         let Some(model) = self.plot_spec(graph) else {
             return;
@@ -4539,26 +4530,26 @@ impl AppState {
         });
     }
 
-    /// Ferme le brouillon d'édition courant sans rien valider.
+    /// Closes the current editing draft without committing anything.
     pub fn close_plot_edit(&mut self) {
         self.plot_edit = None;
     }
 
-    /// La fenêtre des propriétés du graphe, si elle est ouverte.
+    /// The graph properties window, if it is open.
     pub fn plot_settings(&self) -> Option<PlotSettings> {
         self.plot_settings
     }
 
-    /// Change l'onglet ou l'axe affiché par la fenêtre des propriétés.
+    /// Changes the tab or the axis shown by the properties window.
     pub fn plot_settings_mut(&mut self) -> Option<&mut PlotSettings> {
         self.plot_settings.as_mut()
     }
 
-    /// **Valide** et ferme la fenêtre des propriétés (bouton « Valider ») :
-    /// valide d'abord ce qui diverge encore du modèle (une saisie dont le
-    /// champ n'a pas perdu le focus), ferme la macro d'historique — tous les
-    /// gestes de la fenêtre ne forment qu'**une** entrée, qu'un seul Ctrl+Z
-    /// défait — puis abandonne le brouillon.
+    /// **Applies** and closes the properties window (the "Apply" button):
+    /// first commits what still differs from the model (an entry whose
+    /// field has not lost focus), closes the history macro — all the
+    /// gestures of the window form only **one** entry, which a single Ctrl+Z
+    /// undoes — then drops the draft.
     pub fn close_plot_settings(&mut self) {
         self.commit_plot_edit();
         self.end_plot_macro();
@@ -4566,19 +4557,19 @@ impl AppState {
         self.plot_edit = None;
     }
 
-    /// **Annule** et ferme la fenêtre des propriétés (bouton « Annuler »,
-    /// croix, Échap) : avorte la macro d'historique, ce qui restaure le
-    /// graphe tel qu'il était à l'ouverture, et jette le brouillon. Sans
-    /// macro (ouverture refusée, voir [`AppState::begin_plot_macro`]), les
-    /// gestes déjà appliqués restent dans l'historique ordinaire.
+    /// **Cancels** and closes the properties window (the "Cancel" button,
+    /// the close cross, Esc): aborts the history macro, which restores the
+    /// graph as it was at opening, and throws the draft away. Without a
+    /// macro (opening refused, see [`AppState::begin_plot_macro`]), the
+    /// gestures already applied stay in the ordinary history.
     pub fn cancel_plot_settings(&mut self) {
         self.abort_plot_macro();
         self.plot_settings = None;
         self.plot_edit = None;
     }
 
-    /// Avorte la macro des propriétés si elle est ouverte : l'objet visé
-    /// retrouve son état d'ouverture.
+    /// Aborts the properties macro if it is open: the targeted object
+    /// returns to its opening state.
     fn abort_plot_macro(&mut self) {
         if self.plot_macro_open {
             self.plot_macro_open = false;
@@ -4592,10 +4583,10 @@ impl AppState {
         }
     }
 
-    /// Ouvre la macro d'historique de la fenêtre des propriétés. Un refus
-    /// (macro déjà ouverte par un autre émetteur, par exemple un script) est
-    /// dit à l'utilisateur ; la fenêtre reste utilisable, sans annulation
-    /// groupée.
+    /// Opens the history macro of the properties window. A refusal
+    /// (macro already open by another sender, for example a script) is
+    /// reported to the user; the window stays usable, without grouped
+    /// undo.
     fn begin_plot_macro(&mut self) {
         if self.plot_macro_open {
             return;
@@ -4609,14 +4600,14 @@ impl AppState {
         }
     }
 
-    /// Message affiché quand des actions d'une fenêtre détachée sont refusées
-    /// parce que la fenêtre modale des propriétés d'un graphe est ouverte.
+    /// Message shown when actions of a detached window are refused
+    /// because the modal graph properties window is open.
     pub fn reject_detached_actions(&mut self) {
         self.fail(tr!("error-plot-settings-block-detached"));
     }
 
-    /// Ferme la macro de la fenêtre des propriétés (une entrée d'historique,
-    /// aucune si rien n'a changé).
+    /// Closes the macro of the properties window (one history entry,
+    /// none if nothing changed).
     fn end_plot_macro(&mut self) {
         if !self.plot_macro_open {
             return;
@@ -4625,11 +4616,11 @@ impl AppState {
         self.end_grouped_macro();
     }
 
-    /// Valide le brouillon courant ([`Action::SetPlotSpec`]) — mais
-    /// seulement s'il diverge du spec actuellement dans le modèle. Sans
-    /// cette garde, relâcher un curseur qui n'a pas bougé ou perdre le focus
-    /// d'un champ texte non modifié empilerait une entrée d'historique
-    /// identique à la précédente ; voir la doc de tête de [`PlotEdit`].
+    /// Commits the current draft ([`Action::SetPlotSpec`]) — but
+    /// only if it differs from the spec currently in the model. Without
+    /// this guard, releasing a slider that did not move or losing the focus
+    /// of an unmodified text field would stack a history entry
+    /// identical to the previous one; see the head doc of [`PlotEdit`].
     pub fn commit_plot_edit(&mut self) {
         let Some(edit) = self.plot_edit.clone() else {
             return;
@@ -4646,17 +4637,17 @@ impl AppState {
         }
     }
 
-    /// Les feuilles de `book`, dans l'ordre des onglets internes
-    /// `app::tab::Tab::Book` : `(NodeId, nom)`. Vide si `book` n'existe
-    /// plus ou n'est pas un classeur.
+    /// The sheets of `book`, in the order of the inner tabs
+    /// `app::tab::Tab::Book`: `(NodeId, name)`. Empty if `book` no longer
+    /// exists or is not a workbook.
     pub fn worksheets_of(&self, book: NodeId) -> Vec<(NodeId, String)> {
         worksheets_of_in(&self.snapshot.tree, book)
     }
 
-    /// Les classeurs du projet, sous la forme `(identifiant, chemin
-    /// lisible)`. Le pendant exact de [`AppState::graphs`], pour la
-    /// disposition initiale de `stokesforge_app::app::StokesForgeApp::new` : ouvrir le
-    /// premier classeur du projet, comme le premier graphe l'était déjà.
+    /// The workbooks of the project, as `(identifier, readable
+    /// path)`. The exact counterpart of [`AppState::graphs`], for the
+    /// initial layout of `stokesforge_app::app::StokesForgeApp::new`: opening the
+    /// first workbook of the project, as the first graph already was.
     pub fn books(&self) -> Vec<(NodeId, String)> {
         let tree = &self.snapshot.tree;
         tree.walk_all()
@@ -4670,18 +4661,18 @@ impl AppState {
             .collect()
     }
 
-    /// Texte d'une note, ou `None` si `note` n'est pas (ou plus) une note de
-    /// ce projet.
+    /// Text of a note, or `None` if `note` is not (or no longer) a note of
+    /// this project.
     pub fn note_text(&self, note: NodeId) -> Option<String> {
         note_text_in(&self.snapshot.tree, note)
     }
 
-    /// L'arbre du projet tel que le panneau Project Manager le montre :
-    /// dossiers dépliables, feuilles cliquables (`Workbook`, `Graph`,
-    /// `Matrix`, `Note`) jamais développées davantage — voir la doc de tête
-    /// de [`ProjectTreeNode`]. Racine exclue (elle n'a pas de nom à afficher
-    /// comme nœud du panneau) : ses enfants directs sont la racine de
-    /// l'arbre rendu.
+    /// The project tree as the Project Manager panel shows it:
+    /// expandable folders, clickable sheets (`Workbook`, `Graph`,
+    /// `Matrix`, `Note`) never expanded further — see the head doc
+    /// of [`ProjectTreeNode`]. Root excluded (it has no name to display
+    /// as a panel node): its direct children are the root of
+    /// the rendered tree.
     pub fn project_tree(&self) -> Vec<ProjectTreeNode> {
         self.project_tree_children(self.snapshot.tree.root())
     }
@@ -4725,29 +4716,29 @@ impl AppState {
                         name,
                         kind: WindowKind::Note,
                     }),
-                    // `Worksheet`/`Column` : jamais rencontrés ici, enfants
-                    // d'un `Workbook`/`Worksheet` que ce parcours n'atteint
-                    // jamais (on s'arrête à `Workbook`). `Unknown` : pas de
-                    // fenêtre à ouvrir côté UI pour une nature non reconnue
-                    // (invariant 10) — le nœud existe toujours et sera
-                    // réécrit tel quel à la sauvegarde, mais le Project
-                    // Manager n'a rien à en montrer.
+                    // `Worksheet`/`Column`: never met here, children
+                    // of a `Workbook`/`Worksheet` that this walk never
+                    // reaches (we stop at `Workbook`). `Unknown`: no
+                    // window to open on the UI side for an unrecognized kind
+                    // (invariant 10) — the node still exists and will be
+                    // rewritten as is at save time, but the Project
+                    // Manager has nothing to show for it.
                     NodeKind::Worksheet { .. } | NodeKind::Column(_) | NodeKind::Unknown(_) => None,
                 }
             })
             .collect()
     }
 
-    /// Les feuilles du projet, pour les tests et les usages génériques :
-    /// `(NodeId, chemin lisible)`, en ordre de parcours préfixe. Le panneau
-    /// Project Manager ne s'en sert pas (il s'arrête à `Workbook`, voir
-    /// [`AppState::project_tree`]) ; cette méthode reste le pendant exact de
-    /// [`AppState::graphs`] pour qui a besoin de la liste à plat.
+    /// The sheets of the project, for tests and generic uses:
+    /// `(NodeId, readable path)`, in prefix traversal order. The Project
+    /// Manager panel does not use it (it stops at `Workbook`, see
+    /// [`AppState::project_tree`]); this method remains the exact counterpart of
+    /// [`AppState::graphs`] for whoever needs the flat list.
     ///
-    /// Le chemin est reconstruit ici (« Book1 / Sheet1 ») plutôt qu'obtenu de
-    /// `Project::path_of` : cette méthode vit sur `Project`, que l'UI ne
-    /// détient pas — elle n'a qu'un `Arc<Tree>`. C'est un manque relevé par
-    /// cette phase, pas un choix esthétique.
+    /// The path is rebuilt here ("Book1 / Sheet1") rather than obtained from
+    /// `Project::path_of`: that method lives on `Project`, which the UI does not
+    /// hold — it has only an `Arc<Tree>`. This is a gap noted by
+    /// this phase, not an aesthetic choice.
     pub fn sheets(&self) -> Vec<(NodeId, String)> {
         let tree = &self.snapshot.tree;
         tree.walk_all()
@@ -4760,11 +4751,11 @@ impl AppState {
             .collect()
     }
 
-    /// Les graphes du projet, sous la forme `(identifiant, chemin lisible)`.
+    /// The graphs of the project, as `(identifier, readable path)`.
     ///
-    /// Le pendant exact de [`AppState::sheets`], pour le panneau de rendu de
-    /// la phase R4. Comme lui, il reconstruit le chemin à la main faute de
-    /// `Project::path_of` côté `Arc<Tree>`.
+    /// The exact counterpart of [`AppState::sheets`], for the rendering panel of
+    /// phase R4. Like it, it rebuilds the path by hand for lack of
+    /// `Project::path_of` on the `Arc<Tree>` side.
     pub fn graphs(&self) -> Vec<(NodeId, String)> {
         let tree = &self.snapshot.tree;
         tree.walk_all()
@@ -4777,8 +4768,8 @@ impl AppState {
             .collect()
     }
 
-    /// Chemin lisible d'un nœud : les noms de ses ancêtres (racine exclue)
-    /// puis le sien, séparés par « / ».
+    /// Readable path of a node: the names of its ancestors (root excluded)
+    /// then its own, separated by " / ".
     fn readable_path(&self, id: NodeId) -> String {
         let tree = &self.snapshot.tree;
         let root = tree.root();
@@ -4796,21 +4787,21 @@ impl AppState {
         parts.join(" / ")
     }
 
-    /// Ouverture du panneau, mémorisée hors du projet.
+    /// Opening of the panel, remembered outside the project.
     pub fn object_manager_open(&self) -> bool {
         self.object_manager_open
     }
 
-    /// Ouvre ou ferme le panneau pour un test, sans écrire le
-    /// `preferences.json` de la machine (ce que fait
-    /// `Action::SetObjectManagerOpen`) : un test ne dépend ainsi ni ne
-    /// modifie la préférence de l'utilisateur.
+    /// Opens or closes the panel for a test, without writing the
+    /// machine's `preferences.json` (which
+    /// `Action::SetObjectManagerOpen` does): a test thus neither depends on nor
+    /// modifies the user's preference.
     #[cfg(any(test, feature = "test-support"))]
     pub fn set_object_manager_open_for_test(&mut self, open: bool) {
         self.object_manager_open = open;
     }
 
-    /// Échelles (axes) listées dans l'Object Manager (#111), hors projet.
+    /// Scales (axes) listed in the Object Manager (#111), outside the project.
     pub fn object_manager_show_scales(&self) -> bool {
         self.object_manager_settings().show_scales
     }
@@ -4831,16 +4822,16 @@ impl AppState {
         }
     }
 
-    /// Applique une action. Ne rend jamais d'erreur : toute erreur devient un
-    /// [`StatusMessage`]. Rafraîchit l'instantané après toute action qui a pu
-    /// changer le modèle.
+    /// Applies an action. Never returns an error: every error becomes a
+    /// [`StatusMessage`]. Refreshes the snapshot after any action that may have
+    /// changed the model.
     ///
-    /// **Ne bloque jamais**, `RunScript` compris : voir la section « Le
-    /// script Python » en tête de ce module. C'est ce qui rend cette méthode
-    /// sûre à appeler depuis la boucle de rendu pour toute action.
+    /// **Never blocks**, `RunScript` included: see the section "The
+    /// Python script" at the top of this module. This is what makes this method
+    /// safe to call from the rendering loop for any action.
     pub fn dispatch(&mut self, action: Action) {
-        // Une erreur de dialogue ne survit pas à son dialogue : le geste qui
-        // en ouvre un autre part d'un pied vide.
+        // A dialog error does not outlive its dialog: the gesture that
+        // opens another one starts from an empty footer.
         if !self.modal_dialog_open() {
             self.dialog_error = None;
         }
@@ -4863,7 +4854,7 @@ impl AppState {
             } => self.request_unsaved(UnsavedGesture::Open(path), pending_edits),
             Action::Quit { pending_edits } => {
                 if self.session_lost {
-                    // Rien à enregistrer ni à demander : le modèle n'existe plus.
+                    // Nothing to save or to ask: the model no longer exists.
                     self.quit_ready = true;
                 } else if self.quit_without_prompt {
                     self.perform_unsaved(UnsavedGesture::Quit);
@@ -4977,9 +4968,9 @@ impl AppState {
             }
             Action::SetColumnXPrime { column, text } => self.set_column_x_prime(column, text),
             Action::SetColumnFormula { column, formula } => {
-                // Refus : rien n'est écrit, la barre d'état dit pourquoi. Le
-                // passage lettres vers identifiants se fait ici, au-dessus de
-                // la commande (`SetColumnMeta` ne valide jamais les références).
+                // Refusal: nothing is written, the status bar says why. The
+                // conversion from letters to identifiers is done here, above
+                // the command (`SetColumnMeta` never validates references).
                 match formula {
                     None => self.set_column_meta_field(column, |meta| meta.formula = None),
                     Some(text) => match self.snapshot.tree.formula_from_letters(column, &text) {
@@ -5243,7 +5234,7 @@ impl AppState {
                 }
                 let (tab, axis, panel, series) = match target {
                     T::Series(s) => (PlotSettingsTab::Series, None, s.panel, Some(s.index)),
-                    // Un groupe s'ouvre sur sa première série (#197).
+                    // A group opens on its first series (#197).
                     T::SeriesGroup(g) => (
                         PlotSettingsTab::Series,
                         None,
@@ -5472,7 +5463,7 @@ impl AppState {
         }
     }
 
-    /// Les couleurs enregistrées dans le projet, ou pour l'utilisateur.
+    /// The colors saved in the project, or for the user.
     pub fn saved_colors(&self, target: SaveTarget) -> SavedColors {
         match target {
             SaveTarget::Project => self.snapshot.tree.saved_colors().clone(),
@@ -5480,9 +5471,9 @@ impl AppState {
         }
     }
 
-    /// Fait lire et écrire les couleurs de l'utilisateur dans `path` plutôt
-    /// que dans le dossier de configuration — pour les tests, qui ne doivent
-    /// pas toucher aux vraies préférences de la machine.
+    /// Makes the user's colors be read and written in `path` rather than
+    /// in the configuration folder — for tests, which must not
+    /// touch the real preferences of the machine.
     pub fn use_user_colors_file(&mut self, path: std::path::PathBuf) {
         self.user_colors = UserColors::load_from(Some(path));
     }
@@ -5504,9 +5495,9 @@ impl AppState {
         }
     }
 
-    /// Voir [`Action::OpenPlotSettings`]. Passer à un autre graphe valide
-    /// d'abord le brouillon du précédent ; un graphe qui n'existe plus (ou
-    /// n'est pas un graphe) laisse tout en l'état.
+    /// See [`Action::OpenPlotSettings`]. Switching to another graph first
+    /// commits the draft of the previous one; a graph that no longer exists (or
+    /// is not a graph) leaves everything as it is.
     fn open_plot_settings(&mut self, graph: NodeId, tab: PlotSettingsTab, axis: Option<PlotAxis>) {
         if self.plot_spec(graph).is_none() {
             return;
@@ -5533,21 +5524,21 @@ impl AppState {
         });
     }
 
-    /// Rafraîchit l'instantané depuis l'acteur et revalide la sélection.
+    /// Refreshes the snapshot from the actor and revalidates the selection.
     ///
-    /// La revalidation n'est pas réservée au rechargement : c'est le seul
-    /// endroit qui garantit que la feuille affichée existe encore, quelle que
-    /// soit la façon dont l'arbre a changé (y compris par un autre client de
-    /// l'acteur). Un échec de rafraîchissement écrase le message courant —
-    /// l'acteur injoignable est plus grave que ce qu'on allait dire.
+    /// Revalidation is not reserved to reloading: it is the only
+    /// place that guarantees the displayed sheet still exists, whatever
+    /// the way the tree changed (including by another client of
+    /// the actor). A refresh failure overwrites the current message —
+    /// an unreachable actor is more serious than what we were about to say.
     pub fn refresh(&mut self) {
         self.check_session();
         if self.session_lost {
             return;
         }
-        // Un recalcul qui court (#239) : l'acteur ne répondrait qu'à sa fin et
-        // l'interface resterait figée. L'ancien instantané reste peint ;
-        // `poll_recalc` rafraîchit dès que c'est fini.
+        // A recalculation is running (#239): the actor would answer only at its end and
+        // the interface would stay frozen. The old snapshot stays painted;
+        // `poll_recalc` refreshes as soon as it is done.
         if self.recalc_since.is_some() && self.handle.recalc_running().is_some() {
             return;
         }
@@ -5580,15 +5571,15 @@ impl AppState {
         }
     }
 
-    /// Sonde le fil détaché d'une exécution de script en cours, sans jamais
-    /// bloquer. À appeler à **chaque image** (voir `stokesforge_app::app`) : sans
-    /// notification poussée de l'acteur, c'est le seul endroit qui rafraîchit
-    /// l'instantané après un script — l'oublier laisserait la grille figée
-    /// alors que le modèle a changé.
+    /// Polls the detached thread of a script run in progress, never
+    /// blocking. To be called **every frame** (see `stokesforge_app::app`): without a
+    /// notification pushed by the actor, it is the only place that refreshes
+    /// the snapshot after a script — forgetting it would leave the grid frozen
+    /// while the model has changed.
     ///
-    /// Sans effet si aucun script n'est en cours (y compris sans la feature
-    /// `python`, où cette méthode ne fait jamais rien) : sûr à appeler à
-    /// chaque image sans test préalable.
+    /// No effect if no script is running (including without the `python`
+    /// feature, where this method never does anything): safe to call
+    /// every frame without a prior test.
     pub fn poll_script(&mut self) {
         #[cfg(feature = "python")]
         {
@@ -5609,15 +5600,15 @@ impl AppState {
             };
             self.pending_script = None;
             if let Some(engine) = engine {
-                // `pyst.save_as(path)` a pu changer le chemin du projet : la
-                // fenêtre l'adopte, comme après un « Save as ».
+                // `pyst.save_as(path)` may have changed the project path: the
+                // window adopts it, as after a "Save as".
                 if let Some(path) = engine.project_path() {
                     if Path::new(&self.path) != path {
                         self.path = path.to_string_lossy().into_owned();
                     }
                 }
-                // Un `save`/`save_as` du script a enregistré le projet : sans
-                // cela le titre resterait « modifié ».
+                // A `save`/`save_as` of the script saved the project: without
+                // this the title would stay "modified".
                 if let Some(saved) = engine.take_saved_revision() {
                     self.saved_revision = Some(saved);
                     self.autosave_mark_clean();
@@ -5631,31 +5622,31 @@ impl AppState {
         }
     }
 
-    /// État courant de la fenêtre d'import, si elle est ouverte.
+    /// Current state of the import window, if it is open.
     pub fn import_state(&self) -> Option<&ImportState> {
         self.import_state.as_ref()
     }
 
-    /// État courant de la fenêtre d'import, modifiable — la couche fenêtre y
-    /// branche ses widgets (ComboBox, boutons radio, champs texte) pour muter
-    /// `recipe` directement, sans passer par [`Action`] : mutation
-    /// transitoire, comme [`AppState::header_editing_mut`].
+    /// Current state of the import window, mutable — the window layer plugs
+    /// its widgets (ComboBox, radio buttons, text fields) into it to mutate
+    /// `recipe` directly, without going through [`Action`]: transient
+    /// mutation, like [`AppState::header_editing_mut`].
     pub fn import_state_mut(&mut self) -> Option<&mut ImportState> {
         self.import_state.as_mut()
     }
 
-    /// Ouvre la fenêtre d'import pour `book`. Charge le [`stokesforge_import::
-    /// RecipeStore`] depuis le disque une fois pour toute la durée
-    /// d'ouverture de la fenêtre (jamais rechargé à chaque image) et
-    /// démarre sur son premier modèle enregistré s'il y en a un, sinon sur
-    /// une recette permissive par défaut ([`stokesforge_import::ImportRecipe::
-    /// new`]). Remplace sans confirmation une fenêtre d'import déjà ouverte
-    /// (même patron que [`AppState::begin_edit`] pour une saisie de
-    /// cellule).
+    /// Opens the import window for `book`. Loads the [`stokesforge_import::
+    /// RecipeStore`] from disk once for the whole time
+    /// the window is open (never reloaded every frame) and
+    /// starts on its first saved template if there is one, otherwise on
+    /// a permissive default recipe ([`stokesforge_import::ImportRecipe::
+    /// new`]). Replaces without confirmation an import window already open
+    /// (same pattern as [`AppState::begin_edit`] for a cell
+    /// entry).
     pub fn open_import(&mut self, book: impl Into<Option<NodeId>>) {
         let active_book = book.into();
-        // Les modèles fournis d'office sont proposés, mais on démarre sur le
-        // premier modèle **de l'utilisateur**, sinon sur la recette permissive.
+        // The built-in templates are offered, but we start on the
+        // first template **of the user**, otherwise on the permissive recipe.
         let store = stokesforge_import::RecipeStore::load_with_builtins();
         let recipe = store
             .recipes()
@@ -5689,25 +5680,25 @@ impl AppState {
         });
     }
 
-    /// Traite un dépôt de fichiers ([`Action::DropFiles`]). Les `.stf` sont mis
-    /// en file pour ouverture ([`AppState::take_projects_to_open`]). Les
-    /// autres fichiers passent par [`AppState::start_import`] : lus sur le fil
-    /// de fond avec le modèle reconnu, sinon le dernier utilisé, à défaut la
-    /// recette permissive ; ceux qui se lisent correctement partent dans un
-    /// seul import annulable, les autres ouvrent la fenêtre d'import
-    /// pré-remplie pour être réglés à la main.
+    /// Handles a file drop ([`Action::DropFiles`]). The `.stf` files are put
+    /// in a queue for opening ([`AppState::take_projects_to_open`]). The
+    /// other files go through [`AppState::start_import`]: read on the
+    /// background thread with the recognized template, otherwise the last one used, failing
+    /// that the permissive recipe; those that read correctly go off in a
+    /// single cancellable import, the others open the import window
+    /// pre-filled to be set by hand.
     fn drop_files(&mut self, paths: Vec<PathBuf>, target_book: Option<NodeId>) {
-        // Un dépôt OS n'est pas bloqué par le calque modal d'egui, notamment
-        // depuis l'explorateur détaché. La racine possède la macro du graphe :
-        // l'import y serait absorbé si on ne refusait pas ce geste ici.
+        // An OS drop is not blocked by egui's modal layer, notably
+        // from the detached explorer. The root owns the graph's macro:
+        // the import would be absorbed into it if this gesture were not refused here.
         if self.plot_settings.is_some() {
             self.fail(tr!("error-drop-plot-settings-open"));
             return;
         }
         let plan = file_drop_plan(&paths, target_book);
         self.projects_to_open.extend(plan.projects);
-        // L'assistant est ouvert : le dépôt lui ajoute les fichiers au lieu
-        // de les importer par-dessus.
+        // The wizard is open: the drop adds the files to it instead of
+        // importing them on top.
         if self.import_state.is_some() {
             self.add_import_paths(plan.data);
             return;
@@ -5732,8 +5723,8 @@ impl AppState {
         );
     }
 
-    /// Lance la lecture et l'analyse des fichiers sur un fil de fond : entrée
-    /// unique de l'import de menu ([`Action::StartImport`]) et du dépôt.
+    /// Starts the reading and analysis of the files on a background thread: single
+    /// entry point of the menu import ([`Action::StartImport`]) and of the drop.
     fn start_import(
         &mut self,
         destination: ImportDestination,
@@ -5765,9 +5756,9 @@ impl AppState {
                     unreadable: Vec::new(),
                     models: Vec::new(),
                 };
-                // Un modèle par fichier pour un dépôt : le choix automatique
-                // (extension, nom, signature de contenu), sinon le dernier
-                // modèle réellement utilisé, sinon la recette permissive.
+                // One template per file for a drop: the automatic choice
+                // (extension, name, content signature), otherwise the last
+                // template actually used, otherwise the permissive recipe.
                 let store = match &source {
                     ImportSource::Drop { .. } => {
                         Some(stokesforge_import::RecipeStore::load_with_builtins())
@@ -5788,10 +5779,10 @@ impl AppState {
                                         .cloned()
                                 })
                                 .unwrap_or_else(|| fallback.clone());
-                            // Le geste du dépôt ajoute une feuille par fichier :
-                            // les options de remplacement ou de fusion du
-                            // dernier assistant ne doivent pas modifier sa
-                            // destination ni écraser une feuille existante.
+                            // The drop gesture adds one sheet per file:
+                            // the replace or merge options of the
+                            // last wizard must not change its
+                            // destination nor overwrite an existing sheet.
                             recipe.import_mode = stokesforge_import::ImportMode::NewSheet;
                             recipe.files_layout = stokesforge_import::FilesLayout::SheetPerFile;
                             if bytes.as_deref().is_some_and(|b| reads_well(b, &recipe)) {
@@ -5833,7 +5824,7 @@ impl AppState {
         }
     }
 
-    /// Avancement de l'import en cours : `(fichiers analysés, total)`.
+    /// Progress of the import in progress: `(files analyzed, total)`.
     pub fn import_progress(&self) -> Option<(usize, usize)> {
         let job = self.import_job.as_ref()?;
         Some((
@@ -5842,8 +5833,8 @@ impl AppState {
         ))
     }
 
-    /// L'import en fond vu comme un travail à montrer (#232) : depuis combien
-    /// de temps il dure, fichiers analysés, total.
+    /// The background import seen as work to show (#232): how long
+    /// it has been running, files analyzed, total.
     pub fn import_work(&self) -> Option<(std::time::Duration, usize, usize)> {
         let job = self.import_job.as_ref()?;
         Some((
@@ -5853,9 +5844,9 @@ impl AppState {
         ))
     }
 
-    /// Stop de l'import en fond (#232, S-P2) : le fil s'arrête après le fichier
-    /// en cours, rien n'est créé ni annulable, et le résultat partiel est
-    /// ignoré.
+    /// Stop of the background import (#232, S-P2): the thread stops after the file
+    /// in progress, nothing is created or undoable, and the partial result is
+    /// ignored.
     pub fn stop_import(&mut self) {
         if let Some(job) = self.import_job.take() {
             job.stop.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -5863,9 +5854,9 @@ impl AppState {
         }
     }
 
-    /// À appeler à chaque image : met à jour la progression et, quand
-    /// l'analyse est finie, crée les feuilles. Rend vrai si l'import vient de
-    /// s'appliquer. Ne bloque jamais.
+    /// To be called every frame: updates the progress and, when
+    /// the analysis is done, creates the sheets. Returns true if the import has just
+    /// been applied. Never blocks.
     pub fn poll_import(&mut self) -> bool {
         let Some(job) = &mut self.import_job else {
             return false;
@@ -5888,8 +5879,8 @@ impl AppState {
                 }
             }
         }
-        // Les propriétés du graphe tiennent la macro d'historique de la
-        // racine : on garde le travail et on l'applique à leur fermeture.
+        // The graph properties hold the root's history macro:
+        // we keep the work and apply it when they close.
         if self.plot_settings.is_some() {
             return false;
         }
@@ -5931,23 +5922,23 @@ impl AppState {
         applied
     }
 
-    /// Fichiers importés avec succès depuis le dernier appel, pour les
-    /// fichiers récents (vidés : chaque fichier n'est inscrit qu'une fois).
+    /// Files imported successfully since the last call, for the
+    /// recent files (emptied: each file is recorded only once).
     pub fn take_imported_paths(&mut self) -> Vec<PathBuf> {
         std::mem::take(&mut self.recent_to_record)
     }
 
-    /// Au moins une colonne de `sheet` vient d'un fichier qu'on peut relire.
+    /// At least one column of `sheet` comes from a file that can be read again.
     pub fn can_refresh_from_source(&self, sheet: NodeId) -> bool {
         self.visible_columns(sheet)
             .iter()
             .any(|(column, ..)| self.column_meta(*column).import_source.is_some())
     }
 
-    /// [`Action::RefreshFromSource`] : relit les fichiers source des colonnes de
-    /// `sheet` et réécrit leurs valeurs en place, en une seule entrée
-    /// d'historique. Une colonne dont le fichier a disparu ou ne se lit plus est
-    /// laissée telle quelle, avec un message.
+    /// [`Action::RefreshFromSource`]: re-reads the source files of the columns of
+    /// `sheet` and rewrites their values in place, in a single history
+    /// entry. A column whose file has disappeared or can no longer be read is
+    /// left as it is, with a message.
     fn refresh_from_source(&mut self, sheet: NodeId) {
         let sources: Vec<(NodeId, stokesforge_core::ImportSource)> = self
             .visible_columns(sheet)
@@ -5962,8 +5953,8 @@ impl AppState {
             self.fail(tr!("error-refresh-no-imported-column"));
             return;
         }
-        // Un fichier source n'est relu qu'une fois, même s'il alimente plusieurs
-        // colonnes.
+        // A source file is re-read only once, even if it feeds several
+        // columns.
         let mut items: Vec<ImportItem> = Vec::new();
         let mut failures: Vec<String> = Vec::new();
         let mut read_paths: Vec<String> = Vec::new();
@@ -5987,7 +5978,7 @@ impl AppState {
                 }
             }
         }
-        // Chaque colonne retrouve son bloc (fichier, rang) puis sa colonne.
+        // Each column finds its block (file, rank) then its column.
         let refreshed: Vec<(NodeId, PlannedColumn)> = sources
             .iter()
             .filter_map(|(column, source)| {
@@ -6012,9 +6003,9 @@ impl AppState {
             self.fail(tr!("error-refresh-group"));
             return;
         }
-        // Les lignes de la feuille suivent le plus long des nouveaux contenus ;
-        // elles ne raccourcissent que si **toutes** les colonnes sont actualisées
-        // (on ne tronque jamais une colonne saisie à la main).
+        // The rows of the sheet follow the longest of the new contents;
+        // they shrink only if **all** the columns are refreshed
+        // (a hand-typed column is never truncated).
         let new_len = refreshed
             .iter()
             .filter_map(|(_, planned)| stokesforge_importer::import_block(&items, *planned))
@@ -6050,8 +6041,8 @@ impl AppState {
                 .node(*column)
                 .and_then(Node::as_column)
                 .map_or(0, Column::len);
-            // Les cases au-delà du nouveau contenu sont vidées, et rien n'est
-            // écrit au-delà de la colonne.
+            // Cells past the new content are emptied, and nothing is
+            // written past the column.
             match &mut block {
                 ValueBlock::Float(values) => {
                     values.resize(length, f64::NAN);
@@ -6081,14 +6072,14 @@ impl AppState {
         }
     }
 
-    /// Un dernier import existe et peut être repris dans l'assistant.
+    /// A last import exists and can be resumed in the wizard.
     pub fn can_reopen_last_import(&self) -> bool {
         self.last_import.is_some() && self.import_job.is_none()
     }
 
-    /// [`Action::ReopenLastImport`] : annule le dernier import s'il est encore
-    /// au sommet de l'historique (sinon la correction s'ajouterait au lieu de
-    /// le remplacer), puis rouvre l'assistant sur ses fichiers et sa recette.
+    /// [`Action::ReopenLastImport`]: undoes the last import if it is still
+    /// at the top of the history (otherwise the correction would be added instead of
+    /// replacing it), then reopens the wizard on its files and its recipe.
     fn reopen_last_import(&mut self) {
         let Some(last) = self.last_import.clone() else {
             self.fail(tr!("error-import-nothing-to-reopen"));
@@ -6123,13 +6114,13 @@ impl AppState {
         });
     }
 
-    /// Colonne dont la fenêtre des métadonnées est ouverte, s'il y en a une.
+    /// Column whose metadata window is open, if there is one.
     pub fn column_metadata_view(&self) -> Option<NodeId> {
         self.metadata_view
     }
 
-    /// Résumé de la case « Métadonnées » de l'en-tête (« 23 clés »), vide si
-    /// la colonne n'en porte pas. Les titres de section ne comptent pas.
+    /// Summary of the "Metadata" cell of the header ("23 keys"), empty if
+    /// the column carries none. Section titles do not count.
     pub fn file_metadata_summary(&self, column: NodeId) -> String {
         let count = self
             .column_meta(column)
@@ -6143,19 +6134,19 @@ impl AppState {
         crate::tr!("workbook-metadata-summary", count = count)
     }
 
-    /// Projets `.stf` déposés depuis le dernier appel, à ouvrir chacun dans
-    /// une nouvelle fenêtre StokesForge (vidés : un projet ne s'ouvre qu'une fois).
+    /// `.stf` projects dropped since the last call, each to open in
+    /// a new StokesForge window (emptied: a project opens only once).
     pub fn take_projects_to_open(&mut self) -> Vec<PathBuf> {
         std::mem::take(&mut self.projects_to_open)
     }
 
-    /// Ferme la fenêtre d'import sans rien importer.
+    /// Closes the import window without importing anything.
     pub fn cancel_import(&mut self) {
         self.import_state = None;
     }
 
-    /// Repart d'une recette neuve et permissive (bouton « Nouveau modèle »).
-    /// Sans effet si la fenêtre d'import n'est pas ouverte.
+    /// Starts over from a new permissive recipe (the "Reset" button).
+    /// No effect if the import window is not open.
     pub fn new_import_recipe(&mut self) {
         if let Some(state) = &mut self.import_state {
             state.recipe = stokesforge_import::ImportRecipe::new(tr!("import-template-untitled"));
@@ -6164,9 +6155,9 @@ impl AppState {
         }
     }
 
-    /// Charge le modèle `name` du `RecipeStore` dans la recette en cours
-    /// d'édition (sélection dans la liste déroulante). Sans effet si `name`
-    /// n'est pas un modèle enregistré, ou si la fenêtre n'est pas ouverte.
+    /// Loads the template `name` of the `RecipeStore` into the recipe being
+    /// edited (selection in the drop-down list). No effect if `name`
+    /// is not a saved template, or if the window is not open.
     pub fn select_import_recipe(&mut self, name: &str) {
         if let Some(state) = &mut self.import_state {
             if let Some(recipe) = state.store.recipes().iter().find(|r| r.name == name) {
@@ -6179,10 +6170,10 @@ impl AppState {
         }
     }
 
-    /// Remplace les fichiers choisis (« Choisir des fichiers… », sélecteur
-    /// natif ouvert par la couche fenêtre — `rfd` est une dépendance UI,
-    /// elle n'a pas sa place ici). Sans effet si la fenêtre n'est pas
-    /// ouverte.
+    /// Replaces the chosen files ("Choose Files to Import", native picker
+    /// opened by the window layer — `rfd` is a UI dependency,
+    /// it has no place here). No effect if the window is not
+    /// open.
     pub fn set_import_paths(&mut self, paths: Vec<std::path::PathBuf>) {
         if let Some(state) = &mut self.import_state {
             state.paths = paths;
@@ -6191,12 +6182,12 @@ impl AppState {
         }
     }
 
-    /// Ajoute `paths` aux fichiers de l'assistant (dépôt pendant qu'il est
-    /// ouvert, « Ajouter des fichiers… »), sans doublon.
+    /// Adds `paths` to the wizard's files (drop while it is
+    /// open, "Add Files…"), without duplicates.
     ///
-    /// Au **premier** ajout, si le modèle courant n'a pas été modifié, le
-    /// choix automatique du modèle (extension, nom, signature de contenu)
-    /// peut le remplacer : le message dit lequel a été choisi.
+    /// At the **first** addition, if the current template has not been modified, the
+    /// automatic choice of the template (extension, name, content signature)
+    /// can replace it: the message says which one was chosen.
     pub fn add_import_paths(&mut self, paths: Vec<std::path::PathBuf>) {
         let was_empty = self
             .import_state
@@ -6214,9 +6205,9 @@ impl AppState {
         }
     }
 
-    /// Choisit, d'après le fichier montré, le modèle qui lui correspond
-    /// (`stokesforge_import::choose_recipe`) et le charge comme recette courante.
-    /// Sans effet si aucun modèle ne correspond.
+    /// Chooses, from the file shown, the template that matches it
+    /// (`stokesforge_import::choose_recipe`) and loads it as the current recipe.
+    /// No effect if no template matches.
     fn choose_import_recipe_automatically(&mut self) {
         let Some(path) = self.import_preview_path() else {
             return;
@@ -6237,7 +6228,7 @@ impl AppState {
         self.notice(tr!("status-template-chosen", name = name));
     }
 
-    /// Écrit le modèle courant dans `path` (JSON) pour le partager.
+    /// Writes the current template to `path` (JSON) to share it.
     pub fn export_import_recipe(&mut self, path: &std::path::Path) {
         let Some(state) = &self.import_state else {
             return;
@@ -6255,8 +6246,8 @@ impl AppState {
         }
     }
 
-    /// Lit un modèle exporté dans `path`, l'ajoute à la liste (en remplaçant
-    /// celui de même nom) et l'enregistre, puis en fait la recette courante.
+    /// Reads an exported template from `path`, adds it to the list (replacing
+    /// the one of the same name) and saves it, then makes it the current recipe.
     pub fn import_import_recipe(&mut self, path: &std::path::Path) {
         let recipe = match std::fs::read_to_string(path) {
             Ok(text) => stokesforge_import::ImportRecipe::from_json(&text).map_err(|detail| {
@@ -6286,8 +6277,8 @@ impl AppState {
         let name = recipe.name.clone();
         state.store.upsert(recipe.clone());
         let saved = state.store.save();
-        // Comme `save_import_recipe` : sans écriture réussie, garder l'ancienne
-        // référence pour que le modèle importé reste « modifié » (non enregistré).
+        // Like `save_import_recipe`: without a successful write, keep the old
+        // reference so that the imported template stays "modified" (unsaved).
         if saved.is_ok() {
             state.baseline = recipe.clone();
         }
@@ -6302,7 +6293,7 @@ impl AppState {
         }
     }
 
-    /// Retire le fichier `index` de la liste de l'assistant.
+    /// Removes file `index` from the wizard's list.
     pub fn remove_import_path(&mut self, index: usize) {
         if let Some(state) = &mut self.import_state {
             if index < state.paths.len() {
@@ -6313,7 +6304,7 @@ impl AppState {
         }
     }
 
-    /// Choisit le fichier montré dans l'aperçu.
+    /// Chooses the file shown in the preview.
     pub fn set_import_preview_index(&mut self, index: usize) {
         if let Some(state) = &mut self.import_state {
             if index < state.paths.len() {
@@ -6322,22 +6313,22 @@ impl AppState {
         }
     }
 
-    /// Passe à l'étape suivante / précédente de l'assistant.
+    /// Moves to the next / previous step of the wizard.
     pub fn import_step_forward(&mut self) {
         if let Some(state) = &mut self.import_state {
             state.step = state.step.next();
         }
     }
 
-    /// Voir [`AppState::import_step_forward`].
+    /// See [`AppState::import_step_forward`].
     pub fn import_step_back(&mut self) {
         if let Some(state) = &mut self.import_state {
             state.step = state.step.previous();
         }
     }
 
-    /// Octets du fichier `path`, lus une seule fois puis gardés : l'aperçu
-    /// est recalculé à chaque image, le disque ne doit pas l'être.
+    /// Bytes of file `path`, read only once then kept: the preview
+    /// is recomputed every frame, the disk must not be.
     fn import_bytes(&self, path: &std::path::Path) -> Result<Arc<Vec<u8>>, ImportReadError> {
         let state = self
             .import_state
@@ -6357,7 +6348,7 @@ impl AppState {
             .clone()
     }
 
-    /// Fichier montré dans l'aperçu.
+    /// File shown in the preview.
     fn import_preview_path(&self) -> Option<PathBuf> {
         let state = self.import_state.as_ref()?;
         state
@@ -6367,16 +6358,16 @@ impl AppState {
             .cloned()
     }
 
-    /// Encodage détecté du fichier montré dans l'aperçu.
+    /// Encoding detected for the file shown in the preview.
     pub fn import_encoding(&self) -> Option<&'static str> {
         let path = self.import_preview_path()?;
         let bytes = self.import_bytes(&path).ok()?;
         stokesforge_import::detect_encoding(&bytes)
     }
 
-    /// Ce que l'import donnerait pour chaque fichier choisi, avec la recette
-    /// courante : `Ok` avec le nombre de lignes, ou l'erreur qui l'attend —
-    /// montré **avant** le clic sur Importer.
+    /// What the import would give for each chosen file, with the current
+    /// recipe: `Ok` with the number of rows, or the error that awaits it —
+    /// shown **before** the click on Import.
     pub fn import_file_statuses(&self) -> Vec<(PathBuf, Result<usize, ImportReadError>)> {
         let Some(state) = self.import_state.as_ref() else {
             return Vec::new();
@@ -6395,14 +6386,14 @@ impl AppState {
             .collect()
     }
 
-    /// Le modèle courant diffère de celui qui a été chargé ou enregistré.
+    /// The current template differs from the one that was loaded or saved.
     pub fn import_recipe_modified(&self) -> bool {
         self.import_state
             .as_ref()
             .is_some_and(|state| state.recipe != state.baseline)
     }
 
-    /// Demande la suppression du modèle `name` (elle n'a lieu qu'à la
+    /// Requests the deletion of template `name` (it takes place only on
     /// confirmation, [`AppState::confirm_delete_import_recipe`]).
     pub fn request_delete_import_recipe(&mut self, name: &str) {
         if let Some(state) = &mut self.import_state {
@@ -6410,14 +6401,14 @@ impl AppState {
         }
     }
 
-    /// Annule la demande de suppression.
+    /// Cancels the deletion request.
     pub fn cancel_delete_import_recipe(&mut self) {
         if let Some(state) = &mut self.import_state {
             state.confirm_delete = None;
         }
     }
 
-    /// Supprime le modèle dont la suppression a été demandée.
+    /// Deletes the template whose deletion was requested.
     pub fn confirm_delete_import_recipe(&mut self) {
         let name = self
             .import_state
@@ -6428,8 +6419,8 @@ impl AppState {
         }
     }
 
-    /// Colonnes du résultat d'import du fichier montré, avec leurs premières
-    /// valeurs — étape « Colonnes ».
+    /// Columns of the import result of the file shown, with their first
+    /// values — "Columns" step.
     pub fn import_column_previews(
         &self,
     ) -> Option<Result<Vec<ImportColumnPreview>, ImportReadError>> {
@@ -6459,9 +6450,9 @@ impl AppState {
         }))
     }
 
-    /// Toutes les métadonnées que le fichier montré pourrait fournir (en-tête
-    /// et pied de page, sans exclusion) — étape « Métadonnées », pour cocher
-    /// ce qu'on garde.
+    /// All the metadata the file shown could provide (header
+    /// and footer, without exclusion) — "Metadata" step, to tick
+    /// what is kept.
     pub fn import_available_metadata(&self) -> Vec<stokesforge_import::MetadataLine> {
         let Some(state) = self.import_state.as_ref() else {
             return Vec::new();
@@ -6481,10 +6472,9 @@ impl AppState {
             .unwrap_or_default()
     }
 
-    /// Réglage depuis un clic droit sur la ligne `number` (1-based, numéro
-    /// dans le fichier) de l'aperçu. Les lignes blanches de tête ne comptent
-    /// pas dans l'en-tête (comme à l'import) : le décalage vient de la
-    /// première ligne montrée.
+    /// Setting from a right-click on line `number` (1-based, number in the
+    /// file) of the preview. Leading blank lines do not count in the header
+    /// (as at import): the offset comes from the first line shown.
     pub fn import_line_action(&mut self, action: ImportLineAction, number: usize) {
         let Some(Ok(preview)) = self.import_line_preview() else {
             return;
@@ -6509,8 +6499,8 @@ impl AppState {
                 recipe.header_layout.auto_detect = false;
             }
             ImportLineAction::UnitsLine => {
-                // La ligne et celles qui la suivent, jusqu'aux données,
-                // forment le sous-en-tête ; la ligne donne les unités.
+                // The line and those after it, up to the data, form the
+                // subheader; the line gives the units.
                 recipe.header = stokesforge_import::HeaderSkip::None;
                 let total = header_total.max(offset + 1);
                 recipe.header_layout.main_header_lines = offset;
@@ -6530,11 +6520,11 @@ impl AppState {
         }
     }
 
-    /// Enregistre la recette en cours d'édition comme modèle nommé
-    /// `save_as_name` (champ texte de la fenêtre) dans le `RecipeStore`, et
-    /// persiste le store sur disque. Un échec d'écriture (dossier de config
-    /// inaccessible) devient un [`StatusMessage`], jamais une panique — sans
-    /// effet si la fenêtre n'est pas ouverte ou si le nom est vide.
+    /// Saves the recipe being edited as a template named `save_as_name` (text
+    /// field of the window) in the `RecipeStore`, and persists the store to
+    /// disk. A write failure (config folder unreachable) becomes a
+    /// [`StatusMessage`], never a panic. No effect if the window is not open
+    /// or the name is empty.
     pub fn save_import_recipe(&mut self) {
         let Some(state) = &mut self.import_state else {
             return;
@@ -6555,15 +6545,15 @@ impl AppState {
             ));
             return;
         }
-        // Le témoin « modifié » compare au dernier enregistrement réussi,
-        // pas seulement au modèle chargé à l'ouverture. En cas d'échec,
-        // garder l'ancienne référence pour ne pas annoncer une sauvegarde.
+        // The "modified" witness compares with the last successful save, not
+        // only with the template loaded at opening. On failure, keep the old
+        // reference so as not to announce a save.
         state.baseline = state.recipe.clone();
         self.notice(tr!("status-template-saved", name = saved_name));
     }
 
-    /// Supprime le modèle `name` du `RecipeStore` et persiste le store sur
-    /// disque. Même politique d'échec que [`AppState::save_import_recipe`].
+    /// Deletes the template `name` from the `RecipeStore` and persists the
+    /// store to disk. Same failure policy as [`AppState::save_import_recipe`].
     pub fn delete_import_recipe(&mut self, name: &str) {
         let Some(state) = &mut self.import_state else {
             return;
@@ -6579,13 +6569,12 @@ impl AppState {
         self.notice(tr!("status-template-deleted", name = name));
     }
 
-    /// Aperçu du **premier** fichier choisi, reparsé avec les réglages
-    /// courants — recalculé à chaque appel plutôt que mis en cache (les
-    /// fichiers d'aperçu sont petits, voir la doc de tête de [`ImportState`]).
-    /// `None` si la fenêtre n'est pas ouverte ou si aucun fichier n'a encore
-    /// été choisi ; `Some(Err(_))` si la lecture ou l'analyse du fichier a
-    /// échoué (fichier illisible traité comme une erreur d'analyse pour ne
-    /// pas multiplier les types d'échec exposés à la fenêtre).
+    /// Preview of the **first** chosen file, reparsed with the current
+    /// settings. Recomputed at each call rather than cached (preview files are
+    /// small, see the head doc of [`ImportState`]). `None` if the window is
+    /// not open or no file has been chosen yet; `Some(Err(_))` if reading or
+    /// parsing the file failed (an unreadable file is treated as a parse
+    /// error so as not to multiply the failure types exposed to the window).
     pub fn import_preview(
         &self,
     ) -> Option<Result<stokesforge_import::ParsedTable, ImportReadError>> {
@@ -6598,14 +6587,14 @@ impl AppState {
         Some(result)
     }
 
-    /// Aperçu du découpage en lignes (en-tête/sous-en-tête/données/pied de
-    /// page) du **premier** fichier choisi, avec les réglages courants —
-    /// voir [`stokesforge_import::preview::preview`] pour le budget de coût.
-    /// Recalculé à chaque appel, comme [`AppState::import_preview`] : ce
-    /// budget est précisément ce qui rend ce recalcul par image acceptable,
-    /// y compris sur un gros fichier (le travail cellule à cellule reste
-    /// borné à `recipe.preview_lines`, jamais à la taille du fichier). `None`
-    /// dans les mêmes conditions qu'`import_preview`.
+    /// Preview of the split into lines (header/subheader/data/footer) of the
+    /// **first** chosen file, with the current settings. See
+    /// [`stokesforge_import::preview::preview`] for the cost budget.
+    /// Recomputed at each call, like [`AppState::import_preview`]: this
+    /// budget is exactly what makes recomputing at every frame acceptable,
+    /// even on a big file (the cell-by-cell work stays bounded by
+    /// `recipe.preview_lines`, never by the file size). `None` under the same
+    /// conditions as `import_preview`.
     pub fn import_line_preview(
         &self,
     ) -> Option<Result<stokesforge_import::FilePreview, ImportReadError>> {
@@ -6618,13 +6607,13 @@ impl AppState {
         Some(result)
     }
 
-    /// Réévalue `header_layout` (nombre de lignes d'en-tête principal et de
-    /// sous-en-tête) depuis le contenu du **premier** fichier choisi —
-    /// équivalent du bouton de réévaluation automatique d'OriginLab
-    /// ([`stokesforge_import::preview::detect_header_layout`]) : une action
-    /// explicite, pas un recalcul à chaque image, pour ne jamais écraser une
-    /// valeur que l'utilisateur vient de saisir à la main. Sans effet si la
-    /// fenêtre n'est pas ouverte ou si aucun fichier n'a encore été choisi.
+    /// Re-evaluates `header_layout` (number of main header and subheader
+    /// lines) from the content of the **first** chosen file. Equivalent of
+    /// OriginLab's automatic re-evaluation button
+    /// ([`stokesforge_import::preview::detect_header_layout`]): an explicit
+    /// action, not a recomputation at every frame, so as never to overwrite a
+    /// value the user has just typed by hand. No effect if the window is not
+    /// open or no file has been chosen yet.
     pub fn auto_detect_import_header(&mut self) {
         let Some(import) = &self.import_state else {
             return;
@@ -6645,20 +6634,18 @@ impl AppState {
         }
     }
 
-    // -- détail interne ----------------------------------------------------
+    // -- internal detail ---------------------------------------------------
 
-    /// Purge les sélections de feuille et les tampons de saisie devenus
-    /// périmés — un classeur, une feuille ou une colonne qui n'existe plus
-    /// dans le nouvel arbre (rechargement, suppression, y compris par un
-    /// autre client de l'acteur).
+    /// Purges the sheet selections and the input buffers that have become
+    /// stale: a workbook, sheet or column that no longer exists in the new
+    /// tree (reload, deletion, including by another actor client).
     ///
-    /// Contrairement à l'ancienne sélection globale unique, `selected_sheets`
-    /// n'a pas besoin d'être **réaffectée** ici : [`AppState::
-    /// selected_sheet_in`] retombe de lui-même sur la première feuille d'un
-    /// classeur dont l'entrée a disparu (ou n'a jamais existé). Cette méthode
-    /// ne fait donc qu'écarter ce qui ne pointe plus rien de valide, pour ne
-    /// pas laisser grossir la carte avec des entrées mortes au fil des
-    /// rechargements.
+    /// Unlike the old single global selection, `selected_sheets` does not
+    /// need to be **reassigned** here: [`AppState::selected_sheet_in`] falls
+    /// back by itself to the first sheet of a workbook whose entry has gone
+    /// (or never existed). This method therefore only discards what no longer
+    /// points to anything valid, so as not to let the map grow with dead
+    /// entries over the reloads.
     fn revalidate_selection(&mut self) {
         let tree = &self.snapshot.tree;
         self.selected_sheets.retain(|&book, &mut sheet| {
@@ -6668,12 +6655,12 @@ impl AppState {
                     .node(sheet)
                     .is_some_and(|node| node.kind().is_worksheet() && node.parent() == Some(book))
         });
-        // Le tampon de saisie pointe une colonne de l'arbre précédent : s'il
-        // n'a plus de nœud colonne, il n'a plus de sens ici (typiquement, un
-        // rechargement : les identifiants n'ont aucun rapport avec ceux
-        // d'avant). S'il pointe toujours une colonne valide, on le laisse
-        // survivre — c'est le cas d'un `refresh` déclenché par une action qui
-        // ne touche pas la colonne en cours de saisie.
+        // The input buffer points to a column of the previous tree: if it has
+        // no column node any more, it makes no sense here (typically a reload:
+        // the identifiers have nothing to do with the earlier ones). If it
+        // still points to a valid column, it is left alone: that is the case
+        // of a `refresh` triggered by an action that does not touch the column
+        // being typed in.
         if let Some(edit) = &self.editing {
             if tree.node(edit.column).and_then(Node::as_column).is_none() {
                 self.editing = None;
@@ -6687,11 +6674,11 @@ impl AppState {
                 self.note_editing = None;
             }
         }
-        // Une sélection dont plus aucune colonne n'existe (feuille ou
-        // colonnes supprimées) n'a plus de sens — voir `Selection::columns`,
-        // qui rend justement une liste vide dans ce cas. Un champ d'en-tête
-        // sélectionné n'a en revanche *jamais* de colonne via `columns()`
-        // (voir sa doc) : sa colonne se vérifie directement.
+        // A selection whose columns no longer exist (sheet or columns
+        // deleted) makes no sense any more; see `Selection::columns`, which
+        // returns an empty list in that case. A selected header field, on the
+        // other hand, *never* has a column via `columns()` (see its doc): its
+        // column is checked directly.
         self.selection.retain(
             |&sheet, selection| match selection.selected_header_field() {
                 Some((column, _)) => tree.node(column).and_then(Node::as_column).is_some(),
@@ -6705,24 +6692,24 @@ impl AppState {
         }
     }
 
-    /// Enregistre un message informatif. `pub(crate)` pour que la couche
-    /// fenêtre puisse signaler ce qu'elle seule sait — un presse-papier
-    /// système illisible au moment d'un « Coller » pris dans un menu
-    /// contextuel (voir `app::grid::system_clipboard_text`) : cet échec
-    /// naît côté plateforme, jamais dans le modèle.
+    /// Records an informational message. `pub(crate)` so that the window
+    /// layer can report what only it knows: an unreadable system clipboard
+    /// at the time of a "Paste" taken from a context menu (see
+    /// `app::grid::system_clipboard_text`). This failure arises on the
+    /// platform side, never in the model.
     pub fn notice(&mut self, text: String) {
         self.dialog_error = None;
         self.record(text, StatusLevel::Info);
     }
 
-    /// Enregistre un avertissement (S-M4) : visible jusqu'au message suivant.
+    /// Records a warning (S-M4): visible until the next message.
     pub fn warn(&mut self, text: String) {
         self.dialog_error = None;
         self.record(text, StatusLevel::Warning);
     }
 
-    /// Enregistre un message d'échec : dans le pied du dialogue modal ouvert
-    /// (S-M7, #228), dans la barre d'état sinon.
+    /// Records a failure message: in the footer of the open modal dialog
+    /// (S-M7, #228), in the status bar otherwise.
     fn fail(&mut self, text: String) {
         if self.modal_dialog_open() {
             self.dialog_error = Some(text);
@@ -6731,7 +6718,7 @@ impl AppState {
         self.record(text, StatusLevel::Error);
     }
 
-    /// Pose le message courant et l'ajoute à l'historique (S-M6, 50 derniers).
+    /// Sets the current message and adds it to the history (S-M6, last 50).
     fn record(&mut self, text: String, level: StatusLevel) {
         let message = StatusMessage {
             text,
@@ -6746,9 +6733,9 @@ impl AppState {
         self.status = Some(message);
     }
 
-    /// Efface l'information trop ancienne (S-M5) et rend le délai restant avant
-    /// la prochaine échéance, pour programmer **ce seul** redessin : aucun
-    /// réveil périodique au repos. Avertissements et erreurs restent.
+    /// Clears the information that is too old (S-M5) and returns the delay
+    /// left before the next deadline, to schedule **that one** repaint: no
+    /// periodic wake-up at rest. Warnings and errors stay.
     pub fn expire_status(&mut self, now: std::time::Instant) -> Option<std::time::Duration> {
         let message = self.status.as_ref()?;
         if message.level != StatusLevel::Info {
@@ -6763,28 +6750,28 @@ impl AppState {
         }
     }
 
-    /// Les derniers messages, du plus ancien au plus récent (S-M6).
+    /// The latest messages, from oldest to newest (S-M6).
     pub fn status_history(&self) -> impl Iterator<Item = &StatusMessage> {
         self.status_log.iter()
     }
 
-    /// L'historique des messages est-il ouvert ?
+    /// Is the message history open?
     pub fn status_history_open(&self) -> bool {
         self.status_history_open
     }
 
-    /// La fenêtre des préférences est-elle ouverte ?
+    /// Is the Preferences window open?
     pub fn preferences_open(&self) -> bool {
         self.preferences_open
     }
 
-    /// La fenêtre des raccourcis clavier est-elle ouverte ?
+    /// Is the keyboard shortcuts window open?
     pub fn keyboard_shortcuts_open(&self) -> bool {
         self.keyboard_shortcuts_open
     }
 
-    /// Titre de la fenêtre : nom du projet, « • » tant qu'il n'est pas
-    /// enregistré (S-R15) : « essai.stf • — StokesForge ».
+    /// Window title: project name, "•" while it is not saved (S-R15):
+    /// "essai.stf • — StokesForge".
     pub fn window_title(&self) -> String {
         let name = if self.path.is_empty() {
             tr!("window-title-untitled")
@@ -6800,11 +6787,11 @@ impl AppState {
         }
     }
 
-    /// Le dernier geste a-t-il échoué ? Erreur dans le pied du dialogue ou
-    /// dans la barre d'état.
+    /// Did the last gesture fail? Error in the dialog footer or in the status
+    /// bar.
     pub(crate) fn last_action_failed(&self) -> bool {
-        // L'avertissement de R² faible (#288) n'est pas un échec : le geste qui
-        // l'a ouvert a réussi.
+        // The low R² warning (#288) is not a failure: the gesture that opened
+        // it succeeded.
         self.dialog_error.is_some()
             || self
                 .alert
@@ -6813,13 +6800,13 @@ impl AppState {
             || self.status.as_ref().is_some_and(StatusMessage::is_error)
     }
 
-    /// Envoie une commande à l'acteur et rend compte du résultat.
+    /// Sends a command to the actor and reports the result.
     fn execute(&mut self, command: Command) {
-        // Le libellé se calcule sur l'arbre d'**avant** : après coup, une
-        // colonne supprimée n'a plus de nom.
+        // The label is computed on the tree from **before**: afterwards, a
+        // deleted column has no name.
         let label = command.label(&self.snapshot.tree);
-        // Interruptible (#239) : la commande est appliquée sans attendre le
-        // recalcul des formules, que Stop peut arrêter.
+        // Interruptible (#239): the command is applied without waiting for the
+        // formula recalculation, which Stop can halt.
         match self.handle.execute_interruptible(command) {
             Ok(revision) => {
                 self.applied_revision = self.applied_revision.max(revision);
@@ -6830,10 +6817,11 @@ impl AppState {
         }
     }
 
-    /// Attend [`RECALC_WAIT`] la fin du recalcul que la commande vient de
-    /// lancer : un recalcul bref reste invisible et l'instantané est frais au
-    /// retour, comme avant #239. Au-delà, on rend la main (l'interface se
-    /// repeint avec son indicateur) et [`AppState::poll_recalc`] reprendra.
+    /// Waits [`RECALC_WAIT`] for the end of the recalculation that the command
+    /// has just started: a short recalculation stays invisible and the
+    /// snapshot is fresh on return, as before #239. Beyond that, hand back
+    /// control (the interface repaints with its indicator) and
+    /// [`AppState::poll_recalc`] will resume.
     fn settle_recalc(&mut self) {
         if self.handle.wait_recalc(RECALC_WAIT) {
             self.finish_recalc();
@@ -6842,8 +6830,8 @@ impl AppState {
         }
     }
 
-    /// Le recalcul est fini : relève comment, rafraîchit, et dit si Stop a
-    /// défait la commande.
+    /// The recalculation is done: reads how, refreshes, and says whether Stop
+    /// undid the command.
     fn finish_recalc(&mut self) {
         self.recalc_since = None;
         let end = self.handle.take_recalc_end();
@@ -6853,8 +6841,8 @@ impl AppState {
         }
     }
 
-    /// À appeler à chaque image : reprend la main quand un recalcul que
-    /// l'interface n'a pas attendu vient de finir. Ne bloque jamais.
+    /// To call at every frame: resumes when a recalculation that the
+    /// interface did not wait for has just finished. Never blocks.
     pub fn poll_recalc(&mut self) {
         self.check_session();
         if self.recalc_since.is_some() && self.handle.recalc_running().is_none() {
@@ -6862,11 +6850,11 @@ impl AppState {
         }
     }
 
-    /// L'acteur de session a-t-il disparu (panic, #310) ? Dans ce cas, **une
-    /// seule fois** : le recalcul « en cours » est abandonné, une copie de
-    /// secours du dernier instantané est écrite (si un dossier est connu) et un
-    /// dialogue bloquant l'annonce. Plus rien ne passe ensuite par l'acteur :
-    /// fermer est la seule issue.
+    /// Has the session actor disappeared (panic, #310)? In that case, **once
+    /// only**: the "running" recalculation is abandoned, a backup copy of the
+    /// last snapshot is written (if a folder is known) and a blocking dialog
+    /// announces it. Nothing goes through the actor afterwards: closing is the
+    /// only way out.
     fn check_session(&mut self) {
         if self.session_lost || self.handle.actor_alive() {
             return;
@@ -6901,37 +6889,36 @@ impl AppState {
         });
     }
 
-    /// Fixe le dossier des copies de secours (`None` : aucune). Par défaut le
-    /// dossier de données de l'application ; un test ou un intégrateur le
-    /// remplace pour ne rien écrire hors de son dossier temporaire.
+    /// Sets the backup copies folder (`None`: none). By default the
+    /// application data folder; a test or an integrator replaces it so as to
+    /// write nothing outside its temporary folder.
     pub fn set_recovery_dir(&mut self, dir: Option<PathBuf>) {
         self.recovery_dir = dir;
     }
 
-    /// Quitter sans demander d'enregistrer (démonstration forcée par
-    /// `STOKESFORGE_DEMO=1`, voir [`crate::startup`]) : le binaire l'active, rien
-    /// d'autre. La copie de secours s'en va comme pour un Discard.
+    /// Quit without asking to save (demo forced by `STOKESFORGE_DEMO=1`, see
+    /// [`crate::startup`]): the binary turns it on, nothing else. The backup
+    /// copy goes away as for a Discard.
     pub fn set_quit_without_prompt(&mut self, on: bool) {
         self.quit_without_prompt = on;
     }
 
-    /// L'acteur de session est-il mort (#310) ? La fenêtre n'a alors plus qu'à
-    /// se fermer.
+    /// Is the session actor dead (#310)? The window then has only to close.
     pub fn session_lost(&self) -> bool {
         self.session_lost
     }
 
-    /// Le recalcul en cours vu comme un travail à montrer (#239) : depuis
-    /// combien de temps il dure.
+    /// The running recalculation seen as work to show (#239): how long it has
+    /// lasted.
     pub fn recalc_work(&self) -> Option<std::time::Duration> {
         let since = self.recalc_since?;
         self.handle.recalc_running()?;
         Some(since.elapsed())
     }
 
-    /// Stop du recalcul (#239, S-P2) : il s'arrête entre deux colonnes, la
-    /// commande qui l'a déclenché est annulée, ce qui avait changé est
-    /// recalculé. Le message vient à la fin ([`AppState::finish_recalc`]).
+    /// Stop of the recalculation (#239, S-P2): it halts between two columns,
+    /// the command that triggered it is undone, what had changed is
+    /// recalculated. The message comes at the end ([`AppState::finish_recalc`]).
     pub fn stop_recalc(&mut self) {
         if let Some(id) = self.handle.recalc_running() {
             self.handle.stop_recalc(id);
@@ -6939,8 +6926,8 @@ impl AppState {
     }
 
     pub(super) fn undo(&mut self) {
-        // Le libellé disparaît de la pile dès que l'annulation est faite : il
-        // faut le lire avant.
+        // The label disappears from the stack as soon as the undo is done: it
+        // must be read before.
         let label = self.snapshot.history.undo_label.clone();
         match self.handle.undo() {
             Ok(Some(_)) => {
@@ -6970,21 +6957,21 @@ impl AppState {
         }
     }
 
-    /// Enregistre ; puis poursuit le geste qui attendait l'enregistrement
-    /// (réponse Save, S-F4). Un échec est un échec grave (S-M8) : dialogue
-    /// bloquant, et le geste en attente est abandonné.
+    /// Saves; then carries on with the gesture that was waiting for the save
+    /// (Save answer, S-F4). A failure is a serious failure (S-M8): blocking
+    /// dialog, and the pending gesture is abandoned.
     fn save(&mut self) -> bool {
-        // Un script écrit dans le modèle depuis son fil : enregistrer
-        // maintenant figerait un état intermédiaire (#315). Le bouton est
-        // grisé ; ce refus est la garde de l'état.
+        // A script writes into the model from its thread: saving now would
+        // freeze an intermediate state (#315). The button is disabled; this
+        // refusal is the guard of the state.
         if self.script_running() {
             self.after_save = None;
             self.fail(tr!("error-save-script-running"));
             return false;
         }
-        // Écraser le fichier source d'une lecture qui a écarté des données les
-        // supprimerait du disque : on demande d'abord (#309, F3). L'attente
-        // n'est pas un échec ; `after_save` reste en attente de la réponse.
+        // Overwriting the source file of a read that discarded data would
+        // delete it from disk: ask first (#309, F3). Waiting is not a
+        // failure; `after_save` stays pending the answer.
         if self
             .discarded_source
             .as_ref()
@@ -6996,7 +6983,7 @@ impl AppState {
         self.write_save()
     }
 
-    /// L'écriture de [`AppState::save`], sans plus de question.
+    /// The write of [`AppState::save`], with no further question.
     fn write_save(&mut self) -> bool {
         let path = PathBuf::from(&self.path);
         match self.handle.save(&path) {
@@ -7004,7 +6991,7 @@ impl AppState {
                 self.refresh();
                 self.saved_revision =
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));
-                // Enregistré : la copie de secours n'a plus de raison d'être.
+                // Saved: the backup copy no longer has a reason to exist.
                 self.autosave_remove_slot();
                 self.autosave_mark_clean();
                 if self
@@ -7014,9 +7001,9 @@ impl AppState {
                 {
                     self.discarded_source = None;
                 }
-                // A2 (#316) : un fichier plus gros que le plafond d'ouverture
-                // s'enregistre, mais ne se rouvrira pas tel quel : le dire,
-                // et comment relever la limite.
+                // A2 (#316): a file bigger than the opening cap can be saved,
+                // but will not reopen as is: say so, and how to raise the
+                // limit.
                 let limit = self.object_manager_preferences.max_file_bytes();
                 let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                 if size > limit {
@@ -7049,16 +7036,15 @@ impl AppState {
         }
     }
 
-    /// Enregistre sous `path`. Le chemin n'est remplacé que si
-    /// l'enregistrement réussit (modèle de [`AppState::open_project`]) ; il
-    /// est rétabli **après** `save`, dont le geste en attente peut changer de
-    /// projet.
+    /// Saves as `path`. The path is replaced only if the save succeeds (model
+    /// of [`AppState::open_project`]); it is restored **after** `save`, whose
+    /// pending gesture may change the project.
     fn save_as(&mut self, path: String) {
         let previous = std::mem::replace(&mut self.path, path);
         if !self.save() {
             if let Some(pending) = self.pending_discarded_save.as_mut() {
-                // Vers la source : le chemin n'est rétabli que si la réponse
-                // est Cancel ou si l'écriture échoue.
+                // To the source: the path is restored only if the answer is
+                // Cancel or if the write fails.
                 pending.restore_path = Some(previous);
             } else {
                 self.path = previous;
@@ -7082,9 +7068,9 @@ impl AppState {
         }
     }
 
-    /// Le fichier que l'enregistrement écraserait sans ce que sa lecture a
-    /// écarté, avec ce qui l'a été (« 2 calculations and 1 correction record »),
-    /// en attente de confirmation (#309, F3).
+    /// The file that saving would overwrite without what its read discarded,
+    /// with what was discarded ("2 calculations and 1 correction record"),
+    /// waiting for confirmation (#309, F3).
     pub fn pending_discarded_save(&self) -> Option<(String, String)> {
         self.pending_discarded_save.as_ref()?;
         let source = self.discarded_source.as_ref()?;
@@ -7096,8 +7082,8 @@ impl AppState {
         Some((name, what))
     }
 
-    /// Applique `change` à un clone du spec de `graph` et l'envoie au modèle
-    /// ([`Command::SetPlotSpec`]) s'il a réellement changé quelque chose.
+    /// Applies `change` to a clone of the spec of `graph` and sends it to the
+    /// model ([`Command::SetPlotSpec`]) if it really changed something.
     fn edit_annotations(&mut self, graph: NodeId, change: impl FnOnce(&mut PlotSpec) -> bool) {
         let Some(mut spec) = self.plot_spec(graph) else {
             return;
@@ -7108,7 +7094,7 @@ impl AppState {
         }
     }
 
-    /// Même delta que les propriétés ; le motif précise le geste dans l'historique.
+    /// Same delta as the properties; the reason specifies the gesture in the history.
     fn edit_plot_object(
         &mut self,
         graph: NodeId,
@@ -7124,27 +7110,27 @@ impl AppState {
         }
     }
 
-    /// Plafond de taille d'un `.stf` à l'ouverture, en Mo (A2, #316).
+    /// Cap on the size of a `.stf` at opening, in MB (A2, #316).
     pub fn max_file_mb(&self) -> u32 {
         self.object_manager_preferences.max_file_mb()
     }
 
-    /// Budget global de cellules à l'ouverture, en millions (B1, #316).
+    /// Global budget of cells at opening, in millions (B1, #316).
     pub fn max_cells_m(&self) -> u32 {
         self.object_manager_preferences.max_cells_m()
     }
 
-    /// La boîte « R² très faible » est-elle permise par l'application (#288) ?
+    /// Is the "Low R²" box allowed by the application (#288)?
     pub fn analysis_low_r2_dialog(&self) -> bool {
         self.object_manager_preferences.analysis_low_r2_dialog()
     }
 
-    /// Les rangées d'en-tête `(Metadata, x')` des nouveaux classeurs.
+    /// The header rows `(Metadata, x')` of new workbooks.
     pub fn workbook_header_defaults(&self) -> (bool, bool) {
         self.object_manager_preferences.workbook_header_rows()
     }
 
-    /// L'écriture du texte des exports SVG (#162).
+    /// How the text of SVG exports is written (#162).
     pub fn copy_formats(&self) -> &[crate::preferences::CopyFormatEntry] {
         self.object_manager_preferences.copy_formats()
     }
@@ -7153,18 +7139,18 @@ impl AppState {
         self.object_manager_preferences.svg_text_mode()
     }
 
-    /// L'agrandissement des exports PNG.
+    /// The scale-up of PNG exports.
     pub fn png_export_scale(&self) -> f32 {
         self.png_export_scale
     }
 
-    /// Voir [`Action::ExportGraph`]. Mesure et compose comme l'écran : même
-    /// taille logique (`DEFAULT_SIZE`, celle où `GraphView::paint_scaled`
-    /// met la figure en page), mêmes polices.
+    /// See [`Action::ExportGraph`]. Measures and composes like the screen:
+    /// same logical size (`DEFAULT_SIZE`, the one where
+    /// `GraphView::paint_scaled` lays out the figure), same fonts.
     ///
-    /// Le sélecteur natif demande avant d'écraser le nom saisi ; l'extension
-    /// ajoutée ici donne un autre fichier, qu'il n'a pas vu : s'il existe,
-    /// l'export attend la confirmation (S-F3, [`Action::ConfirmOverwrite`]).
+    /// The native picker asks before overwriting the typed name; the extension
+    /// added here gives another file, which it has not seen: if it exists, the
+    /// export waits for confirmation (S-F3, [`Action::ConfirmOverwrite`]).
     fn export_graph(&mut self, mut path: PathBuf, spec: &PlotSpec) {
         if path.extension().is_none() {
             path.set_extension("svg");
@@ -7176,7 +7162,7 @@ impl AppState {
         self.write_graph_export(&path, spec);
     }
 
-    /// L'écriture de l'export, sans plus de question.
+    /// The write of the export, with no further question.
     fn write_graph_export(&mut self, path: &std::path::Path, spec: &PlotSpec) {
         let Some(format) = stokesforge_render_svg::ExportFormat::from_path(
             path,
@@ -7207,24 +7193,25 @@ impl AppState {
         }
     }
 
-    /// Voir [`Action::CopyGraphFigure`]. Mêmes taille, mesure et polices que
-    /// l'export vers un fichier ; la figure n'est composée qu'une fois pour
-    /// les trois formats. Un format qui échoue seul est omis et nommé dans le
-    /// message ; si aucun n'est prêt, rien n'est offert.
+    /// See [`Action::CopyGraphFigure`]. Same size, measurement and fonts as
+    /// the export to a file; the figure is composed only once for the three
+    /// formats. A format that fails alone is omitted and named in the
+    /// message; if none is ready, nothing is offered.
     fn copy_graph_figure(&mut self, spec: &PlotSpec) {
         use crate::preferences::CopyFormat;
         use stokesforge_render_svg::ExportFormat;
 
         let plot = stokesforge_core::resolve::resolve_spec(&self.snapshot.tree, spec);
         let measurer = stokesforge_render_svg::SvgTextMeasurer::default();
-        // L'ordre et le choix sont ceux de Preferences › Export : l'ordre des
-        // représentations est celui où les applications les voient.
+        // The order and the choice are those of Preferences › Export: the
+        // order of the representations is the one in which applications see
+        // them.
         let wanted: Vec<(&str, ExportFormat)> = self
             .copy_formats()
             .iter()
             .filter(|entry| entry.on)
             .map(|entry| match entry.format {
-                // Le presse-papiers prend toujours le défaut, texte SVG (#162).
+                // The clipboard always takes the default, SVG text (#162).
                 CopyFormat::Svg => (
                     "SVG",
                     ExportFormat::Svg {
@@ -7290,37 +7277,37 @@ impl AppState {
         self.notice(text);
     }
 
-    /// Les formes de la figure que [`Action::CopyGraphFigure`] vient de
-    /// préparer, à offrir au presse-papiers système par la fenêtre qui a reçu
-    /// le geste ; relevées une seule fois. Des octets étiquetés par leur
-    /// [`ExportFormat`](stokesforge_render_svg::ExportFormat) : le type MIME et
-    /// l'offre au système sont l'affaire de la fenêtre (`figure_copy.rs`), qui
-    /// seule connaît `stokesforge-clipboard`.
+    /// The shapes of the figure that [`Action::CopyGraphFigure`] has just
+    /// prepared, to offer to the system clipboard by the window that received
+    /// the gesture; read only once. Bytes labeled with their
+    /// [`ExportFormat`](stokesforge_render_svg::ExportFormat): the MIME type
+    /// and the offer to the system are the window's business
+    /// (`figure_copy.rs`), which alone knows `stokesforge-clipboard`.
     pub fn take_figure_clipboard(&mut self) -> Option<Vec<FigureBytes>> {
         self.figure_clipboard.take()
     }
 
-    /// Le système a refusé l'offre de la figure : le message « copié » cède la
-    /// place à la cause, que la fenêtre a déjà mise en phrase.
+    /// The system refused the offer of the figure: the "copied" message gives
+    /// way to the cause, which the window has already put into a sentence.
     pub fn figure_clipboard_failed(&mut self, message: String) {
         self.fail(message);
     }
 
-    /// Recharge le fichier courant. Un échec de lecture est un échec grave
-    /// (S-M8) : dialogue bloquant ; rend `false`.
+    /// Reloads the current file. A read failure is a serious failure (S-M8):
+    /// blocking dialog; returns `false`.
     fn load(&mut self) -> bool {
         let path = PathBuf::from(&self.path);
         let limits = self.object_manager_preferences.load_limits();
         match self.handle.load_with_limits(&path, limits) {
             Ok((_, report)) => {
-                // Les identifiants du fichier n'ont aucun rapport avec ceux de
-                // l'arbre précédent : la sélection doit être revalidée, ce que
-                // fait `refresh`.
+                // The identifiers of the file have nothing to do with those of
+                // the previous tree: the selection must be revalidated, which
+                // `refresh` does.
                 self.editing = None;
                 let text = crate::tr!("status-loaded", path = self.path.as_str());
                 self.notice(text);
-                // Un calcul illisible est écarté (invariant 10) mais dit : le
-                // message remplace « Chargé » dans la barre d'état (#278).
+                // An unreadable calculation is discarded (invariant 10) but
+                // reported: the message replaces "Loaded" in the status bar (#278).
                 if let Some(text) = discarded_calculations_text(&report) {
                     self.warn(text);
                 }
@@ -7328,7 +7315,7 @@ impl AppState {
                 self.refresh();
                 self.saved_revision =
                     Some((self.snapshot.revision, self.snapshot.geometry_revision));
-                // L'ancien projet est refermé proprement : sa copie s'en va.
+                // The old project is closed cleanly: its copy goes away.
                 self.autosave_remove_slot();
                 self.autosave_mark_clean();
                 self.discarded_source = DiscardedSource::of(PathBuf::from(&self.path), &report);
@@ -7344,8 +7331,8 @@ impl AppState {
         }
     }
 
-    /// Ouvre `path` ; un fichier illisible laisse le projet **et** le chemin
-    /// courants (un Ctrl+S suivant n'écrase pas le fichier choisi).
+    /// Opens `path`; an unreadable file leaves the current project **and**
+    /// path (a following Ctrl+S does not overwrite the chosen file).
     fn open_project(&mut self, path: String) {
         let previous = std::mem::replace(&mut self.path, path);
         if !self.load() {
@@ -7353,32 +7340,32 @@ impl AppState {
         }
     }
 
-    /// Le changement de projet ne doit pas recueillir un résultat d'import
-    /// ou de script lancé sur l'ancien projet, ni interrompre une macro.
+    /// Changing project must not pick up an import or script result launched
+    /// on the old project, nor interrupt a macro.
     pub fn can_new_project(&self) -> bool {
         !self.script_running() && self.import_job.is_none() && !self.snapshot.history.in_macro
     }
 
-    /// Le geste qui attend la réponse « Discard Changes · Cancel · Save »
+    /// The gesture waiting for the "Discard Changes · Cancel · Save" answer
     /// (S-F4, #229).
     pub fn unsaved_pending(&self) -> Option<&UnsavedGesture> {
         self.unsaved_pending.as_ref()
     }
 
-    /// L'échec grave à dire (S-M8, #229).
+    /// The serious failure to report (S-M8, #229).
     pub fn alert(&self) -> Option<&Alert> {
         self.alert.as_ref()
     }
 
-    /// Le fichier qu'un export écraserait, en attente de confirmation (S-F3).
+    /// The file an export would overwrite, waiting for confirmation (S-F3).
     pub fn pending_overwrite(&self) -> Option<&std::path::Path> {
         self.pending_overwrite
             .as_ref()
             .map(|(path, _)| path.as_path())
     }
 
-    /// Un dialogue bloquant de l'application attend-il une réponse
-    /// (confirmation, choix d'axe, échec grave) ? Rien d'autre n'agit alors.
+    /// Is a blocking dialog of the application waiting for an answer
+    /// (confirmation, axis choice, serious failure)? Nothing else acts then.
     pub fn blocking_dialog(&self) -> bool {
         self.unsaved_pending.is_some()
             || self.pending_row_drop.is_some()
@@ -7388,14 +7375,14 @@ impl AppState {
             || self.recovery_delete_pending()
     }
 
-    /// Plus rien ne retient l'application (Quit accepté) ; une seule fois.
+    /// Nothing holds the application back any more (Quit accepted); once only.
     pub fn take_quit_ready(&mut self) -> bool {
         std::mem::take(&mut self.quit_ready)
     }
 
-    /// Un geste qui remplacerait ou fermerait le projet (S-F3) : sans travail à
-    /// perdre il s'applique, sinon il attend la réponse « Discard Changes ·
-    /// Cancel · Save ».
+    /// A gesture that would replace or close the project (S-F3): with no work
+    /// to lose it applies, otherwise it waits for the "Discard Changes ·
+    /// Cancel · Save" answer.
     fn request_unsaved(&mut self, gesture: UnsavedGesture, pending_edits: bool) {
         self.refresh();
         if gesture == UnsavedGesture::NewProject && !self.can_new_project() {
@@ -7408,9 +7395,9 @@ impl AppState {
         }
     }
 
-    /// Voir [`Action::ConfirmUnsaved`]. Save sans fichier : le geste attend le
-    /// fichier choisi (la fenêtre ouvre le sélecteur, puis `Action::Save`) ;
-    /// Cancel oublie aussi un geste qui attendait un enregistrement.
+    /// See [`Action::ConfirmUnsaved`]. Save with no file: the gesture waits for
+    /// the chosen file (the window opens the picker, then `Action::Save`);
+    /// Cancel also forgets a gesture that was waiting for a save.
     fn confirm_unsaved(&mut self, choice: UnsavedChoice) {
         let gesture = self.unsaved_pending.take();
         if choice == UnsavedChoice::Cancel {
@@ -7437,7 +7424,7 @@ impl AppState {
             UnsavedGesture::NewProject => self.new_project(),
             UnsavedGesture::Open(path) => self.open_project(path),
             UnsavedGesture::Quit => {
-                // Fermeture propre : la copie de secours s'en va.
+                // Clean close: the backup copy goes away.
                 self.autosave_remove_slot();
                 self.quit_ready = true;
             }
@@ -7445,12 +7432,12 @@ impl AppState {
         }
     }
 
-    /// Du travail serait-il perdu : changements depuis l'enregistrement, ou
-    /// saisie en cours (ici ou dans une vue, `pending_edits`) ?
+    /// Would work be lost: changes since the save, or an input in progress
+    /// (here or in a view, `pending_edits`)?
     ///
-    /// La révision comparée est la plus haute de l'instantané et de
-    /// `applied_revision` : tant qu'un recalcul long court, l'instantané garde
-    /// l'ancienne révision alors que la commande est déjà dans l'acteur (#239).
+    /// The compared revision is the highest of the snapshot and
+    /// `applied_revision`: while a long recalculation runs, the snapshot keeps
+    /// the old revision although the command is already in the actor (#239).
     fn has_unsaved_work(&self, pending_edits: bool) -> bool {
         let revision = self.snapshot.revision.max(self.applied_revision);
         let has_content = self
@@ -7509,9 +7496,9 @@ impl AppState {
             self.fail(tr!("error-sheet-gone"));
             return;
         }
-        // Une feuille est toujours l'enfant directe d'un classeur (le seul
-        // parent qu'`accepts_child` autorise) : c'est ce classeur, pas la
-        // feuille elle-même, qui est la clé de `selected_sheets`.
+        // A sheet is always the direct child of a workbook (the only parent
+        // `accepts_child` allows): it is that workbook, not the sheet itself,
+        // that is the key of `selected_sheets`.
         let Some(book) = node.and_then(Node::parent) else {
             self.fail(tr!("error-sheet-no-workbook"));
             return;
@@ -7521,18 +7508,18 @@ impl AppState {
         self.status = None;
     }
 
-    /// Transport à publier par le viewport qui reçoit le geste de copie.
+    /// Transport to publish by the viewport that receives the copy gesture.
     pub fn take_object_clipboard_text(&mut self) -> Option<String> {
         self.object_clipboard_output.take()
     }
 
-    /// Copies créées : source, destination et conservation de l'état de vue.
+    /// Copies created: source, destination and whether the view state is kept.
     pub fn take_copied_objects(&mut self) -> Vec<(NodeId, NodeId, bool)> {
         std::mem::take(&mut self.copied_objects)
     }
 
-    /// Graphes **restants** qui utilisent des colonnes des sous-arbres
-    /// indiqués (un graphe supprimé avec eux n'est pas nommé).
+    /// **Remaining** graphs that use columns of the given subtrees (a graph
+    /// deleted with them is not named).
     pub fn object_users(&self, ids: &[NodeId]) -> Vec<String> {
         let removed: std::collections::HashSet<_> = ids
             .iter()
@@ -7555,8 +7542,8 @@ impl AppState {
         format!("{}:{}", self.object_clipboard_origin, self.snapshot.epoch)
     }
 
-    // Éliminer doublons et descendants d'une autre cible empêche de supprimer
-    // ou déplacer deux fois le même contenu. L'ordre reste celui de l'arbre.
+    // Dropping duplicates and descendants of another target prevents deleting
+    // or moving the same content twice. The order stays that of the tree.
     fn object_targets(&self, ids: &[NodeId]) -> Vec<NodeId> {
         self.tree()
             .walk_all()
@@ -7631,7 +7618,7 @@ impl AppState {
             .collect()
     }
 
-    /// Rend visibles et ouvre les classeurs de données donnés.
+    /// Makes the given data workbooks visible and opens them.
     fn reveal_books(&mut self, books: Vec<NodeId>) {
         for book in books {
             let Some(NodeKind::Workbook { meta, .. }) = self.tree().node(book).map(Node::kind)
@@ -7647,11 +7634,11 @@ impl AppState {
         }
     }
 
-    /// Copier ou dupliquer un dossier est refusé pour l'instant (#170, point 4) :
-    /// la copie locale garderait ses références vers les classeurs d'origine,
-    /// qui ne sont pas dans le dossier. Le geste est expliqué dans la barre
-    /// d'état (le menu, lui, grise l'entrée avec la même phrase). Rend vrai
-    /// quand le geste est refusé. À reprendre dans une issue à part.
+    /// Copying or duplicating a folder is refused for now (#170, point 4): the
+    /// local copy would keep its references to the original workbooks, which
+    /// are not in the folder. The gesture is explained in the status bar (the
+    /// menu disables the entry with the same sentence). Returns true when the
+    /// gesture is refused. To take up in a separate issue.
     fn refuse_folder_copy(&mut self, ids: &[NodeId]) -> bool {
         let has_folder = self.object_targets(ids).into_iter().any(|id| {
             self.tree()
@@ -7788,8 +7775,8 @@ impl AppState {
         self.refresh();
     }
 
-    /// Supprime sans confirmation (S-F3, #229) : un seul Ctrl+Z rend tout. Le
-    /// message nomme les graphes restants qui en utilisaient les données.
+    /// Deletes without confirmation (S-F3, #229): a single Ctrl+Z gives it all
+    /// back. The message names the remaining graphs that used the data.
     fn delete_objects(&mut self, ids: &[NodeId]) {
         let targets = self.object_targets(ids);
         if targets.is_empty() {
@@ -7848,18 +7835,18 @@ impl AppState {
         self.refresh();
     }
 
-    /// Feuille dont l'onglet est en cours de renommage.
+    /// Sheet whose tab is being renamed.
     pub fn renaming_sheet(&self) -> Option<NodeId> {
         self.renaming_sheet
     }
 
-    /// La dernière feuille d'un classeur ne se supprime pas.
+    /// The last sheet of a workbook cannot be deleted.
     pub fn can_delete_sheet(&self, sheet: NodeId) -> bool {
         self.sheet_book(sheet)
             .is_some_and(|book| self.worksheets_of(book).len() > 1)
     }
 
-    /// Noms des graphes qui tracent au moins une colonne de `sheet`.
+    /// Names of the graphs that plot at least one column of `sheet`.
     pub fn sheet_users(&self, sheet: NodeId) -> Vec<String> {
         let tree = &self.snapshot.tree;
         let Some(node) = tree.node(sheet) else {
@@ -7877,7 +7864,7 @@ impl AppState {
             .collect()
     }
 
-    /// Classeur parent de `sheet`, si c'en est bien une.
+    /// Parent workbook of `sheet`, if it is indeed one.
     fn sheet_book(&self, sheet: NodeId) -> Option<NodeId> {
         let node = self.snapshot.tree.node(sheet)?;
         node.kind().is_worksheet().then(|| node.parent()).flatten()
@@ -7973,24 +7960,23 @@ impl AppState {
         }
     }
 
-    /// Rend `true` si la saisie a été acceptée (y compris un no-op parce que
-    /// le texte n'a pas changé), `false` seulement sur un échec de
-    /// validation (colonne inconnue, texte numérique inanalysable) — c'est
-    /// ce que [`AppState::commit_cell_and_advance`] utilise pour décider si
-    /// Entrée doit ajouter une ligne.
+    /// Returns `true` if the input was accepted (including a no-op because the
+    /// text did not change), `false` only on a validation failure (unknown
+    /// column, unparsable numeric text); this is what
+    /// [`AppState::commit_cell_and_advance`] uses to decide whether Enter
+    /// should add a row.
     fn commit_cell(&mut self, column: NodeId, row: usize, text: String) -> bool {
-        // B6 + A9 (option 1, `guide-de-correction-robustesse.md` §F5) — un
-        // seul correctif pour deux anomalies : si le texte validé est
-        // exactement celui déjà affiché, rien n'a été saisi, et on ne
-        // dispatche pas de commande. Sans cette sortie anticipée, traverser
-        // une cellule sans y taper une frappe écrivait quand même (B6 :
-        // révision, version de colonne et entrée d'historique pour rien), et
-        // une chaîne vide présente (`Text(Some(""))`, affichée « » comme
-        // `Text(None)`) était réécrite en valeur absente à la moindre
-        // traversée (A9) — une cellule de saisie ne distingue jamais les
-        // deux en entrée. Comparer au texte affiché
-        // évite les deux sans introduire de convention nouvelle : le cas où
-        // l'utilisateur retape à l'identique n'a jamais besoin d'écrire.
+        // B6 + A9 (option 1, `guide-de-correction-robustesse.md` §F5): a
+        // single fix for two anomalies: if the validated text is exactly the
+        // one already displayed, nothing was typed, and no command is
+        // dispatched. Without this early exit, passing through a cell without
+        // typing a keystroke still wrote (B6: revision, column version and
+        // history entry for nothing), and an empty string that is present
+        // (`Text(Some(""))`, displayed "" like `Text(None)`) was rewritten as
+        // an absent value at the slightest pass-through (A9): an input cell
+        // never tells the two apart on input. Comparing with the displayed
+        // text avoids both without introducing a new convention: the case
+        // where the user retypes the same thing never needs to write.
         if text == self.cell_text(column, row) {
             return true;
         }
@@ -8004,18 +7990,18 @@ impl AppState {
             self.fail(tr!("error-column-gone"));
             return false;
         };
-        // Une saisie qui ne rentre pas dans le type de la colonne ne la fait
-        // plus échouer : elle **élargit** la colonne en `ColumnType::Mixed`,
-        // par `Command::SetCellsPromoting`, qui groupe la conversion et
-        // l'écriture dans une seule entrée d'historique. Taper « n/a » sous
-        // une colonne de mesures est le geste courant d'un cahier de manip ;
-        // le refuser obligeait à retaper la colonne entière en texte, donc à
-        // rendre tout le reste intraçable.
-        // La règle unique du texte saisi (`ValueBlock::from_texts`, #258) :
-        // la même que le collage. Un texte qui ne rentre pas dans une colonne
-        // numérique rend un bloc texte, et `SetCellsPromoting` élargit alors
-        // la colonne en `Mixed` pour l'accueillir ; une case vide est une
-        // valeur manquante, pas zéro (la façon d'effacer une cellule).
+        // An input that does not fit the column type no longer makes it fail:
+        // it **widens** the column to `ColumnType::Mixed`, through
+        // `Command::SetCellsPromoting`, which groups the conversion and the
+        // write in a single history entry. Typing "n/a" under a column of
+        // measurements is the usual gesture of a lab notebook; refusing it
+        // forced retyping the whole column as text, hence making everything
+        // else untraceable.
+        // The single rule for typed text (`ValueBlock::from_texts`, #258): the
+        // same as paste. A text that does not fit a numeric column returns a
+        // text block, and `SetCellsPromoting` then widens the column to
+        // `Mixed` to hold it; an empty box is a missing value, not zero (the
+        // way to clear a cell).
         let (values, promoting) = ValueBlock::from_texts(kind, &[text.as_str()]);
         self.execute(if promoting {
             Command::SetCellsPromoting {
@@ -8032,21 +8018,21 @@ impl AppState {
                 expected_version: None,
             }
         });
-        // Une colonne mixte dont toutes les valeurs présentes se sont
-        // révélées numériques se convertit seule en numérique — pendant du
-        // sens inverse déjà géré ci-dessus (`SetCellsPromoting` : une
-        // colonne numérique qui reçoit du texte s'élargit en `Mixed`). Il
-        // n'y a plus de type `Text` homogène à promouvoir : c'est désormais
-        // une colonne mixte, saisie cellule après cellule, qui peut se
-        // retrouver entièrement numérique sans qu'aucune de ses cellules
-        // n'ait jamais été explicitement « nombre » — typiquement après
-        // correction d'un « n/a » resté seul non-numérique.
+        // A mixed column whose present values all turned out numeric converts
+        // itself to numeric, the counterpart of the opposite direction already
+        // handled above (`SetCellsPromoting`: a numeric column that receives
+        // text widens to `Mixed`). There is no homogeneous `Text` type left to
+        // promote: it is now a mixed column, filled cell by cell, that can end
+        // up entirely numeric without any of its cells ever having been
+        // explicitly "number", typically after fixing an "n/a" left as the
+        // only non-numeric value.
         if kind == ColumnType::Mixed {
             self.auto_promote_mixed_column_if_all_numeric(column);
         }
-        // Avis discret (#311, S-R6) : « 1,234 » est lu 1.234, pas mille deux
-        // cent trente-quatre. Posé après `execute` (qui réécrit le statut), et
-        // seulement pour une saisie de cellule Numeric ou Mixed qui a abouti.
+        // Discreet notice (#311, S-R6): "1,234" is read as 1.234, not one
+        // thousand two hundred thirty-four. Set after `execute` (which rewrites
+        // the status), and only for a Numeric or Mixed cell input that
+        // succeeded.
         if matches!(kind, ColumnType::Numeric | ColumnType::Mixed)
             && !self.last_action_failed()
             && stokesforge_core::number_format::looks_like_thousands_separator(&text)
@@ -8062,10 +8048,9 @@ impl AppState {
         true
     }
 
-    /// Convertit `column` (supposée `Mixed`) en `Numeric` si toutes ses
-    /// cellules présentes sont des nombres — voir l'appel dans
-    /// [`AppState::commit_cell`] et, pour le collage (#258),
-    /// [`AppState::execute_pasted_cells`].
+    /// Converts `column` (assumed `Mixed`) to `Numeric` if all its present
+    /// cells are numbers; see the call in [`AppState::commit_cell`] and, for
+    /// paste (#258), [`AppState::execute_pasted_cells`].
     fn auto_promote_mixed_column_if_all_numeric(&mut self, column: NodeId) {
         let Some(col) = self.snapshot.tree.node(column).and_then(Node::as_column) else {
             return;
@@ -8078,20 +8063,20 @@ impl AppState {
         }
     }
 
-    /// Valide la saisie d'une cellule puis, si `row` était la dernière ligne
-    /// *affichée* de `sheet` et que la validation a réussi, ajoute une ligne
-    /// à `sheet` (`at == len` est une cible valide pour `InsertRows`) —
-    /// Entrée sur la dernière cellule d'une colonne.
+    /// Validates a cell input then, if `row` was the last row *displayed* of
+    /// `sheet` and the validation succeeded, adds a row to `sheet` (`at ==
+    /// len` is a valid target for `InsertRows`): Enter on the last cell of a
+    /// column.
     ///
-    /// Comparer à `row_count(sheet)` (le max des longueurs de **toutes**
-    /// les colonnes de la feuille, `Tree::row_count_in`) plutôt qu'à la
-    /// longueur du buffer interne de `column` seule est essentiel : une
-    /// colonne texte jamais remplie jusqu'au bas de la feuille a un buffer
-    /// plus court que les autres colonnes (buffers sparses, voir
-    /// `Column::len`/`ColumnValues::get`), donc `row + 1 >= column.len()`
-    /// pouvait devenir vrai au *milieu* du tableau — une ligne fantôme
-    /// était alors insérée en bas de toute la feuille dès qu'on validait
-    /// une cellule d'une ligne jamais écrite plus bas dans cette colonne.
+    /// Comparing with `row_count(sheet)` (the max of the lengths of **all**
+    /// the columns of the sheet, `Tree::row_count_in`) rather than with the
+    /// length of the internal buffer of `column` alone is essential: a text
+    /// column never filled down to the bottom of the sheet has a buffer
+    /// shorter than the other columns (sparse buffers, see
+    /// `Column::len`/`ColumnValues::get`), so `row + 1 >= column.len()` could
+    /// become true in the *middle* of the table: a phantom row was then
+    /// inserted at the bottom of the whole sheet as soon as a cell of a row
+    /// never written lower in that column was validated.
     fn commit_cell_and_advance(&mut self, column: NodeId, row: usize, text: String, sheet: NodeId) {
         let was_last_row = row + 1 >= self.row_count(sheet);
         let accepted = self.commit_cell(column, row, text);
@@ -8100,17 +8085,17 @@ impl AppState {
         }
     }
 
-    /// Vide le contenu des cellules ou des champs d'en-tête sélectionnés de
-    /// `sheet` (jamais les deux à la fois, une sélection ne mélange plus les
-    /// deux — voir la doc de tête de [`crate::selection`]), sans décaler ce
-    /// qui suit (Retour arrière/Ctrl+X) — une seule `Command::SetCells` par
-    /// colonne touchée pour une sélection de données, un
-    /// `Command::SetColumnMeta` (via [`AppState::set_column_meta_field`])
-    /// par champ touché pour une sélection d'en-tête (voir
-    /// [`crate::selection::Selection::cleared_header_fields`]). Tout est
-    /// groupé en une seule entrée d'historique dès que plus d'une opération
-    /// est concernée (`History::begin_macro`/`end_macro`), pour qu'annuler
-    /// restaure tout d'un coup.
+    /// Clears the content of the selected cells or header fields of `sheet`
+    /// (never both at once, a selection no longer mixes the two; see the head
+    /// doc of [`crate::selection`]), without shifting what follows
+    /// (Backspace/Ctrl+X): a single `Command::SetCells` per touched column for
+    /// a data selection, one `Command::SetColumnMeta` (via
+    /// [`AppState::set_column_meta_field`]) per touched field for a header
+    /// selection (see
+    /// [`crate::selection::Selection::cleared_header_fields`]). Everything is
+    /// grouped in a single history entry as soon as more than one operation
+    /// is involved (`History::begin_macro`/`end_macro`), so that undo restores
+    /// everything at once.
     fn clear_selected_cells(&mut self, sheet: NodeId) {
         let Some(selection) = self.selection.get(&sheet) else {
             return;
@@ -8146,7 +8131,7 @@ impl AppState {
         for (column, field) in header_fields {
             let tree = Arc::clone(&self.snapshot.tree);
             self.set_column_meta_field(column, |meta| {
-                // Un texte vide est toujours accepté.
+                // An empty text is always accepted.
                 let _ = field.write_text(&tree, column, meta, String::new());
             });
         }
@@ -8155,18 +8140,17 @@ impl AppState {
         }
     }
 
-    /// Réagit à une pression sur Suppr en deux temps — voir [`AppState::
-    /// delete_repeat`] pour l'état qui porte la mémoire d'une pression
-    /// précédente. La première pression sur une sélection vide les cases
-    /// ([`Action::ClearSelectedCells`], comme Retour arrière) ; la
-    /// deuxième, *seulement* si elle vise exactement la même sélection de
-    /// la même feuille sans qu'aucune autre mutation de la grille ne se
-    /// soit glissée entre les deux (voir [`AppState::
-    /// forget_delete_repeat`]), supprime pour de bon
-    /// ([`Action::DeleteSelectedCells`]) et décale ce qui suit — jamais les
-    /// deux à la première pression, pour ne jamais décaler des données par
-    /// une simple habitude de tableur où Suppr vide sans décaler. `None` si
-    /// `sheet` n'a pas de sélection : rien à faire.
+    /// Reacts to a press on Delete in two steps; see [`AppState::
+    /// delete_repeat`] for the state that carries the memory of a previous
+    /// press. The first press on a selection clears the boxes
+    /// ([`Action::ClearSelectedCells`], like Backspace); the second,
+    /// *only* if it targets exactly the same selection of the same sheet with
+    /// no other grid mutation slipped in between (see [`AppState::
+    /// forget_delete_repeat`]), deletes for good
+    /// ([`Action::DeleteSelectedCells`]) and shifts what follows; never both
+    /// on the first press, so as never to shift data out of a spreadsheet
+    /// habit where Delete clears without shifting. `None` if `sheet` has no
+    /// selection: nothing to do.
     pub fn consume_delete_key(&mut self, sheet: NodeId) -> Option<Action> {
         let selection = self.selection.get(&sheet)?.clone();
         if self.delete_repeat.as_ref() == Some(&(sheet, selection.clone())) {
@@ -8178,30 +8162,28 @@ impl AppState {
         }
     }
 
-    /// Oublie une éventuelle double pression sur Suppr en cours pour
-    /// `sheet` — à appeler avant toute autre mutation de la grille qui
-    /// pourrait se glisser entre les deux temps de [`AppState::
-    /// consume_delete_key`] (Couper, Retour arrière, coller...), pour
-    /// qu'une pression sur Suppr qui suit reparte au premier temps (vider)
-    /// plutôt que de supprimer par surprise sur une sélection qui n'a pas
-    /// changé mais dont le contenu, lui, a bougé entre-temps.
+    /// Forgets a possible double press on Delete in progress for `sheet`; to
+    /// call before any other grid mutation that could slip in between the two
+    /// steps of [`AppState::consume_delete_key`] (Cut, Backspace, paste...), so
+    /// that a following press on Delete starts again at the first step (clear)
+    /// rather than deleting by surprise on a selection that has not changed
+    /// but whose content has moved in the meantime.
     pub fn forget_delete_repeat(&mut self, sheet: NodeId) {
         if matches!(&self.delete_repeat, Some((s, _)) if *s == sheet) {
             self.delete_repeat = None;
         }
     }
 
-    /// Vide le contenu des cellules sélectionnées de `sheet` **et** fait
-    /// remonter les cellules suivantes de chaque colonne touchée,
-    /// indépendamment (touche Suppr) — une seule `Command::DeleteCells`,
-    /// déjà multi-colonnes.
+    /// Clears the content of the selected cells of `sheet` **and** moves up
+    /// the following cells of each touched column, independently (Delete
+    /// key): a single `Command::DeleteCells`, already multi-column.
     ///
-    /// Sur une sélection entièrement dans l'en-tête, il n'y a rien à faire
-    /// remonter (un champ n'est pas répété par ligne, voir
-    /// [`crate::selection::Selection::delete_at_count`]) : Suppr y vide les
-    /// champs, comme Retour arrière. Sans ça la touche resterait sans effet
-    /// dans l'en-tête, alors qu'elle y vidait le champ avant l'unification
-    /// du bloc clavier.
+    /// On a selection entirely in the header, there is nothing to move up (a
+    /// field is not repeated per row, see
+    /// [`crate::selection::Selection::delete_at_count`]): Delete clears the
+    /// fields there, like Backspace. Without that, the key would stay without
+    /// effect in the header, whereas it cleared the field there before the
+    /// unification of the keyboard block.
     fn delete_selected_cells(&mut self, sheet: NodeId) {
         let Some(selection) = self.selection.get(&sheet) else {
             return;
@@ -8219,11 +8201,11 @@ impl AppState {
         self.execute(Command::DeleteCells { columns, at, count });
     }
 
-    /// Voir [`Action::MoveColumns`] : la suite de `Command::Move` que calcule
-    /// [`crate::column_move::plan`], un seul `execute` pour une colonne, une macro
-    /// `MoveColumns` pour plusieurs. Ni `column_users_before` ni
-    /// `open_column_use` : un déplacement ne change pas ce que lit un calcul
-    /// (formules et analyses désignent leurs colonnes par identifiant).
+    /// See [`Action::MoveColumns`]: the sequence of `Command::Move` computed
+    /// by [`crate::column_move::plan`], a single `execute` for one column, a
+    /// `MoveColumns` macro for several. Neither `column_users_before` nor
+    /// `open_column_use`: a move does not change what a calculation reads
+    /// (formulas and analyses designate their columns by identifier).
     fn move_columns(
         &mut self,
         sheet: NodeId,
@@ -8266,13 +8248,13 @@ impl AppState {
         self.end_grouped_macro();
     }
 
-    /// Retire des colonnes entières de leur feuille (menu « Delete » des
-    /// lettres de colonne, Suppr en seconde pression sur une plage de
-    /// colonnes) : un `Command::DeleteColumn` par colonne, groupés pour
-    /// qu'un seul Annuler les rende toutes. Les séries qui les citaient
-    /// restent tracées en gris (invariant 10), rien d'autre à nettoyer.
+    /// Removes whole columns from their sheet ("Delete" menu of the column
+    /// letters, Delete as a second press on a range of columns): one
+    /// `Command::DeleteColumn` per column, grouped so that a single Undo gives
+    /// them all back. The series that cited them stay plotted in grey
+    /// (invariant 10), nothing else to clean.
     fn delete_columns(&mut self, columns: &[NodeId]) {
-        // La liste des lecteurs se calcule sur l'arbre d'avant (#306).
+        // The list of readers is computed on the tree from before (#306).
         let users = self.column_users_before(columns);
         match columns {
             [] => {}
@@ -8291,14 +8273,13 @@ impl AppState {
         self.open_column_use(users);
     }
 
-    /// Colle `text` à partir de l'ancre de la sélection courante de `sheet`
-    /// — Ctrl+V ([`Action::Paste`]). Rejoue [`AppState::grid_clipboard`] si
-    /// `text` est exactement ce qu'[`AppState::copy_selection`]/
-    /// [`AppState::copy_full_columns`] a poussé au presse-papier système en
-    /// dernier ([`AppState::clipboard_text`]) ; sinon `text` est un texte
-    /// externe, reconstruit en [`GridClipboard`] par
-    /// [`external_clipboard_from_text`]. Voir [`AppState::apply_paste`] pour
-    /// la matrice de comportement complète.
+    /// Pastes `text` from the anchor of the current selection of `sheet`:
+    /// Ctrl+V ([`Action::Paste`]). Replays [`AppState::grid_clipboard`] if
+    /// `text` is exactly what [`AppState::copy_selection`]/
+    /// [`AppState::copy_full_columns`] last pushed to the system clipboard
+    /// ([`AppState::clipboard_text`]); otherwise `text` is an external text,
+    /// rebuilt into a [`GridClipboard`] by [`external_clipboard_from_text`].
+    /// See [`AppState::apply_paste`] for the full behavior matrix.
     fn paste(&mut self, sheet: NodeId, text: String) {
         if !self.paste_target_is_unambiguous(sheet) {
             return;
@@ -8324,8 +8305,8 @@ impl AppState {
         self.apply_paste(sheet, anchor, &clipboard, false);
     }
 
-    /// Faux, avec un message d'état, si la sélection de `sheet` est non
-    /// contiguë (#159) : un collage n'a alors pas de cible univoque.
+    /// False, with a status message, if the selection of `sheet` is
+    /// non-contiguous (#159): a paste then has no unambiguous target.
     fn paste_target_is_unambiguous(&mut self, sheet: NodeId) -> bool {
         let contiguous = self
             .selection
@@ -8337,11 +8318,10 @@ impl AppState {
         contiguous
     }
 
-    /// Colle en position absolue depuis [`AppState::grid_clipboard`] —
-    /// Ctrl+Maj+V ([`Action::PasteAbsolute`]), qui n'a jamais de texte à lui
-    /// (voir la doc de l'action). Sans effet si rien n'a encore été copié
-    /// dans cette session : un texte externe n'a pas de rang d'origine à
-    /// rejouer.
+    /// Pastes in absolute position from [`AppState::grid_clipboard`]:
+    /// Ctrl+Shift+V ([`Action::PasteAbsolute`]), which never has a text of its
+    /// own (see the doc of the action). No effect if nothing has been copied
+    /// yet in this session: an external text has no original rank to replay.
     fn paste_absolute(&mut self, sheet: NodeId) {
         if !self.paste_target_is_unambiguous(sheet) {
             return;
@@ -8361,33 +8341,31 @@ impl AppState {
         self.apply_paste(sheet, anchor, &clipboard, true);
     }
 
-    /// Cœur du collage, partagé par [`AppState::paste`] (`absolute: false`)
-    /// et [`AppState::paste_absolute`] (`absolute: true`) — la matrice de
-    /// comportement complète (section copier/coller en tête de ce module) :
+    /// Core of paste, shared by [`AppState::paste`] (`absolute: false`) and
+    /// [`AppState::paste_absolute`] (`absolute: true`); the full behavior
+    /// matrix (copy/paste section at the head of this module):
     ///
-    /// - [`GridClipboard::Text`] s'écrit dans la case ancrée, quelle qu'elle
-    ///   soit (champ d'en-tête ou cellule de donnée) — `absolute` n'a pas de
-    ///   sens pour une case unique, ignoré ;
-    /// - [`GridClipboard::Relative`] se décale sur l'ancre si elle est de la
-    ///   même sorte (champs sur un champ, données sur une cellule) ; rien ne
-    ///   se colle si l'ancre est de l'autre sorte ; en absolu, chaque rangée
-    ///   retombe sur son rang d'origine plutôt que sur l'ancre ;
-    /// - [`GridClipboard::FullColumns`] colle l'en-tête à partir du champ
-    ///   ancré (rien au-dessus) et le corps sans décalage si l'ancre est un
-    ///   champ ; jette l'en-tête et décale le corps sur l'ancre si elle est
-    ///   une cellule ; en absolu, tout retombe sur son rang d'origine quelle
-    ///   que soit l'ancre.
+    /// - [`GridClipboard::Text`] is written into the anchored box, whatever it
+    ///   is (header field or data cell); `absolute` makes no sense for a
+    ///   single box, ignored;
+    /// - [`GridClipboard::Relative`] shifts onto the anchor if it is of the
+    ///   same kind (fields on a field, data on a cell); nothing is pasted if
+    ///   the anchor is of the other kind; in absolute, each row falls back on
+    ///   its original rank rather than on the anchor;
+    /// - [`GridClipboard::FullColumns`] pastes the header from the field
+    ///   anchored field (nothing above) and the body without shifting if the
+    ///   anchor is a field; drops the header and shifts the body onto the
+    ///   anchor if it is a cell; in absolute, everything falls back on its
+    ///   original rank whatever the anchor.
     ///
-    /// Collage de lignes de données (#311) : une case **absente** (ligne plus
-    /// courte) garde la valeur existante, une case présente et vide est une
-    /// valeur manquante ; les colonnes copiées au-delà de la feuille sont
-    /// abandonnées, le statut en donne le nombre.
+    /// Paste of data rows (#311): an **absent** box (shorter row) keeps the
+    /// existing value, a present and empty box is a missing value; columns
+    /// copied beyond the sheet are dropped, the status gives their number.
     ///
-    /// Une colonne formule refuse naturellement l'écriture de données
-    /// (`CoreError::FormulaColumnReadOnly`) : signalée par le statut, sans
-    /// bloquer les autres colonnes déjà collées. Un collage qui touche
-    /// plusieurs colonnes ou plusieurs champs reste groupé dans une seule
-    /// entrée d'historique.
+    /// A formula column naturally refuses the write of data
+    /// (`CoreError::FormulaColumnReadOnly`): reported by the status, without
+    /// blocking the other columns already pasted. A paste that touches several
+    /// columns or several fields stays grouped in a single history entry.
     fn apply_paste(
         &mut self,
         sheet: NodeId,
@@ -8413,9 +8391,9 @@ impl AppState {
         }
     }
 
-    /// [`GridClipboard::Text`] : écrit `text` dans la case ancrée, champ
-    /// d'en-tête ou cellule de donnée selon `anchor` — une seule commande,
-    /// jamais groupée (un seul champ/une seule cellule touché).
+    /// [`GridClipboard::Text`]: writes `text` into the anchored box, header
+    /// field or data cell depending on `anchor`; a single command, never
+    /// grouped (a single field/cell touched).
     fn paste_single_value(&mut self, anchor: GridCursor, text: &str) {
         match anchor {
             GridCursor::Header(column, field) => {
@@ -8440,22 +8418,22 @@ impl AppState {
         }
     }
 
-    /// Écrit un bloc de cellules collées à partir de [`value_block_from_tsv_column`]
-    /// — `Command::SetCellsPromoting` plutôt que `Command::SetCells` quand
-    /// `promoting` demande d'élargir la colonne en `Mixed` (voir la doc de
-    /// [`value_block_from_tsv_column`]), sinon même commande stricte
-    /// qu'avant. Partagé par les trois points de collage en cellules de
-    /// données ([`AppState::paste_single_value`], [`AppState::
+    /// Writes a block of pasted cells from [`value_block_from_tsv_column`]:
+    /// `Command::SetCellsPromoting` rather than `Command::SetCells` when
+    /// `promoting` asks to widen the column to `Mixed` (see the doc of
+    /// [`value_block_from_tsv_column`]), otherwise the same strict command as
+    /// before. Shared by the three paste points into data cells
+    /// ([`AppState::paste_single_value`], [`AppState::
     /// paste_relative`], [`AppState::paste_full_columns`]).
     ///
-    /// `kind` est le type de la colonne **avant** le collage. Si elle était
-    /// `Mixed` et que toutes ses cases présentes sont des nombres après
-    /// l'écriture, elle repasse en `Numeric` (#258), comme après une saisie
-    /// (`Command::SetColumnType`, invariant 1). Un collage reste **une**
-    /// entrée d'historique (invariant 8) : `grouped` dit qu'une macro
-    /// `PasteCells` est déjà ouverte par l'appelant, la repromotion s'y glisse
-    /// avant sa clôture ; sinon, une macro propre n'est ouverte que si une
-    /// repromotion aura lieu (un collage simple reste une entrée simple).
+    /// `kind` is the type of the column **before** the paste. If it was
+    /// `Mixed` and all its present boxes are numbers after the write, it goes
+    /// back to `Numeric` (#258), as after an input
+    /// (`Command::SetColumnType`, invariant 1). A paste stays **one** history
+    /// entry (invariant 8): `grouped` says that a `PasteCells` macro is
+    /// already open by the caller, the re-promotion slips into it before it
+    /// closes; otherwise, a macro of its own is opened only if a re-promotion
+    /// will happen (a simple paste stays a simple entry).
     fn execute_pasted_cells(
         &mut self,
         column: NodeId,
@@ -8492,7 +8470,7 @@ impl AppState {
                 expected_version: None,
             }
         });
-        // Une écriture refusée (colonne formule) ne se suit d'aucune conversion.
+        // A refused write (formula column) is followed by no conversion.
         if repromote && !self.last_action_failed() {
             self.auto_promote_mixed_column_if_all_numeric(column);
         }
@@ -8501,12 +8479,12 @@ impl AppState {
         }
     }
 
-    /// Statut posé quand la copie déborde de la feuille (#311) : `columns`
-    /// colonnes au-delà du bord droit, `fields` rangées d'en-tête au-delà de
-    /// Formule (collage de champs ancré bas). Ce qui déborde est abandonné,
-    /// jamais ajouté. Posé **après** les écritures (chaque commande réécrit le
-    /// statut), et seulement si aucune n'a échoué : une erreur (colonne
-    /// formule) reste affichée. Un seul message si les deux débordent.
+    /// Status set when the copy overflows the sheet (#311): `columns` columns
+    /// beyond the right edge, `fields` header rows beyond Formula (field
+    /// paste anchored low). What overflows is dropped, never added. Set
+    /// **after** the writes (each command rewrites the status), and only if
+    /// none failed: an error (formula column) stays displayed. A single
+    /// message if both overflow.
     fn notice_dropped(&mut self, columns: usize, fields: usize) {
         if self.last_action_failed() {
             return;
@@ -8523,14 +8501,14 @@ impl AppState {
         }
     }
 
-    /// Nombre de colonnes à abandonner : `wanted` voulues, `available` places.
+    /// Number of columns to drop: `wanted` wanted, `available` places.
     fn dropped_columns(wanted: usize, available: usize) -> usize {
         wanted.saturating_sub(available)
     }
 
-    /// [`GridClipboard::Relative`] : voir [`AppState::apply_paste`] pour la
-    /// règle. Rien ne se colle si `anchor` n'est pas de la même sorte que
-    /// `relative` (champs contre cellule de donnée, ou l'inverse).
+    /// [`GridClipboard::Relative`]: see [`AppState::apply_paste`] for the
+    /// rule. Nothing is pasted if `anchor` is not of the same kind as
+    /// `relative` (fields against a data cell, or the reverse).
     fn paste_relative(
         &mut self,
         anchor: GridCursor,
@@ -8581,14 +8559,14 @@ impl AppState {
                 if grouped {
                     self.end_grouped_macro();
                 }
-                // Rangées d'en-tête jetées : l'ancre bas les pousse au-delà de
-                // Formule (`writes` ne garde que celles qui tiennent).
+                // Header rows dropped: the low anchor pushes them beyond
+                // Formula (`writes` keeps only those that fit).
                 self.notice_dropped(
                     Self::dropped_columns(column_count, targets.len()),
                     rows.len() - writes.len(),
                 );
-                // Le refus d'une formule passe en dernier : il l'emporte sur
-                // l'avis de débordement, les autres champs sont collés.
+                // The refusal of a formula goes last: it wins over the
+                // overflow notice, the other fields are pasted.
                 if let Some(refusal) = refusal {
                     self.fail(refusal);
                 }
@@ -8627,16 +8605,15 @@ impl AppState {
                 }
                 self.notice_dropped(Self::dropped_columns(column_count, targets.len()), 0);
             }
-            // Champs copiés + ancre sur une cellule de donnée, ou lignes de
-            // données copiées + ancre sur un champ d'en-tête : sortes
-            // différentes, rien ne se colle (voir la matrice de
-            // comportement en tête de ce module).
+            // Copied fields + anchor on a data cell, or copied data rows +
+            // anchor on a header field: different kinds, nothing is pasted
+            // (see the behavior matrix at the head of this module).
             _ => {}
         }
     }
 
-    /// [`GridClipboard::FullColumns`] : voir [`AppState::apply_paste`] pour
-    /// la règle — dépend de `anchor` (champ ou cellule) et de `absolute`.
+    /// [`GridClipboard::FullColumns`]: see [`AppState::apply_paste`] for the
+    /// rule; depends on `anchor` (field or cell) and on `absolute`.
     fn paste_full_columns(
         &mut self,
         anchor: GridCursor,
@@ -8652,9 +8629,9 @@ impl AppState {
         if targets.is_empty() {
             return;
         }
-        // Champ de départ de l'en-tête à écrire : tous en absolu, à partir
-        // du champ ancré (rien au-dessus) en relatif si l'ancre est un
-        // champ, aucun (en-tête jeté) en relatif si l'ancre est une cellule.
+        // Starting field of the header to write: all of them in absolute, from
+        // the anchored field (nothing above) in relative if the anchor is a
+        // field, none (header dropped) in relative if the anchor is a cell.
         let header_from: Option<usize> = if absolute {
             Some(0)
         } else {
@@ -8663,8 +8640,8 @@ impl AppState {
                 GridCursor::Data(..) => None,
             }
         };
-        // Ligne de départ du corps : jamais décalé, sauf en relatif ancré
-        // sur une cellule de donnée (décalage sur l'ancre).
+        // Starting row of the body: never shifted, except in relative anchored
+        // on a data cell (shift onto the anchor).
         let body_start = match (absolute, anchor) {
             (false, GridCursor::Data(_, row)) => row,
             _ => 0,
@@ -8721,23 +8698,23 @@ impl AppState {
             self.end_grouped_macro();
         }
         self.notice_dropped(Self::dropped_columns(columns.len(), targets.len()), 0);
-        // Le refus d'une formule passe en dernier : les autres champs et les
-        // valeurs sont collés, la barre d'état dit ce qui ne l'est pas.
+        // The refusal of a formula goes last: the other fields and the values
+        // are pasted, the status bar says what is not.
         if let Some(refusal) = refusal {
             self.fail(refusal);
         }
     }
 
-    /// Relit les métadonnées actuelles de `column`, laisse `update` en
-    /// modifier un seul champ, puis les remplace en bloc
-    /// (`Command::SetColumnMeta` — doctrine « remplacement en bloc, jamais
-    /// par sous-champ » du crate `stokesforge-commands`, voir sa doc de tête).
-    /// Écrit `text` dans le champ d'en-tête `field` de `column` ; un texte
-    /// que le champ refuse est signalé sans rien écrire. x' non numérique : la
-    /// barre d'état le dit tout de suite. Formule refusée (lettre inconnue,
-    /// auto-lecture, `#REF`) : la **phrase** du refus est rendue, et c'est
-    /// l'appelant qui la pose, **après** les écritures de tout le collage (les
-    /// autres champs sont collés, la barre d'état garde le refus).
+    /// Re-reads the current metadata of `column`, lets `update` modify a
+    /// single field, then replaces them as a block
+    /// (`Command::SetColumnMeta`: the "block replacement, never by subfield"
+    /// doctrine of the `stokesforge-commands` crate, see its head doc).
+    /// Writes `text` into the header field `field` of `column`; a text that
+    /// the field refuses is reported without writing anything. Non-numeric x':
+    /// the status bar says so right away. Formula refused (unknown letter,
+    /// self-read, `#REF`): the **sentence** of the refusal is returned, and the
+    /// caller sets it, **after** the writes of the whole paste (the other
+    /// fields are pasted, the status bar keeps the refusal).
     fn paste_header_text(
         &mut self,
         column: NodeId,
@@ -8761,9 +8738,9 @@ impl AppState {
                 return None;
             }
             Err(HeaderTextRefused::Formula(error)) => {
-                // Formule collée dont une lettre n'existe pas dans la feuille
-                // d'arrivée, ou qui porte `#REF` : rien n'est écrit dans ce
-                // champ.
+                // Pasted formula with a letter that does not exist in the
+                // destination sheet, or that carries `#REF`: nothing is written
+                // in this field.
                 return Some(errors::formula::error_message(&error));
             }
         }
@@ -8791,14 +8768,14 @@ impl AppState {
         self.set_meta_dropping_formula_data(column, meta, false);
     }
 
-    /// Au moins une des `columns` porte une formule.
+    /// At least one of the `columns` carries a formula.
     pub fn any_formula(&self, columns: &[NodeId]) -> bool {
         columns
             .iter()
             .any(|&column| self.column_meta(column).formula.is_some())
     }
 
-    /// Colonnes dont le champ Formule est sélectionné et porte une formule.
+    /// Columns whose Formula field is selected and carries a formula.
     fn formula_columns_selected(&self, sheet: NodeId) -> Vec<NodeId> {
         let Some(selection) = self.selection.get(&sheet) else {
             return Vec::new();
@@ -8838,13 +8815,12 @@ impl AppState {
         }
     }
 
-    /// **Le** chemin d'écriture des métadonnées d'une colonne (#236) : quand
-    /// elles retirent une formule, les valeurs calculées partent avec elle
-    /// (`DeleteCells` de toute la colonne) sauf `keep_data`, le tout en une
-    /// seule entrée d'historique (`MacroKind::RemoveFormula`) pour que Ctrl+Z
-    /// rende formule et données ensemble. Toute voie d'effacement de la
-    /// formule (en-tête, Suppr, coller, vider le champ, plusieurs colonnes)
-    /// passe ici.
+    /// **The** write path for a column's metadata (#236): when they remove a
+    /// formula, the computed values leave with it (`DeleteCells` of the whole
+    /// column) except `keep_data`, all in a single history entry
+    /// (`MacroKind::RemoveFormula`) so that Ctrl+Z gives back formula and data
+    /// together. Every way of clearing the formula (header, Delete, paste,
+    /// clearing the field, several columns) goes through here.
     fn set_meta_dropping_formula_data(
         &mut self,
         column: NodeId,
@@ -8860,8 +8836,8 @@ impl AppState {
             .map_or(0, Column::len);
         if !removes_formula || keep_data || len == 0 {
             if removes_formula && keep_data {
-                // Une seule commande, mais l'entrée porte tout de même le
-                // libellé « Remove Formula ».
+                // A single command, but the entry still carries the
+                // "Remove Formula" label.
                 if self.handle.begin_macro(MacroKind::RemoveFormula).is_ok() {
                     self.execute(Command::SetColumnMeta { column, meta });
                     self.end_grouped_macro();
@@ -8893,10 +8869,10 @@ impl AppState {
         });
     }
 
-    /// Nouveau classeur de l'utilisateur (menu Fichier) : sa première feuille
-    /// reçoit déjà une colonne X et une colonne Y, en une seule entrée
-    /// d'historique. L'import, lui, crée ses classeurs vides
-    /// (`create_import_book`) : c'est le fichier qui fournit les colonnes.
+    /// New workbook of the user (File menu): its first sheet already gets an
+    /// X column and a Y column, in a single history entry. Import, for its
+    /// part, creates its workbooks empty (`create_import_book`): the file
+    /// provides the columns.
     fn add_workbook(&mut self) {
         let root = self.snapshot.tree.root();
         if !self.begin_creation_macro(MacroKind::AddWorkbook) {
@@ -8925,9 +8901,9 @@ impl AppState {
         self.end_creation_macro();
     }
 
-    /// Nouveau dossier de l'utilisateur (#326) : « FolderN » est le premier nom
-    /// libre parmi les enfants de `parent` (l'unicité est fraternelle). Un
-    /// parent disparu échoue dans la barre d'état, sans entrée d'historique.
+    /// New folder of the user (#326): "FolderN" is the first free name among
+    /// the children of `parent` (uniqueness is among siblings). A vanished
+    /// parent fails in the status bar, with no history entry.
     fn add_folder(&mut self, parent: NodeId) {
         let tree = &self.snapshot.tree;
         let taken = |name: &str| {
@@ -8947,8 +8923,8 @@ impl AppState {
         self.execute(Command::AddFolder { parent, name });
     }
 
-    /// Nouvelle feuille de l'utilisateur : comme [`AppState::add_workbook`],
-    /// elle naît avec une colonne X et une colonne Y.
+    /// New sheet of the user: like [`AppState::add_workbook`], it is born with
+    /// an X column and a Y column.
     fn add_worksheet(&mut self, book: NodeId) {
         if !self.begin_creation_macro(MacroKind::AddWorksheet) {
             return;
@@ -8983,12 +8959,12 @@ impl AppState {
         self.end_grouped_macro();
     }
 
-    /// Clôture **commune** de toute opération groupée (collage, effacement,
-    /// création, propriétés du graphe) : ferme la macro, remonte l'erreur en
-    /// [`StatusMessage`], puis rafraîchit l'instantané. `end_macro` ne
-    /// rafraîchit rien, et `execute` ne l'a fait que **pendant** la macro :
-    /// sans ce dernier `refresh`, `can_undo`/`undo_label` restent ceux d'avant
-    /// la clôture jusqu'à un rafraîchissement fortuit (issue #22).
+    /// **Common** closing of every grouped operation (paste, clearing,
+    /// creation, graph properties): closes the macro, raises the error into a
+    /// [`StatusMessage`], then refreshes the snapshot. `end_macro` refreshes
+    /// nothing, and `execute` did so only **during** the macro: without this
+    /// last `refresh`, `can_undo`/`undo_label` stay those from before the
+    /// closing until an incidental refresh (issue #22).
     fn set_columns_grouped(
         &mut self,
         kind: MacroKind,
@@ -9008,7 +8984,7 @@ impl AppState {
         }
     }
 
-    /// Rôle de plusieurs colonnes, en un seul groupe annulable.
+    /// Role of several columns, in a single undoable group.
     fn set_columns_role_grouped(&mut self, columns: &[NodeId], role: ColumnRole) {
         let grouped = columns.len() > 1;
         if grouped && self.handle.begin_macro(MacroKind::SetColumnsRole).is_err() {
@@ -9023,14 +8999,13 @@ impl AppState {
         }
     }
 
-    /// Ferme un groupe ouvert par `begin_macro` (voir la clôture commune
-    /// ci-dessus). La barre d'état dit alors le libellé **du groupe**, mis en phrase par
-    /// `history_text` comme le fait l'annulation (« Move Columns »), et non
-    /// celui de la dernière étape que `execute` y avait posé (« Move “B” »).
-    /// Un échec (de la clôture ou d'une étape) garde sa place. Le libellé est
-    /// celui de l'entrée d'historique qui vient d'être posée : un groupe vide
-    /// n'en pose pas, et ne remplace alors rien (seule une entrée de groupe
-    /// est reprise).
+    /// Closes a group opened by `begin_macro` (see the common closing above).
+    /// The status bar then says the label **of the group**, put into a
+    /// sentence by `history_text` as undo does ("Move Columns"), and not that
+    /// of the last step that `execute` had set there ("Move “B”"). A failure
+    /// (of the closing or of a step) keeps its place. The label is that of
+    /// the history entry that has just been pushed: an empty group pushes
+    /// none, and then replaces nothing (only a group entry is taken over).
     fn end_grouped_macro(&mut self) {
         let closed = self.handle.end_macro();
         if let Err(err) = &closed {
@@ -9047,7 +9022,7 @@ impl AppState {
         }
     }
 
-    /// Ajoute à `sheet` une colonne X (rôle abscisse) puis une colonne Y.
+    /// Adds an X column (abscissa role) then a Y column to `sheet`.
     fn add_xy_columns(&mut self, sheet: NodeId) {
         self.add_column(sheet);
         self.add_column(sheet);
@@ -9059,10 +9034,10 @@ impl AppState {
         }
     }
 
-    /// Ajoute une colonne en fin de `sheet` puis y sélectionne `row` — voir
-    /// [`Action::AddColumnAndSelect`]. `self.execute` a déjà rafraîchi
-    /// `self.snapshot` en retour : la nouvelle colonne, dernière des
-    /// colonnes visibles, existe donc déjà pour `select_cell`.
+    /// Adds a column at the end of `sheet` then selects `row` in it; see
+    /// [`Action::AddColumnAndSelect`]. `self.execute` has already refreshed
+    /// `self.snapshot` on return: the new column, last of the visible
+    /// columns, therefore already exists for `select_cell`.
     fn add_column_and_select(&mut self, sheet: NodeId, row: usize) {
         self.add_column(sheet);
         if let Some((column, ..)) = self.visible_columns(sheet).into_iter().next_back() {
@@ -9070,9 +9045,9 @@ impl AppState {
         }
     }
 
-    /// Ajoute une colonne en fin de `sheet` puis y sélectionne `field` —
-    /// voir [`Action::AddColumnAndSelectHeaderField`], pendant de
-    /// [`AppState::add_column_and_select`] côté en-tête.
+    /// Adds a column at the end of `sheet` then selects `field` in it; see
+    /// [`Action::AddColumnAndSelectHeaderField`], the header-side counterpart
+    /// of [`AppState::add_column_and_select`].
     fn add_column_and_select_header_field(&mut self, sheet: NodeId, field: HeaderField) {
         self.add_column(sheet);
         if let Some((column, ..)) = self.visible_columns(sheet).into_iter().next_back() {
@@ -9080,7 +9055,7 @@ impl AppState {
         }
     }
 
-    /// Insertion (`insert`) ou suppression de lignes sur `sheet`.
+    /// Insertion (`insert`) or deletion of rows on `sheet`.
     fn rows(&mut self, sheet: NodeId, at: usize, count: usize, insert: bool) {
         let command = if insert {
             Command::InsertRows { sheet, at, count }
@@ -9090,14 +9065,14 @@ impl AppState {
         self.execute(command);
     }
 
-    /// Importe chaque fichier de `paths` dans sa propre nouvelle feuille,
-    /// selon `destination`, avec `recipe` — [`Action::ImportFiles`]. Un fichier illisible
-    /// ou inanalysable devient un [`StatusMessage`] et fait passer au
-    /// suivant, jamais un abandon complet du lot. Tout le lot tient dans une
-    /// seule entrée d'historique : `self.handle.begin_macro`/`end_macro`
-    /// encadrent toute la boucle, même si un seul fichier réussit — voir
+    /// Imports each file of `paths` into its own new sheet, according to
+    /// `destination`, with `recipe`: [`Action::ImportFiles`]. An unreadable
+    /// or unparsable file becomes a [`StatusMessage`] and moves on to the
+    /// next, never a complete abandon of the batch. The whole batch fits in a
+    /// single history entry: `self.handle.begin_macro`/`end_macro` frame the
+    /// whole loop, even if a single file succeeds; see
     /// `History::begin_macro`/`end_macro` (`stokesforge-commands/src/
-    /// history.rs`) pour l'absorption d'une macro qui finirait vide.
+    /// history.rs`) for the absorption of a macro that would end up empty.
     fn import_files(
         &mut self,
         destination: ImportDestination,
@@ -9114,17 +9089,17 @@ impl AppState {
         self.apply_import(destination, items);
     }
 
-    /// Crée les feuilles et les colonnes d'un lot **déjà analysé** (par
-    /// [`AppState::import_files`], ou en fond par [`AppState::start_import`]),
-    /// en une seule entrée d'historique « Importer ».
+    /// Creates the sheets and columns of a batch **already parsed** (by
+    /// [`AppState::import_files`], or in the background by
+    /// [`AppState::start_import`]), in a single history entry "Import".
     ///
-    /// Trois décisions, toutes lues dans la recette du premier fichier lisible :
-    /// la **répartition** des fichiers en feuilles ([`stokesforge_import::FilesLayout`]),
-    /// le **mode** dans le classeur actif ([`stokesforge_import::ImportMode`]), et la
-    /// destination. Le plan (quelles colonnes de quels fichiers, sur quelle
-    /// feuille) est calculé d'abord ([`plan_import`]), puis exécuté.
+    /// Three decisions, all read from the recipe of the first readable file:
+    /// the **layout** of the files into sheets ([`stokesforge_import::FilesLayout`]),
+    /// the **mode** in the active workbook ([`stokesforge_import::ImportMode`]), and the
+    /// destination. The plan (which columns of which files, on which
+    /// sheet) is computed first ([`plan_import`]), then executed.
     fn apply_import(&mut self, destination: ImportDestination, items: Vec<ImportItem>) {
-        // Fichiers distincts (un fichier à plusieurs blocs compte pour un seul).
+        // Distinct files (a file with several blocks counts as one).
         let mut paths: Vec<PathBuf> = Vec::new();
         for item in &items {
             if !paths.contains(&item.path) {
@@ -9135,11 +9110,12 @@ impl AppState {
             self.fail(tr!("error-import-group"));
             return;
         }
-        // Accumulées plutôt que passées à `self.fail` au fil de la boucle :
-        // `self.fail`/`self.notice` remplacent `self.status` sans le combiner à
-        // ce qu'il portait déjà, donc un `self.fail` par fichier en échec se
-        // serait fait écraser par le suivant. Tout finit dans un seul message,
-        // en échec dès qu'au moins un fichier a échoué, pour que ça se voie.
+        // Accumulated rather than passed to `self.fail` along the loop:
+        // `self.fail`/`self.notice` replace `self.status` without combining it
+        // with what it already carried, so one `self.fail` per failing file
+        // would have been overwritten by the next. Everything ends up in a
+        // single message, a failure as soon as at least one file failed, so
+        // that it shows.
         let mut failures: Vec<String> = Vec::new();
         for item in &items {
             if let Err(failure) = &item.table {
@@ -9162,7 +9138,7 @@ impl AppState {
                 _ => None,
             };
             if let Some(sheet) = merge_sheet {
-                // Tous les plans se fondent dans la feuille active.
+                // All the plans merge into the active sheet.
                 let columns: Vec<PlannedColumn> = plans
                     .iter()
                     .flat_map(|plan| plan.columns.iter().copied())
@@ -9211,7 +9187,7 @@ impl AppState {
             failures.push("échec de la clôture de l'entrée d'historique d'import".to_string());
         }
         if imported > 0 {
-            // De quoi « Régler le dernier import… » et les fichiers récents.
+            // Material for "Reopen Last Import…" and the recent files.
             self.recent_to_record.extend(done_paths.iter().cloned());
             if let Some(ImportItem {
                 recipe: first_recipe,
@@ -9225,9 +9201,9 @@ impl AppState {
                 });
             }
         }
-        // `self.execute` rafraîchit l'instantané à chaque commande, mais
-        // toujours **pendant** que la macro est ouverte : sans ce dernier
-        // rafraîchissement, `can_undo` resterait sur l'état d'avant la clôture.
+        // `self.execute` refreshes the snapshot at each command, but always
+        // **while** the macro is open: without this last refresh, `can_undo`
+        // would stay on the state from before the closing.
         self.refresh();
         if failures.is_empty() {
             self.notice(tr!(
@@ -9245,8 +9221,8 @@ impl AppState {
         }
     }
 
-    /// Le classeur qui reçoit `plan` : le classeur actif, ou un classeur neuf
-    /// (un par plan, ou un seul partagé).
+    /// The workbook that receives `plan`: the active workbook, or a new
+    /// workbook (one per plan, or a single shared one).
     fn book_for_plan(
         &mut self,
         destination: ImportDestination,
@@ -9277,15 +9253,15 @@ impl AppState {
         }
     }
 
-    /// Ajoute une feuille à `book` et la nomme `name` (au mieux : si le nom est
-    /// pris, elle garde son nom automatique — ce n'est pas un échec d'import).
+    /// Adds a sheet to `book` and names it `name` (best effort: if the name is
+    /// taken, it keeps its automatic name; this is not an import failure).
     ///
-    /// `Command::AddWorksheet` ne rend que la `Revision`, jamais l'identifiant
-    /// de la feuille créée. `Project::add_worksheet` insère toujours la feuille
-    /// en dernière position des enfants de `book`, et `self.execute` rafraîchit
-    /// déjà l'instantané : le dernier enfant juste après est la nouvelle
-    /// feuille — le seul moyen de la retrouver depuis ce banc, qui n'a qu'un
-    /// `Arc<Tree>` figé.
+    /// `Command::AddWorksheet` returns only the `Revision`, never the
+    /// identifier of the created sheet. `Project::add_worksheet` always
+    /// inserts the sheet in last position among the children of `book`, and
+    /// `self.execute` has already refreshed the snapshot: the last child just
+    /// after is the new sheet, the only way to find it again from this bench,
+    /// which only has a frozen `Arc<Tree>`.
     fn add_named_sheet(
         &mut self,
         book: NodeId,
@@ -9315,8 +9291,8 @@ impl AppState {
         Some(sheet)
     }
 
-    /// Mode « classeur actif » hors nouvelle feuille : remplace le contenu de
-    /// `sheet`, ajoute des colonnes à sa suite, ou prolonge ses colonnes.
+    /// "Active workbook" mode outside a new sheet: replaces the content of
+    /// `sheet`, adds columns after it, or extends its columns.
     fn fill_existing_sheet(
         &mut self,
         sheet: NodeId,
@@ -9385,8 +9361,8 @@ impl AppState {
                                 });
                             }
                         }
-                        // Plus de colonnes dans le fichier que dans la feuille :
-                        // la colonne neuve commence par autant de cases vides.
+                        // More columns in the file than in the sheet: the new
+                        // column starts with as many empty boxes.
                         None => {
                             if let Some(column) =
                                 stokesforge_importer::make_import_column(items, planned, start)
@@ -9405,8 +9381,8 @@ impl AppState {
         }
     }
 
-    /// `AddEmptyWorkbook` évite la feuille « Sheet1 » que `AddWorkbook`
-    /// ajouterait en plus des feuilles importées.
+    /// `AddEmptyWorkbook` avoids the "Sheet1" sheet that `AddWorkbook` would
+    /// add on top of the imported sheets.
     fn create_import_book(&mut self, file_stem: Option<&str>) -> Option<NodeId> {
         let root = self.snapshot.tree.root();
         let previous = self.snapshot.tree.node(root)?.children().last().copied();
@@ -9427,12 +9403,12 @@ impl AppState {
         Some(book)
     }
 
-    /// Crée un graphe à partir des colonnes sélectionnées de `sheet` — voir
-    /// [`Action::PlotColumns`]. Le graphe est ajouté dans le dossier qui
-    /// contient le classeur de `sheet` (le parent du classeur, pas de la
-    /// feuille). Pas de commande envoyée si aucune colonne Y n'est présente
-    /// dans `columns` : cette action de tracé ne crée rien sans Y. Un graphique
-    /// vide se crée explicitement par [`Action::AddGraph`].
+    /// Creates a graph from the selected columns of `sheet`; see
+    /// [`Action::PlotColumns`]. The graph is added in the folder that
+    /// contains the workbook of `sheet` (the parent of the workbook, not of
+    /// the sheet). No command sent if no Y column is present in `columns`:
+    /// this plot action creates nothing without a Y. An empty graph is
+    /// created explicitly by [`Action::AddGraph`].
     fn plot_columns(&mut self, sheet: NodeId, columns: Vec<NodeId>, plot_type: PlotType) {
         let planned = series_from_columns(
             &self.snapshot.tree,
@@ -9454,11 +9430,11 @@ impl AppState {
             self.fail(tr!("error-workbook-no-folder"));
             return;
         };
-        // Des courbes tracées ensemble forment un groupe (#177).
+        // Curves plotted together form a group (#177).
         let mut panel = PanelSpec::default();
         panel.push_series_batch(planned.primary);
-        // Les colonnes Y2, Y3 et Y4 vont chacune sur son calque superposé :
-        // axe X en haut, axe Y à droite, échelles propres (#167, #168).
+        // The Y2, Y3 and Y4 columns each go on their own overlaid layer:
+        // X axis on top, Y axis on the right, own scales (#167, #168).
         let mut panels = vec![panel.clone()];
         for (slot, series) in planned.overlays.into_iter().enumerate() {
             if series.is_empty() {
@@ -9482,18 +9458,18 @@ impl AppState {
         });
     }
 
-    /// Ajoute des séries construites depuis `columns` au calque `panel` du
-    /// `PlotSpec` courant de `graph` — voir [`Action::AddSeriesToGraph`].
-    /// Même règle d'appariement X/Y que [`AppState::plot_columns`], mais la
-    /// feuille d'où viennent les colonnes se déduit de leur propre parent
-    /// (le classeur ouvert n'est pas porté par cette action) : toutes les
-    /// colonnes de `columns` doivent donc appartenir à la même feuille. Sans
-    /// `plot_type`, les séries prennent celui du calque ([`panel_plot_type`]).
-    /// Les nouvelles séries prolongent la palette après celles déjà présentes,
-    /// sans toucher aux séries existantes, en une seule commande annulable.
-    /// Pas de commande envoyée si `columns` est vide, si aucune n'est de rôle
-    /// Y, si `panel` n'existe pas, ou si `graph` n'est pas un graphe de ce
-    /// projet.
+    /// Adds series built from `columns` to the layer `panel` of the current
+    /// `PlotSpec` of `graph`; see [`Action::AddSeriesToGraph`].
+    /// Same X/Y pairing rule as [`AppState::plot_columns`], but the
+    /// sheet the columns come from is deduced from their own parent
+    /// (the open workbook is not carried by this action): all the
+    /// columns of `columns` must therefore belong to the same sheet. Without
+    /// `plot_type`, the series take that of the layer ([`panel_plot_type`]).
+    /// The new series extend the palette after those already present,
+    /// without touching the existing series, in a single undoable command.
+    /// No command sent if `columns` is empty, if none has the Y role, if
+    /// `panel` does not exist, or if `graph` is not a graph of this
+    /// project.
     fn add_series_to_graph(
         &mut self,
         graph: NodeId,
@@ -9517,8 +9493,8 @@ impl AppState {
             return;
         };
         let plot_type = plot_type.unwrap_or_else(|| panel_plot_type(target));
-        // Le calque de chaque rôle Y2, Y3, Y4 : celui de ce numéro qui
-        // recouvre déjà le calque visé, à créer sinon (#167, #168).
+        // The layer of each role Y2, Y3, Y4: the one of that number that
+        // already covers the target layer, to be created otherwise (#167, #168).
         let base = overlay_base(&spec, panel);
         let existing: [Option<usize>; OVERLAY_ROLES] = std::array::from_fn(|slot| {
             role_layer_of(&spec, base, OverlaySpec::FIRST_ROLE_LAYER + slot as u8)
@@ -9570,9 +9546,9 @@ impl AppState {
         self.execute(Command::SetPlotSpec { graph, spec });
     }
 
-    /// Ajoute un calque superposé au calque de base de `panel` — voir
-    /// [`Action::AddLayer`]. Pas de commande si `graph` n'est pas un graphe de
-    /// ce projet ou si `panel` n'existe pas.
+    /// Adds an overlaid layer to the base layer of `panel`; see
+    /// [`Action::AddLayer`]. No command if `graph` is not a graph of this
+    /// project or if `panel` does not exist.
     fn add_layer(&mut self, graph: NodeId, panel: usize, x_top: bool, y_right: bool) {
         let Some(mut spec) = current_plot_spec(&self.snapshot.tree, graph) else {
             self.fail(tr!("error-graph-gone"));
@@ -9587,8 +9563,8 @@ impl AppState {
             self.fail(tr!("error-layers-full"));
             return;
         }
-        // Un calque à deux axes prend le premier numéro de rôle libre : les
-        // colonnes Xn/Yn de ce numéro s'y rangent ensuite (#168).
+        // A two-axis layer takes the first free role number: the Xn/Yn columns
+        // of that number are then stored in it (#168).
         let axes = match free_role_layer(&spec, base) {
             Some(layer) if x_top && y_right => OverlaySpec::role_layer(layer),
             _ => OverlaySpec::new(x_top, y_right),
@@ -9597,17 +9573,17 @@ impl AppState {
         self.execute(Command::SetPlotSpec { graph, spec });
     }
 
-    /// [`Action::AddRowsToGraph`] : une série « ligne » par ligne de `rows`,
-    /// ancrée sur la première colonne x' de `sheet` (la feuille d'une série
-    /// ligne se lit sur sa colonne `y`, voir [`SeriesSpec::row`]).
+    /// [`Action::AddRowsToGraph`]: one "row" series per row of `rows`,
+    /// anchored on the first x' column of `sheet` (the sheet of a row series
+    /// is read from its `y` column, see [`SeriesSpec::row`]).
     ///
-    /// [`RowAxis::Ask`] : un graphe qui a déjà un X (une série à abscisse
-    /// issue d'une colonne X, ou une série ligne) pose la question au lieu
-    /// d'agir ([`AppState::pending_row_drop`]) ; sans X, l'axe principal.
-    /// [`RowAxis::New`] ajoute un calque superposé dont l'axe X est en haut
-    /// (l'axe Y suit celui du calque recouvert) ; [`RowAxis::Present`] ajoute
-    /// les séries au calque visé. Une seule commande, donc un seul pas
-    /// d'annulation.
+    /// [`RowAxis::Ask`]: a graph that already has an X (a series with abscissa
+    /// from an X column, or a row series) asks the question instead of
+    /// acting ([`AppState::pending_row_drop`]); with no X, the main axis.
+    /// [`RowAxis::New`] adds an overlaid layer whose X axis is on top
+    /// (the Y axis follows that of the covered layer); [`RowAxis::Present`] adds
+    /// the series to the target layer. A single command, hence a single undo
+    /// step.
     fn add_rows_to_graph(
         &mut self,
         graph: NodeId,
@@ -9678,8 +9654,8 @@ impl AppState {
         self.execute(Command::SetPlotSpec { graph, spec });
     }
 
-    /// [`Action::PlotRows`] : un graphe neuf, dans le dossier du classeur de
-    /// `sheet`, dont les séries sont les lignes demandées.
+    /// [`Action::PlotRows`]: a new graph, in the folder of the workbook of
+    /// `sheet`, whose series are the requested rows.
     fn plot_rows(&mut self, sheet: NodeId, rows: Vec<usize>, plot_type: PlotType) {
         let Some(&anchor) = x_prime_columns(&self.snapshot.tree, sheet).first() else {
             self.fail(crate::tr!("status-row-no-x-prime"));
@@ -9715,8 +9691,8 @@ impl AppState {
         });
     }
 
-    /// [`Action::ConfirmRowDrop`] : rejoue le dépôt en attente avec l'axe
-    /// choisi, ou l'abandonne.
+    /// [`Action::ConfirmRowDrop`]: replays the pending drop with the chosen
+    /// axis, or abandons it.
     fn confirm_row_drop(&mut self, choice: Option<RowAxis>) {
         let Some(pending) = self.pending_row_drop.take() else {
             return;
@@ -9732,10 +9708,10 @@ impl AppState {
         }
     }
 
-    /// Remplace le texte d'une note, sauf s'il est déjà exactement celui-là —
-    /// le même garde-fou que [`AppState::commit_cell`] (B6/A9 option 1) :
-    /// traverser l'éditeur d'une note sans y taper une frappe ne doit pas
-    /// écrire une entrée d'historique pour rien.
+    /// Replaces the text of a note, unless it is already exactly that: the
+    /// same guard as [`AppState::commit_cell`] (B6/A9 option 1): passing
+    /// through a note editor without typing a keystroke must not write a
+    /// history entry for nothing.
     fn set_note_text(&mut self, note: NodeId, text: String) {
         if self.note_text(note).as_ref() == Some(&text) {
             return;
@@ -9743,20 +9719,19 @@ impl AppState {
         self.execute(Command::SetNoteText { id: note, text });
     }
 
-    /// Refuse d'exécuter un script : ce binaire n'embarque pas le pont Python
-    /// (critère 1 de `tests/shell.rs`). N'envoie aucune commande, la
-    /// révision ne bouge pas.
+    /// Refuses to run a script: this binary does not embed the Python bridge
+    /// (criterion 1 of `tests/shell.rs`). Sends no command, the revision does
+    /// not move.
     #[cfg(not(feature = "python"))]
     fn run_script(&mut self) {
         self.fail(tr!("error-script-unavailable"));
     }
 
-    /// Démarre une exécution de script sur un fil détaché, en réutilisant le
-    /// moteur s'il existe déjà ou en le créant paresseusement sinon — la
-    /// création comme l'exécution se font **hors du fil appelant**, pour que
-    /// même le tout premier script (coût de démarrage de l'interpréteur
-    /// compris) ne fige jamais la fenêtre. Le résultat n'est récupéré que par
-    /// [`AppState::poll_script`].
+    /// Starts a script run on a detached thread, reusing the engine if it
+    /// already exists or creating it lazily otherwise: both the creation and
+    /// the run happen **off the calling thread**, so that even the very first
+    /// script (interpreter startup cost included) never freezes the window.
+    /// The result is only collected by [`AppState::poll_script`].
     #[cfg(feature = "python")]
     fn run_script(&mut self) {
         if self.pending_script.is_some() {
@@ -9768,14 +9743,14 @@ impl AppState {
             return;
         };
         let existing_engine = self.engine.clone();
-        // Identité propre au script : une macro ouverte par l'interface
-        // (propriétés du graphe) ne l'absorbe pas et ne l'annule pas (#21).
+        // Identity of the script's own: a macro opened by the interface
+        // (graph properties) does not absorb it and does not undo it (#21).
         let handle = self.handle.with_new_identity();
         let source = self.script_source.clone();
-        // Le chemin que `pyst.save()` écrira : celui du projet, s'il en a un.
+        // The path that `pyst.save()` will write: the project's, if it has one.
         let project_path = (!self.path.is_empty()).then(|| PathBuf::from(&self.path));
-        // Garde #309 : `pyst.save()` n'écrase pas la source d'une lecture qui a
-        // écarté des données (`save_as` reste permis).
+        // Guard #309: `pyst.save()` does not overwrite the source of a read that
+        // discarded data (`save_as` stays allowed).
         let protected_path = self
             .discarded_source
             .as_ref()
@@ -9798,9 +9773,9 @@ impl AppState {
                     }
                     Err(message) => (None, Err(message)),
                 };
-                // Personne à prévenir si `AppState` a disparu entre-temps
-                // (fenêtre fermée pendant l'exécution) : le canal est alors
-                // simplement lâché.
+                // Nobody to warn if `AppState` has disappeared in the meantime
+                // (window closed during the run): the channel is then simply
+                // dropped.
                 let _ = reply_tx.send(reply);
             });
 
@@ -9816,24 +9791,24 @@ impl AppState {
         }
     }
 
-    /// Applique le résultat d'un script terminé : mémorise sa sortie, pose un
-    /// message de statut — court, en erreur pour une exception (S-M10, #230) ;
-    /// sa trace se lit dans la sortie, jamais dans la barre d'état — puis rafraîchit l'instantané (c'est le piège de
-    /// cette tâche : sans ce geste, la grille resterait figée alors que le
-    /// modèle a changé).
+    /// Applies the result of a finished script: remembers its output, sets a
+    /// status message (short, an error for an exception (S-M10, #230); its
+    /// trace is read in the output, never in the status bar) then refreshes
+    /// the snapshot (this is the trap of this task: without this gesture, the
+    /// grid would stay frozen although the model changed).
     ///
-    /// Le message est posé **avant** `refresh`, comme dans [`AppState::
-    /// execute`] : si le rafraîchissement échoue (acteur injoignable), il
-    /// écrase ce message par l'erreur — plus grave, elle doit
-    /// l'emporter, pas l'inverse.
+    /// The message is set **before** `refresh`, as in [`AppState::
+    /// execute`]: if the refresh fails (actor unreachable), it overwrites
+    /// this message with the error; more serious, it must win, not the
+    /// reverse.
     #[cfg(feature = "python")]
     fn finish_script_run(&mut self, outcome: ScriptOutcome) {
         let interrupted = outcome.interrupted;
         let failed = outcome.error.is_some();
         self.script_output = Some(ScriptOutput::from(outcome));
         if failed && !interrupted {
-            // S-M10 : une exception de script est une erreur, la trace est dans
-            // la console (seule exception écrite à « un seul canal », S-R13).
+            // S-M10: a script exception is an error, the trace is in the
+            // console (the only exception written to "a single channel", S-R13).
             self.fail(tr!("status-script-exception"));
         } else {
             self.notice(if interrupted {
@@ -9845,22 +9820,22 @@ impl AppState {
         self.refresh();
     }
 
-    /// Refuse d'interrompre un script : ce binaire n'embarque pas le pont
-    /// Python.
+    /// Refuses to interrupt a script: this binary does not embed the Python
+    /// bridge.
     #[cfg(not(feature = "python"))]
     fn interrupt_script(&mut self) {
         self.fail(tr!("error-script-unavailable"));
     }
 
-    /// Demande l'arrêt du script en cours. Ne bloque pas : pose un drapeau
-    /// que le fil détaché consulte à son prochain point de contrôle (voir
-    /// `stokesforge_script::ScriptEngine::interrupt`). Sans effet s'il n'y a pas
-    /// de script en cours.
+    /// Requests the stop of the running script. Does not block: sets a flag
+    /// that the detached thread consults at its next checkpoint (see
+    /// `stokesforge_script::ScriptEngine::interrupt`). No effect if there is
+    /// no running script.
     #[cfg(feature = "python")]
     fn interrupt_script(&mut self) {
-        // L'`Arc` est cloné puis le prêt relâché avant `notice` : les deux
-        // champs de `self` ne peuvent pas être empruntés en même temps que
-        // `self.notice` a besoin d'un emprunt exclusif.
+        // The `Arc` is cloned then the borrow released before `notice`: the two
+        // fields of `self` cannot be borrowed at the same time as
+        // `self.notice` needs an exclusive borrow.
         let engine = self.engine.clone();
         match engine {
             Some(engine) if self.pending_script.is_some() => {
@@ -9872,7 +9847,7 @@ impl AppState {
     }
 }
 
-/// Classeurs référencés par un graphique ; utilisable depuis tous les viewports.
+/// Workbooks referenced by a graph; usable from all viewports.
 pub fn graph_data_books(tree: &Tree, graph: NodeId) -> Vec<NodeId> {
     let Some(NodeKind::Graph { spec, .. }) = tree.node(graph).map(Node::kind) else {
         return Vec::new();
@@ -9886,7 +9861,7 @@ pub fn graph_data_books(tree: &Tree, graph: NodeId) -> Vec<NodeId> {
     )
 }
 
-/// Classeurs des colonnes d'une seule courbe ; vide si la courbe n'existe plus.
+/// Workbooks of the columns of a single curve; empty if the curve no longer exists.
 pub fn series_data_books(
     tree: &Tree,
     graph: NodeId,
@@ -9925,12 +9900,12 @@ fn workbooks_of_columns(tree: &Tree, columns: impl IntoIterator<Item = NodeId>) 
 
 #[cfg(test)]
 mod tests {
-    //! Tests unitaires ciblés sur ce qui ne dépend d'aucune session ni
-    //! d'aucun projet : la frontière valeur ↔ texte elle-même (A9 option 2 et
-    //! C4, `guide-de-correction-robustesse.md` §F1/§F8). Le reste du fichier
-    //! (dispatch, historique, sauvegarde…) est couvert en intégration par
-    //! `tests/shell.rs` et par le banc `stokesforge-robustesse` (batterie 15), qui
-    //! ont besoin d'une session réelle.
+    //! Unit tests targeted at what depends on no session nor project: the
+    //! value ↔ text boundary itself (A9 option 2 and C4,
+    //! `guide-de-correction-robustesse.md` §F1/§F8). The rest of the file
+    //! (dispatch, history, save...) is covered in integration by
+    //! `tests/shell.rs` and by the `stokesforge-robustesse` bench (battery 15),
+    //! which need a real session.
 
     use super::{
         external_clipboard_from_text, grid_clipboard_to_text, GridClipboard, HeaderField,
@@ -9938,44 +9913,44 @@ mod tests {
     };
     use stokesforge_core::number_format::format_exact as format_f64_for_display;
 
-    /// A9 (option 2) — la convention d'affichage à elle seule : une valeur
-    /// absente ne doit jamais s'afficher comme la chaîne vide qui représente
-    /// une chaîne vide **présente**, quel que soit l'appelant.
+    /// A9 (option 2): the display convention on its own: an absent value
+    /// must never display as the empty string that represents a **present**
+    /// empty string, whatever the caller.
     #[test]
-    fn a9_option2_le_marqueur_dabsence_nest_pas_la_chaine_vide() {
+    fn a9_option2_the_absence_marker_is_not_the_empty_string() {
         assert_ne!(
             MISSING_TEXT_DISPLAY, "",
-            "sans quoi une valeur absente et une chaîne vide présente \
-             s'affichent identiquement (l'anomalie A9)"
+            "otherwise an absent value and a present empty string \
+             display identically (anomaly A9)"
         );
         assert_eq!(
             MISSING_TEXT_DISPLAY, "\u{00A0}",
-            "convention retenue : un unique espace insécable"
+            "chosen convention: a single non-breaking space"
         );
     }
 
-    /// C4 — la reproduction du banc (`b15_une_mesure_scientifique_tient_dans_une_cellule`)
-    /// fixe la spécification ; ce test fige les mêmes trois valeurs au niveau
-    /// de la fonction de formatage elle-même, sans passer par une session.
+    /// C4: the bench reproduction (`b15_a_scientific_measurement_fits_in_a_cell`)
+    /// fixes the specification; this test pins the same three values at the
+    /// level of the formatting function itself, without going through a session.
     #[test]
-    fn c4_les_trois_mesures_de_la_reproduction_tiennent_en_24_caracteres() {
-        const LISIBLE: usize = 24;
-        for valeur in [1.602_176_634e-19_f64, 6.022_140_76e23, 0.1 + 0.2] {
-            let affiche = format_f64_for_display(valeur);
+    fn c4_the_three_reproduction_measures_fit_in_24_characters() {
+        const READABLE: usize = 24;
+        for value in [1.602_176_634e-19_f64, 6.022_140_76e23, 0.1 + 0.2] {
+            let shown = format_f64_for_display(value);
             assert!(
-                affiche.len() <= LISIBLE,
-                "{valeur} → « {affiche} » ({} caractères)",
-                affiche.len()
+                shown.len() <= READABLE,
+                "{value} → \"{shown}\" ({} characters)",
+                shown.len()
             );
         }
     }
 
-    /// C4 — l'aller-retour reste exact bit à bit : c'est ce que §F8 du guide
-    /// vérifie déjà pour le `Display` par défaut, et qui doit rester vrai
-    /// pour la notation scientifique.
+    /// C4: the round trip stays bit-exact; this is what §F8 of the guide
+    /// already checks for the default `Display`, and which must stay true
+    /// for scientific notation.
     #[test]
-    fn c4_laller_retour_texte_est_exact_bit_a_bit() {
-        for valeur in [
+    fn c4_the_text_round_trip_is_bit_exact() {
+        for value in [
             1.602_176_634e-19_f64,
             6.022_140_76e23,
             0.1 + 0.2,
@@ -9984,44 +9959,43 @@ mod tests {
             f64::MIN_POSITIVE,
             f64::MAX,
         ] {
-            let affiche = format_f64_for_display(valeur);
-            let relu: f64 = affiche.parse().unwrap_or_else(|e| {
-                panic!("« {affiche} » (depuis {valeur:e}) ne se reparse pas : {e}")
-            });
+            let shown = format_f64_for_display(value);
+            let reread: f64 = shown
+                .parse()
+                .unwrap_or_else(|e| panic!("\"{shown}\" (from {value:e}) does not reparse: {e}"));
             assert_eq!(
-                relu.to_bits(),
-                valeur.to_bits(),
-                "{valeur:e} → « {affiche} » → {relu:e} : bits différents"
+                reread.to_bits(),
+                value.to_bits(),
+                "{value:e} → \"{shown}\" → {reread:e}: different bits"
             );
         }
     }
 
-    /// C4 — zéro ne bascule jamais en notation scientifique (`"0e0"` serait
-    /// correct mais illisible pour un cas aussi courant).
+    /// C4: zero never switches to scientific notation (`"0e0"` would be
+    /// correct but unreadable for such a common case).
     #[test]
-    fn c4_zero_reste_decimal() {
+    fn c4_zero_stays_decimal() {
         assert_eq!(format_f64_for_display(0.0), "0");
         assert_eq!(format_f64_for_display(-0.0), "-0");
     }
 
-    /// C4 — une valeur ordinaire (celle que la grille affiche le plus
-    /// souvent) n'est pas touchée par le seuil.
+    /// C4: an ordinary value (the one the grid displays most often) is not
+    /// touched by the threshold.
     #[test]
-    fn c4_une_valeur_ordinaire_reste_decimale() {
+    fn c4_an_ordinary_value_stays_decimal() {
         assert_eq!(format_f64_for_display(42.5), "42.5");
         assert_eq!(format_f64_for_display(0.0), "0");
         assert_eq!(format_f64_for_display(1.0), "1");
     }
 
-    /// [`external_clipboard_from_text`] — règle 1 de la matrice de
-    /// comportement : un texte externe sans tabulation ni retour à la ligne
-    /// devient un [`GridClipboard::Text`], quel que soit son contenu (y
-    /// compris vide).
+    /// [`external_clipboard_from_text`]: rule 1 of the behavior matrix: an
+    /// external text with no tab or line break becomes a
+    /// [`GridClipboard::Text`], whatever its content (including empty).
     #[test]
-    fn external_clipboard_from_text_texte_simple_devient_text() {
+    fn external_clipboard_from_text_plain_text_becomes_text() {
         assert_eq!(
-            external_clipboard_from_text("Capteur 1"),
-            GridClipboard::Text("Capteur 1".to_string())
+            external_clipboard_from_text("Sensor 1"),
+            GridClipboard::Text("Sensor 1".to_string())
         );
         assert_eq!(
             external_clipboard_from_text(""),
@@ -10029,11 +10003,11 @@ mod tests {
         );
     }
 
-    /// Un texte externe tabulé (même sans retour à la ligne) ou multi-lignes
-    /// devient un rectangle relatif de données, parti de la ligne 0 — jamais
-    /// de champ d'en-tête depuis un texte externe.
+    /// A tabbed external text (even with no line break) or a multi-line one
+    /// becomes a relative rectangle of data, starting from row 0; never a
+    /// header field from an external text.
     #[test]
-    fn external_clipboard_from_text_texte_tabule_ou_multiligne_devient_des_donnees() {
+    fn external_clipboard_from_text_tabbed_or_multiline_text_becomes_data() {
         assert_eq!(
             external_clipboard_from_text("0\t10\n0.5\t\n"),
             GridClipboard::Relative(RelativeCopy::DataRows {
@@ -10053,11 +10027,11 @@ mod tests {
         );
     }
 
-    /// #259 : un tableur externe termine ses lignes par `\r\n` et met entre
-    /// guillemets une case qui porte un retour à la ligne — cette case reste
-    /// une case, et une case seule (même multiligne) reste un texte.
+    /// #259: an external spreadsheet ends its lines with `\r\n` and quotes a
+    /// box that carries a line break; this box stays a box, and a lone box
+    /// (even multiline) stays a text.
     #[test]
-    fn external_clipboard_from_text_lit_le_format_des_tableurs() {
+    fn external_clipboard_from_text_reads_the_spreadsheet_format() {
         assert_eq!(
             external_clipboard_from_text("a\t\"b\nc\"\r\nd\te\r\n"),
             GridClipboard::Relative(RelativeCopy::DataRows {
@@ -10074,10 +10048,10 @@ mod tests {
         );
     }
 
-    /// #259 : le texte poussé au système met entre guillemets les cases qui
-    /// portent tabulation, retour à la ligne ou guillemet.
+    /// #259: the text pushed to the system quotes the boxes that carry a
+    /// tab, line break or quote.
     #[test]
-    fn grid_clipboard_to_text_met_les_cases_speciales_entre_guillemets() {
+    fn grid_clipboard_to_text_quotes_the_special_boxes() {
         let clipboard = GridClipboard::Relative(RelativeCopy::DataRows {
             start: 0,
             rows: vec![vec!["a\nb".to_string(), "c".to_string()]],
@@ -10093,18 +10067,18 @@ mod tests {
         );
     }
 
-    /// [`grid_clipboard_to_text`] — le texte poussé au presse-papier système
-    /// ne porte plus jamais de caractère de contrôle (contrairement à
-    /// l'ancien `HEADER_LINE_MARKER`) : une copie de champs d'en-tête se lit
-    /// comme un TSV ordinaire.
+    /// [`grid_clipboard_to_text`]: the text pushed to the system clipboard
+    /// never carries a control character any more (unlike the former
+    /// `HEADER_LINE_MARKER`): a copy of header fields reads like an ordinary
+    /// TSV.
     #[test]
-    fn grid_clipboard_to_text_ne_contient_aucun_caractere_de_controle() {
+    fn grid_clipboard_to_text_contains_no_control_character() {
         let clipboard = GridClipboard::Relative(RelativeCopy::HeaderFields {
             start: HeaderField::Unit,
-            rows: vec![vec!["nm".to_string()], vec!["un commentaire".to_string()]],
+            rows: vec![vec!["nm".to_string()], vec!["a comment".to_string()]],
         });
         let text = grid_clipboard_to_text(&clipboard);
-        assert_eq!(text, "nm\nun commentaire\n");
+        assert_eq!(text, "nm\na comment\n");
         assert!(text.chars().all(|c| !c.is_control() || c == '\n'));
     }
 }

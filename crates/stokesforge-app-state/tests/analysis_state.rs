@@ -1,6 +1,6 @@
-//! Les gestes d'analyse de `AppState` (#181), pilotés sans fenêtre : ouvrir la
-//! fenêtre sur la sélection, valider (une entrée d'historique), modifier,
-//! recalculer, détacher, supprimer avec confirmation.
+//! The analysis gestures of `AppState` (#181), driven without a window: open the
+//! window on the selection, validate (one history entry), edit,
+//! recalculate, detach, delete with confirmation.
 
 use stokesforge_analysis::model::Model;
 use stokesforge_analysis::ops::OperationKind;
@@ -18,12 +18,12 @@ struct Setup {
     y: NodeId,
 }
 
-/// Une feuille `A` (X), `B` (Y) : `y = 2x + 1` sur 11 points.
+/// A sheet `A` (X), `B` (Y): `y = 2x + 1` over 11 points.
 fn setup(dir: &std::path::Path) -> Setup {
     setup_points(dir, 11)
 }
 
-/// Comme [`setup`], avec `n` points (la décomposition en pics en veut 16).
+/// Like [`setup`], with `n` points (peak decomposition wants 16).
 fn setup_points(dir: &std::path::Path, n: u32) -> Setup {
     i18n::set_language(Language::English);
     let mut project = Project::new("P").unwrap();
@@ -106,7 +106,7 @@ fn opening_pairs_each_y_with_its_x_and_validating_is_one_undoable_step() {
     assert!(s.state.analysis_form().is_none(), "the window closes");
     assert!(!s.state.status().unwrap().is_error());
     assert_eq!(s.state.tree().calculations().len(), 1);
-    // x, y, résidus, ajustement.
+    // x, y, residuals, fit.
     assert_eq!(columns(&s), 4);
 
     s.state.dispatch(Action::Undo);
@@ -120,12 +120,12 @@ fn opening_pairs_each_y_with_its_x_and_validating_is_one_undoable_step() {
 fn a_failing_calculation_keeps_the_window_open() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
-    // Une correction sans colonne de référence ne se valide pas.
+    // A correction without a reference column cannot be validated.
     open(&mut s, Preset::Correct);
     s.state.dispatch(Action::ApplyAnalysis);
     assert!(s.state.analysis_form().is_some());
-    // S-M7 (#228) : l'erreur va dans le pied de la fenêtre, jamais dans la barre
-    // d'état.
+    // S-M7 (#228): the error goes in the window footer, never in the status
+    // bar.
     assert!(s.state.dialog_error().is_some());
     assert!(!s.state.status().is_some_and(|status| status.is_error()));
     assert!(s.state.tree().calculations().is_empty());
@@ -133,7 +133,7 @@ fn a_failing_calculation_keeps_the_window_open() {
     assert!(s.state.analysis_form().is_none());
     assert!(
         s.state.dialog_error().is_none(),
-        "l'erreur ne survit pas à sa fenêtre"
+        "the error does not outlive its window"
     );
 }
 
@@ -285,11 +285,11 @@ fn dragging_a_handle_is_one_undoable_step_that_changes_the_data() {
     assert!(!s.state.status().unwrap().is_error());
     assert_eq!(range(&s), vec![(2.0, 6.0)]);
 
-    // Un seul pas : annuler ramène l'ancienne plage.
+    // A single step: undoing brings back the old range.
     s.state.dispatch(Action::Undo);
     assert_eq!(range(&s), vec![(2.0, 4.0)]);
 
-    // Une poignée qui n'a pas bougé n'écrit rien dans l'historique.
+    // A handle that did not move writes nothing to the history.
     s.state.dispatch(Action::MoveCalculationHandle {
         calculation: id,
         slot: HandleSlot::Edge(RangeSet::Integrate, 0, Edge::Hi),
@@ -297,7 +297,7 @@ fn dragging_a_handle_is_one_undoable_step_that_changes_the_data() {
         y: 0.0,
     });
     s.state.dispatch(Action::Redo);
-    assert_eq!(range(&s), vec![(2.0, 6.0)], "le Redo est resté disponible");
+    assert_eq!(range(&s), vec![(2.0, 6.0)], "Redo stayed available");
 }
 
 fn graphs_count(s: &Setup) -> usize {
@@ -320,7 +320,7 @@ fn plotted_columns(s: &Setup) -> Vec<NodeId> {
 fn add_to_graph_plots_the_new_columns_in_the_same_undo_step() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
-    // Sans graphique qui montre la courbe, aucun candidat.
+    // Without a graph showing the curve, no candidate.
     assert!(s.state.graphs_plotting(&[s.y]).is_empty());
     s.state.dispatch(Action::PlotColumns {
         sheet: s.sheet,
@@ -346,12 +346,12 @@ fn add_to_graph_plots_the_new_columns_in_the_same_undo_step() {
         s.state.status()
     );
     let plotted = plotted_columns(&s);
-    // La source et l'ajustement ; les résidus ne sont pas tracés.
+    // The source and the fit; the residuals are not plotted.
     assert_eq!(plotted.len(), 2, "{plotted:?}");
     assert_eq!(plotted[0], s.y);
     assert_eq!(columns(&s), 4);
 
-    // Un seul Ctrl+Z défait le calcul, ses colonnes et leur tracé.
+    // A single Ctrl+Z undoes the calculation, its columns and their plot.
     s.state.dispatch(Action::Undo);
     assert!(s.state.tree().calculations().is_empty());
     assert_eq!(columns(&s), 2);
@@ -371,7 +371,7 @@ fn without_the_box_nothing_is_plotted() {
     });
     open(&mut s, Preset::Fit(Model::Linear));
     s.state.dispatch(Action::ApplyAnalysis);
-    assert_eq!(plotted_columns(&s), vec![s.y], "témoin : case décochée");
+    assert_eq!(plotted_columns(&s), vec![s.y], "witness: unchecked box");
 }
 
 #[test]
@@ -395,26 +395,26 @@ fn the_output_choice_is_remembered_across_sessions() {
     open(&mut s, Preset::Fit(Model::Linear));
     assert!(
         !s.state.analysis_form().unwrap().keep_results,
-        "Show par défaut"
+        "Show by default"
     );
     s.state.analysis_form_mut().unwrap().keep_results = true;
     s.state.dispatch(Action::ApplyAnalysis);
-    // Une session neuve retrouve le choix.
+    // A fresh session finds the choice again.
     let mut s = make(true);
     open(&mut s, Preset::Fit(Model::Linear));
     assert!(s.state.analysis_form().unwrap().keep_results);
 }
 
 #[test]
-fn analyse_depuis_graphe_garde_x_sigma_styles_calque_groupe_et_annulation() {
+fn analysis_from_a_graph_keeps_x_sigma_styles_layer_group_and_undo() {
     use stokesforge_plot::{LineStyle, PanelSpec, PlotSpec, SeriesSpec};
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
-    // Le X de la série est volontairement différent du X apparié de B.
+    // The series X is deliberately different from the paired X of B.
     s.state.dispatch(Action::AddColumn { sheet: s.sheet });
     let explicit_x = *s.state.tree().children(s.sheet).unwrap().last().unwrap();
-    // Une abscisse implicite aurait aussi le mauvais résultat : les valeurs
-    // choisies exercent réellement la lecture de cette autre colonne.
+    // An implicit abscissa would also give the wrong result: the chosen values
+    // really exercise the reading of this other column.
     s._session
         .handle()
         .execute(stokesforge_commands::Command::SetCells {
@@ -438,7 +438,7 @@ fn analyse_depuis_graphe_garde_x_sigma_styles_calque_groupe_et_annulation() {
     panel.bottom.range_min = Some(12.0);
     panel.bottom.range_max = Some(18.0);
     let mut spec = PlotSpec::default().with_panels(vec![PanelSpec::default(), panel]);
-    // Le graphe d'essai se crée par la commande habituelle.
+    // The test graph is created by the usual command.
     s._session
         .handle()
         .execute(stokesforge_commands::Command::AddGraph {
@@ -496,7 +496,7 @@ fn analyse_depuis_graphe_garde_x_sigma_styles_calque_groupe_et_annulation() {
 }
 
 #[test]
-fn remplacement_conserve_la_colonne_et_les_traces_successives() {
+fn replacement_keeps_the_column_and_the_successive_plots() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let before = s.state.tree().clone();
@@ -530,7 +530,7 @@ fn remplacement_conserve_la_colonne_et_les_traces_successives() {
 }
 
 #[test]
-fn remplacement_partage_attend_confirmation_et_annuler_garde_le_formulaire() {
+fn shared_replacement_waits_for_confirmation_and_cancel_keeps_the_form() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     for _ in 0..2 {
@@ -559,10 +559,10 @@ fn remplacement_partage_attend_confirmation_et_annuler_garde_le_formulaire() {
     assert_eq!(columns(&s), 2);
 }
 
-// ── Analyses récentes (#249) ────────────────────────────────────────────
+// ── Recent analyses (#249) ──────────────────────────────────────────────
 
-/// Un état dont les préférences vivent dans un fichier temporaire : jamais la
-/// configuration réelle de la machine.
+/// A state whose preferences live in a temporary file: never the real
+/// configuration of the machine.
 fn with_preferences(s: &mut Setup, dir: &std::path::Path) -> std::path::PathBuf {
     let file = dir.join("preferences.json");
     let preferences =
@@ -595,7 +595,7 @@ fn launch_integrate(s: &mut Setup, cumulative: bool) {
 }
 
 #[test]
-fn les_analyses_lancees_sont_retenues_sans_doublon_et_survivent_a_la_session() {
+fn launched_analyses_are_remembered_without_duplicates_and_survive_the_session() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let file = with_preferences(&mut s, dir.path());
@@ -611,30 +611,30 @@ fn les_analyses_lancees_sont_retenues_sans_doublon_et_survivent_a_la_session() {
         "Polynomial Fit (degree 3)"
     );
 
-    // La même analyse n'occupe qu'une place, remontée en tête.
+    // The same analysis takes only one place, moved to the top.
     launch_integrate(&mut s, false);
     assert_eq!(s.state.analysis_recent().len(), 3);
     assert_eq!(s.state.analysis_recent()[0].label(), "Integrate");
 
-    // Une quatrième fait partir la plus ancienne.
+    // A fourth pushes out the oldest.
     open(&mut s, Preset::Fit(Model::Gaussian));
     s.state.dispatch(Action::ApplyAnalysis);
     assert_eq!(s.state.analysis_recent().len(), 3);
 
-    // Un calcul qui échoue ou qu'on annule ne compte pas.
+    // A calculation that fails or is canceled does not count.
     let before = s.state.analysis_recent().to_vec();
     open(&mut s, Preset::Correct);
     s.state.dispatch(Action::ApplyAnalysis);
     s.state.dispatch(Action::CloseAnalysis);
     assert_eq!(s.state.analysis_recent(), before.as_slice());
 
-    // Les entrées vivent dans les préférences, pas dans le projet.
+    // The entries live in the preferences, not in the project.
     let preferences = stokesforge_app_state::preferences::Preferences::load_from(Some(file));
     assert_eq!(preferences.analysis_recent(), before.as_slice());
 }
 
 #[test]
-fn modifier_un_calcul_ne_change_pas_les_analyses_recentes() {
+fn editing_a_calculation_does_not_change_the_recent_analyses() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     with_preferences(&mut s, dir.path());
@@ -653,7 +653,7 @@ fn modifier_un_calcul_ne_change_pas_les_analyses_recentes() {
 }
 
 #[test]
-fn un_clic_rouvre_la_fenetre_avec_les_reglages_sans_les_plages() {
+fn a_click_reopens_the_window_with_the_settings_without_the_ranges() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     with_preferences(&mut s, dir.path());
@@ -670,20 +670,23 @@ fn un_clic_rouvre_la_fenetre_avec_les_reglages_sans_les_plages() {
         run: false,
         target,
     });
-    let form = s.state.analysis_form().expect("la fenêtre s'ouvre");
+    let form = s.state.analysis_form().expect("the window opens");
     assert_eq!(form.kind, OperationKind::Integrate);
-    assert!(form.setup.integrate.cumulative, "le réglage est repris");
-    assert!(form.setup.integrate.ranges.is_empty(), "pas la plage");
-    assert_eq!(form.series.len(), 1, "la sélection courante");
+    assert!(
+        form.setup.integrate.cumulative,
+        "the setting is carried over"
+    );
+    assert!(form.setup.integrate.ranges.is_empty(), "not the range");
+    assert_eq!(form.series.len(), 1, "the current selection");
     assert_eq!(
         s.state.tree().calculations().len(),
         calculations,
-        "rien n'est lancé"
+        "nothing is launched"
     );
 }
 
 #[test]
-fn ctrl_clic_lance_sur_la_selection_courante_et_se_defait_en_un_pas() {
+fn ctrl_click_launches_on_the_current_selection_and_undoes_in_one_step() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     with_preferences(&mut s, dir.path());
@@ -695,19 +698,19 @@ fn ctrl_clic_lance_sur_la_selection_courante_et_se_defait_en_un_pas() {
         run: true,
         target,
     });
-    assert!(s.state.analysis_form().is_none(), "lancée tout de suite");
+    assert!(s.state.analysis_form().is_none(), "launched right away");
     assert_eq!(s.state.tree().calculations().len(), 2);
     s.state.dispatch(Action::Undo);
     assert_eq!(s.state.tree().calculations().len(), 1);
 }
 
 #[test]
-fn ctrl_clic_ouvre_la_fenetre_quand_il_manque_une_colonne_de_reference() {
+fn ctrl_click_opens_the_window_when_a_reference_column_is_missing() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     with_preferences(&mut s, dir.path());
     open(&mut s, Preset::Correct);
-    // La référence n'est pas un réglage retenu : on la pose pour lancer.
+    // The reference is not a retained setting: it is set in order to launch.
     s.state.analysis_form_mut().unwrap().aux = Some(stokesforge_core::AuxRef { x: None, y: s.x });
     s.state.dispatch(Action::ApplyAnalysis);
     assert!(s.state.analysis_form().is_none());
@@ -721,13 +724,13 @@ fn ctrl_clic_ouvre_la_fenetre_quand_il_manque_une_colonne_de_reference() {
     let form = s
         .state
         .analysis_form()
-        .expect("la fenêtre attend sa colonne");
+        .expect("the window waits for its column");
     assert!(form.aux.is_none());
     assert_eq!(s.state.tree().calculations().len(), calculations);
 }
 
 #[test]
-fn ctrl_clic_remplace_directement_les_donnees_et_le_dit() {
+fn ctrl_click_replaces_the_data_directly_and_says_so() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     with_preferences(&mut s, dir.path());
@@ -738,7 +741,7 @@ fn ctrl_clic_remplace_directement_les_donnees_et_le_dit() {
     s.state.dispatch(Action::ApplyAnalysis);
     assert!(
         s.state.analysis_recent()[0].replace_original,
-        "mémorisé avec les réglages"
+        "remembered with the settings"
     );
     assert_eq!(s.state.tree().correction_traces().len(), 1);
 
@@ -752,7 +755,7 @@ fn ctrl_clic_remplace_directement_les_donnees_et_le_dit() {
     assert_eq!(
         s.state.tree().correction_traces().len(),
         2,
-        "remplacé une seconde fois"
+        "replaced a second time"
     );
     let status = s.state.status().unwrap();
     assert!(!status.is_error());
@@ -764,7 +767,7 @@ fn ctrl_clic_remplace_directement_les_donnees_et_le_dit() {
         "Ctrl+Z le rattrape"
     );
 
-    // Témoin : un clic simple n'applique rien.
+    // Witness: a plain click applies nothing.
     let target = self::target(&s);
     s.state.dispatch(Action::OpenRecentAnalysis {
         index: 0,
@@ -775,10 +778,10 @@ fn ctrl_clic_remplace_directement_les_donnees_et_le_dit() {
     assert_eq!(s.state.tree().correction_traces().len(), 1);
 }
 
-// ── Catégories, référence figée, restauration (#248) ────────────────────
+// ── Categories, frozen reference, restoration (#248) ────────────────────
 
 #[test]
-fn restaurer_les_donnees_originales_ecrase_les_saisies_et_s_annule() {
+fn restoring_the_original_data_overwrites_the_input_and_undoes() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let original: Vec<f64> = s
@@ -808,7 +811,7 @@ fn restaurer_les_donnees_originales_ecrase_les_saisies_et_s_annule() {
             .unwrap()
             .to_vec()
     };
-    assert_ne!(values(&s), original, "témoin : remplacé");
+    assert_ne!(values(&s), original, "witness: replaced");
     s.state.dispatch(Action::CommitCell {
         column: s.y,
         row: 0,
@@ -816,7 +819,7 @@ fn restaurer_les_donnees_originales_ecrase_les_saisies_et_s_annule() {
     });
 
     s.state.dispatch(Action::RestoreOriginalData(trace));
-    assert_eq!(values(&s), original, "la saisie est écrasée");
+    assert_eq!(values(&s), original, "the input is overwritten");
     assert!(s.state.tree().correction_traces().is_empty());
     assert!(!s.state.status().is_some_and(|m| m.is_error()));
 
@@ -824,13 +827,13 @@ fn restaurer_les_donnees_originales_ecrase_les_saisies_et_s_annule() {
     assert_eq!(
         values(&s)[0],
         999.0,
-        "Ctrl+Z rend l'état d'avant la restauration"
+        "Ctrl+Z gives back the state before the restoration"
     );
     assert_eq!(s.state.tree().correction_traces().len(), 1);
 }
 
 #[test]
-fn une_correction_garde_sa_reference_meme_si_la_colonne_d_origine_disparait() {
+fn a_correction_keeps_its_reference_even_if_the_original_column_disappears() {
     i18n::set_language(Language::English);
     let dir = tempfile::tempdir().unwrap();
     let mut project = Project::new("P").unwrap();
@@ -867,7 +870,7 @@ fn une_correction_garde_sa_reference_meme_si_la_colonne_d_origine_disparait() {
     state.dispatch(Action::ApplyAnalysis);
     let id = *state.tree().calculations().keys().next().unwrap();
     let frozen = state.tree().calculation(id).unwrap().aux.clone().unwrap();
-    assert_ne!(frozen.y, reference, "le calcul lit une copie figée");
+    assert_ne!(frozen.y, reference, "the calculation reads a frozen copy");
     assert!(state.tree().is_analysis_copy(frozen.y));
     let corrected = |state: &AppState| {
         let out = state.tree().calculation(id).unwrap().outputs[0]
@@ -885,7 +888,7 @@ fn une_correction_garde_sa_reference_meme_si_la_colonne_d_origine_disparait() {
     };
     let expected = corrected(&state);
 
-    // La colonne d'origine est supprimée, puis le calcul recalculé de force.
+    // The original column is deleted, then the calculation is recalculated by force.
     session
         .handle()
         .execute(stokesforge_commands::Command::RemoveNode { id: reference })
@@ -893,22 +896,22 @@ fn une_correction_garde_sa_reference_meme_si_la_colonne_d_origine_disparait() {
     state.dispatch(Action::RecalculateCalculations(vec![id]));
     assert!(state.tree().node(reference).is_none());
     let calc = state.tree().calculation(id).unwrap();
-    assert!(calc.stale.is_none(), "rien n'est cassé : {:?}", calc.stale);
+    assert!(calc.stale.is_none(), "nothing is broken: {:?}", calc.stale);
     let bits = |values: Vec<f64>| values.into_iter().map(f64::to_bits).collect::<Vec<_>>();
     assert_eq!(bits(corrected(&state)), bits(expected));
 
-    // Le classeur caché n'est ni un classeur de l'application ni une ligne du
+    // The hidden workbook is neither an application workbook nor a row of the
     // Project Manager.
     assert_eq!(state.books().len(), 1);
     assert_eq!(state.project_tree().len(), 1);
     session.shutdown().unwrap();
 }
 
-// ---- Avertissement de R² faible (#288) --------------------------------
+// ---- Low R² warning (#288) --------------------------------------------
 
 use stokesforge_app_state::state::AlertKind;
 
-/// Brouille la colonne Y : un ajustement linéaire y a un R² proche de 0.
+/// Scrambles the Y column: a linear fit on it has an R² close to 0.
 fn scramble(s: &mut Setup) {
     for (row, text) in [
         "0", "100", "0", "100", "0", "100", "0", "100", "0", "100", "0",
@@ -924,15 +927,15 @@ fn scramble(s: &mut Setup) {
     }
 }
 
-/// Lance un ajustement linéaire avec les réglages donnés.
+/// Runs a linear fit with the given settings.
 fn fit(s: &mut Setup, keep: bool, dialog: bool) {
     open(s, Preset::Fit(Model::Linear));
     let form = s.state.analysis_form_mut().unwrap();
     form.keep_results = keep;
     form.low_r2_dialog = dialog;
     s.state.dispatch(Action::ApplyAnalysis);
-    // Un R² faible n'est pas un échec : la fenêtre se ferme (sauf si une autre
-    // alerte attendait déjà, ce que `last_action_failed` compte comme échec).
+    // A low R² is not a failure: the window closes (unless another alert was
+    // already waiting, which `last_action_failed` counts as a failure).
     if !matches!(s.state.alert(), Some(a) if a.kind == AlertKind::SaveFailed) {
         assert!(s.state.analysis_form().is_none(), "the fit was applied");
     }
@@ -1003,17 +1006,17 @@ fn every_recalculation_with_a_new_low_r2_reopens_the_dialog() {
     let mut s = setup(dir.path());
     fit(&mut s, true, true);
     assert!(s.state.alert().is_none());
-    // Recalcul automatique après une édition des données.
+    // Automatic recalculation after a data edit.
     scramble(&mut s);
     assert_eq!(
         s.state.alert().map(|a| a.kind),
         Some(AlertKind::LowRSquared)
     );
     s.state.dispatch(Action::DismissAlert);
-    // Rien n'a changé : pas de nouvelle boîte à chaque image.
+    // Nothing changed: no new dialog on every frame.
     s.state.refresh();
     assert!(s.state.alert().is_none());
-    // Un résultat neuf, toujours très faible : la boîte revient.
+    // A fresh result, still very low: the dialog comes back.
     s.state.dispatch(Action::CommitCell {
         column: s.y,
         row: 0,
@@ -1030,7 +1033,7 @@ fn a_low_r2_never_replaces_an_alert_already_waiting() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     scramble(&mut s);
-    s.state.set_path(dir.path().display().to_string()); // un dossier : l'enregistrement échoue
+    s.state.set_path(dir.path().display().to_string()); // a folder: saving fails
     s.state.dispatch(Action::Save);
     assert_eq!(s.state.alert().map(|a| a.kind), Some(AlertKind::SaveFailed));
     fit(&mut s, true, true);
@@ -1045,10 +1048,10 @@ fn several_failing_calculations_make_one_dialog_that_counts_them_by_type() {
     fit(&mut s, true, true);
     assert!(s.state.alert().is_none());
     scramble(&mut s);
-    // Un seul recalcul, deux calculs en défaut : une seule boîte.
+    // A single recalculation, two calculations at fault: a single dialog.
     let alert = s.state.alert().expect("one dialog");
     assert_eq!(alert.kind, AlertKind::LowRSquared);
-    // Un compteur par type (#290), plus « première ligne et N autres ».
+    // One counter per type (#290), plus "first line and N others".
     assert!(alert.message.contains("2 fits"), "{}", alert.message);
     assert!(!alert.message.contains("other"), "{}", alert.message);
 }
@@ -1069,11 +1072,11 @@ fn opening_a_project_with_a_low_r2_is_not_a_recalculation() {
     assert!(again.alert().is_none());
 }
 
-// ---- Pastille des R² faibles du projet et boîte groupée (#290) --------
+// ---- Project low R² badge and grouped dialog (#290) -------------------
 
 use stokesforge_app_state::r_squared::LowRSquaredGroup;
 
-/// Remet Y sur `y = 2x + 1` (bon R² à tout ajustement linéaire).
+/// Puts Y back on `y = 2x + 1` (good R² for any linear fit).
 fn restore(s: &mut Setup) {
     for row in 0..11 {
         s.state.dispatch(Action::CommitCell {
@@ -1139,7 +1142,7 @@ fn the_badge_stays_when_the_dialog_opens_and_after_it_closes() {
     );
     assert_eq!(s.state.low_r2_total(), 1);
     s.state.dispatch(Action::DismissAlert);
-    assert_eq!(s.state.low_r2_total(), 1, "un état, pas un évènement");
+    assert_eq!(s.state.low_r2_total(), 1, "a state, not an event");
 }
 
 #[test]
@@ -1171,10 +1174,10 @@ fn the_badge_goes_when_the_r2_rises_again_or_the_calculation_is_undone() {
     scramble(&mut s);
     fit(&mut s, true, false);
     assert_eq!(s.state.low_r2_total(), 1);
-    // Les données redeviennent bonnes : le recalcul automatique remonte R².
+    // The data become good again: the automatic recalculation raises R².
     restore(&mut s);
     assert_eq!(s.state.low_r2_total(), 0);
-    // Les brouiller encore, puis annuler le calcul.
+    // Scramble them again, then undo the calculation.
     scramble(&mut s);
     assert_eq!(s.state.low_r2_total(), 1);
     let id = only_calculation(&s);
@@ -1184,7 +1187,7 @@ fn the_badge_goes_when_the_r2_rises_again_or_the_calculation_is_undone() {
     ));
     assert_eq!(s.state.low_r2_total(), 0);
     s.state.dispatch(Action::Undo);
-    assert_eq!(s.state.low_r2_total(), 1, "l'annulation le ramène");
+    assert_eq!(s.state.low_r2_total(), 1, "undo brings it back");
 }
 
 #[test]
@@ -1192,7 +1195,7 @@ fn the_badge_list_opens_closes_and_never_touches_the_alert() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     s.state.dispatch(Action::OpenLowR2List);
-    assert!(!s.state.low_r2_list_open(), "rien à lister");
+    assert!(!s.state.low_r2_list_open(), "nothing to list");
     scramble(&mut s);
     s.state.set_path(dir.path().display().to_string());
     s.state.dispatch(Action::Save);
@@ -1203,7 +1206,7 @@ fn the_badge_list_opens_closes_and_never_touches_the_alert() {
     assert!(s.state.low_r2_list_text().contains("1 fit"));
     s.state.dispatch(Action::CloseLowR2List);
     assert!(!s.state.low_r2_list_open());
-    // La liste se referme d'elle-même quand plus rien n'est faible.
+    // The list closes by itself when nothing is low any more.
     s.state.dispatch(Action::OpenLowR2List);
     restore(&mut s);
     assert!(!s.state.low_r2_list_open());
@@ -1213,9 +1216,9 @@ fn the_badge_list_opens_closes_and_never_touches_the_alert() {
 fn the_badge_groups_two_types_in_the_fixed_order_of_the_types() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup_points(dir.path(), 40);
-    // Des paliers de cinq lignes à 0 puis à 100 : un bruit à R² faible (< 0,6)
-    // dont la décomposition en pics converge. La dent de scie (0, 100, 0, 100…)
-    // ne converge pas en 400 itérations, sur aucune plateforme (#332).
+    // Steps of five rows at 0 then at 100: noise with a low R² (< 0.6)
+    // whose peak decomposition converges. The sawtooth (0, 100, 0, 100...)
+    // does not converge in 400 iterations, on any platform (#332).
     for row in 0..40 {
         s.state.dispatch(Action::CommitCell {
             column: s.y,
@@ -1223,7 +1226,7 @@ fn the_badge_groups_two_types_in_the_fixed_order_of_the_types() {
             text: if (row / 5) % 2 == 0 { "0" } else { "100" }.to_string(),
         });
     }
-    // Les pics d'abord, l'ajustement ensuite : l'ordre d'apparition ne compte pas.
+    // Peaks first, then the fit: the order of appearance does not matter.
     open(&mut s, Preset::Peaks);
     let form = s.state.analysis_form_mut().unwrap();
     form.keep_results = true;
@@ -1272,38 +1275,38 @@ fn a_calculation_with_two_failing_series_counts_two() {
     assert_eq!(groups(&s), vec![(OperationKind::Fit, 2)]);
 }
 
-// ---- Blindage de l'avertissement de R² faible (#288) ------------------
+// ---- Hardening of the low R² warning (#288) ---------------------------
 
 fn kind_of_alert(s: &Setup) -> Option<AlertKind> {
     s.state.alert().map(|a| a.kind)
 }
 
-/// Les deux coupures (préférence d'application, réglage du calcul) se
-/// combinent en ET : la boîte ne s'ouvre que si aucune ne l'a coupée. Tableau
-/// complet, pour un calcul qui garde ses valeurs et pour un calcul « Show ».
+/// The two switches (application preference, calculation setting) combine
+/// as AND: the dialog only opens if neither has turned it off. Full table,
+/// for a calculation that keeps its values and for a "Show" calculation.
 #[test]
-fn la_boite_exige_preference_active_et_reglage_du_calcul_actif() {
+fn the_dialog_requires_the_preference_on_and_the_calculation_setting_on() {
     for keep in [true, false] {
-        for (preference, reglage) in [(true, true), (true, false), (false, true), (false, false)] {
+        for (preference, setting) in [(true, true), (true, false), (false, true), (false, false)] {
             let dir = tempfile::tempdir().unwrap();
             let mut s = setup(dir.path());
             with_preferences(&mut s, dir.path());
             s.state.dispatch(Action::SetAnalysisLowR2Dialog(preference));
             assert_eq!(s.state.analysis_low_r2_dialog(), preference);
             scramble(&mut s);
-            fit(&mut s, keep, reglage);
-            let attendu = (preference && reglage).then_some(AlertKind::LowRSquared);
+            fit(&mut s, keep, setting);
+            let expected = (preference && setting).then_some(AlertKind::LowRSquared);
             assert_eq!(
                 kind_of_alert(&s),
-                attendu,
-                "keep = {keep}, préférence = {preference}, calcul = {reglage}"
+                expected,
+                "keep = {keep}, preference = {preference}, calculation = {setting}"
             );
         }
     }
 }
 
 #[test]
-fn le_message_de_la_boite_est_celui_du_resume_groupe() {
+fn the_dialog_message_is_the_grouped_summary() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     scramble(&mut s);
@@ -1318,10 +1321,10 @@ fn le_message_de_la_boite_est_celui_du_resume_groupe() {
     );
 }
 
-/// `DismissAlert` ferme la boîte ; l'ouverture n'est pas un échec du geste
-/// (le formulaire s'est fermé, aucune erreur dans le pied).
+/// `DismissAlert` closes the dialog; opening is not a failure of the gesture
+/// (the form closed, no error in the footer).
 #[test]
-fn la_boite_se_ferme_et_ne_compte_pas_comme_un_echec() {
+fn the_dialog_closes_and_does_not_count_as_a_failure() {
     for keep in [true, false] {
         let dir = tempfile::tempdir().unwrap();
         let mut s = setup(dir.path());
@@ -1337,10 +1340,10 @@ fn la_boite_se_ferme_et_ne_compte_pas_comme_un_echec() {
     }
 }
 
-/// Pas de boîte au premier instantané d'un projet ouvert, ni à un instantané
-/// ultérieur qui ne change rien au résultat (amorçage de l'empreinte).
+/// No dialog at the first snapshot of an opened project, nor at a later
+/// snapshot that changes nothing to the result (seeding of the fingerprint).
 #[test]
-fn un_projet_ouvert_avec_un_r2_faible_ne_rouvre_rien_aux_instantanes_suivants() {
+fn a_project_opened_with_a_low_r2_reopens_nothing_on_later_snapshots() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     scramble(&mut s);
@@ -1353,24 +1356,21 @@ fn un_projet_ouvert_avec_un_r2_faible_ne_rouvre_rien_aux_instantanes_suivants() 
     )
     .unwrap();
     assert!(again.alert().is_none());
-    assert_eq!(again.low_r2_total(), 1, "la pastille, elle, le dit");
+    assert_eq!(again.low_r2_total(), 1, "the badge, for its part, says it");
     again.dispatch(Action::AddColumn { sheet: s.sheet });
-    assert!(
-        again.alert().is_none(),
-        "R² inchangé : amorcé à l'ouverture"
-    );
+    assert!(again.alert().is_none(), "R² unchanged: seeded at opening");
     again.refresh();
     assert!(again.alert().is_none());
 }
 
-/// Un instantané inchangé ne rouvre pas la boîte ; mais un R² qui repasse au-
-/// dessus du palier puis redescend (même valeur qu'avant) est un résultat neuf.
+/// An unchanged snapshot does not reopen the dialog; but an R² that goes back
+/// above the threshold then drops again (same value as before) is a fresh result.
 #[test]
-fn la_boite_se_rouvre_quand_le_r2_remonte_puis_redescend() {
+fn the_dialog_reopens_when_r2_rises_then_falls_again() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
-    // Une seule édition suffit à faire chuter R² (aberrante au centre : la
-    // pente ne bouge pas) et une seule à le rétablir.
+    // A single edit is enough to make R² drop (outlier in the center: the
+    // slope does not move) and a single one to restore it.
     let edit = |s: &mut Setup, text: &str| {
         s.state.dispatch(Action::CommitCell {
             column: s.y,
@@ -1385,7 +1385,7 @@ fn la_boite_se_rouvre_quand_le_r2_remonte_puis_redescend() {
     s.state.dispatch(Action::DismissAlert);
     s.state.refresh();
     s.state.dispatch(Action::AddColumn { sheet: s.sheet });
-    assert!(s.state.alert().is_none(), "instantané inchangé");
+    assert!(s.state.alert().is_none(), "snapshot unchanged");
     edit(&mut s, "11");
     assert!(s.state.alert().is_none());
     assert_eq!(s.state.low_r2_total(), 0);
@@ -1393,14 +1393,14 @@ fn la_boite_se_rouvre_quand_le_r2_remonte_puis_redescend() {
     assert_eq!(
         kind_of_alert(&s),
         Some(AlertKind::LowRSquared),
-        "même R² qu'avant, mais l'empreinte avait été purgée"
+        "same R² as before, but the fingerprint had been purged"
     );
 }
 
-/// Un calcul supprimé est purgé de la mémoire des R² vus : restauré par
-/// l'annulation, il compte comme neuf ; le refaire (redo) ne dit rien.
+/// A deleted calculation is purged from the memory of seen R²: restored by
+/// undo, it counts as new; redoing it says nothing.
 #[test]
-fn un_calcul_supprime_est_purge_de_la_memoire_et_l_annulation_le_signale() {
+fn a_deleted_calculation_is_purged_from_memory_and_undo_reports_it() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     scramble(&mut s);
@@ -1420,11 +1420,11 @@ fn un_calcul_supprime_est_purge_de_la_memoire_et_l_annulation_le_signale() {
     assert_eq!(s.state.low_r2_total(), 0);
 }
 
-/// Épingle le comportement actuel : une alerte déjà là n'est pas écrasée, et
-/// l'avertissement est perdu (l'empreinte est mise à jour sans boîte) ; seule
-/// la pastille le garde.
+/// Pins the current behavior: an alert already there is not overwritten, and
+/// the warning is lost (the fingerprint is updated without a dialog); only the
+/// badge keeps it.
 #[test]
-fn une_alerte_presente_n_est_pas_ecrasee_et_l_avertissement_est_perdu() {
+fn an_existing_alert_is_not_overwritten_and_the_warning_is_lost() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     scramble(&mut s);
@@ -1436,14 +1436,14 @@ fn une_alerte_presente_n_est_pas_ecrasee_et_l_avertissement_est_perdu() {
     s.state.dispatch(Action::DismissAlert);
     s.state.dispatch(Action::AddColumn { sheet: s.sheet });
     s.state.refresh();
-    assert!(s.state.alert().is_none(), "perdu : pas de rattrapage");
-    assert_eq!(s.state.low_r2_total(), 1, "la pastille le garde");
+    assert!(s.state.alert().is_none(), "lost: no catch-up");
+    assert_eq!(s.state.low_r2_total(), 1, "the badge keeps it");
 }
 
-/// Un calcul « Show » ne passe que par `ApplyAnalysis` : seul son application
-/// parle, aucun recalcul ensuite ne rouvre la boîte.
+/// A "Show" calculation only goes through `ApplyAnalysis`: only its application
+/// speaks, no later recalculation reopens the dialog.
 #[test]
-fn un_calcul_show_parle_a_l_application_seulement() {
+fn a_show_calculation_speaks_to_the_application_only() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     scramble(&mut s);
@@ -1458,9 +1458,9 @@ fn un_calcul_show_parle_a_l_application_seulement() {
     assert!(s.state.alert().is_none());
 }
 
-/// Un bon ajustement qui reste bon ne dit rien, même après des éditions.
+/// A good fit that stays good says nothing, even after edits.
 #[test]
-fn un_bon_ajustement_reste_silencieux_apres_edition() {
+fn a_good_fit_stays_silent_after_editing() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     fit(&mut s, true, true);
@@ -1474,11 +1474,11 @@ fn un_bon_ajustement_reste_silencieux_apres_edition() {
 }
 
 #[test]
-fn la_preference_met_a_jour_l_etat_et_le_fichier() {
+fn the_preference_updates_the_state_and_the_file() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     let file = with_preferences(&mut s, dir.path());
-    assert!(s.state.analysis_low_r2_dialog(), "actif par défaut");
+    assert!(s.state.analysis_low_r2_dialog(), "active by default");
     s.state.dispatch(Action::SetAnalysisLowR2Dialog(false));
     assert!(!s.state.analysis_low_r2_dialog());
     let json: serde_json::Value =
@@ -1492,53 +1492,53 @@ fn la_preference_met_a_jour_l_etat_et_le_fichier() {
 }
 
 #[test]
-fn une_erreur_d_ecriture_de_la_preference_est_dite_et_l_etat_est_applique() {
+fn a_write_error_on_the_preference_is_reported_and_the_state_is_applied() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
-    // Le « dossier » parent du fichier est un fichier : l'écriture échoue.
-    let bloc = dir.path().join("bloc");
-    std::fs::write(&bloc, "x").unwrap();
+    // The parent "folder" of the file is a file: writing fails.
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, "x").unwrap();
     s.state = AppState::new_with_preferences(
         s._session.handle(),
         dir.path().join("p.stf").display().to_string(),
         stokesforge_app_state::preferences::Preferences::load_from(Some(
-            bloc.join("preferences.json"),
+            blocker.join("preferences.json"),
         )),
     )
     .unwrap();
     s.state.dispatch(Action::SetAnalysisLowR2Dialog(false));
-    let status = s.state.status().expect("un message d'erreur");
+    let status = s.state.status().expect("an error message");
     assert!(status.is_error());
     assert!(
         status.text.starts_with("Could not save the preferences:"),
         "{}",
         status.text
     );
-    assert!(!s.state.analysis_low_r2_dialog(), "valable pour la session");
+    assert!(!s.state.analysis_low_r2_dialog(), "valid for the session");
 }
 
-// ---- Blindage de la pastille et de la boîte groupée (#290) ------------
+// ---- Hardening of the badge and the grouped dialog (#290) -------------
 
-/// La boîte et la liste de la pastille disent la même chose, mot pour mot : un
-/// seul recalcul fait tomber deux ajustements (le cas à deux types se lit dans
-/// `low_r2_project.rs`, les pics ne se recalculant pas d'eux-mêmes).
+/// The dialog and the badge list say the same thing, word for word: a
+/// single recalculation drops two fits (the two-type case is read in
+/// `low_r2_project.rs`, peaks not recalculating by themselves).
 #[test]
-fn la_boite_et_la_liste_de_la_pastille_ont_le_meme_texte() {
+fn the_dialog_and_the_badge_list_have_the_same_text() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     fit(&mut s, true, true);
     fit(&mut s, true, true);
     scramble(&mut s);
     assert_eq!(groups(&s), vec![(OperationKind::Fit, 2)]);
-    let boite = s.state.alert().expect("une boîte").message.clone();
-    assert_eq!(boite, s.state.low_r2_list_text());
-    assert!(boite.contains("2 fits"), "{boite}");
+    let dialog_alert = s.state.alert().expect("a dialog").message.clone();
+    assert_eq!(dialog_alert, s.state.low_r2_list_text());
+    assert!(dialog_alert.contains("2 fits"), "{dialog_alert}");
 }
 
-/// La liste ouverte se referme d'elle-même quand le dernier calcul faible est
-/// supprimé, et rouvre à l'annulation seulement sur demande.
+/// The open list closes by itself when the last low calculation is
+/// deleted, and reopens on undo only on request.
 #[test]
-fn la_liste_se_referme_a_la_suppression_du_dernier_calcul_faible() {
+fn the_list_closes_when_the_last_low_r2_calculation_is_deleted() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     scramble(&mut s);
@@ -1551,11 +1551,11 @@ fn la_liste_se_referme_a_la_suppression_du_dernier_calcul_faible() {
         CalculationDelete::WithColumns,
     ));
     assert_eq!(s.state.low_r2_total(), 0);
-    assert!(!s.state.low_r2_list_open(), "fermée avec le dernier compte");
+    assert!(!s.state.low_r2_list_open(), "closed with the last count");
     s.state.dispatch(Action::Undo);
     assert_eq!(s.state.low_r2_total(), 1);
-    assert!(!s.state.low_r2_list_open(), "pas rouverte d'elle-même");
-    // Ouvrir deux fois, fermer deux fois : idempotent.
+    assert!(!s.state.low_r2_list_open(), "not reopened by itself");
+    // Open twice, close twice: idempotent.
     s.state.dispatch(Action::OpenLowR2List);
     s.state.dispatch(Action::OpenLowR2List);
     assert!(s.state.low_r2_list_open());

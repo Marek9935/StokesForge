@@ -1,44 +1,44 @@
-//! Le niveau d'alerte d'un R² (#288), **sans egui** : l'état dit « orange »,
-//! « rouge » ou « boîte de dialogue » ; `stokesforge-app` choisit la teinte
-//! (`theme::r_squared_color`) et peint la boîte.
+//! The alert level of an R² (#288), **without egui**: the state says
+//! "orange", "red" or "dialog box"; `stokesforge-app` picks the shade
+//! (`theme::r_squared_color`) and paints the box.
 //!
-//! Les paliers se cumulent : un R² sous [`DIALOG_BELOW`] est aussi rouge et
-//! aussi orange. Les bornes sont strictes (`0,95` pile n'avertit pas) ; un R²
-//! négatif — ajustement pire qu'une droite horizontale — relève du palier le
-//! plus bas. `NaN` (pas de valeur) n'avertit de rien : on n'alerte pas sur ce
-//! qu'on ne sait pas mesurer.
+//! The levels accumulate: an R² below [`DIALOG_BELOW`] is also red and also
+//! orange. The bounds are strict (exactly `0.95` does not warn); a negative
+//! R² — a fit worse than a horizontal line — falls under the lowest level.
+//! `NaN` (no value) warns of nothing: we do not alert on what we cannot
+//! measure.
 
 use stokesforge_analysis::ops::OperationKind;
 use stokesforge_core::{Calculation, Tree};
 
 use crate::tr;
 
-/// La clé des résultats qui porte R² (ajustements et pics).
+/// The key of the results that carries R² (fits and peaks).
 pub const R_SQUARED_KEY: &str = "stat.r_squared";
 
-/// Sous cette valeur (stricte), R² s'écrit en orange.
+/// Below this value (strict), R² is written in orange.
 pub const ORANGE_BELOW: f64 = 0.95;
-/// Sous cette valeur (stricte), R² s'écrit en rouge.
+/// Below this value (strict), R² is written in red.
 pub const RED_BELOW: f64 = 0.8;
-/// Sous cette valeur (stricte), R² ouvre aussi la boîte de dialogue, si ni la
-/// préférence de l'application ni le réglage du calcul ne l'ont coupée.
+/// Below this value (strict), R² also opens the dialog box, unless neither the
+/// application preference nor the calculation's setting has turned it off.
 pub const DIALOG_BELOW: f64 = 0.6;
 
-/// Le palier atteint par un R², du plus doux au plus fort.
+/// The level reached by an R², from the mildest to the strongest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RSquaredLevel {
-    /// Aucun avertissement (bon R², ou `NaN`).
+    /// No warning (good R², or `NaN`).
     Good,
-    /// `R² < 0,95`.
+    /// `R² < 0.95`.
     Orange,
-    /// `R² < 0,8`.
+    /// `R² < 0.8`.
     Red,
-    /// `R² < 0,6` : rouge, et boîte de dialogue.
+    /// `R² < 0.6`: red, and dialog box.
     Dialog,
 }
 
 impl RSquaredLevel {
-    /// Le palier de `r_squared`.
+    /// The level of `r_squared`.
     pub fn of(r_squared: f64) -> Self {
         if r_squared.is_nan() {
             Self::Good
@@ -53,19 +53,19 @@ impl RSquaredLevel {
         }
     }
 
-    /// La valeur se peint-elle en couleur (orange ou plus) ?
+    /// Is the value painted in color (orange or above)?
     pub fn is_warning(self) -> bool {
         self >= Self::Orange
     }
 
-    /// La valeur se peint-elle en rouge (rouge ou plus) ?
+    /// Is the value painted red (red or above)?
     pub fn is_red(self) -> bool {
         self >= Self::Red
     }
 }
 
-/// Le palier d'une valeur calculée : celui de son R² si `key` est
-/// [`R_SQUARED_KEY`], sinon [`RSquaredLevel::Good`].
+/// The level of a computed value: that of its R² if `key` is
+/// [`R_SQUARED_KEY`], otherwise [`RSquaredLevel::Good`].
 pub fn level_of_value(key: &str, value: f64) -> RSquaredLevel {
     if key == R_SQUARED_KEY {
         RSquaredLevel::of(value)
@@ -74,9 +74,9 @@ pub fn level_of_value(key: &str, value: f64) -> RSquaredLevel {
     }
 }
 
-/// Les R² du calcul qui franchissent le palier de la boîte, par série, en bits
-/// (une empreinte exacte : deux recalculs au même résultat n'avertissent pas
-/// deux fois). Vide : aucun défaut.
+/// The R² of the calculation that cross the box level, per series, as bits
+/// (an exact fingerprint: two recalculations with the same result do not warn
+/// twice). Empty: no fault.
 pub fn dialog_fingerprint(calc: &Calculation) -> Vec<(usize, u64)> {
     let mut out = Vec::new();
     for (rank, result) in calc.results.iter().enumerate() {
@@ -89,8 +89,8 @@ pub fn dialog_fingerprint(calc: &Calculation) -> Vec<(usize, u64)> {
     out
 }
 
-/// Le nombre de **séries** du calcul dont le R² franchit le palier de la boîte
-/// (#290) : l'unité de compte est la série, une courbe = un R².
+/// The number of **series** of the calculation whose R² crosses the box level
+/// (#290): the unit of count is the series, one curve = one R².
 pub fn low_series_count(calc: &Calculation) -> usize {
     calc.results
         .iter()
@@ -103,17 +103,17 @@ pub fn low_series_count(calc: &Calculation) -> usize {
         .count()
 }
 
-/// Les séries en défaut d'un type de calcul.
+/// The faulty series of a calculation type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LowRSquaredGroup {
     pub kind: OperationKind,
-    /// Toujours au moins 1.
+    /// Always at least 1.
     pub count: usize,
 }
 
-/// Regroupe des `(type, nombre de séries)` par type, dans l'ordre fixe de
-/// [`OperationKind::ALL`] (stable d'un instantané à l'autre) ; les types sans
-/// série en défaut disparaissent.
+/// Groups `(type, number of series)` by type, in the fixed order of
+/// [`OperationKind::ALL`] (stable from one snapshot to the next); types with
+/// no faulty series disappear.
 pub fn group_by_kind(
     items: impl IntoIterator<Item = (OperationKind, usize)>,
 ) -> Vec<LowRSquaredGroup> {
@@ -131,10 +131,10 @@ pub fn group_by_kind(
         .collect()
 }
 
-/// Les R² faibles de tout le projet (#290), regroupés par type : tous les
-/// calculs qui gardent leurs valeurs, quel que soit leur réglage
-/// `low_r2_dialog` (le réglage coupe la boîte, pas l'information). Un calcul
-/// « Show » ne garde rien : il n'y compte pas.
+/// The low R² of the whole project (#290), grouped by type: all the
+/// calculations that keep their values, whatever their `low_r2_dialog`
+/// setting (the setting turns off the box, not the information). A "Show"
+/// calculation keeps nothing: it does not count there.
 pub fn project_groups(tree: &Tree) -> Vec<LowRSquaredGroup> {
     group_by_kind(
         tree.calculations()
@@ -143,7 +143,7 @@ pub fn project_groups(tree: &Tree) -> Vec<LowRSquaredGroup> {
     )
 }
 
-/// Le total de séries des groupes.
+/// The total of series of the groups.
 pub fn total(groups: &[LowRSquaredGroup]) -> usize {
     groups.iter().map(|g| g.count).sum()
 }
@@ -152,7 +152,7 @@ fn count_i64(count: usize) -> i64 {
     i64::try_from(count).unwrap_or(i64::MAX)
 }
 
-/// « 12 reconvolutions » : le compteur d'un type, avec son pluriel.
+/// "12 reconvolutions": the counter of a type, with its plural.
 pub fn group_line(group: &LowRSquaredGroup) -> String {
     let count = count_i64(group.count);
     match group.kind {
@@ -169,8 +169,8 @@ pub fn group_line(group: &LowRSquaredGroup) -> String {
     }
 }
 
-/// Le texte de la boîte et de la liste de la pastille : « R² < 0,6 pour : »,
-/// une ligne « • N type » par groupe, puis le renvoi vers les Résultats.
+/// The text of the box and of the badge list: "R² < 0.6 for:", one line
+/// "• N type" per group, then the pointer to the Results.
 pub fn summary_text(groups: &[LowRSquaredGroup]) -> String {
     let mut text = tr!("low-r2-summary-head");
     for group in groups {
@@ -182,7 +182,7 @@ pub fn summary_text(groups: &[LowRSquaredGroup]) -> String {
     text
 }
 
-/// Le libellé de la pastille de la barre d'état : « ⚠ 13 R² faibles ».
+/// The label of the status bar badge: "13 low R²".
 pub fn badge_text(total: usize) -> String {
     tr!("status-low-r2-badge", count = count_i64(total))
 }
@@ -192,9 +192,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn les_paliers_ont_des_bornes_strictes() {
+    fn the_levels_have_strict_bounds() {
         use RSquaredLevel::*;
-        let cas = [
+        let cases = [
             (1.0, Good),
             (0.95, Good),
             (0.9499, Orange),
@@ -207,13 +207,13 @@ mod tests {
             (f64::NEG_INFINITY, Dialog),
             (f64::NAN, Good),
         ];
-        for (r2, attendu) in cas {
-            assert_eq!(RSquaredLevel::of(r2), attendu, "R² = {r2}");
+        for (r2, expected) in cases {
+            assert_eq!(RSquaredLevel::of(r2), expected, "R² = {r2}");
         }
     }
 
     #[test]
-    fn les_paliers_se_cumulent() {
+    fn the_levels_accumulate() {
         let dialog = RSquaredLevel::of(0.1);
         assert!(dialog.is_warning() && dialog.is_red());
         let orange = RSquaredLevel::of(0.9);
@@ -222,51 +222,51 @@ mod tests {
     }
 
     #[test]
-    fn seule_la_cle_r_carre_est_jugee() {
+    fn only_the_r_squared_key_is_judged() {
         assert_eq!(level_of_value("param.tau", 0.1), RSquaredLevel::Good);
         assert_eq!(level_of_value(R_SQUARED_KEY, 0.1), RSquaredLevel::Dialog);
     }
 
-    fn suivant(x: f64) -> f64 {
+    fn next(x: f64) -> f64 {
         f64::from_bits(x.to_bits() + 1)
     }
 
-    fn precedent(x: f64) -> f64 {
+    fn previous(x: f64) -> f64 {
         f64::from_bits(x.to_bits() - 1)
     }
 
-    /// Les trois seuils, pile et à un ulp de chaque côté : la borne est stricte.
+    /// The three thresholds, exactly and one ulp on each side: the bound is strict.
     #[test]
-    fn chaque_palier_est_strict_a_l_ulp_pres() {
+    fn each_level_is_strict_to_the_ulp() {
         use RSquaredLevel::*;
-        let cas = [
+        let cases = [
             (ORANGE_BELOW, Good),
-            (precedent(ORANGE_BELOW), Orange),
-            (suivant(ORANGE_BELOW), Good),
+            (previous(ORANGE_BELOW), Orange),
+            (next(ORANGE_BELOW), Good),
             (ORANGE_BELOW - f64::EPSILON, Orange),
             (ORANGE_BELOW + f64::EPSILON, Good),
             (RED_BELOW, Orange),
-            (precedent(RED_BELOW), Red),
-            (suivant(RED_BELOW), Orange),
+            (previous(RED_BELOW), Red),
+            (next(RED_BELOW), Orange),
             (RED_BELOW - f64::EPSILON, Red),
             (RED_BELOW + f64::EPSILON, Orange),
             (DIALOG_BELOW, Red),
-            (precedent(DIALOG_BELOW), Dialog),
-            (suivant(DIALOG_BELOW), Red),
+            (previous(DIALOG_BELOW), Dialog),
+            (next(DIALOG_BELOW), Red),
             (DIALOG_BELOW - f64::EPSILON, Dialog),
             (DIALOG_BELOW + f64::EPSILON, Red),
         ];
-        for (r2, attendu) in cas {
-            assert_eq!(RSquaredLevel::of(r2), attendu, "R² = {r2:e}");
+        for (r2, expected) in cases {
+            assert_eq!(RSquaredLevel::of(r2), expected, "R² = {r2:e}");
         }
-        // Les seuils eux-mêmes sont ceux de l'issue.
+        // The thresholds themselves are those of the issue.
         assert_eq!((ORANGE_BELOW, RED_BELOW, DIALOG_BELOW), (0.95, 0.8, 0.6));
     }
 
     #[test]
-    fn les_valeurs_extremes_et_speciales() {
+    fn extreme_and_special_values() {
         use RSquaredLevel::*;
-        let cas = [
+        let cases = [
             (1.0, Good),
             (1.0 + f64::EPSILON, Good),
             (0.0, Dialog),
@@ -280,15 +280,15 @@ mod tests {
             (-f64::NAN, Good),
             (f64::MIN_POSITIVE, Dialog),
         ];
-        for (r2, attendu) in cas {
-            assert_eq!(RSquaredLevel::of(r2), attendu, "R² = {r2:e}");
+        for (r2, expected) in cases {
+            assert_eq!(RSquaredLevel::of(r2), expected, "R² = {r2:e}");
         }
     }
 
-    /// Les paliers se cumulent, palier par palier : `is_warning` et `is_red`
-    /// pour chacun des quatre niveaux.
+    /// The levels accumulate, level by level: `is_warning` and `is_red`
+    /// for each of the four levels.
     #[test]
-    fn le_cumul_des_paliers_est_exact() {
+    fn the_accumulation_of_levels_is_exact() {
         use RSquaredLevel::*;
         let table = [
             (Good, false, false),
@@ -296,21 +296,21 @@ mod tests {
             (Red, true, true),
             (Dialog, true, true),
         ];
-        for (niveau, avertit, rouge) in table {
-            assert_eq!(niveau.is_warning(), avertit, "{niveau:?}");
-            assert_eq!(niveau.is_red(), rouge, "{niveau:?}");
+        for (level, warns, red) in table {
+            assert_eq!(level.is_warning(), warns, "{level:?}");
+            assert_eq!(level.is_red(), red, "{level:?}");
         }
         assert!(Good < Orange && Orange < Red && Red < Dialog);
     }
 
     #[test]
-    fn les_autres_cles_sont_ignorees_meme_avec_une_valeur_tres_basse() {
-        for cle in ["param.tau", "area", "stat.r_squared_adj", "R_SQUARED", ""] {
-            for valeur in [-5.0, 0.0, 0.3, f64::NEG_INFINITY] {
+    fn other_keys_are_ignored_even_with_a_very_low_value() {
+        for key in ["param.tau", "area", "stat.r_squared_adj", "R_SQUARED", ""] {
+            for value in [-5.0, 0.0, 0.3, f64::NEG_INFINITY] {
                 assert_eq!(
-                    level_of_value(cle, valeur),
+                    level_of_value(key, value),
                     RSquaredLevel::Good,
-                    "{cle:?} = {valeur}"
+                    "{key:?} = {value}"
                 );
             }
         }
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(R_SQUARED_KEY, "stat.r_squared");
     }
 
-    fn valeur(key: &str, value: f64) -> stokesforge_core::ResultValue {
+    fn result_value(key: &str, value: f64) -> stokesforge_core::ResultValue {
         stokesforge_core::ResultValue {
             key: key.to_string(),
             index: None,
@@ -329,7 +329,7 @@ mod tests {
         }
     }
 
-    fn calcul(series: Vec<Vec<(&str, f64)>>) -> Calculation {
+    fn calculation(series: Vec<Vec<(&str, f64)>>) -> Calculation {
         use stokesforge_analysis::correct::CorrectOp;
         use stokesforge_analysis::ops::Operation;
         Calculation {
@@ -342,7 +342,10 @@ mod tests {
             results: series
                 .into_iter()
                 .map(|values| stokesforge_core::SeriesResult {
-                    values: values.into_iter().map(|(k, v)| valeur(k, v)).collect(),
+                    values: values
+                        .into_iter()
+                        .map(|(k, v)| result_value(k, v))
+                        .collect(),
                     ..Default::default()
                 })
                 .collect(),
@@ -354,23 +357,23 @@ mod tests {
     }
 
     #[test]
-    fn l_empreinte_est_vide_sans_r2_sous_le_palier_de_la_boite() {
-        let bon = calcul(vec![
+    fn the_fingerprint_is_empty_without_an_r2_below_the_box_level() {
+        let good = calculation(vec![
             vec![(R_SQUARED_KEY, 0.99), ("param.tau", 0.1)],
             vec![(R_SQUARED_KEY, DIALOG_BELOW)],
             vec![(R_SQUARED_KEY, f64::NAN)],
             vec![("param.tau", -9.0)],
             vec![(R_SQUARED_KEY, 0.7)],
         ]);
-        assert!(dialog_fingerprint(&bon).is_empty());
-        assert_eq!(low_series_count(&bon), 0);
-        assert!(dialog_fingerprint(&calcul(Vec::new())).is_empty());
-        assert!(dialog_fingerprint(&calcul(vec![Vec::new()])).is_empty());
+        assert!(dialog_fingerprint(&good).is_empty());
+        assert_eq!(low_series_count(&good), 0);
+        assert!(dialog_fingerprint(&calculation(Vec::new())).is_empty());
+        assert!(dialog_fingerprint(&calculation(vec![Vec::new()])).is_empty());
     }
 
     #[test]
-    fn l_empreinte_porte_le_rang_de_la_serie_et_les_bits_du_r2() {
-        let calc = calcul(vec![
+    fn the_fingerprint_carries_the_series_rank_and_the_bits_of_the_r2() {
+        let calc = calculation(vec![
             vec![(R_SQUARED_KEY, 0.99)],
             vec![(R_SQUARED_KEY, 0.2), ("param.tau", 0.1)],
             vec![(R_SQUARED_KEY, -1.0)],
@@ -383,27 +386,27 @@ mod tests {
     }
 
     #[test]
-    fn l_empreinte_est_stable_et_change_au_moindre_bit() {
-        let a = calcul(vec![vec![(R_SQUARED_KEY, 0.3)]]);
-        let b = calcul(vec![vec![(R_SQUARED_KEY, 0.3)]]);
+    fn the_fingerprint_is_stable_and_changes_on_the_slightest_bit() {
+        let a = calculation(vec![vec![(R_SQUARED_KEY, 0.3)]]);
+        let b = calculation(vec![vec![(R_SQUARED_KEY, 0.3)]]);
         assert_eq!(dialog_fingerprint(&a), dialog_fingerprint(&b));
-        // Épingle : l'empreinte est exacte, un écart de 1e-12 compte comme un
-        // résultat neuf (la boîte se rouvre).
-        let c = calcul(vec![vec![(R_SQUARED_KEY, 0.3 + 1e-12)]]);
+        // Pin: the fingerprint is exact, a difference of 1e-12 counts as a new
+        // result (the box reopens).
+        let c = calculation(vec![vec![(R_SQUARED_KEY, 0.3 + 1e-12)]]);
         assert_ne!(dialog_fingerprint(&a), dialog_fingerprint(&c));
-        // Même R² sur une autre série : autre empreinte.
-        let d = calcul(vec![Vec::new(), vec![(R_SQUARED_KEY, 0.3)]]);
+        // Same R² on another series: another fingerprint.
+        let d = calculation(vec![Vec::new(), vec![(R_SQUARED_KEY, 0.3)]]);
         assert_ne!(dialog_fingerprint(&a), dialog_fingerprint(&d));
     }
 
     #[test]
-    fn low_series_count_compte_les_series_pas_les_valeurs() {
-        let calc = calcul(vec![
+    fn low_series_count_counts_series_not_values() {
+        let calc = calculation(vec![
             vec![(R_SQUARED_KEY, 0.1), (R_SQUARED_KEY, 0.2)],
             vec![(R_SQUARED_KEY, 0.9)],
             vec![(R_SQUARED_KEY, 0.3)],
         ]);
         assert_eq!(low_series_count(&calc), 2);
-        assert_eq!(dialog_fingerprint(&calc).len(), 3, "une entrée par valeur");
+        assert_eq!(dialog_fingerprint(&calc).len(), 3, "one entry per value");
     }
 }

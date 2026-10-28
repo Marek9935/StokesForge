@@ -1,30 +1,30 @@
-//! Le modèle de la fenêtre d'analyse (#181) : ce que l'utilisateur règle pour
-//! lancer un calcul (ligne de base, correction, intégrale, ajustement, pics,
-//! déconvolution), **sans egui**.
+//! The model of the analysis window (#181): what the user sets to run a
+//! computation (baseline, correction, integral, fit, peaks, deconvolution),
+//! **without egui**.
 //!
-//! La fenêtre (`app/analysis_dialog.rs`) ne fait que peindre ce formulaire et
-//! pousser des [`Action`](crate::state::Action) ; tout ce qui se décide — les
-//! valeurs par défaut d'une opération, ce qui manque pour valider, l'opération
-//! que les réglages décrivent, les colonnes produites et leurs noms — se lit
-//! ici et se teste sans fenêtre (`tests/analysis.rs`).
+//! The window (`app/analysis_dialog.rs`) only paints this form and pushes
+//! [`Action`](crate::state::Action)s; everything that is decided — the default
+//! values of an operation, what is missing to validate, the operation the
+//! settings describe, the columns produced and their names — is read here and
+//! tested without a window (`tests/analysis.rs`).
 //!
-//! # Un réglage par famille, tous gardés
+//! # One setting per family, all kept
 //!
-//! Le formulaire garde les réglages de **chaque** famille en même temps
-//! ([`Setup`]) : passer de « Reconvolution » à « Direct Deconvolution », ou d'une
-//! ligne de base par deux points à des zones, ne perd rien de ce qui avait été
-//! posé. [`AnalysisForm::operation`] ne lit que la famille active. Une
-//! [`Operation`] n'est construite qu'une fois les réglages complets : une ligne
-//! de base à un point n'est pas une opération, c'est un [`Issue`].
+//! The form keeps the settings of **every** family at the same time
+//! ([`Setup`]): going from "Reconvolution" to "Direct Deconvolution", or from a
+//! two-point baseline to zones, loses nothing of what had been set.
+//! [`AnalysisForm::operation`] reads only the active family. An [`Operation`] is
+//! built only once the settings are complete: a one-point baseline is not an
+//! operation, it is an [`Issue`].
 //!
-//! # Aperçu et validation
+//! # Preview and validation
 //!
-//! [`AnalysisForm::preview`] calcule la série affichée (toutes les séries pour
-//! un ajustement global) avec les colonnes d'aide forcées — la ligne de base et
-//! les résidus se montrent même si la colonne ne sera pas écrite.
-//! [`AnalysisForm::draft`] calcule le lot entier, ne garde que les colonnes
-//! demandées et leur donne un nom long (M6) ; c'est lui que la commande
-//! `AddCalculation` / `UpdateCalculation` reçoit.
+//! [`AnalysisForm::preview`] computes the displayed series (all the series for
+//! a global fit) with the helper columns forced — the baseline and the
+//! residuals show even if the column will not be written.
+//! [`AnalysisForm::draft`] computes the whole batch, keeps only the requested
+//! columns and gives them a long name (M6); this is what the `AddCalculation` /
+//! `UpdateCalculation` command receives.
 
 use stokesforge_analysis::baseline::{BaselineMethod, BaselineOp, Interpolation};
 use stokesforge_analysis::correct::CorrectOp;
@@ -46,47 +46,47 @@ use i18n_embed::fluent::FluentLanguageLoader;
 
 use crate::tr;
 
-/// Nombre de points moyennés par défaut quand un point est aimanté sur la
-/// courbe (M4 b).
+/// Default number of points averaged when a point is snapped onto the curve
+/// (M4 b).
 pub const DEFAULT_AVERAGE: usize = 5;
 
-/// Bornes du réglage « moyenne sur N points » (molette).
+/// Bounds of the "average over N points" setting (wheel).
 pub const AVERAGE_RANGE: std::ops::RangeInclusive<usize> = 1..=101;
 
-/// Une entrée du menu Analysis : la famille **et** la méthode préchoisie
-/// (M1 B). La fenêtre sait changer de méthode, pour « Edit Calculation… ».
+/// An entry of the Analysis menu: the family **and** the pre-chosen method
+/// (M1 B). The window can change method, for "Edit Calculation…".
 #[derive(Debug, Clone, PartialEq)]
 pub enum Preset {
-    /// Ligne de base constante par un point ou la moyenne d’une zone.
+    /// Constant baseline from one point or the mean of a zone.
     BaselineConstant,
-    /// Ligne de base par deux points.
+    /// Baseline from two points.
     BaselineLine,
-    /// Ligne de base polynomiale sur des zones.
+    /// Polynomial baseline on zones.
     BaselinePolynomial,
-    /// Ligne de base par points d'ancrage.
+    /// Baseline from anchor points.
     BaselineAnchors,
-    /// Correction par une colonne de référence.
+    /// Correction by a reference column.
     Correct,
-    /// Intégrale sur une ou plusieurs plages.
+    /// Integral over one or more ranges.
     Integrate,
-    /// Ajustement, le modèle préchoisi.
+    /// Fit, with the pre-chosen model.
     Fit(Model),
-    /// Décomposition en pics.
+    /// Peak decomposition.
     Peaks,
-    /// Reconvolution par une réponse instrumentale.
+    /// Reconvolution by an instrument response.
     Reconvolution,
-    /// Déconvolution directe.
+    /// Direct deconvolution.
     DirectDeconvolution,
-    /// Lissage par moyenne adjacente (#324).
+    /// Smoothing by adjacent averaging (#324).
     SmoothAdjacent,
-    /// Lissage de Savitzky-Golay (#324).
+    /// Savitzky-Golay smoothing (#324).
     SmoothSavitzkyGolay,
-    /// Lissage par médiane glissante (#324).
+    /// Smoothing by a rolling median (#324).
     SmoothMedian,
 }
 
 impl Preset {
-    /// La famille d'opération que ce choix lance.
+    /// The operation family this choice launches.
     pub fn kind(&self) -> OperationKind {
         match self {
             Preset::BaselineConstant
@@ -105,13 +105,13 @@ impl Preset {
         }
     }
 
-    /// La catégorie (donc la fenêtre) de ce choix.
+    /// The category (hence the window) of this choice.
     pub fn category(&self) -> Category {
         Category::of(self.kind())
     }
 
-    /// Les modèles proposés par `Fitting ▸` (le modèle libre se saisit dans la
-    /// fenêtre, il n'a pas d'entrée de menu qui le préremplisse).
+    /// The models offered by `Fitting ▸` (the free model is typed in the window, it
+    /// has no menu entry that pre-fills it).
     pub fn fit_models() -> [Model; 10] {
         [
             Model::Linear,
@@ -130,23 +130,23 @@ impl Preset {
     }
 }
 
-/// La catégorie d'une analyse (#248), comme dans OriginLab : une entrée du
-/// menu Analysis, une fenêtre. Seule `DataManipulation` transforme la courbe et
-/// peut **remplacer** les données ; les autres écrivent de nouvelles colonnes.
+/// The category of an analysis (#248), as in OriginLab: one Analysis menu entry,
+/// one window. Only `DataManipulation` transforms the curve and can **replace**
+/// the data; the others write new columns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Category {
-    /// Lignes de base, correction par une référence et lissage.
+    /// Baselines, correction by a reference and smoothing.
     DataManipulation,
-    /// Ajustement par un modèle.
+    /// Fit by a model.
     Fitting,
-    /// Décomposition en pics, reconvolution, déconvolution directe.
+    /// Peak decomposition, reconvolution, direct deconvolution.
     PeaksAndDeconvolution,
-    /// Intégrale.
+    /// Integral.
     Integrate,
 }
 
 impl Category {
-    /// Les catégories, dans l'ordre du menu.
+    /// The categories, in menu order.
     pub const ALL: [Category; 4] = [
         Category::DataManipulation,
         Category::Fitting,
@@ -154,7 +154,7 @@ impl Category {
         Category::Integrate,
     ];
 
-    /// La catégorie d'une famille d'opération.
+    /// The category of an operation family.
     pub fn of(kind: OperationKind) -> Self {
         match kind {
             OperationKind::Baseline | OperationKind::Correct | OperationKind::Smooth => {
@@ -168,7 +168,7 @@ impl Category {
         }
     }
 
-    /// Les familles que la fenêtre de la catégorie propose (« Analysis type »).
+    /// The families that the category's window offers ("Analysis type").
     pub fn kinds(self) -> &'static [OperationKind] {
         match self {
             Category::DataManipulation => &[
@@ -186,8 +186,8 @@ impl Category {
         }
     }
 
-    /// La méthode préchoisie quand on ouvre la fenêtre de la catégorie sans
-    /// méthode (clic droit).
+    /// The method pre-chosen when the category's window is opened without a method
+    /// (right-click).
     pub fn default_preset(self) -> Preset {
         match self {
             Category::DataManipulation => Preset::BaselineLine,
@@ -197,7 +197,7 @@ impl Category {
         }
     }
 
-    /// Le nom de la catégorie, dans la langue courante.
+    /// The name of the category, in the current language.
     pub fn title(self) -> String {
         match self {
             Category::DataManipulation => tr!("analysis-category-data-manipulation"),
@@ -208,8 +208,8 @@ impl Category {
     }
 }
 
-/// Là où une analyse récente se relance (#249) : la sélection courante, des
-/// colonnes d'une feuille ou des courbes d'un graphe.
+/// Where a recent analysis is rerun (#249): the current selection, columns of a
+/// worksheet or curves of a graph.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecentTarget {
     Columns {
@@ -221,44 +221,44 @@ pub enum RecentTarget {
         series: Vec<stokesforge_plot::SeriesRef>,
         spec: Box<stokesforge_plot::PlotSpec>,
     },
-    /// Des lignes entières `(feuille, ligne)` (#253).
+    /// Whole rows `(worksheet, row)` (#253).
     Rows {
         rows: Vec<(NodeId, usize)>,
     },
 }
 
-/// La forme d'une ligne de base (M10).
+/// The shape of a baseline (M10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BaselineShape {
-    /// Fond plat par un point.
+    /// Flat background from one point.
     Constant,
-    /// Fond plat par la moyenne d’une zone.
+    /// Flat background from the mean of a zone.
     ConstantZone,
-    /// Une droite par deux points posés.
+    /// A straight line through two placed points.
     TwoPoints,
-    /// Un polynôme ajusté sur des zones de fond.
+    /// A polynomial fitted on background zones.
     Zones,
-    /// Une courbe qui passe par des points d'ancrage.
+    /// A curve that goes through anchor points.
     Anchors,
 }
 
-/// Réglages de la ligne de base.
+/// Baseline settings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BaselineSetup {
     pub shape: BaselineShape,
-    /// Réglages propres aux constantes : changer de forme conserve ceux des
-    /// ancrages et du polynôme, même après un nouveau geste sur l’aperçu.
+    /// Settings specific to constants: changing shape keeps those of the anchors
+    /// and of the polynomial, even after a new gesture on the preview.
     pub constant_point: Option<(f64, f64)>,
     pub constant_zone: Option<(f64, f64)>,
-    /// Les deux points de la droite, ou les points d'ancrage.
+    /// The two points of the line, or the anchor points.
     pub points: Vec<(f64, f64)>,
-    /// Les zones de fond.
+    /// The background zones.
     pub zones: Vec<(f64, f64)>,
-    /// Degré du polynôme des zones (1 : droite).
+    /// Degree of the zones' polynomial (1: a line).
     pub degree: u32,
     pub interpolation: Interpolation,
     pub op: BaselineOp,
-    /// Écrire aussi la ligne de base dans une colonne.
+    /// Also write the baseline into a column.
     pub baseline_column: bool,
 }
 
@@ -278,10 +278,10 @@ impl Default for BaselineSetup {
     }
 }
 
-/// Réglages de l'intégrale.
+/// Integral settings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IntegrateSetup {
-    /// Plages `(de, à)` ; vide : la série entière.
+    /// Ranges `(from, to)`; empty: the whole series.
     pub ranges: Vec<(f64, f64)>,
     pub under: Under,
     pub cumulative: bool,
@@ -299,16 +299,16 @@ impl Default for IntegrateSetup {
     }
 }
 
-/// Réglages de l'ajustement.
+/// Fit settings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FitSetup {
     pub model: Model,
-    /// Un réglage par paramètre du modèle (voir [`FitSetup::reset_params`]).
+    /// One setting per model parameter (see [`FitSetup::reset_params`]).
     pub params: Vec<ParamSetting>,
-    /// Plage de X ajustée ; `None` : toute la série.
+    /// Fitted X range; `None`: the whole series.
     pub range: Option<(f64, f64)>,
     pub residuals: bool,
-    /// Pondérer par la colonne d'erreur de chaque série (`1/σ`).
+    /// Weight by the error column of each series (`1/σ`).
     pub weighted: bool,
 }
 
@@ -325,13 +325,13 @@ impl Default for FitSetup {
 }
 
 impl FitSetup {
-    /// Le nombre de paramètres du modèle courant (0 si un modèle libre ne se
-    /// compile pas encore).
+    /// The number of parameters of the current model (0 if a free model does not
+    /// compile yet).
     pub fn param_count(&self) -> usize {
         self.model.compile().map_or(0, |m| m.param_count())
     }
 
-    /// Les noms des paramètres du modèle courant.
+    /// The names of the parameters of the current model.
     pub fn param_names(&self) -> Vec<String> {
         self.model.compile().map_or_else(
             |_| Vec::new(),
@@ -339,16 +339,16 @@ impl FitSetup {
         )
     }
 
-    /// Remet les réglages par paramètre à leur défaut, à la bonne longueur
-    /// (changement de modèle, de degré ou d'expression).
+    /// Resets the per-parameter settings to their default, at the right length
+    /// (change of model, degree or expression).
     pub fn reset_params(&mut self) {
         self.params = vec![ParamSetting::default(); self.param_count()];
     }
 
-    /// Remplit les valeurs de départ avec l'estimation automatique du modèle
-    /// sur les points `(x, y)` donnés, restreints à la plage ajustée (bouton
-    /// « Auto », #204). La règle est celle de `FitSpec::auto_initial`
-    /// (`stokesforge-analysis`). Sans effet si le modèle ne se compile pas.
+    /// Fills the starting values with the model's automatic estimate on the given
+    /// `(x, y)` points, restricted to the fitted range ("Auto" button, #204). The
+    /// rule is that of `FitSpec::auto_initial` (`stokesforge-analysis`). No effect
+    /// if the model does not compile.
     pub fn auto_initial(&mut self, x: &[f64], y: &[f64]) {
         let mut spec = FitSpec {
             model: self.model.clone(),
@@ -358,37 +358,37 @@ impl FitSetup {
         self.params = spec.params;
     }
 
-    /// Le modèle change : réglages remis à zéro.
+    /// The model changes: settings reset.
     pub fn set_model(&mut self, model: Model) {
         self.model = model;
         self.reset_params();
     }
 
-    /// Au moins un paramètre est partagé : ajustement global.
+    /// At least one parameter is shared: global fit.
     pub fn is_global(&self) -> bool {
         self.params.iter().any(|p| p.shared)
     }
 }
 
-/// Réglages de la décomposition en pics.
+/// Peak decomposition settings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PeaksSetup {
     pub shape: PeakShape,
     pub background: PeakBackground,
-    /// Positions de départ posées à la main ; vides, la détection les trouve.
+    /// Starting positions set by hand; when empty, detection finds them.
     pub seeds: Vec<PeakSeed>,
     pub link_widths: bool,
-    /// Demi-largeur (en X) dans laquelle chaque position reste bornée autour de
-    /// son point de départ ; `None` : positions libres (#204).
+    /// Half-width (in X) within which each position stays bounded around its
+    /// starting point; `None`: free positions (#204).
     pub center_window: Option<f64>,
-    /// Proéminence minimale pour la détection, en % de l'étendue de Y.
+    /// Minimum prominence for detection, in % of the Y extent.
     pub prominence_percent: f64,
     pub max_peaks: usize,
     pub range: Option<(f64, f64)>,
     pub residuals: bool,
-    /// Une colonne par pic.
+    /// One column per peak.
     pub peak_columns: bool,
-    /// Une colonne pour la somme des pics (fond compris).
+    /// One column for the sum of the peaks (background included).
     pub sum_column: bool,
 }
 
@@ -410,7 +410,7 @@ impl Default for PeaksSetup {
     }
 }
 
-/// Réglages de la reconvolution.
+/// Reconvolution settings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReconvSetup {
     pub spec: ReconvSpec,
@@ -435,16 +435,16 @@ impl Default for ReconvSetup {
 }
 
 impl ReconvSetup {
-    /// Nombre de paramètres : fond, une amplitude et une durée de vie par
-    /// composante, puis le décalage.
+    /// Number of parameters: background, one amplitude and one lifetime per
+    /// component, then the shift.
     pub fn param_count(&self) -> usize {
         2 + 2 * self.spec.components
     }
 
-    /// Ajuste la longueur de la liste des réglages au nombre de composantes.
-    /// Le décalage est le **dernier** paramètre : on le met de côté, on
-    /// redimensionne les composantes, puis on le remet en queue — sinon ses
-    /// réglages (départ, fixé, bornes) glisseraient sur la composante ajoutée.
+    /// Adjusts the length of the settings list to the number of components. The
+    /// shift is the **last** parameter: it is set aside, the components are resized,
+    /// then it is put back at the end — otherwise its settings (start, fixed,
+    /// bounds) would slide onto the added component.
     pub fn resize_params(&mut self) {
         let count = self.param_count();
         let shift = self.spec.params.pop().unwrap_or_default();
@@ -453,19 +453,19 @@ impl ReconvSetup {
     }
 }
 
-/// L'algorithme de la déconvolution directe.
+/// The direct deconvolution algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirectAlgorithm {
     RichardsonLucy,
     Wiener,
 }
 
-/// Réglages de la déconvolution directe.
+/// Direct deconvolution settings.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DirectSetup {
     pub algorithm: DirectAlgorithm,
     pub iterations: usize,
-    /// Rapport bruit/signal de Wiener ; `None` : estimé.
+    /// Wiener noise-to-signal ratio; `None`: estimated.
     pub noise: Option<f64>,
     pub shift: f64,
 }
@@ -481,8 +481,8 @@ impl Default for DirectSetup {
     }
 }
 
-/// L'algorithme d'un lissage (#324), l'ordre du polynôme étant gardé à part
-/// pour survivre à un changement de méthode.
+/// The algorithm of a smoothing (#324), the polynomial order being kept apart
+/// so that it survives a change of method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmoothAlgorithm {
     AdjacentAverage,
@@ -490,23 +490,23 @@ pub enum SmoothAlgorithm {
     Median,
 }
 
-/// L'unité dans laquelle la fenêtre d'un lissage se règle.
+/// The unit in which a smoothing's window is set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmoothUnit {
     Points,
     XUnits,
 }
 
-/// Réglages d'un lissage (#324).
+/// Settings of a smoothing (#324).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SmoothSetup {
     pub algorithm: SmoothAlgorithm,
     pub unit: SmoothUnit,
-    /// Fenêtre en points : toujours impaire (voir [`Self::set_points`]).
+    /// Window in points: always odd (see [`Self::set_points`]).
     pub points: usize,
-    /// Fenêtre en unités de X.
+    /// Window in X units.
     pub x_width: f64,
-    /// Ordre du polynôme de Savitzky-Golay.
+    /// Savitzky-Golay polynomial order.
     pub order: usize,
 }
 
@@ -523,15 +523,15 @@ impl Default for SmoothSetup {
 }
 
 impl SmoothSetup {
-    /// Règle la fenêtre en points : bornée à `[MIN_WINDOW, MAX_WINDOW]` et
-    /// relevée au nombre impair suivant (un lissage centré a autant de voisins
-    /// de chaque côté), pour que le champ ne puisse pas fabriquer un réglage que
-    /// le calcul refuserait.
+    /// Sets the window in points: bounded to `[MIN_WINDOW, MAX_WINDOW]` and raised
+    /// to the next odd number (a centered smoothing has as many neighbors on each
+    /// side), so that the field cannot produce a setting the computation would
+    /// refuse.
     pub fn set_points(&mut self, points: usize) {
         self.points = (points | 1).clamp(smooth::MIN_WINDOW, smooth::MAX_WINDOW);
     }
 
-    /// L'opération que ces réglages décrivent.
+    /// The operation these settings describe.
     pub fn spec(&self) -> SmoothSpec {
         SmoothSpec {
             method: match self.algorithm {
@@ -547,7 +547,7 @@ impl SmoothSetup {
     }
 }
 
-/// Les réglages de toutes les familles, gardés ensemble.
+/// The settings of all the families, kept together.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Setup {
     pub baseline: BaselineSetup,
@@ -577,74 +577,74 @@ impl Default for Setup {
     }
 }
 
-/// L'outil actif de l'aperçu (M4 a).
+/// The active tool of the preview (M4 a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PreviewTool {
-    /// Un clic pose un point (ancrage, graine de pic, borne).
+    /// A click sets a point (anchor, peak seed, bound).
     #[default]
     Points,
-    /// Glisser pose une zone ou une plage.
+    /// Dragging sets a zone or a range.
     Zone,
 }
 
-/// Ce qui manque pour valider ou pour montrer l'aperçu.
+/// What is missing to validate or to show the preview.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Issue {
-    /// Aucune série à traiter.
+    /// No series to process.
     NoSeries,
-    /// La correction attend une colonne de référence.
+    /// The correction awaits a reference column.
     NeedsReference,
-    /// Une déconvolution attend une réponse instrumentale.
+    /// A deconvolution awaits an instrument response.
     NeedsResponse,
-    /// Pas assez de points posés.
+    /// Not enough points placed.
     NeedsPoints { needed: usize, have: usize },
-    /// Une zone de fond au moins.
+    /// At least one background zone.
     NeedsZone,
-    /// Le modèle libre est illisible (`Some`) ou sans paramètre (`None`).
+    /// The free model is unreadable (`Some`) or has no parameter (`None`).
     BadModel(Option<stokesforge_analysis::expr::ExprError>),
-    /// Une colonne citée n'existe plus.
+    /// A cited column no longer exists.
     MissingColumn,
-    /// Le calcul lui-même a échoué.
+    /// The computation itself failed.
     Failed(AnalysisError),
 }
 
-/// Le formulaire complet d'une fenêtre d'analyse.
+/// The complete form of an analysis window.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisForm {
-    /// La famille active ; les réglages des autres sont gardés dans `setup`.
+    /// The active family; the settings of the others are kept in `setup`.
     pub kind: OperationKind,
     pub setup: Setup,
     pub series: Vec<SeriesRef>,
-    /// Référence d'une correction, réponse instrumentale d'une déconvolution.
+    /// Reference of a correction, instrument response of a deconvolution.
     pub aux: Option<AuxRef>,
-    /// « Keep in Results » plutôt que « Show » (M5).
+    /// "Keep in Results" rather than "Show" (M5).
     pub keep_results: bool,
-    /// Recalcul automatique (M9 b).
+    /// Automatic recalculation (M9 b).
     pub auto_recalc: bool,
-    /// L'utilisateur a touché la case : un changement de famille ne la remet
-    /// plus au défaut de l'opération.
+    /// The user touched the checkbox: a change of family no longer resets it to the
+    /// operation's default.
     pub auto_recalc_chosen: bool,
-    /// Boîte de dialogue quand R² est faible (#288), par calcul.
+    /// Dialog box when R² is low (#288), per computation.
     pub low_r2_dialog: bool,
-    /// Le calcul qu'on modifie (« Edit Calculation… »).
+    /// The computation being edited ("Edit Calculation…").
     pub editing: Option<NodeId>,
-    /// Le graphe d'où l'on vient : « Add to graph » y range les colonnes.
+    /// The graph the user comes from: "Add to graph" puts the columns there.
     pub graph: Option<NodeId>,
     pub add_to_graph: bool,
-    /// Remplace définitivement les Y ; seul Annuler revient aux valeurs brutes.
+    /// Permanently replaces the Y values; only Undo returns to the raw values.
     pub replace_original: bool,
-    /// Cadrage et styles figés au geste depuis un graphe (#210), avec les
-    /// adresses des sources dans ce spec ; jamais persistés comme calcul.
+    /// Framing and styles frozen at the gesture from a graph (#210), with the
+    /// addresses of the sources in this spec; never persisted as a computation.
     pub graph_source: Option<(stokesforge_plot::PlotSpec, Vec<stokesforge_plot::SeriesRef>)>,
-    /// La série montrée dans l'aperçu.
+    /// The series shown in the preview.
     pub current: usize,
     pub tool: PreviewTool,
-    /// Moyenne locale d'un point aimanté (M4 b).
+    /// Local mean of a snapped point (M4 b).
     pub average: usize,
 }
 
 impl AnalysisForm {
-    /// Un formulaire neuf pour `preset` sur `series`.
+    /// A fresh form for `preset` on `series`.
     pub fn new(preset: &Preset, series: Vec<SeriesRef>, keep_results: bool) -> Self {
         let mut setup = Setup::default();
         match preset {
@@ -659,8 +659,8 @@ impl AnalysisForm {
             Preset::SmoothAdjacent => setup.smooth.algorithm = SmoothAlgorithm::AdjacentAverage,
             Preset::SmoothSavitzkyGolay => {
                 setup.smooth.algorithm = SmoothAlgorithm::SavitzkyGolay;
-                // Un polynôme d'ordre 2 sur 5 points est trop serré pour lisser :
-                // 9 points est le défaut courant.
+                // A polynomial of order 2 over 5 points is too tight to smooth:
+                // 9 points is the current default.
                 setup.smooth.points = 9;
             }
             Preset::SmoothMedian => setup.smooth.algorithm = SmoothAlgorithm::Median,
@@ -690,9 +690,9 @@ impl AnalysisForm {
         form
     }
 
-    /// Les deux formulaires donnent-ils le même aperçu ? L'outil de la souris, la
-    /// moyenne locale, la destination et les cases de sortie ne changent pas ce
-    /// qui est calculé : l'aperçu ne se recalcule pas pour eux.
+    /// Do the two forms give the same preview? The mouse tool, the local mean, the
+    /// destination and the output checkboxes do not change what is computed: the
+    /// preview is not recomputed for them.
     pub fn same_preview(&self, other: &Self) -> bool {
         self.kind == other.kind
             && self.current == other.current
@@ -701,7 +701,7 @@ impl AnalysisForm {
             && self.setup == other.setup
     }
 
-    /// Le formulaire qui rouvre un calcul existant (« Edit Calculation… »).
+    /// The form that reopens an existing computation ("Edit Calculation…").
     pub fn from_calculation(id: NodeId, calc: &Calculation) -> Self {
         let mut form = Self::new(
             &preset_of(&calc.operation),
@@ -714,7 +714,7 @@ impl AnalysisForm {
         form.low_r2_dialog = calc.low_r2_dialog;
         form.auto_recalc_chosen = true;
         form.setup.load(&calc.operation);
-        // La pondération n'est pas dans l'opération : elle se lit dans les séries.
+        // Weighting is not in the operation: it is read from the series.
         form.setup.fit.weighted = calc.series.iter().any(|s| s.sigma.is_some());
         let has = |key: &str| calc.outputs.iter().any(|o| o.key == key);
         form.setup.peaks.peak_columns = has("peak");
@@ -722,15 +722,16 @@ impl AnalysisForm {
         form
     }
 
-    /// Change de famille ; le recalcul automatique retrouve le défaut de la
-    /// nouvelle opération tant que l'utilisateur n'a pas choisi.
+    /// Changes family; automatic recalculation returns to the default of the new
+    /// operation as long as the user has not chosen.
     pub fn set_kind(&mut self, kind: OperationKind) {
         self.kind = kind;
         self.apply_default_auto();
     }
 
-    /// Remet la case « recalcul automatique » au défaut de l'opération et du
-    /// nombre de séries (reconvolution, déconvolution et gros lots : manuel).
+    /// Resets the "automatic recalculation" checkbox to the default of the
+    /// operation and of the number of series (reconvolution, deconvolution and
+    /// large batches: manual).
     pub fn apply_default_auto(&mut self) {
         if self.auto_recalc_chosen {
             return;
@@ -738,7 +739,7 @@ impl AnalysisForm {
         self.auto_recalc = self.auto_by_default();
     }
 
-    /// Le défaut de M9 b pour la famille et le nombre de séries actuels.
+    /// The M9 b default for the current family and number of series.
     pub fn auto_by_default(&self) -> bool {
         !matches!(
             self.kind,
@@ -746,7 +747,7 @@ impl AnalysisForm {
         ) && self.series.len() <= HEAVY_BATCH
     }
 
-    /// Cette famille lit une colonne annexe.
+    /// This family reads an auxiliary column.
     pub fn needs_aux(&self) -> bool {
         matches!(
             self.kind,
@@ -756,20 +757,19 @@ impl AnalysisForm {
         )
     }
 
-    /// L'ajustement lie des paramètres entre les séries : l'aperçu les calcule
-    /// toutes.
+    /// The fit links parameters across series: the preview computes them all.
     pub fn is_global(&self) -> bool {
         self.kind == OperationKind::Fit && self.setup.fit.is_global() && self.series.len() > 1
     }
 
-    /// Les séries sont nommées une par une dans l'aperçu (`◀ ▶`).
+    /// The series are named one by one in the preview (`◀ ▶`).
     pub fn clamp_current(&mut self) {
         if self.current >= self.series.len() {
             self.current = self.series.len().saturating_sub(1);
         }
     }
 
-    /// Ce qui empêche de valider, sans consulter les données.
+    /// What prevents validating, without consulting the data.
     pub fn issues(&self) -> Vec<Issue> {
         let mut issues = Vec::new();
         if self.series.is_empty() {
@@ -786,24 +786,24 @@ impl AnalysisForm {
         issues
     }
 
-    /// Les réglages propres à la famille active qui manquent : le brouillon se
-    /// décrit en [`Operation`] (même incomplet) et `stokesforge-analysis` dit ce
-    /// qui manque ([`Operation::readiness`]).
+    /// The settings of the active family that are missing: the draft is described
+    /// as an [`Operation`] (even incomplete) and `stokesforge-analysis` says what
+    /// is missing ([`Operation::readiness`]).
     fn setup_issues(&self) -> Option<Issue> {
         issue_of(self.draft_operation(false).readiness())
     }
 
-    /// L'opération que les réglages décrivent, ou `None` tant qu'un réglage
-    /// manque. `for_preview` force les colonnes d'aide (ligne de base,
-    /// résidus) pour qu'elles se montrent même non écrites.
+    /// The operation the settings describe, or `None` while a setting is missing.
+    /// `for_preview` forces the helper columns (baseline, residuals) so that they
+    /// show even if not written.
     pub fn operation_for(&self, for_preview: bool) -> Option<Operation> {
         let op = self.draft_operation(for_preview);
         (op.readiness() == Readiness::Ready).then_some(op)
     }
 
-    /// L'opération des réglages de la famille active, **sans juger** s'ils
-    /// suffisent : un point ou une zone pas encore posé y est un `NaN`, que
-    /// [`Operation::readiness`] lit comme « à poser ».
+    /// The operation of the active family's settings, **without judging** whether
+    /// they suffice: a point or a zone not yet placed is a `NaN` there, which
+    /// [`Operation::readiness`] reads as "to be placed".
     fn draft_operation(&self, for_preview: bool) -> Operation {
         const UNPOSED: (f64, f64) = (f64::NAN, f64::NAN);
         let s = &self.setup;
@@ -893,13 +893,13 @@ impl AnalysisForm {
         }
     }
 
-    /// L'opération qui sera enregistrée.
+    /// The operation that will be saved.
     pub fn operation(&self) -> Option<Operation> {
         self.operation_for(false)
     }
 
-    /// Les séries telles que le calcul les lit : la colonne d'erreur ne compte
-    /// que pour un ajustement pondéré.
+    /// The series as the computation reads them: the error column counts only for
+    /// a weighted fit.
     pub fn effective_series(&self) -> Vec<SeriesRef> {
         let weighted = self.kind == OperationKind::Fit && self.setup.fit.weighted;
         self.series
@@ -911,8 +911,8 @@ impl AnalysisForm {
             .collect()
     }
 
-    /// Les séries que l'aperçu calcule : la série montrée, ou toutes pour un
-    /// ajustement global (les paramètres partagés les lient).
+    /// The series the preview computes: the shown series, or all of them for a
+    /// global fit (the shared parameters link them).
     fn preview_series(&self) -> Vec<SeriesRef> {
         let all = self.effective_series();
         if self.is_global() {
@@ -922,8 +922,8 @@ impl AnalysisForm {
         }
     }
 
-    /// Le calcul de l'aperçu : colonnes d'aide comprises. Les indices de
-    /// série des colonnes rendues sont ceux de [`Self::preview_rank`].
+    /// The preview computation: helper columns included. The series indices of the
+    /// returned columns are those of [`Self::preview_rank`].
     pub fn preview(&self, tree: &Tree) -> Result<Computed, Issue> {
         if let Some(issue) = self.issues().into_iter().next() {
             return Err(issue);
@@ -933,7 +933,7 @@ impl AnalysisForm {
         run(tree, &op, &series, self.aux.as_ref())
     }
 
-    /// Le rang, dans `preview`, de la série montrée.
+    /// The rank, in `preview`, of the shown series.
     pub fn preview_rank(&self) -> usize {
         if self.is_global() {
             self.current
@@ -942,7 +942,7 @@ impl AnalysisForm {
         }
     }
 
-    /// Une correction peut remplacer uniquement des colonnes ordinaires.
+    /// A correction can replace ordinary columns only.
     pub fn replacement_disabled(&self, tree: &Tree) -> Option<String> {
         if self.editing.is_some()
             || !matches!(
@@ -964,17 +964,17 @@ impl AnalysisForm {
         None
     }
 
-    /// Le lot à enregistrer : toutes les séries calculées, les colonnes
-    /// demandées avec leur nom long (M6), les valeurs si on les garde.
+    /// The batch to save: all the series computed, the requested columns with their
+    /// long name (M6), the values if they are kept.
     ///
-    /// En modification, une colonne qui existe déjà garde ses métadonnées (nom
-    /// long, unité, commentaire que l'utilisateur a pu retoucher).
+    /// When editing, a column that already exists keeps its metadata (long name,
+    /// unit, comment that the user may have touched up).
     pub fn draft(&self, tree: &Tree) -> Result<CalculationDraft, Issue> {
         self.draft_with_values(tree).map(|(draft, _)| draft)
     }
 
-    /// [`Self::draft`], et en plus **toutes** les valeurs calculées, gardées ou
-    /// non : l'avertissement de R² faible (#288) juge aussi un calcul « Show ».
+    /// [`Self::draft`], and in addition **all** the computed values, kept or not:
+    /// the low R² warning (#288) also judges a "Show" computation.
     pub fn draft_with_values(
         &self,
         tree: &Tree,
@@ -985,8 +985,8 @@ impl AnalysisForm {
         let operation = self.operation().ok_or(Issue::NoSeries)?;
         let series = self.effective_series();
         let computed = run(tree, &operation, &series, self.aux.as_ref())?;
-        // Les colonnes d'aide suivent l'opération ; les deux cases des pics sont
-        // les seules à vivre dans le formulaire (la liste est celle du cœur).
+        // The helper columns follow the operation; the two peak checkboxes are the
+        // only ones to live in the form (the list is the core's).
         let peak_outputs = stokesforge_core::PeakOutputs {
             peak_columns: self.setup.peaks.peak_columns,
             sum_column: self.setup.peaks.sum_column,
@@ -1051,14 +1051,14 @@ fn run(
     })
 }
 
-/// Le nom court d'une colonne source (« B »), à défaut le vide.
+/// The short name of a source column ("B"), otherwise empty.
 fn short_name(tree: &Tree, column: NodeId) -> String {
     tree.node(column)
         .map(|n| n.name().to_string())
         .unwrap_or_default()
 }
 
-/// Le nom long d'une colonne source, ou à défaut son nom court.
+/// The long name of a source column, otherwise its short name.
 fn long_name(tree: &Tree, column: NodeId) -> String {
     tree.node(column)
         .and_then(|n| n.as_column())
@@ -1067,11 +1067,11 @@ fn long_name(tree: &Tree, column: NodeId) -> String {
         .unwrap_or_else(|| short_name(tree, column))
 }
 
-/// Le nom d'une colonne de sortie, dans la langue du chargeur `loader`. La règle
-/// (quel nom, quelles pièces) est celle de `stokesforge_core::OutputName` ; ce
-/// `match` n'a **pas** de branche par défaut : une variante ajoutée au cœur ne
-/// compile pas ici tant qu'elle n'a pas sa clé `analysis-output-*`.
-/// `tests/output_names.rs` garde l'accord de l'anglais avec `english()`.
+/// The name of an output column, in the language of the `loader`. The rule
+/// (which name, which pieces) is that of `stokesforge_core::OutputName`; this
+/// `match` has **no** default branch: a variant added to the core does not
+/// compile here until it has its `analysis-output-*` key.
+/// `tests/output_names.rs` guards the agreement of English with `english()`.
 pub fn output_name_text_in(loader: &FluentLanguageLoader, name: &OutputName) -> String {
     macro_rules! tr {
         ($($arguments:tt)*) => {
@@ -1117,21 +1117,20 @@ pub fn output_name_text_in(loader: &FluentLanguageLoader, name: &OutputName) -> 
         OutputName::Smoothed { name } => {
             tr!("analysis-output-smoothed", name = name.as_str())
         }
-        // Le repli d'une clé inconnue est le nom de la source, déjà du texte
-        // de l'utilisateur : rien à traduire.
+        // The fallback of an unknown key is the source's name, already user text:
+        // nothing to translate.
         OutputName::Source { name } => name.clone(),
     }
 }
 
-/// Le nom d'une colonne de sortie, dans la langue courante.
+/// The name of an output column, in the current language.
 pub fn output_name_text(name: &OutputName) -> String {
     output_name_text_in(crate::i18n::loader(), name)
 }
 
-/// Les métadonnées d'une colonne produite (M6) : le nom long dit la sortie et
-/// la source (`OutputName`, traduit) ; l'unité est **toujours** celle de la
-/// source (`output_unit`, vide pour une clé inconnue) ; le commentaire nomme
-/// l'opération.
+/// The metadata of a produced column (M6): the long name says the output and
+/// the source (`OutputName`, translated); the unit is **always** the source's
+/// (`output_unit`, empty for an unknown key); the comment names the operation.
 pub fn output_meta(
     tree: &Tree,
     kind: OperationKind,
@@ -1148,7 +1147,7 @@ pub fn output_meta(
     }
 }
 
-/// Le nom d'une famille d'opération, dans la langue courante.
+/// The name of an operation family, in the current language.
 pub fn kind_title(kind: OperationKind) -> String {
     match kind {
         OperationKind::Baseline => tr!("analysis-kind-baseline"),
@@ -1162,9 +1161,9 @@ pub fn kind_title(kind: OperationKind) -> String {
     }
 }
 
-/// La colonne de référence d'une correction, telle que l'utilisateur la lit :
-/// « copy of /[Book1]Sheet1!B » quand le calcul lit sa copie figée (#248), sinon
-/// le nom de la colonne.
+/// The reference column of a correction, as the user reads it:
+/// "copy of /[Book1]Sheet1!B" when the computation reads its frozen copy (#248),
+/// otherwise the column's name.
 pub fn reference_label(tree: &Tree, aux: &AuxRef) -> String {
     if tree.is_analysis_copy(aux.y) {
         let source = tree
@@ -1184,7 +1183,7 @@ pub fn reference_label(tree: &Tree, aux: &AuxRef) -> String {
     )
 }
 
-/// Le préréglage qui rouvre une opération existante.
+/// The preset that reopens an existing operation.
 pub fn preset_of(op: &Operation) -> Preset {
     match op {
         Operation::Baseline { method, .. } => match method {
@@ -1210,7 +1209,7 @@ pub fn preset_of(op: &Operation) -> Preset {
 }
 
 impl Setup {
-    /// Reprend les réglages d'une opération existante (modification).
+    /// Takes over the settings of an existing operation (editing).
     pub fn load(&mut self, op: &Operation) {
         match op {
             Operation::Baseline {
@@ -1329,9 +1328,9 @@ impl Setup {
     }
 }
 
-/// Ce que `Operation::readiness` dit de l'opération, dans les cas de
-/// l'interface. Un `match` exhaustif sans `_` : une variante nouvelle de
-/// `Readiness` ne compile pas sans son cas (et sa phrase, `issue_message`).
+/// What `Operation::readiness` says about the operation, in the interface's
+/// cases. An exhaustive `match` without `_`: a new variant of `Readiness` does
+/// not compile without its case (and its sentence, `issue_message`).
 fn issue_of(readiness: Readiness) -> Option<Issue> {
     match readiness {
         Readiness::Ready => None,
@@ -1343,7 +1342,7 @@ fn issue_of(readiness: Readiness) -> Option<Issue> {
     }
 }
 
-/// Ce qui manque ou ce qui a échoué, en phrase de l'interface.
+/// What is missing or what failed, as an interface sentence.
 pub fn issue_message(issue: &Issue) -> String {
     match issue {
         Issue::NoSeries => tr!("analysis-issue-no-series"),
@@ -1366,8 +1365,8 @@ pub fn issue_message(issue: &Issue) -> String {
 }
 
 impl ReconvSetup {
-    /// Les noms des paramètres, dans l'ordre des réglages : fond, une
-    /// amplitude et une durée de vie par composante, puis le décalage.
+    /// The parameter names, in the order of the settings: background, one
+    /// amplitude and one lifetime per component, then the shift.
     pub fn param_names(&self) -> Vec<String> {
         let mut names = vec!["bkg".to_string()];
         for i in 1..=self.spec.components {
@@ -1380,8 +1379,8 @@ impl ReconvSetup {
 }
 
 impl AnalysisForm {
-    /// L'outil qui sert le plus souvent à la famille et à la forme courantes :
-    /// des zones pour les plages et le fond, des points sinon.
+    /// The tool most often used for the current family and shape: zones for ranges
+    /// and background, points otherwise.
     pub fn natural_tool(&self) -> PreviewTool {
         match self.kind {
             OperationKind::Baseline
@@ -1399,10 +1398,10 @@ impl AnalysisForm {
         }
     }
 
-    /// Les gestes parmi lesquels l'utilisateur choisit dans l'aperçu (#270,
-    /// #299) : les deux de la détection de pics (un clic pose la position d'un
-    /// pic, un glisser sa plage de recherche), aucun pour les autres analyses,
-    /// dont le geste est celui de [`Self::natural_tool`] sans rien à montrer.
+    /// The gestures among which the user chooses in the preview (#270, #299): the
+    /// two of peak detection (a click sets a peak's position, a drag its search
+    /// range), none for the other analyses, whose gesture is that of
+    /// [`Self::natural_tool`] with nothing to show.
     pub fn tool_choices(&self) -> &'static [PreviewTool] {
         match self.kind {
             OperationKind::Peaks => &[PreviewTool::Points, PreviewTool::Zone],
@@ -1410,8 +1409,8 @@ impl AnalysisForm {
         }
     }
 
-    /// Un clic de l'outil « points » en `(x, y)` : un point d'ancrage ou de
-    /// droite, ou la position de départ d'un pic.
+    /// A click of the "points" tool at `(x, y)`: an anchor or line point, or the
+    /// starting position of a peak.
     pub fn add_point(&mut self, x: f64, y: f64) {
         match self.kind {
             OperationKind::Baseline => {
@@ -1447,8 +1446,8 @@ impl AnalysisForm {
         }
     }
 
-    /// Une zone tracée de `a` à `b` : zone de fond, plage d'intégration,
-    /// plage d'ajustement ou fenêtre de reconvolution.
+    /// A zone drawn from `a` to `b`: background zone, integration range, fit range
+    /// or reconvolution window.
     pub fn add_zone(&mut self, a: f64, b: f64) {
         let range = (a.min(b), a.max(b));
         if range.0 == range.1 {
@@ -1475,9 +1474,9 @@ impl AnalysisForm {
         }
     }
 
-    /// Retire ce que le clic droit vise en `x` : le point ou le pic à moins de
-    /// `tolerance`, ou la zone qui contient `x`. Rend vrai si quelque chose a
-    /// été retiré.
+    /// Removes what the right-click aims at in `x`: the point or peak within
+    /// `tolerance`, or the zone that contains `x`. Returns true if something was
+    /// removed.
     pub fn remove_near(&mut self, x: f64, tolerance: f64) -> bool {
         fn nearest(values: impl Iterator<Item = f64>, x: f64, tolerance: f64) -> Option<usize> {
             values
@@ -1557,41 +1556,41 @@ impl AnalysisForm {
     }
 }
 
-/// Un ensemble de plages d'un calcul : celui dont on déplace une borne.
+/// A set of ranges of a computation: the one whose bound is being moved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RangeSet {
-    /// Les zones de fond d'une ligne de base.
+    /// The background zones of a baseline.
     BaselineZones,
-    /// Les plages d'une intégrale.
+    /// The ranges of an integral.
     Integrate,
-    /// La plage d'un ajustement.
+    /// The range of a fit.
     Fit,
-    /// La plage d'une décomposition en pics.
+    /// The range of a peak decomposition.
     Peaks,
-    /// La fenêtre d'une reconvolution.
+    /// The window of a reconvolution.
     Window,
 }
 
-/// Une borne d'une plage.
+/// A bound of a range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Edge {
     Lo,
     Hi,
 }
 
-/// Ce qu'une poignée déplace dans les réglages d'un calcul (#199).
+/// What a handle moves in a computation's settings (#199).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HandleSlot {
-    /// Un point de droite ou d'ancrage : X **et** Y se déplacent.
+    /// A line or anchor point: X **and** Y move.
     Point(usize),
-    /// La position de départ d'un pic : seul X se déplace.
+    /// The starting position of a peak: only X moves.
     Seed(usize),
-    /// La borne d'une plage : seul X se déplace.
+    /// The bound of a range: only X moves.
     Edge(RangeSet, usize, Edge),
 }
 
-/// Une poignée posée sur la figure : où elle est, en données. `y` est `None`
-/// pour les poignées qui ne portent qu'une abscisse.
+/// A handle placed on the figure: where it is, in data. `y` is `None` for
+/// handles that carry only an abscissa.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Handle {
     pub slot: HandleSlot,
@@ -1600,8 +1599,8 @@ pub struct Handle {
 }
 
 impl AnalysisForm {
-    /// Les poignées que les réglages courants exposent sur le graphe (#199) :
-    /// points d'ancrage, bornes de zones et de plages, positions de pics.
+    /// The handles the current settings expose on the graph (#199): anchor points,
+    /// bounds of zones and ranges, peak positions.
     pub fn handles(&self) -> Vec<Handle> {
         let mut out = Vec::new();
         let mut edges = |set: RangeSet, ranges: &[(f64, f64)]| {
@@ -1669,10 +1668,10 @@ impl AnalysisForm {
         out
     }
 
-    /// Déplace la poignée `slot` en `(x, y)`. Une borne ne franchit pas sa
-    /// jumelle (la plage garde au moins un pas) ; des points d'ancrage
-    /// restent triés. Rend faux quand rien n'a changé (poignée disparue,
-    /// valeur non finie, plage réduite à un point).
+    /// Moves the handle `slot` to `(x, y)`. A bound does not cross its twin (the
+    /// range keeps at least one step); anchor points stay sorted. Returns false
+    /// when nothing changed (handle gone, non-finite value, range reduced to a
+    /// point).
     pub fn move_handle(&mut self, slot: HandleSlot, x: f64, y: f64) -> bool {
         if !x.is_finite() || !y.is_finite() {
             return false;
@@ -1758,9 +1757,9 @@ impl AnalysisForm {
     }
 }
 
-/// Les valeurs de X et de Y de **chaque ligne** d'une série, `NaN` pour une
-/// cellule vide ou textuelle ; sans colonne X, le numéro de ligne à partir de 1
-/// (comme le calcul).
+/// The X and Y values of **each row** of a series, `NaN` for an empty or text
+/// cell; without an X column, the row number starting at 1 (like the
+/// computation).
 pub fn series_rows(tree: &Tree, series: &SeriesRef) -> (Vec<f64>, Vec<f64>) {
     let numbers = |id: NodeId| -> Vec<f64> {
         tree.node(id)
@@ -1777,7 +1776,7 @@ pub fn series_rows(tree: &Tree, series: &SeriesRef) -> (Vec<f64>, Vec<f64>) {
     (xs, ys)
 }
 
-/// Les points `(x, y)` finis d'une série, dans l'ordre des lignes.
+/// The finite `(x, y)` points of a series, in row order.
 pub fn series_points(tree: &Tree, series: &SeriesRef) -> (Vec<f64>, Vec<f64>) {
     let (xs, ys) = series_rows(tree, series);
     xs.into_iter()
@@ -1786,7 +1785,7 @@ pub fn series_points(tree: &Tree, series: &SeriesRef) -> (Vec<f64>, Vec<f64>) {
         .unzip()
 }
 
-/// Le nom d'une série pour la fenêtre : « Feuille / nom long (B) ».
+/// The name of a series for the window: "Sheet / long name (B)".
 pub fn series_label(tree: &Tree, series: &SeriesRef) -> String {
     let short = short_name(tree, series.y);
     let long = long_name(tree, series.y);
@@ -1797,9 +1796,9 @@ pub fn series_label(tree: &Tree, series: &SeriesRef) -> String {
     }
 }
 
-/// Les colonnes Y que la fenêtre propose comme référence ou comme réponse
-/// instrumentale : celles du classeur de la première série, hors les séries
-/// traitées elles-mêmes. Le nom dit la feuille.
+/// The Y columns the window offers as reference or as instrument response:
+/// those of the first series' workbook, excluding the series being processed
+/// themselves. The name says the worksheet.
 pub fn aux_candidates(tree: &Tree, series: &[SeriesRef]) -> Vec<(NodeId, String)> {
     let Some(first) = series.first() else {
         return Vec::new();
@@ -1842,8 +1841,8 @@ fn series_label_of(tree: &Tree, column: NodeId) -> String {
     )
 }
 
-/// La colonne annexe `y` avec le X le plus proche à sa gauche dans sa feuille
-/// (la règle d'appariement de `stokesforge_core::compose::x_for`).
+/// The auxiliary column `y` with the nearest X to its left in its worksheet
+/// (the pairing rule of `stokesforge_core::compose::x_for`).
 pub fn aux_for(tree: &Tree, y: NodeId) -> AuxRef {
     AuxRef {
         x: stokesforge_core::compose::x_for(tree, y),
@@ -1851,9 +1850,9 @@ pub fn aux_for(tree: &Tree, y: NodeId) -> AuxRef {
     }
 }
 
-/// La formule d'un modèle, en Typst, pour la fenêtre d'ajustement (#204). Les
-/// noms de paramètres sont ceux du tableau (`A`, `tau`, `y0`…). `None` pour le
-/// modèle libre : sa formule est celle que l'utilisateur écrit.
+/// The formula of a model, in Typst, for the fit window (#204). The parameter
+/// names are those of the table (`A`, `tau`, `y0`...). `None` for the free
+/// model: its formula is the one the user writes.
 pub fn model_formula_source(model: &Model) -> Option<&'static str> {
     Some(match model {
         Model::Linear => r#"$ y = "intercept" + "slope" dot x $"#,
@@ -1869,9 +1868,9 @@ pub fn model_formula_source(model: &Model) -> Option<&'static str> {
     })
 }
 
-/// L'unité d'une valeur calculée : pour une aire, le produit des unités de X et
-/// de Y (`nm·counts`), sans conversion, écrite seulement si les deux sont
-/// renseignées (#187, #204) ; vide pour tout le reste.
+/// The unit of a computed value: for an area, the product of the units of X
+/// and Y (`nm·counts`), without conversion, written only if both are filled in
+/// (#187, #204); empty for everything else.
 pub fn value_unit(tree: &Tree, series: &SeriesRef, key: &str) -> String {
     if !matches!(key, "area" | "area.total" | "peak.area") {
         return String::new();
@@ -1890,7 +1889,7 @@ pub fn value_unit(tree: &Tree, series: &SeriesRef, key: &str) -> String {
     }
 }
 
-/// Une valeur et son erreur, suivies de leur unité quand elle existe.
+/// A value and its error, followed by their unit when it exists.
 pub fn with_unit(text: String, unit: &str) -> String {
     if unit.is_empty() {
         text
@@ -1899,9 +1898,10 @@ pub fn with_unit(text: String, unit: &str) -> String {
     }
 }
 
-/// Le libellé d'une valeur calculée (`area`, `param.tau`, `stat.r_squared`…),
-/// avec son rang pour les valeurs par plage ou par pic. Une clé inconnue
-/// s'affiche brute : rien ne disparaît.
+/// The label of a computed value (`area`, `param.tau`, `stat.r_squared`...),
+/// with its rank for per-range or per-peak values. An unknown key is displayed
+/// raw: nothing disappears.
+///
 pub fn value_label(key: &str, index: Option<usize>) -> String {
     let n = index.map_or(0, |i| i64::try_from(i).unwrap_or(i64::MAX));
     if let Some(name) = key.strip_prefix("param.") {

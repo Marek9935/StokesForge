@@ -1,25 +1,24 @@
-//! « Colonne utilisée par un calcul » (#306) : après la suppression de
-//! colonnes (ou d'une feuille, d'un classeur) que lit un calcul, une fenêtre
-//! d'information dit lesquels, avec deux réponses : `Close` ne fait rien,
-//! `Undo` annule le geste.
+//! "Column used by a calculation" (#306): after deleting columns (or a
+//! sheet, a workbook) that a calculation reads, an information window says
+//! which ones, with two answers: `Close` does nothing, `Undo` undoes the
+//! gesture.
 //!
-//! Le geste n'est jamais bloqué ni confirmé d'avance : il reste annulable
-//! (invariant 1), la liste se calcule sur l'arbre d'**avant** (une colonne
-//! supprimée n'a plus de nom) et la fenêtre s'ouvre après, seulement si le
-//! geste a réussi. Les textes sont des `tr!` ici, jamais dans les crates du
-//! dessous.
+//! The gesture is never blocked nor confirmed beforehand: it stays undoable
+//! (invariant 1), the list is computed on the tree from **before** (a deleted
+//! column has no name any more) and the window opens afterwards, only if the
+//! gesture succeeded. The texts are `tr!` here, never in the crates below.
 //!
-//! Quatre sortes de lecteurs, et une seule exclusion :
-//! - une colonne **à formule** de la même feuille qui lit une colonne
-//!   supprimée (#321 : une formule retient les colonnes par identifiant, les
-//!   lettres suivantes ne glissent plus — la formule s'affiche `#REF`) ;
-//! - un **calcul d'analyse** dont une série (X, Y, σ) est une colonne
-//!   supprimée. La référence cachée d'une correction (`aux`) ne compte pas :
-//!   c'est une copie. Un calcul dont une colonne de sortie disparaît avec le
-//!   geste ne compte pas non plus : il disparaît avec elle.
+//! Four kinds of readers, and a single exclusion:
+//! - a **formula** column of the same sheet that reads a deleted column
+//!   (#321: a formula keeps columns by identifier, the following letters no
+//!   longer slide; the formula displays `#REF`);
+//! - an **analysis calculation** one of whose series (X, Y, σ) is a deleted
+//!   column. The hidden reference of a correction (`aux`) does not count: it
+//!   is a copy. A calculation whose output column disappears with the
+//!   gesture does not count either: it disappears with it.
 //!
-//! Le texte stocké d'une formule n'est jamais réécrit
-//! (`docs/modele-de-donnees.md`) : les lettres affichées suivent les colonnes.
+//! The stored text of a formula is never rewritten
+//! (`docs/modele-de-donnees.md`): the displayed letters follow the columns.
 
 use std::collections::BTreeSet;
 
@@ -31,40 +30,40 @@ use super::AppState;
 use crate::analysis::kind_title;
 use crate::tr;
 
-/// La réponse à la question de Ctrl+Maj+C sur des colonnes à formule (#306).
+/// The answer to the Ctrl+Shift+C question about formula columns (#306).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FullColumnsCopy {
-    /// Copie les valeurs ; la ligne Formule reste vide.
+    /// Copies the values; the Formula row stays empty.
     Values,
-    /// Copie aussi les formules.
+    /// Also copies the formulas.
     Formulas,
-    /// Ne copie rien.
+    /// Copies nothing.
     Cancel,
 }
 
-/// Un lecteur de colonne supprimée, en donnée : le texte se fait à l'affichage.
+/// A reader of a deleted column, as data: the text is made at display time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ColumnUser {
-    /// Une colonne à formule, nommée par son nom court (même feuille).
+    /// A formula column, named by its short name (same sheet).
     Formula { name: String },
-    /// Un calcul d'analyse : sa famille et sa première colonne de sortie,
-    /// nommée `[Classeur]Feuille!Colonne` (ou par son nom court dans la
-    /// feuille d'une colonne supprimée).
+    /// An analysis calculation: its family and its first output column,
+    /// named `[Workbook]Sheet!Column` (or by its short name in the sheet of a
+    /// deleted column).
     Calculation {
         kind: OperationKind,
         output: Option<String>,
     },
 }
 
-/// La fenêtre ouverte : ce qu'elle liste, et l'étiquette d'annulation de
-/// **ce** geste, pour que `Undo` n'annule rien d'autre.
+/// The open window: what it lists, and the undo label of **this** gesture,
+/// so that `Undo` undoes nothing else.
 #[derive(Debug, Clone)]
 pub(super) struct ColumnUseNotice {
     users: Vec<ColumnUser>,
     undo_label: Option<HistoryLabel>,
 }
 
-/// Les colonnes (feuilles de données) sous `ids`, `ids` compris.
+/// The columns (data sheets) under `ids`, `ids` included.
 pub(super) fn columns_under(tree: &Tree, ids: &[NodeId]) -> Vec<NodeId> {
     let mut out = Vec::new();
     let mut stack: Vec<NodeId> = ids.iter().rev().copied().collect();
@@ -82,11 +81,11 @@ pub(super) fn columns_under(tree: &Tree, ids: &[NodeId]) -> Vec<NodeId> {
     out
 }
 
-/// Qui lit les colonnes `deleted` (à calculer **avant** la suppression).
+/// Who reads the `deleted` columns (to compute **before** the deletion).
 pub(super) fn column_users(tree: &Tree, deleted: &[NodeId]) -> Vec<ColumnUser> {
     let gone: BTreeSet<NodeId> = deleted.iter().copied().collect();
     let mut users = Vec::new();
-    // Colonnes à formule : par feuille, à partir du plus petit rang supprimé.
+    // Formula columns: per sheet, from the smallest deleted rank.
     let sheets: BTreeSet<NodeId> = deleted
         .iter()
         .filter_map(|&c| tree.node(c).and_then(Node::parent))
@@ -143,7 +142,7 @@ pub(super) fn column_users(tree: &Tree, deleted: &[NodeId]) -> Vec<ColumnUser> {
     users
 }
 
-/// `[Classeur]Feuille!Colonne`, `None` si la colonne n'a pas de feuille.
+/// `[Workbook]Sheet!Column`, `None` if the column has no sheet.
 fn column_path(tree: &Tree, column: NodeId) -> Option<String> {
     let node = tree.node(column)?;
     let sheet = tree.node(node.parent()?)?;
@@ -153,15 +152,15 @@ fn column_path(tree: &Tree, column: NodeId) -> Option<String> {
 }
 
 impl AppState {
-    /// Les colonnes lues, calculées avant le geste : `ids` sont les nœuds
-    /// supprimés (colonnes, feuilles, classeurs).
+    /// The columns read, computed before the gesture: `ids` are the deleted
+    /// nodes (columns, sheets, workbooks).
     pub(super) fn column_users_before(&self, ids: &[NodeId]) -> Vec<ColumnUser> {
         let tree = &self.snapshot.tree;
         column_users(tree, &columns_under(tree, ids))
     }
 
-    /// Ouvre la fenêtre après un geste réussi qui a rendu `users` orphelins.
-    /// Rien si la liste est vide ou si le geste a échoué.
+    /// Opens the window after a successful gesture that orphaned `users`.
+    /// Nothing if the list is empty or if the gesture failed.
     pub(super) fn open_column_use(&mut self, users: Vec<ColumnUser>) {
         if users.is_empty() || self.last_action_failed() {
             return;
@@ -172,7 +171,7 @@ impl AppState {
         });
     }
 
-    /// Les lignes de la fenêtre « colonne utilisée », ouverte ou non.
+    /// The lines of the "column used" window, open or not.
     pub fn column_use_lines(&self) -> Option<Vec<String>> {
         let notice = self.column_use.as_ref()?;
         Some(
@@ -199,13 +198,13 @@ impl AppState {
         )
     }
 
-    /// `Close` : ne fait rien.
+    /// `Close`: does nothing.
     pub(super) fn close_column_use(&mut self) {
         self.column_use = None;
     }
 
-    /// `Undo` : annule le geste, et seulement lui — si la pile n'a plus son
-    /// étiquette en tête, on ferme sans rien annuler.
+    /// `Undo`: undoes the gesture, and only it; if the stack no longer has its
+    /// label on top, close without undoing anything.
     pub(super) fn undo_column_use(&mut self) {
         let Some(notice) = self.column_use.take() else {
             return;
@@ -215,8 +214,8 @@ impl AppState {
         }
     }
 
-    /// Réponse à la question de Ctrl+Maj+C : la copie se fait maintenant, et
-    /// son texte part au presse-papiers système par la voie des objets.
+    /// Answer to the Ctrl+Shift+C question: the copy is done now, and its text
+    /// goes to the system clipboard through the objects path.
     pub(super) fn confirm_full_columns_copy(&mut self, choice: FullColumnsCopy) {
         let Some(sheet) = self.pending_full_copy.take() else {
             return;

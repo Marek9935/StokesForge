@@ -1,4 +1,4 @@
-//! #105 : décisions du Project Manager sans serveur d'affichage.
+//! #105: Project Manager decisions without a display server.
 
 use stokesforge_app_state::state::{Action, AppState, StatusLevel};
 use stokesforge_app_state::tr;
@@ -38,7 +38,7 @@ fn fixture() -> (Session, AppState, NodeId, NodeId, NodeId) {
 }
 
 #[test]
-fn duplication_multiple_groupee_et_graphes_sur_les_colonnes_originales() {
+fn grouped_multiple_duplication_and_graphs_on_the_original_columns() {
     let (_session, mut state, book, graph, y) = fixture();
     let before = state.tree().clone();
     state.dispatch(Action::DuplicateObjects(vec![graph, book, book]));
@@ -66,7 +66,7 @@ fn duplication_multiple_groupee_et_graphes_sur_les_colonnes_originales() {
         .iter()
         .all(|id| !before.contains(*id)));
     let NodeKind::Graph { spec, .. } = state.tree().node(graph_copy).unwrap().kind() else {
-        panic!("graphe")
+        panic!("graph")
     };
     assert!(spec.references(y));
     state.dispatch(Action::Undo);
@@ -77,7 +77,7 @@ fn duplication_multiple_groupee_et_graphes_sur_les_colonnes_originales() {
 }
 
 #[test]
-fn presse_papiers_fige_et_collage_entre_projets_avec_identifiants_de_destination() {
+fn frozen_clipboard_and_paste_between_projects_with_destination_identifiers() {
     let (_source, mut source, book, _, y) = fixture();
     source.dispatch(Action::CopyObjects(vec![book]));
     let text = source.take_object_clipboard_text().unwrap();
@@ -86,7 +86,7 @@ fn presse_papiers_fige_et_collage_entre_projets_avec_identifiants_de_destination
         row: 0,
         text: "99".into(),
     });
-    // Les IDs source se recouvrent volontairement avec ceux du destinataire.
+    // The source IDs deliberately overlap with the recipient's.
     let (_destination, mut destination, _, _, _) = fixture();
     let parent = destination.tree().root();
     let before = destination.tree().clone();
@@ -125,17 +125,17 @@ fn presse_papiers_fige_et_collage_entre_projets_avec_identifiants_de_destination
     assert_eq!(destination.tree(), &before);
 }
 
-/// S-F3 (#229) : une suppression annulable ne demande rien ; le message nomme
-/// les graphes **restants** qui en utilisaient les données, et un seul Undo
-/// rend tout.
+/// S-F3 (#229): an undoable deletion asks nothing; the message names the
+/// **remaining** graphs that used its data, and a single Undo gives
+/// everything back.
 #[test]
-fn suppression_sans_confirmation_nomme_les_graphes_et_un_seul_undo_restaure_tout() {
+fn deletion_without_confirmation_names_the_graphs_and_a_single_undo_restores_everything() {
     let (_session, mut state, book, graph, _) = fixture();
     let before = state.tree().clone();
     assert_eq!(state.object_users(&[book]), vec!["Graph1"]);
     assert!(
         state.object_users(&[book, graph]).is_empty(),
-        "un graphe supprimé avec ses données n'est pas nommé"
+        "a graph deleted with its data is not named"
     );
     state.dispatch(Action::DeleteObjects(vec![book]));
     assert!(!state.tree().contains(book));
@@ -155,7 +155,7 @@ fn suppression_sans_confirmation_nomme_les_graphes_et_un_seul_undo_restaure_tout
 }
 
 #[test]
-fn renommage_local_et_chemins_non_ambigus_apres_enregistrement() {
+fn local_rename_and_unambiguous_paths_after_saving() {
     let (_session, mut state, book, graph, y) = fixture();
     let before = state.tree().clone();
     state.dispatch(Action::RenameObject {
@@ -178,7 +178,7 @@ fn renommage_local_et_chemins_non_ambigus_apres_enregistrement() {
 }
 
 #[test]
-fn graphe_collable_dans_son_projet_et_embarque_ses_donnees_dans_un_autre() {
+fn pasteable_graph_in_its_project_and_embeds_its_data_in_another() {
     let (_session, mut state, _, graph, y) = fixture();
     state.dispatch(Action::CopyObjects(vec![graph]));
     let text = state.take_object_clipboard_text().unwrap();
@@ -207,7 +207,7 @@ fn graphe_collable_dans_son_projet_et_embarque_ses_donnees_dans_un_autre() {
         kind: stokesforge_app_state::state::WindowKind::Book,
     };
     assert!(!other.project_tree().contains(&entry));
-    // #152 : « Show Data » d'une courbe ne révèle que le classeur de cette courbe.
+    // #152: "Show Data" of a curve only reveals the workbook of that curve.
     let series = stokesforge_plot::SeriesRef::new(0, 0);
     assert_eq!(
         stokesforge_app_state::state::series_data_books(other.tree(), copied, series),
@@ -220,7 +220,7 @@ fn graphe_collable_dans_son_projet_et_embarque_ses_donnees_dans_un_autre() {
             stokesforge_plot::SeriesRef::new(0, 99)
         )
         .is_empty(),
-        "une courbe absente n'ouvre aucun classeur"
+        "an absent curve opens no workbook"
     );
     other.dispatch(Action::ShowSeriesData {
         graph: copied,
@@ -235,7 +235,7 @@ fn graphe_collable_dans_son_projet_et_embarque_ses_donnees_dans_un_autre() {
     assert_eq!(
         other.take_copied_objects()[0].1,
         book,
-        "Show Data du graphique reste disponible"
+        "Show Data of the graph stays available"
     );
     other.dispatch(Action::Undo);
     assert!(
@@ -254,7 +254,7 @@ fn graphe_collable_dans_son_projet_et_embarque_ses_donnees_dans_un_autre() {
 }
 
 #[test]
-fn renommage_de_feuille_transmis_a_la_vue_detachee() {
+fn sheet_rename_passed_to_the_detached_view() {
     let (_session, mut state, book, _, _) = fixture();
     let sheet = state.tree().children(book).unwrap()[0];
     state.dispatch(Action::BeginRenameSheet(sheet));
@@ -266,7 +266,7 @@ fn renommage_de_feuille_transmis_a_la_vue_detachee() {
 }
 
 #[test]
-fn renommer_plusieurs_objets_est_un_seul_geste_et_un_echec_est_atomique() {
+fn renaming_several_objects_is_a_single_gesture_and_a_failure_is_atomic() {
     let (_session, mut state, book, graph, _) = fixture();
     let before = state.tree().clone();
     state.dispatch(Action::RenameObjects(vec![
@@ -285,7 +285,7 @@ fn renommer_plusieurs_objets_est_un_seul_geste_et_un_echec_est_atomique() {
 }
 
 #[test]
-fn collage_dans_un_autre_dossier_et_deplacement_groupes() {
+fn paste_into_another_folder_and_grouped_move() {
     let mut project = Project::new("Test").unwrap();
     let root = project.root();
     let a = project.add_folder(root, "A").unwrap();
@@ -316,7 +316,7 @@ fn collage_dans_un_autre_dossier_et_deplacement_groupes() {
 }
 
 #[test]
-fn deux_collages_de_graphe_sont_independants_et_figes() {
+fn two_graph_pastes_are_independent_and_frozen() {
     let (_session, mut source, _, graph, y) = fixture();
     source.dispatch(Action::CopyObjects(vec![graph]));
     let text = source.take_object_clipboard_text().unwrap();
@@ -359,14 +359,14 @@ fn deux_collages_de_graphe_sont_independants_et_figes() {
 }
 
 #[test]
-fn les_colonnes_calculees_embarquees_conservent_leurs_valeurs_sans_dependances() {
+fn embedded_calculated_columns_keep_their_values_without_dependencies() {
     let (_session, mut source, _, graph, y) = fixture();
     source.dispatch(Action::SetColumnFormula {
         column: y,
         formula: Some("A*2".into()),
     });
     let mut spec = source.plot_spec(graph).unwrap();
-    spec.panels.iter_mut().next().unwrap().series[0].x = None; // A participe au calcul, mais n’est pas tracée.
+    spec.panels.iter_mut().next().unwrap().series[0].x = None; // A is part of the calculation, but is not plotted.
     source.dispatch(Action::SetPlotSpec { graph, spec });
     assert_eq!(
         source.tree().node(y).unwrap().as_column().unwrap().get(0),
@@ -384,15 +384,15 @@ fn les_colonnes_calculees_embarquees_conservent_leurs_valeurs_sans_dependances()
     assert_eq!(data.meta().formula, None);
 }
 
-/// #170, point 4 : copier ou dupliquer un dossier est refusé pour l'instant
-/// (la copie locale garderait ses références vers les classeurs d'origine).
-/// Rien n'est écrit au presse-papiers ni à l'arbre, l'historique ne bouge pas,
-/// et la barre d'état dit pourquoi. Témoin : la même copie d'une fenêtre passe.
+/// #170, point 4: copying or duplicating a folder is refused for now
+/// (the local copy would keep its references to the original workbooks).
+/// Nothing is written to the clipboard or the tree, the history does not move,
+/// and the status bar says why. Witness: the same copy of a window works.
 #[test]
-fn copier_ou_dupliquer_un_dossier_est_refuse_avec_sa_raison() {
-    let mut project = Project::new("Dossiers").unwrap();
+fn copying_or_duplicating_a_folder_is_refused_with_its_reason() {
+    let mut project = Project::new("Folders").unwrap();
     let root = project.root();
-    let dossier = project.add_folder(root, "Dossier").unwrap();
+    let folder = project.add_folder(root, "Folder").unwrap();
     let note = project.add_note(root, Some("Note1"), "").unwrap();
     let session = Session::spawn(project, None).unwrap();
     let mut state = AppState::new_with_preferences(
@@ -405,16 +405,16 @@ fn copier_ou_dupliquer_un_dossier_est_refuse_avec_sa_raison() {
     let undo = state.snapshot().history.undo_label.clone();
 
     for action in [
-        Action::CopyObjects(vec![dossier]),
-        Action::CopyObjects(vec![note, dossier]),
-        Action::DuplicateObjects(vec![dossier]),
-        Action::DuplicateObjects(vec![note, dossier]),
+        Action::CopyObjects(vec![folder]),
+        Action::CopyObjects(vec![note, folder]),
+        Action::DuplicateObjects(vec![folder]),
+        Action::DuplicateObjects(vec![note, folder]),
     ] {
         state.dispatch(action.clone());
         assert_eq!(state.take_object_clipboard_text(), None, "{action:?}");
         assert_eq!(state.tree(), &before, "{action:?}");
         assert_eq!(state.snapshot().history.undo_label, undo, "{action:?}");
-        let status = state.status().expect("la raison est dite");
+        let status = state.status().expect("the reason is given");
         assert_eq!(status.level, StatusLevel::Warning, "{action:?}");
         assert_eq!(status.text, tr!("disabled-copy-folder"), "{action:?}");
     }
@@ -422,6 +422,6 @@ fn copier_ou_dupliquer_un_dossier_est_refuse_avec_sa_raison() {
     state.dispatch(Action::CopyObjects(vec![note]));
     assert!(
         state.take_object_clipboard_text().is_some(),
-        "témoin : une fenêtre se copie"
+        "witness: a window can be copied"
     );
 }

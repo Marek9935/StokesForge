@@ -1,12 +1,13 @@
-# Configuration de i18n-embed pour `stokesforge-app-state` (issue #41, #263).
-# L'anglais est la langue source : le catalogue `en` est la référence, `fl!` en
-# vérifie les clés à la compilation, et toute clé absente d'une autre langue
-# reprend l'anglais.
+# i18n-embed configuration for `stokesforge-app-state` (issue #41, #263).
+# English is the source language: the `en` catalog is the reference, `fl!`
+# checks its keys at compile time, and any key missing from another language
+# falls back to English.
 #
-# Le catalogue vit ici (`i18n/`) mais sert aussi `stokesforge-app`, dont les
-# `tr!` se déplient dans ce crate-là : `fl!` lit l'`i18n.toml` du crate APPELANT
-# et tire le domaine du nom du paquet. Les deux fichiers fixent donc le même
-# domaine, `stokesforge_app` (nom du fichier `.ftl`, inchangé).
+# The catalog lives here (`i18n/`) but also serves `stokesforge-app`, whose
+# `tr!` calls expand inside this crate: `fl!` reads the `i18n.toml` of the
+# CALLING crate and takes the domain from the package name. Both files
+# therefore set the same domain, `stokesforge_app` (the `.ftl` file name,
+# unchanged).
 fallback_language = "en"
 
 [fluent]

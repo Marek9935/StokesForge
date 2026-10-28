@@ -1,61 +1,60 @@
-//! La table des grandeurs (#220, S-N8) : pour chaque grandeur numérique de
-//! l'interface, une seule définition de ses bornes, de ses pas, de ses
-//! décimales et des valeurs qu'on propose.
+//! The table of quantities (#220, S-N8): for each numeric quantity of the
+//! interface, a single definition of its bounds, its steps, its decimals and
+//! the values offered.
 //!
-//! Un champ numérique ne réécrit jamais `0.0..=20.0` ni `speed(0.1)` : il
-//! nomme sa grandeur ici et la brique `stokesforge_app::number_field` fait le reste.
-//! Changer la plage de l'épaisseur du trait, c'est changer une ligne de ce
-//! fichier, pour tous les champs d'épaisseur à la fois.
+//! A numeric field never rewrites `0.0..=20.0` or `speed(0.1)`: it names its
+//! quantity here and the building block `stokesforge_app::number_field` does the
+//! rest. Changing the line width range means changing one line of this file,
+//! for all the width fields at once.
 //!
-//! L'**unité** n'est pas dans la table : elle se dit dans le libellé du champ
-//! (« Line width (pt) »), clé du catalogue (S-N10, `docs/textes-interface.md`).
-//! Un `▼` n'apparaît que si la grandeur a des [`Quantity::presets`] ; une borne
-//! d'axe ou un paramètre d'ajustement n'en ont pas.
+//! The **unit** is not in the table: it is stated in the field's label
+//! ("Line width (pt)"), a catalog key (S-N10, `docs/textes-interface.md`).
+//! A `▼` appears only if the quantity has [`Quantity::presets`]; an axis bound
+//! or a fit parameter has none.
 //!
-//! Les plafonds d'un réglage d'analyse (degré, itérations, pics, composantes)
-//! ne s'écrivent pas ici : ils sont lus dans `stokesforge_analysis::ops`
-//! (#260), la source que `Operation::validate` applique aussi pour `pyst` et le
-//! fichier.
+//! The caps of an analysis setting (degree, iterations, peaks, components) are
+//! not written here: they are read from `stokesforge_analysis::ops` (#260), the
+//! source that `Operation::validate` also applies for `pyst` and the file.
 
 use stokesforge_analysis::ops as limits;
 use stokesforge_analysis::smooth as smoothing;
 
-/// Ce qu'une grandeur fait du mot `auto` et d'un champ vidé (#221, S-C4/S-R10).
+/// What a quantity does with the word `auto` and an emptied field (#221, S-C4/S-R10).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutoKind {
-    /// Pas d'Auto : `auto` et un champ vidé sont refusés (S-N6).
+    /// No Auto: `auto` and an emptied field are rejected (S-N6).
     None,
-    /// La valeur elle-même a un Auto : un champ vidé ou `auto` la rend
-    /// automatique, et le champ affiche alors « Auto (…) » en gris.
+    /// The value itself has an Auto: an emptied field or `auto` makes it
+    /// automatic, and the field then shows "Auto (…)" in grey.
     Field,
-    /// L'Auto est celui d'un groupe lié (Min/Max d'axe, case « Auto range ») :
-    /// `auto` l'active pour tout le groupe, un champ vidé est refusé.
+    /// The Auto belongs to a linked group (axis Min/Max, "Auto range" box):
+    /// `auto` enables it for the whole group, an emptied field is rejected.
     Group,
 }
 
-/// La définition d'une grandeur numérique.
+/// The definition of a numeric quantity.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quantity {
-    /// Plus petite valeur permise (`f64::NEG_INFINITY` : aucune borne).
+    /// Smallest allowed value (`f64::NEG_INFINITY`: no bound).
     pub min: f64,
-    /// Plus grande valeur permise (`f64::INFINITY` : aucune borne).
+    /// Largest allowed value (`f64::INFINITY`: no bound).
     pub max: f64,
-    /// Un cran de flèche ou de molette.
+    /// One notch of arrow or wheel.
     pub step: f64,
-    /// Un grand cran (Maj + flèche).
+    /// A big notch (Shift + arrow).
     pub big_step: f64,
-    /// Décimales les plus longues affichées (la saisie peut en porter plus).
+    /// Most decimals displayed (the input may carry more).
     pub decimals: usize,
-    /// Nombre entier : une saisie à décimales est refusée.
+    /// Whole number: an input with decimals is rejected.
     pub integer: bool,
-    /// Valeurs proposées par le `▼`, dans l'ordre d'affichage.
+    /// Values offered by the `▼`, in display order.
     pub presets: &'static [f64],
-    /// Ce que la grandeur fait de `auto` et d'un champ vidé.
+    /// What the quantity does with `auto` and an emptied field.
     pub auto: AutoKind,
 }
 
 impl Quantity {
-    /// Un réel non borné.
+    /// An unbounded real.
     pub const fn real(step: f64, big_step: f64, decimals: usize) -> Self {
         Self {
             min: f64::NEG_INFINITY,
@@ -69,7 +68,7 @@ impl Quantity {
         }
     }
 
-    /// Un entier non borné, de pas 1.
+    /// An unbounded integer, with step 1.
     pub const fn whole(big_step: f64) -> Self {
         Self {
             min: f64::NEG_INFINITY,
@@ -83,15 +82,15 @@ impl Quantity {
         }
     }
 
-    /// Le nombre est entier, positif et tient en trois chiffres, sans liste de
-    /// valeurs : le champ prend la largeur « quelques chiffres » (S-L2, #237).
+    /// The number is an integer, positive and fits in three digits, with no
+    /// list of values: the field takes the "a few digits" width (S-L2, #237).
     pub fn is_compact(&self) -> bool {
         self.integer && self.min >= 0.0 && self.max < 1000.0 && self.presets.is_empty()
     }
 
-    /// Le nombre est un réel signé borné à trois chiffres, sans liste de
-    /// valeurs (rotation en degrés) : « -180.5 » tient dans un champ un peu
-    /// plus large que [`Self::is_compact`] (#246).
+    /// The number is a signed real bounded to three digits, with no list of
+    /// values (rotation in degrees): "-180.5" fits in a field slightly wider
+    /// than [`Self::is_compact`] (#246).
     pub fn is_compact_signed(&self) -> bool {
         !self.integer
             && self.min > -1000.0
@@ -100,96 +99,96 @@ impl Quantity {
             && self.auto == AutoKind::None
     }
 
-    /// La même grandeur bornée à `min..=max`.
+    /// The same quantity bounded to `min..=max`.
     pub const fn between(self, min: f64, max: f64) -> Self {
         Self { min, max, ..self }
     }
 
-    /// La même grandeur, avec l'Auto donné.
+    /// The same quantity, with the given Auto.
     pub const fn with_auto(self, auto: AutoKind) -> Self {
         Self { auto, ..self }
     }
 
-    /// La même grandeur avec ses valeurs proposées.
+    /// The same quantity with its offered values.
     pub const fn with_presets(self, presets: &'static [f64]) -> Self {
         Self { presets, ..self }
     }
 }
 
-/// Une valeur libre : abscisse, ordonnée, borne d'axe, paramètre d'ajustement.
+/// A free value: abscissa, ordinate, axis bound, fit parameter.
 pub const FREE: Quantity = Quantity::real(0.1, 1.0, 8);
 
-/// Sous-graduations entre deux graduations principales (#344) : 1 à 9, ou Auto.
+/// Minor ticks between two major ticks (#344): 1 to 9, or Auto.
 pub const MINOR_TICK_COUNT: Quantity = Quantity::whole(4.0)
     .between(1.0, 9.0)
     .with_auto(AutoKind::Field);
 
-/// Un nombre de graduation sur n est écrit (#344) : 1 les écrit tous.
+/// One tick out of n is labeled (#344): 1 labels them all.
 pub const LABEL_EVERY: Quantity = Quantity::whole(1.0).between(1.0, 99.0);
 
-/// Longueur d'un tiret de graduation, en pixels de figure (#344, « Avancé ») :
-/// 0 à 50 (le plafond du rendu, `MAX_TICK_LENGTH`), entier (les tirets se
-/// tracent au pixel), Auto par défaut.
+/// Length of a tick mark, in figure pixels (#344, "Advanced"): 0 to 50 (the
+/// rendering cap, `MAX_TICK_LENGTH`), integer (tick marks are drawn on whole
+/// pixels), Auto by default.
 pub const TICK_LENGTH: Quantity = Quantity::whole(5.0)
     .between(0.0, 50.0)
     .with_auto(AutoKind::Field);
 
-/// Épaisseur des tirets de graduation, en points (#344, « Avancé ») : entière
-/// (Plotters trace en pixels entiers), 1 à 20, Auto par défaut.
+/// Thickness of tick marks, in points (#344, "Advanced"): integer (Plotters
+/// draws in whole pixels), 1 to 20, Auto by default.
 pub const TICK_WIDTH: Quantity = Quantity::whole(1.0)
     .between(1.0, 20.0)
     .with_auto(AutoKind::Field);
 
-/// Une borne d'axe : libre. Le mot `auto` (ou le bouton « Auto » de la rangée
-/// De / À) rend les deux bornes aux données ; un champ vidé est refusé (#344).
+/// An axis bound: free. The word `auto` (or the "Auto" button of the From / To
+/// row) gives both bounds back to the data; an emptied field is rejected (#344).
 pub const AXIS_BOUND: Quantity = FREE.with_auto(AutoKind::Group);
 
-/// Épaisseur d'un trait de série, en points : 0 à 20, décimales au clavier.
+/// Thickness of a series line, in points: 0 to 20, decimals typed.
 pub const LINE_WIDTH: Quantity = Quantity::real(0.1, 1.0, 2)
     .between(0.0, 20.0)
     .with_presets(&[0.5, 1.0, 1.5, 2.0, 3.0, 4.0]);
 
-/// Épaisseur du trait d'une forme du graphe, en points ; valeurs de la barre
-/// de format des objets.
+/// Thickness of a graph shape's line, in points; values of the object format
+/// bar.
 pub const SHAPE_LINE_WIDTH: Quantity = Quantity::real(0.1, 1.0, 2)
     .between(0.0, 100.0)
     .with_presets(&[0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0, 12.0]);
 
-/// Taille d'un symbole de série, en points.
+/// Size of a series symbol, in points.
 pub const SYMBOL_SIZE: Quantity = Quantity::real(0.1, 1.0, 2)
     .between(0.0, 40.0)
     .with_presets(&[2.0, 4.0, 6.0, 8.0, 10.0, 12.0]);
 
-/// Corps d'un texte du graphe, en points ; bornes de `AnnotationSpec::SIZE_RANGE`.
+/// Size of a graph text, in points; bounds of `AnnotationSpec::SIZE_RANGE`.
 pub const TEXT_SIZE: Quantity = Quantity::real(0.5, 2.0, 1)
     .between(4.0, 200.0)
     .with_presets(&[8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 24.0, 36.0]);
 
-/// Corps proposé par la barre de format du texte : mêmes bornes que
-/// [`TEXT_SIZE`], liste plus longue et entrée « Auto » (S-C4, S-N9).
+/// Size offered by the text format bar: same bounds as [`TEXT_SIZE`], longer
+/// list and an "Auto" entry (S-C4, S-N9).
 pub const TEXT_FORMAT_SIZE: Quantity = TEXT_SIZE
     .with_presets(&[
         6.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0,
     ])
     .with_auto(AutoKind::Field);
 
-/// Rotation d'un texte, en degrés.
+/// Rotation of a text, in degrees.
 pub const ROTATION: Quantity = Quantity::real(1.0, 15.0, 1).between(-180.0, 180.0);
 
-/// Canal rouge, vert ou bleu, de 0 à 255.
+/// Red, green or blue channel, from 0 to 255.
 pub const COLOR_CHANNEL: Quantity = Quantity::whole(16.0).between(0.0, 255.0);
 
-/// Opacité, en pour cent.
+/// Opacity, in percent.
 pub const OPACITY_PERCENT: Quantity = Quantity::whole(10.0).between(0.0, 100.0);
 
-/// Teinte, en degrés.
+/// Hue, in degrees.
 pub const HUE_DEGREES: Quantity = Quantity::whole(15.0).between(0.0, 360.0);
 
-/// Saturation ou luminosité, en pour cent.
+/// Saturation or lightness, in percent.
 pub const PERCENT: Quantity = Quantity::whole(10.0).between(0.0, 100.0);
 
-/// Taille maximale d'un fichier `.stf` à l'ouverture, en Mo (A2, #316) ;
-/// bornes de `preferences::{MIN,MAX}_MAX_FILE_MB`.
+/// Maximum size of a `.stf` file on opening, in MB (A2, #316); bounds of
+/// `preferences::{MIN,MAX}_MAX_FILE_MB`.
 pub const MAX_FILE_MB: Quantity = Quantity::whole(64.0)
     .between(
         crate::preferences::MIN_MAX_FILE_MB as f64,
@@ -197,8 +196,8 @@ pub const MAX_FILE_MB: Quantity = Quantity::whole(64.0)
     )
     .with_presets(&[64.0, 128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0]);
 
-/// Budget global de cellules d'un `.stf` à l'ouverture, en millions (B1,
-/// #316) ; bornes de `preferences::{MIN,MAX}_MAX_CELLS_M`.
+/// Global cell budget of a `.stf` on opening, in millions (B1, #316); bounds
+/// of `preferences::{MIN,MAX}_MAX_CELLS_M`.
 pub const MAX_CELLS_M: Quantity = Quantity::whole(100.0)
     .between(
         crate::preferences::MIN_MAX_CELLS_M as f64,
@@ -206,7 +205,7 @@ pub const MAX_CELLS_M: Quantity = Quantity::whole(100.0)
     )
     .with_presets(&[10.0, 100.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0]);
 
-/// Période de la sauvegarde automatique, en minutes (#317) ; bornes de
+/// Period of the autosave, in minutes (#317); bounds of
 /// `preferences::{MIN,MAX}_AUTOSAVE_MINUTES`.
 pub const AUTOSAVE_MINUTES: Quantity = Quantity::whole(1.0)
     .between(
@@ -215,39 +214,39 @@ pub const AUTOSAVE_MINUTES: Quantity = Quantity::whole(1.0)
     )
     .with_presets(&[1.0, 5.0, 10.0, 15.0, 30.0, 60.0]);
 
-/// Degré d'un polynôme.
+/// Degree of a polynomial.
 pub const POLYNOMIAL_DEGREE: Quantity =
     Quantity::whole(1.0).between(1.0, limits::MAX_DEGREE as f64);
 
-/// Proéminence minimale d'un pic, en pour cent du signal.
+/// Minimum prominence of a peak, in percent of the signal.
 pub const PROMINENCE_PERCENT: Quantity = Quantity::real(0.5, 5.0, 2).between(0.1, 100.0);
 
-/// Nombre maximal de pics cherchés.
+/// Maximum number of peaks searched.
 pub const MAX_PEAKS: Quantity = Quantity::whole(5.0).between(1.0, limits::MAX_PEAKS as f64);
 
-/// Nombre de composantes d'une déconvolution.
+/// Number of components of a deconvolution.
 pub const COMPONENTS: Quantity = Quantity::whole(1.0).between(1.0, limits::MAX_COMPONENTS as f64);
 
-/// Nombre d'itérations d'un solveur.
+/// Number of iterations of a solver.
 pub const ITERATIONS: Quantity = Quantity::whole(100.0).between(1.0, limits::MAX_ITERATIONS as f64);
 
-/// Fenêtre d'un lissage, en points : impaire, donc le pas est de 2 (le réglage
-/// relève une saisie paire, `SmoothSetup::set_points`).
+/// Window of a smoothing, in points: odd, so the step is 2 (the setting
+/// raises an even input, `SmoothSetup::set_points`).
 pub const SMOOTH_WINDOW_POINTS: Quantity = Quantity {
     step: 2.0,
     ..Quantity::whole(10.0).between(smoothing::MIN_WINDOW as f64, smoothing::MAX_WINDOW as f64)
 };
 
-/// Largeur de la fenêtre d'un lissage, en unités de X : strictement positive.
+/// Width of a smoothing window, in X units: strictly positive.
 pub const SMOOTH_WINDOW_X: Quantity =
     Quantity::real(0.1, 1.0, 6).between(f64::MIN_POSITIVE, f64::INFINITY);
 
-/// Ordre du polynôme d'un Savitzky-Golay.
+/// Polynomial order of a Savitzky-Golay.
 pub const SMOOTH_ORDER: Quantity =
     Quantity::whole(1.0).between(smoothing::MIN_ORDER as f64, smoothing::MAX_ORDER as f64);
 
-/// Un nombre de lignes ou de caractères à sauter à l'import (0 et plus).
+/// A number of lines or characters to skip on import (0 and up).
 pub const COUNT: Quantity = Quantity::whole(10.0).between(0.0, 9_007_199_254_740_991.0);
 
-/// Un numéro de ligne de l'import (1 et plus).
+/// A line number of the import (1 and up).
 pub const LINE_NUMBER: Quantity = Quantity::whole(10.0).between(1.0, 9_007_199_254_740_991.0);

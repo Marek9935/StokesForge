@@ -1,11 +1,11 @@
-//! Les noms des colonnes de sortie d'analyse (#256) : la règle est dans
-//! `stokesforge_core::OutputName`, l'application la traduit. L'anglais du
-//! catalogue dit **la même chose** que `OutputName::english()` (utilisé par
-//! `pyst`), variante par variante ; sans ce test, deux rédactions de la même
-//! phrase divergeraient sans bruit.
+//! The names of the analysis output columns (#256): the rule is in
+//! `stokesforge_core::OutputName`, the application translates it. The English
+//! of the catalog says **the same thing** as `OutputName::english()` (used by
+//! `pyst`), variant by variant; without this test, two wordings of the same
+//! sentence would diverge silently.
 //!
-//! Les tests bâtissent leur propre chargeur (`build_loader`) : la langue du
-//! chargeur global dépend de l'environnement.
+//! The tests build their own loader (`build_loader`): the language of the
+//! global loader depends on the environment.
 
 use stokesforge_analysis::ops::OperationKind;
 use stokesforge_app_state::analysis::output_name_text_in;
@@ -13,9 +13,9 @@ use stokesforge_app_state::history_text::kind_title;
 use stokesforge_app_state::i18n::{build_loader, pseudo, Language};
 use stokesforge_core::{family_english, OutputName};
 
-/// Le rang de chaque variante, `match` exhaustif sans branche par défaut : une
-/// variante ajoutée à `OutputName` ne compile pas ici tant qu'elle n'a pas de
-/// rang, et le test de couverture exige alors des exemples.
+/// The rank of each variant, exhaustive `match` with no default branch: a
+/// variant added to `OutputName` does not compile here until it has a rank,
+/// and the coverage test then requires examples.
 fn rank(name: &OutputName) -> usize {
     match name {
         OutputName::BaselineCorrected { .. } => 0,
@@ -81,8 +81,8 @@ fn the_samples_cover_every_variant() {
     assert_eq!(covered, (0..VARIANTS).collect());
 }
 
-/// Le catalogue `en` et `english()` (scripts `pyst`, journaux) disent la même
-/// chose, sur chaque variante.
+/// The `en` catalog and `english()` (`pyst` scripts, logs) say the same thing,
+/// on each variant.
 #[test]
 fn the_english_catalogue_matches_the_raw_english_of_the_name() {
     let english = build_loader(Language::English);
@@ -95,8 +95,8 @@ fn the_english_catalogue_matches_the_raw_english_of_the_name() {
     }
 }
 
-/// Le titre de famille (commentaire des colonnes) : les clés `analysis-kind-*`
-/// en anglais disent `family_english`.
+/// The family title (column comment): the `analysis-kind-*` keys in English
+/// say `family_english`.
 #[test]
 fn the_english_catalogue_matches_the_family_titles() {
     let english = build_loader(Language::English);
@@ -105,8 +105,8 @@ fn the_english_catalogue_matches_the_family_titles() {
     }
 }
 
-/// Toute variante traduite passe par le catalogue (hors le repli, qui est le
-/// nom de l'utilisateur) : en pseudo-langue, la phrase est encadrée de `⟦ ⟧`.
+/// Every translated variant goes through the catalog (except the fallback,
+/// which is the user's name): in the pseudo-language, the sentence is framed by `⟦ ⟧`.
 #[test]
 fn the_pseudo_language_covers_every_output_name() {
     let pseudo_loader = build_loader(Language::PseudoEnglish);
@@ -118,12 +118,12 @@ fn the_pseudo_language_covers_every_output_name() {
         }
         assert!(
             phrase.starts_with(pseudo::OPEN) && phrase.ends_with(pseudo::CLOSE),
-            "{name:?} : {phrase:?} n'est pas passé par le catalogue"
+            "{name:?}: {phrase:?} did not go through the catalog"
         );
     }
 }
 
-/// Le français a son catalogue : même donnée, autre langue.
+/// French has its catalog: same data, other language.
 #[test]
 fn french_translates_the_same_name() {
     let french = build_loader(Language::French);

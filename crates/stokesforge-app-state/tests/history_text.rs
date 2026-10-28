@@ -1,10 +1,10 @@
-//! Mise en phrase des libellés d'historique (issue #46) : l'anglais du
-//! catalogue dit la même chose que le `Display` de `stokesforge-commands`, variante
-//! par variante, les pluriels sont ceux de Fluent, et la pseudo-langue couvre
-//! chaque phrase.
+//! Wording of the history labels (issue #46): the English of the catalog says
+//! the same thing as the `Display` of `stokesforge-commands`, variant by
+//! variant, plurals are Fluent's, and the pseudo-language covers every
+//! sentence.
 //!
-//! Les tests bâtissent leur propre chargeur (`build_loader`) : la langue du
-//! chargeur global dépend de l'environnement (`STOKESFORGE_LANG`, préférences).
+//! The tests build their own loader (`build_loader`): the language of the
+//! global loader depends on the environment (`STOKESFORGE_LANG`, preferences).
 
 use stokesforge_analysis::ops::OperationKind;
 use stokesforge_app_state::history_text::history_text_in;
@@ -15,9 +15,9 @@ fn name(text: &str) -> Option<String> {
     Some(text.to_string())
 }
 
-/// Le rang de chaque variante, `match` exhaustif sans branche par défaut : une
-/// variante ajoutée à `HistoryLabel` ne compile pas ici tant qu'elle n'a pas de
-/// rang, et le test de couverture exige alors des exemples.
+/// The rank of each variant, exhaustive `match` with no default branch: a
+/// variant added to `HistoryLabel` does not compile here until it has a rank,
+/// and the coverage test then requires examples.
 fn rank(label: &HistoryLabel) -> usize {
     match label {
         HistoryLabel::SetCells { .. } => 0,
@@ -57,8 +57,8 @@ fn rank(label: &HistoryLabel) -> usize {
 
 const VARIANTS: usize = 32;
 
-/// Chaque variante, sous **chacune** de ses formes (cible connue ou non, 0, 1 et
-/// plusieurs lignes, chaque nature de groupe).
+/// Each variant, in **each** of its forms (known target or not, 0, 1 and
+/// several rows, each kind of group).
 fn all_labels() -> Vec<HistoryLabel> {
     let mut labels = vec![
         HistoryLabel::SetCells { column: None },
@@ -77,11 +77,11 @@ fn all_labels() -> Vec<HistoryLabel> {
         },
         HistoryLabel::Rename {
             from: name("Book1"),
-            to: "Mesures".to_string(),
+            to: "Measurements".to_string(),
         },
         HistoryLabel::Rename {
             from: None,
-            to: "Mesures".to_string(),
+            to: "Measurements".to_string(),
         },
         HistoryLabel::Move { name: None },
         HistoryLabel::Move {
@@ -92,7 +92,7 @@ fn all_labels() -> Vec<HistoryLabel> {
             column: Some(ColumnRef(2)),
         },
         HistoryLabel::AddFolder {
-            name: "Manips".to_string(),
+            name: "Experiments".to_string(),
         },
         HistoryLabel::AddWorkbook,
         HistoryLabel::AddEmptyWorkbook,
@@ -159,9 +159,9 @@ fn the_samples_cover_every_variant() {
     assert_eq!(covered, (0..VARIANTS).collect());
 }
 
-/// Le catalogue `en` et le `Display` de `stokesforge-commands` (journaux, CLI) disent
-/// **la même chose**, sur chaque variante et chaque forme : sans ce test, deux
-/// rédactions de la même phrase divergeraient sans bruit.
+/// The `en` catalog and the `Display` of `stokesforge-commands` (logs, CLI) say
+/// **the same thing**, on each variant and each form: without this test, two
+/// wordings of the same sentence would diverge silently.
 #[test]
 fn the_english_catalogue_matches_the_display_of_the_label() {
     let english = build_loader(Language::English);
@@ -174,7 +174,7 @@ fn the_english_catalogue_matches_the_display_of_the_label() {
     }
 }
 
-/// Les deux cas de l'issue : le pluriel est celui de Fluent (règles CLDR).
+/// The two cases of the issue: the plural is Fluent's (CLDR rules).
 #[test]
 fn insert_rows_pluralizes_through_fluent() {
     let english = build_loader(Language::English);
@@ -182,16 +182,16 @@ fn insert_rows_pluralizes_through_fluent() {
     assert_eq!(insert(1), "Insert 1 Row");
     assert_eq!(insert(3), "Insert 3 Rows");
     assert_eq!(insert(0), "Insert 0 Rows");
-    // Pas de séparateur de milliers : « 1000 », comme le `Display`.
+    // No thousands separator: "1000", like the `Display`.
     assert_eq!(insert(1000), "Insert 1000 Rows");
     let delete = |count| history_text_in(&english, &HistoryLabel::DeleteRows { count });
     assert_eq!(delete(1), "Delete 1 Row");
     assert_eq!(delete(5), "Delete 5 Rows");
 }
 
-/// Une colonne se dit par sa lettre de grille ; un nom choisi par l'utilisateur
-/// est entre guillemets, sans marque d'isolation bidirectionnelle (les polices
-/// de l'interface les dessineraient comme des carrés).
+/// A column is named by its grid letter; a name chosen by the user is in
+/// quotes, with no bidirectional isolation mark (the interface fonts would
+/// draw them as squares).
 #[test]
 fn columns_are_letters_and_names_are_quoted() {
     let english = build_loader(Language::English);
@@ -212,19 +212,19 @@ fn columns_are_letters_and_names_are_quoted() {
     assert_eq!(
         text(HistoryLabel::Macro(MacroKind::Import)),
         "Import",
-        "le groupe d'import"
+        "the import group"
     );
     for label in all_labels() {
         let phrase = text(label);
         assert!(
             !phrase.contains(['\u{2068}', '\u{2069}']),
-            "marque d'isolation dans {phrase:?}"
+            "isolation mark in {phrase:?}"
         );
     }
 }
 
-/// Toute phrase passe par le catalogue : en pseudo-langue, elle est encadrée de
-/// `⟦ ⟧`, et chaque argument (nombre, lettre, nom) y figure tel quel.
+/// Every sentence goes through the catalog: in the pseudo-language, it is framed
+/// by `⟦ ⟧`, and each argument (number, letter, name) appears in it as is.
 #[test]
 fn the_pseudo_language_covers_every_history_sentence() {
     let pseudo_loader = build_loader(Language::PseudoEnglish);
@@ -232,23 +232,23 @@ fn the_pseudo_language_covers_every_history_sentence() {
         let phrase = history_text_in(&pseudo_loader, &label);
         assert!(
             phrase.starts_with(pseudo::OPEN) && phrase.ends_with(pseudo::CLOSE),
-            "{label:?} : {phrase:?} n'est pas passé par le catalogue"
+            "{label:?}: {phrase:?} did not go through the catalog"
         );
     }
     let phrase = history_text_in(
         &pseudo_loader,
         &HistoryLabel::Rename {
             from: name("Book1"),
-            to: "Mesures".to_string(),
+            to: "Measurements".to_string(),
         },
     );
     assert!(
-        phrase.contains("Book1") && phrase.contains("Mesures"),
+        phrase.contains("Book1") && phrase.contains("Measurements"),
         "{phrase:?}"
     );
 }
 
-/// Le français a son catalogue (#49) : le même `HistoryLabel`, en français.
+/// French has its catalog (#49): the same `HistoryLabel`, in French.
 #[test]
 fn french_translates_the_same_label() {
     let french = build_loader(Language::French);

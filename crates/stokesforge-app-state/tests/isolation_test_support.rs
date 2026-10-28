@@ -1,19 +1,18 @@
-//! Les tests d'intégration d'`stokesforge-app-state`, lancés seuls, n'atteignent
-//! pas les vraies préférences de la machine (#329).
+//! The integration tests of `stokesforge-app-state`, run alone, do not reach
+//! the machine's real preferences (#329).
 //!
-//! `cfg(test)` ne vaut que pour les tests unitaires du crate : un test
-//! d'intégration compile la bibliothèque normalement. Sans la feature
-//! `test-support` (activée par la dev-dependency de `Cargo.toml`), il lirait la
-//! langue du vrai `preferences.json` — d'où un `project_objects` rouge en
-//! français — et pourrait l'écrire. En `--workspace`, `stokesforge-app` active la
-//! feature pour tout le monde et masque le défaut : seul `cargo test -p
-//! stokesforge-app-state` seul le montre. Retirer la dev-dependency fait échouer
-//! ce test.
+//! `cfg(test)` only holds for the crate's unit tests: an integration test
+//! compiles the library normally. Without the `test-support` feature (enabled
+//! by the dev-dependency in `Cargo.toml`), it would read the language from the
+//! real `preferences.json` (hence a red `project_objects` in French) and might
+//! write it. With `--workspace`, `stokesforge-app` enables the feature for
+//! everyone and hides the flaw: only `cargo test -p stokesforge-app-state`
+//! alone shows it. Removing the dev-dependency makes this test fail.
 
 #[test]
-fn la_feature_test_support_est_active_dans_les_tests_d_integration() {
-    // `Preferences::load()` ne désigne aucun fichier quand le chemin est isolé :
-    // sans la feature, il lirait le vrai `preferences.json` de la machine.
+fn the_test_support_feature_is_enabled_in_integration_tests() {
+    // `Preferences::load()` points to no file when the path is isolated:
+    // without the feature, it would read the machine's real `preferences.json`.
     assert_eq!(
         stokesforge_app_state::preferences::Preferences::load().language(),
         None

@@ -1,5 +1,5 @@
-//! #336 : « Place at least N points » s'accorde avec N (R10), dans les deux
-//! langues. Chargeurs propres : la langue globale n'est pas touchée.
+//! #336: "Place at least N points" agrees with N (R10), in both languages.
+//! Clean loaders: the global language is not touched.
 
 use stokesforge_app_state::i18n::{build_loader, Language};
 use stokesforge_app_state::tr;
@@ -10,7 +10,7 @@ fn phrase(language: Language, needed: i64) -> String {
 }
 
 #[test]
-fn le_message_des_points_a_placer_s_accorde() {
+fn the_points_to_place_message_agrees_with_the_count() {
     let en = |n| phrase(Language::English, n);
     assert!(en(1).contains("1 point ("), "{}", en(1));
     assert!(en(2).contains("2 points ("), "{}", en(2));

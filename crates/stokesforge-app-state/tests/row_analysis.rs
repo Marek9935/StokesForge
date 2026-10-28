@@ -1,7 +1,7 @@
-//! Analyser des lignes (#253) : la feuille transposée liée se crée avec le
-//! calcul en un seul groupe annulable, Cancel n'en laisse rien, une colonne
-//! sans x' est refusée en la nommant, et la remise à jour de la feuille
-//! demande confirmation avant d'écraser des valeurs éditées.
+//! Analyzing rows (#253): the linked transposed sheet is created with the
+//! calculation in a single undoable group, Cancel leaves nothing of it, a column
+//! without x' is refused by naming it, and updating the sheet asks for
+//! confirmation before overwriting edited values.
 
 use stokesforge_analysis::model::Model;
 use stokesforge_app_state::analysis::Preset;
@@ -18,8 +18,8 @@ struct Setup {
     cols: Vec<NodeId>,
 }
 
-/// Six colonnes de quatre lignes, x' = 0, 10, 20…, la ligne `r` valant
-/// `(r + 1) * (colonne + 1)` : chaque ligne est une droite de x'.
+/// Six columns of four rows, x' = 0, 10, 20..., row `r` being worth
+/// `(r + 1) * (column + 1)`: each row is a line of x'.
 fn setup(dir: &std::path::Path) -> Setup {
     i18n::set_language(Language::English);
     let mut project = Project::new("P").unwrap();
@@ -77,18 +77,15 @@ fn opening_creates_the_linked_sheet_and_analyses_its_row_column() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = setup(dir.path());
     open_rows(&mut s, &[1]);
-    let sheet = transposed(&s).expect("la feuille transposée existe");
+    let sheet = transposed(&s).expect("the transposed sheet exists");
     assert_eq!(name(&s, sheet), format!("Sheet1{TRANSPOSE_MARK}"));
     let kids = s.state.tree().children(sheet).unwrap().to_vec();
-    let form = s.state.analysis_form().expect("la fenêtre est ouverte");
+    let form = s.state.analysis_form().expect("the window is open");
     assert_eq!(form.series.len(), 1);
     assert_eq!(form.series[0].x, Some(kids[0]));
     assert_eq!(form.series[0].y, kids[1]);
     assert_eq!(name(&s, kids[1]), "Row 2");
-    assert!(
-        form.graph.is_none(),
-        "aucun tracé de résultat sur un graphe"
-    );
+    assert!(form.graph.is_none(), "no result plot on a graph");
 }
 
 #[test]
@@ -117,16 +114,16 @@ fn apply_closes_one_group_and_one_undo_removes_sheet_and_calculation() {
         calc.series
             .iter()
             .all(|series| s.state.tree().parent(series.y).unwrap() == Some(sheet)),
-        "le calcul lit la colonne de la transposée"
+        "the calculation reads the column of the transposed sheet"
     );
 
     s.state.dispatch(Action::Undo);
     assert!(
         transposed(&s).is_none(),
-        "feuille et lien défaits d'un bloc"
+        "sheet and link undone as one block"
     );
     assert!(s.state.tree().calculations().is_empty());
-    assert!(!s.state.can_undo(), "un seul groupe");
+    assert!(!s.state.can_undo(), "a single group");
     s.state.dispatch(Action::Redo);
     assert!(transposed(&s).is_some());
     assert_eq!(s.state.tree().calculations().len(), 1);
@@ -141,8 +138,8 @@ fn cancel_leaves_nothing_behind() {
     s.state.dispatch(Action::CloseAnalysis);
     assert!(transposed(&s).is_none());
     assert!(s.state.tree().transposes().is_empty());
-    assert!(!s.state.can_undo(), "aucune entrée d'historique");
-    // Une écriture ordinaire se range ensuite seule, hors de tout groupe resté ouvert.
+    assert!(!s.state.can_undo(), "no history entry");
+    // An ordinary write then files itself alone, outside any group left open.
     s.state.dispatch(Action::AddColumn { sheet: s.sheet });
     assert!(s.state.can_undo());
     s.state.dispatch(Action::Undo);
@@ -158,7 +155,7 @@ fn a_column_without_x_prime_is_refused_by_its_letter_and_nothing_is_created() {
         .execute(stokesforge_commands::Command::AddColumn {
             sheet: s.sheet,
             index: None,
-            name: Some("Temps".into()),
+            name: Some("Time".into()),
             column: Column::from_f64(&[1.0]),
         })
         .unwrap();
@@ -167,13 +164,13 @@ fn a_column_without_x_prime_is_refused_by_its_letter_and_nothing_is_created() {
     assert!(s.state.analysis_form().is_none());
     let status = s.state.status().unwrap();
     assert!(status.is_error());
-    assert!(status.text.contains("Column G (Temps)"), "{}", status.text);
+    assert!(status.text.contains("Column G (Time)"), "{}", status.text);
     assert!(transposed(&s).is_none());
     s.state.dispatch(Action::Undo);
     assert_eq!(
         s.state.tree().children(s.sheet).unwrap().len(),
         6,
-        "le seul pas annulé est l'ajout de la colonne, le groupe refusé n'a rien laissé"
+        "the only undone step is the column addition, the refused group left nothing behind"
     );
 }
 
@@ -188,16 +185,16 @@ fn a_second_row_completes_the_same_sheet_and_the_same_row_reuses_its_column() {
     open_rows(&mut s, &[2]);
     assert_eq!(transposed(&s), Some(sheet));
     let after = s.state.tree().children(sheet).unwrap().len();
-    assert!(after > before, "une colonne de plus");
+    assert!(after > before, "one more column");
     s.state.dispatch(Action::CloseAnalysis);
     assert_eq!(
         s.state.tree().children(sheet).unwrap().len(),
         before,
-        "Cancel retire la colonne ajoutée, pas la feuille déjà analysée"
+        "Cancel removes the added column, not the sheet already analyzed"
     );
     open_rows(&mut s, &[0]);
     let row_columns = s.state.tree().children(sheet).unwrap().len();
-    assert_eq!(row_columns, before, "la ligne 1 réutilise sa colonne");
+    assert_eq!(row_columns, before, "row 1 reuses its column");
 }
 
 #[test]
@@ -225,7 +222,7 @@ fn a_row_curve_of_a_graph_is_analysed_through_the_transposed_sheet() {
         series: vec![SeriesRef::new(0, 0)],
         spec: Box::new(spec),
     });
-    let sheet = transposed(&s).expect("la ligne du graphe passe par la transposée");
+    let sheet = transposed(&s).expect("the graph row goes through the transposed sheet");
     let form = s.state.analysis_form().unwrap();
     assert_eq!(
         s.state.tree().parent(form.series[0].y).unwrap(),
@@ -243,7 +240,7 @@ fn recalculating_asks_before_erasing_edited_values() {
     let sheet = transposed(&s).unwrap();
     assert!(!s.state.transpose_info(sheet).unwrap().stale);
 
-    // Source modifiée : périmée, remise à jour sans question.
+    // Modified source: stale, updated without a question.
     s.session
         .handle()
         .execute(stokesforge_commands::Command::SetCells {
@@ -261,7 +258,7 @@ fn recalculating_asks_before_erasing_edited_values() {
     let info = s.state.transpose_info(sheet).unwrap();
     assert!(!info.stale);
 
-    // Valeur éditée dans la colonne liée : confirmation d'abord.
+    // Edited value in the linked column: confirmation first.
     let row = s.state.tree().children(sheet).unwrap()[1];
     s.session
         .handle()
@@ -279,12 +276,12 @@ fn recalculating_asks_before_erasing_edited_values() {
     s.state.dispatch(Action::ConfirmTransposeRelink(false));
     assert!(
         s.state.transpose_info(sheet).unwrap().modified,
-        "Cancel ne fait rien"
+        "Cancel does nothing"
     );
     s.state.dispatch(Action::RecalculateTranspose { sheet });
     s.state.dispatch(Action::ConfirmTransposeRelink(true));
     let info = s.state.transpose_info(sheet).unwrap();
     assert!(!info.modified && !info.stale);
     s.state.dispatch(Action::Undo);
-    assert!(s.state.transpose_info(sheet).unwrap().modified, "annulable");
+    assert!(s.state.transpose_info(sheet).unwrap().modified, "undoable");
 }

@@ -1,7 +1,7 @@
-//! L'avertissement de chargement des calculs écartés (#278) : singulier et
-//! pluriel, au plus cinq identifiants puis « … », parité anglais/français.
+//! The load warning for discarded calculations (#278): singular and plural,
+//! at most five identifiers then "…", English/French parity.
 //!
-//! Un seul test, dans son propre binaire : le chargeur de langue est global.
+//! A single test, in its own binary: the language loader is global.
 
 use std::path::Path;
 
@@ -14,9 +14,9 @@ use stokesforge_core::{
 };
 use stokesforge_session::Session;
 
-/// Un fichier à `total` calculs de correction « subtract » sur autant de
-/// colonnes ; les `damaged` premiers sont rendus illisibles dans les octets.
-/// Rend les identifiants de calcul, croissants.
+/// A file with `total` "subtract" correction calculations on as many columns;
+/// the first `damaged` are made unreadable in the bytes.
+/// Returns the calculation identifiers, ascending.
 fn write_file(path: &Path, total: usize, damaged: usize) -> Vec<u64> {
     let mut project = Project::new("P").unwrap();
     let book = project.add_workbook(project.root(), Some("Book")).unwrap();
@@ -58,8 +58,8 @@ fn write_file(path: &Path, total: usize, damaged: usize) -> Vec<u64> {
         ids.push(id.raw());
     }
     stokesforge_persistence::save(&project, path).unwrap();
-    // Chaque occurrence de « subtract » est une opération ; on abîme les
-    // `damaged` premières (l'ordre du fichier est celui des identifiants).
+    // Each occurrence of "subtract" is an operation; the first `damaged` are
+    // corrupted (the file order is the identifier order).
     let mut bytes = std::fs::read(path).unwrap();
     let mut seen = 0;
     let mut at = 0;
@@ -74,14 +74,14 @@ fn write_file(path: &Path, total: usize, damaged: usize) -> Vec<u64> {
         seen += 1;
         at = found + 8;
     }
-    assert_eq!(seen, total, "une occurrence d'opération par calcul");
+    assert_eq!(seen, total, "one operation occurrence per calculation");
     std::fs::write(path, bytes).unwrap();
     ids
 }
 
-/// Charge `path` dans une session neuve : le message de la barre d'état.
+/// Loads `path` into a fresh session: the status bar message.
 fn load_message(path: &Path) -> (StatusLevel, String) {
-    let session = Session::spawn(Project::new("Vide").unwrap(), None).unwrap();
+    let session = Session::spawn(Project::new("Empty").unwrap(), None).unwrap();
     let mut state = AppState::new_with_preferences(
         session.handle(),
         path.display().to_string(),
@@ -89,8 +89,8 @@ fn load_message(path: &Path) -> (StatusLevel, String) {
     )
     .unwrap();
     state.dispatch(Action::Load);
-    assert!(state.alert().is_none(), "le projet se charge");
-    let status = state.status().expect("un message");
+    assert!(state.alert().is_none(), "the project loads");
+    let status = state.status().expect("a message");
     (status.level, status.text.clone())
 }
 
@@ -107,13 +107,13 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
     let path = dir.path().join("p.stf");
 
     i18n::set_language(Language::English);
-    // Aucun écart : « Loaded », en information, pas d'avertissement.
+    // No discard: "Loaded", as information, no warning.
     write_file(&path, 2, 0);
     let (level, text) = load_message(&path);
     assert_eq!(level, StatusLevel::Info);
     assert!(text.starts_with("Loaded from"), "{text}");
 
-    // Un seul : singulier, son identifiant.
+    // Just one: singular, its identifier.
     let ids = write_file(&path, 2, 1);
     let (level, text) = load_message(&path);
     assert_eq!(level, StatusLevel::Warning);
@@ -125,7 +125,7 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
         )
     );
 
-    // Deux : pluriel et compte.
+    // Two: plural and count.
     let ids = write_file(&path, 3, 2);
     let (_, text) = load_message(&path);
     assert_eq!(
@@ -136,7 +136,7 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
         )
     );
 
-    // Cinq pile : tous nommés, pas de points de suspension.
+    // Exactly five: all named, no ellipsis.
     let ids = write_file(&path, 6, 5);
     let (_, text) = load_message(&path);
     assert_eq!(
@@ -148,7 +148,7 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
     );
     assert!(!text.contains('…'));
 
-    // Six : cinq identifiants puis « … », le compte reste exact.
+    // Six: five identifiers then "…", the count stays exact.
     let ids = write_file(&path, 8, 6);
     let (_, text) = load_message(&path);
     assert_eq!(
@@ -160,10 +160,10 @@ fn the_discarded_calculations_warning_counts_and_abbreviates() {
     );
     assert!(
         !text.contains(&format!("#{}", ids[5])),
-        "le sixième n'est pas nommé"
+        "the sixth is not named"
     );
 
-    // Parité française : même structure, même liste.
+    // French parity: same structure, same list.
     i18n::set_language(Language::French);
     let ids = write_file(&path, 2, 1);
     let (level, text) = load_message(&path);

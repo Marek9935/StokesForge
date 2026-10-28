@@ -1,49 +1,50 @@
-//! Garde-fou de #263 (chantier #254) : `stokesforge-app-state` — l'état de
-//! l'application, ses textes et ses erreurs mises en phrase — ne doit **jamais**
-//! dépendre d'une bibliothèque d'interface. C'est toute sa raison d'être : que la
-//! frontière « egui ne sert qu'à dessiner » tienne par le compilateur, et que
-//! les tests de l'état (`tests/shell.rs`…) compilent sans fenêtre.
+//! Guard of #263 (work package #254): `stokesforge-app-state` (the application
+//! state, its texts and its errors put into sentences) must **never** depend on
+//! a UI library. That is its whole reason for being: the "egui only draws"
+//! boundary holds through the compiler, and the state tests (`tests/shell.rs`…)
+//! compile without a window.
 //!
-//! Plutôt que de deviner ce qu'est « une dépendance UI », ce test liste les
-//! seules dépendances autorisées : toute addition dans `Cargo.toml` doit être
-//! ajoutée ici explicitement, ce qui force une décision consciente. Ni `egui`,
-//! ni `eframe`, ni `winit`, ni `wgpu` — ni `stokesforge-clipboard` ni
-//! `stokesforge-render-egui`, dont l'un tire winit (patch smithay) et l'autre
-//! egui : l'offre de la figure au presse-papiers reste dans `stokesforge-app`.
+//! Rather than guessing what "a UI dependency" is, this test lists the only
+//! allowed dependencies: any addition to `Cargo.toml` must be added here
+//! explicitly, which forces a conscious decision. No `egui`, no `eframe`, no
+//! `winit`, no `wgpu`, and neither `stokesforge-clipboard` nor
+//! `stokesforge-render-egui`, one of which pulls in winit (smithay patch) and
+//! the other egui: the offer of the figure to the clipboard stays in
+//! `stokesforge-app`.
 
 const ALLOWED_DEPENDENCIES: &[&str] = &[
-    "stokesforge-analysis", // formulaires d'analyse : bornes, prérequis, réglages
-    "stokesforge-core",     // le modèle
-    "stokesforge-commands", // le bus de commandes : tout passe par lui
-    "stokesforge-import",   // recettes d'import, sans interface
-    "stokesforge-importer", // fichiers d'appareil → colonnes du modèle
-    "stokesforge-session",  // l'acteur, seul détenteur du `&mut Project`
-    "stokesforge-persistence", // format `.stf`
-    "stokesforge-plot",     // description native des graphes, sans rendu
-    // `RenderError`, les formules, la géométrie de graphe : générique sur le
-    // backend, ne voit qu'`epaint` pour la mesure de texte (choix assumé)
+    "stokesforge-analysis",    // analysis forms: bounds, prerequisites, settings
+    "stokesforge-core",        // the model
+    "stokesforge-commands",    // the command bus: everything goes through it
+    "stokesforge-import",      // import recipes, no interface
+    "stokesforge-importer",    // instrument files -> model columns
+    "stokesforge-session",     // the actor, sole holder of the `&mut Project`
+    "stokesforge-persistence", // `.stf` format
+    "stokesforge-plot",        // native description of graphs, no rendering
+    // `RenderError`, formulas, graph geometry: generic over the backend, sees
+    // only `epaint` for text measurement (deliberate choice)
     "stokesforge-render",
-    "stokesforge-render-svg", // export SVG/PDF/PNG, sans serveur graphique
-    // pont Python, feature `python` seulement
+    "stokesforge-render-svg", // SVG/PDF/PNG export, no graphics server
+    // Python bridge, `python` feature only
     "stokesforge-script",
     "stokesforge-python",
-    // sélecteur de fichiers natif (`file_picker`) : n'apporte ici que
-    // `raw-window-handle`, ni egui ni winit
+    // native file picker (`file_picker`): only brings `raw-window-handle` here,
+    // neither egui nor winit
     "rfd",
-    "directories", // dossier de configuration (préférences, couleurs)
-    "serde",       // préférences et couleurs enregistrées
+    "directories", // configuration folder (preferences, colors)
+    "serde",       // saved preferences and colors
     "serde_json",
-    // interface multilingue (Fluent) : le catalogue et `tr!`
+    // multilingual interface (Fluent): the catalog and `tr!`
     "i18n-embed",
     "i18n-embed-fl",
     "rust-embed",
-    "fluent-syntax", // pseudo-langue `en-XA`
+    "fluent-syntax", // pseudo-language `en-XA`
 ];
 
 #[test]
 fn only_allowed_dependencies_are_declared() {
-    // Lecture commune (`stokesforge-arch-guard`) : dépendances normales, de build,
-    // conditionnelles (`target`) et renommées (`package`) — issue #24.
+    // Shared reading (`stokesforge-arch-guard`): normal, build, conditional
+    // (`target`) and renamed (`package`) dependencies, issue #24.
     stokesforge_arch_guard::assert_only_allowed_dependencies(
         env!("CARGO_MANIFEST_DIR"),
         ALLOWED_DEPENDENCIES,

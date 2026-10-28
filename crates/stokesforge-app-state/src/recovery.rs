@@ -1,33 +1,33 @@
-//! Copies de secours : mort de l'acteur (#310) et sauvegarde automatique
-//! périodique (#317), dans `recovery/` du dossier de données de l'application.
+//! Recovery copies: actor death (#310) and periodic autosave (#317), in
+//! `recovery/` of the application's data folder.
 //!
-//! Tout y est de la logique **pure** (dossier en paramètre), testable sans
-//! fenêtre ni horloge ; `state/autosave.rs` n'y ajoute que la décision.
+//! All of it is **pure** logic (folder as a parameter), testable without a
+//! window or a clock; `state/autosave.rs` adds only the decision.
 //!
-//! # Mort de l'acteur (#310)
+//! # Actor death (#310)
 //!
-//! Un panic du fil de l'acteur détruit le `Project` : il ne reste que le
-//! dernier instantané que l'interface a relu (`Arc<Tree>` immuable, déjà
-//! partagé). On le réécrit dans un fichier **neuf** — jamais sur le `.stf` de
-//! l'utilisateur, que la copie peut précéder d'une commande (un panic en plein
-//! recalcul laisse l'état d'avant).
+//! A panic of the actor's thread destroys the `Project`: only the last
+//! snapshot that the interface has read back remains (immutable `Arc<Tree>`,
+//! already shared). It is rewritten to a **new** file — never over the user's
+//! `.stf`, which the copy may precede by one command (a panic in the middle of
+//! a recalculation leaves the earlier state).
 //!
-//! `Project::from_tree(.., 0)` reprend les identifiants au plus haut vivant :
-//! ceux des nœuds supprimés peuvent revenir, sans effet puisque l'historique
-//! est perdu avec l'acteur.
+//! `Project::from_tree(.., 0)` resumes identifiers from the highest live one:
+//! those of deleted nodes may come back, with no effect since the history is
+//! lost with the actor.
 //!
-//! # Sauvegarde automatique (#317)
+//! # Autosave (#317)
 //!
-//! Un **emplacement par processus** : `<nom|Untitled>-<pid>.stf`, écrasé à
-//! chaque échéance (l'écriture est atomique, temporaire puis renommage, côté
-//! persistance), avec une **fiche** `.json` (chemin d'origine, heure) et un
-//! verrou `.lock` tenu (`File::try_lock`) tant que le processus vit. Le
-//! verrou distingue, au démarrage suivant, la copie d'un autre StokesForge
-//! encore ouvert (qu'on ne propose pas) de celle d'un processus mort : le
-//! système le libère à la fin du processus, plantage compris. Une copie n'est
-//! proposée que si elle est **plus récente** que le `.stf` d'origine ; sans
-//! fiche ou sans `.stf`, elle l'est toujours (une fiche illisible dégrade,
-//! invariant 10, elle ne bloque jamais la récupération).
+//! One **slot per process**: `<name|Untitled>-<pid>.stf`, overwritten at each
+//! deadline (the write is atomic, temporary file then rename, on the
+//! persistence side), with a `.json` **sidecar** (origin path, time) and a
+//! `.lock` lock held (`File::try_lock`) as long as the process lives. At the
+//! next startup, the lock tells apart the copy of another StokesForge still
+//! open (not offered) from that of a dead process: the system releases it when
+//! the process ends, crashes included. A copy is offered only if it is
+//! **newer** than the original `.stf`; with no sidecar or no `.stf`, it
+//! always is (an unreadable sidecar degrades, invariant 10, it never blocks
+//! recovery).
 
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -37,20 +37,20 @@ use stokesforge_core::Project;
 use stokesforge_persistence::PersistenceError;
 use stokesforge_session::Snapshot;
 
-/// Pourquoi la copie de secours n'a pas pu être écrite.
+/// Why the recovery copy could not be written.
 #[derive(Debug)]
 pub enum RecoveryError {
-    /// Le dossier de secours n'a pas pu être créé.
+    /// The recovery folder could not be created.
     CreateDir(std::io::Error),
-    /// L'écriture du fichier a échoué.
+    /// Writing the file failed.
     Save(PersistenceError),
 }
 
-/// Dossier des copies de secours (`stokesforge_import::config_dir::recovery_dir`,
-/// #332) : `recovery/` dans le dossier de données de l'application, ou, quand
-/// `STOKESFORGE_CONFIG_DIR` est posée, `<ce dossier>/recovery`. `None` sous `cfg(test)` ou la feature `test-support` : un
-/// test n'écrit jamais dans les vraies données de la machine (comme les
-/// préférences, #250).
+/// Folder of the recovery copies (`stokesforge_import::config_dir::recovery_dir`,
+/// #332): `recovery/` in the application's data folder, or, when
+/// `STOKESFORGE_CONFIG_DIR` is set, `<that folder>/recovery`. `None` under
+/// `cfg(test)` or the `test-support` feature: a test never writes into the
+/// machine's real data (like the preferences, #250).
 pub(crate) fn default_dir() -> Option<PathBuf> {
     if cfg!(any(test, feature = "test-support")) {
         return None;
@@ -58,8 +58,8 @@ pub(crate) fn default_dir() -> Option<PathBuf> {
     stokesforge_import::config_dir::recovery_dir()
 }
 
-/// Le nom de copie d'un projet : son nom de fichier sans extension, `Untitled`
-/// quand il n'a pas de chemin (#317).
+/// The copy name of a project: its file name without extension, `Untitled`
+/// when it has no path (#317).
 pub fn stem_of(project_path: &str) -> String {
     Path::new(project_path).file_stem().map_or_else(
         || "Untitled".to_string(),
@@ -73,11 +73,11 @@ fn now_seconds() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// Écrit `snapshot` dans un fichier neuf de `dir` et rend son chemin. Le nom
-/// reprend celui du projet (`project_path`) suivi de l'heure : deux plantages
-/// ne s'écrasent pas, et `save` ne rencontre jamais un fichier existant. La
-/// fiche est écrite aussi : cette copie se propose au démarrage suivant comme
-/// celles de la sauvegarde automatique (#317).
+/// Writes `snapshot` to a new file in `dir` and returns its path. The name
+/// reuses the project's (`project_path`) followed by the time: two crashes do
+/// not overwrite each other, and `save` never meets an existing file. The
+/// sidecar is written too: this copy is offered at the next startup like those
+/// of the autosave (#317).
 pub fn write_copy(
     dir: &Path,
     project_path: &str,
@@ -103,12 +103,12 @@ pub fn write_copy(
     Ok(path)
 }
 
-/// La fiche d'une copie : d'où elle vient et quand elle a été écrite.
+/// A copy's sidecar: where it comes from and when it was written.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Sidecar {
-    /// Le chemin du projet au moment de l'écriture ; vide : jamais enregistré.
+    /// The project's path at the time of writing; empty: never saved.
     origin: String,
-    /// Secondes depuis l'époque Unix.
+    /// Seconds since the Unix epoch.
     at: u64,
 }
 
@@ -120,8 +120,8 @@ fn lock_path(stf: &Path) -> PathBuf {
     stf.with_extension("lock")
 }
 
-/// Écrit la fiche de `stf`. Un échec est ignoré : une copie sans fiche reste
-/// proposée (sans chemin d'origine ni comparaison de date).
+/// Writes the sidecar of `stf`. A failure is ignored: a copy with no sidecar
+/// is still offered (with no origin path or date comparison).
 fn write_sidecar(stf: &Path, origin: &str) {
     let sidecar = Sidecar {
         origin: origin.to_string(),
@@ -132,20 +132,18 @@ fn write_sidecar(stf: &Path, origin: &str) {
     }
 }
 
-/// L'emplacement de sauvegarde automatique **de ce processus** : le verrou
-/// tenu, et le chemin de la copie.
+/// The autosave slot **of this process**: the held lock, and the copy's path.
 #[derive(Debug)]
 pub struct Slot {
     stem: String,
     stf: PathBuf,
-    // Tenu pour sa seule existence : le verrou tombe quand le fichier se ferme.
+    // Held for its existence alone: the lock drops when the file closes.
     lock: File,
 }
 
 impl Slot {
-    /// Prend l'emplacement `<stem>-<pid>` de `dir` (créé au besoin) et pose son
-    /// verrou. Un verrou déjà tenu (un autre processus, un pid réutilisé) est
-    /// une erreur.
+    /// Takes the slot `<stem>-<pid>` of `dir` (created if needed) and sets its
+    /// lock. A lock already held (another process, a reused pid) is an error.
     pub fn acquire(dir: &Path, stem: &str, pid: u32) -> Result<Self, std::io::Error> {
         std::fs::create_dir_all(dir)?;
         let stf = dir.join(format!("{stem}-{pid}.stf"));
@@ -161,9 +159,9 @@ impl Slot {
                 "the recovery slot is held by another process",
             ),
         })?;
-        // Une copie restée d'un processus mort de même pid (pid réutilisé) ne
-        // doit pas être écrasée : elle est écartée sous un autre nom, et se
-        // proposera comme les autres.
+        // A copy left by a dead process with the same pid (reused pid) must
+        // not be overwritten: it is set aside under another name, and will be
+        // offered like the others.
         if stf.exists() {
             let aside = (1..)
                 .map(|n| dir.join(format!("{stem}-{pid}-{n}.stf")))
@@ -180,25 +178,24 @@ impl Slot {
         })
     }
 
-    /// Le nom de projet sous lequel l'emplacement est pris.
+    /// The project name under which the slot is taken.
     pub fn stem(&self) -> &str {
         &self.stem
     }
 
-    /// Le fichier de la copie.
+    /// The copy's file.
     pub fn path(&self) -> &Path {
         &self.stf
     }
 
-    /// Écrit la fiche, **avant** la copie : une copie existe toujours avec sa
-    /// fiche.
+    /// Writes the sidecar, **before** the copy: a copy always exists with its
+    /// sidecar.
     pub fn write_sidecar(&self, origin: &str) {
         write_sidecar(&self.stf, origin);
     }
 
-    /// Supprime la copie, sa fiche et le verrou (fermeture propre,
-    /// enregistrement). Le verrou est lâché avant d'effacer son fichier
-    /// (Windows).
+    /// Deletes the copy, its sidecar and the lock (clean close, save). The
+    /// lock is released before erasing its file (Windows).
     pub fn remove(self) {
         let Self { stf, lock, .. } = self;
         drop(lock);
@@ -212,29 +209,29 @@ fn remove_files(stf: &Path) {
     let _ = std::fs::remove_file(lock_path(stf));
 }
 
-/// Une copie de secours proposée au démarrage.
+/// A recovery copy offered at startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Found {
-    /// Le fichier de la copie.
+    /// The copy's file.
     pub stf: PathBuf,
-    /// Le chemin du projet au moment de la copie ; `None` : jamais enregistré,
-    /// ou fiche perdue.
+    /// The project's path at the time of the copy; `None`: never saved, or
+    /// sidecar lost.
     pub origin: Option<PathBuf>,
-    /// Le nom à montrer : celui du fichier d'origine ; `None` : `Untitled`.
+    /// The name to show: the original file's; `None`: `Untitled`.
     pub name: Option<String>,
-    /// Secondes Unix de l'écriture de la copie.
+    /// Unix seconds of the copy's write.
     pub saved_at: u64,
 }
 
 impl Found {
-    /// Supprime la copie, sa fiche et son verrou orphelin.
+    /// Deletes the copy, its sidecar and its orphan lock.
     pub fn delete(&self) {
         remove_files(&self.stf);
     }
 }
 
-/// Le nom d'une copie sans fiche : celui du fichier sans son suffixe
-/// numérique (`-pid` ou `-secondes`), `None` s'il ne reste rien.
+/// The name of a copy with no sidecar: the file's without its numeric suffix
+/// (`-pid` or `-seconds`), `None` if nothing is left.
 fn name_from_copy(stf: &Path) -> Option<String> {
     let stem = stf.file_stem()?.to_string_lossy().into_owned();
     let trimmed = match stem.rsplit_once('-') {
@@ -248,7 +245,7 @@ fn name_from_copy(stf: &Path) -> Option<String> {
     (trimmed != "Untitled").then(|| format!("{trimmed}.stf"))
 }
 
-/// Une copie est-elle tenue par un processus vivant ?
+/// Is a copy held by a live process?
 fn is_held(stf: &Path) -> bool {
     let Ok(lock) = File::options().write(true).open(lock_path(stf)) else {
         return false;
@@ -256,9 +253,8 @@ fn is_held(stf: &Path) -> bool {
     matches!(lock.try_lock(), Err(std::fs::TryLockError::WouldBlock))
 }
 
-/// Les copies à proposer dans `dir`, la plus récente d'abord : celles dont le
-/// processus a disparu et qui sont plus récentes que leur `.stf`. Dossier
-/// absent ou illisible : aucune.
+/// The copies to offer in `dir`, newest first: those whose process is gone
+/// and which are newer than their `.stf`. Missing or unreadable folder: none.
 pub fn scan(dir: &Path) -> Vec<Found> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -277,7 +273,7 @@ pub fn scan(dir: &Path) -> Vec<Found> {
                 .as_ref()
                 .filter(|s| !s.origin.is_empty())
                 .map(|s| PathBuf::from(&s.origin));
-            // Pas plus récente que le `.stf` : il a été enregistré depuis.
+            // Not newer than the `.stf`: it has been saved since.
             let origin_modified = origin
                 .as_ref()
                 .and_then(|o| std::fs::metadata(o).and_then(|m| m.modified()).ok());
@@ -311,12 +307,12 @@ pub fn scan(dir: &Path) -> Vec<Found> {
     found
 }
 
-/// `AAAA-MM-JJ HH:MM` (UTC) d'un instant en secondes Unix : l'application n'a
-/// pas de bibliothèque de dates, et l'heure locale ne lui est pas connue.
+/// `YYYY-MM-DD HH:MM` (UTC) of an instant in Unix seconds: the application has
+/// no date library, and does not know the local time.
 pub fn format_utc(seconds: u64) -> String {
     let days = i64::try_from(seconds / 86_400).unwrap_or(0);
     let rest = seconds % 86_400;
-    // Jours depuis 1970-01-01 -> date civile (algorithme de H. Hinnant).
+    // Days since 1970-01-01 -> civil date (H. Hinnant's algorithm).
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -339,7 +335,7 @@ mod tests {
 
     use std::time::Duration;
 
-    /// Un `.stf` quelconque (contenu sans importance pour `scan`).
+    /// Any `.stf` (content irrelevant to `scan`).
     fn touch(path: &Path, age_seconds: u64) {
         std::fs::write(path, b"x").unwrap();
         let file = File::options().write(true).open(path).unwrap();
@@ -355,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn la_date_civile_est_juste() {
+    fn the_civil_date_is_right() {
         assert_eq!(format_utc(0), "1970-01-01 00:00");
         assert_eq!(
             format_utc(951_782_400 + 3600 * 13 + 60 * 5),
@@ -365,90 +361,94 @@ mod tests {
     }
 
     #[test]
-    fn le_nom_d_une_copie_sans_chemin_est_untitled() {
+    fn the_name_of_a_copy_without_a_path_is_untitled() {
         assert_eq!(stem_of(""), "Untitled");
-        assert_eq!(stem_of("/a/b/mesures.stf"), "mesures");
+        assert_eq!(stem_of("/a/b/measurements.stf"), "measurements");
     }
 
     #[test]
-    fn plus_ancienne_que_le_stf_exclue_plus_recente_listee() {
+    fn older_than_the_stf_is_excluded_newer_is_listed() {
         let dir = tempfile::tempdir().unwrap();
         let rec = dir.path().join("recovery");
         std::fs::create_dir_all(&rec).unwrap();
-        let user = dir.path().join("travail.stf");
+        let user = dir.path().join("work.stf");
         touch(&user, 100);
-        // Copie écrite il y a 200 s : plus ancienne que le .stf (100 s).
-        copy_with_sidecar(&rec, "ancienne-1.stf", user.to_str().unwrap(), 200);
-        // Copie écrite il y a 10 s : plus récente.
-        let recente = copy_with_sidecar(&rec, "recente-2.stf", user.to_str().unwrap(), 10);
+        // Copy written 200 s ago: older than the .stf (100 s).
+        copy_with_sidecar(&rec, "old-1.stf", user.to_str().unwrap(), 200);
+        // Copy written 10 s ago: newer.
+        let recent = copy_with_sidecar(&rec, "recent-2.stf", user.to_str().unwrap(), 10);
         let found = scan(&rec);
         assert_eq!(found.len(), 1, "{found:?}");
-        assert_eq!(found[0].stf, recente);
+        assert_eq!(found[0].stf, recent);
         assert_eq!(found[0].origin.as_deref(), Some(user.as_path()));
-        assert_eq!(found[0].name.as_deref(), Some("travail.stf"));
+        assert_eq!(found[0].name.as_deref(), Some("work.stf"));
     }
 
     #[test]
-    fn sans_stf_ou_sans_fiche_la_copie_est_listee() {
+    fn without_a_stf_or_without_a_sidecar_the_copy_is_listed() {
         let dir = tempfile::tempdir().unwrap();
         let rec = dir.path();
-        // Origine disparue du disque.
-        copy_with_sidecar(rec, "perdu-1.stf", "/nulle/part/perdu.stf", 5);
-        // Jamais enregistré : origine vide.
+        // Origin gone from the disk.
+        copy_with_sidecar(rec, "lost-1.stf", "/nowhere/lost.stf", 5);
+        // Never saved: empty origin.
         copy_with_sidecar(rec, "Untitled-2.stf", "", 5);
-        // Sans fiche (copie de #310 d'avant la fiche) : nom tiré du fichier.
-        touch(&rec.join("ancien-1700000000.stf"), 5);
-        // Fiche illisible : dégradée comme une absence (invariant 10).
-        touch(&rec.join("abime-3.stf"), 5);
-        std::fs::write(rec.join("abime-3.json"), "{pas du json").unwrap();
+        // No sidecar (a #310 copy from before the sidecar): name taken from the file.
+        touch(&rec.join("old-1700000000.stf"), 5);
+        // Unreadable sidecar: degraded like an absence (invariant 10).
+        touch(&rec.join("damaged-3.stf"), 5);
+        std::fs::write(rec.join("damaged-3.json"), "{not json").unwrap();
         let mut names: Vec<_> = scan(rec).into_iter().map(|f| f.name).collect();
         names.sort();
         assert_eq!(
             names,
             vec![
                 None,
-                Some("abime.stf".to_string()),
-                Some("ancien.stf".to_string()),
-                Some("perdu.stf".to_string()),
+                Some("damaged.stf".to_string()),
+                Some("lost.stf".to_string()),
+                Some("old.stf".to_string()),
             ]
         );
     }
 
     #[test]
-    fn une_copie_de_secours_de_310_est_listee_avec_sa_fiche() {
+    fn a_310_recovery_copy_is_listed_with_its_sidecar() {
         let dir = tempfile::tempdir().unwrap();
         let session =
             stokesforge_session::Session::spawn(Project::new("Demo").unwrap(), None).unwrap();
         let snapshot = session.handle().snapshot().unwrap();
-        let path = write_copy(dir.path(), "/x/travail.stf", &snapshot).unwrap();
+        let path = write_copy(dir.path(), "/x/work.stf", &snapshot).unwrap();
         assert!(sidecar_path(&path).exists());
         let found = scan(dir.path());
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].stf, path);
-        assert_eq!(found[0].name.as_deref(), Some("travail.stf"));
+        assert_eq!(found[0].name.as_deref(), Some("work.stf"));
         session.shutdown().unwrap();
     }
 
     #[test]
-    fn un_verrou_tenu_exclut_la_copie_et_sa_chute_la_libere() {
+    fn a_held_lock_excludes_the_copy_and_dropping_it_releases_the_copy() {
         let dir = tempfile::tempdir().unwrap();
-        let slot = Slot::acquire(dir.path(), "projet", 4242).unwrap();
+        let slot = Slot::acquire(dir.path(), "project", 4242).unwrap();
         slot.write_sidecar("");
         touch(slot.path(), 5);
-        assert!(scan(dir.path()).is_empty(), "tenue par un processus vivant");
+        assert!(scan(dir.path()).is_empty(), "held by a live process");
         assert!(
-            Slot::acquire(dir.path(), "projet", 4242).is_err(),
-            "un emplacement ne se prend pas deux fois"
+            Slot::acquire(dir.path(), "project", 4242).is_err(),
+            "a slot cannot be taken twice"
         );
         let path = slot.path().to_path_buf();
         drop(slot);
         let found = scan(dir.path());
-        assert_eq!(found.len(), 1, "le verrou lâché, la copie se propose");
+        assert_eq!(
+            found.len(),
+            1,
+            "with the lock released, the copy is offered"
+        );
         assert_eq!(found[0].stf, path);
     }
 
     #[test]
-    fn remove_et_delete_effacent_copie_fiche_et_verrou() {
+    fn remove_and_delete_erase_copy_sidecar_and_lock() {
         let dir = tempfile::tempdir().unwrap();
         let slot = Slot::acquire(dir.path(), "a", 1).unwrap();
         slot.write_sidecar("");

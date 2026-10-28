@@ -1,65 +1,62 @@
-//! Que montrer au démarrage (#333) : la décision, sans fenêtre ni disque.
+//! What to show at startup (#333): the decision, with no window or disk.
 //!
-//! La démonstration n'est pas un décor permanent. Elle s'offre **une fois**, à
-//! la toute première ouverture : écrite dans `demo.stf`, à côté des
-//! préférences, puis ouverte depuis ce fichier, que l'utilisateur retrouve
-//! ensuite par « Ouvrir ». Les lancements suivants partent d'un projet vide,
-//! comme Fichier > Nouveau.
+//! The demo is not a permanent fixture. It is offered **once**, on the very
+//! first launch: written to `demo.stf`, next to the preferences, then opened
+//! from that file, which the user afterwards finds again through "Open". Later
+//! launches start from an empty project, like File > New.
 //!
-//! Le développement garde la démonstration à chaque lancement par
-//! `STOKESFORGE_DEMO=1` (captures, essais, mesures) : le binaire lit
-//! l'environnement et passe le drapeau à [`plan`], qui n'y touche jamais, pour
-//! se tester sans `set_var`. Cette démonstration est jetable : le binaire règle
-//! aussi [`crate::state::AppState::set_quit_without_prompt`], et la fermeture
-//! ne demande plus d'enregistrer (New et Open… demandent toujours).
+//! Development keeps the demo on every launch through `STOKESFORGE_DEMO=1`
+//! (screenshots, trials, measurements): the binary reads the environment and
+//! passes the flag to [`plan`], which never touches it, so it can be tested
+//! without `set_var`. This demo is disposable: the binary also sets
+//! [`crate::state::AppState::set_quit_without_prompt`], and closing no longer
+//! asks to save (New and Open… always ask).
 //!
-//! Règles, dans l'ordre :
-//! 1. un chemin existant est chargé, toujours ;
-//! 2. `STOKESFORGE_DEMO=1` : la démonstration en mémoire, sans marqueur ;
-//! 3. un chemin absent est la cible d'un futur enregistrement, sur un projet
-//!    vide (ce n'est pas une « première ouverture ») ;
-//! 4. sans argument : la démonstration si le marqueur de première ouverture
-//!    manque, sinon un projet vide.
+//! Rules, in order:
+//! 1. an existing path is loaded, always;
+//! 2. `STOKESFORGE_DEMO=1`: the in-memory demo, with no marker;
+//! 3. a missing path is the target of a future save, on an empty project
+//!    (it is not a "first launch");
+//! 4. no argument: the demo if the first-launch marker is missing, otherwise
+//!    an empty project.
 //!
-//! Un `demo.stf` du dossier courant n'est jamais lu (#315) : seul celui du
-//! dossier de configuration compte.
+//! A `demo.stf` in the current folder is never read (#315): only the one in
+//! the configuration folder counts.
 
 use std::path::{Path, PathBuf};
 
 use crate::preferences::Preferences;
 
-/// Ce qu'il faut construire au démarrage.
+/// What to build at startup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartupSource {
-    /// Charger ce fichier existant.
+    /// Load this existing file.
     Load(PathBuf),
-    /// Écrire la démonstration dans ce fichier, puis l'ouvrir depuis lui. Si
-    /// l'écriture ou la lecture échoue, le binaire garde la démonstration en
-    /// mémoire, sans chemin.
+    /// Write the demo to this file, then open it from there. If writing or
+    /// reading fails, the binary keeps the demo in memory, with no path.
     DemoFile(PathBuf),
-    /// La démonstration en mémoire ; le chemin est la cible d'un futur
-    /// enregistrement (vide s'il n'y en a pas).
+    /// The in-memory demo; the path is the target of a future save (empty if
+    /// there is none).
     DemoMemory(PathBuf),
-    /// Un projet vide ; même chemin cible.
+    /// An empty project; same target path.
     Empty(PathBuf),
 }
 
-/// Le plan de démarrage.
+/// The startup plan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Startup {
-    /// Le projet à construire.
+    /// The project to build.
     pub source: StartupSource,
-    /// Pré-remplir la zone de script avec le script d'exemple : il lit
-    /// `[Book1]Sheet1!A`, qui n'existe que dans la démonstration.
+    /// Pre-fill the script area with the example script: it reads
+    /// `[Book1]Sheet1!A`, which exists only in the demo.
     pub example_script: bool,
-    /// Poser le marqueur « première ouverture faite » une fois la fenêtre
-    /// construite.
+    /// Set the "first launch done" marker once the window is built.
     pub mark_first_run: bool,
 }
 
-/// Décide quoi ouvrir. `requested` est l'argument de la ligne de commande,
-/// `requested_exists` dit s'il désigne un fichier existant, `demo_forced` vient
-/// de `STOKESFORGE_DEMO=1`.
+/// Decides what to open. `requested` is the command-line argument,
+/// `requested_exists` says whether it names an existing file, `demo_forced`
+/// comes from `STOKESFORGE_DEMO=1`.
 pub fn plan(
     requested: Option<&Path>,
     requested_exists: bool,
@@ -88,9 +85,9 @@ pub fn plan(
             mark_first_run: false,
         };
     }
-    // Première ouverture : le fichier dans le dossier de configuration, ou, sans
-    // dossier de configuration, la démonstration en mémoire (le marqueur ne
-    // pourra pas s'écrire : elle reviendra).
+    // First launch: the file in the configuration folder, or, with no
+    // configuration folder, the in-memory demo (the marker cannot be
+    // written: it will come back).
     let source = match preferences.demo_file_path() {
         Some(file) => StartupSource::DemoFile(file),
         None => StartupSource::DemoMemory(PathBuf::new()),
@@ -122,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    fn sans_argument_ni_marqueur_la_demo_s_ouvre_depuis_son_fichier() {
+    fn without_argument_or_marker_the_demo_opens_from_its_file() {
         let (dir, prefs) = preferences(false);
         let startup = plan(None, false, false, &prefs);
         assert_eq!(
@@ -134,7 +131,7 @@ mod tests {
     }
 
     #[test]
-    fn avec_le_marqueur_le_projet_est_vide() {
+    fn with_the_marker_the_project_is_empty() {
         let (_dir, prefs) = preferences(true);
         let startup = plan(None, false, false, &prefs);
         assert_eq!(startup.source, StartupSource::Empty(PathBuf::new()));
@@ -143,7 +140,7 @@ mod tests {
     }
 
     #[test]
-    fn la_demo_forcee_ignore_le_marqueur_et_n_en_pose_pas() {
+    fn the_forced_demo_ignores_the_marker_and_sets_none() {
         let (_dir, prefs) = preferences(true);
         let startup = plan(None, false, true, &prefs);
         assert_eq!(startup.source, StartupSource::DemoMemory(PathBuf::new()));
@@ -152,7 +149,7 @@ mod tests {
     }
 
     #[test]
-    fn sans_dossier_de_configuration_la_demo_reste_en_memoire() {
+    fn without_a_configuration_folder_the_demo_stays_in_memory() {
         let prefs = Preferences::load_from(None);
         let startup = plan(None, false, false, &prefs);
         assert_eq!(startup.source, StartupSource::DemoMemory(PathBuf::new()));
@@ -160,9 +157,9 @@ mod tests {
     }
 
     #[test]
-    fn un_chemin_existant_est_toujours_charge_meme_si_la_demo_est_forcee() {
+    fn an_existing_path_is_always_loaded_even_if_the_demo_is_forced() {
         let (_dir, prefs) = preferences(false);
-        let path = Path::new("projet.stf");
+        let path = Path::new("project.stf");
         let startup = plan(Some(path), true, true, &prefs);
         assert_eq!(startup.source, StartupSource::Load(path.to_path_buf()));
         assert!(!startup.example_script);
@@ -170,9 +167,9 @@ mod tests {
     }
 
     #[test]
-    fn un_chemin_absent_donne_un_projet_vide_qui_le_vise_sans_marqueur() {
+    fn a_missing_path_gives_an_empty_project_targeting_it_with_no_marker() {
         let (_dir, prefs) = preferences(false);
-        let path = Path::new("nouveau.stf");
+        let path = Path::new("new.stf");
         let startup = plan(Some(path), false, false, &prefs);
         assert_eq!(startup.source, StartupSource::Empty(path.to_path_buf()));
         assert!(!startup.mark_first_run);
